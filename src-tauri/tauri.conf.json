@@ -55,7 +55,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/simnJS/iabench/releases/latest/download/latest.json"
+        "https://github.com/simnJS/hangar-ia/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFN0M0MjlEQTA4OUM1MwpSV1JUbkFqYUtjVG5EUldHd0F6aGRWSmdpWWRWcXVOanhqUG5Tak5NZVhpdXRKTzZZRmkxQXl3RQo="
     }
