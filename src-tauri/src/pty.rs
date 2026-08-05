@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One live pseudo-terminal, owned by the manager for the lifetime of a pane.
 struct PtySession {
@@ -291,7 +291,7 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
-pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+pub fn pty_kill(app: AppHandle, manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     // Taken out under the lock, reaped outside it: `wait` blocks until the
     // shell is really gone, and a shell that takes its time — one still
     // tearing down a child agent — would otherwise hold the manager and
@@ -309,18 +309,59 @@ pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String
         session
     };
     session.live.store(false, Ordering::Relaxed);
-    let _reaping = Reaping {
-        manager: &manager,
-        id,
-    };
 
-    let _ = session.child.kill();
-    let _ = session.child.wait();
-    // Closing the master is what ends the reader thread, so it happens before
-    // the id is handed back rather than at the end of the scope.
-    drop(session);
+    // Off this thread, and not as a courtesy: a Tauri command that is not
+    // `async` runs on the main thread, so every millisecond spent in `wait`
+    // here is a millisecond the window does not repaint, scroll or answer a
+    // key. That bill is never zero on unix — `kill` sends SIGHUP first and
+    // waits out a grace period, and an interactive shell installs a handler
+    // for SIGHUP rather than dying on it — and a shell that hangs on the way
+    // out froze the window for good.
+    //
+    // Nothing waits on this thread. `dying` already holds the id, and the
+    // spawn that wants it back blocks on the condvar until the reap ends.
+    std::thread::spawn(move || {
+        let manager = app.state::<PtyManager>();
+        let _reaping = Reaping {
+            manager: manager.inner(),
+            id,
+        };
+
+        let _ = session.child.kill();
+        reap_process_group(&session);
+        let _ = session.child.wait();
+        // Closing the master is what ends the reader thread, so it happens
+        // before the id is handed back rather than at the end of the scope.
+        drop(session);
+    });
+
     Ok(())
 }
+
+/// Kills whatever the shell left running behind it.
+///
+/// `Child::kill` signals the shell alone, and an agent it started outlives it:
+/// re-parented, still holding the pty open, still burning cpu on a pane that is
+/// gone from screen. The shell owns a session of its own — the pty gave it one
+/// — so its process group is exactly the pane and nothing else.
+///
+/// Guarded against ever naming our own group: a pty that somehow did not get
+/// its own session would otherwise make this the last thing the app does.
+#[cfg(unix)]
+fn reap_process_group(session: &PtySession) {
+    let Some(pid) = session.child.process_id() else {
+        return;
+    };
+    unsafe {
+        let group = libc::getpgid(pid as libc::pid_t);
+        if group > 0 && group != libc::getpgrp() {
+            libc::killpg(group, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn reap_process_group(_session: &PtySession) {}
 
 #[tauri::command]
 pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {

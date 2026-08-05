@@ -1545,6 +1545,7 @@ dependencies = [
  "axum",
  "dirs",
  "discord-rich-presence",
+ "libc",
  "portable-pty",
  "serde",
  "serde_json",

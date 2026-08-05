@@ -37,3 +37,8 @@ tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2.3.1"
 discord-rich-presence = "1.1.0"
 
+# Signalling a pane's whole process group on the way out, which `Child::kill`
+# does not do: it reaches the shell only, and leaves the agent behind it.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
