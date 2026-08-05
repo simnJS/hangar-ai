@@ -129,7 +129,7 @@ function Add-Masthead {
 
     $wordBrush = New-Object System.Drawing.SolidBrush($textPrimary)
     $wordRect = New-Object System.Drawing.RectangleF -ArgumentList ([single]$X), ([single]($Y + 138.0 * $Scale)), ([single]$W), ([single](52.0 * $Scale))
-    $G.DrawString("Hangar.IA", $wordFont, $wordBrush, $wordRect, $centered)
+    $G.DrawString("Hangar.AI", $wordFont, $wordBrush, $wordRect, $centered)
     $wordBrush.Dispose()
 
     $taglineBrush = New-Object System.Drawing.SolidBrush($textMuted)
@@ -168,7 +168,7 @@ foreach ($s in @(1, 2)) {
 $c = New-Canvas 493 58
 $c.Graphics.Clear([System.Drawing.Color]::White)
 $logoSize = 32
-$name = "Hangar.IA"
+$name = "Hangar.AI"
 $nameWidth = [Math]::Ceiling($c.Graphics.MeasureString($name, $fontBanner).Width)
 $c.Graphics.DrawImage($logo, [single](493 - 12 - $nameWidth - 6 - $logoSize), [single]((58 - $logoSize) / 2.0), [single]$logoSize, [single]$logoSize)
 $nameBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 26, 27, 38))

@@ -320,6 +320,64 @@ export function zoneAt(rect: DOMRect, x: number, y: number): Zone {
   return zone;
 }
 
+export type Direction = "left" | "right" | "up" | "down";
+
+/**
+ * The pane sitting next to `fromId` in a direction, or null at the edge of the
+ * grid.
+ *
+ * Read off the rectangles rather than the tree: what "the pane on the left"
+ * means is what is on screen, and two panes can be side by side without being
+ * siblings in the tree. A candidate has to be entirely past our edge — a pane
+ * we overlap is not next to us — and to actually face us, which is what the
+ * overlap on the other axis measures. The closest one wins; when two are
+ * equally close, the one facing us the most.
+ */
+export function neighborOf(
+  tree: SplitNode,
+  fromId: string,
+  dir: Direction,
+): string | null {
+  const { rects } = computeLayout(tree);
+  const from = rects[fromId];
+  if (!from) return null;
+
+  const epsilon = 1e-4;
+  const horizontal = dir === "left" || dir === "right";
+  const backwards = dir === "left" || dir === "up";
+
+  const near = horizontal ? from.left : from.top;
+  const far = near + (horizontal ? from.width : from.height);
+  const sideStart = horizontal ? from.top : from.left;
+  const sideEnd = sideStart + (horizontal ? from.height : from.width);
+
+  let best: string | null = null;
+  let bestGap = Infinity;
+  let bestOverlap = 0;
+
+  for (const [id, rect] of Object.entries(rects)) {
+    if (id === fromId) continue;
+
+    const start = horizontal ? rect.left : rect.top;
+    const end = start + (horizontal ? rect.width : rect.height);
+    const gap = backwards ? near - end : start - far;
+    if (gap < -epsilon) continue;
+
+    const otherStart = horizontal ? rect.top : rect.left;
+    const otherEnd = otherStart + (horizontal ? rect.height : rect.width);
+    const overlap = Math.min(sideEnd, otherEnd) - Math.max(sideStart, otherStart);
+    if (overlap <= epsilon) continue;
+
+    if (gap < bestGap - epsilon || (gap <= bestGap + epsilon && overlap > bestOverlap)) {
+      best = id;
+      bestGap = gap;
+      bestOverlap = overlap;
+    }
+  }
+
+  return best;
+}
+
 /** Splits along the longer side, so panes stay as square as they can. */
 export function preferredDir(paneId: string | null): "row" | "col" {
   if (!paneId) return "row";

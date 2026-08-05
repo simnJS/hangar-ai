@@ -28,7 +28,7 @@ if (-not $makensis) {
     throw "makensis not found. Run ``pnpm tauri build`` once to let Tauri fetch NSIS, or install NSIS."
 }
 
-$outFile = Join-Path $env:TEMP "hangar-ia-preview-setup.exe"
+$outFile = Join-Path $env:TEMP "hangar-ai-preview-setup.exe"
 $script = Join-Path $PSScriptRoot "preview.nsi"
 
 # The same charset flags Tauri passes, so a non-ASCII character that survives

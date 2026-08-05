@@ -46,9 +46,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: Hangar.IA ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: Hangar.AI ${{ github.event.inputs.tag || github.ref_name }}
           releaseBody: |
-            Windows build of Hangar.IA.
+            Windows build of Hangar.AI.
 
             - `.msi` / `.exe` installers under **Assets**
             - Requires WebView2, which ships with Windows 11

@@ -74,6 +74,26 @@ export interface Settings {
   notifyIdleMs: number;
   /** Stay quiet for the pane you are already watching. */
   notifyOnlyWhenAway: boolean;
+  /**
+   * Re-bound keyboard shortcuts, by command id — only what differs from the
+   * defaults in lib/shortcuts, so a default that changes in a later version
+   * reaches everyone who never touched it. An empty array disables a command.
+   */
+  keybindings: Record<string, string[]>;
+  /**
+   * Publish what you are working on to Discord. Off by default: this is the
+   * one setting that sends anything out of the machine.
+   */
+  discordPresence: boolean;
+  /** Name the workspace on Discord. Off keeps the presence generic. */
+  discordShowWorkspace: boolean;
+  /** Name the agents running. Off only shows how many. */
+  discordShowAgents: boolean;
+  /**
+   * Discord application the presence speaks for — its uploaded art is what the
+   * card shows. Empty follows the one this app ships with.
+   */
+  discordAppId: string;
 }
 
 export interface AppState {
@@ -113,4 +133,9 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnIdle: true,
   notifyIdleMs: 3000,
   notifyOnlyWhenAway: true,
+  keybindings: {},
+  discordPresence: false,
+  discordShowWorkspace: true,
+  discordShowAgents: true,
+  discordAppId: "",
 };
