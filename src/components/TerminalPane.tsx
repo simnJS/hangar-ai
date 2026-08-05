@@ -300,7 +300,11 @@ export function TerminalPane({
         if (disposed || controller.signal.aborted) return;
 
         const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
-        const command = launchCommand(pane.agent, resumeId);
+        const command = launchCommand(
+          pane.agent,
+          resumeId,
+          settingsRef.current.agentCommands,
+        );
         if (command) {
           if (resumeId) claim(resumeId);
           await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);

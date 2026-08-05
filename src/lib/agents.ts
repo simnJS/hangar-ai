@@ -1,23 +1,50 @@
 import { listSessions } from "./ipc";
 import type { AgentId } from "../types";
 
+/** What each agent is started with when nothing was customised. */
+export const DEFAULT_AGENT_COMMANDS: Record<Exclude<AgentId, "shell">, string> = {
+  claude: "claude",
+  codex: "codex",
+  gemini: "gemini",
+  opencode: "opencode",
+};
+
+/**
+ * The command a pane starts an agent with: whatever the settings hold for it,
+ * or the plain binary name.
+ *
+ * Trimmed, and an empty override reads as "not customised" rather than as a
+ * pane that types nothing — clearing the field in the settings is how you go
+ * back to the default.
+ */
+export function agentCommand(agent: AgentId, commands?: Record<string, string>): string | null {
+  if (agent === "shell") return null;
+  return commands?.[agent]?.trim() || DEFAULT_AGENT_COMMANDS[agent];
+}
+
 /**
  * Builds the command typed into a freshly opened shell. Returning null means
  * "leave the user at a plain prompt".
+ *
+ * The resume arguments are appended to the command rather than replacing it,
+ * so a custom launcher — an alias carrying flags of its own, a wrapper script
+ * — resumes a conversation as well as the bare binary does.
  */
-export function launchCommand(agent: AgentId, sessionId: string | null): string | null {
+export function launchCommand(
+  agent: AgentId,
+  sessionId: string | null,
+  commands?: Record<string, string>,
+): string | null {
+  const command = agentCommand(agent, commands);
+  if (!command) return null;
+
   switch (agent) {
     case "claude":
-      return sessionId ? `claude --resume ${sessionId}` : "claude";
+      return sessionId ? `${command} --resume ${sessionId}` : command;
     case "codex":
-      return sessionId ? `codex resume ${sessionId}` : "codex";
-    case "gemini":
-      return "gemini";
-    case "opencode":
-      return "opencode";
-    case "shell":
+      return sessionId ? `${command} resume ${sessionId}` : command;
     default:
-      return null;
+      return command;
   }
 }
 

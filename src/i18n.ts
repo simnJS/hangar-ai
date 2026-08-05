@@ -162,6 +162,9 @@ const en = {
   "settings.autoResumeHint": "relaunch agents on their last session",
   "settings.launchDelay": "Launch delay",
   "settings.launchDelayHint": "leaves the shell time to load its profile",
+  "settings.agentCommands": "Launch commands",
+  "settings.agentCommandsHint":
+    "What a pane types to start each agent. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default.",
 
   "settings.shortcutsAll": "All commands",
   "settings.shortcutsHint":
@@ -478,6 +481,9 @@ const fr: Record<Key, string> = {
   "settings.autoResumeHint": "relance les agents sur leur dernière session",
   "settings.launchDelay": "Délai de lancement",
   "settings.launchDelayHint": "laisse au shell le temps de charger son profil",
+  "settings.agentCommands": "Commandes de lancement",
+  "settings.agentCommandsHint":
+    "Ce qu'un panneau tape pour démarrer chaque agent. C'est envoyé à un shell interactif : un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.",
 
   "settings.shortcutsAll": "Toutes les commandes",
   "settings.shortcutsHint":
