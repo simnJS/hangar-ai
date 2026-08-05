@@ -6,8 +6,8 @@ fn main() {
     // agent CLIs. Shipping one binary means agent configs only ever need this
     // path, with no sidecar to bundle or locate.
     if std::env::args().any(|arg| arg == "--mcp") {
-        hangar_ia_lib::run_mcp();
+        hangar_ai_lib::run_mcp();
         return;
     }
-    hangar_ia_lib::run()
+    hangar_ai_lib::run()
 }

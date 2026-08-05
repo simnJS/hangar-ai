@@ -1,4 +1,5 @@
 mod board;
+mod discord;
 mod endpoint;
 mod install;
 mod instructions;
@@ -11,7 +12,7 @@ mod store;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
-/// Entry point for `hangar-ia --mcp`: no window, no Tauri runtime, just the
+/// Entry point for `hangar-ai --mcp`: no window, no Tauri runtime, just the
 /// stdio protocol loop talking to whatever app instance is running.
 pub fn run_mcp() {
     mcp::run_stdio();
@@ -26,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .manage(pty::PtyManager::default())
+        .manage(discord::DiscordPresence::default())
         .setup(|app| {
             let handle = app.handle().clone();
             let token = endpoint::generate_token();
@@ -69,6 +71,8 @@ pub fn run() {
             install::mcp_manual_commands,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
+            discord::discord_presence_set,
+            discord::discord_presence_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -81,6 +85,9 @@ pub fn run() {
                 pty::kill_all(&app.state::<pty::PtyManager>());
                 // Stale endpoint files would make agents try to reach a dead port.
                 endpoint::clear();
+                // Discord drops the presence when the pipe dies anyway; this
+                // just takes it down before the window is gone from screen.
+                app.state::<discord::DiscordPresence>().stop();
             }
         });
 }

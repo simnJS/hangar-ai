@@ -74,16 +74,20 @@ ${StrLoc}
 !define MANUKEY "Software\${MANUFACTURER}"
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
 ; Custom: the two keys above are derived from ${PRODUCTNAME}, not from the
-; bundle identifier. Releases up to 0.1.1 shipped as "IaBench", so after the
-; rename this installer looks under names nothing wrote: it would find no
-; previous install, land in a second directory, and leave the old binary, its
-; Start menu shortcut and its Add/Remove entry behind — two apps, one of them
-; never updated again. These point at what 0.1.1 wrote, so PageReinstall can
-; find that install and retire it. Removing them is only safe once no 0.1.1
-; install is left in the wild.
-!define LEGACYPRODUCTNAME "IaBench"
-!define LEGACYUNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACYPRODUCTNAME}"
-!define LEGACYMANUPRODUCTKEY "${MANUKEY}\${LEGACYPRODUCTNAME}"
+; bundle identifier. Every rename therefore leaves the previous install recorded
+; under a name this build no longer writes: it would find no previous install,
+; land in a second directory, and leave the old binary, its Start menu shortcut
+; and its Add/Remove entry behind — two apps, one of them never updated again.
+;
+; Two names have shipped so far. Each one stays listed until no install under it
+; is left in the wild, and the newest is tried first so a machine carrying both
+; migrates from the one it actually runs.
+!define LEGACYPRODUCTNAME1 "Hangar.IA" ; 0.2.0, which shipped the name misspelt
+!define LEGACYUNINSTKEY1 "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACYPRODUCTNAME1}"
+!define LEGACYMANUPRODUCTKEY1 "${MANUKEY}\${LEGACYPRODUCTNAME1}"
+!define LEGACYPRODUCTNAME2 "IaBench" ; up to 0.1.1, before the product was renamed
+!define LEGACYUNINSTKEY2 "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACYPRODUCTNAME2}"
+!define LEGACYMANUPRODUCTKEY2 "${MANUKEY}\${LEGACYPRODUCTNAME2}"
 !define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
@@ -92,13 +96,39 @@ Var PassiveMode
 Var UpdateMode
 Var NoShortcutMode
 Var WixMode
-; Custom: set when the only install found is one made under
-; ${LEGACYPRODUCTNAME}. Handled like $WixMode - a previous install recorded
-; under keys this build no longer writes, so it is uninstalled before this one
-; goes in rather than left alongside it.
+; Custom: set when the only install found is one made under a previous product
+; name. Handled like $WixMode - a previous install recorded under keys this
+; build no longer writes, so it is uninstalled before this one goes in rather
+; than left alongside it. The two key variables hold whichever legacy name
+; matched, so the uninstall step reads back the same place the check found.
 Var LegacyMode
 Var LegacyInstDir
+Var LegacyUninstKey
+Var LegacyManuProductKey
 Var OldMainBinaryName
+
+; Custom: looks for an install under one previous product name. Both its
+; uninstaller and its directory are required: reinst_uninstall has to hand the
+; uninstaller its own directory through `_?=`, and without it the migration
+; would fail halfway. Missing either, this leaves everything as it found it so
+; the next name can be tried, and a plain first install stays a first install.
+!macro TryLegacyInstall UninstKey ManuKey
+  ${If} $LegacyMode = 0
+    ReadRegStr $R0 SHCTX "${UninstKey}" ""
+    ReadRegStr $R1 SHCTX "${UninstKey}" "UninstallString"
+    ReadRegStr $LegacyInstDir SHCTX "${ManuKey}" ""
+    ${If} "$R0$R1" != ""
+    ${AndIf} $LegacyInstDir != ""
+      StrCpy $LegacyMode 1
+      StrCpy $LegacyUninstKey "${UninstKey}"
+      StrCpy $LegacyManuProductKey "${ManuKey}"
+    ${Else}
+      StrCpy $R0 ""
+      StrCpy $R1 ""
+      StrCpy $LegacyInstDir ""
+    ${EndIf}
+  ${EndIf}
+!macroend
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -261,9 +291,10 @@ Function PageReinstall
     ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "DisplayName"
     ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "Publisher"
     StrCmp "$R0$R1" "${PRODUCTNAME}${MANUFACTURER}" wix_match 0
-    ; Custom: an MSI installed before the rename registered itself under
-    ; ${LEGACYPRODUCTNAME}, so match that name too.
-    StrCmp "$R0$R1" "${LEGACYPRODUCTNAME}${MANUFACTURER}" wix_match wix_loop
+    ; Custom: an MSI installed before a rename registered itself under the
+    ; product name of its day, so match those too.
+    StrCmp "$R0$R1" "${LEGACYPRODUCTNAME1}${MANUFACTURER}" wix_match 0
+    StrCmp "$R0$R1" "${LEGACYPRODUCTNAME2}${MANUFACTURER}" wix_match wix_loop
   wix_match:
     ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
     ${StrCase} $R1 $R0 "L"
@@ -278,22 +309,11 @@ Function PageReinstall
   ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
   ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
 
-  ; Custom: nothing under the current product name — look for an install left
-  ; by a release that shipped under ${LEGACYPRODUCTNAME}. Its directory is
-  ; required as well as its uninstaller: reinst_uninstall has to hand the
-  ; uninstaller its own directory through `_?=`, and without it the migration
-  ; would fail halfway. Missing either, this stays a plain first install.
+  ; Custom: nothing under the current product name — look for an install left by
+  ; a release that shipped under an earlier one, newest first.
   ${If} "$R0$R1" == ""
-    ReadRegStr $R0 SHCTX "${LEGACYUNINSTKEY}" ""
-    ReadRegStr $R1 SHCTX "${LEGACYUNINSTKEY}" "UninstallString"
-    ReadRegStr $LegacyInstDir SHCTX "${LEGACYMANUPRODUCTKEY}" ""
-    ${If} "$R0$R1" != ""
-    ${AndIf} $LegacyInstDir != ""
-      StrCpy $LegacyMode 1
-    ${Else}
-      StrCpy $R0 ""
-      StrCpy $R1 ""
-    ${EndIf}
+    !insertmacro TryLegacyInstall "${LEGACYUNINSTKEY1}" "${LEGACYMANUPRODUCTKEY1}"
+    !insertmacro TryLegacyInstall "${LEGACYUNINSTKEY2}" "${LEGACYMANUPRODUCTKEY2}"
   ${EndIf}
 
   ${IfThen} "$R0$R1" == "" ${|} Abort ${|}
@@ -304,9 +324,9 @@ Function PageReinstall
   StrCpy $R4 "$(older)"
   ${If} $WixMode = 1
     ReadRegStr $R0 HKLM "$R6" "DisplayVersion"
-  ; Custom: the version of the install found under the previous product name.
+  ; Custom: the version of the install found under a previous product name.
   ${ElseIf} $LegacyMode = 1
-    ReadRegStr $R0 SHCTX "${LEGACYUNINSTKEY}" "DisplayVersion"
+    ReadRegStr $R0 SHCTX $LegacyUninstKey "DisplayVersion"
   ${Else}
     ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayVersion"
   ${EndIf}
@@ -463,7 +483,7 @@ Function PageLeaveReinstall
       ; what keeps that uninstaller from clearing the app data.
       ${If} $LegacyMode = 1
         StrCpy $4 $LegacyInstDir
-        ReadRegStr $R1 SHCTX "${LEGACYUNINSTKEY}" "UninstallString"
+        ReadRegStr $R1 SHCTX $LegacyUninstKey "UninstallString"
       ${Else}
         ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
         ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
@@ -505,8 +525,8 @@ Function PageLeaveReinstall
     ${If} $LegacyMode = 1
       Delete "$LegacyInstDir\uninstall.exe"
       RMDir "$LegacyInstDir"
-      DeleteRegKey SHCTX "${LEGACYMANUPRODUCTKEY}"
-      DeleteRegKey HKCU "${LEGACYMANUPRODUCTKEY}"
+      DeleteRegKey SHCTX $LegacyManuProductKey
+      DeleteRegKey HKCU $LegacyManuProductKey
     ${EndIf}
   reinst_done:
 FunctionEnd

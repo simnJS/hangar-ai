@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
+import { Logo } from "./Logo";
 import type { Workspace } from "../types";
 
 interface Props {
@@ -30,8 +31,8 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <span className="sidebar__logo">◧</span>
-        <span className="sidebar__title">Hangar.IA</span>
+        <Logo size={17} />
+        <span className="sidebar__title">Hangar.AI</span>
       </div>
 
       <div className="sidebar__section">{t("sidebar.workspaces")}</div>

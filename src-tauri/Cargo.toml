@@ -1,10 +1,10 @@
 [package]
-name = "hangar-ia"
-version = "0.2.0"
+name = "hangar-ai"
+version = "0.3.0"
 description = "Terminal multiplexer for CLI coding agents, with a shared task board"
 authors = ["simnJS"]
 license = "MIT"
-repository = "https://github.com/simnJS/hangar-ia"
+repository = "https://github.com/simnJS/hangar-ai"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +13,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "hangar_ia_lib"
+name = "hangar_ai_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -35,4 +35,5 @@ toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2.3.1"
+discord-rich-presence = "1.1.0"
 

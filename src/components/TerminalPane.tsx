@@ -6,6 +6,8 @@ import "@xterm/xterm/css/xterm.css";
 
 import { ptyKill, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
 import { subscribePty } from "../lib/ptyBus";
+import { registerTerminal } from "../lib/terminalRegistry";
+import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
 import { createActivityWatcher } from "../lib/activity";
 import { notify } from "../lib/notify";
 import { usePaneDrag } from "./PaneGrid";
@@ -18,6 +20,7 @@ import {
   watchForSession,
 } from "../lib/agents";
 import { useT } from "../i18n";
+import type { CommandId } from "../lib/shortcuts";
 import type { TerminalTheme } from "../themes";
 import {
   AGENTS,
@@ -87,6 +90,8 @@ export function TerminalPane({
   const [attention, setAttention] = useState(false);
   const drag = usePaneDrag();
   const t = useT();
+  const shortcut = useShortcutLabel();
+  const withKeys = useShortcutTitle();
 
   // Latest settings/theme without forcing the terminal to be rebuilt.
   const settingsRef = useRef(settings);
@@ -101,6 +106,8 @@ export function TerminalPane({
   visibleRef.current = visible;
   const tRef = useRef(t);
   tRef.current = t;
+
+  const jumpKeys = index < 9 ? shortcut(`pane.focus${index + 1}` as CommandId) : "";
 
   const paneCwd = pane.cwd || cwd;
   const agentMeta = AGENTS.find((a) => a.id === pane.agent);
@@ -157,6 +164,9 @@ export function TerminalPane({
 
     termRef.current = term;
     fitRef.current = fit;
+    // Shortcuts that act on the terminal itself — clear, copy, scroll — are
+    // dispatched from the app and look the instance up by pane id.
+    const unregister = registerTerminal(pane.id, term);
 
     try {
       fit.fit();
@@ -342,6 +352,7 @@ export function TerminalPane({
       controller.abort();
       observer.disconnect();
       watcher.dispose();
+      unregister();
       unsubscribe?.();
       ptyKill(pane.id).catch(() => undefined);
       term.dispose();
@@ -410,16 +421,16 @@ export function TerminalPane({
         title={t("pane.move")}
       >
         {/*
-          Only the first nine panes get the shortcut hint: the handler reads a
-          single `event.key`, and a digit key is always one character, so
-          Ctrl+10 and beyond cannot be typed at all. The rest fall back to
-          naming the pane rather than promising a key that does not exist.
+          Only the first nine panes get the shortcut hint: there are nine
+          "focus pane N" commands, and the user is free to unbind any of them.
+          The rest fall back to naming the pane rather than promising a key
+          that does not exist.
         */}
         <span
           className="pane__index"
           title={
-            index < 9
-              ? t("pane.jump", { n: index + 1 })
+            jumpKeys
+              ? t("pane.jump", { keys: jumpKeys })
               : t("pane.label", { name: pane.name })
           }
         >
@@ -487,17 +498,25 @@ export function TerminalPane({
           </span>
         )}
         <span className={`pane__status pane__status--${status}`} title={status} />
-        <button className="pane__action" onClick={onRestart} title={t("pane.restart")}>
+        <button
+          className="pane__action"
+          onClick={onRestart}
+          title={withKeys(t("pane.restart"), "pane.restart")}
+        >
           ↻
         </button>
-        <button className="pane__action" onClick={onSplit} title={t("pane.split")}>
+        <button
+          className="pane__action"
+          onClick={onSplit}
+          title={withKeys(t("pane.split"), "pane.split")}
+        >
           ⊞
         </button>
         <button
           className="pane__action pane__action--close"
           onClick={onClose}
           disabled={!canClose}
-          title={canClose ? t("pane.close") : t("pane.closeLast")}
+          title={canClose ? withKeys(t("pane.close"), "pane.close") : t("pane.closeLast")}
         >
           ✕
         </button>

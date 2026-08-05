@@ -18,9 +18,9 @@ ManifestDPIAwareness PerMonitorV2
 !define IB_ROOT "${__FILEDIR__}\.."
 !define IB_INSTALLER "${IB_ROOT}\src-tauri\installer"
 
-Name "Hangar.IA"
+Name "Hangar.AI"
 OutFile "${IB_OUTFILE}"
-InstallDir "$LOCALAPPDATA\Hangar.IA"
+InstallDir "$LOCALAPPDATA\Hangar.AI"
 RequestExecutionLevel user
 
 !define MUI_ICON "${IB_ROOT}\src-tauri\icons\icon.ico"
@@ -54,7 +54,7 @@ Function ibWelcomePage
   ${EndIf}
 
   !insertmacro IB_Backdrop
-  !insertmacro IB_Masthead "Hangar.IA" "A terminal multiplexer for CLI coding agents"
+  !insertmacro IB_Masthead "Hangar.AI" "A terminal multiplexer for CLI coding agents"
   !insertmacro IB_CloseButton ibQuit
   !insertmacro IB_Button $IB_Primary 160 240 200 44 "Install"
   ${NSD_OnClick} $IB_Primary ibNext
@@ -64,7 +64,7 @@ Function ibWelcomePage
 FunctionEnd
 
 Function ibInstallPageShow
-  !insertmacro IB_StyleInstallPage "Hangar.IA" "A terminal multiplexer for CLI coding agents" "Installing…"
+  !insertmacro IB_StyleInstallPage "Hangar.AI" "A terminal multiplexer for CLI coding agents" "Installing…"
 FunctionEnd
 
 Function ibFinishPage
@@ -75,10 +75,10 @@ Function ibFinishPage
   ${EndIf}
 
   !insertmacro IB_Backdrop
-  !insertmacro IB_Masthead "Hangar.IA" "A terminal multiplexer for CLI coding agents"
+  !insertmacro IB_Masthead "Hangar.AI" "A terminal multiplexer for CLI coding agents"
   !insertmacro IB_CloseButton ibNext
-  !insertmacro IB_Label $IB_Note 40 240 440 22 "Hangar.IA is installed" ""
-  !insertmacro IB_Button $IB_Primary 160 276 200 44 "Launch Hangar.IA"
+  !insertmacro IB_Label $IB_Note 40 240 440 22 "Hangar.AI is installed" ""
+  !insertmacro IB_Button $IB_Primary 160 276 200 44 "Launch Hangar.AI"
   ${NSD_OnClick} $IB_Primary ibNext
 
   nsDialogs::Show
@@ -88,9 +88,9 @@ FunctionEnd
 Section "Install"
   SetOutPath "$PLUGINSDIR"
   SetAutoClose true
-  DetailPrint "Preparing Hangar.IA 0.1.1"
+  DetailPrint "Preparing Hangar.AI 0.3.0"
   Sleep 500
-  DetailPrint "Extracting hangar-ia.exe"
+  DetailPrint "Extracting hangar-ai.exe"
   Sleep 900
   DetailPrint "Extracting the WebView2 loader"
   Sleep 700

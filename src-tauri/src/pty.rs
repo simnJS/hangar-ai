@@ -111,7 +111,7 @@ fn take_utf8(pending: &mut Vec<u8>) -> String {
 
 /// Session markers an agent CLI leaves in the environment of anything it spawns.
 ///
-/// If Hangar.IA is itself launched from inside an agent session, these leak all
+/// If Hangar.AI is itself launched from inside an agent session, these leak all
 /// the way down into the panes. `CLAUDE_CODE_CHILD_SESSION` in particular tells
 /// Claude Code it is a nested run and to skip writing a transcript — which
 /// silently breaks session capture and resume. A pane must look like a fresh

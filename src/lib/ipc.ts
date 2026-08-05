@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { DiscordPresence, DiscordStatus } from "./discord";
 import type { AgentSession, AppState, ShellInfo } from "../types";
 
 export const ptySpawn = (args: {
@@ -32,5 +33,12 @@ export const saveState = (state: AppState) =>
   invoke<void>("save_state", { state });
 
 export const dirExists = (path: string) => invoke<boolean>("dir_exists", { path });
+
+/** `null` clears the presence and closes the connection to Discord. */
+export const setDiscordPresence = (wanted: DiscordPresence | null) =>
+  invoke<void>("discord_presence_set", { wanted });
+
+export const discordPresenceStatus = () =>
+  invoke<DiscordStatus>("discord_presence_status");
 
 export const homeDir = () => invoke<string>("home_dir");

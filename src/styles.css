@@ -86,10 +86,16 @@ select {
   padding: 14px 16px 12px;
 }
 
-.sidebar__logo {
-  color: var(--accent);
-  font-size: 17px;
-  line-height: 1;
+/* The mark takes its colors from the theme like the rest of the chrome: the
+   active pane in the accent, the other two in the foreground. */
+.logo {
+  display: block;
+  flex: none;
+  fill: var(--fg);
+}
+
+.logo__active {
+  fill: var(--accent);
 }
 
 .sidebar__title {
@@ -730,21 +736,25 @@ body.is-dragging-pane .pane__bar {
   color: var(--fg-subtle);
 }
 
-/* ---------- Settings drawer ---------- */
+/* ---------- Settings page ---------- */
 
-.drawer {
+/* Fullscreen, above the workspace but below the modals. The terminals stay
+   mounted underneath: opening the settings never disturbs a running agent. */
+.settings {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 380px;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-sunken);
-  border-left: 1px solid var(--border);
-  box-shadow: -18px 0 40px -24px var(--shadow);
-  animation: slide-in 180ms ease;
-  z-index: 20;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+  animation: settings-in 150ms ease;
+}
+
+@keyframes settings-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 @keyframes slide-in {
@@ -754,42 +764,159 @@ body.is-dragging-pane .pane__bar {
   }
 }
 
-.drawer__head {
+.settings__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
+  gap: 14px;
+  padding: 11px 16px;
+  background: var(--bg-sunken);
   border-bottom: 1px solid var(--border);
 }
 
-.drawer__head h2 {
+.settings__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
 }
 
-.drawer__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 14px 20px;
+.settings__title-icon {
+  color: var(--accent);
 }
 
-.group {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.group:last-child {
-  border-bottom: 0;
-}
-
-.group__title {
+.settings__search {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  margin-left: auto;
+  width: min(340px, 42vw);
+  padding: 4px 6px 4px 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color var(--dur);
+}
+
+.settings__search:focus-within {
+  border-color: var(--accent-ring);
+}
+
+.settings__search-icon {
+  color: var(--fg-subtle);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.settings__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  outline: none;
+}
+
+.settings__search input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.settings__body {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.settings__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 10px;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+}
+
+.settings__nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.settings__nav:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.settings__nav.is-active {
+  background: var(--surface-active);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.settings__nav.is-active .settings__nav-icon {
+  color: var(--accent);
+}
+
+.settings__nav-icon {
+  width: 15px;
+  text-align: center;
+  color: var(--fg-subtle);
+}
+
+.settings__nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings__nav-count {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings__content {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.settings__page {
+  display: grid;
+  gap: 24px;
+  align-content: start;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 24px 30px 64px;
+}
+
+.settings__page-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings__empty {
+  padding: 48px 30px;
+  text-align: center;
+  color: var(--fg-subtle);
+}
+
+.set-section {
+  display: grid;
   gap: 8px;
-  margin: 0 0 10px;
+}
+
+.set-section__title {
+  margin: 0;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.09em;
@@ -797,27 +924,42 @@ body.is-dragging-pane .pane__bar {
   color: var(--fg-subtle);
 }
 
-.group__toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 10.5px;
-  font-weight: 500;
-  cursor: pointer;
+.set-section__hint {
+  margin: -4px 0 0;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
 }
 
-.themes {
+.set-section__rows {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.theme-groups {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.theme-group__label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 7px;
 }
 
 .theme-card {
   display: grid;
-  gap: 7px;
-  padding: 9px 10px;
+  gap: 8px;
+  padding: 10px 11px;
   border-radius: 0;
   border: 1.5px solid transparent;
   cursor: pointer;
@@ -850,34 +992,54 @@ body.is-dragging-pane .pane__bar {
   border-radius: 0;
 }
 
-.field {
+/* ---------- Settings rows & controls ---------- */
+
+.set-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
+  gap: 22px;
+  padding: 11px 14px;
 }
 
-.field__label {
+.set-row + .set-row {
+  border-top: 1px solid var(--border);
+}
+
+/* Anything too wide for a label/control pair: theme grid, preview… The flex
+   alignments above would otherwise keep the grid tracks at their content size. */
+.set-row--block {
   display: grid;
-  gap: 1px;
-  color: var(--fg-muted);
+  align-items: normal;
+  justify-content: normal;
+  gap: 10px;
 }
 
-.field__hint {
-  font-size: 10.5px;
+.set-row__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.set-row__label {
+  color: var(--fg);
+}
+
+.set-row__hint {
+  font-size: 11px;
   color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums;
 }
 
-.field__control {
+.set-row__control {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  min-width: 160px;
   justify-content: flex-end;
+  gap: 10px;
+  min-width: 236px;
 }
 
-.field select {
+.set-select {
   width: 100%;
   padding: 5px 8px;
   border-radius: var(--radius-sm);
@@ -887,21 +1049,363 @@ body.is-dragging-pane .pane__bar {
   cursor: pointer;
 }
 
-.field select option {
+.set-select:focus-visible {
+  border-color: var(--accent-ring);
+}
+
+.set-select option {
   background: var(--bg-sunken);
 }
 
-.field input[type="range"] {
+.set-input {
   width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  outline: none;
+}
+
+.set-input:focus-visible {
+  border-color: var(--accent-ring);
+}
+
+.set-range {
+  flex: 1;
+  min-width: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-.field input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
+.set-value {
+  min-width: 62px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-text {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.seg {
+  display: flex;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.seg__btn {
+  padding: 5px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
   cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.seg__btn + .seg__btn {
+  border-left: 1px solid var(--border);
+}
+
+.seg__btn:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.seg__btn.is-active {
+  background: var(--accent-soft);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The checkbox covers the track, so the whole switch is the hit area. */
+.switch {
+  position: relative;
+  display: inline-flex;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch__track {
+  display: flex;
+  width: 34px;
+  height: 18px;
+  padding: 1px;
+  background: var(--surface-active);
+  border: 1px solid var(--border-strong);
+  transition: background var(--dur), border-color var(--dur);
+}
+
+.switch__knob {
+  width: 14px;
+  height: 14px;
+  background: var(--fg-subtle);
+  transition: transform var(--dur), background var(--dur);
+}
+
+.switch input:checked + .switch__track {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch__track .switch__knob {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+.switch input:focus-visible + .switch__track {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.font-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
+  gap: 7px;
+}
+
+.font-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur), border-color var(--dur);
+}
+
+.font-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.font-card.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.font-card__name {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+.font-card__sample {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+/* Typography, cursor and padding, shown on the live theme. */
+.term-preview {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.term-preview__prompt {
+  color: var(--success);
+}
+
+.term-preview__dim {
+  color: var(--fg-subtle);
+}
+
+.term-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  height: 1.1em;
+  width: 0.6em;
+}
+
+.term-cursor--bar {
+  width: 2px;
+}
+
+.term-cursor--underline {
+  height: 2px;
+}
+
+.term-cursor.is-blinking {
+  animation: cursor-blink 1.05s steps(1) infinite;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Discord presence ---------- */
+
+/* The card Discord will show, drawn on the live theme rather than in Discord's
+   own colours: it belongs to this window, and only its shape has to read as
+   Discord for the preview to do its job. */
+.dc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.dc-card {
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  /* Roughly the width Discord gives it: stretched to the page it stops
+     reading as the card it is meant to preview. */
+  max-width: 400px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  transition: opacity var(--dur) ease;
+}
+
+/* Off is a preview, not a state: dimmed enough to read as inactive, legible
+   enough to judge the toggles by. */
+.dc-card.is-off {
+  opacity: 0.45;
+}
+
+.dc-card__art {
+  position: relative;
+  flex: none;
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.dc-card__icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dc-card__badge {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 2px solid var(--bg-sunken);
+  border-radius: 50%;
+}
+
+.dc-card__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  justify-content: center;
+}
+
+.dc-card__lines > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-card__head {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  margin-bottom: 2px;
+}
+
+.dc-card__name {
+  font-size: 13.5px;
+  color: var(--fg);
+}
+
+.dc-card__details,
+.dc-card__state {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.dc-card__time {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not a real button: Discord draws it, this only shows where it lands. */
+.dc-card__button {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  color: var(--fg);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+}
+
+.dc-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.dc-status__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+}
+
+.dc-status--on .dc-status__dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+/* Retrying, not broken: the pulse says something is still happening. */
+.dc-status--waiting .dc-status__dot {
+  background: var(--warning);
+  animation: dc-pulse 1.8s ease-in-out infinite;
+}
+
+.dc-status--on .dc-status__label {
+  color: var(--fg);
+}
+
+.dc-status__hint {
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes dc-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* ---------- Session modal ---------- */
@@ -1612,4 +2116,282 @@ body.is-dragging-pane .pane__bar {
 .preview__cell--opencode {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
   color: var(--danger);
+}
+
+/* ---------- Keyboard shortcuts ---------- */
+
+.keymap {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+
+.keymap__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keymap__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.keymap__search:focus-within {
+  border-color: var(--accent);
+}
+
+.keymap__search-icon {
+  color: var(--fg-subtle);
+}
+
+.keymap__search input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+
+.keymap__state {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  border: 1px solid var(--border);
+}
+
+.keymap__state.is-conflict {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.keymap__group-title {
+  margin: 0 0 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.keymap__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+}
+
+.keymap__empty {
+  margin: 0;
+  color: var(--fg-subtle);
+}
+
+/* Wrapping, so a conflict note takes the whole width under the row it warns
+   about rather than squeezing the keys next to it. */
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 7px 10px;
+}
+
+.key-row + .key-row {
+  border-top: 1px solid var(--border);
+}
+
+.key-row:hover {
+  background: var(--surface);
+}
+
+.key-row.is-conflict {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.key-row__text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.key-row__tag {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.key-row__binds {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.key-row__none {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+
+.key-row__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+
+.key-row__btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.key-row__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.key-row__warn {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.key-row__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.key-bind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px 2px 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.key-bind.is-conflict {
+  border-color: var(--danger);
+}
+
+.key-bind__x {
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-subtle);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.key-bind__x:hover {
+  color: var(--danger);
+}
+
+/* Chords of a sequence are spaced apart; the keys inside one are not. */
+.kbd-seq {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.kbd-chord {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.kbd-seq kbd {
+  padding: 3px 5px;
+  font-family: var(--ui-font);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--surface-active);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+}
+
+.kbd-seq .kbd--ghost {
+  opacity: 0.45;
+}
+
+.key-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 5px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.key-rec__dot {
+  width: 7px;
+  height: 7px;
+  background: var(--danger);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.key-rec__prompt {
+  font-size: 11px;
+}
+
+.key-rec__hint {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+/* Half-typed sequence, floating above the broadcast bar. */
+.chord-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 10px 26px -18px var(--shadow);
+  z-index: 30;
+}
+
+.chord-hint__keys {
+  font-weight: 600;
+  color: var(--accent);
 }
