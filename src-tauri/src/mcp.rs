@@ -1,6 +1,6 @@
 //! MCP server exposed over stdio.
 //!
-//! Runs inside the same executable as the GUI (`iabench --mcp`), which keeps
+//! Runs inside the same executable as the GUI (`hangar-ia --mcp`), which keeps
 //! agent configuration trivial: one absolute path, no sidecar to bundle or
 //! locate. Every call is proxied to the running app's HTTP API so that task
 //! claims stay atomic across all panes.
@@ -38,7 +38,7 @@ struct Api {
 impl Api {
     fn connect() -> Result<Self, String> {
         let endpoint =
-            crate::endpoint::read().ok_or("IaBench is not running (no endpoint file found)")?;
+            crate::endpoint::read().ok_or("Hangar.IA is not running (no endpoint file found)")?;
         Ok(Api {
             base: format!("http://127.0.0.1:{}", endpoint.port),
             token: endpoint.token,
@@ -267,7 +267,7 @@ fn handle(request: &Value) -> Option<Value> {
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "iabench-board", "version": env!("CARGO_PKG_VERSION") }
+                "serverInfo": { "name": "hangar-ia-board", "version": env!("CARGO_PKG_VERSION") }
             }),
         ),
         "tools/list" => respond(id, json!({ "tools": tool_definitions() })),

@@ -25,9 +25,9 @@ fn playbook() -> String {
     format!(
         r#"{START}
 
-## Shared task board (IaBench)
+## Shared task board (Hangar.IA)
 
-This project is driven from IaBench. Several agents work **in parallel** in separate
+This project is driven from Hangar.IA. Several agents work **in parallel** in separate
 terminals on this same directory. A shared kanban board is the source of truth for
 who is doing what. Reach it through the MCP tools prefixed `board_`.
 
@@ -149,7 +149,7 @@ fn update_gitignore(root: &Path) -> InstructionReport {
     if !updated.is_empty() {
         updated.push('\n');
     }
-    updated.push_str("# IaBench — tableau de tâches local\n.iabench/\n");
+    updated.push_str("# Hangar.IA — tableau de tâches local\n.iabench/\n");
 
     match fs::write(&path, updated) {
         Ok(()) => InstructionReport {

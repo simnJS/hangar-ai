@@ -1,34 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SessionPicker } from "./components/SessionPicker";
-import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
+import { WorkspaceTerminals } from "./components/WorkspaceTerminals";
 import { BoardView } from "./components/BoardView";
 import { McpPanel } from "./components/McpPanel";
-import { PaneGrid, normalizeTree } from "./components/PaneGrid";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { detectAgents, detectShells, ptyWrite } from "./lib/ipc";
-import { resolveShell } from "./lib/shells";
+import { leafIds, MAX_PANES, normalizeTree, preferredDir } from "./lib/layout";
 import { useT } from "./i18n";
 import { useStore } from "./store";
 import { applyThemeToDocument, getTheme } from "./themes";
-import { AGENTS, type AgentId, type LayoutSize, type ShellInfo } from "./types";
+import { AGENTS, type LayoutSize, type Pane, type ShellInfo } from "./types";
 
 const LAYOUTS: LayoutSize[] = [1, 2, 4, 8];
 
 export default function App() {
-  const { state, hydrated, activeWorkspace, updatePane, setLayout, updateWorkspace } =
+  const { state, hydrated, activeWorkspace, respawnPane, applyPreset, addPane, closePane } =
     useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
   const [view, setView] = useState<"terminals" | "board">("terminals");
-  const [focusedPaneId, setFocusedPaneId] = useState<string | null>(null);
+  /** One focused pane per workspace: leaving and coming back lands you back. */
+  const [focusByWorkspace, setFocusByWorkspace] = useState<Record<string, string>>({});
   const [pickerPaneId, setPickerPaneId] = useState<string | null>(null);
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
+  const [openedIds, setOpenedIds] = useState<string[]>([]);
   const t = useT();
 
   const theme = useMemo(
@@ -49,44 +50,126 @@ export default function App() {
       .catch(() => setShells([]));
   }, []);
 
-  const panes = activeWorkspace ? activeWorkspace.panes.slice(0, activeWorkspace.layout) : [];
+  const panes = useMemo(() => activeWorkspace?.panes ?? [], [activeWorkspace?.panes]);
 
-  const paneTree = useMemo(
-    () => normalizeTree(activeWorkspace?.layout ?? 1, activeWorkspace?.tree),
-    [activeWorkspace?.layout, activeWorkspace?.tree],
+  /** Pane ids in reading order: Ctrl+N follows the arrangement on screen. */
+  const order = useMemo(
+    () => (activeWorkspace ? leafIds(normalizeTree(panes, activeWorkspace.tree)) : []),
+    [panes, activeWorkspace],
+  );
+
+  const focusedPaneId = activeWorkspace
+    ? (focusByWorkspace[activeWorkspace.id] ?? null)
+    : null;
+
+  const focusPane = useCallback((workspaceId: string, paneId: string) => {
+    setFocusByWorkspace((current) => ({ ...current, [workspaceId]: paneId }));
+  }, []);
+
+  /**
+   * Workspaces stay mounted once visited. Switching away only hides them, so
+   * their agents keep running — unmounting a pane kills its PTY. The list is
+   * built lazily: nothing spawns for a workspace the user never opened.
+   */
+  useEffect(() => {
+    const id = state.activeWorkspaceId;
+    if (id) setOpenedIds((current) => (current.includes(id) ? current : [...current, id]));
+  }, [state.activeWorkspaceId]);
+
+  const openWorkspaces = useMemo(
+    () => state.workspaces.filter((ws) => openedIds.includes(ws.id)),
+    [state.workspaces, openedIds],
   );
 
   // Keep focus on a pane that still exists after a layout change.
   useEffect(() => {
+    if (!activeWorkspace) return;
     if (panes.length && !panes.some((p) => p.id === focusedPaneId)) {
-      setFocusedPaneId(panes[0].id);
+      focusPane(activeWorkspace.id, panes[0].id);
     }
-  }, [panes, focusedPaneId]);
+  }, [activeWorkspace, panes, focusedPaneId, focusPane]);
 
-  // Ctrl+1..8 jumps between panes; Ctrl+, toggles settings.
+  const splitPane = useCallback(
+    (workspaceId: string, paneId: string | null) => {
+      const near = paneId ?? focusByWorkspace[workspaceId] ?? null;
+      const created = addPane(workspaceId, { near, dir: preferredDir(near) });
+      if (created) focusPane(workspaceId, created);
+    },
+    [addPane, focusByWorkspace, focusPane],
+  );
+
+  const replacePane = useCallback(
+    (workspaceId: string, paneId: string, patch: Partial<Pane>) => {
+      // A fresh id remounts the terminal, which is how a pane restarts.
+      const nextId = respawnPane(workspaceId, paneId, patch);
+      if (nextId && focusByWorkspace[workspaceId] === paneId) {
+        focusPane(workspaceId, nextId);
+      }
+    },
+    [respawnPane, focusByWorkspace, focusPane],
+  );
+
+  // Ctrl+1..9 jumps between panes, Ctrl+, toggles settings,
+  // Ctrl+Shift+Enter splits the focused pane and Ctrl+Shift+X closes it.
   useEffect(() => {
+    /**
+     * A shortcut we act on goes no further. This listener runs on the capture
+     * phase of `window`, above everything: left to propagate, Ctrl+Shift+Enter
+     * would also reach the broadcast input — which sends on Enter — and the
+     * focused terminal, so one keystroke would do two things. Stopping here
+     * rather than filtering on the target is what keeps the shortcuts working
+     * from inside a terminal, whose xterm surface is a <textarea>.
+     */
+    function consume(event: KeyboardEvent) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     function onKey(event: KeyboardEvent) {
       if (!event.ctrlKey || event.altKey) return;
-      if (event.key === ",") {
-        event.preventDefault();
+
+      if (event.key === "," && !event.shiftKey) {
+        consume(event);
         setShowSettings((open) => !open);
         return;
       }
+
+      // Everything below acts on panes, which only exist on screen — and are
+      // only what the keystroke can be about — in the terminals view.
+      if (!activeWorkspace || view !== "terminals") return;
+
+      if (event.shiftKey && event.key === "Enter") {
+        consume(event);
+        splitPane(activeWorkspace.id, null);
+        return;
+      }
+
+      if (event.shiftKey && (event.key === "X" || event.key === "x")) {
+        consume(event);
+        if (focusedPaneId && panes.length > 1) {
+          closePane(activeWorkspace.id, focusedPaneId);
+        }
+        return;
+      }
+
       const digit = Number(event.key);
-      if (Number.isInteger(digit) && digit >= 1 && digit <= panes.length) {
-        event.preventDefault();
-        setFocusedPaneId(panes[digit - 1].id);
+      if (Number.isInteger(digit) && digit >= 1 && digit <= order.length) {
+        consume(event);
+        focusPane(activeWorkspace.id, order[digit - 1]);
       }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [panes]);
-
-  function replacePane(paneId: string, patch: Record<string, unknown>) {
-    if (!activeWorkspace) return;
-    // A fresh id remounts the terminal, which is how a pane restarts.
-    updatePane(activeWorkspace.id, paneId, { ...patch, id: crypto.randomUUID() });
-  }
+  }, [
+    order,
+    panes.length,
+    focusedPaneId,
+    activeWorkspace,
+    view,
+    closePane,
+    splitPane,
+    focusPane,
+  ]);
 
   function sendBroadcast() {
     const text = broadcast.trim();
@@ -143,9 +226,9 @@ export default function App() {
                     {LAYOUTS.map((size) => (
                       <button
                         key={size}
-                        className={`layouts__btn ${activeWorkspace.layout === size ? "is-active" : ""}`}
-                        onClick={() => setLayout(activeWorkspace.id, size)}
-                        title={t("topbar.panes", { n: size })}
+                        className={`layouts__btn ${panes.length === size ? "is-active" : ""}`}
+                        onClick={() => applyPreset(activeWorkspace.id, size)}
+                        title={t("topbar.presetHint", { n: size })}
                       >
                         {size}
                       </button>
@@ -154,7 +237,18 @@ export default function App() {
 
                   <button
                     className="btn btn--ghost"
-                    onClick={() => panes.forEach((p) => replacePane(p.id, {}))}
+                    onClick={() => splitPane(activeWorkspace.id, null)}
+                    disabled={panes.length >= MAX_PANES}
+                    title={t("topbar.addPaneHint")}
+                  >
+                    {t("topbar.addPane")}
+                  </button>
+
+                  <button
+                    className="btn btn--ghost"
+                    onClick={() =>
+                      panes.forEach((p) => replacePane(activeWorkspace.id, p.id, {}))
+                    }
                     title={t("topbar.restartAllHint")}
                   >
                     {t("topbar.restartAll")}
@@ -163,46 +257,25 @@ export default function App() {
               )}
             </header>
 
-            {/* Hidden, never unmounted: unmounting would kill every PTY and
-                lose the running agents when switching to the board. */}
-            <PaneGrid
-              hidden={view !== "terminals"}
-              tree={paneTree}
-              onTreeChange={(tree) => updateWorkspace(activeWorkspace.id, { tree })}
-              renderPane={(index) => {
-                const pane = panes[index];
-                if (!pane) return null;
-                return (
-                <TerminalPane
-                  key={pane.id}
-                  pane={pane}
-                  index={index}
-                  cwd={activeWorkspace.cwd}
-                  settings={state.settings}
-                  theme={theme}
-                  focused={focusedPaneId === pane.id}
-                  availableAgents={availableAgents}
-                  shells={shells}
-                  shell={resolveShell(
-                    shells,
-                    pane.shellId,
-                    activeWorkspace.shellId,
-                    state.settings.shellId,
-                  )}
-                  onFocus={() => setFocusedPaneId(pane.id)}
-                  onAgentChange={(agent: AgentId) =>
-                    replacePane(pane.id, { agent, sessionId: null })
-                  }
-                  onShellChange={(shellId) => replacePane(pane.id, { shellId })}
-                  onSessionCaptured={(sessionId) =>
-                    updatePane(activeWorkspace.id, pane.id, { sessionId })
-                  }
-                  onRestart={() => replacePane(pane.id, {})}
-                  onOpenSessions={() => setPickerPaneId(pane.id)}
-                />
-                );
-              }}
-            />
+            {/* One grid per workspace ever opened, all but one hidden. They
+                are never unmounted: that would kill every PTY and lose the
+                running agents — on a workspace switch as much as on the
+                switch to the board. */}
+            {openWorkspaces.map((ws) => (
+              <WorkspaceTerminals
+                key={ws.id}
+                workspace={ws}
+                hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
+                settings={state.settings}
+                availableAgents={availableAgents}
+                shells={shells}
+                focusedPaneId={focusByWorkspace[ws.id] ?? null}
+                onFocusPane={(paneId) => focusPane(ws.id, paneId)}
+                onSplitPane={(paneId) => splitPane(ws.id, paneId)}
+                onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                onOpenSessions={setPickerPaneId}
+              />
+            ))}
 
             {view === "board" && (
               <BoardView cwd={activeWorkspace.cwd} onOpenMcp={() => setShowMcp(true)} />
@@ -270,7 +343,7 @@ export default function App() {
           currentId={pickerPane.sessionId}
           onClose={() => setPickerPaneId(null)}
           onPick={(sessionId) => {
-            replacePane(pickerPane.id, { sessionId });
+            replacePane(activeWorkspace.id, pickerPane.id, { sessionId });
             setPickerPaneId(null);
           }}
         />

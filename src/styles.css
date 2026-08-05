@@ -183,7 +183,9 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.ws__remove {
+/* Row controls stay out of the way until the row is under the pointer, so a
+   list of workspaces reads as names rather than as a wall of icons. */
+.ws__action {
   border: 0;
   background: transparent;
   color: var(--fg-subtle);
@@ -195,8 +197,13 @@ select {
   transition: opacity var(--dur), color var(--dur);
 }
 
-.ws:hover .ws__remove {
+.ws:hover .ws__action,
+.ws__action:focus-visible {
   opacity: 1;
+}
+
+.ws__action:hover {
+  color: var(--fg);
 }
 
 .ws__remove:hover {
@@ -372,58 +379,53 @@ select {
 
 /* ---------- Pane grid ---------- */
 
-/* Nested flex splits, not a grid: every boundary owns its own ratio, so
-   dragging one separator leaves every other pane untouched. */
+/* Panes are flat, absolutely positioned siblings whose rectangles come from
+   the split tree. Nothing is ever reparented, so a pane keeps its terminal
+   alive while it is resized, split or dragged to another spot. */
 .grid {
+  position: relative;
   flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  background: var(--border);
-}
-
-.grid > * {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-.split {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* flex-basis 0 makes flex-grow behave as a true proportion of the container. */
-.split__side {
-  display: flex;
-  flex-basis: 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--border);
 }
 
-.split__side > * {
+.grid__slot {
+  position: absolute;
+  display: flex;
+  overflow: hidden;
+}
+
+.grid__slot > * {
   flex: 1;
   min-width: 0;
   min-height: 0;
 }
 
+/* The pane being dragged stays in place, dimmed, as its own drop origin. */
+.grid__slot.is-dragging {
+  opacity: 0.45;
+}
+
 .splitter {
-  flex: 0 0 5px;
+  position: absolute;
+  z-index: 3;
   background: var(--border);
-  position: relative;
-  z-index: 2;
   transition: background var(--dur);
   touch-action: none;
 }
 
+/* A row split is separated by a vertical bar, hence the col-resize cursor. */
 .splitter--col {
+  width: 5px;
+  margin-left: -2.5px;
   cursor: col-resize;
 }
 
 .splitter--row {
+  height: 5px;
+  margin-top: -2.5px;
   cursor: row-resize;
 }
 
@@ -437,6 +439,46 @@ select {
   content: "";
   position: absolute;
   inset: -3px;
+}
+
+/* While a pane is being dragged the separators must not swallow the pointer,
+   or the hit test would lose the pane underneath. */
+body.is-dragging-pane .splitter {
+  pointer-events: none;
+}
+
+body.is-dragging-pane,
+body.is-dragging-pane * {
+  user-select: none;
+}
+
+body.is-resizing {
+  user-select: none;
+}
+
+/* ---------- Pane drag & drop ---------- */
+
+.drop-hint {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
+}
+
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  pointer-events: none;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.75;
 }
 
 .pane {
@@ -456,6 +498,13 @@ select {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* A pane that finished while you were elsewhere keeps its outline until you
+   actually read it, so the desktop notification is never the only trace. */
+.pane--attn {
+  box-shadow: inset 0 0 0 1px var(--warning);
+}
+
+/* Doubles as the drag handle for the whole pane. */
 .pane__bar {
   display: flex;
   align-items: center;
@@ -463,18 +512,34 @@ select {
   padding: 4px 6px 4px 8px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  cursor: grab;
+  touch-action: none;
 }
 
+body.is-dragging-pane .pane__bar {
+  cursor: grabbing;
+}
+
+/* The controls inside the bar keep their own affordance. */
+.pane__bar button,
+.pane__bar select {
+  cursor: pointer;
+}
+
+/* Holds a short first name, not a digit: it grows with the word. */
 .pane__index {
   min-width: 16px;
   height: 16px;
+  padding: 0 5px;
   display: grid;
   place-items: center;
   border-radius: 0;
   background: var(--surface-active);
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
   font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .pane--focused .pane__index {
@@ -551,6 +616,17 @@ select {
   font-weight: 700;
 }
 
+.pane__attn {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
 .pane__status {
   width: 7px;
   height: 7px;
@@ -591,6 +667,17 @@ select {
 .pane__action:hover {
   color: var(--fg);
   background: var(--surface-hover);
+}
+
+.pane__action:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: transparent;
+}
+
+.pane__action--close:hover:enabled {
+  color: var(--bg);
+  background: var(--danger);
 }
 
 .pane__term {
@@ -1502,8 +1589,9 @@ select {
   top: 4px;
   left: 6px;
   font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums;
 }
 
 .preview__cell--claude {

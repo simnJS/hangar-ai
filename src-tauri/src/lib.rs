@@ -11,7 +11,7 @@ mod store;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
-/// Entry point for `iabench --mcp`: no window, no Tauri runtime, just the
+/// Entry point for `hangar-ia --mcp`: no window, no Tauri runtime, just the
 /// stdio protocol loop talking to whatever app instance is running.
 pub fn run_mcp() {
     mcp::run_stdio();
@@ -24,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(pty::PtyManager::default())
         .setup(|app| {
             let handle = app.handle().clone();

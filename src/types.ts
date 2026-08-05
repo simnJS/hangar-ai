@@ -1,5 +1,6 @@
 export type AgentId = "shell" | "claude" | "codex" | "gemini" | "opencode";
 
+/** Starting points offered in the UI; a workspace can hold any pane count. */
 export type LayoutSize = 1 | 2 | 4 | 8;
 
 /** A shell discovered on this machine, as reported by the Rust side. */
@@ -12,6 +13,11 @@ export interface ShellInfo {
 
 export interface Pane {
   id: string;
+  /**
+   * Human name for this pane — unique within its workspace, and stable across
+   * splits, moves and restarts, unlike a position.
+   */
+  name: string;
   agent: AgentId;
   /** Agent session to resume on next launch. Captured automatically. */
   sessionId: string | null;
@@ -26,21 +32,21 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
-  layout: LayoutSize;
   panes: Pane[];
   /** Overrides the global theme for this workspace only. */
   themeId: string | null;
   /** Overrides the global default shell. null follows the settings. */
   shellId: string | null;
   /**
-   * Nested split tree describing the pane layout. Unlike a CSS grid, each
+   * Nested split tree describing the pane arrangement. Unlike a CSS grid, each
    * split owns its own ratio, so resizing one boundary leaves the rest alone.
    */
   tree: SplitNode | null;
 }
 
 export type SplitNode =
-  | { type: "pane"; index: number }
+  /** Leaves point at a pane id: closing or moving a pane never renumbers. */
+  | { type: "pane"; id: string }
   /** `row` places children side by side (vertical bar), `col` stacks them. */
   | { type: "split"; dir: "row" | "col"; ratio: number; a: SplitNode; b: SplitNode };
 
@@ -62,6 +68,12 @@ export interface Settings {
   autoResume: boolean;
   /** Wait before auto-launching agents, so the shell finishes its profile. */
   launchDelayMs: number;
+  /** Raise a desktop notification when a pane hands control back. */
+  notifyOnIdle: boolean;
+  /** Silence, in ms, after which a working pane counts as finished. */
+  notifyIdleMs: number;
+  /** Stay quiet for the pane you are already watching. */
+  notifyOnlyWhenAway: boolean;
 }
 
 export interface AppState {
@@ -98,4 +110,7 @@ export const DEFAULT_SETTINGS: Settings = {
   padding: 10,
   autoResume: true,
   launchDelayMs: 700,
+  notifyOnIdle: true,
+  notifyIdleMs: 3000,
+  notifyOnlyWhenAway: true,
 };

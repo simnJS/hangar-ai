@@ -20,7 +20,12 @@ function ensureBus(): Promise<void> {
       await listen<{ id: string }>("pty:exit", (event) => {
         exitHandlers.get(event.payload.id)?.();
       });
-    })();
+    })().catch((err) => {
+      // A cached rejection would make every pane opened afterwards fail on a
+      // problem that was over long ago. Forget it so the next one retries.
+      ready = null;
+      throw err;
+    });
   }
   return ready;
 }

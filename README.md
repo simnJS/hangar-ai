@@ -1,4 +1,4 @@
-# IaBench
+# Hangar.IA
 
 A terminal multiplexer for CLI coding agents. Run Claude Code, Codex and friends
 side by side in one window, resume their sessions where you left off, and give them
@@ -15,7 +15,7 @@ workspace and every pane comes back with its agent and its previous conversation
 independently resizable — dragging one boundary leaves the others alone. Pick the shell
 per pane from whatever is installed: PowerShell, cmd, Git Bash, WSL, MSYS2, Nushell.
 
-**Session resume.** CLI agents do not expose their session id, so IaBench derives it:
+**Session resume.** CLI agents do not expose their session id, so Hangar.IA derives it:
 it snapshots the transcript directory before launching, then watches for the new file
 that appears. On the next launch the pane runs `claude --resume <id>` or
 `codex resume <id>` automatically. A global claim prevents two panes in the same
@@ -110,7 +110,7 @@ pnpm tauri build    # produce the installer
 Check the MCP server without the GUI:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./src-tauri/target/debug/iabench --mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./src-tauri/target/debug/hangar-ia --mcp
 ```
 
 ## Layout

@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
@@ -11,12 +13,61 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
+    /// Cleared when the pane is killed. The reader thread outlives the kill by
+    /// a moment — it can be holding a chunk read just before it — and this is
+    /// what stops those last events from landing in whatever holds the id next.
+    live: Arc<AtomicBool>,
+}
+
+/// Everything the manager tracks, behind one lock: an id is live, being reaped,
+/// or free, and it can never be seen as free while it is still one of the
+/// other two.
+#[derive(Default)]
+struct Registry {
+    sessions: HashMap<String, PtySession>,
+    /// Ids pulled out of `sessions` whose shell is still being reaped. They own
+    /// their id as much as a live session does: until the old child is really
+    /// gone, spawning into that id would put two shells on one pane.
+    dying: HashSet<String>,
 }
 
 #[derive(Default)]
 pub struct PtyManager {
-    sessions: Mutex<HashMap<String, PtySession>>,
+    registry: Mutex<Registry>,
+    /// Signalled when an id leaves `dying`, so a spawn queued behind a kill
+    /// wakes as soon as the old shell is reaped instead of polling for it.
+    reaped: Condvar,
 }
+
+impl PtyManager {
+    fn lock(&self) -> MutexGuard<'_, Registry> {
+        self.registry.lock().unwrap()
+    }
+}
+
+/// Holds an id in `dying` for as long as its shell is being reaped and hands it
+/// back on the way out — early return, error, or a panic inside `wait` included
+/// — so a reap that goes wrong cannot strand the id for good.
+struct Reaping<'a> {
+    manager: &'a PtyManager,
+    id: String,
+}
+
+impl Drop for Reaping<'_> {
+    fn drop(&mut self) {
+        // Deliberately not `unwrap`: panicking here while already unwinding
+        // would abort the process instead of just failing the pane.
+        if let Ok(mut registry) = self.manager.registry.lock() {
+            registry.dying.remove(&self.id);
+        }
+        self.manager.reaped.notify_all();
+    }
+}
+
+/// How long `pty_spawn` waits for the previous shell on the same id to be
+/// reaped. Killing and reaping a shell is near instant; this is only here so a
+/// shell that refuses to die fails one pane instead of hanging the command.
+const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Serialize)]
 struct PtyOutput {
@@ -60,7 +111,7 @@ fn take_utf8(pending: &mut Vec<u8>) -> String {
 
 /// Session markers an agent CLI leaves in the environment of anything it spawns.
 ///
-/// If IaBench is itself launched from inside an agent session, these leak all
+/// If Hangar.IA is itself launched from inside an agent session, these leak all
 /// the way down into the panes. `CLAUDE_CODE_CHILD_SESSION` in particular tells
 /// Claude Code it is a nested run and to skip writing a transcript — which
 /// silently breaks session capture and resume. A pane must look like a fresh
@@ -84,9 +135,27 @@ pub fn pty_spawn(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    // Re-spawning into a live id would orphan the old process.
-    if manager.sessions.lock().unwrap().contains_key(&id) {
-        return Err(format!("pty {id} already running"));
+    // An id belongs to one shell at a time, and one being reaped by `pty_kill`
+    // still counts: its child is alive and its reader thread still speaks under
+    // that id. A live session is a caller mistake and fails, but a dying one is
+    // routine — the frontend kills and respawns a pane without awaiting the
+    // kill — so it is waited out. The lock is released while waiting, here and
+    // during the reap itself, so no other pane stalls behind it.
+    {
+        let registry = manager.lock();
+        if registry.sessions.contains_key(&id) {
+            return Err(format!("pty {id} already running"));
+        }
+        let (registry, wait) = manager
+            .reaped
+            .wait_timeout_while(registry, REAP_TIMEOUT, |r| r.dying.contains(&id))
+            .unwrap();
+        if wait.timed_out() {
+            return Err(format!("pty {id} is still shutting down"));
+        }
+        if registry.sessions.contains_key(&id) {
+            return Err(format!("pty {id} already running"));
+        }
     }
 
     let pty_system = native_pty_system();
@@ -126,17 +195,20 @@ pub fn pty_spawn(
     // Dropping the slave handle is what lets the reader see EOF on exit.
     drop(pair.slave);
 
-    manager.sessions.lock().unwrap().insert(
+    let live = Arc::new(AtomicBool::new(true));
+    manager.lock().sessions.insert(
         id.clone(),
         PtySession {
             master: pair.master,
             writer,
             child,
+            live: live.clone(),
         },
     );
 
     let reader_app = app.clone();
     let reader_id = id.clone();
+    let reader_live = live;
     std::thread::spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
         let mut buf = [0u8; 8192];
@@ -144,6 +216,12 @@ pub fn pty_spawn(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // The pane may have been killed while this chunk was in
+                    // flight. It belongs to nobody now, and the id may already
+                    // be back in use by another pane.
+                    if !reader_live.load(Ordering::Relaxed) {
+                        break;
+                    }
                     pending.extend_from_slice(&buf[..n]);
                     let text = take_utf8(&mut pending);
                     if !text.is_empty() {
@@ -159,13 +237,18 @@ pub fn pty_spawn(
                 Err(_) => break,
             }
         }
-        let _ = reader_app.emit(
-            "pty:exit",
-            PtyExit {
-                id: reader_id,
-                code: None,
-            },
-        );
+        // Only a shell that ended on its own has an exit to report: a killed
+        // pane is already gone as far as the frontend is concerned, and the id
+        // may have been handed to a new shell in the meantime.
+        if reader_live.load(Ordering::Relaxed) {
+            let _ = reader_app.emit(
+                "pty:exit",
+                PtyExit {
+                    id: reader_id,
+                    code: None,
+                },
+            );
+        }
     });
 
     Ok(())
@@ -173,8 +256,8 @@ pub fn pty_spawn(
 
 #[tauri::command]
 pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
-    let mut sessions = manager.sessions.lock().unwrap();
-    let session = sessions.get_mut(&id).ok_or("pty not found")?;
+    let mut registry = manager.lock();
+    let session = registry.sessions.get_mut(&id).ok_or("pty not found")?;
     session
         .writer
         .write_all(data.as_bytes())
@@ -189,8 +272,8 @@ pub fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = manager.sessions.lock().unwrap();
-    let session = sessions.get(&id).ok_or("pty not found")?;
+    let registry = manager.lock();
+    let session = registry.sessions.get(&id).ok_or("pty not found")?;
     session
         .master
         .resize(PtySize {
@@ -204,23 +287,46 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
-    let mut sessions = manager.sessions.lock().unwrap();
-    if let Some(mut session) = sessions.remove(&id) {
-        let _ = session.child.kill();
-        let _ = session.child.wait();
-    }
+    // Taken out under the lock, reaped outside it: `wait` blocks until the
+    // shell is really gone, and a shell that takes its time — one still
+    // tearing down a child agent — would otherwise hold the manager and
+    // freeze every write and resize in the other panes. The id is booked in
+    // `dying` for that window instead, so it stays taken without the lock
+    // being taken with it, and a `pty_spawn` on the same id waits for the old
+    // shell rather than running alongside it.
+    let mut session = {
+        let mut registry = manager.lock();
+        // Unknown or already reaped: nothing to kill, nothing to book.
+        let Some(session) = registry.sessions.remove(&id) else {
+            return Ok(());
+        };
+        registry.dying.insert(id.clone());
+        session
+    };
+    session.live.store(false, Ordering::Relaxed);
+    let _reaping = Reaping {
+        manager: &manager,
+        id,
+    };
+
+    let _ = session.child.kill();
+    let _ = session.child.wait();
+    // Closing the master is what ends the reader thread, so it happens before
+    // the id is handed back rather than at the end of the scope.
+    drop(session);
     Ok(())
 }
 
 #[tauri::command]
 pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {
-    manager.sessions.lock().unwrap().contains_key(&id)
+    manager.lock().sessions.contains_key(&id)
 }
 
 /// Kills every live pane. Used on window close so no shell is left behind.
 pub fn kill_all(manager: &PtyManager) {
-    let mut sessions = manager.sessions.lock().unwrap();
-    for (_, mut session) in sessions.drain() {
+    let mut registry = manager.lock();
+    for (_, mut session) in registry.sessions.drain() {
+        session.live.store(false, Ordering::Relaxed);
         let _ = session.child.kill();
     }
 }

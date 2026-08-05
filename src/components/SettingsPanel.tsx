@@ -306,6 +306,40 @@ export function SettingsPanel({
             />
           </Row>
         </section>
+
+        <section className="group">
+          <h3 className="group__title">{t("settings.notifications")}</h3>
+
+          <Row label={t("settings.notifyOnIdle")} hint={t("settings.notifyOnIdleHint")}>
+            <input
+              type="checkbox"
+              checked={settings.notifyOnIdle}
+              onChange={(e) => set("notifyOnIdle", e.target.checked)}
+            />
+          </Row>
+
+          <Row
+            label={t("settings.notifyIdle")}
+            hint={`${(settings.notifyIdleMs / 1000).toFixed(1)} s`}
+          >
+            <input
+              type="range"
+              min={1000}
+              max={15000}
+              step={500}
+              value={settings.notifyIdleMs}
+              onChange={(e) => set("notifyIdleMs", Number(e.target.value))}
+            />
+          </Row>
+
+          <Row label={t("settings.notifyAway")} hint={t("settings.notifyAwayHint")}>
+            <input
+              type="checkbox"
+              checked={settings.notifyOnlyWhenAway}
+              onChange={(e) => set("notifyOnlyWhenAway", e.target.checked)}
+            />
+          </Row>
+        </section>
       </div>
     </div>
   );

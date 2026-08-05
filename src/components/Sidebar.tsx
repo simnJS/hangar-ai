@@ -31,7 +31,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     <aside className="sidebar">
       <div className="sidebar__brand">
         <span className="sidebar__logo">◧</span>
-        <span className="sidebar__title">IaBench</span>
+        <span className="sidebar__title">Hangar.IA</span>
       </div>
 
       <div className="sidebar__section">{t("sidebar.workspaces")}</div>
@@ -44,12 +44,18 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
               key={ws.id}
               className={`ws ${active ? "ws--active" : ""}`}
               onClick={() => setActiveWorkspace(ws.id)}
-              onDoubleClick={() => startRename(ws)}
+              onDoubleClick={(e) => {
+                // The row's buttons carry their own meaning; only the label
+                // itself opens the rename field.
+                if ((e.target as Element).closest("button")) return;
+                startRename(ws);
+              }}
             >
               {renaming === ws.id ? (
                 <input
                   className="ws__input"
                   autoFocus
+                  title={t("sidebar.renameHint")}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onBlur={commitRename}
@@ -67,9 +73,20 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
                       {ws.cwd}
                     </span>
                   </div>
-                  <span className="ws__badge">{ws.layout}</span>
+                  <span className="ws__badge">{ws.panes.length}</span>
+                  {/* Double-click renames too, but nothing on the row says so. */}
                   <button
-                    className="ws__remove"
+                    className="ws__action"
+                    title={t("sidebar.rename")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRename(ws);
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className="ws__action ws__remove"
                     title={t("sidebar.remove")}
                     onClick={(e) => {
                       e.stopPropagation();

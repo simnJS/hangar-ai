@@ -24,6 +24,8 @@ const en = {
   "sidebar.empty": "No workspace yet.\nCreate one to get started.",
   "sidebar.new": "+ New workspace",
   "sidebar.settings": "⚙ Appearance & settings",
+  "sidebar.rename": "Rename workspace (or double-click it)",
+  "sidebar.renameHint": "Enter to confirm, Escape to cancel",
   "sidebar.remove": "Delete workspace",
 
   "view.terminals": "Terminals",
@@ -32,12 +34,14 @@ const en = {
   "topbar.layout": "Layout",
   "topbar.restartAll": "↻ Restart all",
   "topbar.restartAllHint": "Restart every pane",
-  "topbar.panes_one": "{n} pane",
-  "topbar.panes_other": "{n} panes",
+  "topbar.addPane": "+ Terminal",
+  "topbar.addPaneHint": "Split the focused pane (Ctrl+Shift+Enter)",
+  "topbar.presetHint_one": "Even layout, {n} pane",
+  "topbar.presetHint_other": "Even layout, {n} panes",
 
   "placeholder.title": "No workspace open",
   "placeholder.body":
-    "Create a workspace from the sidebar: pick a project folder, then spread your agents ({agents}) across 1, 2, 4 or 8 panes.",
+    "Create a workspace from the sidebar: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
 
   "broadcast.placeholder": "Send the same instruction to all {n} panes…",
   "broadcast.send": "Broadcast",
@@ -51,9 +55,25 @@ const en = {
   "pane.resuming": "Resuming session: {id}",
   "pane.noSession": "No session stored — click to pick one",
   "pane.restart": "Restart pane",
-  "pane.label": "Pane {n}",
+  "pane.split": "Split this pane (Ctrl+Shift+Enter)",
+  "pane.close": "Close pane (Ctrl+Shift+X)",
+  "pane.closeLast": "The last pane cannot be closed",
+  "pane.move": "Drag this bar to move the pane · drop on an edge to split, in the middle to swap",
+  "pane.label": "Pane {name}",
+  "pane.jump": "Focus with Ctrl+{n}",
   "pane.spawnFailed": "Failed to start shell",
   "pane.notOnPath": "{agent} not found on PATH",
+  "pane.attention": "Finished while you were away",
+
+  "notify.title": "{name} · {agent}",
+  "notify.settled": "Finished — waiting for you",
+
+  "settings.notifications": "Notifications",
+  "settings.notifyOnIdle": "When a pane finishes",
+  "settings.notifyOnIdleHint": "desktop notification once an agent hands control back",
+  "settings.notifyIdle": "Silence before finished",
+  "settings.notifyAway": "Only in the background",
+  "settings.notifyAwayHint": "with the window in front, the pane badge is enough",
 
   "settings.title": "Appearance & settings",
   "settings.close": "Close",
@@ -155,7 +175,7 @@ const en = {
 
   "mcp.title": "Connect agents to the board",
   "mcp.intro":
-    "IaBench registers itself as an MCP server in each tool's configuration. The port and token are never written to those files: they are resolved at launch, so the configuration stays valid across restarts.",
+    "Hangar.IA registers itself as an MCP server in each tool's configuration. The port and token are never written to those files: they are resolved at launch, so the configuration stays valid across restarts.",
   "mcp.playbook": "Write the agent playbook",
   "mcp.playbookHint": "AGENTS.md + CLAUDE.md · adds .iabench/ to .gitignore",
   "mcp.alreadyThere": "already present",
@@ -187,6 +207,8 @@ const fr: Record<Key, string> = {
   "sidebar.empty": "Aucun workspace.\nCrée-en un pour démarrer.",
   "sidebar.new": "+ Nouveau workspace",
   "sidebar.settings": "⚙ Apparence & réglages",
+  "sidebar.rename": "Renommer le workspace (ou double-clic dessus)",
+  "sidebar.renameHint": "Entrée pour valider, Échap pour annuler",
   "sidebar.remove": "Supprimer le workspace",
 
   "view.terminals": "Terminaux",
@@ -195,12 +217,14 @@ const fr: Record<Key, string> = {
   "topbar.layout": "Disposition",
   "topbar.restartAll": "↻ Tout relancer",
   "topbar.restartAllHint": "Relancer tous les panneaux",
-  "topbar.panes_one": "{n} panneau",
-  "topbar.panes_other": "{n} panneaux",
+  "topbar.addPane": "+ Terminal",
+  "topbar.addPaneHint": "Diviser le panneau actif (Ctrl+Maj+Entrée)",
+  "topbar.presetHint_one": "Disposition régulière, {n} panneau",
+  "topbar.presetHint_other": "Disposition régulière, {n} panneaux",
 
   "placeholder.title": "Aucun workspace ouvert",
   "placeholder.body":
-    "Crée un workspace depuis la barre latérale : choisis un dossier de projet, puis répartis tes agents ({agents}) dans 1, 2, 4 ou 8 panneaux.",
+    "Crée un workspace depuis la barre latérale : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
 
   "broadcast.placeholder": "Envoyer la même instruction aux {n} panneaux…",
   "broadcast.send": "Diffuser",
@@ -214,9 +238,26 @@ const fr: Record<Key, string> = {
   "pane.resuming": "Session reprise : {id}",
   "pane.noSession": "Aucune session mémorisée — cliquer pour en choisir une",
   "pane.restart": "Relancer le panneau",
-  "pane.label": "Panneau {n}",
+  "pane.split": "Diviser ce panneau (Ctrl+Maj+Entrée)",
+  "pane.close": "Fermer le panneau (Ctrl+Maj+X)",
+  "pane.closeLast": "Le dernier panneau ne peut pas être fermé",
+  "pane.move":
+    "Glisse cette barre pour déplacer le panneau · dépose sur un bord pour diviser, au centre pour échanger",
+  "pane.label": "Panneau {name}",
+  "pane.jump": "Activer avec Ctrl+{n}",
   "pane.spawnFailed": "Échec du démarrage du shell",
   "pane.notOnPath": "{agent} introuvable dans le PATH",
+  "pane.attention": "A terminé pendant ton absence",
+
+  "notify.title": "{name} · {agent}",
+  "notify.settled": "A terminé — il t'attend",
+
+  "settings.notifications": "Notifications",
+  "settings.notifyOnIdle": "Quand un panneau a terminé",
+  "settings.notifyOnIdleHint": "notification système dès qu'un agent rend la main",
+  "settings.notifyIdle": "Silence avant « terminé »",
+  "settings.notifyAway": "Seulement en arrière-plan",
+  "settings.notifyAwayHint": "fenêtre au premier plan, la pastille du panneau suffit",
 
   "settings.title": "Apparence & réglages",
   "settings.close": "Fermer",
@@ -318,7 +359,7 @@ const fr: Record<Key, string> = {
 
   "mcp.title": "Connecter les agents au tableau",
   "mcp.intro":
-    "IaBench s'enregistre comme serveur MCP dans la configuration de chaque outil. Le port et le jeton ne sont jamais écrits dans ces fichiers : ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.",
+    "Hangar.IA s'enregistre comme serveur MCP dans la configuration de chaque outil. Le port et le jeton ne sont jamais écrits dans ces fichiers : ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.",
   "mcp.playbook": "Écrire le mode d'emploi pour les agents",
   "mcp.playbookHint": "AGENTS.md + CLAUDE.md · ajoute .iabench/ au .gitignore",
   "mcp.alreadyThere": "déjà présent",
@@ -343,7 +384,7 @@ const fr: Record<Key, string> = {
 
 const DICTIONARIES: Record<Locale, Record<Key, string>> = { en, fr };
 
-/** `topbar.panes_one` also exposes `topbar.panes` as a callable key. */
+/** `topbar.presetHint_one` also exposes `topbar.presetHint` as a callable key. */
 type PluralBase<K> = K extends `${infer Base}_one` ? Base : never;
 
 export type TranslateKey = Key | PluralBase<Key>;

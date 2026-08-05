@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop } from "./Backdrop";
 import { useT } from "../i18n";
+import { PANE_NAMES } from "../lib/paneNames";
 import { useStore, type WorkspaceDraft } from "../store";
 import { AGENTS, type AgentId, type LayoutSize, type ShellInfo } from "../types";
 
@@ -259,7 +260,8 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                   title={AGENTS.find((a) => a.id === agent)?.label}
                 >
                   <span className="preview__tag">{AGENT_SHORT[agent]}</span>
-                  <span className="preview__num">{index + 1}</span>
+                  {/* The names the panes will actually be created with. */}
+                  <span className="preview__num">{PANE_NAMES[index] ?? index + 1}</span>
                 </button>
               ))}
             </div>

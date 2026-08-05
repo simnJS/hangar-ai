@@ -6,6 +6,9 @@ import "@xterm/xterm/css/xterm.css";
 
 import { ptyKill, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
 import { subscribePty } from "../lib/ptyBus";
+import { createActivityWatcher } from "../lib/activity";
+import { notify } from "../lib/notify";
+import { usePaneDrag } from "./PaneGrid";
 import {
   claim,
   isResumable,
@@ -32,19 +35,27 @@ interface Props {
   settings: Settings;
   theme: TerminalTheme;
   focused: boolean;
+  /**
+   * False while the whole workspace is hidden. Focus is stored per workspace,
+   * so `focused` alone says nothing about what the user is actually looking
+   * at: every mounted workspace keeps one focused pane, on screen or not.
+   */
+  visible: boolean;
   index: number;
   availableAgents: string[];
   shells: ShellInfo[];
   /** Already resolved through the pane → workspace → global chain. */
   shell: ShellInfo | null;
+  /** False when this is the last pane left: a workspace keeps at least one. */
+  canClose: boolean;
   onFocus: () => void;
   onAgentChange: (agent: AgentId) => void;
   onShellChange: (shellId: string | null) => void;
   onSessionCaptured: (sessionId: string) => void;
   onRestart: () => void;
+  onSplit: () => void;
+  onClose: () => void;
   onOpenSessions: () => void;
-  /** Grid placement supplied by PaneGrid. */
-  style?: React.CSSProperties;
 }
 
 export function TerminalPane({
@@ -53,22 +64,28 @@ export function TerminalPane({
   settings,
   theme,
   focused,
+  visible,
   index,
   availableAgents,
   shells,
   shell,
+  canClose,
   onFocus,
   onAgentChange,
   onShellChange,
   onSessionCaptured,
   onRestart,
+  onSplit,
+  onClose,
   onOpenSessions,
-  style,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<Status>("starting");
+  /** The pane handed control back while you were looking somewhere else. */
+  const [attention, setAttention] = useState(false);
+  const drag = usePaneDrag();
   const t = useT();
 
   // Latest settings/theme without forcing the terminal to be rebuilt.
@@ -76,6 +93,14 @@ export function TerminalPane({
   settingsRef.current = settings;
   const shellRef = useRef(shell);
   shellRef.current = shell;
+  // The terminal effect runs once per pane id, so whatever it reads later must
+  // come through a ref rather than the closure captured on mount.
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const paneCwd = pane.cwd || cwd;
   const agentMeta = AGENTS.find((a) => a.id === pane.agent);
@@ -110,6 +135,26 @@ export function TerminalPane({
     term.loadAddon(new WebLinksAddon());
     term.open(host);
 
+    /**
+     * Ctrl+V pastes, as it does everywhere else on the machine.
+     *
+     * Left alone, xterm maps every Ctrl+letter to its control code — Ctrl+V
+     * becomes ^V, sent straight to the shell — and cancels the key event,
+     * which also cancels the webview's own paste. Returning false hands the
+     * key back untouched: the browser pastes into the helper textarea, and
+     * xterm already listens for that paste event.
+     *
+     * The trade-off is that ^V no longer reaches the shell, so readline's
+     * quoted-insert is out of reach from that key — the same bargain
+     * Windows Terminal makes.
+     */
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown" || event.altKey) return true;
+      const pasting =
+        (event.ctrlKey || event.metaKey) && (event.key === "v" || event.key === "V");
+      return !pasting;
+    });
+
     termRef.current = term;
     fitRef.current = fit;
 
@@ -127,21 +172,100 @@ export function TerminalPane({
       ptyResize(pane.id, cols, rows).catch(() => undefined);
     });
 
-    (async () => {
-      unsubscribe = await subscribePty(
-        pane.id,
-        (data) => term.write(data),
-        () => !disposed && setStatus("exited"),
+    /**
+     * Everything needed to decide whether a hand-back is worth interrupting
+     * you for is local to the pane: whether it is the one you are watching,
+     * and whether the window is even in front. Nothing has to travel upwards.
+     */
+    function announce(body: string) {
+      if (disposed) return;
+      const windowFocused = document.hasFocus();
+      // You are already looking at it: not news. All three have to hold —
+      // being the focused pane of a workspace that is off screen means the
+      // hand-back happened out of sight, which is the whole point of this.
+      if (windowFocused && focusedRef.current && visibleRef.current) return;
+
+      setAttention(true);
+
+      const current = settingsRef.current;
+      if (!current.notifyOnIdle) return;
+      // With the window in front, the pane badge is enough of a signal.
+      if (current.notifyOnlyWhenAway && windowFocused) return;
+
+      notify(
+        tRef.current("notify.title", {
+          // Both safe to capture: the name never changes, and a different
+          // agent means a different pane id, which remounts this effect.
+          name: pane.name,
+          agent: agentMeta?.label ?? pane.agent,
+        }),
+        body,
       );
-      if (disposed) return;
+    }
 
-      // Snapshot before launching, so a brand new transcript stands out.
-      const known = isResumable(pane.agent)
-        ? await knownSessionIds(pane.agent, paneCwd)
-        : new Set<string>();
-      if (disposed) return;
+    const watcher = createActivityWatcher({
+      idleMs: () => settingsRef.current.notifyIdleMs,
+      onSettle: () => announce(tRef.current("notify.settled")),
+    });
 
+    // A bell is the agent asking for you outright, so it settles the pane
+    // without waiting out the silence.
+    term.onBell(() => watcher.ring());
+
+    // OSC 9 and OSC 777 are the terminal escape codes for "raise a desktop
+    // notification": the agent already wrote the message, so it is passed
+    // through instead of being guessed at.
+    term.parser.registerOscHandler(9, (data) => {
+      // Only iTerm2's `OSC 9 ; <message>` is a notification. On Windows the
+      // same code is mostly used for ConEmu sub-commands that have nothing to
+      // say to you: `OSC 9 ; 4 ; <state> ; <pct>` is the taskbar progress bar
+      // (PowerShell 7, winget, pip) and `OSC 9 ; 9 ; <cwd>` reports the
+      // working directory (ConEmu, Windows Terminal). They are told apart by
+      // their leading numeric segment — a message written for a human does not
+      // start with one — and left to whoever else wants them, rather than
+      // badging the pane and popping up a notification reading `4;3;0`.
+      if (/^\d+(;|$)/.test(data)) return false;
+      announce(data.trim() || tRef.current("notify.settled"));
+      return true;
+    });
+    term.parser.registerOscHandler(777, (data) => {
+      const [kind, title, body] = data.split(";");
+      if (kind !== "notify") return false;
+      announce(body?.trim() || title?.trim() || tRef.current("notify.settled"));
+      return true;
+    });
+
+    // Read and cleared by the session watcher: a silent pane cannot have
+    // started a conversation, so it is not worth a look at the transcripts.
+    let printedSinceLastLook = false;
+
+    (async () => {
       try {
+        const stop = await subscribePty(
+          pane.id,
+          (data) => {
+            term.write(data);
+            watcher.push();
+            printedSinceLastLook = true;
+          },
+          () => !disposed && setStatus("exited"),
+        );
+        // The cleanup may have run during that await, in which case it saw
+        // `unsubscribe` still null and unsubscribed nothing. Assigning now
+        // would strand the handlers — and the terminal they close over — for
+        // good, so the subscription is undone here instead.
+        if (disposed) {
+          stop();
+          return;
+        }
+        unsubscribe = stop;
+
+        // Snapshot before launching, so a brand new transcript stands out.
+        const known = isResumable(pane.agent)
+          ? await knownSessionIds(pane.agent, paneCwd)
+          : new Set<string>();
+        if (disposed) return;
+
         await ptySpawn({
           id: pane.id,
           cwd: paneCwd,
@@ -149,36 +273,58 @@ export function TerminalPane({
           cols: term.cols,
           rows: term.rows,
         });
+        // Same race as the subscription above: a cleanup that ran during the
+        // spawn killed an id the backend did not know yet, so the shell it
+        // just registered would outlive the pane. Killing again is free when
+        // the id is already gone.
+        if (disposed) {
+          ptyKill(pane.id).catch(() => undefined);
+          return;
+        }
+        setStatus("running");
+
+        if (pane.agent === "shell") return;
+
+        // Let the shell profile settle before typing into it.
+        await sleep(settingsRef.current.launchDelayMs, controller.signal);
+        if (disposed || controller.signal.aborted) return;
+
+        const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
+        const command = launchCommand(pane.agent, resumeId);
+        if (command) {
+          if (resumeId) claim(resumeId);
+          await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);
+        }
+
+        // Watched for as long as the pane lives, resumed or not: /new inside
+        // the agent opens another transcript, and the pane has to follow it
+        // or the next launch would resume the conversation you walked away
+        // from. `known` already holds the resumed id, so it is not re-read as
+        // a discovery.
+        if (isResumable(pane.agent)) {
+          // Deliberately not awaited — it polls until the pane goes away.
+          watchForSession({
+            agent: pane.agent,
+            cwd: paneCwd,
+            known,
+            signal: controller.signal,
+            hadOutput: () => {
+              const printed = printedSinceLastLook;
+              printedSinceLastLook = false;
+              return printed;
+            },
+            onFound: (sessionId) => !disposed && onSessionCaptured(sessionId),
+          }).catch(() => undefined);
+        }
       } catch (err) {
-        term.writeln(`\r\n\x1b[31mFailed to start shell: ${String(err)}\x1b[0m`);
+        // Covers the whole start path, event subscription included: a pane
+        // that cannot start says so and offers its restart button, instead of
+        // sitting on "starting" forever behind an unhandled rejection.
+        if (disposed) return;
+        term.writeln(
+          `\r\n\x1b[31m${tRef.current("pane.spawnFailed")}: ${String(err)}\x1b[0m`,
+        );
         setStatus("exited");
-        return;
-      }
-      if (disposed) return;
-      setStatus("running");
-
-      if (pane.agent === "shell") return;
-
-      // Let the shell profile settle before typing into it.
-      await sleep(settingsRef.current.launchDelayMs, controller.signal);
-      if (disposed || controller.signal.aborted) return;
-
-      const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
-      const command = launchCommand(pane.agent, resumeId);
-      if (command) {
-        if (resumeId) claim(resumeId);
-        await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);
-      }
-
-      // Only hunt for an id when we did not already resume one.
-      if (isResumable(pane.agent) && !resumeId) {
-        watchForSession({
-          agent: pane.agent,
-          cwd: paneCwd,
-          known,
-          signal: controller.signal,
-          onFound: (sessionId) => !disposed && onSessionCaptured(sessionId),
-        });
       }
     })();
 
@@ -195,6 +341,7 @@ export function TerminalPane({
       disposed = true;
       controller.abort();
       observer.disconnect();
+      watcher.dispose();
       unsubscribe?.();
       ptyKill(pane.id).catch(() => undefined);
       term.dispose();
@@ -234,19 +381,50 @@ export function TerminalPane({
     settings.scrollback,
   ]);
 
+  // Visibility is a dependency, not just a guard: switching workspaces changes
+  // no pane's `focused` — it is stored per workspace — while the grid it left
+  // gets `display:none`, which drops the DOM focus back onto <body>. Without
+  // the re-run, keystrokes would go nowhere until a pane is clicked. A hidden
+  // pane never runs this, so it can neither steal the focus nor clear a badge
+  // it earned while off screen when the window comes back to the front.
   useEffect(() => {
-    if (focused) termRef.current?.focus();
-  }, [focused]);
+    if (!focused || !visible) return;
+    termRef.current?.focus();
+    // Looking at the pane clears its badge — including when the window comes
+    // back to the front with this pane already focused.
+    setAttention(false);
+    const clear = () => setAttention(false);
+    window.addEventListener("focus", clear);
+    return () => window.removeEventListener("focus", clear);
+  }, [focused, visible]);
 
   return (
     <section
-      className={`pane ${focused ? "pane--focused" : ""}`}
-      style={style}
+      className={`pane ${focused ? "pane--focused" : ""} ${attention ? "pane--attn" : ""}`}
       onMouseDown={onFocus}
-      aria-label={t("pane.label", { n: index + 1 })}
+      aria-label={t("pane.label", { name: pane.name })}
     >
-      <header className="pane__bar">
-        <span className="pane__index">{index + 1}</span>
+      <header
+        className="pane__bar"
+        onPointerDown={(event) => drag.begin(pane.id, event)}
+        title={t("pane.move")}
+      >
+        {/*
+          Only the first nine panes get the shortcut hint: the handler reads a
+          single `event.key`, and a digit key is always one character, so
+          Ctrl+10 and beyond cannot be typed at all. The rest fall back to
+          naming the pane rather than promising a key that does not exist.
+        */}
+        <span
+          className="pane__index"
+          title={
+            index < 9
+              ? t("pane.jump", { n: index + 1 })
+              : t("pane.label", { name: pane.name })
+          }
+        >
+          {pane.name}
+        </span>
 
         <select
           className="pane__agent"
@@ -303,9 +481,25 @@ export function TerminalPane({
             !
           </span>
         )}
+        {attention && (
+          <span className="pane__attn" title={t("pane.attention")}>
+            ✳
+          </span>
+        )}
         <span className={`pane__status pane__status--${status}`} title={status} />
         <button className="pane__action" onClick={onRestart} title={t("pane.restart")}>
           ↻
+        </button>
+        <button className="pane__action" onClick={onSplit} title={t("pane.split")}>
+          ⊞
+        </button>
+        <button
+          className="pane__action pane__action--close"
+          onClick={onClose}
+          disabled={!canClose}
+          title={canClose ? t("pane.close") : t("pane.closeLast")}
+        >
+          ✕
         </button>
       </header>
 

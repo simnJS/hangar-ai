@@ -38,10 +38,26 @@ export function claim(sessionId: string) {
   claimed.add(sessionId);
 }
 
+/** Brisk while hunting the first id, patient once the pane has one. */
+const HUNT_MS = 1500;
+const FOLLOW_MS = 5000;
+
+/**
+ * A transcript has to be warm to be ours. Without this a pane could adopt any
+ * file it happens not to know about — one left by another window, say —
+ * instead of the conversation that just started under it.
+ */
+const FRESH_MS = 15_000;
+
 /**
  * Agents do not report their session id, so we diff the transcript directory:
- * whatever file appears after launch that we did not already know about
- * belongs to this pane.
+ * whatever file appears that we did not already know about belongs to this
+ * pane.
+ *
+ * This runs for the whole life of the pane, not just at launch. Typing /new
+ * or /clear inside an agent abandons the current transcript for a fresh one,
+ * and a pane that stopped watching would keep pointing at the old chat — and
+ * reopen it on the next resume, which is not the conversation you left.
  */
 export async function watchForSession(options: {
   agent: AgentId;
@@ -49,15 +65,21 @@ export async function watchForSession(options: {
   known: Set<string>;
   onFound: (sessionId: string) => void;
   signal: AbortSignal;
-  timeoutMs?: number;
+  /**
+   * Consumed once per round. A pane that printed nothing since the last look
+   * cannot have opened a session, so it is skipped without touching the disk
+   * — and a transcript another pane just created is far less likely to be
+   * mistaken for this one's.
+   */
+  hadOutput?: () => boolean;
 }): Promise<void> {
-  const { agent, cwd, known, onFound, signal } = options;
-  const timeoutMs = options.timeoutMs ?? 120_000;
-  const startedAt = Date.now();
+  const { agent, cwd, known, onFound, signal, hadOutput } = options;
+  let intervalMs = HUNT_MS;
 
-  while (!signal.aborted && Date.now() - startedAt < timeoutMs) {
-    await sleep(1500, signal);
+  while (!signal.aborted) {
+    await sleep(intervalMs, signal);
     if (signal.aborted) return;
+    if (hadOutput && !hadOutput()) continue;
 
     let sessions;
     try {
@@ -66,12 +88,18 @@ export async function watchForSession(options: {
       continue;
     }
 
-    const fresh = sessions.find((s) => !known.has(s.id) && !claimed.has(s.id));
-    if (fresh) {
-      claimed.add(fresh.id);
-      onFound(fresh.id);
-      return;
-    }
+    // Sorted most recently touched first, so the first match is the newest.
+    const now = Date.now();
+    const fresh = sessions.find(
+      (s) => !known.has(s.id) && !claimed.has(s.id) && now - s.modified_ms < FRESH_MS,
+    );
+    if (!fresh) continue;
+
+    claimed.add(fresh.id);
+    // Remembered as ours, so the next round hunts the one after it.
+    known.add(fresh.id);
+    onFound(fresh.id);
+    intervalMs = FOLLOW_MS;
   }
 }
 
@@ -86,10 +114,17 @@ export async function knownSessionIds(agent: AgentId, cwd: string): Promise<Set<
 
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
+    // Both paths unregister the other, so the polling loop below does not pile
+    // up one abort listener per iteration on a signal that lives as long as
+    // the pane does.
+    const onAbort = () => {
       clearTimeout(timer);
       resolve();
-    });
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
