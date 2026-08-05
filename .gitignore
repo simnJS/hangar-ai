@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local task board, and generated agent configs holding absolute paths
+.iabench/
+.mcp.json
+.cursor/mcp.json
+.vscode/mcp.json
+AGENTS.md
+CLAUDE.md
+
+# Machine-specific editor and tool settings
+.claude/settings.local.json
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+*.local
