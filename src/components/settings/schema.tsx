@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { LOCALES, type Translator } from "../../i18n";
 import { buildPresence } from "../../lib/discord";
+import { isMac } from "../../lib/keys";
 import { THEMES } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import { ShortcutsSettings } from "./ShortcutsSettings";
@@ -636,7 +637,9 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
         {
           id: "keymap",
           title: t("settings.shortcutsAll"),
-          hint: t("settings.shortcutsHint"),
+          // The sequence it names is a real default, so it has to be spelled
+          // the way this platform spells it.
+          hint: t("settings.shortcutsHint", { mod: isMac() ? "Cmd" : "Ctrl" }),
           items: [
             {
               // One block rather than a row per command: the editor brings its

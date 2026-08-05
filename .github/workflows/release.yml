@@ -14,7 +14,21 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One universal binary rather than two downloads: an Apple Silicon
+          # user picking the Intel build gets a working app either way, and
+          # nobody has to know which one they are on.
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +42,8 @@ jobs:
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -39,6 +55,10 @@ jobs:
       # Builds the installers and, because the signing key is present, the
       # signed `latest.json` the in-app updater polls. Without these secrets the
       # release still succeeds but auto-update will reject the artifacts.
+      #
+      # The two platforms publish to the same release: whichever job gets there
+      # first creates it, the second adds its assets and merges its entry into
+      # `latest.json`.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,10 +68,11 @@ jobs:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: Hangar.AI ${{ github.event.inputs.tag || github.ref_name }}
           releaseBody: |
-            Windows build of Hangar.AI.
-
-            - `.msi` / `.exe` installers under **Assets**
-            - Requires WebView2, which ships with Windows 11
+            - **Windows**: `.msi` or `.exe` under **Assets**. Requires WebView2,
+              which ships with Windows 11.
+            - **macOS**: the `.dmg`, universal for Apple Silicon and Intel. The
+              build is unsigned, so the first launch is right-click → **Open**.
+          args: ${{ matrix.args }}
           # Published straight away: the updater polls
           # releases/latest/download/latest.json, and a draft is not reachable
           # under /latest/, so auto-update would silently find nothing.

@@ -314,3 +314,19 @@ export function chordFromEvent(event: KeyboardEvent): Chord | null {
 export function isBareChord(chord: Chord): boolean {
   return !chord.ctrl && !chord.alt && !chord.meta;
 }
+
+/** Letters the platform modifier reserves for editing a text field. */
+const EDITING_KEYS = new Set(["A", "C", "V", "X", "Z", "Y"]);
+
+/**
+ * True for the chords a text field owns — Cmd+C on a Mac, Ctrl+C elsewhere.
+ *
+ * Nothing is bound to them by default, but they are the obvious thing to
+ * rebind copy and paste onto, and the dispatcher captures above every field in
+ * the app. Without this, doing so would take copying away from the workspace
+ * name, the broadcast box and the task board at the same time.
+ */
+export function isTextEditingChord(chord: Chord): boolean {
+  if (chord.alt || !EDITING_KEYS.has(chord.key)) return false;
+  return MAC ? chord.meta && !chord.ctrl : chord.ctrl && !chord.meta;
+}

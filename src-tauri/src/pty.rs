@@ -158,6 +158,11 @@ pub fn pty_spawn(
         }
     }
 
+    // The pane inherits our environment, so the PATH it starts with is the one
+    // we were fixed with — which matters for the shells that are not opened as
+    // login shells and would otherwise see the bare system PATH.
+    crate::path_env::ensure();
+
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {

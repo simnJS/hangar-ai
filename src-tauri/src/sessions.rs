@@ -203,6 +203,10 @@ pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
 /// Reports which agent CLIs are actually on PATH, so the UI can grey out the rest.
 #[tauri::command]
 pub fn detect_agents() -> Vec<String> {
+    // Without this the answer on macOS is "none of them": a bundled app is
+    // handed the bare system PATH, and no agent CLI installs into it.
+    crate::path_env::ensure();
+
     let candidates: [(&str, &[&str]); 4] = [
         ("claude", &["claude.exe", "claude.cmd", "claude"]),
         ("codex", &["codex.exe", "codex.cmd", "codex"]),

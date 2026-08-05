@@ -111,7 +111,15 @@ fn detected(target: &Target) -> bool {
         "codex" => home.join(".codex").exists(),
         "gemini" => home.join(".gemini").exists(),
         "cursor" => home.join(".cursor").exists(),
-        "vscode" => home.join(".vscode").exists() || home.join("AppData/Roaming/Code").exists(),
+        // VS Code keeps its user data per platform: %APPDATA% on Windows,
+        // ~/Library/Application Support on macOS, ~/.config on Linux. The
+        // ~/.vscode directory holding extensions is common to all three.
+        "vscode" => {
+            home.join(".vscode").exists()
+                || home.join("AppData/Roaming/Code").exists()
+                || home.join("Library/Application Support/Code").exists()
+                || home.join(".config/Code").exists()
+        }
         _ => false,
     }
 }

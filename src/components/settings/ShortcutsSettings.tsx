@@ -6,6 +6,7 @@ import {
   chordSegments,
   formatBinding,
   isBareChord,
+  isMac,
   parseBinding,
   writeBinding,
   type Binding,
@@ -79,10 +80,16 @@ interface Held {
   meta: boolean;
 }
 
+/**
+ * The modifiers currently down, spelled the way the rest of the app spells
+ * them — ⌃⌥⇧⌘ on a Mac — so what the recorder shows while a chord is being
+ * held matches what it shows once the chord is recorded.
+ */
 const heldSegments = (held: Held) =>
-  [held.ctrl && "Ctrl", held.alt && "Alt", held.shift && "Shift", held.meta && "Meta"].filter(
-    (segment): segment is string => Boolean(segment),
-  );
+  (isMac()
+    ? [held.ctrl && "⌃", held.alt && "⌥", held.shift && "⇧", held.meta && "⌘"]
+    : [held.ctrl && "Ctrl", held.alt && "Alt", held.shift && "Shift", held.meta && "Win"]
+  ).filter((segment): segment is string => Boolean(segment));
 
 /**
  * Captures keystrokes until the user confirms.

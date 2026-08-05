@@ -4,6 +4,7 @@ mod endpoint;
 mod install;
 mod instructions;
 mod mcp;
+mod path_env;
 mod pty;
 mod server;
 mod sessions;
@@ -29,6 +30,11 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .manage(discord::DiscordPresence::default())
         .setup(|app| {
+            // Warmed here rather than on the first detection call: asking the
+            // login shell for its PATH takes a moment, and doing it now means
+            // the window is never the thing waiting on it.
+            std::thread::spawn(path_env::ensure);
+
             let handle = app.handle().clone();
             let token = endpoint::generate_token();
             let advertised = token.clone();
