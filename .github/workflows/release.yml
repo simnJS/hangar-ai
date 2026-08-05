@@ -52,5 +52,8 @@ jobs:
 
             - `.msi` / `.exe` installers under **Assets**
             - Requires WebView2, which ships with Windows 11
-          releaseDraft: true
+          # Published straight away: the updater polls
+          # releases/latest/download/latest.json, and a draft is not reachable
+          # under /latest/, so auto-update would silently find nothing.
+          releaseDraft: false
           prerelease: false
