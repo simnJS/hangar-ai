@@ -70,6 +70,17 @@ export interface Settings {
   cursorBlink: boolean;
   scrollback: number;
   padding: number;
+  /**
+   * What a pane types to start each agent, by agent id — only where it differs
+   * from the plain command, so an agent nobody customised follows whatever a
+   * later version ships.
+   *
+   * This is the command line, not a path: it is typed into an interactive
+   * shell, so an alias or a function of your own works as well as a binary.
+   * Resume arguments are appended to it, which is what keeps `--resume`
+   * working on top of a custom launcher.
+   */
+  agentCommands: Record<string, string>;
   /** Relaunch agents with their previous session when a workspace opens. */
   autoResume: boolean;
   /** Wait before auto-launching agents, so the shell finishes its profile. */
@@ -142,6 +153,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursorBlink: true,
   scrollback: 10000,
   padding: 10,
+  agentCommands: {},
   autoResume: true,
   launchDelayMs: 700,
   notifyOnIdle: true,

@@ -1,6 +1,27 @@
 import { listSessions } from "./ipc";
 import type { AgentId } from "../types";
 
+/** What each agent is started with when nothing was customised. */
+export const DEFAULT_AGENT_COMMANDS: Record<Exclude<AgentId, "shell">, string> = {
+  claude: "claude",
+  codex: "codex",
+  gemini: "gemini",
+  opencode: "opencode",
+};
+
+/**
+ * The command a pane starts an agent with: whatever the settings hold for it,
+ * or the plain binary name.
+ *
+ * Trimmed, and an empty override reads as "not customised" rather than as a
+ * pane that types nothing — clearing the field in the settings is how you go
+ * back to the default.
+ */
+export function agentCommand(agent: AgentId, commands?: Record<string, string>): string | null {
+  if (agent === "shell") return null;
+  return commands?.[agent]?.trim() || DEFAULT_AGENT_COMMANDS[agent];
+}
+
 /**
  * A path safe to put between double quotes in a command line.
  *
@@ -16,36 +37,43 @@ const isQuotable = (root: string) => !/["`$\r\n]/.test(root);
  * Builds the command typed into a freshly opened shell. Returning null means
  * "leave the user at a plain prompt".
  *
+ * The resume arguments are appended to the command rather than replacing it,
+ * so a custom launcher — an alias carrying flags of its own, a wrapper script
+ * — resumes a conversation as well as the bare binary does.
+ *
  * `extraRoots` holds the folders a multi-root workspace has beyond the one the
  * terminal opened in. Only Claude Code takes them on the command line; the
  * others are left with their working directory rather than handed a flag they
  * would refuse to start with.
+ *
+ * Both arrive in one options object rather than as two more positional
+ * parameters, so a caller that only cares about one of them does not have to
+ * name the other to get past it.
  */
 export function launchCommand(
   agent: AgentId,
   sessionId: string | null,
-  extraRoots: string[] = [],
+  options: { extraRoots?: string[]; commands?: Record<string, string> } = {},
 ): string | null {
+  const command = agentCommand(agent, options.commands);
+  if (!command) return null;
+
   switch (agent) {
     case "claude": {
       const resume = sessionId ? ` --resume ${sessionId}` : "";
-      const roots = extraRoots.filter(isQuotable);
-      // `--add-dir` is variadic, so it comes last: a following flag would be
-      // swallowed as one more directory.
+      const roots = (options.extraRoots ?? []).filter(isQuotable);
+      // `--add-dir` is variadic, so it comes last: a following flag — one the
+      // custom command carries, or the resume above — would be swallowed as
+      // one more directory.
       const added = roots.length
         ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
         : "";
-      return `claude${resume}${added}`;
+      return `${command}${resume}${added}`;
     }
     case "codex":
-      return sessionId ? `codex resume ${sessionId}` : "codex";
-    case "gemini":
-      return "gemini";
-    case "opencode":
-      return "opencode";
-    case "shell":
+      return sessionId ? `${command} resume ${sessionId}` : command;
     default:
-      return null;
+      return command;
   }
 }
 

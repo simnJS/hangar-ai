@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 import { LOCALES, type Translator } from "../../i18n";
+import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
 import { THEMES } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import { ShortcutsSettings } from "./ShortcutsSettings";
-import { DEFAULT_SETTINGS, type Settings, type ShellInfo, type Workspace } from "../../types";
+import {
+  AGENTS,
+  DEFAULT_SETTINGS,
+  type Settings,
+  type ShellInfo,
+  type Workspace,
+} from "../../types";
 
 /**
  * The settings are described as data rather than laid out by hand: a new option
@@ -291,6 +298,29 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               onChange: (value) => set("launchDelayMs", value),
             },
           ],
+        },
+        {
+          id: "agentCommands",
+          title: t("settings.agentCommands"),
+          hint: t("settings.agentCommandsHint"),
+          items: AGENTS.filter((agent) => agent.id !== "shell").map((agent) => ({
+            id: `agentCommand.${agent.id}`,
+            kind: "input" as const,
+            label: agent.label,
+            keywords: `${agent.id} command commande launch lancement alias`,
+            value: settings.agentCommands[agent.id] ?? "",
+            // The default as the placeholder, so an empty field reads as
+            // "starts with this" rather than as nothing at all.
+            placeholder: DEFAULT_AGENT_COMMANDS[agent.id as keyof typeof DEFAULT_AGENT_COMMANDS],
+            onChange: (value: string) => {
+              const next = { ...settings.agentCommands };
+              // Cleared means back to the default, and storing "" would
+              // pin this agent to a command it no longer follows.
+              if (value.trim()) next[agent.id] = value;
+              else delete next[agent.id];
+              set("agentCommands", next);
+            },
+          })),
         },
       ],
     },
