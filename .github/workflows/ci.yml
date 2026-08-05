@@ -6,12 +6,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A push to a branch that also has a PR open would otherwise run this twice.
+# Superseded runs are cancelled instead of queueing behind each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    runs-on: windows-latest
+  # Node work is markedly faster on Linux runners, and nothing here is
+  # platform-specific.
+  frontend:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -24,32 +32,41 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm build` already runs `tsc`, so a separate typecheck step would
+      # compile the whole project twice.
+      - name: Typecheck and build
+        run: pnpm build
+
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      # Cargo's registry and the build dir dominate cold-run time here.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck frontend
-        run: pnpm exec tsc --noEmit
-
-      - name: Build frontend
-        run: pnpm build
+      # tauri-build embeds whatever `frontendDist` points at. The Rust checks do
+      # not care about its contents, so a placeholder saves installing Node and
+      # rebuilding the bundle the frontend job already produced.
+      - name: Stub frontend bundle
+        shell: bash
+        run: mkdir -p dist && touch dist/index.html
 
       - name: Check formatting
         working-directory: src-tauri
         run: cargo fmt --check
 
+      # clippy compiles the crate, so a following `cargo build` would be a
+      # second full pass over ~400 dependencies for no extra signal. Linking is
+      # exercised by the release workflow.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Build backend
-        working-directory: src-tauri
-        run: cargo build --locked
+        run: cargo clippy --all-targets --locked -- -D warnings

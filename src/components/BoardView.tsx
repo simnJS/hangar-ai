@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   BOARD_COLUMNS,
-  COLUMN_LABELS,
   boardCreate,
   boardLoad,
   boardUpdate,
+  columnKey,
   type BoardColumn,
   type Task,
 } from "../lib/board";
+import { useT } from "../i18n";
 import { TaskDialog } from "./TaskDialog";
 
 interface Props {
@@ -21,6 +22,7 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [dragOver, setDragOver] = useState<BoardColumn | null>(null);
+  const t = useT();
 
   const refresh = useCallback(() => {
     boardLoad(cwd)
@@ -59,14 +61,10 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
   return (
     <div className="board">
       <div className="board__bar">
-        <span className="board__count">
-          {tasks.length} tâche{tasks.length > 1 ? "s" : ""}
-        </span>
-        <span className="board__hint">
-          Les agents lisent et modifient ce tableau via MCP
-        </span>
+        <span className="board__count">{t("board.tasks", { n: tasks.length })}</span>
+        <span className="board__hint">{t("board.hint")}</span>
         <button className="btn btn--ghost" onClick={onOpenMcp}>
-          ⚙ Connexion MCP
+          {t("board.mcp")}
         </button>
       </div>
 
@@ -93,7 +91,7 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
               }}
             >
               <header className="column__head">
-                <span className="column__name">{COLUMN_LABELS[column]}</span>
+                <span className="column__name">{t(columnKey(column))}</span>
                 <span className="column__count">{items.length}</span>
               </header>
 
@@ -113,12 +111,12 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
                         <span className="chip chip--priority">P{task.priority}</span>
                       )}
                       {task.assignee && (
-                        <span className="chip chip--assignee" title="Agent en charge">
+                        <span className="chip chip--assignee" title={t("board.assignee")}>
                           {task.assignee}
                         </span>
                       )}
                       {task.depends_on.length > 0 && (
-                        <span className="chip" title="Dépend d'autres tâches">
+                        <span className="chip" title={t("board.dependsOn")}>
                           ⛓ {task.depends_on.length}
                         </span>
                       )}
@@ -136,7 +134,7 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
 
                 <input
                   className="column__add"
-                  placeholder="+ Ajouter…"
+                  placeholder={t("board.add")}
                   value={draft[column] ?? ""}
                   onChange={(e) => setDraft((prev) => ({ ...prev, [column]: e.target.value }))}
                   onKeyDown={(e) => {

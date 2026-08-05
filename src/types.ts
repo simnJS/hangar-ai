@@ -46,6 +46,8 @@ export type SplitNode =
 
 export interface Settings {
   themeId: string;
+  /** null follows the OS language. */
+  locale: "en" | "fr" | null;
   /** Default shell for every new pane. null means "first one detected". */
   shellId: string | null;
   fontFamily: string;
@@ -84,6 +86,7 @@ export const AGENTS: { id: AgentId; label: string; resumable: boolean }[] = [
 
 export const DEFAULT_SETTINGS: Settings = {
   themeId: "tokyo-night",
+  locale: null,
   shellId: null,
   fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace',
   fontSize: 13,

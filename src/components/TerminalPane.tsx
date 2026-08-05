@@ -14,6 +14,7 @@ import {
   sleep,
   watchForSession,
 } from "../lib/agents";
+import { useT } from "../i18n";
 import type { TerminalTheme } from "../themes";
 import {
   AGENTS,
@@ -68,6 +69,7 @@ export function TerminalPane({
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<Status>("starting");
+  const t = useT();
 
   // Latest settings/theme without forcing the terminal to be rebuilt.
   const settingsRef = useRef(settings);
@@ -241,7 +243,7 @@ export function TerminalPane({
       className={`pane ${focused ? "pane--focused" : ""}`}
       style={style}
       onMouseDown={onFocus}
-      aria-label={`Panneau ${index + 1}`}
+      aria-label={t("pane.label", { n: index + 1 })}
     >
       <header className="pane__bar">
         <span className="pane__index">{index + 1}</span>
@@ -250,12 +252,14 @@ export function TerminalPane({
           className="pane__agent"
           value={pane.agent}
           onChange={(e) => onAgentChange(e.target.value as AgentId)}
-          title="Agent lancé dans ce panneau"
+          title={t("pane.agent")}
         >
           {AGENTS.map((agent) => (
             <option key={agent.id} value={agent.id}>
               {agent.label}
-              {agent.id !== "shell" && !availableAgents.includes(agent.id) ? " (absent)" : ""}
+              {agent.id !== "shell" && !availableAgents.includes(agent.id)
+                ? t("pane.missing")
+                : ""}
             </option>
           ))}
         </select>
@@ -264,9 +268,13 @@ export function TerminalPane({
           className="pane__agent pane__agent--shell"
           value={pane.shellId ?? ""}
           onChange={(e) => onShellChange(e.target.value || null)}
-          title={shell ? `Shell : ${shell.program}` : "Shell du panneau"}
+          title={
+            shell ? t("pane.shellTitle", { program: shell.program }) : t("pane.shell")
+          }
         >
-          <option value="">{shell ? shell.label : "Shell"} (hérité)</option>
+          <option value="">
+            {t("pane.inherited", { name: shell ? shell.label : t("pane.shell") })}
+          </option>
           {shells.map((entry) => (
             <option key={entry.id} value={entry.id}>
               {entry.label}
@@ -280,23 +288,23 @@ export function TerminalPane({
             onClick={onOpenSessions}
             title={
               pane.sessionId
-                ? `Session reprise : ${pane.sessionId}`
-                : "Aucune session mémorisée — cliquer pour en choisir une"
+                ? t("pane.resuming", { id: pane.sessionId })
+                : t("pane.noSession")
             }
           >
-            {pane.sessionId ? `⟲ ${pane.sessionId.slice(0, 8)}` : "⟲ nouvelle"}
+            {pane.sessionId ? `⟲ ${pane.sessionId.slice(0, 8)}` : t("pane.newSession")}
           </button>
         )}
 
         <span className="pane__spacer" />
 
         {agentMissing && (
-          <span className="pane__warn" title={`${pane.agent} introuvable dans le PATH`}>
+          <span className="pane__warn" title={t("pane.notOnPath", { agent: pane.agent })}>
             !
           </span>
         )}
         <span className={`pane__status pane__status--${status}`} title={status} />
-        <button className="pane__action" onClick={onRestart} title="Relancer le panneau">
+        <button className="pane__action" onClick={onRestart} title={t("pane.restart")}>
           ↻
         </button>
       </header>

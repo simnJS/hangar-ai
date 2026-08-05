@@ -10,6 +10,7 @@ import { PaneGrid, normalizeTree } from "./components/PaneGrid";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { detectAgents, detectShells, ptyWrite } from "./lib/ipc";
 import { resolveShell } from "./lib/shells";
+import { useT } from "./i18n";
 import { useStore } from "./store";
 import { applyThemeToDocument, getTheme } from "./themes";
 import { AGENTS, type AgentId, type LayoutSize, type ShellInfo } from "./types";
@@ -28,6 +29,7 @@ export default function App() {
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
+  const t = useT();
 
   const theme = useMemo(
     () => getTheme(activeWorkspace?.themeId ?? state.settings.themeId),
@@ -98,7 +100,7 @@ export default function App() {
   const pickerPane = panes.find((p) => p.id === pickerPaneId) ?? null;
 
   if (!hydrated) {
-    return <div className="boot">Chargement…</div>;
+    return <div className="boot">{t("app.loading")}</div>;
   }
 
   return (
@@ -120,30 +122,30 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="layouts" role="group" aria-label="Vue">
+              <div className="layouts" role="group" aria-label={t("view.group")}>
                 <button
                   className={`layouts__btn layouts__btn--wide ${view === "terminals" ? "is-active" : ""}`}
                   onClick={() => setView("terminals")}
                 >
-                  Terminaux
+                  {t("view.terminals")}
                 </button>
                 <button
                   className={`layouts__btn layouts__btn--wide ${view === "board" ? "is-active" : ""}`}
                   onClick={() => setView("board")}
                 >
-                  Tableau
+                  {t("view.board")}
                 </button>
               </div>
 
               {view === "terminals" && (
                 <>
-                  <div className="layouts" role="group" aria-label="Disposition">
+                  <div className="layouts" role="group" aria-label={t("topbar.layout")}>
                     {LAYOUTS.map((size) => (
                       <button
                         key={size}
                         className={`layouts__btn ${activeWorkspace.layout === size ? "is-active" : ""}`}
                         onClick={() => setLayout(activeWorkspace.id, size)}
-                        title={`${size} panneau${size > 1 ? "x" : ""}`}
+                        title={t("topbar.panes", { n: size })}
                       >
                         {size}
                       </button>
@@ -153,9 +155,9 @@ export default function App() {
                   <button
                     className="btn btn--ghost"
                     onClick={() => panes.forEach((p) => replacePane(p.id, {}))}
-                    title="Relancer tous les panneaux"
+                    title={t("topbar.restartAllHint")}
                   >
-                    ↻ Tout relancer
+                    {t("topbar.restartAll")}
                   </button>
                 </>
               )}
@@ -211,7 +213,7 @@ export default function App() {
               <span className="broadcast__icon">⇉</span>
               <input
                 className="broadcast__input"
-                placeholder={`Envoyer la même instruction aux ${panes.length} panneaux…`}
+                placeholder={t("broadcast.placeholder", { n: panes.length })}
                 value={broadcast}
                 onChange={(e) => setBroadcast(e.target.value)}
                 onKeyDown={(e) => {
@@ -223,24 +225,23 @@ export default function App() {
                 onClick={sendBroadcast}
                 disabled={!broadcast.trim()}
               >
-                Diffuser
+                {t("broadcast.send")}
               </button>
             </footer>
             )}
           </>
         ) : (
           <div className="placeholder">
-            <h2>Aucun workspace ouvert</h2>
+            <h2>{t("placeholder.title")}</h2>
             <p>
-              Crée un workspace depuis la barre latérale : choisis un dossier de projet, puis
-              répartis tes agents (
-              {AGENTS.filter((a) => a.id !== "shell")
-                .map((a) => a.label)
-                .join(", ")}
-              ) dans 1, 2, 4 ou 8 panneaux.
+              {t("placeholder.body", {
+                agents: AGENTS.filter((a) => a.id !== "shell")
+                  .map((a) => a.label)
+                  .join(", "),
+              })}
             </p>
             <button className="btn btn--primary" onClick={() => setShowCreate(true)}>
-              + Nouveau workspace
+              {t("sidebar.new")}
             </button>
           </div>
         )}

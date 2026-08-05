@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Backdrop } from "./Backdrop";
+import { useT } from "../i18n";
 import {
   agentInstructionsStatus,
   mcpInstall,
@@ -24,6 +25,7 @@ export function McpPanel({ cwd, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [writePlaybook, setWritePlaybook] = useState(true);
   const [playbookPresent, setPlaybookPresent] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     mcpTargets(cwd)
@@ -80,7 +82,7 @@ export function McpPanel({ cwd, onClose }: Props) {
     <Backdrop onClose={onClose}>
       <div className="modal modal--wide">
         <header className="modal__head">
-          <h2>Connecter les agents au tableau</h2>
+          <h2>{t("mcp.title")}</h2>
           <button className="icon-btn" onClick={onClose}>
             ×
           </button>
@@ -91,11 +93,7 @@ export function McpPanel({ cwd, onClose }: Props) {
         </p>
 
         <div className="modal__body modal__body--form">
-          <p className="form-hint form-hint--block">
-            IaBench s'enregistre comme serveur MCP dans la configuration de chaque outil.
-            Le port et le jeton ne sont jamais écrits dans ces fichiers : ils sont résolus
-            au lancement, donc la configuration reste valable après un redémarrage.
-          </p>
+          <p className="form-hint form-hint--block">{t("mcp.intro")}</p>
 
           <div className="targets">
             {targets.map((target) => (
@@ -111,9 +109,13 @@ export function McpPanel({ cwd, onClose }: Props) {
                 <span className="target__meta">
                   <span className="target__label">
                     {target.label}
-                    {target.configured && <em className="target__badge">déjà configuré</em>}
+                    {target.configured && (
+                      <em className="target__badge">{t("mcp.configured")}</em>
+                    )}
                     {!target.detected && !target.configured && (
-                      <em className="target__badge target__badge--muted">non détecté</em>
+                      <em className="target__badge target__badge--muted">
+                        {t("mcp.notDetected")}
+                      </em>
                     )}
                   </span>
                   <span className="target__path">{target.path}</span>
@@ -130,12 +132,12 @@ export function McpPanel({ cwd, onClose }: Props) {
             />
             <span className="target__meta">
               <span className="target__label">
-                Écrire le mode d'emploi pour les agents
-                {playbookPresent && <em className="target__badge">déjà présent</em>}
+                {t("mcp.playbook")}
+                {playbookPresent && (
+                  <em className="target__badge">{t("mcp.alreadyThere")}</em>
+                )}
               </span>
-              <span className="target__path">
-                AGENTS.md + CLAUDE.md · ajoute .iabench/ au .gitignore
-              </span>
+              <span className="target__path">{t("mcp.playbookHint")}</span>
             </span>
           </label>
 
@@ -146,17 +148,15 @@ export function McpPanel({ cwd, onClose }: Props) {
                   {report.ok ? "✓" : "✕"} {report.id} — {report.message}
                 </p>
               ))}
-              <p className="form-hint">
-                Redémarre les agents concernés pour qu'ils chargent le serveur.
-              </p>
+              <p className="form-hint">{t("mcp.restartHint")}</p>
             </div>
           )}
 
           {manual && (
             <section className="form-row">
               <span className="form-label">
-                Ou à la main
-                <span className="form-hint">si tu préfères passer par la CLI</span>
+                {t("mcp.manual")}
+                <span className="form-hint">{t("mcp.manualHint")}</span>
               </span>
               <pre className="snippet">{manual.claude}</pre>
               <pre className="snippet">{manual.codex}</pre>
@@ -166,14 +166,14 @@ export function McpPanel({ cwd, onClose }: Props) {
 
         <footer className="modal__foot modal__foot--actions">
           <button className="btn btn--ghost" onClick={onClose}>
-            Fermer
+            {t("mcp.close")}
           </button>
           <button
             className="btn btn--primary"
             onClick={install}
             disabled={busy || selected.size === 0}
           >
-            {busy ? "Installation…" : `Configurer (${selected.size})`}
+            {busy ? t("mcp.installing") : t("mcp.install", { n: selected.size })}
           </button>
         </footer>
       </div>

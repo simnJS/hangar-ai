@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { useT } from "../i18n";
 
 type Stage = "idle" | "available" | "downloading" | "ready" | "failed";
 
@@ -9,6 +10,7 @@ export function UpdateBanner() {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   useEffect(() => {
     let cancelled = false;
@@ -63,28 +65,28 @@ export function UpdateBanner() {
       {stage === "available" && (
         <>
           <span className="update__text">
-            Version <strong>{update.version}</strong> disponible
+            {t("update.available", { version: update.version })}
           </span>
           <button className="btn btn--ghost" onClick={() => setStage("idle")}>
-            Plus tard
+            {t("update.later")}
           </button>
           <button className="btn btn--primary" onClick={install}>
-            Mettre à jour
+            {t("update.install")}
           </button>
         </>
       )}
 
       {stage === "downloading" && (
         <span className="update__text">
-          Téléchargement… {progress > 0 ? `${progress}%` : ""}
+          {t("update.downloading", { progress: progress > 0 ? `${progress}%` : "" })}
         </span>
       )}
 
       {stage === "ready" && (
         <>
-          <span className="update__text">Mise à jour installée</span>
+          <span className="update__text">{t("update.ready")}</span>
           <button className="btn btn--primary" onClick={() => relaunch()}>
-            Redémarrer
+            {t("update.restart")}
           </button>
         </>
       )}
@@ -92,10 +94,10 @@ export function UpdateBanner() {
       {stage === "failed" && (
         <>
           <span className="update__text update__text--error" title={error ?? ""}>
-            Échec de la mise à jour
+            {t("update.failed")}
           </span>
           <button className="btn btn--ghost" onClick={() => setStage("available")}>
-            Réessayer
+            {t("update.retry")}
           </button>
         </>
       )}

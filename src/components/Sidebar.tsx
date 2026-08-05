@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { useT } from "../i18n";
 import type { Workspace } from "../types";
 
 interface Props {
@@ -12,6 +13,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     useStore();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const t = useT();
 
   function startRename(ws: Workspace) {
     setRenaming(ws.id);
@@ -32,7 +34,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
         <span className="sidebar__title">IaBench</span>
       </div>
 
-      <div className="sidebar__section">Workspaces</div>
+      <div className="sidebar__section">{t("sidebar.workspaces")}</div>
 
       <nav className="sidebar__list">
         {state.workspaces.map((ws) => {
@@ -68,7 +70,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
                   <span className="ws__badge">{ws.layout}</span>
                   <button
                     className="ws__remove"
-                    title="Supprimer le workspace"
+                    title={t("sidebar.remove")}
                     onClick={(e) => {
                       e.stopPropagation();
                       removeWorkspace(ws.id);
@@ -83,20 +85,16 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
         })}
 
         {state.workspaces.length === 0 && (
-          <p className="sidebar__empty">
-            Aucun workspace.
-            <br />
-            Crée-en un pour démarrer.
-          </p>
+          <p className="sidebar__empty">{t("sidebar.empty")}</p>
         )}
       </nav>
 
       <div className="sidebar__footer">
         <button className="btn btn--primary btn--block" onClick={onNewWorkspace}>
-          + Nouveau workspace
+          {t("sidebar.new")}
         </button>
         <button className="btn btn--ghost btn--block" onClick={onOpenSettings}>
-          ⚙ Apparence & réglages
+          {t("sidebar.settings")}
         </button>
       </div>
     </aside>

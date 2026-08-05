@@ -118,6 +118,8 @@ select {
   color: var(--fg-subtle);
   font-size: 12px;
   line-height: 1.6;
+  /* Translations carry their own line breaks. */
+  white-space: pre-line;
 }
 
 .sidebar__footer {

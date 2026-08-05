@@ -31,6 +31,11 @@ new tasks for each other.
 restyle the whole window, not just the terminals. Font, size, line height, cursor and
 padding are all live-adjustable.
 
+**Languages.** English and French, following the OS language unless you pick one.
+Translations live in `src/i18n.ts`, where English is the reference: the French table is
+typed as `Record<Key, string>`, so a missing or misspelled key fails the build rather
+than silently falling back at runtime.
+
 ## Why the board is not just a JSON file
 
 Eight agents doing read-modify-write on a shared file would all claim the same task.

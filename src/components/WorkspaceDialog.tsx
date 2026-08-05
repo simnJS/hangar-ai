@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop } from "./Backdrop";
+import { useT } from "../i18n";
 import { useStore, type WorkspaceDraft } from "../store";
 import { AGENTS, type AgentId, type LayoutSize, type ShellInfo } from "../types";
 
@@ -37,6 +38,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
   const [assignments, setAssignments] = useState<AgentId[]>(() =>
     Array.from({ length: 4 }, () => "shell" as AgentId),
   );
+  const t = useT();
 
   const counts = useMemo(() => {
     const tally = {} as Record<AgentId, number>;
@@ -90,7 +92,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Dossier du projet",
+      title: t("create.folderDialog"),
     });
     if (typeof selected !== "string") return;
     setCwd(selected);
@@ -117,7 +119,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
     <Backdrop onClose={onClose}>
       <div className="modal modal--wide">
         <header className="modal__head">
-          <h2>Nouveau workspace</h2>
+          <h2>{t("create.title")}</h2>
           <button className="icon-btn" onClick={onClose}>
             ×
           </button>
@@ -126,40 +128,40 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
         <div className="modal__body modal__body--form">
           <section className="form-row">
             <label className="form-label" htmlFor="ws-folder">
-              Dossier du projet
+              {t("create.folder")}
             </label>
             <div className="picker">
               <input
                 id="ws-folder"
                 className="picker__path"
                 value={cwd}
-                placeholder="Aucun dossier sélectionné"
+                placeholder={t("create.folderEmpty")}
                 onChange={(e) => setCwd(e.target.value)}
               />
               <button className="btn" onClick={browse}>
-                Parcourir…
+                {t("create.browse")}
               </button>
             </div>
           </section>
 
           <section className="form-row">
             <label className="form-label" htmlFor="ws-name">
-              Nom
+              {t("create.name")}
             </label>
             <input
               id="ws-name"
               className="text-input"
               value={name}
-              placeholder={cwd ? basename(cwd) : "Mon projet"}
+              placeholder={cwd ? basename(cwd) : t("create.namePlaceholder")}
               onChange={(e) => setName(e.target.value)}
             />
           </section>
 
           <section className="form-row">
             <label className="form-label" htmlFor="ws-shell">
-              Shell
+              {t("pane.shell")}
               <span className="form-hint">
-                {shells.length} détecté{shells.length > 1 ? "s" : ""} sur ce PC
+                {t("create.shellDetected", { n: shells.length })}
               </span>
             </label>
             <select
@@ -168,7 +170,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
               value={shellId ?? ""}
               onChange={(e) => setShellId(e.target.value || null)}
             >
-              <option value="">Par défaut ({shells[0]?.label ?? "aucun"})</option>
+              <option value="">
+                {t("create.shellDefault", {
+                  name: shells[0]?.label ?? t("create.shellNone"),
+                })}
+              </option>
               {shells.map((shell) => (
                 <option key={shell.id} value={shell.id}>
                   {shell.label}
@@ -178,7 +184,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
           </section>
 
           <section className="form-row">
-            <span className="form-label">Nombre de terminaux</span>
+            <span className="form-label">{t("create.terminals")}</span>
             <div className="layouts layouts--lg">
               {LAYOUTS.map((size) => (
                 <button
@@ -194,11 +200,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
 
           <section className="form-row">
             <span className="form-label">
-              Répartition des agents
+              {t("create.agents")}
               <span className="form-hint">
                 {freeSlots > 0
-                  ? `${freeSlots} panneau${freeSlots > 1 ? "x" : ""} en shell simple`
-                  : "tous les panneaux sont attribués"}
+                  ? t("create.freeSlots", { n: freeSlots })
+                  : t("create.allAssigned")}
               </span>
             </span>
 
@@ -209,7 +215,9 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                   <div key={agent.id} className={`counter ${missing ? "is-missing" : ""}`}>
                     <span className="counter__name">
                       {agent.label}
-                      {missing && <em className="counter__missing">non installé</em>}
+                      {missing && (
+                        <em className="counter__missing">{t("create.notInstalled")}</em>
+                      )}
                     </span>
                     <div className="counter__controls">
                       <button
@@ -236,8 +244,8 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
 
           <section className="form-row">
             <span className="form-label">
-              Disposition
-              <span className="form-hint">clique une case pour changer son agent</span>
+              {t("create.layout")}
+              <span className="form-hint">{t("create.layoutHint")}</span>
             </span>
             <div
               className="preview"
@@ -260,10 +268,10 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
 
         <footer className="modal__foot modal__foot--actions">
           <button className="btn btn--ghost" onClick={onClose}>
-            Annuler
+            {t("create.cancel")}
           </button>
           <button className="btn btn--primary" onClick={submit} disabled={!cwd}>
-            Créer le workspace
+            {t("create.submit")}
           </button>
         </footer>
       </div>

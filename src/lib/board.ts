@@ -3,12 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 export const BOARD_COLUMNS = ["todo", "doing", "review", "done"] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 
-export const COLUMN_LABELS: Record<BoardColumn, string> = {
-  todo: "À faire",
-  doing: "En cours",
-  review: "Revue",
-  done: "Terminé",
-};
+/** Maps a column to its translation key, so labels stay in one place. */
+export const columnKey = (column: BoardColumn) => `board.${column}` as const;
 
 export interface TaskComment {
   id: string;

@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { LOCALES, useT } from "../i18n";
 import { THEMES } from "../themes";
 import type { Settings, ShellInfo } from "../types";
 
@@ -9,10 +10,18 @@ const FONT_STACKS = [
   { label: "Consolas", value: 'Consolas, "Courier New", monospace' },
   { label: "Hack", value: 'Hack, "DejaVu Sans Mono", Consolas, monospace' },
   { label: "IBM Plex Mono", value: '"IBM Plex Mono", Consolas, monospace' },
-  { label: "Système", value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+  { label: "System", value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
 ];
 
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="field">
       <span className="field__label">
@@ -33,6 +42,7 @@ export function SettingsPanel({
 }) {
   const { state, activeWorkspace, updateSettings, updateWorkspace } = useStore();
   const settings = state.settings;
+  const t = useT();
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     updateSettings({ [key]: value } as Partial<Settings>);
@@ -52,16 +62,36 @@ export function SettingsPanel({
   return (
     <div className="drawer">
       <header className="drawer__head">
-        <h2>Apparence & réglages</h2>
-        <button className="icon-btn" onClick={onClose} title="Fermer">
+        <h2>{t("settings.title")}</h2>
+        <button className="icon-btn" onClick={onClose} title={t("settings.close")}>
           ×
         </button>
       </header>
 
       <div className="drawer__body">
         <section className="group">
+          <h3 className="group__title">{t("settings.language")}</h3>
+
+          <Row label={t("settings.languageLabel")}>
+            <select
+              value={settings.locale ?? ""}
+              onChange={(e) =>
+                set("locale", (e.target.value || null) as Settings["locale"])
+              }
+            >
+              <option value="">Auto</option>
+              {LOCALES.map((locale) => (
+                <option key={locale.id} value={locale.id}>
+                  {locale.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </section>
+
+        <section className="group">
           <h3 className="group__title">
-            Thème
+            {t("settings.theme")}
             {activeWorkspace && (
               <label className="group__toggle">
                 <input
@@ -73,7 +103,7 @@ export function SettingsPanel({
                     })
                   }
                 />
-                spécifique à ce workspace
+                {t("settings.themePerWorkspace")}
               </label>
             )}
           </h3>
@@ -113,14 +143,21 @@ export function SettingsPanel({
         </section>
 
         <section className="group">
-          <h3 className="group__title">Shell</h3>
+          <h3 className="group__title">{t("settings.shell")}</h3>
 
-          <Row label="Par défaut" hint={`${shells.length} détecté(s)`}>
+          <Row
+            label={t("settings.shellDefault")}
+            hint={t("settings.shellDetected", { n: shells.length })}
+          >
             <select
-              value={state.settings.shellId ?? ""}
+              value={settings.shellId ?? ""}
               onChange={(e) => updateSettings({ shellId: e.target.value || null })}
             >
-              <option value="">Auto ({shells[0]?.label ?? "aucun"})</option>
+              <option value="">
+                {t("settings.shellAuto", {
+                  name: shells[0]?.label ?? t("create.shellNone"),
+                })}
+              </option>
               {shells.map((shell) => (
                 <option key={shell.id} value={shell.id}>
                   {shell.label}
@@ -130,14 +167,17 @@ export function SettingsPanel({
           </Row>
 
           {activeWorkspace && (
-            <Row label="Ce workspace" hint="prioritaire sur le défaut">
+            <Row
+              label={t("settings.shellWorkspace")}
+              hint={t("settings.shellWorkspaceHint")}
+            >
               <select
                 value={activeWorkspace.shellId ?? ""}
                 onChange={(e) =>
                   updateWorkspace(activeWorkspace.id, { shellId: e.target.value || null })
                 }
               >
-                <option value="">Suivre le défaut</option>
+                <option value="">{t("settings.shellFollow")}</option>
                 {shells.map((shell) => (
                   <option key={shell.id} value={shell.id}>
                     {shell.label}
@@ -149,9 +189,9 @@ export function SettingsPanel({
         </section>
 
         <section className="group">
-          <h3 className="group__title">Typographie</h3>
+          <h3 className="group__title">{t("settings.typography")}</h3>
 
-          <Row label="Police">
+          <Row label={t("settings.font")}>
             <select value={settings.fontFamily} onChange={(e) => set("fontFamily", e.target.value)}>
               {FONT_STACKS.map((font) => (
                 <option key={font.label} value={font.value}>
@@ -159,12 +199,12 @@ export function SettingsPanel({
                 </option>
               ))}
               {!FONT_STACKS.some((f) => f.value === settings.fontFamily) && (
-                <option value={settings.fontFamily}>Personnalisée</option>
+                <option value={settings.fontFamily}>{t("settings.fontCustom")}</option>
               )}
             </select>
           </Row>
 
-          <Row label="Taille" hint={`${settings.fontSize}px`}>
+          <Row label={t("settings.size")} hint={`${settings.fontSize}px`}>
             <input
               type="range"
               min={9}
@@ -174,7 +214,7 @@ export function SettingsPanel({
             />
           </Row>
 
-          <Row label="Interligne" hint={settings.lineHeight.toFixed(2)}>
+          <Row label={t("settings.lineHeight")} hint={settings.lineHeight.toFixed(2)}>
             <input
               type="range"
               min={1}
@@ -185,7 +225,7 @@ export function SettingsPanel({
             />
           </Row>
 
-          <Row label="Espacement" hint={`${settings.letterSpacing}px`}>
+          <Row label={t("settings.letterSpacing")} hint={`${settings.letterSpacing}px`}>
             <input
               type="range"
               min={-1}
@@ -196,7 +236,7 @@ export function SettingsPanel({
             />
           </Row>
 
-          <Row label="Marge interne" hint={`${settings.padding}px`}>
+          <Row label={t("settings.padding")} hint={`${settings.padding}px`}>
             <input
               type="range"
               min={0}
@@ -208,20 +248,20 @@ export function SettingsPanel({
         </section>
 
         <section className="group">
-          <h3 className="group__title">Curseur & historique</h3>
+          <h3 className="group__title">{t("settings.cursorSection")}</h3>
 
-          <Row label="Curseur">
+          <Row label={t("settings.cursor")}>
             <select
               value={settings.cursorStyle}
               onChange={(e) => set("cursorStyle", e.target.value as Settings["cursorStyle"])}
             >
-              <option value="bar">Barre</option>
-              <option value="block">Bloc</option>
-              <option value="underline">Souligné</option>
+              <option value="bar">{t("settings.cursorBar")}</option>
+              <option value="block">{t("settings.cursorBlock")}</option>
+              <option value="underline">{t("settings.cursorUnderline")}</option>
             </select>
           </Row>
 
-          <Row label="Clignotement">
+          <Row label={t("settings.blink")}>
             <input
               type="checkbox"
               checked={settings.cursorBlink}
@@ -229,7 +269,10 @@ export function SettingsPanel({
             />
           </Row>
 
-          <Row label="Scrollback" hint={`${settings.scrollback} lignes`}>
+          <Row
+            label={t("settings.scrollback")}
+            hint={t("settings.scrollbackLines", { n: settings.scrollback })}
+          >
             <input
               type="range"
               min={1000}
@@ -242,9 +285,9 @@ export function SettingsPanel({
         </section>
 
         <section className="group">
-          <h3 className="group__title">Sessions</h3>
+          <h3 className="group__title">{t("settings.sessions")}</h3>
 
-          <Row label="Reprise auto" hint="relance les agents sur leur dernière session">
+          <Row label={t("settings.autoResume")} hint={t("settings.autoResumeHint")}>
             <input
               type="checkbox"
               checked={settings.autoResume}
@@ -252,7 +295,7 @@ export function SettingsPanel({
             />
           </Row>
 
-          <Row label="Délai de lancement" hint={`${settings.launchDelayMs} ms`}>
+          <Row label={t("settings.launchDelay")} hint={`${settings.launchDelayMs} ms`}>
             <input
               type="range"
               min={0}
