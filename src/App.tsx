@@ -367,7 +367,15 @@ export default function App() {
                       <button
                         key={size}
                         className={`layouts__btn ${panes.length === size ? "is-active" : ""}`}
-                        onClick={() => applyPreset(activeWorkspace.id, size)}
+                        onClick={() =>
+                          // The focused pane is the model for whatever the
+                          // preset has to create.
+                          applyPreset(
+                            activeWorkspace.id,
+                            size,
+                            focusByWorkspace[activeWorkspace.id] ?? null,
+                          )
+                        }
                         title={t("topbar.presetHint", { n: size })}
                       >
                         {size}

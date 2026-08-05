@@ -84,8 +84,12 @@ interface StoreValue {
   removeWorkspace: (id: string) => void;
   updateWorkspace: (id: string, patch: Partial<Workspace>) => void;
   setActiveWorkspace: (id: string | null) => void;
-  /** Rebuilds an even arrangement with exactly `count` panes. */
-  applyPreset: (workspaceId: string, count: number) => void;
+  /**
+   * Rebuilds an even arrangement with exactly `count` panes. Any pane it has to
+   * create copies the agent of `modelPaneId` — the one you are working in —
+   * because a preset is how you ask for more of what you already have.
+   */
+  applyPreset: (workspaceId: string, count: number, modelPaneId?: string | null) => void;
   setTree: (workspaceId: string, tree: SplitNode) => void;
   /**
    * Splits `near` (or the last pane) in two and returns the new pane id, or
@@ -93,6 +97,7 @@ interface StoreValue {
    */
   addPane: (
     workspaceId: string,
+    /** Without an `agent`, the new pane copies the one it was split off. */
     opts?: { agent?: AgentId; near?: string | null; dir?: "row" | "col" },
   ) => string | null;
   closePane: (workspaceId: string, paneId: string) => void;
@@ -221,7 +226,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         update((prev) => ({ ...prev, activeWorkspaceId: id }));
       },
 
-      applyPreset(workspaceId, count) {
+      applyPreset(workspaceId, count, modelPaneId) {
         const size = Math.min(MAX_PANES, Math.max(1, Math.round(count)));
         mapWorkspace(workspaceId, (ws) => {
           // Reading order, not creation order: the panes you see first are the
@@ -237,7 +242,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // Same pane objects, same ids: the survivors keep their PTY and only
           // get resized. Only a shrinking preset ever closes anything.
           const panes = arranged.slice(0, size);
-          while (panes.length < size) panes.push(makePane("shell", paneNames(panes)));
+          // The pane you were in leads. Falling back to the last one kept means
+          // a grid grown from a single agent comes up as that agent throughout,
+          // which is the whole point of asking for four terminals.
+          const model =
+            arranged.find((pane) => pane.id === modelPaneId) ?? panes[panes.length - 1];
+          const agent = model?.agent ?? "shell";
+          while (panes.length < size) panes.push(makePane(agent, paneNames(panes)));
           return { ...ws, panes, tree: presetTree(panes.map((pane) => pane.id)) };
         });
       },
@@ -247,7 +258,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
 
       addPane(workspaceId, opts = {}) {
-        // Built outside the updater so the caller can focus it right away.
+        // Built outside the updater so the caller can focus it right away. Its
+        // agent is settled inside, where the pane being split can be read.
         const pane = makePane(opts.agent ?? "shell");
         const zone = (opts.dir ?? "row") === "row" ? "right" : "bottom";
         // The updater is the only place that sees the workspace as it stands,
@@ -264,7 +276,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             opts.near && ids.includes(opts.near) ? opts.near : ids[ids.length - 1];
           // Named against the workspace as it stands now, so two adds in the
           // same tick cannot land on the same name.
-          const named = { ...pane, name: pickPaneName(paneNames(ws.panes)) };
+          // Splitting a Claude Code pane asks for another one, not for a bare
+          // prompt. An explicit agent from the caller still wins.
+          const inherited = ws.panes.find((p) => p.id === near)?.agent;
+          const named = {
+            ...pane,
+            name: pickPaneName(paneNames(ws.panes)),
+            agent: opts.agent ?? inherited ?? "shell",
+          };
           inserted = true;
           return {
             ...ws,
