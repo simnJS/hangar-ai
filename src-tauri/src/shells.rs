@@ -25,6 +25,7 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|p| p.is_file()).cloned()
 }
 
+#[cfg(windows)]
 fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key).map(PathBuf::from)
 }
@@ -123,41 +124,112 @@ fn discover() -> Vec<ShellInfo> {
     found
 }
 
+/// Arguments a POSIX shell is opened with in a pane.
+///
+/// macOS terminals all open login shells, and here it is closer to required
+/// than conventional: Homebrew's `shellenv` is conventionally written to
+/// `~/.zprofile`, which only a login shell reads. A pane started without `-l`
+/// would come up on a machine full of tools with none of them on PATH.
+///
+/// Linux desktops go the other way — their terminals open non-login shells, and
+/// a login shell there re-runs `~/.profile` in a session that already has it —
+/// so this stays a macOS decision.
+#[cfg(all(unix, target_os = "macos"))]
+const POSIX_ARGS: &[&str] = &["-l"];
+#[cfg(all(unix, not(target_os = "macos")))]
+const POSIX_ARGS: &[&str] = &[];
+
 #[cfg(not(windows))]
 fn discover() -> Vec<ShellInfo> {
-    let candidates: [(&str, &str, &str); 5] = [
-        ("bash", "Bash", "/bin/bash"),
-        ("zsh", "Zsh", "/bin/zsh"),
-        ("fish", "Fish", "/usr/bin/fish"),
-        ("nu", "Nushell", "/usr/bin/nu"),
-        ("sh", "sh", "/bin/sh"),
+    crate::path_env::ensure();
+
+    // Each shell is looked for in every place it is normally installed, before
+    // falling back to PATH: macOS keeps its own zsh and bash in /bin, while
+    // Homebrew installs to /opt/homebrew on Apple Silicon and /usr/local on
+    // Intel. A pane then holds an absolute path rather than a name to resolve.
+    let candidates: [(&str, &str, &[&str], &[&str]); 6] = [
+        (
+            "zsh",
+            "Zsh",
+            &["/bin/zsh", "/opt/homebrew/bin/zsh"],
+            POSIX_ARGS,
+        ),
+        (
+            "bash",
+            "Bash",
+            // A newer Homebrew bash comes first: the /bin/bash macOS ships is
+            // still 3.2, and scripts written this decade tend to notice.
+            &["/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"],
+            POSIX_ARGS,
+        ),
+        (
+            "fish",
+            "Fish",
+            &[
+                "/opt/homebrew/bin/fish",
+                "/usr/local/bin/fish",
+                "/usr/bin/fish",
+            ],
+            POSIX_ARGS,
+        ),
+        (
+            "nu",
+            "Nushell",
+            &["/opt/homebrew/bin/nu", "/usr/local/bin/nu", "/usr/bin/nu"],
+            // Nushell spells it in full and rejects the short form.
+            if cfg!(target_os = "macos") {
+                &["--login"]
+            } else {
+                &[]
+            },
+        ),
+        (
+            "pwsh",
+            "PowerShell",
+            &[
+                "/opt/homebrew/bin/pwsh",
+                "/usr/local/bin/pwsh",
+                "/usr/bin/pwsh",
+            ],
+            &[],
+        ),
+        ("sh", "sh", &["/bin/sh"], &[]),
     ];
 
     let mut found: Vec<ShellInfo> = candidates
         .iter()
-        .filter_map(|(id, label, path)| {
-            let program = first_existing(&[PathBuf::from(path)]).or_else(|| on_path(id))?;
+        .filter_map(|(id, label, paths, args)| {
+            let owned: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+            let program = first_existing(&owned).or_else(|| on_path(id))?;
             Some(ShellInfo {
                 id: id.to_string(),
                 label: label.to_string(),
                 program: program.to_string_lossy().into_owned(),
-                args: vec![],
+                args: args.iter().map(|a| a.to_string()).collect(),
             })
         })
         .collect();
 
-    // Whatever the user actually logs in with wins the default slot.
+    // Whatever the user actually logs in with wins the default slot. When that
+    // is one of the shells above it is moved rather than added, so the list
+    // does not carry the same binary twice under two names.
     if let Ok(login) = std::env::var("SHELL") {
-        if Path::new(&login).is_file() && !found.iter().any(|s| s.program == login) {
-            found.insert(
-                0,
-                ShellInfo {
-                    id: "login".into(),
-                    label: format!("{login} (login shell)"),
-                    program: login,
-                    args: vec![],
-                },
-            );
+        if Path::new(&login).is_file() {
+            match found.iter().position(|s| s.program == login) {
+                Some(index) => {
+                    let shell = found.remove(index);
+                    found.insert(0, shell);
+                }
+                None => found.insert(
+                    0,
+                    ShellInfo {
+                        id: "login".into(),
+                        label: format!("{login} (login shell)"),
+                        program: login,
+                        args: POSIX_ARGS.iter().map(|a| a.to_string()).collect(),
+                    },
+                ),
+            }
         }
     }
 

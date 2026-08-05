@@ -1,5 +1,6 @@
 import {
   formatBinding,
+  isMac,
   parseBinding,
   serializeBinding,
   serializeChords,
@@ -87,12 +88,25 @@ export interface ShortcutCommand {
 
 const DIGITS: Digit[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+/**
+ * The platform's own choice, for the handful of commands where one binding
+ * cannot serve both.
+ *
+ * Most defaults do not need this: they are written with `Mod`, which is Ctrl on
+ * Windows and Cmd on a Mac, and that is the whole difference. What this is for
+ * is the keys where the two platforms disagree on more than a modifier — a
+ * chord macOS reserves for itself, a key a MacBook does not have, or an action
+ * a Mac user expects under a different shortcut entirely.
+ */
+const forPlatform = (windows: Binding[], mac: Binding[]): Binding[] =>
+  isMac() ? mac : windows;
+
 const focusDigits: ShortcutCommand[] = DIGITS.map((n) => ({
   id: `pane.focus${n}` as CommandId,
   section: "navigation",
   labelKey: "cmd.pane.focusN",
   labelParams: { n },
-  defaults: [`Ctrl+${n}`],
+  defaults: [`Mod+${n}`],
 }));
 
 const workspaceDigits: ShortcutCommand[] = DIGITS.map((n) => ({
@@ -100,62 +114,75 @@ const workspaceDigits: ShortcutCommand[] = DIGITS.map((n) => ({
   section: "workspaces",
   labelKey: "cmd.workspace.goN",
   labelParams: { n },
-  defaults: [`Alt+${n}`],
+  // Option+digit types a character on a Mac, and with `macOptionIsMeta` on it
+  // is also how you send a Meta digit to the shell, so Cmd joins it there.
+  defaults: forPlatform([`Alt+${n}`], [`Meta+Alt+${n}`]),
 }));
 
 /**
- * Defaults lean on Ctrl+Shift for pane management and plain Alt for moving
+ * Defaults lean on Mod+Shift for pane management and plain Alt for moving
  * around, which keeps every Ctrl+letter the shell needs — Ctrl+C, Ctrl+D,
  * Ctrl+R — reaching the terminal untouched.
+ *
+ * `Mod` reads as Ctrl on Windows and Cmd on a Mac. That single substitution
+ * covers most of the difference, because the chords a Mac reserves are Cmd
+ * ones and the shell only ever wants Ctrl. Where it is not enough — Option
+ * arrows, which a terminal uses to move by word, and the keys a MacBook simply
+ * does not have — `forPlatform` states both.
  */
 export const COMMANDS: ShortcutCommand[] = [
   {
     id: "pane.split",
     section: "panes",
     labelKey: "cmd.pane.split",
-    defaults: ["Ctrl+Shift+Enter"],
+    defaults: ["Mod+Shift+Enter"],
   },
   {
     id: "pane.splitRight",
     section: "panes",
     labelKey: "cmd.pane.splitRight",
-    defaults: ["Ctrl+Alt+Right"],
+    // Cmd+D and Cmd+Shift+D are the splits every Mac terminal already uses,
+    // and they leave Cmd+Option+arrow free for stepping between workspaces,
+    // which is where a Mac puts tab navigation.
+    defaults: forPlatform(["Ctrl+Alt+Right"], ["Meta+D"]),
   },
   {
     id: "pane.splitDown",
     section: "panes",
     labelKey: "cmd.pane.splitDown",
-    defaults: ["Ctrl+Alt+Down"],
+    defaults: forPlatform(["Ctrl+Alt+Down"], ["Meta+Shift+D"]),
   },
   {
     id: "pane.close",
     section: "panes",
     labelKey: "cmd.pane.close",
-    defaults: ["Ctrl+Shift+X"],
+    defaults: ["Mod+Shift+X"],
   },
   {
     id: "pane.restart",
     section: "panes",
     labelKey: "cmd.pane.restart",
-    defaults: ["Ctrl+Shift+R"],
+    defaults: ["Mod+Shift+R"],
   },
   {
     id: "pane.restartAll",
     section: "panes",
     labelKey: "cmd.pane.restartAll",
-    defaults: ["Ctrl+Alt+Shift+R"],
+    defaults: ["Mod+Alt+Shift+R"],
   },
   {
     id: "pane.sessions",
     section: "panes",
     labelKey: "cmd.pane.sessions",
-    defaults: ["Ctrl+Shift+S"],
+    defaults: ["Mod+Shift+S"],
   },
 
   {
     id: "pane.next",
     section: "navigation",
     labelKey: "cmd.pane.next",
+    // Left as Ctrl on both: Cmd+Tab is the macOS application switcher and
+    // never reaches a window.
     defaults: ["Ctrl+Tab"],
   },
   {
@@ -168,69 +195,73 @@ export const COMMANDS: ShortcutCommand[] = [
     id: "pane.focusLeft",
     section: "navigation",
     labelKey: "cmd.pane.focusLeft",
-    defaults: ["Alt+Left"],
+    // Option+arrow moves by word in a terminal, and a Mac user would notice
+    // losing it, so Ctrl joins the chord there rather than taking it over.
+    defaults: forPlatform(["Alt+Left"], ["Ctrl+Alt+Left"]),
   },
   {
     id: "pane.focusRight",
     section: "navigation",
     labelKey: "cmd.pane.focusRight",
-    defaults: ["Alt+Right"],
+    defaults: forPlatform(["Alt+Right"], ["Ctrl+Alt+Right"]),
   },
   {
     id: "pane.focusUp",
     section: "navigation",
     labelKey: "cmd.pane.focusUp",
-    defaults: ["Alt+Up"],
+    defaults: forPlatform(["Alt+Up"], ["Ctrl+Alt+Up"]),
   },
   {
     id: "pane.focusDown",
     section: "navigation",
     labelKey: "cmd.pane.focusDown",
-    defaults: ["Alt+Down"],
+    defaults: forPlatform(["Alt+Down"], ["Ctrl+Alt+Down"]),
   },
   ...focusDigits,
   {
     id: "pane.swapLeft",
     section: "navigation",
     labelKey: "cmd.pane.swapLeft",
-    defaults: ["Alt+Shift+Left"],
+    defaults: forPlatform(["Alt+Shift+Left"], ["Ctrl+Alt+Shift+Left"]),
   },
   {
     id: "pane.swapRight",
     section: "navigation",
     labelKey: "cmd.pane.swapRight",
-    defaults: ["Alt+Shift+Right"],
+    defaults: forPlatform(["Alt+Shift+Right"], ["Ctrl+Alt+Shift+Right"]),
   },
   {
     id: "pane.swapUp",
     section: "navigation",
     labelKey: "cmd.pane.swapUp",
-    defaults: ["Alt+Shift+Up"],
+    defaults: forPlatform(["Alt+Shift+Up"], ["Ctrl+Alt+Shift+Up"]),
   },
   {
     id: "pane.swapDown",
     section: "navigation",
     labelKey: "cmd.pane.swapDown",
-    defaults: ["Alt+Shift+Down"],
+    defaults: forPlatform(["Alt+Shift+Down"], ["Ctrl+Alt+Shift+Down"]),
   },
 
   {
     id: "workspace.next",
     section: "workspaces",
     labelKey: "cmd.workspace.next",
-    defaults: ["Ctrl+PageDown"],
+    // A MacBook has no Page keys. Cmd+Option+arrow is what macOS browsers
+    // use to step through tabs, which is the same gesture as this.
+    defaults: forPlatform(["Ctrl+PageDown"], ["Meta+Alt+Right"]),
   },
   {
     id: "workspace.prev",
     section: "workspaces",
     labelKey: "cmd.workspace.prev",
-    defaults: ["Ctrl+PageUp"],
+    defaults: forPlatform(["Ctrl+PageUp"], ["Meta+Alt+Left"]),
   },
   {
     id: "workspace.new",
     section: "workspaces",
     labelKey: "cmd.workspace.new",
-    defaults: ["Ctrl+Shift+N"],
+    defaults: ["Mod+Shift+N"],
   },
   ...workspaceDigits,
 
@@ -238,7 +269,7 @@ export const COMMANDS: ShortcutCommand[] = [
     id: "view.settings",
     section: "view",
     labelKey: "cmd.view.settings",
-    defaults: ["Ctrl+,"],
+    defaults: ["Mod+,"],
   },
   {
     id: "view.shortcuts",
@@ -246,68 +277,75 @@ export const COMMANDS: ShortcutCommand[] = [
     labelKey: "cmd.view.shortcuts",
     // A two-step sequence, both because it reads well and because it is the
     // one place the feature documents itself.
-    defaults: ["Ctrl+K Ctrl+S"],
+    defaults: ["Mod+K Mod+S"],
   },
   {
     id: "view.terminals",
     section: "view",
     labelKey: "cmd.view.terminals",
-    defaults: ["Ctrl+Alt+T"],
+    defaults: ["Mod+Alt+T"],
   },
   {
     id: "view.board",
     section: "view",
     labelKey: "cmd.view.board",
-    defaults: ["Ctrl+Alt+B"],
+    defaults: ["Mod+Alt+B"],
   },
   {
     id: "view.mcp",
     section: "view",
     labelKey: "cmd.view.mcp",
-    defaults: ["Ctrl+Alt+M"],
+    defaults: ["Mod+Alt+M"],
   },
   {
     id: "view.broadcast",
     section: "view",
     labelKey: "cmd.view.broadcast",
-    defaults: ["Ctrl+Shift+B"],
+    defaults: ["Mod+Shift+B"],
   },
 
   {
     id: "terminal.clear",
     section: "terminal",
     labelKey: "cmd.terminal.clear",
-    defaults: ["Ctrl+Shift+L"],
+    defaults: ["Mod+Shift+L"],
   },
   {
     id: "terminal.copy",
     section: "terminal",
     labelKey: "cmd.terminal.copy",
-    defaults: ["Ctrl+Shift+C"],
+    // Shift on both, for different reasons. On Windows Ctrl+C has to stay
+    // the interrupt. On a Mac plain Cmd+C never reaches us at all: it is an
+    // accelerator on the Edit menu, which macOS resolves before the window
+    // sees the key — and which already copies the terminal selection, since
+    // xterm answers the clipboard event the menu raises.
+    defaults: forPlatform(["Ctrl+Shift+C"], ["Meta+Shift+C"]),
   },
   {
     id: "terminal.paste",
     section: "terminal",
     labelKey: "cmd.terminal.paste",
-    defaults: ["Ctrl+Shift+V"],
+    defaults: forPlatform(["Ctrl+Shift+V"], ["Meta+Shift+V"]),
   },
   {
     id: "terminal.selectAll",
     section: "terminal",
     labelKey: "cmd.terminal.selectAll",
-    defaults: ["Ctrl+Shift+A"],
+    defaults: forPlatform(["Ctrl+Shift+A"], ["Meta+Shift+A"]),
   },
   {
     id: "terminal.scrollTop",
     section: "terminal",
     labelKey: "cmd.terminal.scrollTop",
-    defaults: ["Ctrl+Home"],
+    // Home and End are the other keys a MacBook does without; Cmd with an
+    // arrow is what macOS puts in their place.
+    defaults: forPlatform(["Ctrl+Home"], ["Meta+Up"]),
   },
   {
     id: "terminal.scrollBottom",
     section: "terminal",
     labelKey: "cmd.terminal.scrollBottom",
-    defaults: ["Ctrl+End"],
+    defaults: forPlatform(["Ctrl+End"], ["Meta+Down"]),
   },
 
   {
@@ -316,25 +354,25 @@ export const COMMANDS: ShortcutCommand[] = [
     labelKey: "cmd.app.zoomIn",
     // Both spellings of the same physical key, because a keyboard that needs
     // Shift for "+" would otherwise report the shifted chord only.
-    defaults: ["Ctrl+=", "Ctrl++"],
+    defaults: ["Mod+=", "Mod++"],
   },
   {
     id: "app.zoomOut",
     section: "app",
     labelKey: "cmd.app.zoomOut",
-    defaults: ["Ctrl+-"],
+    defaults: ["Mod+-"],
   },
   {
     id: "app.zoomReset",
     section: "app",
     labelKey: "cmd.app.zoomReset",
-    defaults: ["Ctrl+0"],
+    defaults: ["Mod+0"],
   },
   {
     id: "app.fullscreen",
     section: "app",
     labelKey: "cmd.app.fullscreen",
-    defaults: ["F11"],
+    defaults: forPlatform(["F11"], ["Ctrl+Meta+F"]),
   },
 ];
 

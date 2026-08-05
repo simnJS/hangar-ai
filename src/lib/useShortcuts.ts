@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { chordFromEvent, isBareChord, serializeChords, type Chord } from "./keys";
+import {
+  chordFromEvent,
+  isBareChord,
+  isTextEditingChord,
+  serializeChords,
+  type Chord,
+} from "./keys";
 import {
   indexKeymap,
   resolveKeymap,
@@ -124,6 +130,11 @@ export function useShortcuts(options: {
       // it into a field is not asking for the command. Mid-sequence the same
       // key is unambiguous, so the guard only applies to a first chord.
       if (!armed && isBareChord(chord) && isTypingTarget(event.target)) return;
+
+      // Copy, paste and select-all belong to the field the caret is in. On a
+      // Mac they are also the terminal's own bindings, which is why this is not
+      // covered by the check above: Cmd+C is anything but a bare chord.
+      if (!armed && isTextEditingChord(chord) && isTypingTarget(event.target)) return;
 
       const chords = [...pendingRef.current, chord];
       const serial = serializeChords(chords);

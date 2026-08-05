@@ -165,7 +165,7 @@ const en = {
 
   "settings.shortcutsAll": "All commands",
   "settings.shortcutsHint":
-    "Click + on a command to record its keys. A shortcut can be a sequence: type Ctrl+K, then Ctrl+S.",
+    "Click + on a command to record its keys. A shortcut can be a sequence: type {mod}+K, then {mod}+S.",
 
   "keymap.search": "Filter by command or key…",
   "keymap.clear": "Clear the filter",
@@ -481,7 +481,7 @@ const fr: Record<Key, string> = {
 
   "settings.shortcutsAll": "Toutes les commandes",
   "settings.shortcutsHint":
-    "Clique sur + à côté d'une commande pour enregistrer ses touches. Un raccourci peut être une séquence : tape Ctrl+K, puis Ctrl+S.",
+    "Clique sur + à côté d'une commande pour enregistrer ses touches. Un raccourci peut être une séquence : tape {mod}+K, puis {mod}+S.",
 
   "keymap.search": "Filtrer par commande ou par touche…",
   "keymap.clear": "Effacer le filtre",

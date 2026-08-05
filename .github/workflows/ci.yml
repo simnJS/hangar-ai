@@ -40,8 +40,15 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
+  # Both targets, because most of what is platform-specific here is compiled
+  # out on the other one: shell discovery, the PATH repair, the pane arguments.
+  # A Windows-only job would let a macOS build break without anyone noticing.
   rust:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +67,10 @@ jobs:
         shell: bash
         run: mkdir -p dist && touch dist/index.html
 
+      # One platform is enough: formatting does not vary by OS, and running it
+      # twice only makes the same failure appear twice.
       - name: Check formatting
+        if: matrix.os == 'windows-latest'
         working-directory: src-tauri
         run: cargo fmt --check
 
@@ -70,3 +80,7 @@ jobs:
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --locked
