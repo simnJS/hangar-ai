@@ -160,7 +160,7 @@ export function TerminalPane({
      * quoted-insert is out of reach from that key — the same bargain
      * Windows Terminal makes.
      *
-     * Shift+Enter opens a line instead of sending one.
+     * Shift+Enter opens a line instead of sending one, in an agent pane.
      *
      * xterm decides what Enter means from the keycode alone, so Shift never
      * makes it out: both keys write a bare CR, and the agent answers a prompt
@@ -168,11 +168,27 @@ export function TerminalPane({
      * already read as "newline" — it is what `claude /terminal-setup` binds
      * Shift+Enter to in VS Code and iTerm2 — so sending it here gives the key
      * the meaning it has in every other terminal the user has set up.
+     *
+     * A plain shell is left out, because there ESC is not a prefix waiting for
+     * a second byte but a key of its own: PSReadLine reverts the line on it and
+     * cmd clears it, so the shell would throw away what was typed rather than
+     * run it — and readline, which does treat it as a prefix, has nothing bound
+     * to M-CR and would ignore the keystroke. Shift+Enter keeps submitting
+     * there, which is what it did before and what every other terminal does.
+     *
+     * Read straight off `pane` rather than through a ref: this effect is keyed
+     * on the pane id, and changing a pane's agent mints a new one.
      */
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown" || event.altKey) return true;
 
-      if (event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      if (
+        pane.agent !== "shell" &&
+        event.key === "Enter" &&
+        event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
         // xterm bows out on `false` without cancelling the event, and Enter
         // left to the webview types into the helper textarea it reads pastes
         // from.
