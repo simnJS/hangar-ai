@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DiscordPresence, DiscordStatus } from "./discord";
-import type { AgentSession, AppState, ShellInfo } from "../types";
+import type { AgentSession, AppState, ShellInfo, WorkspaceRoot } from "../types";
 
 export const ptySpawn = (args: {
   id: string;
@@ -33,6 +33,14 @@ export const saveState = (state: AppState) =>
   invoke<void>("save_state", { state });
 
 export const dirExists = (path: string) => invoke<boolean>("dir_exists", { path });
+
+/** The folders a VS Code workspace file lists. Rejects if it cannot be read. */
+export const readCodeWorkspace = (path: string) =>
+  invoke<WorkspaceRoot[]>("read_code_workspace", { path });
+
+/** The `.code-workspace` sitting in `dir`, when there is one to offer. */
+export const findCodeWorkspace = (dir: string) =>
+  invoke<string | null>("find_code_workspace", { dir });
 
 /** `null` clears the presence and closes the connection to Discord. */
 export const setDiscordPresence = (wanted: DiscordPresence | null) =>

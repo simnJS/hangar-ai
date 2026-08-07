@@ -10,6 +10,7 @@ mod server;
 mod sessions;
 mod shells;
 mod store;
+mod workspace_file;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -66,6 +67,8 @@ pub fn run() {
             store::save_state,
             store::dir_exists,
             store::home_dir,
+            workspace_file::read_code_workspace,
+            workspace_file::find_code_workspace,
             board_load,
             board_create,
             board_update,

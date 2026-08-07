@@ -2,14 +2,25 @@ import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop } from "./Backdrop";
 import { useT } from "../i18n";
+import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
 import { PANE_NAMES } from "../lib/paneNames";
 import { useStore, type WorkspaceDraft } from "../store";
-import { AGENTS, type AgentId, type LayoutSize, type ShellInfo } from "../types";
+import {
+  AGENTS,
+  type AgentId,
+  type LayoutSize,
+  type ShellInfo,
+  type WorkspaceRoot,
+} from "../types";
 
 const LAYOUTS: LayoutSize[] = [1, 2, 4, 8];
 
 const basename = (path: string) =>
   path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+
+/** `My project.code-workspace` names a workspace `My project`. */
+const workspaceFileName = (path: string) =>
+  basename(path).replace(/\.code-workspace$/i, "");
 
 /** Grid shape per layout, mirrored from the CSS so the preview matches reality. */
 const PREVIEW_COLUMNS: Record<LayoutSize, number> = { 1: 1, 2: 2, 4: 2, 8: 4 };
@@ -33,6 +44,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
 
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
+  /** Empty until a `.code-workspace` is loaded; `cwd` is one of these. */
+  const [roots, setRoots] = useState<WorkspaceRoot[]>([]);
+  /** A workspace file found next to the folder that was just picked. */
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [shellId, setShellId] = useState<string | null>(null);
   const [layout, setLayout] = useState<LayoutSize>(4);
   // One entry per pane: the source of truth the counters and preview share.
@@ -97,8 +113,47 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
     });
     if (typeof selected !== "string") return;
     setCwd(selected);
+    setRoots([]);
+    setFileError(null);
+    setSuggestion(null);
     // Only auto-fill the name while the user has not typed their own.
     setName((current) => (current.trim() === "" ? basename(selected) : current));
+    // A folder holding a workspace file is usually meant to be opened through
+    // it — usually, not always, so this is offered rather than applied.
+    findCodeWorkspace(selected)
+      .then(setSuggestion)
+      .catch(() => undefined);
+  }
+
+  async function browseWorkspaceFile() {
+    const selected = await open({
+      multiple: false,
+      title: t("create.fileDialog"),
+      filters: [{ name: t("create.fileFilter"), extensions: ["code-workspace"] }],
+    });
+    if (typeof selected !== "string") return;
+    await loadWorkspaceFile(selected);
+  }
+
+  /** Splits a `.code-workspace` into the folder to open in and the rest. */
+  async function loadWorkspaceFile(path: string) {
+    let found: WorkspaceRoot[];
+    try {
+      found = await readCodeWorkspace(path);
+    } catch {
+      setFileError(path);
+      return;
+    }
+    setSuggestion(null);
+    setFileError(null);
+    setRoots(found);
+    // Terminals need a folder that is really there, so a file whose first entry
+    // is missing on this machine falls through to the first one that is not.
+    const main = found.find((root) => root.exists);
+    if (main) setCwd(main.path);
+    setName((current) =>
+      current.trim() === "" ? workspaceFileName(path) : current,
+    );
   }
 
   function submit() {
@@ -106,6 +161,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
     const draft: WorkspaceDraft = {
       name: name.trim() || basename(cwd),
       cwd,
+      // `cwd` is the root the terminals get; the others only ride along for the
+      // agents that can read outside it. Missing folders are never passed on.
+      extraRoots: roots
+        .filter((root) => root.exists && root.path !== cwd)
+        .map((root) => root.path),
       layout,
       agents: assignments,
       shellId,
@@ -142,7 +202,69 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
               <button className="btn" onClick={browse}>
                 {t("create.browse")}
               </button>
+              <button
+                className="btn"
+                onClick={browseWorkspaceFile}
+                title={t("create.fileDialog")}
+              >
+                {t("create.openFile")}
+              </button>
             </div>
+
+            {suggestion && (
+              <div className="notice">
+                <span className="notice__text">
+                  {t("create.fileFound", { name: basename(suggestion) })}
+                </span>
+                <button
+                  className="btn btn--tiny"
+                  onClick={() => loadWorkspaceFile(suggestion)}
+                >
+                  {t("create.fileUse")}
+                </button>
+                <button className="icon-btn" onClick={() => setSuggestion(null)}>
+                  ×
+                </button>
+              </div>
+            )}
+
+            {fileError && (
+              <p className="notice notice--error">
+                <span className="notice__text">
+                  {t("create.fileFailed", { name: basename(fileError) })}
+                </span>
+              </p>
+            )}
+
+            {roots.length > 0 && (
+              <div className="roots">
+                <span className="form-hint">{t("create.rootsHint")}</span>
+                {roots.map((root) => {
+                  const isMain = root.path === cwd;
+                  return (
+                    <button
+                      key={root.path}
+                      className={`root ${isMain ? "is-main" : ""} ${
+                        root.exists ? "" : "is-missing"
+                      }`}
+                      onClick={() => setCwd(root.path)}
+                      disabled={!root.exists}
+                      title={root.path}
+                    >
+                      <span className="root__name">{root.name}</span>
+                      <span className="root__path">{root.path}</span>
+                      <span className="root__tag">
+                        {!root.exists
+                          ? t("create.rootMissing")
+                          : isMain
+                            ? t("create.rootMain")
+                            : t("create.rootExtra")}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           <section className="form-row">

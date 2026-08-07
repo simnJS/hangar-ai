@@ -32,6 +32,12 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  /**
+   * The other folders of a VS Code `.code-workspace`, once `cwd` has taken the
+   * main one. Terminals still open in `cwd` — a shell has one directory — but
+   * the agents that can read beyond it are told about these.
+   */
+  extraRoots: string[];
   panes: Pane[];
   /** Overrides the global theme for this workspace only. */
   themeId: string | null;
@@ -100,6 +106,14 @@ export interface AppState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   settings: Settings;
+}
+
+/** One `folders[]` entry of a VS Code `.code-workspace`, already resolved. */
+export interface WorkspaceRoot {
+  name: string;
+  path: string;
+  /** False when the file points at a folder this machine does not have. */
+  exists: boolean;
 }
 
 export interface AgentSession {

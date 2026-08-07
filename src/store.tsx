@@ -48,6 +48,8 @@ export const makePane = (agent: AgentId = "shell", taken: Iterable<string> = [])
 export interface WorkspaceDraft {
   name: string;
   cwd: string;
+  /** Empty unless the workspace came from a multi-root `.code-workspace`. */
+  extraRoots?: string[];
   layout: LayoutSize;
   /** One agent per pane, in grid order. */
   agents: AgentId[];
@@ -63,12 +65,20 @@ export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
     id: newId(),
     name: draft.name,
     cwd: draft.cwd,
+    extraRoots: draft.extraRoots ?? [],
     panes,
     themeId: null,
     shellId: draft.shellId,
     tree: presetTree(panes.map((pane) => pane.id)),
   };
 };
+
+/** Brings a stored workspace up to the shape the current version expects. */
+const hydrateWorkspace = (ws: Workspace): Workspace => ({
+  ...nameWorkspacePanes(ws),
+  // Absent from everything saved before workspaces could hold extra roots.
+  extraRoots: ws.extraRoots ?? [],
+});
 
 const EMPTY: AppState = {
   workspaces: [],
@@ -144,7 +154,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (loaded) {
           update(() => ({
             // Workspaces stored before panes had names get them here.
-            workspaces: (loaded.workspaces ?? []).map(nameWorkspacePanes),
+            workspaces: (loaded.workspaces ?? []).map(hydrateWorkspace),
             activeWorkspaceId: loaded.activeWorkspaceId ?? null,
             // Merge so settings added in later versions get their defaults.
             settings: { ...DEFAULT_SETTINGS, ...(loaded.settings ?? {}) },

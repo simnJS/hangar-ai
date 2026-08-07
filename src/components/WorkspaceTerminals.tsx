@@ -74,6 +74,7 @@ export function WorkspaceTerminals({
           pane={pane}
           index={Math.max(0, order.indexOf(pane.id))}
           cwd={workspace.cwd}
+          extraRoots={workspace.extraRoots}
           settings={settings}
           theme={theme}
           focused={focusedPaneId === pane.id}

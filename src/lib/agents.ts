@@ -2,13 +2,41 @@ import { listSessions } from "./ipc";
 import type { AgentId } from "../types";
 
 /**
+ * A path safe to put between double quotes in a command line.
+ *
+ * These roots are read out of a `.code-workspace` file, which can arrive with a
+ * cloned repository — nobody types them. A newline would run whatever follows
+ * it as its own command, and a quote, backtick or `$` would end the quoting and
+ * let the rest of the path be read as shell syntax. None of them belong in a
+ * project path, so a root carrying one is dropped rather than escaped.
+ */
+const isQuotable = (root: string) => !/["`$\r\n]/.test(root);
+
+/**
  * Builds the command typed into a freshly opened shell. Returning null means
  * "leave the user at a plain prompt".
+ *
+ * `extraRoots` holds the folders a multi-root workspace has beyond the one the
+ * terminal opened in. Only Claude Code takes them on the command line; the
+ * others are left with their working directory rather than handed a flag they
+ * would refuse to start with.
  */
-export function launchCommand(agent: AgentId, sessionId: string | null): string | null {
+export function launchCommand(
+  agent: AgentId,
+  sessionId: string | null,
+  extraRoots: string[] = [],
+): string | null {
   switch (agent) {
-    case "claude":
-      return sessionId ? `claude --resume ${sessionId}` : "claude";
+    case "claude": {
+      const resume = sessionId ? ` --resume ${sessionId}` : "";
+      const roots = extraRoots.filter(isQuotable);
+      // `--add-dir` is variadic, so it comes last: a following flag would be
+      // swallowed as one more directory.
+      const added = roots.length
+        ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
+        : "";
+      return `claude${resume}${added}`;
+    }
     case "codex":
       return sessionId ? `codex resume ${sessionId}` : "codex";
     case "gemini":

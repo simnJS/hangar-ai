@@ -35,6 +35,8 @@ type Status = "starting" | "running" | "exited";
 interface Props {
   pane: Pane;
   cwd: string;
+  /** Folders of the workspace that the terminal did not open in. */
+  extraRoots: string[];
   settings: Settings;
   theme: TerminalTheme;
   focused: boolean;
@@ -64,6 +66,7 @@ interface Props {
 export function TerminalPane({
   pane,
   cwd,
+  extraRoots,
   settings,
   theme,
   focused,
@@ -98,6 +101,8 @@ export function TerminalPane({
   settingsRef.current = settings;
   const shellRef = useRef(shell);
   shellRef.current = shell;
+  const extraRootsRef = useRef(extraRoots);
+  extraRootsRef.current = extraRoots;
   // The terminal effect runs once per pane id, so whatever it reads later must
   // come through a ref rather than the closure captured on mount.
   const focusedRef = useRef(focused);
@@ -300,7 +305,7 @@ export function TerminalPane({
         if (disposed || controller.signal.aborted) return;
 
         const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
-        const command = launchCommand(pane.agent, resumeId);
+        const command = launchCommand(pane.agent, resumeId, extraRootsRef.current);
         if (command) {
           if (resumeId) claim(resumeId);
           await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);

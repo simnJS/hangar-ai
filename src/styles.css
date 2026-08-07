@@ -2118,6 +2118,97 @@ body.is-dragging-pane .pane__bar {
   color: var(--danger);
 }
 
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11.5px;
+}
+
+.notice__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice--error {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+
+.btn--tiny {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.roots {
+  display: grid;
+  gap: 4px;
+}
+
+.root {
+  display: grid;
+  /* The path takes what is left, so a long one truncates instead of pushing
+     the tag out of the row. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--dur), background var(--dur);
+}
+
+.root:hover:not(:disabled) {
+  border-color: var(--accent-ring);
+}
+
+.root.is-main {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.root.is-missing {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.root__name {
+  font-weight: 550;
+  font-size: 11.5px;
+}
+
+.root__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+.root__tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.root.is-main .root__tag {
+  color: var(--accent);
+}
+
 /* ---------- Keyboard shortcuts ---------- */
 
 .keymap {
