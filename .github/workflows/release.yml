@@ -12,16 +12,19 @@ on:
 permissions:
   contents: write
 
+env:
+  # In CI every build is from scratch, so incremental only pays for dependency
+  # tracking nobody reuses — and it is what makes the cached target directory
+  # big enough for restoring it to cost more than it saves.
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build:
     strategy:
-      # One runner at a time. Every job merges its own entry into the shared
-      # `latest.json` by reading the copy already on the release, adding to it
-      # and uploading the result — so two of them in flight at once and the
-      # slower one writes back a copy that predates the faster one, leaving a
-      # platform with no update to find. Serialising costs a release twenty
-      # minutes; getting it wrong costs an OS its auto-update, silently.
-      max-parallel: 1
+      # All three at once. They no longer contend for `latest.json` — the
+      # publish job below assembles it alone, from the signatures they leave
+      # on the release — so a release now takes as long as its slowest
+      # platform rather than the sum of all of them.
       fail-fast: false
       matrix:
         include:
@@ -50,6 +53,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The Windows runner spends about twice as long on this crate as the
+      # other two, and most of the difference is Defender opening every one of
+      # the tens of thousands of files cargo writes. The runner is already
+      # ephemeral and already runs whatever this workflow says, so scanning the
+      # build it is about to produce buys nothing.
+      - name: Keep Defender out of the build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+          Add-MpPreference -ExclusionProcess "rustc.exe"
+          Add-MpPreference -ExclusionProcess "cargo.exe"
+          Add-MpPreference -ExclusionProcess "link.exe"
+
       # Linux has no system WebView, and `tauri-build` needs it at compile
       # time. `patchelf` is what the AppImage bundler rewrites the binary with.
       - name: Install Linux build dependencies
@@ -77,6 +95,11 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
+      # Worth having for a re-run of the same tag, but not much more: a cache
+      # written under a tag ref is not readable from the next tag, so a release
+      # normally compiles from scratch whatever this restores. Warming it would
+      # mean a full release build on every push to main, which costs more than
+      # it saves at this rate of releasing.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
@@ -107,12 +130,11 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # Builds the installers and, because the signing key is present, the
-      # signed `latest.json` the in-app updater polls. Without these secrets the
-      # release still succeeds but auto-update will reject the artifacts.
+      # `.sig` next to each updater bundle. Without these secrets the release
+      # still succeeds but auto-update will reject the artifacts.
       #
       # The three platforms publish to the same release: whichever job gets
-      # there first creates it, the rest add their assets and merge their entry
-      # into `latest.json`.
+      # there first creates it, the rest add their assets to it.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,31 +153,105 @@ jobs:
           args: ${{ matrix.args }}
           # Held as a draft until every platform has landed, then published by
           # the job below. A half-built release under /releases/latest/ is one
-          # a visitor downloads the wrong half of, and one the updater polls
-          # with two of the three platforms missing from `latest.json`.
+          # a visitor downloads the wrong half of.
           releaseDraft: true
           prerelease: false
+          # `latest.json` is assembled once, by the job below. Left to this
+          # action, each platform would build it by reading the copy already on
+          # the release and writing the result back — a read-modify-write with
+          # no lock, which is only safe while the jobs are serialised. Taking it
+          # away from them is what lets all three run at once.
+          includeUpdaterJson: false
 
+  # The single writer of `latest.json`, and the only thing that publishes.
+  # Everything the updater relies on is decided here, once, with all three
+  # platforms already on the release.
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # Publishing is what moves the release under /releases/latest/, which is
-      # where the updater looks for `latest.json` — so it happens once, at the
-      # end, with every platform already attached.
-      - name: Publish the release
+      - name: Assemble latest.json and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          set -euo pipefail
+
           # Resolved from the list rather than with `gh release view`, whose
           # by-tag endpoint does not return drafts.
-          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-                --jq '.[] | select(.tag_name == env.TAG) | .id' | head -1)
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                --jq 'map(select(.tag_name == env.TAG)) | .[0].id // empty')
           if [ -z "$id" ]; then
             echo "no release found for tag $TAG" >&2
             exit 1
           fi
+
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100")
+          platforms='{}'
+
+          # Every updater bundle leaves a `.sig` beside it, so the signatures
+          # are the list of what can actually be updated to — a `.deb` or a
+          # `.dmg` has none and is a download only. The bundle a signature
+          # belongs to is its own name without the suffix, and the extension
+          # says which platform keys it answers for.
+          #
+          # Both the plain key and the per-bundle one are written, as
+          # tauri-action did: an app installed by an older release polls for
+          # the name it already knows.
+          while read -r asset_id name; do
+            bundle="${name%.sig}"
+            case "$bundle" in
+              *.app.tar.gz) keys="darwin-aarch64 darwin-x86_64 darwin-aarch64-app darwin-x86_64-app" ;;
+              # The AppImage takes the plain linux key: it is the one bundle
+              # that can replace itself in place, which is what the updater
+              # does. The other two are listed under their own name for an
+              # install that came from a package manager.
+              *.AppImage)   keys="linux-x86_64 linux-x86_64-appimage" ;;
+              *.deb)        keys="linux-x86_64-deb" ;;
+              *.rpm)        keys="linux-x86_64-rpm" ;;
+              *.msi)        keys="windows-x86_64 windows-x86_64-msi" ;;
+              *-setup.exe)  keys="windows-x86_64-nsis" ;;
+              *)            echo "::warning::no platform key for $bundle"; continue ;;
+            esac
+            signature=$(gh api -H "Accept: application/octet-stream" \
+                          "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id")
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$bundle"
+            for key in $keys; do
+              platforms=$(jq -c --arg k "$key" --arg s "$signature" --arg u "$url" \
+                '.[$k] = { signature: $s, url: $u }' <<<"$platforms")
+            done
+          done < <(jq -r '.[] | select(.name | endswith(".sig")) | "\(.id) \(.name)"' <<<"$assets")
+
+          # A `latest.json` missing a platform is exactly the silent failure
+          # this job exists to prevent, and one missing all of them means the
+          # signing key never reached the builds. Neither gets published.
+          for required in darwin-aarch64 linux-x86_64 windows-x86_64; do
+            if [ "$(jq --arg k "$required" 'has($k)' <<<"$platforms")" != "true" ]; then
+              echo "latest.json would ship without $required" >&2
+              exit 1
+            fi
+          done
+
+          jq -n --arg v "${TAG#v}" \
+                --arg n "$(gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body)" \
+                --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --argjson p "$platforms" \
+            '{ version: $v, notes: $n, pub_date: $d, platforms: $p }' > latest.json
+          jq -r '.platforms | keys[]' latest.json | sed 's/^/  /'
+
+          # Replaced rather than added, so re-running this job is harmless: an
+          # asset name is unique per release and the upload would be refused.
+          old=$(jq -r 'first(.[] | select(.name == "latest.json") | .id) // empty' <<<"$assets")
+          if [ -n "$old" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+          fi
+          gh api --method POST \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=latest.json" \
+            --header "Content-Type: application/json" \
+            --input latest.json > /dev/null
+
+          # Publishing is what moves the release under /releases/latest/, which
+          # is where the updater polls. It happens last, with the json complete.
           # `draft` is a boolean and `make_latest` a string, per the REST API.
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
             -F draft=false -f make_latest=true

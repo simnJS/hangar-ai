@@ -14,6 +14,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Nothing here is ever built twice, so incremental only pays for dependency
+  # tracking nobody reuses — and it is what makes the cached target directory
+  # big enough for restoring it to cost more than it saves.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   # Node work is markedly faster on Linux runners, and nothing here is
@@ -52,6 +56,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # This job takes about twice as long on Windows as on the other two, and
+      # most of the difference is Defender opening every one of the tens of
+      # thousands of files cargo writes. The runner is ephemeral and already
+      # runs whatever this workflow says, so scanning the build buys nothing.
+      - name: Keep Defender out of the build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+          Add-MpPreference -ExclusionProcess "rustc.exe"
+          Add-MpPreference -ExclusionProcess "cargo.exe"
+          Add-MpPreference -ExclusionProcess "link.exe"
 
       # Windows and macOS ship the WebView Tauri renders through; Linux does
       # not, and `tauri-build` looks for it at compile time — so even a check
