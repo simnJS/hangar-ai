@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/simnJS/hangar-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/simnJS/hangar-ai?style=flat-square&color=7aa2f7"></a>
-  <img alt="Windows and macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-2f3549?style=flat-square">
+  <img alt="Windows, macOS and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2f3549?style=flat-square">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/github/license/simnJS/hangar-ai?style=flat-square&color=2f3549"></a>
 </p>
 
@@ -18,9 +18,11 @@
 **Assets**:
 
 - **Windows** — `.exe` or `.msi`, 64-bit. WebView2 is required and ships with Windows 11.
-- **macOS** — `.dmg`, one universal build for Apple Silicon and Intel. It is not signed by
-  an Apple developer account, so the first launch is right-click → **Open** rather than a
-  double-click; macOS then remembers it.
+- **macOS** — `.dmg`, one universal build for Apple Silicon and Intel. Signed and notarised
+  with an Apple developer account, so it opens on a double-click like anything else.
+- **Linux** — `.AppImage` to run without installing, or `.deb` / `.rpm` for a package
+  manager. WebKitGTK 4.1 is required and every current distribution packages it, as
+  `libwebkit2gtk-4.1-0` on Debian and Ubuntu or `webkit2gtk4.1` on Fedora.
 
 The app updates itself from there, so this is a one-time download.
 
@@ -28,8 +30,8 @@ The app updates itself from there, so this is a one-time download.
 
 - **Tiling panes** — 1, 2, 4 or 8 real terminals. Every split resizes on its own, and each
   pane picks its shell from whatever is installed: PowerShell, cmd, Git Bash, WSL, MSYS2 and
-  Nushell on Windows; zsh, bash, fish and Nushell on macOS, opened as login shells so a pane
-  starts with the PATH your terminal has.
+  Nushell on Windows; zsh, bash, fish, Nushell and pwsh everywhere else — opened as login
+  shells on macOS, so a pane starts with the PATH your terminal has.
 - **Workspaces** — a project directory plus its pane layout, saved. Reopen one and every
   pane comes back with its agent.
 - **Session resume** — agents relaunch on the conversation they were in, with no session
@@ -98,7 +100,13 @@ the terminal, which uses it to move by word.
 ## Development
 
 Node 20+, pnpm and a Rust toolchain; on Windows, the MSVC build tools, and on macOS the
-Xcode command line tools (`xcode-select --install`).
+Xcode command line tools (`xcode-select --install`). Linux builds against the system
+WebView, so it needs its headers first:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+  libxdo-dev libssl-dev patchelf
+```
 
 ```bash
 pnpm install

@@ -333,7 +333,12 @@ impl DiscordPresence {
     pub fn stop(&self) {
         // Nothing was ever published: no thread to wait for, and waiting for
         // one that does not exist would burn the whole grace period.
-        if self.worker.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+        if self
+            .worker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+        {
             return;
         }
         let mut inner = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -361,10 +366,7 @@ impl DiscordPresence {
 }
 
 #[tauri::command]
-pub fn discord_presence_set(
-    presence: tauri::State<'_, DiscordPresence>,
-    wanted: Option<Presence>,
-) {
+pub fn discord_presence_set(presence: tauri::State<'_, DiscordPresence>, wanted: Option<Presence>) {
     presence.set(wanted);
 }
 

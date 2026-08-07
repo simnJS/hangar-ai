@@ -40,17 +40,38 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
-  # Both targets, because most of what is platform-specific here is compiled
-  # out on the other one: shell discovery, the PATH repair, the pane arguments.
-  # A Windows-only job would let a macOS build break without anyone noticing.
+  # Every target we ship, because most of what is platform-specific here is
+  # compiled out on the others: shell discovery, the PATH repair, the pane
+  # arguments. A Windows-only job would let a macOS or Linux build break
+  # without anyone noticing.
   rust:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # Windows and macOS ship the WebView Tauri renders through; Linux does
+      # not, and `tauri-build` looks for it at compile time — so even a check
+      # that never links needs these present.
+      #
+      # Pinned to 22.04 rather than `ubuntu-latest` because the release job has
+      # to be: an AppImage links against the glibc of the machine that built it,
+      # and a newer one quietly stops running on older distributions. Checking
+      # on the same release is what lets this job speak for the artifacts.
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
