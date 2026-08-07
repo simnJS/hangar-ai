@@ -159,9 +159,28 @@ export function TerminalPane({
      * The trade-off is that ^V no longer reaches the shell, so readline's
      * quoted-insert is out of reach from that key — the same bargain
      * Windows Terminal makes.
+     *
+     * Shift+Enter opens a line instead of sending one.
+     *
+     * xterm decides what Enter means from the keycode alone, so Shift never
+     * makes it out: both keys write a bare CR, and the agent answers a prompt
+     * you were still halfway through writing. ESC+CR is the sequence the CLIs
+     * already read as "newline" — it is what `claude /terminal-setup` binds
+     * Shift+Enter to in VS Code and iTerm2 — so sending it here gives the key
+     * the meaning it has in every other terminal the user has set up.
      */
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown" || event.altKey) return true;
+
+      if (event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        // xterm bows out on `false` without cancelling the event, and Enter
+        // left to the webview types into the helper textarea it reads pastes
+        // from.
+        event.preventDefault();
+        term.input("\x1b\r");
+        return false;
+      }
+
       const pasting =
         (event.ctrlKey || event.metaKey) && (event.key === "v" || event.key === "V");
       return !pasting;
