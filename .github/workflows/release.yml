@@ -69,9 +69,10 @@ jobs:
           Add-MpPreference -ExclusionProcess "link.exe"
 
       # Linux has no system WebView, and `tauri-build` needs it at compile
-      # time. `patchelf` is what the AppImage bundler rewrites the binary with,
-      # and `libasound2-dev` is the ALSA header set cpal builds the microphone
-      # capture against — without it dictation fails the build, not the run.
+      # time. `patchelf` is what the AppImage bundler rewrites the binary with.
+      # The last two are dictation: `libasound2-dev` is the ALSA header set cpal
+      # captures the microphone through, and `libclang-dev` is what whisper.cpp's
+      # bindings are generated with. Both fail the build, not the run.
       - name: Install Linux build dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -83,6 +84,7 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libasound2-dev \
+            libclang-dev \
             patchelf
 
       - uses: pnpm/action-setup@v4

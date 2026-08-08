@@ -82,10 +82,7 @@ export function VoiceCard({ t, selected }: { t: Translator; selected: string }) 
 
       <p className="vm__meta">
         {t("settings.voiceModelHint", {
-          // Shown as codes rather than names: twenty-five language names is a
-          // paragraph, and the codes are what you would type in the language
-          // field right below anyway.
-          languages: model.languages.split(" ").join(", "),
+          languages: model.languages,
           license: model.license,
         })}
       </p>

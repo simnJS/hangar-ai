@@ -4,7 +4,7 @@ export type AgentId = "shell" | "claude" | "codex" | "gemini" | "opencode";
 export type VoiceEngine = "local" | "groq";
 
 /** The catalogue id the Rust side downloads and loads for local dictation. */
-export const DEFAULT_VOICE_MODEL = "parakeet-tdt-0.6b-v3";
+export const DEFAULT_VOICE_MODEL = "whisper-large-v3-turbo-q5";
 
 /**
  * Groq's transcription models, cheapest first.
@@ -22,9 +22,8 @@ export const CLOUD_MODELS = [
 export const DEFAULT_CLEANUP_MODEL = "llama-3.1-8b-instant";
 
 /**
- * Offered in the language picker. Not the full list either engine handles —
- * Parakeet has 25 and Whisper 99 — just the ones worth a click, with the field
- * left free-form underneath for anything else.
+ * Offered in the language picker. Not the ninety-nine Whisper handles — just
+ * the ones worth a click, with "detect" covering the rest.
  */
 export const VOICE_LANGUAGES = [
   "en",

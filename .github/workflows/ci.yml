@@ -90,6 +90,7 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libasound2-dev \
+            libclang-dev \
             patchelf
 
       - uses: dtolnay/rust-toolchain@stable

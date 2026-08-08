@@ -40,10 +40,10 @@ The app updates itself from there, so this is a one-time download.
   write, over MCP.
 - **Broadcast** — one instruction, sent to every pane at once.
 - **Dictation** — hold a key, speak, and it is typed into the focused pane. Runs on this
-  machine with NVIDIA's Parakeet v3, downloaded once: 25 languages, no key, no connection,
-  and nothing recorded leaves the computer. Groq's Whisper is there as a fallback for
-  anything it does not cover, and an optional pass can tidy the transcript — dropping the
-  hesitations and spelling `useEffect` the way you would type it.
+  machine through whisper.cpp, on a checkpoint downloaded once: 99 languages, no key, no
+  connection, and nothing recorded leaves the computer. Groq's hosted Whisper is there as
+  a fallback, and an optional pass can tidy the transcript — dropping the hesitations and
+  spelling `useEffect` the way you would type it.
 - **32 themes** — ported from the most-installed VS Code palettes, restyling the whole
   window rather than just the terminals. Font, size, line height, cursor and padding adjust
   live.

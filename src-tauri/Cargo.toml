@@ -47,10 +47,19 @@ discord-rich-presence = "1.1.0"
 # them apart again, `cargo update -p windows-core --precise 0.61.2` puts them
 # back.
 cpal = "0.18"
-# Local transcription. No `ort-*` feature on purpose: the ONNX runtime stays on
-# the CPU, where Parakeet is already fast enough for dictation, and the
-# installer stays free of vendor-specific GPU libraries.
-transcribe-rs = { version = "0.3", default-features = false, features = ["onnx"] }
+# Local transcription, through whisper.cpp rather than the ONNX runtime.
+#
+# Not a preference — ONNX cannot be shipped from this pipeline at all. `ort`
+# downloads prebuilt binaries, and there is no build of them for
+# `x86_64-apple-darwin`, which the universal macOS bundle compiles for; the
+# Linux ones need glibc 2.38 while the AppImage is built on 22.04 (2.35) so it
+# keeps running on older distributions. whisper.cpp is compiled from source by
+# its own build script, so neither question comes up: there is no binary to be
+# missing, and it links against whatever glibc is building it.
+#
+# No `whisper-cuda`/`metal`/`vulkan` feature: CPU is fast enough for
+# dictation-length audio, and the installer stays free of vendor GPU libraries.
+transcribe-rs = { version = "0.3", default-features = false, features = ["whisper-cpp"] }
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.

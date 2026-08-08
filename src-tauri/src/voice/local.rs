@@ -1,34 +1,31 @@
 //! Transcription on this machine, with no network and no key.
 //!
-//! Parakeet TDT rather than Whisper, and CPU rather than GPU, are the same
-//! decision seen twice. The model is 0.6B with a non-autoregressive decoder, so
-//! it runs at roughly twenty times real time on an ordinary desktop core: a ten
-//! second dictation comes back in half a second, on a machine with no graphics
-//! card worth the name. Linking CUDA to make that faster would add a gigabyte
-//! of driver-specific libraries to the installer, and a class of "it does not
-//! work on my machine" that this feature has no need to own.
+//! whisper.cpp on the CPU. The GPU is left out deliberately: a dictation is ten
+//! seconds of audio, the turbo checkpoint clears that in a fraction of it on
+//! any recent processor, and linking CUDA or Metal would buy a wait nobody can
+//! feel at the price of vendor libraries in the installer and a class of
+//! driver-specific failures this feature has no need to own.
 
 use std::path::Path;
 
-use transcribe_rs::onnx::parakeet::ParakeetModel;
-use transcribe_rs::onnx::Quantization;
+use transcribe_rs::whisper_cpp::WhisperEngine;
 use transcribe_rs::{SpeechModel, TranscribeOptions};
 
 use super::engine::SttEngine;
 
 pub struct LocalEngine {
-    model: ParakeetModel,
+    model: WhisperEngine,
 }
 
 impl LocalEngine {
     /// Loads a downloaded checkpoint. Slow — a second or two of reading and
     /// laying out weights — which is exactly why the caller keeps the result
     /// alive between dictations instead of calling this per sentence.
-    pub fn load(dir: &Path) -> Result<Self, String> {
-        if !dir.is_dir() {
+    pub fn load(path: &Path) -> Result<Self, String> {
+        if !path.is_file() {
             return Err("the local model is not downloaded yet".into());
         }
-        let model = ParakeetModel::load(dir, &Quantization::Int8)
+        let model = WhisperEngine::load(path)
             .map_err(|err| format!("could not load the local model: {err}"))?;
         Ok(Self { model })
     }
@@ -40,9 +37,6 @@ impl SttEngine for LocalEngine {
             language: language.map(str::to_string),
             ..Default::default()
         };
-        // `transcribe` rather than `transcribe_raw`: it pads the leading
-        // silence this model's mel preprocessor needs, without which the first
-        // word of every dictation comes back clipped or missing.
         let result = self
             .model
             .transcribe(samples, &options)

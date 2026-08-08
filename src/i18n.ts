@@ -125,7 +125,7 @@ const en = {
   "settings.voiceEngineLocal": "On this machine",
   "settings.voiceEngineCloud": "Groq",
   "settings.voiceModel": "Local model",
-  "settings.voiceModelHint": "{languages} · {license} · downloaded once, kept on this machine",
+  "settings.voiceModelHint": "{languages} languages · {license} · downloaded once, kept on this machine",
   "settings.voiceDownload": "Download ({size})",
   "settings.voiceDownloadAgain": "Download again",
   "settings.voiceDownloading": "Downloading… {percent}%",
@@ -503,7 +503,7 @@ const fr: Record<Key, string> = {
   "settings.voiceEngineCloud": "Groq",
   "settings.voiceModel": "Modèle local",
   "settings.voiceModelHint":
-    "{languages} · {license} · téléchargé une fois, conservé sur cette machine",
+    "{languages} langues · {license} · téléchargé une fois, conservé sur cette machine",
   "settings.voiceDownload": "Télécharger ({size})",
   "settings.voiceDownloadAgain": "Retélécharger",
   "settings.voiceDownloading": "Téléchargement… {percent} %",

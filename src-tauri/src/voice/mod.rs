@@ -284,8 +284,8 @@ fn usable(app: &AppHandle, config: &VoiceConfig) -> Result<(), String> {
 fn build(app: &AppHandle, config: &VoiceConfig) -> Result<Box<dyn SttEngine>, String> {
     match config.engine {
         EngineKind::Local => {
-            let dir = models::model_dir(app, &config.model)?;
-            Ok(Box::new(local::LocalEngine::load(&dir)?))
+            let path = models::model_file(app, &config.model)?;
+            Ok(Box::new(local::LocalEngine::load(&path)?))
         }
         EngineKind::Groq => Ok(Box::new(groq::GroqEngine::new(
             &config.model,

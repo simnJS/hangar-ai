@@ -43,22 +43,18 @@ struct Catalogue {
 
 /// The one local model, and everything needed to fetch it.
 ///
-/// Int8 rather than fp32: it is a quarter of the download, loads in a quarter
-/// of the memory, and the accuracy difference on dictation-length speech does
-/// not survive contact with a real microphone.
+/// The turbo checkpoint rather than large-v3: a decoder of four layers instead
+/// of thirty-two, for a handful of tenths of a point of word error rate that a
+/// spoken instruction will never notice. Quantised to q5 on top, which halves
+/// both the download and the memory it loads into.
 const CATALOGUE: &[Catalogue] = &[Catalogue {
-    id: "parakeet-tdt-0.6b-v3",
-    label: "Parakeet TDT 0.6B v3",
-    repo: "istupakov/parakeet-tdt-0.6b-v3-onnx",
-    files: &[
-        "encoder-model.int8.onnx",
-        "decoder_joint-model.int8.onnx",
-        "nemo128.onnx",
-        "vocab.txt",
-    ],
-    approx_bytes: 660 * 1024 * 1024,
-    languages: "en fr de es it pt nl pl ru uk sv da fi el cs sk sl hr bg hu ro lt lv et mt",
-    license: "CC-BY-4.0",
+    id: "whisper-large-v3-turbo-q5",
+    label: "Whisper large-v3 turbo",
+    repo: "ggerganov/whisper.cpp",
+    files: &["ggml-large-v3-turbo-q5_0.bin"],
+    approx_bytes: 574 * 1024 * 1024,
+    languages: "99",
+    license: "MIT",
 }];
 
 #[derive(Serialize)]
@@ -108,6 +104,18 @@ fn installed(app: &AppHandle, model: &Catalogue) -> bool {
 /// opens, so a missing download is reported to someone who has not spoken yet.
 pub fn is_installed(app: &AppHandle, id: &str) -> bool {
     entry(id).is_some_and(|model| installed(app, model))
+}
+
+/// The checkpoint itself. whisper.cpp loads one file, but it is kept inside the
+/// model's own directory anyway: that is what the staged download renames into
+/// place, and what makes a future model with several files no different.
+pub fn model_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    let model = entry(id).ok_or_else(|| format!("unknown model {id}"))?;
+    let file = model
+        .files
+        .first()
+        .ok_or_else(|| format!("model {id} lists no files"))?;
+    Ok(model_dir(app, id)?.join(file))
 }
 
 #[tauri::command]
