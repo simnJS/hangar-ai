@@ -10,6 +10,7 @@ mod server;
 mod sessions;
 mod shells;
 mod store;
+mod voice;
 mod workspace_file;
 
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -30,6 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(pty::PtyManager::default())
         .manage(discord::DiscordPresence::default())
+        .manage(voice::VoiceManager::default())
         .setup(|app| {
             // Warmed here rather than on the first detection call: asking the
             // login shell for its PATH takes a moment, and doing it now means
@@ -82,6 +84,12 @@ pub fn run() {
             instructions::agent_instructions_status,
             discord::discord_presence_set,
             discord::discord_presence_status,
+            voice::voice_start,
+            voice::voice_stop,
+            voice::voice_recording,
+            voice::voice_unload,
+            voice::models::voice_models,
+            voice::models::voice_model_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

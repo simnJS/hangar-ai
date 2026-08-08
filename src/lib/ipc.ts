@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DiscordPresence, DiscordStatus } from "./discord";
+import type { VoiceConfig, VoiceModel } from "./voice";
 import type { AgentSession, AppState, ShellInfo, WorkspaceRoot } from "../types";
 
 export const ptySpawn = (args: {
@@ -50,3 +51,26 @@ export const discordPresenceStatus = () =>
   invoke<DiscordStatus>("discord_presence_status");
 
 export const homeDir = () => invoke<string>("home_dir");
+
+/**
+ * Arms the microphone. Rejects when there is none, when one is already open,
+ * or when the chosen engine could not transcribe anyway — a model still to be
+ * downloaded, a key still to be pasted.
+ */
+export const voiceStart = (config: VoiceConfig) => invoke<void>("voice_start", { config });
+
+/** Ends the recording; `cancel` throws the audio away instead of sending it. */
+export const voiceStop = (config: VoiceConfig, cancel: boolean) =>
+  invoke<void>("voice_stop", { config, cancel });
+
+/** Whether a recording is open — how the interface recovers after a reload. */
+export const voiceRecording = () => invoke<boolean>("voice_recording");
+
+/** Frees the resident model. */
+export const voiceUnload = () => invoke<void>("voice_unload");
+
+export const voiceModels = () => invoke<VoiceModel[]>("voice_models");
+
+/** Resolves when the model is installed; progress arrives on `voice:download`. */
+export const voiceModelDownload = (id: string) =>
+  invoke<void>("voice_model_download", { id });

@@ -75,7 +75,8 @@ export type CommandId =
   | "app.zoomIn"
   | "app.zoomOut"
   | "app.zoomReset"
-  | "app.fullscreen";
+  | "app.fullscreen"
+  | "voice.dictate";
 
 export interface ShortcutCommand {
   id: CommandId;
@@ -373,6 +374,15 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "app",
     labelKey: "cmd.app.fullscreen",
     defaults: forPlatform(["F11"], ["Ctrl+Meta+F"]),
+  },
+  {
+    id: "voice.dictate",
+    section: "app",
+    labelKey: "cmd.voice.dictate",
+    // The one Mod+Alt letter neither platform had already taken. Push to talk:
+    // held it records, released it transcribes — so whatever this is rebound
+    // to wants to be something comfortable to hold down for a sentence.
+    defaults: ["Mod+Alt+V"],
   },
 ];
 

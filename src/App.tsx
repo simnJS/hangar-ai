@@ -8,6 +8,7 @@ import { WorkspaceTerminals } from "./components/WorkspaceTerminals";
 import { BoardView } from "./components/BoardView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { VoiceHud } from "./components/VoiceHud";
 import { detectAgents, detectShells, ptyWrite } from "./lib/ipc";
 import {
   leafIds,
@@ -18,6 +19,7 @@ import {
   type Direction,
 } from "./lib/layout";
 import { buildPresence, useDiscordPresence } from "./lib/discord";
+import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal } from "./lib/terminalRegistry";
 import type { CommandId } from "./lib/shortcuts";
@@ -70,6 +72,8 @@ export default function App() {
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
   const [openedIds, setOpenedIds] = useState<string[]>([]);
+  /** Transient line at the bottom of the window — dictation errors, for now. */
+  const [notice, setNotice] = useState<string | null>(null);
   const broadcastRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
@@ -109,6 +113,45 @@ export default function App() {
   const focusPane = useCallback((workspaceId: string, paneId: string) => {
     setFocusByWorkspace((current) => ({ ...current, [workspaceId]: paneId }));
   }, []);
+
+  /**
+   * Where a transcript lands.
+   *
+   * The broadcast box is checked first and by identity, not by tag name: it is
+   * a controlled input, so writing to the DOM node would put text on screen
+   * that React does not know about and drops on the next render. Everything
+   * else goes to the focused pane, unsubmitted — an agent acting on a sentence
+   * a microphone guessed at is worth one deliberate Enter.
+   */
+  const insertTranscript = useCallback(
+    (text: string) => {
+      if (document.activeElement === broadcastRef.current) {
+        setBroadcast((current) => (current ? `${current} ${text}` : text));
+        return;
+      }
+      if (!focusedPaneId) {
+        setNotice(t("voice.noPane"));
+        return;
+      }
+      const payload = state.settings.voiceSubmit ? `${text}\r` : text;
+      ptyWrite(focusedPaneId, payload).catch(() => undefined);
+    },
+    [focusedPaneId, state.settings.voiceSubmit, t],
+  );
+
+  const voice = useVoice({
+    settings: state.settings,
+    onText: insertTranscript,
+    onError: (message) => setNotice(t("voice.failed", { error: message })),
+  });
+
+  // Notices are informational and never actionable, so they clear themselves
+  // rather than asking for a dismiss button nobody wants to find.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   // Discord shows the open workspace and what is running in it. Rebuilt here
   // and published only when it differs — see lib/discord.
@@ -211,6 +254,10 @@ export default function App() {
           .catch(() => undefined);
       },
     };
+
+    // Left out entirely while dictation is off, so the shortcut falls through
+    // to the terminal instead of being swallowed by a feature nobody enabled.
+    if (state.settings.voiceEnabled) map["voice.dictate"] = voice.press;
 
     const workspaces = state.workspaces;
     for (let i = 0; i < Math.min(9, workspaces.length); i++) {
@@ -468,6 +515,16 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* A microphone is silent to look at, so whether it is listening — and
+          whether it can hear you — has to be somewhere on screen. */}
+      {voice.phase !== "idle" && <VoiceHud phase={voice.phase} level={voice.level} />}
+
+      {notice && (
+        <div className="voice-pill voice-pill--notice" role="status">
+          <span className="voice-pill__text">{notice}</span>
+        </div>
+      )}
 
       {/* A half-typed sequence is held for a moment; saying so is the only way
           the user can tell it from a keystroke that did nothing. */}

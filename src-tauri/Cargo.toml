@@ -30,12 +30,27 @@ dirs = "6.0.0"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync"] }
-ureq = { version = "3.3.0", default-features = false, features = ["json"] }
+ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
 toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2.3.1"
 discord-rich-presence = "1.1.0"
+# Microphone capture for dictation.
+#
+# On Windows this one needs its lockfile left alone: cpal takes `windows` and
+# `windows-core` as two separate dependencies, each accepting 0.61 or 0.62.
+# Cargo satisfies them independently — `windows` 0.61 carrying its own core,
+# next to a bare `windows-core` 0.62 — and cpal then fails to build, with the
+# COM types coming from one crate and the traits implementing them from the
+# other. Cargo.lock pins both halves to 0.61; if a `cargo update` ever pulls
+# them apart again, `cargo update -p windows-core --precise 0.61.2` puts them
+# back.
+cpal = "0.18"
+# Local transcription. No `ort-*` feature on purpose: the ONNX runtime stays on
+# the CPU, where Parakeet is already fast enough for dictation, and the
+# installer stays free of vendor-specific GPU libraries.
+transcribe-rs = { version = "0.3", default-features = false, features = ["onnx"] }
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.

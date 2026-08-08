@@ -6,11 +6,18 @@ import { isMac } from "../../lib/keys";
 import { THEMES } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import { ShortcutsSettings } from "./ShortcutsSettings";
+import { VoiceCard } from "./VoiceCard";
+import { voiceUnload } from "../../lib/ipc";
+import { resolveKeymap, shortcutLabel } from "../../lib/shortcuts";
 import {
   AGENTS,
+  CLOUD_MODELS,
+  DEFAULT_CLEANUP_MODEL,
   DEFAULT_SETTINGS,
+  VOICE_LANGUAGES,
   type Settings,
   type ShellInfo,
+  type VoiceEngine,
   type Workspace,
 } from "../../types";
 
@@ -569,6 +576,167 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               hint: t("settings.notifyAwayHint"),
               value: settings.notifyOnlyWhenAway,
               onChange: (value) => set("notifyOnlyWhenAway", value),
+            },
+          ],
+        },
+      ],
+    },
+
+    {
+      id: "voice",
+      label: t("settings.catVoice"),
+      icon: "🎙",
+      sections: [
+        {
+          id: "voice",
+          title: t("settings.voice"),
+          hint: t("settings.voiceHint"),
+          items: [
+            {
+              id: "voiceEnabled",
+              kind: "toggle",
+              label: t("settings.voiceEnable"),
+              hint: t("settings.voiceEnableHint"),
+              keywords: "voice dictation microphone dictée micro parole whisper parakeet",
+              value: settings.voiceEnabled,
+              onChange: (value) => set("voiceEnabled", value),
+            },
+            {
+              id: "voiceShortcut",
+              kind: "text",
+              label: t("settings.voiceShortcut"),
+              // Read from the live keymap rather than the defaults: the whole
+              // point of the row is to answer "which key was it again", and it
+              // has to stay right after the command has been rebound.
+              value: shortcutLabel(resolveKeymap(settings.keybindings), "voice.dictate"),
+            },
+            {
+              id: "voiceEngine",
+              kind: "segmented",
+              label: t("settings.voiceEngine"),
+              hint: t("settings.voiceEngineHint"),
+              keywords: "local cloud groq offline hors ligne",
+              value: settings.voiceEngine,
+              choices: [
+                { value: "local", label: t("settings.voiceEngineLocal") },
+                { value: "groq", label: t("settings.voiceEngineCloud") },
+              ],
+              onChange: (value) => set("voiceEngine", value as VoiceEngine),
+            },
+            ...(settings.voiceEngine === "local"
+              ? ([
+                  {
+                    id: "voiceModel",
+                    kind: "custom",
+                    label: t("settings.voiceModel"),
+                    keywords: "parakeet model modèle download télécharger",
+                    render: () => <VoiceCard t={t} selected={settings.voiceModel} />,
+                  },
+                ] as SettingItem[])
+              : ([
+                  {
+                    id: "voiceCloudModel",
+                    kind: "select",
+                    label: t("settings.voiceCloudModel"),
+                    hint: t("settings.voiceCloudModelHint"),
+                    keywords: "whisper turbo groq model modèle",
+                    value: settings.voiceCloudModel,
+                    choices: CLOUD_MODELS.map((model) => ({
+                      value: model.id,
+                      label: `${model.label} — ${model.price}`,
+                    })),
+                    onChange: (value) => set("voiceCloudModel", value),
+                  },
+                ] as SettingItem[])),
+            {
+              id: "voiceLanguage",
+              kind: "select",
+              label: t("settings.voiceLanguage"),
+              hint: t("settings.voiceLanguageHint"),
+              keywords: "language langue français english accent",
+              value: settings.voiceLanguage,
+              choices: [
+                { value: "", label: t("settings.voiceLanguageAuto") },
+                ...VOICE_LANGUAGES.map((code) => ({ value: code, label: code })),
+              ],
+              onChange: (value) => set("voiceLanguage", value),
+            },
+            {
+              id: "voiceSubmit",
+              kind: "toggle",
+              label: t("settings.voiceSubmit"),
+              hint: t("settings.voiceSubmitHint"),
+              keywords: "enter entrée submit envoyer",
+              value: settings.voiceSubmit,
+              onChange: (value) => set("voiceSubmit", value),
+            },
+            ...(settings.voiceEngine === "local"
+              ? ([
+                  {
+                    // The model stays in memory between dictations, which is
+                    // what makes the second one instant and the first one
+                    // slow. Worth a way out for anyone who dictated once this
+                    // morning and would like the gigabyte back.
+                    id: "voiceUnload",
+                    kind: "action",
+                    label: t("settings.voiceUnload"),
+                    actionLabel: t("settings.voiceUnloadAction"),
+                    keywords: "memory mémoire ram unload décharger",
+                    onAct: () => {
+                      voiceUnload().catch(() => undefined);
+                    },
+                  },
+                ] as SettingItem[])
+              : []),
+          ],
+        },
+        {
+          id: "voiceKey",
+          title: t("settings.voiceEngineCloud"),
+          items: [
+            {
+              id: "voiceApiKey",
+              kind: "input",
+              label: t("settings.voiceKey"),
+              hint: t("settings.voiceKeyHint"),
+              keywords: "groq api key clé token",
+              value: settings.voiceApiKey,
+              placeholder: t("settings.voiceKeyPlaceholder"),
+              onChange: (value) => set("voiceApiKey", value.trim()),
+            },
+          ],
+        },
+        {
+          id: "voiceCleanup",
+          title: t("settings.voiceCleanupSection"),
+          items: [
+            {
+              id: "voiceCleanup",
+              kind: "toggle",
+              label: t("settings.voiceCleanup"),
+              hint: t("settings.voiceCleanupHintRow"),
+              keywords: "cleanup llm nettoyage relecture ponctuation",
+              value: settings.voiceCleanup,
+              onChange: (value) => set("voiceCleanup", value),
+            },
+            {
+              id: "voiceCleanupModel",
+              kind: "input",
+              label: t("settings.voiceCleanupModel"),
+              hint: t("settings.voiceCleanupModelHint", { model: DEFAULT_CLEANUP_MODEL }),
+              value: settings.voiceCleanupModel,
+              placeholder: DEFAULT_CLEANUP_MODEL,
+              onChange: (value) => set("voiceCleanupModel", value.trim()),
+            },
+            {
+              id: "voiceCleanupHint",
+              kind: "input",
+              label: t("settings.voiceVocabulary"),
+              hint: t("settings.voiceVocabularyHint"),
+              keywords: "vocabulary vocabulaire jargon noms spelling",
+              value: settings.voiceCleanupHint,
+              placeholder: t("settings.voiceVocabularyPlaceholder"),
+              onChange: (value) => set("voiceCleanupHint", value),
             },
           ],
         },

@@ -2486,3 +2486,177 @@ body.is-dragging-pane .pane__bar {
   font-weight: 600;
   color: var(--accent);
 }
+
+/* Dictation ------------------------------------------------------------- */
+
+/* Sits where the chord hint sits, and is mutually exclusive with it in
+   practice: both are the same kind of transient badge about what the keyboard
+   is currently doing.
+
+   Rounded, unlike everything else in this interface — `--radius` is 0 by
+   design. That is the point: it is not part of the window, it is a thing that
+   appears over it for three seconds, and the shape says so before the content
+   does. */
+.voice-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 12px 30px -14px var(--shadow);
+  z-index: 31;
+}
+
+/* Raised above the recording pill, which it can briefly overlap when a
+   dictation fails on the way out. Text, not bars: an error has to be read. */
+.voice-pill--notice {
+  bottom: 96px;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.voice-pill__text {
+  font-size: 11.5px;
+}
+
+.voice-pill__sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-strong);
+  flex: none;
+}
+
+.voice-pill__bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Fixed, so the pill does not breathe with the voice inside it. */
+  height: 18px;
+  flex: none;
+}
+
+.voice-pill__bars i {
+  display: block;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--fg);
+  /* Grows from the middle, which is what makes a row of bars read as a
+     waveform rather than as a bar chart. */
+  align-self: center;
+  /* Matched to the scroll interval: any slower and the trace smears, any
+     faster and it steps. */
+  transition: height 70ms linear;
+}
+
+/* Nothing to meter once the audio is gone, so the bars stop tracing a voice
+   and start marking time instead — same shape, so the pill does not jump.
+   Kept shallower than a real signal reaches, so a glance tells the two apart
+   without reading the colour. */
+.voice-pill__bars.is-working i {
+  height: 26% !important;
+  background: var(--accent);
+  animation: voice-wave 1s ease-in-out infinite;
+}
+
+.voice-pill__bars.is-working i:nth-child(1) { animation-delay: 0ms; }
+.voice-pill__bars.is-working i:nth-child(2) { animation-delay: 70ms; }
+.voice-pill__bars.is-working i:nth-child(3) { animation-delay: 140ms; }
+.voice-pill__bars.is-working i:nth-child(4) { animation-delay: 210ms; }
+.voice-pill__bars.is-working i:nth-child(5) { animation-delay: 280ms; }
+.voice-pill__bars.is-working i:nth-child(6) { animation-delay: 350ms; }
+.voice-pill__bars.is-working i:nth-child(7) { animation-delay: 420ms; }
+.voice-pill__bars.is-working i:nth-child(8) { animation-delay: 490ms; }
+.voice-pill__bars.is-working i:nth-child(9) { animation-delay: 560ms; }
+
+@keyframes voice-wave {
+  50% {
+    transform: scaleY(2.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-pill__bars.is-working i {
+    animation: none;
+  }
+  .voice-pill__bars i {
+    transition: none;
+  }
+}
+
+/* The local model block in the settings ---------------------------------- */
+
+.vm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.vm__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vm__name {
+  font-size: 13px;
+}
+
+.vm__state {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+.vm__state.is-ready {
+  color: var(--success);
+}
+
+.vm__meta {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-subtle);
+  /* Twenty-five language codes wrap; without this they push the card wide. */
+  overflow-wrap: anywhere;
+}
+
+.vm__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vm__note {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.vm__note--error {
+  color: var(--danger);
+}
+
+.vm__bar {
+  height: 4px;
+  background: var(--surface-active);
+  overflow: hidden;
+}
+
+.vm__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms linear;
+}

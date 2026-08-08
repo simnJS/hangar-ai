@@ -1,5 +1,45 @@
 export type AgentId = "shell" | "claude" | "codex" | "gemini" | "opencode";
 
+/** Where a dictation is transcribed. Mirrored in Rust as `EngineKind`. */
+export type VoiceEngine = "local" | "groq";
+
+/** The catalogue id the Rust side downloads and loads for local dictation. */
+export const DEFAULT_VOICE_MODEL = "parakeet-tdt-0.6b-v3";
+
+/**
+ * Groq's transcription models, cheapest first.
+ *
+ * Turbo is the default for the same reason it is elsewhere: at $0.04 an hour
+ * against $0.111 it is the one that makes the cloud fallback cost nothing worth
+ * noticing, and dictation is too short for the accuracy gap to show.
+ */
+export const CLOUD_MODELS = [
+  { id: "whisper-large-v3-turbo", label: "Whisper large-v3 turbo", price: "$0.04/h" },
+  { id: "whisper-large-v3", label: "Whisper large-v3", price: "$0.111/h" },
+];
+
+/** Mirrors `cleanup::DEFAULT_MODEL`, and only ever shown as a placeholder. */
+export const DEFAULT_CLEANUP_MODEL = "llama-3.1-8b-instant";
+
+/**
+ * Offered in the language picker. Not the full list either engine handles —
+ * Parakeet has 25 and Whisper 99 — just the ones worth a click, with the field
+ * left free-form underneath for anything else.
+ */
+export const VOICE_LANGUAGES = [
+  "en",
+  "fr",
+  "de",
+  "es",
+  "it",
+  "pt",
+  "nl",
+  "pl",
+  "ru",
+  "uk",
+  "sv",
+];
+
 /** Starting points offered in the UI; a workspace can hold any pane count. */
 export type LayoutSize = 1 | 2 | 4 | 8;
 
@@ -98,6 +138,33 @@ export interface Settings {
    */
   keybindings: Record<string, string[]>;
   /**
+   * Dictation. Off until asked for: it wants a microphone, and either a model
+   * downloaded or a key pasted, so turning it on is a decision rather than a
+   * default someone stumbles into.
+   */
+  voiceEnabled: boolean;
+  /** `local` runs on this machine, `groq` sends the audio to Groq. */
+  voiceEngine: VoiceEngine;
+  /** Downloaded checkpoint, by catalogue id. */
+  voiceModel: string;
+  /** Model name on Groq. Kept apart from `voiceModel` so switching engines
+      back and forth does not lose either choice. */
+  voiceCloudModel: string;
+  /** ISO code, or empty to let the model work it out. */
+  voiceLanguage: string;
+  /** Also used by the cleanup pass, which talks to the same API. */
+  voiceApiKey: string;
+  /** Rewrite the transcript with a small model before it lands. */
+  voiceCleanup: boolean;
+  voiceCleanupModel: string;
+  /** Project words the cleanup pass should spell the way you do. */
+  voiceCleanupHint: string;
+  /**
+   * Press Enter for you once the text is in. Off by default — reading back
+   * what a microphone heard before an agent acts on it is worth the keystroke.
+   */
+  voiceSubmit: boolean;
+  /**
    * Publish what you are working on to Discord. Off by default: this is the
    * one setting that sends anything out of the machine.
    */
@@ -160,6 +227,16 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyIdleMs: 3000,
   notifyOnlyWhenAway: true,
   keybindings: {},
+  voiceEnabled: false,
+  voiceEngine: "local",
+  voiceModel: DEFAULT_VOICE_MODEL,
+  voiceCloudModel: CLOUD_MODELS[0].id,
+  voiceLanguage: "",
+  voiceApiKey: "",
+  voiceCleanup: false,
+  voiceCleanupModel: "",
+  voiceCleanupHint: "",
+  voiceSubmit: false,
   discordPresence: false,
   discordShowWorkspace: true,
   discordShowAgents: true,

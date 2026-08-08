@@ -89,6 +89,7 @@ jobs:
             librsvg2-dev \
             libxdo-dev \
             libssl-dev \
+            libasound2-dev \
             patchelf
 
       - uses: dtolnay/rust-toolchain@stable
