@@ -216,8 +216,14 @@ jobs:
               *.AppImage)   keys="linux-x86_64 linux-x86_64-appimage" ;;
               *.deb)        keys="linux-x86_64-deb" ;;
               *.rpm)        keys="linux-x86_64-rpm" ;;
-              *.msi)        keys="windows-x86_64 windows-x86_64-msi" ;;
-              *-setup.exe)  keys="windows-x86_64-nsis" ;;
+              # The plain windows key belongs to the NSIS installer, which is
+              # the only one shipped: it installs per-user, so an update can
+              # replace an install without asking for rights the first one
+              # never needed. The msi line is kept for the day that target
+              # comes back, and stays on its own key so it cannot take the
+              # default back by simply existing.
+              *-setup.exe)  keys="windows-x86_64 windows-x86_64-nsis" ;;
+              *.msi)        keys="windows-x86_64-msi" ;;
               *)            echo "::warning::no platform key for $bundle"; continue ;;
             esac
             signature=$(gh api -H "Accept: application/octet-stream" \
