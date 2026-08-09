@@ -17,7 +17,9 @@
 **[Get the latest release](https://github.com/simnJS/hangar-ai/releases/latest)**, under
 **Assets**:
 
-- **Windows** — `.exe` or `.msi`, 64-bit. WebView2 is required and ships with Windows 11.
+- **Windows** — the `.exe`, 64-bit. It installs for you alone and asks for no administrator
+  rights. Being unsigned, SmartScreen shows a warning on first run: **More info** →
+  **Run anyway**. WebView2 is required and ships with Windows 11.
 - **macOS** — `.dmg`, one universal build for Apple Silicon and Intel. Signed and notarised
   with an Apple developer account, so it opens on a double-click like anything else.
 - **Linux** — `.AppImage` to run without installing, or `.deb` / `.rpm` for a package

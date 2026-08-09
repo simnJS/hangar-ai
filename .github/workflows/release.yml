@@ -149,7 +149,9 @@ jobs:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: Hangar.AI ${{ github.event.inputs.tag || github.ref_name }}
           releaseBody: |
-            - **Windows** — `.exe` or `.msi` under **Assets**. Requires WebView2,
+            - **Windows** — the `.exe` under **Assets**. Installs for you alone,
+              with no administrator rights. Unsigned, so SmartScreen warns on
+              first run: **More info** → **Run anyway**. Requires WebView2,
               which ships with Windows 11.
             - **macOS** — the `.dmg`, universal for Apple Silicon and Intel.${{ env.APPLE_CERTIFICATE == '' && ' The build is unsigned, so the first launch is right-click → **Open**.' || '' }}
             - **Linux** — the `.AppImage` runs anywhere; the `.deb` and `.rpm`
