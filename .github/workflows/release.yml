@@ -19,7 +19,57 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # The one place a release is created.
+  #
+  # Letting the three build jobs race for it — first one creates, the others
+  # attach to what they find — works only while they finish far enough apart.
+  # When they do not, two releases appear under the same tag with the assets
+  # split between them, and the publish job below refuses a `latest.json` that
+  # is missing whichever platform landed in the other one. Creating it once,
+  # before anything builds, is what removes the race rather than narrowing it.
+  draft:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Create the draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          NOTES: |
+            - **Windows** — the `.exe` under **Assets**. Installs for you alone,
+              with no administrator rights. Unsigned, so SmartScreen warns on
+              first run: **More info** → **Run anyway**. Requires WebView2,
+              which ships with Windows 11.
+            - **macOS** — the `.dmg`, universal for Apple Silicon and Intel.${{ secrets.APPLE_CERTIFICATE == '' && ' The build is unsigned, so the first launch is right-click → **Open**.' || '' }}
+            - **Linux** — the `.AppImage` runs anywhere; the `.deb` and `.rpm`
+              are there for a package manager. Needs WebKitGTK 4.1, which every
+              current distribution packages.
+        run: |
+          set -euo pipefail
+
+          # A re-run of a failed release finds its own draft from the first
+          # attempt; reusing it keeps whatever assets already uploaded rather
+          # than starting a second release beside the first.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                --jq 'map(select(.tag_name == env.TAG)) | .[0].id // empty')
+
+          if [ -z "$id" ]; then
+            id=$(jq -n --arg tag "$TAG" --arg body "$NOTES" \
+                  '{ tag_name: $tag, name: ("Hangar.AI " + $tag),
+                     body: $body, draft: true, prerelease: false }' \
+                 | gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+                     --input - --jq .id)
+            echo "created release $id for $TAG"
+          else
+            echo "reusing release $id for $TAG"
+          fi
+
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: draft
     strategy:
       # All three at once. They no longer contend for `latest.json` — the
       # publish job below assembles it alone, from the signatures they leave
@@ -138,31 +188,20 @@ jobs:
       # `.sig` next to each updater bundle. Without these secrets the release
       # still succeeds but auto-update will reject the artifacts.
       #
-      # The three platforms publish to the same release: whichever job gets
-      # there first creates it, the rest add their assets to it.
+      # Uploads into the release the `draft` job made. Naming it by id rather
+      # than by tag is what keeps three parallel jobs on one release: with an
+      # id there is nothing left to look up, and nothing to lose a race over.
+      # The release stays a draft until the job below publishes it — a
+      # half-built release under /releases/latest/ is one a visitor downloads
+      # the wrong half of.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: Hangar.AI ${{ github.event.inputs.tag || github.ref_name }}
-          releaseBody: |
-            - **Windows** — the `.exe` under **Assets**. Installs for you alone,
-              with no administrator rights. Unsigned, so SmartScreen warns on
-              first run: **More info** → **Run anyway**. Requires WebView2,
-              which ships with Windows 11.
-            - **macOS** — the `.dmg`, universal for Apple Silicon and Intel.${{ env.APPLE_CERTIFICATE == '' && ' The build is unsigned, so the first launch is right-click → **Open**.' || '' }}
-            - **Linux** — the `.AppImage` runs anywhere; the `.deb` and `.rpm`
-              are there for a package manager. Needs WebKitGTK 4.1, which every
-              current distribution packages.
+          releaseId: ${{ needs.draft.outputs.release_id }}
           args: ${{ matrix.args }}
-          # Held as a draft until every platform has landed, then published by
-          # the job below. A half-built release under /releases/latest/ is one
-          # a visitor downloads the wrong half of.
-          releaseDraft: true
-          prerelease: false
           # `latest.json` is assembled once, by the job below. Left to this
           # action, each platform would build it by reading the copy already on
           # the release and writing the result back — a read-modify-write with
@@ -174,22 +213,23 @@ jobs:
   # Everything the updater relies on is decided here, once, with all three
   # platforms already on the release.
   publish:
-    needs: build
+    needs: [draft, build]
     runs-on: ubuntu-latest
     steps:
       - name: Assemble latest.json and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          # Taken from the job that created it rather than looked up by tag:
+          # a search would have to pick one of whatever is there, which is the
+          # mistake that published nothing when two releases shared a tag.
+          ID: ${{ needs.draft.outputs.release_id }}
         run: |
           set -euo pipefail
 
-          # Resolved from the list rather than with `gh release view`, whose
-          # by-tag endpoint does not return drafts.
-          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-                --jq 'map(select(.tag_name == env.TAG)) | .[0].id // empty')
+          id="$ID"
           if [ -z "$id" ]; then
-            echo "no release found for tag $TAG" >&2
+            echo "no release id from the draft job" >&2
             exit 1
           fi
 
