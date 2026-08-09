@@ -24,6 +24,7 @@ export type ShortcutSection =
   | "workspaces"
   | "view"
   | "terminal"
+  | "voice"
   | "app";
 
 export const SECTIONS: ShortcutSection[] = [
@@ -32,6 +33,10 @@ export const SECTIONS: ShortcutSection[] = [
   "workspaces",
   "view",
   "terminal",
+  // A section for one command, because the alternative was filing dictation
+  // under "Window" next to zoom and full screen, where nobody looking for it
+  // would ever think to look.
+  "voice",
   "app",
 ];
 
@@ -377,7 +382,7 @@ export const COMMANDS: ShortcutCommand[] = [
   },
   {
     id: "voice.dictate",
-    section: "app",
+    section: "voice",
     labelKey: "cmd.voice.dictate",
     // The one Mod+Alt letter neither platform had already taken. Push to talk:
     // held it records, released it transcribes — so whatever this is rebound

@@ -53,6 +53,7 @@ const SECTION_KEYS: Record<ShortcutSection, TranslateKey> = {
   workspaces: "keymap.section.workspaces",
   view: "keymap.section.view",
   terminal: "keymap.section.terminal",
+  voice: "keymap.section.voice",
   app: "keymap.section.app",
 };
 

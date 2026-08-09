@@ -244,6 +244,7 @@ const en = {
   "keymap.section.workspaces": "Workspaces",
   "keymap.section.view": "Views & panels",
   "keymap.section.terminal": "Terminal",
+  "keymap.section.voice": "Voice",
   "keymap.section.app": "Window",
 
   "cmd.pane.split": "Split the focused pane",
@@ -623,6 +624,7 @@ const fr: Record<Key, string> = {
   "keymap.section.workspaces": "Workspaces",
   "keymap.section.view": "Vues & panneaux",
   "keymap.section.terminal": "Terminal",
+  "keymap.section.voice": "Voix",
   "keymap.section.app": "Fenêtre",
 
   "cmd.pane.split": "Diviser le panneau actif",
