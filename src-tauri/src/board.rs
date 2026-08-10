@@ -77,11 +77,26 @@ impl Board {
 
 /// Boards live beside the code they describe, one per workspace directory.
 fn board_path(workspace_cwd: &str) -> PathBuf {
+    Path::new(workspace_cwd).join(".hangar").join("board.json")
+}
+
+/// Where boards lived before the directory was renamed.
+///
+/// Read-only, and never deleted: a board found here is read as-is until the
+/// next write, which lands in `.hangar/` and adopts it. Same care as
+/// `adopt_previous_state()` in store.rs — a rename that moves the file would
+/// strand every board belonging to an older build still on the machine.
+fn legacy_board_path(workspace_cwd: &str) -> PathBuf {
     Path::new(workspace_cwd).join(".iabench").join("board.json")
 }
 
 fn read_board(workspace_cwd: &str) -> Board {
-    let path = board_path(workspace_cwd);
+    let current = board_path(workspace_cwd);
+    let path = if current.is_file() {
+        current
+    } else {
+        legacy_board_path(workspace_cwd)
+    };
     fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -284,4 +299,81 @@ pub fn next_task(board: &Board) -> Option<Task> {
             )
         })
         .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ONE_TASK: &str = r#"{"tasks":[{"id":"a","title":"tache existante","column":"todo","created_at":1,"updated_at":1}]}"#;
+
+    fn temp_workspace(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hangar-board-{tag}-{}", new_id()));
+        fs::create_dir_all(&dir).expect("temp workspace");
+        dir
+    }
+
+    fn seed(path: &Path, body: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn a_board_left_in_the_previous_directory_is_still_read() {
+        let dir = temp_workspace("legacy-read");
+        let cwd = dir.to_string_lossy().into_owned();
+        seed(&legacy_board_path(&cwd), ONE_TASK);
+
+        let board = read_board(&cwd);
+
+        assert_eq!(board.tasks.len(), 1);
+        assert_eq!(board.tasks[0].title, "tache existante");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The adoption: the first write lands in the new directory with the tasks
+    /// that were read from the old one, which stays where it is.
+    #[test]
+    fn writing_adopts_the_previous_board_without_moving_it() {
+        let dir = temp_workspace("legacy-adopt");
+        let cwd = dir.to_string_lossy().into_owned();
+        let legacy = legacy_board_path(&cwd);
+        seed(&legacy, ONE_TASK);
+
+        let board = read_board(&cwd);
+        write_board(&cwd, &board).expect("write");
+
+        let adopted = read_board(&cwd);
+        assert!(board_path(&cwd).is_file());
+        assert_eq!(adopted.tasks.len(), 1);
+        assert_eq!(adopted.tasks[0].title, "tache existante");
+        assert!(legacy.is_file(), "the old board must be left in place");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_current_directory_wins_when_both_exist() {
+        let dir = temp_workspace("both");
+        let cwd = dir.to_string_lossy().into_owned();
+        seed(&legacy_board_path(&cwd), ONE_TASK);
+        seed(
+            &board_path(&cwd),
+            r#"{"tasks":[{"id":"b","title":"tache courante","column":"todo","created_at":2,"updated_at":2}]}"#,
+        );
+
+        let board = read_board(&cwd);
+
+        assert_eq!(board.tasks.len(), 1);
+        assert_eq!(board.tasks[0].title, "tache courante");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_workspace_with_no_board_anywhere_starts_empty() {
+        let dir = temp_workspace("empty");
+        let cwd = dir.to_string_lossy().into_owned();
+
+        assert!(read_board(&cwd).tasks.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -31,9 +31,14 @@ export function McpPanel({ cwd, onClose }: Props) {
     mcpTargets(cwd)
       .then((found) => {
         setTargets(found);
-        // Pre-tick the tools that are installed but not wired up yet.
+        // Pre-tick the tools that are installed but not wired up yet — and the
+        // ones whose entry is broken, since reinstalling is the repair.
         setSelected(
-          new Set(found.filter((t) => t.detected && !t.configured).map((t) => t.id)),
+          new Set(
+            found
+              .filter((t) => t.detected && (!t.configured || t.stale))
+              .map((t) => t.id),
+          ),
         );
       })
       .catch(() => setTargets([]));
@@ -99,7 +104,9 @@ export function McpPanel({ cwd, onClose }: Props) {
             {targets.map((target) => (
               <label
                 key={target.id}
-                className={`target ${target.configured ? "target--done" : ""}`}
+                className={`target ${
+                  target.configured && !target.stale ? "target--done" : ""
+                }`}
               >
                 <input
                   type="checkbox"
@@ -109,7 +116,12 @@ export function McpPanel({ cwd, onClose }: Props) {
                 <span className="target__meta">
                   <span className="target__label">
                     {target.label}
-                    {target.configured && (
+                    {target.stale && (
+                      <em className="target__badge target__badge--alert">
+                        {t("mcp.stale")}
+                      </em>
+                    )}
+                    {target.configured && !target.stale && (
                       <em className="target__badge">{t("mcp.configured")}</em>
                     )}
                     {!target.detected && !target.configured && (
@@ -119,6 +131,13 @@ export function McpPanel({ cwd, onClose }: Props) {
                     )}
                   </span>
                   <span className="target__path">{target.path}</span>
+                  {target.stale && (
+                    <span className="target__path target__path--alert">
+                      {target.command
+                        ? t("mcp.staleHint", { command: target.command })
+                        : t("mcp.staleHintNoCommand")}
+                    </span>
+                  )}
                 </span>
               </label>
             ))}

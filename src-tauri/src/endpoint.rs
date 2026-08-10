@@ -16,31 +16,66 @@ pub struct Endpoint {
 }
 
 pub fn endpoint_path() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".hangar").join("endpoint.json"))
+}
+
+/// Where the endpoint lived before the directory was renamed.
+fn legacy_endpoint_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".iabench").join("endpoint.json"))
 }
 
+/// Both locations, current first.
+///
+/// This file is the handshake between the app and the `--mcp` process, and the
+/// two are separate binaries that get updated at different times: an agent tool
+/// may still be launching a pre-rename executable long after the app itself has
+/// been updated. Writing both locations and reading either keeps every
+/// combination working; once only post-rename binaries are in play, the legacy
+/// path can go.
+fn endpoint_paths() -> Vec<PathBuf> {
+    [endpoint_path(), legacy_endpoint_path()]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 pub fn publish(port: u16, token: &str) -> Result<(), String> {
-    let path = endpoint_path().ok_or("no home directory")?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
     let body = serde_json::to_string_pretty(&Endpoint {
         port,
         token: token.to_string(),
         pid: std::process::id(),
     })
     .map_err(|e| e.to_string())?;
-    fs::write(&path, body).map_err(|e| e.to_string())
+
+    let paths = endpoint_paths();
+    if paths.is_empty() {
+        return Err("no home directory".into());
+    }
+
+    // The current location is the one that has to succeed; failing to refresh
+    // the legacy copy only costs older binaries their connection.
+    let mut result = Ok(());
+    for (nth, path) in paths.iter().enumerate() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let outcome = fs::write(path, &body).map_err(|e| e.to_string());
+        if nth == 0 {
+            result = outcome;
+        }
+    }
+    result
 }
 
 pub fn read() -> Option<Endpoint> {
-    let path = endpoint_path()?;
-    let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    endpoint_paths().into_iter().find_map(|path| {
+        let raw = fs::read_to_string(path).ok()?;
+        serde_json::from_str(&raw).ok()
+    })
 }
 
 pub fn clear() {
-    if let Some(path) = endpoint_path() {
+    for path in endpoint_paths() {
         let _ = fs::remove_file(path);
     }
 }

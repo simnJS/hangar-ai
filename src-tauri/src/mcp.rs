@@ -11,12 +11,21 @@ use serde_json::{json, Value};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// First of `names` that is set and not empty.
+///
+/// The list exists for the rename: configs written before it still export the
+/// `IABENCH_*` variables and still launch this binary, so the old names have to
+/// keep working. Only the new name is ever written.
+fn env_var(names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+}
+
 /// Workspace the caller is acting on: an explicit override, else the working
 /// directory the agent was launched in — which is the workspace root.
 fn workspace_cwd() -> String {
-    std::env::var("IABENCH_WORKSPACE")
-        .ok()
-        .filter(|s| !s.is_empty())
+    env_var(&["HANGAR_WORKSPACE", "IABENCH_WORKSPACE"])
         .or_else(|| {
             std::env::current_dir()
                 .ok()
@@ -26,7 +35,7 @@ fn workspace_cwd() -> String {
 }
 
 fn agent_name() -> String {
-    std::env::var("IABENCH_AGENT").unwrap_or_else(|_| "agent".to_string())
+    env_var(&["HANGAR_AGENT", "IABENCH_AGENT"]).unwrap_or_else(|| "agent".to_string())
 }
 
 struct Api {

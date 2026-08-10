@@ -1847,6 +1847,11 @@ body.is-dragging-pane .pane__bar {
   color: var(--fg-subtle);
 }
 
+.target__badge--alert {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
 .target__path {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 10.5px;
@@ -1854,6 +1859,14 @@ body.is-dragging-pane .pane__bar {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The dead path is the point of the message, so it wraps instead of being
+   truncated like the config path above it. */
+.target__path--alert {
+  color: var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .reports {

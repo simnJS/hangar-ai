@@ -73,6 +73,10 @@ export interface McpTarget {
   path: string;
   detected: boolean;
   configured: boolean;
+  /** Registered, but under an old key or pointing at a missing executable. */
+  stale: boolean;
+  /** The executable the config names today, shown when it is the broken part. */
+  command: string | null;
   project_scoped: boolean;
 }
 

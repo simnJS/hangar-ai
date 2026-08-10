@@ -6,12 +6,20 @@
 //! patch its file in place, preserving whatever the user already had.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-const SERVER_KEY: &str = "iabench";
+const SERVER_KEY: &str = "hangar";
+
+/// Names this server has been registered under before, newest first.
+///
+/// They are still sitting in configs installed on users' machines, and every one
+/// of them points at a binary path from that era. Leaving them in place would
+/// declare a second server that fails to start on every agent launch, so an
+/// install removes them rather than adding beside them.
+const LEGACY_SERVER_KEYS: &[&str] = &["iabench"];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Format {
@@ -21,6 +29,14 @@ enum Format {
     JsonServers,
     /// `[mcp_servers.name]` — Codex.
     TomlCodex,
+}
+
+/// Top-level key holding the servers, for the two JSON shapes.
+fn json_section(format: Format) -> &'static str {
+    match format {
+        Format::JsonServers => "servers",
+        _ => "mcpServers",
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +96,15 @@ pub struct TargetStatus {
     pub detected: bool,
     /// Our server is already registered in its config.
     pub configured: bool,
+    /// Registered, but pointing at an executable that is no longer there.
+    ///
+    /// A config that names a missing binary looks identical to a working one
+    /// until an agent tries to start the server and silently gets nothing, so
+    /// the distinction has to reach the UI.
+    pub stale: bool,
+    /// The executable the config currently names, when there is one. Shown next
+    /// to a stale entry so the user can see what it is still pointing at.
+    pub command: Option<String>,
     pub project_scoped: bool,
 }
 
@@ -137,7 +162,7 @@ fn server_entry(workspace_cwd: &str) -> Result<Value, String> {
     Ok(json!({
         "command": executable()?,
         "args": ["--mcp"],
-        "env": { "IABENCH_WORKSPACE": workspace_cwd }
+        "env": { "HANGAR_WORKSPACE": workspace_cwd }
     }))
 }
 
@@ -153,7 +178,7 @@ fn read_json(path: &PathBuf) -> Map<String, Value> {
 fn backup(path: &PathBuf) {
     if path.exists() {
         let backup = path.with_extension(format!(
-            "{}.iabench-bak",
+            "{}.hangar-bak",
             path.extension().and_then(|e| e.to_str()).unwrap_or("")
         ));
         if !backup.exists() {
@@ -176,6 +201,9 @@ fn install_json(path: &PathBuf, key: &str, workspace_cwd: &str) -> Result<(), St
     let Some(servers) = servers.as_object_mut() else {
         return Err(format!("'{key}' exists but is not an object"));
     };
+    for legacy in LEGACY_SERVER_KEYS {
+        servers.remove(*legacy);
+    }
     servers.insert(SERVER_KEY.to_string(), server_entry(workspace_cwd)?);
 
     let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
@@ -204,7 +232,13 @@ fn allow_project_server_globally() -> Result<(), String> {
     let Some(list) = list.as_array_mut() else {
         return Err("'enabledMcpjsonServers' exists but is not an array".into());
     };
-    // Preserve any server the user already approved.
+    // The approval is by server name, so an entry under the old name approves a
+    // server that no longer exists. Drop it, keeping everything else the user
+    // has already approved.
+    list.retain(|v| {
+        !v.as_str()
+            .is_some_and(|name| LEGACY_SERVER_KEYS.contains(&name))
+    });
     if !list.iter().any(|v| v.as_str() == Some(SERVER_KEY)) {
         list.push(Value::String(SERVER_KEY.to_string()));
     }
@@ -230,7 +264,7 @@ fn install_toml(path: &PathBuf, workspace_cwd: &str) -> Result<(), String> {
     args.push("--mcp");
 
     let mut env = Table::new();
-    env.insert("IABENCH_WORKSPACE", value(workspace_cwd));
+    env.insert("HANGAR_WORKSPACE", value(workspace_cwd));
 
     let mut server = Table::new();
     server.insert("command", value(executable()?));
@@ -246,30 +280,84 @@ fn install_toml(path: &PathBuf, workspace_cwd: &str) -> Result<(), String> {
     let servers = doc["mcp_servers"]
         .as_table_mut()
         .ok_or("'mcp_servers' exists but is not a table")?;
+    for legacy in LEGACY_SERVER_KEYS {
+        servers.remove(legacy);
+    }
     servers.insert(SERVER_KEY, Item::Table(server));
 
     fs::write(path, doc.to_string()).map_err(|e| e.to_string())
 }
 
-fn is_configured(target: &Target, path: &PathBuf) -> bool {
+/// The entry we own in a target's config.
+struct Registration {
+    /// Sits under an old server key, so it predates the rename.
+    legacy: bool,
+    /// The executable the entry names, when it declares one.
+    command: Option<String>,
+}
+
+impl Registration {
+    /// An entry nothing can start: the wrong key, no command, or a command that
+    /// is not on disk any more. All three look "configured" in a config file,
+    /// which is exactly how a dead registration goes unnoticed.
+    fn stale(&self) -> bool {
+        self.legacy
+            || match &self.command {
+                Some(command) => !Path::new(command).is_file(),
+                None => true,
+            }
+    }
+}
+
+fn registration(target: &Target, path: &PathBuf) -> Option<Registration> {
     match target.format {
-        Format::JsonMcpServers => read_json(path)
-            .get("mcpServers")
-            .and_then(|v| v.get(SERVER_KEY))
-            .is_some(),
-        Format::JsonServers => read_json(path)
-            .get("servers")
-            .and_then(|v| v.get(SERVER_KEY))
-            .is_some(),
-        Format::TomlCodex => fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| raw.parse::<toml_edit::DocumentMut>().ok())
-            .map(|doc| {
-                doc.get("mcp_servers")
-                    .and_then(|s| s.get(SERVER_KEY))
-                    .is_some()
+        Format::JsonMcpServers | Format::JsonServers => {
+            let command_of = |entry: &Value| {
+                entry
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            };
+            let root = read_json(path);
+            let servers = root.get(json_section(target.format))?;
+            if let Some(entry) = servers.get(SERVER_KEY) {
+                return Some(Registration {
+                    legacy: false,
+                    command: command_of(entry),
+                });
+            }
+            LEGACY_SERVER_KEYS.iter().find_map(|key| {
+                servers.get(*key).map(|entry| Registration {
+                    legacy: true,
+                    command: command_of(entry),
+                })
             })
-            .unwrap_or(false),
+        }
+        Format::TomlCodex => {
+            let command_of = |entry: &toml_edit::Item| {
+                entry
+                    .get("command")
+                    .and_then(|c| c.as_str())
+                    .map(str::to_string)
+            };
+            let doc = fs::read_to_string(path)
+                .ok()?
+                .parse::<toml_edit::DocumentMut>()
+                .ok()?;
+            let servers = doc.get("mcp_servers")?;
+            if let Some(entry) = servers.get(SERVER_KEY) {
+                return Some(Registration {
+                    legacy: false,
+                    command: command_of(entry),
+                });
+            }
+            LEGACY_SERVER_KEYS.iter().find_map(|key| {
+                servers.get(*key).map(|entry| Registration {
+                    legacy: true,
+                    command: command_of(entry),
+                })
+            })
+        }
     }
 }
 
@@ -279,10 +367,13 @@ pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
         .iter()
         .filter_map(|target| {
             let path = config_path(target, &workspace_cwd)?;
+            let found = registration(target, &path);
             Some(TargetStatus {
                 id: target.id.to_string(),
                 label: target.label.to_string(),
-                configured: is_configured(target, &path),
+                configured: found.is_some(),
+                stale: found.as_ref().is_some_and(Registration::stale),
+                command: found.and_then(|found| found.command),
                 path: path.to_string_lossy().into_owned(),
                 detected: detected(target),
                 project_scoped: target.project_scoped,
@@ -310,9 +401,8 @@ pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport
             };
 
             let mut outcome = match target.format {
-                Format::JsonMcpServers => install_json(&path, "mcpServers", &workspace_cwd),
-                Format::JsonServers => install_json(&path, "servers", &workspace_cwd),
                 Format::TomlCodex => install_toml(&path, &workspace_cwd),
+                format => install_json(&path, json_section(format), &workspace_cwd),
             };
 
             // Writing .mcp.json alone leaves the user re-approving every session.
@@ -336,6 +426,108 @@ pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const JSON_TARGET: Target = Target {
+        id: "test",
+        label: "test",
+        format: Format::JsonMcpServers,
+        project_scoped: true,
+        relative_path: "mcp.json",
+    };
+
+    fn temp_config(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hangar-install-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir.join("mcp.json")
+    }
+
+    fn write_server(path: &PathBuf, key: &str, command: &str) {
+        let body = json!({ "mcpServers": { key: { "command": command, "args": ["--mcp"] } } });
+        fs::write(path, body.to_string()).unwrap();
+    }
+
+    /// Leaving the old entry behind would declare a second server pointing at a
+    /// binary from before the rename, which fails on every agent launch.
+    #[test]
+    fn installing_drops_the_entry_from_the_previous_server_name() {
+        let path = temp_config("purge");
+        let body = json!({
+            "mcpServers": {
+                "iabench": { "command": "C:/gone/hangar-ia.exe", "args": ["--mcp"] },
+                "unrelated": { "command": "C:/other.exe" }
+            }
+        });
+        fs::write(&path, body.to_string()).unwrap();
+
+        install_json(&path, "mcpServers", "C:/ws").expect("install");
+
+        let root = read_json(&path);
+        let servers = root.get("mcpServers").unwrap();
+        assert!(servers.get("iabench").is_none());
+        assert!(servers.get(SERVER_KEY).is_some());
+        assert!(
+            servers.get("unrelated").is_some(),
+            "other servers must survive"
+        );
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn an_entry_under_the_previous_name_reads_as_stale() {
+        let path = temp_config("legacy-key");
+        let exe = std::env::current_exe().unwrap();
+        write_server(&path, "iabench", &exe.to_string_lossy());
+
+        let found = registration(&JSON_TARGET, &path).expect("registration");
+
+        assert!(found.legacy);
+        assert!(found.stale(), "the old key needs reinstalling either way");
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// The failure this whole change exists for: the key is there, so the UI
+    /// said "configured", while the binary it named had been renamed away.
+    #[test]
+    fn an_entry_naming_a_missing_executable_is_stale() {
+        let path = temp_config("dead-path");
+        write_server(&path, SERVER_KEY, "C:/nowhere/hangar-ia.exe");
+
+        let found = registration(&JSON_TARGET, &path).expect("registration");
+
+        assert!(!found.legacy);
+        assert!(found.stale());
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn an_entry_naming_a_real_executable_is_healthy() {
+        let path = temp_config("live-path");
+        let exe = std::env::current_exe().unwrap();
+        write_server(&path, SERVER_KEY, &exe.to_string_lossy());
+
+        let found = registration(&JSON_TARGET, &path).expect("registration");
+
+        assert!(!found.stale());
+        assert_eq!(found.command.as_deref(), Some(&*exe.to_string_lossy()));
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_config_that_never_had_us_reports_nothing() {
+        let path = temp_config("absent");
+        fs::write(&path, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
+
+        assert!(registration(&JSON_TARGET, &path).is_none());
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
 }
 
 /// Shown in the UI so the user can register the server by hand if they prefer.

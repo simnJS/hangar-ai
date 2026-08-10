@@ -8,12 +8,17 @@ src-tauri/target/
 src-tauri/gen/schemas/
 
 # Local task board, and generated agent configs holding absolute paths
+.hangar/
 .iabench/
 .mcp.json
 .cursor/mcp.json
 .vscode/mcp.json
 AGENTS.md
 CLAUDE.md
+
+# One-shot copies the MCP installer leaves beside a config it rewrites
+*.hangar-bak
+*.iabench-bak
 
 # Machine-specific editor and tool settings
 .claude/settings.local.json
@@ -40,3 +45,4 @@ lerna-debug.log*
 Thumbs.db
 
 *.local
+.vercel

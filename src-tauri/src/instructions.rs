@@ -1,6 +1,6 @@
 //! Writes the agent playbook into the files agents actually read on startup.
 //!
-//! A doc parked in `.iabench/` would be loaded by nobody. `AGENTS.md` is the
+//! A doc parked in `.hangar/` would be loaded by nobody. `AGENTS.md` is the
 //! cross-tool convention (Codex, Cursor, recent Claude Code) and `CLAUDE.md`
 //! is always read by Claude Code, so the block goes in both.
 
@@ -9,8 +9,18 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-const START: &str = "<!-- IABENCH:START - generated, do not edit by hand -->";
-const END: &str = "<!-- IABENCH:END -->";
+const START: &str = "<!-- HANGAR:START - generated, do not edit by hand -->";
+const END: &str = "<!-- HANGAR:END -->";
+
+/// Marker pairs written by earlier versions, newest first.
+///
+/// These are already sitting in users' `AGENTS.md` and `CLAUDE.md`. A rename
+/// that only knew the new markers would not match the old block, so instead of
+/// replacing the playbook it would append a second copy on every run.
+const LEGACY_MARKERS: &[(&str, &str)] = &[(
+    "<!-- IABENCH:START - generated, do not edit by hand -->",
+    "<!-- IABENCH:END -->",
+)];
 
 const TARGET_FILES: [&str; 2] = ["AGENTS.md", "CLAUDE.md"];
 
@@ -84,13 +94,16 @@ rather than editing the same files at the same time.
 /// Replaces our block if present, otherwise appends it, leaving the rest of the
 /// file untouched.
 fn upsert_block(existing: &str, block: &str) -> String {
-    if let (Some(start), Some(end)) = (existing.find(START), existing.find(END)) {
-        if start < end {
-            let mut out = String::with_capacity(existing.len());
-            out.push_str(&existing[..start]);
-            out.push_str(block);
-            out.push_str(&existing[end + END.len()..]);
-            return out;
+    let known = std::iter::once((START, END)).chain(LEGACY_MARKERS.iter().copied());
+    for (start_marker, end_marker) in known {
+        if let (Some(start), Some(end)) = (existing.find(start_marker), existing.find(end_marker)) {
+            if start < end {
+                let mut out = String::with_capacity(existing.len());
+                out.push_str(&existing[..start]);
+                out.push_str(block);
+                out.push_str(&existing[end + end_marker.len()..]);
+                return out;
+            }
         }
     }
 
@@ -129,9 +142,13 @@ fn update_gitignore(root: &Path) -> InstructionReport {
     let path = root.join(".gitignore");
     let existing = fs::read_to_string(&path).unwrap_or_default();
 
+    // Deliberately only looks for the current directory: a repository that
+    // already ignores `.iabench/` still needs a rule for `.hangar/`, or the
+    // board lands in the next commit. The two coexist until the old board is
+    // gone, and both deserve a line.
     let already = existing.lines().any(|line| {
         let trimmed = line.trim().trim_end_matches('/');
-        trimmed == ".iabench" || trimmed == "/.iabench"
+        trimmed == ".hangar" || trimmed == "/.hangar"
     });
 
     if already {
@@ -149,7 +166,7 @@ fn update_gitignore(root: &Path) -> InstructionReport {
     if !updated.is_empty() {
         updated.push('\n');
     }
-    updated.push_str("# Hangar.AI — tableau de tâches local\n.iabench/\n");
+    updated.push_str("# Hangar.AI — tableau de tâches local\n.hangar/\n");
 
     match fs::write(&path, updated) {
         Ok(()) => InstructionReport {
@@ -191,7 +208,54 @@ pub fn agent_instructions_status(workspace_cwd: String) -> bool {
     let root = PathBuf::from(workspace_cwd);
     TARGET_FILES.iter().any(|file| {
         fs::read_to_string(root.join(file))
-            .map(|content| content.contains(START))
+            .map(|content| {
+                content.contains(START)
+                    || LEGACY_MARKERS
+                        .iter()
+                        .any(|(start, _)| content.contains(start))
+            })
             .unwrap_or(false)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The reason `upsert_block` knows the old markers at all: without this the
+    /// generated section is appended a second time instead of replaced, and it
+    /// grows by one copy on every install.
+    #[test]
+    fn a_block_under_the_previous_markers_is_replaced_not_duplicated() {
+        let (legacy_start, legacy_end) = LEGACY_MARKERS[0];
+        let existing =
+            format!("# Projet\n\n{legacy_start}\nancien contenu\n{legacy_end}\n\n## Suite\n");
+
+        let updated = upsert_block(&existing, &playbook());
+
+        assert_eq!(updated.matches(START).count(), 1);
+        assert!(!updated.contains(legacy_start));
+        assert!(!updated.contains("ancien contenu"));
+        assert!(updated.contains("# Projet"));
+        assert!(updated.contains("## Suite"));
+    }
+
+    #[test]
+    fn a_block_under_the_current_markers_is_replaced_in_place() {
+        let existing = format!("avant\n\n{START}\nx\n{END}\n\napres\n");
+
+        let updated = upsert_block(&existing, &playbook());
+
+        assert_eq!(updated.matches(START).count(), 1);
+        assert!(updated.starts_with("avant"));
+        assert!(updated.trim_end().ends_with("apres"));
+    }
+
+    #[test]
+    fn a_file_with_no_marker_keeps_what_it_had() {
+        let updated = upsert_block("# Mon projet\n", &playbook());
+
+        assert!(updated.contains("# Mon projet"));
+        assert_eq!(updated.matches(START).count(), 1);
+    }
 }
