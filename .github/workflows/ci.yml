@@ -44,6 +44,14 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
+      # The same command Vercel runs, so a site that will not build is a red
+      # check on the commit rather than a failed production deployment nobody
+      # is told about. It is what caught nothing on the day five of them went
+      # out in a row: the file the build needed had never been committed, and
+      # only Vercel was in a position to notice.
+      - name: Build the site
+        run: pnpm demo:build
+
   # Every target we ship, because most of what is platform-specific here is
   # compiled out on the others: shell discovery, the PATH repair, the pane
   # arguments. A Windows-only job would let a macOS or Linux build break
