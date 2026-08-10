@@ -305,14 +305,11 @@ pub fn trim(samples: &[f32], threshold: f32, margin_ms: usize) -> &[f32] {
 
     let loud = |chunk: &[f32]| rms(chunk) > threshold;
 
-    let first = samples.chunks(window).position(|c| loud(c));
+    let first = samples.chunks(window).position(loud);
     let Some(first) = first else {
         return &[];
     };
-    let last = samples
-        .chunks(window)
-        .rposition(|c| loud(c))
-        .unwrap_or(first);
+    let last = samples.chunks(window).rposition(loud).unwrap_or(first);
 
     let start = (first * window).saturating_sub(margin);
     let end = ((last + 1) * window + margin).min(samples.len());
