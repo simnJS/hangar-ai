@@ -299,10 +299,47 @@ FunctionEnd
   Pop $0
 !macroend
 
+; Same control, same geometry, made through nsDialogs instead of straight
+; CreateWindowEx.
+;
+; ${NSD_OnClick} does not hook a window: it hands the handle to the plugin,
+; which looks it up in the table of controls it created and attaches the
+; callback there. A handle the plugin never made is not in that table, the
+; lookup fails, and the callback is dropped — silently, at run time. The
+; control still draws and still highlights under the cursor; it just does
+; nothing when pressed.
+;
+; So anything that has to be clickable is created here. Only valid on a page
+; that called nsDialogs::Create — the plugin adds to the dialog it owns, which
+; the stock install page is not.
+!macro IB_MakeCtlNSD out x y w h text style
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+
+  StrCpy $0 ${x}
+  StrCpy $1 ${y}
+  StrCpy $2 ${w}
+  StrCpy $3 ${h}
+  !insertmacro IB_Scale $0
+  !insertmacro IB_Scale $1
+  !insertmacro IB_Scale $2
+  !insertmacro IB_Scale $3
+
+  nsDialogs::CreateControl STATIC ${style} 0 $0 $1 $2 $3 "${text}"
+  Pop ${out}
+
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
 ; A flat accent button. Real Win32 buttons are painted by the visual style and
 ; ignore colours entirely, so this is a static that behaves like one.
 !macro IB_Button out x y w h text
-  !insertmacro IB_MakeCtl ${out} ${x} ${y} ${w} ${h} "${text}" \
+  !insertmacro IB_MakeCtlNSD ${out} ${x} ${y} ${w} ${h} "${text}" \
     "${WS_CHILD}|${WS_VISIBLE}|${SS_NOTIFY}|${SS_CENTER}|${SS_CENTERIMAGE}"
   SendMessage ${out} ${WM_SETFONT} $IB_FontButton 1
   SetCtlColors ${out} "${IB_ON_ACCENT}" "${IB_ACCENT}"
@@ -375,7 +412,7 @@ FunctionEnd
 
 ; Without a caption there is no close button, so every page draws its own.
 !macro IB_CloseButton onclick
-  !insertmacro IB_MakeCtl $IB_Close 476 12 32 32 "×" \
+  !insertmacro IB_MakeCtlNSD $IB_Close 476 12 32 32 "×" \
     "${WS_CHILD}|${WS_VISIBLE}|${SS_NOTIFY}|${SS_CENTER}|${SS_CENTERIMAGE}"
   SendMessage $IB_Close ${WM_SETFONT} $IB_FontClose 1
   SetCtlColors $IB_Close "${IB_TEXT_DIM}" ${IB_CLEAR}
