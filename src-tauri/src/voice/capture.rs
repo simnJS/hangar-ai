@@ -97,7 +97,13 @@ impl Recorder {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        std::mem::take(&mut *self.shared.samples.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(
+            &mut *self
+                .shared
+                .samples
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
     }
 }
 
