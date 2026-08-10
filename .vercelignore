@@ -1,0 +1,9 @@
+# The site build needs src/, demo/, scripts/, assets/ and the manifests.
+# Nothing else travels: the Rust side is a desktop app and has no business on
+# a CDN. assets/ stays because src/components/settings/DiscordCard.tsx imports
+# assets/logo.png, so dropping it fails the build.
+src-tauri
+dist
+node_modules
+.hangar
+.iabench

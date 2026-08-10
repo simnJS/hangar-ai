@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en" data-theme="tokyo-night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hangar.AI: run Claude Code, Codex and friends side by side</title>
+<meta name="description" content="One window, up to eight real terminals, and a task board your agents read and write themselves. Windows, macOS and Linux. MIT.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#16161e">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<meta property="og:title" content="Hangar.AI">
+<meta property="og:description" content="Run Claude Code, Codex and friends side by side, in one window.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="styles.css">
+<script>document.documentElement.classList.add('js');</script>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar" id="topbar">
+  <div class="topbar__in">
+    <a class="brand" href="#top" aria-label="Hangar.AI, back to top">
+      <svg class="brand__mark" width="21" height="21" viewBox="0 0 1024 1024" aria-hidden="true">
+        <rect x="200" y="200" width="260" height="624" fill="var(--acc)"></rect>
+        <rect x="538" y="200" width="286" height="260" fill="var(--ink)"></rect>
+        <rect x="538" y="538" width="286" height="286" fill="var(--ink)"></rect>
+      </svg>
+      <span class="brand__name">Hangar<span class="brand__dot">.</span>AI</span>
+    </a>
+
+    <nav class="topnav" id="topnav" aria-label="Sections">
+      <a href="#demo">Demo</a>
+      <a href="#features">Features</a>
+      <a href="#board">Board</a>
+      <a href="#themes">Themes</a>
+      <a href="#keys">Keys</a>
+    </nav>
+
+    <div class="topbar__right">
+      <a class="ghostlink" href="https://github.com/simnJS/hangar-ai">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"></path>
+        </svg>
+        GitHub
+      </a>
+      <a class="btn btn--sm" href="https://github.com/simnJS/hangar-ai/releases/latest">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ══════════════════════ HERO ══════════════════════ -->
+<section class="hero" id="top">
+  <div class="hero__glow" aria-hidden="true"></div>
+
+  <div class="shell hero__in">
+    <a class="badge" href="https://github.com/simnJS/hangar-ai/releases/latest">
+      <span class="badge__ver">0.6.1</span>
+      <span class="badge__what">Dictation, and a shared task board</span>
+      <span class="badge__go" aria-hidden="true">→</span>
+    </a>
+
+    <h1 class="hero__title">
+      Every coding agent,<br><span class="hero__accent">side by side.</span>
+    </h1>
+
+    <p class="hero__sub">
+      Claude Code, Codex, Gemini and whatever you install next, in real terminals, tiled
+      1, 2, 4 or 8 at a time. Reopen the window and every pane comes back on the
+      conversation it was in.
+    </p>
+
+    <div class="hero__cta">
+      <a class="btn btn--lg" href="https://github.com/simnJS/hangar-ai/releases/latest" id="mainget">
+        Download for Windows
+      </a>
+      <a class="btn btn--lg btn--ghost" href="#demo">Try it right here</a>
+    </div>
+
+    <p class="hero__fine">
+      <span>MIT</span><i></i><span>No account</span><i></i><span>Updates itself</span>
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════════ THE APP ══════════════════════ -->
+<section class="demo" id="demo">
+  <div class="wide">
+    <div class="stage reveal">
+      <div class="stage__bar">
+        <span class="stage__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="stage__name">Hangar.AI</span>
+        <span class="tag tag--live">Live</span>
+        <a class="stage__out" href="demo/index.html" target="_blank" rel="noopener">
+          Open in a tab <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+
+      <div class="stage__body">
+        <div class="stage__boot" id="stageboot" role="status">
+          <span class="spin" aria-hidden="true"></span>
+          <b>Starting the app…</b>
+          <a class="stage__bootlink" href="demo/index.html" target="_blank" rel="noopener">
+            Taking a while. Open it in a tab ↗
+          </a>
+        </div>
+
+        <iframe
+          class="stage__frame"
+          id="demoframe"
+          src="demo/index.html"
+          title="Hangar.AI running in the browser"
+        ></iframe>
+      </div>
+
+      <p class="stage__narrow">
+        Eight terminals need a wider screen.
+        <a href="demo/index.html">Open the demo in a tab</a>.
+      </p>
+    </div>
+
+    <div class="prompts reveal">
+      <span class="prompts__label">Send a prompt to the Claude Code pane</span>
+      <div class="prompts__row" id="prompts">
+        <button type="button" class="chip" data-send="take the next task on the board">take the next task on the board</button>
+        <button type="button" class="chip" data-send="write the tests for atomic claims">write the tests</button>
+        <button type="button" class="chip" data-send="check the fr table against en">check the fr translations</button>
+        <button type="button" class="chip" data-send="what can you do here?">what can you do?</button>
+      </div>
+      <p class="prompts__note">
+        Or click a pane and type. The bottom-right one is a plain shell; try <code>help</code>.
+        Replies are canned. No model runs here.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ FEATURES ══════════════════════ -->
+<section class="feats" id="features">
+  <div class="shell">
+    <header class="sec-head reveal">
+      <h2 class="sec-title">What it does</h2>
+    </header>
+
+    <div class="bento">
+      <article class="bx bx--panes reveal">
+        <div class="bx__art" aria-hidden="true">
+          <div class="mini">
+            <span class="mini__p mini__p--a"></span>
+            <span class="mini__p mini__p--b"></span>
+            <span class="mini__p mini__p--c"></span>
+            <span class="mini__p mini__p--d"></span>
+          </div>
+        </div>
+        <div class="bx__txt">
+          <h3>Tiling panes</h3>
+          <p>
+            1, 2, 4 or 8 real terminals. Every split owns its ratio, so dragging one boundary
+            leaves the rest alone. Double-click one to reset it to 50/50.
+          </p>
+          <p class="bx__meta">
+            PowerShell · cmd · Git Bash · WSL · MSYS2 · Nushell · zsh · bash · fish · pwsh
+          </p>
+        </div>
+      </article>
+
+      <article class="bx bx--board reveal">
+        <div class="bx__art" aria-hidden="true">
+          <div class="minicards">
+            <span class="mc"><i style="--k:var(--faint)"></i>free</span>
+            <span class="mc mc--on"><i style="--k:var(--acc)"></i>claude</span>
+            <span class="mc"><i style="--k:var(--green)"></i>codex</span>
+          </div>
+        </div>
+        <div class="bx__txt">
+          <h3>The shared board</h3>
+          <p>
+            Agents read it, claim from it and close it over MCP. Claims are atomic: two agents
+            racing for one task cannot both win it.
+          </p>
+        </div>
+      </article>
+
+      <article class="bx reveal">
+        <h3>Workspaces</h3>
+        <p>A project directory plus its pane layout, saved. Reopen one and every pane comes back with its agent.</p>
+      </article>
+
+      <article class="bx reveal">
+        <h3>Session resume</h3>
+        <p>Agents relaunch on the conversation they were in. No session ids to keep track of.</p>
+      </article>
+
+      <article class="bx reveal">
+        <h3>Broadcast</h3>
+        <p>One instruction, sent to every pane at once.</p>
+      </article>
+
+      <article class="bx bx--themes reveal">
+        <div class="bx__txt">
+          <h3>32 themes</h3>
+          <p>
+            Ported from VS Code. They restyle the whole window, not just the sixteen terminal
+            colours. Font, size, line height, cursor and padding adjust live.
+          </p>
+        </div>
+        <div class="bx__art" aria-hidden="true">
+          <div class="tstrip">
+            <i style="background:#1a1b26"></i><i style="background:#1e1e2e"></i>
+            <i style="background:#282a36"></i><i style="background:#282c34"></i>
+            <i style="background:#2e3440"></i><i style="background:#282828"></i>
+            <i style="background:#1f1f28"></i><i style="background:#ffffff"></i>
+          </div>
+        </div>
+      </article>
+
+      <article class="bx bx--voice reveal">
+        <div class="bx__txt">
+          <h3>Dictation</h3>
+          <p>
+            Hold a key and talk. The transcript lands in the focused pane, unsubmitted. Runs on
+            this machine, or through Groq.
+          </p>
+          <p class="bx__meta">Off until you turn it on.</p>
+        </div>
+        <div class="bx__art" aria-hidden="true">
+          <div class="wave">
+            <i style="--h:30%"></i><i style="--h:62%"></i><i style="--h:88%"></i><i style="--h:54%"></i>
+            <i style="--h:96%"></i><i style="--h:40%"></i><i style="--h:72%"></i><i style="--h:26%"></i>
+            <i style="--h:58%"></i><i style="--h:84%"></i><i style="--h:36%"></i><i style="--h:64%"></i>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ BOARD ══════════════════════ -->
+<section class="boardsec" id="board">
+  <div class="shell">
+    <div class="split">
+      <div class="split__copy reveal">
+        <p class="sec-kicker">The task board</p>
+        <h2 class="sec-title">Agents file work for each other.</h2>
+        <p class="sec-lede">
+          Every workspace gets a board. Over MCP the agents read what is open, claim what is
+          free, comment, and close what is done.
+        </p>
+        <p class="note">
+          <b>Claims are atomic.</b> Every change goes through a single lock, so the second agent
+          to reach a task gets an error.
+        </p>
+      </div>
+
+      <div class="split__aside reveal">
+        <table class="tools">
+          <caption class="sr-only">MCP tools exposed by the board</caption>
+          <tbody>
+            <tr><td><code>board_list_tasks</code></td><td>Read the current state of the work</td></tr>
+            <tr><td><code>board_next_task</code></td><td>Highest-priority free task whose dependencies are done</td></tr>
+            <tr><td><code>board_claim_task</code></td><td>Take ownership, or fail if someone got there first</td></tr>
+            <tr><td><code>board_create_task</code></td><td>File work, with priorities and dependencies</td></tr>
+            <tr><td><code>board_update_task</code></td><td>Move between columns, edit, or release</td></tr>
+            <tr><td><code>board_comment_task</code></td><td>Leave notes, which is how agents talk to each other</td></tr>
+            <tr><td><code>board_delete_task</code></td><td>Remove a task</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="wiring reveal">
+      <h3 class="wiring__title">Settings → MCP registers the server wherever it finds a tool</h3>
+      <ul class="wiring__list">
+        <li><b>Claude Code</b><code>.mcp.json</code></li>
+        <li><b>Codex</b><code>~/.codex/config.toml</code></li>
+        <li><b>Gemini CLI</b><code>~/.gemini/settings.json</code></li>
+        <li><b>Cursor</b><code>.cursor/mcp.json</code></li>
+        <li><b>VS Code</b><code>.vscode/mcp.json</code></li>
+      </ul>
+      <p class="wiring__note">
+        Existing configuration is merged rather than overwritten, and a backup is kept on first
+        write. The API port and its token are resolved at launch, never written into those files,
+        so the configs stay valid across restarts.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ THEMES ══════════════════════ -->
+<section class="themes" id="themes">
+  <div class="shell">
+    <header class="sec-head reveal">
+      <h2 class="sec-title">Pick one. The whole window follows.</h2>
+      <p class="sec-lede">
+        This page repaints with the app above it, because that is what the setting does.
+        Resets on reload.
+      </p>
+    </header>
+
+    <div class="swatches reveal" id="swatches" role="group" aria-label="Preview a theme"></div>
+  </div>
+</section>
+
+<!-- ══════════════════════ KEYS ══════════════════════ -->
+<section class="keys" id="keys">
+  <div class="shell">
+    <header class="sec-head reveal">
+      <h2 class="sec-title">Defaults follow the platform.</h2>
+      <p class="sec-lede">
+        A Mac copies with <kbd>Cmd</kbd><kbd>C</kbd> and moves between panes with
+        <kbd>Ctrl</kbd><kbd>⌥</kbd><kbd>→</kbd>, leaving <kbd>⌥</kbd><kbd>→</kbd> to the terminal,
+        which uses it to move by word. All of it is rebindable.
+      </p>
+    </header>
+
+    <dl class="keylist reveal">
+      <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>8</kbd></dt><dd>Focus pane N</dd></div>
+      <div><dt><kbd>Ctrl</kbd><kbd>D</kbd></dt><dd>Split the focused pane</dd></div>
+      <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd></dt><dd>Jump to the broadcast field</dd></div>
+      <div><dt><kbd>Ctrl</kbd><kbd>,</kbd></dt><dd>Settings</dd></div>
+      <div><dt>Double-click a split</dt><dd>Reset that boundary to 50/50</dd></div>
+      <div><dt>Double-click a workspace</dt><dd>Rename it</dd></div>
+    </dl>
+  </div>
+</section>
+
+<!-- ══════════════════════ DOWNLOAD ══════════════════════ -->
+<section class="download" id="download">
+  <div class="shell">
+    <header class="sec-head sec-head--mid reveal">
+      <h2 class="sec-title">One file, then it updates itself.</h2>
+    </header>
+
+    <div class="plats reveal">
+      <article class="plat" data-os="windows">
+        <div class="plat__head"><h3>Windows</h3><span class="plat__you">Your platform</span></div>
+        <p class="plat__files"><code>.exe</code> <code>.msi</code>, 64-bit</p>
+        <p class="plat__req">WebView2 is required, and ships with Windows 11.</p>
+        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the installer</a>
+      </article>
+
+      <article class="plat" data-os="macos">
+        <div class="plat__head"><h3>macOS</h3><span class="plat__you">Your platform</span></div>
+        <p class="plat__files"><code>.dmg</code>, universal</p>
+        <p class="plat__req">Signed and notarised, so it opens on a double-click. Apple Silicon and Intel in one build.</p>
+        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the disk image</a>
+      </article>
+
+      <article class="plat" data-os="linux">
+        <div class="plat__head"><h3>Linux</h3><span class="plat__you">Your platform</span></div>
+        <p class="plat__files"><code>.AppImage</code> <code>.deb</code> <code>.rpm</code></p>
+        <p class="plat__req">Needs WebKitGTK 4.1: <code>libwebkit2gtk-4.1-0</code> on Debian and Ubuntu, <code>webkit2gtk4.1</code> on Fedora.</p>
+        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the build</a>
+      </article>
+    </div>
+
+    <p class="build reveal">
+      Or build it yourself. Node 20, pnpm and a Rust toolchain:
+      <code>pnpm install &amp;&amp; pnpm tauri build</code>
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="shell foot__in">
+    <span class="brand brand--sm">
+      <svg class="brand__mark" width="17" height="17" viewBox="0 0 1024 1024" aria-hidden="true">
+        <rect x="200" y="200" width="260" height="624" fill="var(--acc)"></rect>
+        <rect x="538" y="200" width="286" height="260" fill="var(--ink)"></rect>
+        <rect x="538" y="538" width="286" height="286" fill="var(--ink)"></rect>
+      </svg>
+      Hangar<span class="brand__dot">.</span>AI
+    </span>
+    <nav class="foot__links" aria-label="Elsewhere">
+      <a href="https://github.com/simnJS/hangar-ai">Source</a>
+      <a href="https://github.com/simnJS/hangar-ai/releases/latest">Releases</a>
+      <a href="https://github.com/simnJS/hangar-ai/blob/main/LICENSE">MIT</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

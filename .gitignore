@@ -6,6 +6,9 @@ dist/
 dist-ssr/
 src-tauri/target/
 src-tauri/gen/schemas/
+# `pnpm demo:build` writes the demo into the site it is served from, so this one
+# generated file sits among sources. 770 kB of bundle, rebuilt every time.
+site/demo/
 
 # Local task board, and generated agent configs holding absolute paths
 .hangar/

@@ -1,0 +1,18 @@
+/* Small adjustments for running inside a page rather than a window. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* The app draws its own rounded window; inside an iframe the frame is the
+   page's, so square it off and let the embed provide the corners. */
+.app {
+  border-radius: 0;
+}
+
+/* A visitor cannot install anything from a web page. */
+.update-banner {
+  display: none !important;
+}
