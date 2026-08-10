@@ -3,8 +3,14 @@ export type AgentId = "shell" | "claude" | "codex" | "gemini" | "opencode";
 /** Where a dictation is transcribed. Mirrored in Rust as `EngineKind`. */
 export type VoiceEngine = "local" | "groq";
 
-/** The catalogue id the Rust side downloads and loads for local dictation. */
-export const DEFAULT_VOICE_MODEL = "whisper-large-v3-turbo-q5";
+/**
+ * The catalogue id the Rust side downloads and loads for local dictation.
+ *
+ * A settings file written before this changed still names the old checkpoint;
+ * Rust resolves an id it does not know to the one model there is, so nothing
+ * has to migrate this.
+ */
+export const DEFAULT_VOICE_MODEL = "whisper-small-q5_1";
 
 /**
  * Groq's transcription models, cheapest first.

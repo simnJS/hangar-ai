@@ -1,6 +1,6 @@
 [package]
 name = "hangar-ai"
-version = "0.5.2"
+version = "0.6.0"
 description = "Terminal multiplexer for CLI coding agents, with a shared task board"
 authors = ["simnJS"]
 license = "MIT"
@@ -57,9 +57,20 @@ cpal = "0.18"
 # its own build script, so neither question comes up: there is no binary to be
 # missing, and it links against whatever glibc is building it.
 #
-# No `whisper-cuda`/`metal`/`vulkan` feature: CPU is fast enough for
-# dictation-length audio, and the installer stays free of vendor GPU libraries.
-transcribe-rs = { version = "0.3", default-features = false, features = ["whisper-cpp"] }
+# The binding directly rather than through transcribe-rs, which wrapped it
+# until dictation turned out to need the two knobs it does not forward:
+# `n_threads` and `audio_ctx`, which between them are the difference between
+# eight seconds and forty. Nothing else was being used of it — the cloud engine
+# next door talks to Groq over plain HTTP.
+#
+# No `cuda`/`metal`/`vulkan` feature: CPU is fast enough for dictation-length
+# audio, and the installer stays free of vendor GPU libraries.
+whisper-rs = { version = "0.16", default-features = false }
+
+# Physical core count, which `std` does not expose. whisper.cpp defaults to four
+# threads and gets three times slower than it needs to on anything larger; the
+# number that matters is physical cores, not logical — see voice/local.rs.
+num_cpus = "1.17"
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.

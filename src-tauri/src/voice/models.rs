@@ -5,11 +5,8 @@
 //! who never dictate — and the app updates itself, so that bill would come
 //! round every release.
 //!
-//! One model is offered, not seven. Parakeet v3 is both the fastest and the
-//! most accurate open checkpoint that covers French, and a list of Whisper
-//! sizes would only ask the user to answer a question they have no way to
-//! judge: on any machine from the last decade, `tiny` is never the right
-//! answer, and `large` has no advantage worth its cost here.
+//! One model is offered, not seven: a list of Whisper sizes would only ask the
+//! user to answer a question they have no way to judge.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -43,16 +40,27 @@ struct Catalogue {
 
 /// The one local model, and everything needed to fetch it.
 ///
-/// The turbo checkpoint rather than large-v3: a decoder of four layers instead
-/// of thirty-two, for a handful of tenths of a point of word error rate that a
-/// spoken instruction will never notice. Quantised to q5 on top, which halves
-/// both the download and the memory it loads into.
+/// `small`, and the reasoning that first picked large-v3-turbo was wrong twice.
+///
+/// On speed: turbo prunes the *decoder* from thirty-two layers to four, and on
+/// a CPU the decoder is not what costs anything — the encoder is, and turbo's
+/// is large-v3's, untouched. Measured on eleven seconds of speech and sixteen
+/// cores: turbo 89s, small 17s. The distilled French checkpoints have the same
+/// shape and so the same price.
+///
+/// On accuracy: a dictation is a few seconds long, and the large models are the
+/// ones that handle that badly. Trained on thirty-second segments, they fill
+/// short context with sentences nobody said. For clips this length small is not
+/// the compromise, it is the better transcript.
+///
+/// Quantised to q5_1, which loses under a point of word error rate and takes
+/// the download from 465 MB to 181.
 const CATALOGUE: &[Catalogue] = &[Catalogue {
-    id: "whisper-large-v3-turbo-q5",
-    label: "Whisper large-v3 turbo",
+    id: "whisper-small-q5_1",
+    label: "Whisper small",
     repo: "ggerganov/whisper.cpp",
-    files: &["ggml-large-v3-turbo-q5_0.bin"],
-    approx_bytes: 574 * 1024 * 1024,
+    files: &["ggml-small-q5_1.bin"],
+    approx_bytes: 181 * 1024 * 1024,
     languages: "99",
     license: "MIT",
 }];
@@ -77,8 +85,19 @@ struct Progress {
     done: bool,
 }
 
+/// The catalogue entry an id names.
+///
+/// An id this build has never heard of resolves to the one model there is,
+/// which is how a settings file written by an earlier release keeps working:
+/// it still names the checkpoint that release downloaded, and nothing would
+/// ever rewrite it — the frontend only stores what it is given. Falling back
+/// here means such a machine is told "not downloaded yet" about the model it
+/// actually needs, rather than "unknown model" about one it no longer wants.
 fn entry(id: &str) -> Option<&'static Catalogue> {
-    CATALOGUE.iter().find(|m| m.id == id)
+    CATALOGUE
+        .iter()
+        .find(|m| m.id == id)
+        .or_else(|| CATALOGUE.first())
 }
 
 /// Where a model lives once installed.
@@ -115,7 +134,10 @@ pub fn model_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
         .files
         .first()
         .ok_or_else(|| format!("model {id} lists no files"))?;
-    Ok(model_dir(app, id)?.join(file))
+    // `model.id`, not `id`: the two differ when an old settings file named a
+    // checkpoint this build no longer carries, and every path has to land on
+    // the directory `installed` checks and `download` fills.
+    Ok(model_dir(app, model.id)?.join(file))
 }
 
 #[tauri::command]
@@ -133,6 +155,36 @@ pub fn voice_models(app: AppHandle) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// Deletes every model directory the catalogue no longer lists.
+///
+/// A checkpoint is half a gigabyte and nothing else would ever remove it: the
+/// releases that shipped Parakeet and large-v3-turbo left theirs behind, which
+/// on this machine is 1.2 GB of models no build can load any more. Run after a
+/// successful download, which is the moment the replacement is on disk and the
+/// old one is provably not needed.
+///
+/// Failures are ignored on purpose. This is housekeeping — a file held open by
+/// something else is worth nothing to report and not worth failing a download
+/// that has already succeeded.
+fn sweep(app: &AppHandle) {
+    let Ok(dir) = app.path().app_data_dir().map(|dir| dir.join("models")) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if CATALOGUE.iter().any(|model| model.id == name) {
+            continue;
+        }
+        if entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Downloads a model, reporting progress on `voice:download`.
 #[tauri::command]
 pub async fn voice_model_download(app: AppHandle, id: String) -> Result<(), String> {
@@ -143,6 +195,9 @@ pub async fn voice_model_download(app: AppHandle, id: String) -> Result<(), Stri
 
 fn download(app: &AppHandle, id: &str) -> Result<(), String> {
     let model = entry(id).ok_or_else(|| format!("unknown model {id}"))?;
+    // See `model_file`: the resolved entry decides where this goes, so a stale
+    // id cannot fill a directory nothing will ever read.
+    let id = model.id;
     let target = model_dir(app, id)?;
     if installed(app, model) {
         return Ok(());
@@ -242,6 +297,7 @@ fn download(app: &AppHandle, id: &str) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     fs::rename(&staging, &target).map_err(|err| format!("cannot install the model: {err}"))?;
+    sweep(app);
 
     let _ = app.emit(
         "voice:download",
