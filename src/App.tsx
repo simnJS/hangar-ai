@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./components/Sidebar";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -6,6 +7,7 @@ import { SessionPicker } from "./components/SessionPicker";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { WorkspaceTerminals } from "./components/WorkspaceTerminals";
 import { BoardView } from "./components/BoardView";
+import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
@@ -64,7 +66,7 @@ export default function App() {
   const [settingsCategory, setSettingsCategory] = useState("general");
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
-  const [view, setView] = useState<"terminals" | "board">("terminals");
+  const [view, setView] = useState<"terminals" | "board" | "memory">("terminals");
   /** One focused pane per workspace: leaving and coming back lands you back. */
   const [focusByWorkspace, setFocusByWorkspace] = useState<Record<string, string>>({});
   const [pickerPaneId, setPickerPaneId] = useState<string | null>(null);
@@ -191,6 +193,53 @@ export default function App() {
     }
   }, [activeWorkspace, panes, focusedPaneId, focusPane]);
 
+  /**
+   * Landing on the pane whose notification was clicked. The window is already
+   * in front by the time this runs — the Rust side raises it — so all that is
+   * left is showing what the toast was about.
+   *
+   * Rebuilt on every render behind a ref, because the listener below is
+   * installed once and would otherwise keep answering with the workspaces the
+   * app had on mount.
+   */
+  const activateRef = useRef<(workspaceId: string, paneId: string) => void>(() => {});
+  activateRef.current = (workspaceId, paneId) => {
+    const workspace = state.workspaces.find((ws) => ws.id === workspaceId);
+    // Deleted since the toast went out: the raised window is all it gets.
+    if (!workspace) return;
+    // Anything drawn over the terminals goes: the settings page is a
+    // fullscreen layer, and a click that promised a pane must not land on it.
+    setShowSettings(false);
+    setShowMcp(false);
+    setShowCreate(false);
+    setPickerPaneId(null);
+    setActiveWorkspace(workspaceId);
+    setView("terminals");
+    // A pane that is gone leaves the focus alone — the effect above moves it
+    // onto a pane that still exists.
+    if (workspace.panes.some((p) => p.id === paneId)) focusPane(workspaceId, paneId);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    let off: (() => void) | null = null;
+    listen<{ workspaceId: string; paneId: string }>("notification-activated", (event) =>
+      activateRef.current(event.payload.workspaceId, event.payload.paneId),
+    )
+      .then((stop) => {
+        // Unmounted while the listener was being registered; keeping it would
+        // leak it for good.
+        if (cancelled) stop();
+        else off = stop;
+      })
+      // No event bus outside the Tauri shell, and nothing to say about it.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, []);
+
   /** `dir` is only passed by the shortcuts that name a side; otherwise the
       longer side of the pane decides. */
   const splitPane = useCallback(
@@ -279,6 +328,7 @@ export default function App() {
 
     map["view.terminals"] = () => setView("terminals");
     map["view.board"] = () => setView("board");
+    map["view.memory"] = () => setView("memory");
     map["view.mcp"] = () => setShowMcp(true);
 
     // Everything below acts on panes, which are only on screen — and are only
@@ -405,6 +455,12 @@ export default function App() {
                 >
                   {t("view.board")}
                 </button>
+                <button
+                  className={`layouts__btn layouts__btn--wide ${view === "memory" ? "is-active" : ""}`}
+                  onClick={() => setView("memory")}
+                >
+                  {t("view.memory")}
+                </button>
               </div>
 
               {view === "terminals" && (
@@ -475,6 +531,8 @@ export default function App() {
             {view === "board" && (
               <BoardView cwd={activeWorkspace.cwd} onOpenMcp={() => setShowMcp(true)} />
             )}
+
+            {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
 
             {view === "terminals" && (
             <footer className="broadcast">

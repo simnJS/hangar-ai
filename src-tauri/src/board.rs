@@ -90,13 +90,35 @@ fn legacy_board_path(workspace_cwd: &str) -> PathBuf {
     Path::new(workspace_cwd).join(".iabench").join("board.json")
 }
 
+/// Every worktree of a repository works off the board of its main repository.
+///
+/// A linked worktree is its own directory, so the rule above — one board per
+/// workspace directory — would give each of them a separate, empty board, and
+/// agents spread across worktrees would be coordinating with nobody. Resolving
+/// here, in the only two functions that touch the file, is what puts them all
+/// on the one board; it covers the MCP path too, where `HANGAR_WORKSPACE` may
+/// well point at a worktree.
+///
+/// Anything that is not a linked worktree keeps the path it was given.
+fn shared_workspace(workspace_cwd: &str) -> String {
+    crate::git::shared_root(workspace_cwd).unwrap_or_else(|| workspace_cwd.to_string())
+}
+
 fn read_board(workspace_cwd: &str) -> Board {
-    let current = board_path(workspace_cwd);
-    let path = if current.is_file() {
-        current
-    } else {
-        legacy_board_path(workspace_cwd)
-    };
+    let shared = shared_workspace(workspace_cwd);
+    let mut candidates = vec![board_path(&shared), legacy_board_path(&shared)];
+    // A worktree opened as a workspace before boards were shared has a board
+    // of its own. Reading it when the main repository has none is the same
+    // adoption the `.iabench` rename got: the tasks stay visible, and the
+    // first write moves them to the shared location for good.
+    if shared != workspace_cwd {
+        candidates.push(board_path(workspace_cwd));
+        candidates.push(legacy_board_path(workspace_cwd));
+    }
+    let path = candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| board_path(&shared));
     fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -104,7 +126,7 @@ fn read_board(workspace_cwd: &str) -> Board {
 }
 
 fn write_board(workspace_cwd: &str, board: &Board) -> Result<(), String> {
-    let path = board_path(workspace_cwd);
+    let path = board_path(&shared_workspace(workspace_cwd));
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

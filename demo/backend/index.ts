@@ -114,6 +114,23 @@ export async function route(command: string, args: Record<string, any>): Promise
         { path: "CLAUDE.md", ok: true, message: "block written (demo)" },
       ];
 
+    /* ── git worktrees ──
+       There is no checkout behind the demo, and no git to ask about one, so
+       the panel says so instead of inventing a repository. */
+    case "git_repo_info":
+      throw new Error("Worktrees need the desktop app. This is the browser demo.");
+
+    /* ── global memory ──
+       Nothing behind the demo can keep a fact across sessions, and a mocked
+       store pretending otherwise would teach the wrong thing. The view is
+       always on screen, so it gets a sentence instead of the router's
+       "no such command". */
+    case "memory_load":
+    case "memory_create":
+    case "memory_update":
+    case "memory_delete":
+      throw new Error("The memory needs the desktop app. This is the browser demo.");
+
     /* ── Discord ── */
     case "discord_presence_set":
       return undefined;

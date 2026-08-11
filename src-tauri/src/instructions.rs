@@ -87,6 +87,49 @@ Before editing a central file, check with `board_list_tasks` that no other agent
 a `doing` task covering the same area. If one does, leave a comment on their task
 rather than editing the same files at the same time.
 
+## Global memory
+
+You also have a **persistent global memory**, reached through the MCP tools prefixed
+`memory_`. It is shared by every workspace, every project and every agent, and it
+survives across sessions: what you write there, the next agent reads. The origin
+(workspace, agent) is recorded for you.
+
+### Read before you dig
+
+**At the start of a task, call `memory_search`** with the project name and the subject you
+are about to touch. Another agent may already have paid the price of finding this out —
+do not re-discover what is already written down. `memory_list` gives a compact index,
+`memory_read` pulls one entry in full.
+
+### Write the moment you learn
+
+Call `memory_write` as soon as a durable, reusable fact appears, not at the end of the
+task. Worth keeping:
+
+- architecture decisions **and the reason behind them**
+- environment or build traps: the flag that is required, the command that hangs, the
+  version that breaks things
+- project conventions that are not obvious from a quick read
+- preferences the user stated explicitly
+
+Do not write: task progress, which belongs in `board_comment_task`; anything readable
+from the code or the git history; ephemeral details of the current conversation.
+
+### How to write an entry
+
+- **Title** short, stable, searchable. `memory_write` upserts on the title
+  (case-insensitive), so reuse the same title to update a fact instead of stacking a
+  near-duplicate next to it.
+- **Content** brief and factual — actionable by someone arriving with no context.
+- **Tags** must include the project name. The memory is global, so an entry that does not
+  carry its own project context is noise everywhere else.
+
+### Hygiene
+
+When a fact turns out to be false, correct it with `memory_update` or drop it with
+`memory_delete`. Never leave two entries contradicting each other: the next agent has no
+way to tell which one is still true.
+
 {END}"#
     )
 }
@@ -249,6 +292,27 @@ mod tests {
         assert_eq!(updated.matches(START).count(), 1);
         assert!(updated.starts_with("avant"));
         assert!(updated.trim_end().ends_with("apres"));
+    }
+
+    /// The memory tools are useless if the playbook does not name them: an agent
+    /// that never reads about `memory_search` will never call it. This pins the
+    /// two halves of the loop — read on startup, write when you learn — and the
+    /// place they must not end up in.
+    #[test]
+    fn the_generated_block_teaches_the_memory_tools() {
+        let block = playbook();
+
+        assert!(block.contains("## Global memory"));
+        for tool in [
+            "memory_search",
+            "memory_list",
+            "memory_read",
+            "memory_write",
+        ] {
+            assert!(block.contains(tool), "playbook never mentions {tool}");
+        }
+        // Task progress belongs to the board, not to the memory.
+        assert!(block.contains("board_comment_task"));
     }
 
     #[test]

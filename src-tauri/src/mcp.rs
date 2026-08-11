@@ -66,13 +66,15 @@ impl Api {
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
-        ureq::get(&self.url(path))
-            .header("authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|e| e.to_string())?
-            .body_mut()
-            .read_json::<Value>()
-            .map_err(|e| e.to_string())
+        read_api_response(
+            ureq::get(&self.url(path))
+                .config()
+                .http_status_as_error(false)
+                .build()
+                .header("authorization", &format!("Bearer {}", self.token))
+                .call()
+                .map_err(|e| e.to_string())?,
+        )
     }
 
     fn send(&self, method: &str, path: &str, body: Value) -> Result<Value, String> {
@@ -83,24 +85,63 @@ impl Api {
             "PATCH" => ureq::patch(&self.url(path)),
             _ => return Err(format!("unsupported method {method}")),
         };
-        request
-            .header("authorization", &format!("Bearer {}", self.token))
-            .send_json(body)
-            .map_err(|e| e.to_string())?
-            .body_mut()
-            .read_json::<Value>()
-            .map_err(|e| e.to_string())
+        read_api_response(
+            request
+                .config()
+                .http_status_as_error(false)
+                .build()
+                .header("authorization", &format!("Bearer {}", self.token))
+                .send_json(body)
+                .map_err(|e| e.to_string())?,
+        )
     }
 
     fn delete(&self, path: &str) -> Result<Value, String> {
-        ureq::delete(&self.url(path))
-            .header("authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|e| e.to_string())?
-            .body_mut()
-            .read_json::<Value>()
-            .map_err(|e| e.to_string())
+        read_api_response(
+            ureq::delete(&self.url(path))
+                .config()
+                .http_status_as_error(false)
+                .build()
+                .header("authorization", &format!("Bearer {}", self.token))
+                .call()
+                .map_err(|e| e.to_string())?,
+        )
     }
+}
+
+/// The server's own words, not ureq's. With statuses left as errors, a 400
+/// surfaces as the string "http status: 400" and the diagnostic the route put
+/// in the body — "already claimed by claude-2", "content is 25000 characters,
+/// the limit is 20000" — never reaches the model, which is left to retry the
+/// identical call. Statuses are turned off above so the body survives the hop;
+/// this reads it and hands back whichever half carries the answer.
+fn read_api_response(mut response: ureq::http::Response<ureq::Body>) -> Result<Value, String> {
+    let status = response.status();
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+
+    if status.is_success() {
+        return serde_json::from_str(&text).map_err(|e| e.to_string());
+    }
+
+    let message = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .get("error")
+                .and_then(|message| message.as_str())
+                .map(str::to_string)
+        })
+        // axum's own rejections — a body that would not deserialize — are
+        // plain text, and still say more than the number alone.
+        .or_else(|| {
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        })
+        .unwrap_or_else(|| format!("http status: {status}"));
+    Err(message)
 }
 
 fn urlencode(value: &str) -> String {
@@ -206,6 +247,80 @@ fn tool_definitions() -> Value {
                 "properties": { "id": { "type": "string" } },
                 "required": ["id"]
             }
+        },
+        {
+            "name": "memory_search",
+            "description": "Search the shared long-term memory: facts you and other agents recorded in earlier sessions, in this project and in every other one. Run this before you start a task and whenever you are about to investigate something that feels like it has been solved before — the answer may already be written down. Terms are ANDed, so add words to narrow the search. Results carry an excerpt, not the full text; call memory_read on the one you want.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Words to look for in titles, contents and tags." },
+                    "tag": { "type": "string", "description": "Only entries carrying this tag." },
+                    "workspace": { "type": "string", "description": "Only entries written from a workspace path containing this text — use it to narrow to one project." },
+                    "limit": { "type": "integer", "description": "Default 20, maximum 100." }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "memory_write",
+            "description": "Record something worth knowing next time: a decision and why it was taken, a trap in this codebase, a convention, a command that turned out to be the right one. Write facts that stay true after the current task is over — progress on a task belongs in a board comment instead. Writing a title that already exists REPLACES that entry, so re-recording something you refined keeps one good note instead of five near-duplicates. Keep the title specific enough to be searched for.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Short and specific, e.g. 'ONNX cannot be shipped from this CI'. Max 200 characters." },
+                    "content": { "type": "string", "description": "The fact itself, and enough context for it to be useful to someone who was not here. Max 20000 characters." },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Up to 10 short labels to search by, e.g. ['rust', 'ci']."
+                    }
+                },
+                "required": ["title", "content"]
+            }
+        },
+        {
+            "name": "memory_update",
+            "description": "Correct an entry you found with memory_search or memory_list, by id. Use it when a recorded fact has become wrong or incomplete — a stale memory is worse than none. Only the fields you pass are changed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "content": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "memory_list",
+            "description": "List what is in the memory, titles and tags only, without the contents. Use it to get a feel for what has been recorded, or to find an id to read or delete; prefer memory_search when you have a question to answer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tag": { "type": "string", "description": "Only entries carrying this tag." },
+                    "workspace": { "type": "string", "description": "Only entries written from a workspace path containing this text." }
+                }
+            }
+        },
+        {
+            "name": "memory_read",
+            "description": "Read one memory entry in full, by id. This is the follow-up to memory_search when an excerpt looks like the answer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "memory_delete",
+            "description": "Delete a memory entry permanently. Use it for facts that are no longer true and cannot be corrected — an entry about code that no longer exists, for instance. When the fact is merely out of date, memory_update is the better move.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
         }
     ])
 }
@@ -255,6 +370,68 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
         "board_delete_task" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
             api.delete(&format!("/api/tasks/{id}"))
+        }
+        "memory_search" => {
+            let query = str_arg("query").ok_or("missing 'query'")?;
+            let mut path = format!("/api/memory/search?q={}", urlencode(&query));
+            if let Some(tag) = str_arg("tag") {
+                path.push_str(&format!("&tag={}", urlencode(&tag)));
+            }
+            if let Some(workspace) = str_arg("workspace") {
+                path.push_str(&format!("&workspace={}", urlencode(&workspace)));
+            }
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+                path.push_str(&format!("&limit={limit}"));
+            }
+            api.get(&path)
+        }
+        "memory_write" => {
+            let title = str_arg("title").ok_or("missing 'title'")?;
+            let content = str_arg("content").ok_or("missing 'content'")?;
+            // The origin is not the model's to state: the workspace comes from
+            // the cwd Api::url appends, the agent from the pane's environment.
+            let mut body = json!({ "title": title, "content": content, "agent": agent_name() });
+            // Only a real list goes through. A model spelling "no tags" as an
+            // explicit null would otherwise fail the whole write: the server
+            // deserializes `tags` into a Vec, and serde's default only covers
+            // an absent field, never a null one.
+            if let Some(tags) = args.get("tags").filter(|tags| tags.is_array()) {
+                body["tags"] = tags.clone();
+            }
+            api.send("POST", "/api/memory", body)
+        }
+        "memory_update" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            let mut patch = args.clone();
+            if let Some(obj) = patch.as_object_mut() {
+                obj.remove("id");
+            }
+            api.send("PATCH", &format!("/api/memory/{id}"), patch)
+        }
+        "memory_list" => {
+            // The route filters and strips the contents itself; this side only
+            // forwards the parameters. An empty string is not forwarded — it
+            // means "no filter", the way it does on the search route: a model
+            // that fills every property of the schema would otherwise ask for
+            // the entries tagged with nothing and be told the memory is empty.
+            let mut path = String::from("/api/memory");
+            let mut sep = '?';
+            for key in ["tag", "workspace"] {
+                if let Some(value) = str_arg(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+                    path.push(sep);
+                    path.push_str(&format!("{key}={}", urlencode(&value)));
+                    sep = '&';
+                }
+            }
+            api.get(&path)
+        }
+        "memory_read" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            api.get(&format!("/api/memory/{id}"))
+        }
+        "memory_delete" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            api.delete(&format!("/api/memory/{id}"))
         }
         other => Err(format!("unknown tool '{other}'")),
     }

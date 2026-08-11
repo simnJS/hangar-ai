@@ -77,3 +77,13 @@ num_cpus = "1.17"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Toasts that answer a click, which tauri-plugin-notification does not expose —
+# see notify.rs. Already in the tree underneath that plugin, so this only names
+# a crate that was being compiled anyway.
+#
+# Held at 0.7 deliberately: 0.8 moved to `windows` 0.62, which is the version
+# that pulls the pair apart for cpal (see above). 0.7 wants 0.61, the version
+# already locked.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7.3"
+

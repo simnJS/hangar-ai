@@ -2673,3 +2673,329 @@ body.is-dragging-pane .pane__bar {
   background: var(--accent);
   transition: width 200ms linear;
 }
+
+/* ---------- Git worktrees panel ---------- */
+
+.wt-list {
+  display: grid;
+  gap: 5px;
+}
+
+/* The MCP target card, minus the checkbox: a worktree row is acted on rather
+   than ticked, so the buttons take the right and the badges carry the state. */
+.wt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wt__meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wt__label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.wt__branch {
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The commit behind the branch, in the tone of a path: present for whoever
+   looks, quiet enough to skip. */
+.wt__stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+.wt__sha {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.wt__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Full width under its row: git's refusal is a sentence, and the forced retry
+   belongs next to the reason rather than back in the line of actions. */
+.wt__blocked {
+  grid-column: 1 / -1;
+}
+
+/* The question the removal leaves behind, under the list it came from. */
+.wt__orphan {
+  margin-top: 6px;
+}
+
+/* Sits with the field it judges rather than in the label above it. */
+.wt__hint {
+  display: block;
+  margin-top: -2px;
+}
+
+.wt__hint--error {
+  color: var(--danger);
+}
+
+/* Half a failure: the worktree is there, something around it is not. */
+.wt__notice--warn {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: var(--warning);
+}
+
+.wt__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.wt__create {
+  justify-self: start;
+}
+
+/* Housekeeping on the left, so the right stays where every dialog keeps its
+   way out. */
+.wt__foot {
+  justify-content: space-between;
+}
+
+.wt__foot-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Global memory ---------- */
+
+.memory {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.memory__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.memory__count {
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory__search {
+  width: 280px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  transition: border-color var(--dur);
+}
+
+.memory__search::placeholder {
+  color: var(--fg-subtle);
+}
+
+.memory__search:focus {
+  border-color: var(--accent-ring);
+}
+
+.memory__hint {
+  flex: 1;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+}
+
+/* A refused write — a limit, a missing title — says so where it happened. */
+.memory__error {
+  margin: 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.memory__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px 16px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.memory__composer {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--accent-ring);
+  background: var(--surface);
+}
+
+.memory__composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory__composer-foot .form-hint {
+  flex: 1;
+}
+
+.memory__empty {
+  padding: 44px 12px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.memory__empty h3 {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.memory__empty p {
+  max-width: 520px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.memory__none {
+  margin: 0;
+  padding: 24px 2px;
+  text-align: center;
+  color: var(--fg-subtle);
+}
+
+.mem {
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color var(--dur), background var(--dur);
+}
+
+.mem:hover {
+  border-color: var(--border-strong);
+}
+
+/* Left rule marks the entry being read, like a claimed card on the board. */
+.mem--open {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-hover);
+}
+
+.mem__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.mem__toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mem__caret {
+  flex: none;
+  color: var(--fg-subtle);
+  font-size: 10px;
+}
+
+.mem__title {
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mem__time {
+  flex: none;
+  color: var(--fg-subtle);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.mem__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.mem__meta:empty {
+  display: none;
+}
+
+.mem__content {
+  margin: 7px 0 0;
+  color: var(--fg-muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Collapsed entries keep the list scannable; the whole text is one click away. */
+.mem__content--clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mem__editor {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.mem__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.mem__actions .form-hint,
+.mem__created {
+  flex: 1;
+}
+
+.mem__created {
+  color: var(--fg-subtle);
+  font-size: 10px;
+}

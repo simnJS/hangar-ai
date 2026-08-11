@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
 import { Logo } from "./Logo";
+import { WorktreePanel } from "./WorktreePanel";
 import type { Workspace } from "../types";
 
 interface Props {
@@ -14,7 +15,11 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     useStore();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  /** Workspace whose worktrees are on screen; it may be deleted under us. */
+  const [worktreesFor, setWorktreesFor] = useState<string | null>(null);
   const t = useT();
+
+  const worktreesWs = state.workspaces.find((ws) => ws.id === worktreesFor) ?? null;
 
   function startRename(ws: Workspace) {
     setRenaming(ws.id);
@@ -87,6 +92,16 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
                     ✎
                   </button>
                   <button
+                    className="ws__action"
+                    title={t("worktrees.action")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWorktreesFor(ws.id);
+                    }}
+                  >
+                    ⎇
+                  </button>
+                  <button
                     className="ws__action ws__remove"
                     title={t("sidebar.remove")}
                     onClick={(e) => {
@@ -115,6 +130,14 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
           {t("sidebar.settings")}
         </button>
       </div>
+
+      {worktreesWs && (
+        <WorktreePanel
+          workspaceId={worktreesWs.id}
+          cwd={worktreesWs.cwd}
+          onClose={() => setWorktreesFor(null)}
+        />
+      )}
     </aside>
   );
 }

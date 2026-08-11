@@ -69,6 +69,7 @@ export type CommandId =
   | "view.shortcuts"
   | "view.terminals"
   | "view.board"
+  | "view.memory"
   | "view.mcp"
   | "view.broadcast"
   | "terminal.clear"
@@ -296,6 +297,15 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "view",
     labelKey: "cmd.view.board",
     defaults: ["Mod+Alt+B"],
+  },
+  {
+    id: "view.memory",
+    section: "view",
+    labelKey: "cmd.view.memory",
+    // Its own initial is the MCP panel's, so the memory takes K, for the
+    // knowledge it holds — the one Mod+Alt letter left that types nothing on
+    // an AZERTY keyboard, where Ctrl+Alt is AltGr.
+    defaults: ["Mod+Alt+K"],
   },
   {
     id: "view.mcp",

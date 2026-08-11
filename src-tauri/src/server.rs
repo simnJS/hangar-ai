@@ -10,6 +10,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
 use crate::board::{self, BoardStore, NewTask, TaskPatch};
+use crate::memory::{self, MemoryPatch, NewMemory};
 
 pub struct ApiState {
     /// Borrowed from the app's single store: the UI and the agents must
@@ -169,6 +170,161 @@ async fn comment_task(
     Ok(Json(json!({ "task": task })))
 }
 
+// ---------------------------------------------------------------------------
+// Memory
+//
+// The board is one file per workspace; the memory is one file for the whole
+// install (see memory.rs). These routes therefore ignore `cwd` on every read —
+// it is only kept as the origin stamped on a write.
+// ---------------------------------------------------------------------------
+
+/// Query parameters of the memory routes, in one struct because they all
+/// arrive on URLs the MCP proxy builds, and it appends `cwd` to every one of
+/// them. Nothing here is required: a memory read is answerable without any of
+/// it, and refusing the call over a missing parameter we do not use would only
+/// make the proxy harder to change.
+#[derive(Deserialize)]
+struct MemoryQuery {
+    /// Workspace the writer is acting from. Recorded as the origin of a fact.
+    #[serde(default)]
+    cwd: String,
+    /// Free-text search terms.
+    #[serde(default)]
+    q: String,
+    tag: Option<String>,
+    workspace: Option<String>,
+    limit: Option<usize>,
+}
+
+/// The app data directory is resolved per request rather than cached in
+/// `ApiState`: it costs a `create_dir_all` and keeps the memory routes from
+/// changing the shape of the state the board routes share.
+fn memory_dir(
+    state: &ApiState,
+) -> Result<std::path::PathBuf, (StatusCode, Json<serde_json::Value>)> {
+    memory::dir(&state.app).map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+fn memory_changed(state: &ApiState) {
+    memory::notify_changed(&state.app);
+}
+
+/// A refused mutation is the caller's to fix (400); a memory file that could
+/// not be read or written is not (500), and in that case nothing was stored.
+/// Reporting the second as a bad request would send an agent off rewriting a
+/// perfectly good call against a store that is momentarily unreachable.
+fn memory_failed(err: memory::StoreError) -> (StatusCode, Json<serde_json::Value>) {
+    match err {
+        memory::StoreError::Storage(message) => bad(StatusCode::INTERNAL_SERVER_ERROR, message),
+        memory::StoreError::Refused(message) => bad(StatusCode::BAD_REQUEST, message),
+    }
+}
+
+async fn get_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Query(q): Query<MemoryQuery>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    // An unreadable store answers with an error, never with an empty list: a
+    // caller told "you know nothing" writes the fact again over a file it was
+    // simply not allowed to open.
+    let memory = memory::store()
+        .read(&memory_dir(&state)?)
+        .map_err(memory_failed)?;
+    // The index carries no contents — its one caller is the MCP proxy, whose
+    // reader is a model paying for every character; the full text of an entry
+    // is one `memory_read` away. Filtering lives here, next to the search
+    // route's, so the two can never disagree about what a tag matches.
+    let entries = memory::list(&memory, q.tag.as_deref(), q.workspace.as_deref());
+    Ok(Json(json!({ "entries": entries })))
+}
+
+async fn search_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Query(q): Query<MemoryQuery>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    let found = memory::search(
+        &memory::store()
+            .read(&memory_dir(&state)?)
+            .map_err(memory_failed)?,
+        &memory::SearchQuery {
+            q: q.q,
+            tag: q.tag,
+            workspace: q.workspace,
+            limit: q.limit,
+        },
+    );
+    Ok(Json(
+        serde_json::to_value(found).unwrap_or_else(|_| json!({ "results": [], "total": 0 })),
+    ))
+}
+
+async fn read_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    let memory = memory::store()
+        .read(&memory_dir(&state)?)
+        .map_err(memory_failed)?;
+    let entry = memory::find(&memory, &id)
+        .ok_or_else(|| bad(StatusCode::NOT_FOUND, "memory entry not found"))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+async fn create_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Query(q): Query<MemoryQuery>,
+    Json(mut input): Json<NewMemory>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    // The origin is taken from the URL, not from the body: the caller states
+    // what it learned, the proxy states where it was working. A worktree
+    // resolves to its main repository the way the board does — the `workspace`
+    // search filter runs over this string, and a fact learned on a branch
+    // belongs to the project, not to a checkout that may be gone tomorrow.
+    input.workspace = crate::git::shared_root(&q.cwd).unwrap_or(q.cwd);
+    let (entry, created) = memory::store()
+        .update(&memory_dir(&state)?, |memory| memory::upsert(memory, input))
+        .map_err(memory_failed)?;
+    memory_changed(&state);
+    Ok(Json(json!({ "entry": entry, "created": created })))
+}
+
+async fn patch_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(patch): Json<MemoryPatch>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    let entry = memory::store()
+        .update(&memory_dir(&state)?, |memory| {
+            memory::patch(memory, &id, patch)
+        })
+        .map_err(memory_failed)?;
+    memory_changed(&state);
+    Ok(Json(json!({ "entry": entry })))
+}
+
+async fn delete_memory(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    memory::store()
+        .update(&memory_dir(&state)?, |memory| memory::delete(memory, &id))
+        .map_err(memory_failed)?;
+    memory_changed(&state);
+    Ok(Json(json!({ "ok": true })))
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
@@ -193,6 +349,16 @@ pub async fn start(
         )
         .route("/api/tasks/{id}/claim", post(claim_task))
         .route("/api/tasks/{id}/comment", post(comment_task))
+        .route("/api/memory", get(get_memory).post(create_memory))
+        // Declared before the parameterised sibling for readability only:
+        // matchit 0.8, which axum routes with, prefers a static segment over a
+        // `{param}` at the same depth whichever order they were inserted in, so
+        // "search" can never be swallowed as an id.
+        .route("/api/memory/search", get(search_memory))
+        .route(
+            "/api/memory/{id}",
+            get(read_memory).patch(patch_memory).delete(delete_memory),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

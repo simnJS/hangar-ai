@@ -1691,6 +1691,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tauri-winrt-notification",
  "tokio",
  "toml_edit 0.25.13+spec-1.1.0",
  "ureq",

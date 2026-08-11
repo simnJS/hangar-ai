@@ -72,6 +72,7 @@ export function WorkspaceTerminals({
       renderPane={(pane) => (
         <TerminalPane
           pane={pane}
+          workspaceId={workspace.id}
           index={Math.max(0, order.indexOf(pane.id))}
           cwd={workspace.cwd}
           extraRoots={workspace.extraRoots}

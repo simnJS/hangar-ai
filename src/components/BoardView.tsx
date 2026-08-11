@@ -33,15 +33,18 @@ export function BoardView({ cwd, onOpenMcp }: Props) {
   useEffect(refresh, [refresh]);
 
   // Agents mutate the board through the HTTP API; the backend emits this so
-  // the window reflects their work without polling.
+  // the window reflects their work without polling. The payload names the
+  // caller's cwd, which is NOT compared against ours: worktree sharing makes
+  // several paths alias one board, so an agent writing from a linked worktree
+  // carries a path this view has never heard of. Only the active workspace
+  // mounts a BoardView and a reload is one small file read, so refreshing on
+  // every change is cheaper than resolving path identity here.
   useEffect(() => {
-    const unlisten = listen<string>("board:changed", (event) => {
-      if (event.payload === cwd) refresh();
-    });
+    const unlisten = listen<string>("board:changed", () => refresh());
     return () => {
       unlisten.then((off) => off()).catch(() => undefined);
     };
-  }, [cwd, refresh]);
+  }, [refresh]);
 
   async function addTask(column: BoardColumn) {
     const title = (draft[column] ?? "").trim();

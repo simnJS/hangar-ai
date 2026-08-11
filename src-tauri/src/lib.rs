@@ -1,9 +1,12 @@
 mod board;
 mod discord;
 mod endpoint;
+mod git;
 mod install;
 mod instructions;
 mod mcp;
+mod memory;
+mod notify;
 mod path_env;
 mod pty;
 mod server;
@@ -77,11 +80,27 @@ pub fn run() {
             board_delete,
             board_claim,
             board_comment,
+            git::git_repo_info,
+            git::git_worktree_list,
+            git::git_branches,
+            git::git_worktree_add,
+            git::git_worktree_remove,
+            git::git_worktree_prune,
+            git::git_worktree_lock,
+            git::git_worktree_unlock,
+            git::git_fetch,
+            git::git_branch_delete,
+            git::git_copy_untracked,
+            memory::memory_load,
+            memory::memory_create,
+            memory::memory_update,
+            memory::memory_delete,
             install::mcp_targets,
             install::mcp_install,
             install::mcp_manual_commands,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
+            notify::notify_send,
             discord::discord_presence_set,
             discord::discord_presence_status,
             voice::voice_start,

@@ -103,12 +103,18 @@ interface StoreValue {
   setTree: (workspaceId: string, tree: SplitNode) => void;
   /**
    * Splits `near` (or the last pane) in two and returns the new pane id, or
-   * `null` when the workspace is unknown or already full.
+   * `null` when the workspace is unknown or already full. A `cwd` opens the
+   * new pane somewhere other than the workspace root.
    */
   addPane: (
     workspaceId: string,
     /** Without an `agent`, the new pane copies the one it was split off. */
-    opts?: { agent?: AgentId; near?: string | null; dir?: "row" | "col" },
+    opts?: {
+      agent?: AgentId;
+      near?: string | null;
+      dir?: "row" | "col";
+      cwd?: string | null;
+    },
   ) => string | null;
   closePane: (workspaceId: string, paneId: string) => void;
   movePane: (
@@ -293,6 +299,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...pane,
             name: pickPaneName(paneNames(ws.panes)),
             agent: opts.agent ?? inherited ?? "shell",
+            // Left alone by default: a pane follows the workspace root.
+            cwd: opts.cwd ?? pane.cwd,
           };
           inserted = true;
           return {

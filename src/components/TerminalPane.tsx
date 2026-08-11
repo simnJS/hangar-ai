@@ -34,6 +34,8 @@ type Status = "starting" | "running" | "exited";
 
 interface Props {
   pane: Pane;
+  /** Owning workspace — where a click on this pane's notification has to land. */
+  workspaceId: string;
   cwd: string;
   /** Folders of the workspace that the terminal did not open in. */
   extraRoots: string[];
@@ -65,6 +67,7 @@ interface Props {
 
 export function TerminalPane({
   pane,
+  workspaceId,
   cwd,
   extraRoots,
   settings,
@@ -250,6 +253,9 @@ export function TerminalPane({
           agent: agentMeta?.label ?? pane.agent,
         }),
         body,
+        // Same reasoning for the target: a pane never changes workspace, and
+        // its id lives exactly as long as this effect does.
+        { workspaceId, paneId: pane.id },
       );
     }
 

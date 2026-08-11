@@ -36,7 +36,10 @@ fn adopt_previous_state(path: &Path) {
 /// loses the workspaces. The timestamp keeps every rescue (seconds since the
 /// epoch, which needs no date library); the counter covers two failures inside
 /// the same second.
-fn quarantine(path: &Path) -> Option<PathBuf> {
+///
+/// `pub(crate)` because memory.rs rescues its own unparseable file with the
+/// exact same move — one implementation, one behavior.
+pub(crate) fn quarantine(path: &Path) -> Option<PathBuf> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
