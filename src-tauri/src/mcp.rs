@@ -417,7 +417,10 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
             let mut path = String::from("/api/memory");
             let mut sep = '?';
             for key in ["tag", "workspace"] {
-                if let Some(value) = str_arg(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+                if let Some(value) = str_arg(key)
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                {
                     path.push(sep);
                     path.push_str(&format!("{key}={}", urlencode(&value)));
                     sep = '&';

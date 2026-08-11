@@ -666,8 +666,7 @@ pub fn memory_create(app: AppHandle, mut input: NewMemory) -> Result<MemoryEntry
     // belongs to the project, and the `workspace` search filter runs over this
     // very string. See `shared_workspace` in board.rs.
     if !input.workspace.is_empty() {
-        input.workspace =
-            crate::git::shared_root(&input.workspace).unwrap_or(input.workspace);
+        input.workspace = crate::git::shared_root(&input.workspace).unwrap_or(input.workspace);
     }
     let (entry, _created) = store()
         .update(&root, |memory| upsert(memory, input))
