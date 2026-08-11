@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "hangar-ai"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "axum",
  "cpal",
