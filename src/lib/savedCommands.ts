@@ -1,4 +1,5 @@
-import { ptyWrite } from "./ipc";
+import { bridgeEnqueue, ptyWrite } from "./ipc";
+import { getPaneActivity } from "./agentState";
 import type { SavedCommand, Settings, Workspace } from "../types";
 
 /**
@@ -24,8 +25,20 @@ export const mergeCommands = (
  *
  * The trailing CR is what runs it: without `autoRun` the command lands on the
  * prompt and waits, which is the point of saving a line you finish by hand.
+ *
+ * A command that runs itself does not barge into a Claude Code that is busy:
+ * typed into a permission dialog, it would answer the dialog. When the pane's
+ * hangar-bridge mod is there to hold it, it waits for the turn to end.
  */
 export function runSavedCommand(command: SavedCommand, paneIds: string[]) {
   const payload = command.autoRun ? `${command.command}\r` : command.command;
-  for (const id of paneIds) ptyWrite(id, payload).catch(() => undefined);
+  for (const id of paneIds) {
+    const pane = getPaneActivity(id);
+    const busy = pane?.activity === "working" || pane?.activity === "waiting";
+    if (command.autoRun && pane?.bridged && busy) {
+      bridgeEnqueue(id, command.command).catch(() => undefined);
+    } else {
+      ptyWrite(id, payload).catch(() => undefined);
+    }
+  }
 }

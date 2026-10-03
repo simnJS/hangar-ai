@@ -42,7 +42,10 @@ function seed(cwd: string): Task[] {
     return [
       task("21", "Cart total ignores the currency", "todo", { priority: 2, labels: ["bug"] }),
       task("22", "Checkout: keep the address on a failed payment", "todo"),
-      task("23", "Product grid: skeleton while images load", "doing", { assignee: "claude" }),
+      task("23", "Product grid: skeleton while images load", "doing", {
+        assignee: "claude",
+        doing_since: now() - 25 * 60_000,
+      }),
     ];
   }
   return [
@@ -56,8 +59,18 @@ function seed(cwd: string): Task[] {
       description: "Two agents racing for one task: exactly one wins.",
     }),
     task("12", "Rich Presence badge art for opencode", "todo", { priority: 0 }),
-    task("14", "Port the installer bitmaps to the new mark", "todo"),
-    task("06", "Build every platform in one job", "review", { assignee: "codex" }),
+    task("14", "Port the installer bitmaps to the new mark", "todo", { depends_on: ["06"] }),
+    task("06", "Build every platform in one job", "review", {
+      assignee: "codex",
+      comments: [
+        {
+          id: "c1",
+          author: "codex",
+          text: "Matrix job builds Windows, macOS and Linux; artifacts attached to the run.",
+          created_at: now() - 20 * 60_000,
+        },
+      ],
+    }),
     task("07", "Shift+Enter sends a newline", "done", { assignee: "claude" }),
     task("05", "Keep Shift+Enter submitting in a plain shell", "done", { assignee: "claude" }),
   ];
@@ -72,6 +85,14 @@ function boardFor(cwd: string): Task[] {
   return list;
 }
 
+/** Same rule as `Task::enter_column` in Rust: the doing clock restarts only
+    when the task arrives in `doing`. */
+function enterColumn(found: Task, column: BoardColumn) {
+  if (column !== "doing") found.doing_since = null;
+  else if (found.column !== "doing") found.doing_since = now();
+  found.column = column;
+}
+
 /** Same event the Rust side raises, so BoardView refreshes on its own. */
 function changed(cwd: string) {
   dispatch("board:changed", cwd);
@@ -83,13 +104,15 @@ export function load(cwd: string): { tasks: Task[] } {
 
 export function create(cwd: string, input: NewTask): Task {
   const list = boardFor(cwd);
-  const created = task(String(++serial), input.title, input.column ?? "todo", {
+  const column = input.column ?? "todo";
+  const created = task(String(++serial), input.title, column, {
     description: input.description ?? "",
     priority: input.priority ?? 1,
     labels: input.labels ?? [],
     depends_on: input.depends_on ?? [],
     created_at: now(),
     updated_at: now(),
+    doing_since: column === "doing" ? now() : null,
   });
   list.unshift(created);
   changed(cwd);
@@ -103,7 +126,7 @@ export function update(cwd: string, id: string, patch: TaskPatch): Task {
   if (patch.assignee !== undefined) found.assignee = patch.assignee;
   if (patch.title !== undefined) found.title = patch.title;
   if (patch.description !== undefined) found.description = patch.description;
-  if (patch.column !== undefined) found.column = patch.column;
+  if (patch.column !== undefined) enterColumn(found, patch.column);
   if (patch.priority !== undefined) found.priority = patch.priority;
   if (patch.labels !== undefined) found.labels = patch.labels;
   if (patch.depends_on !== undefined) found.depends_on = patch.depends_on;
@@ -128,7 +151,7 @@ export function claim(cwd: string, id: string, agent: string): Task {
     throw new Error(`task ${id} is already held by ${found.assignee}`);
   }
   found.assignee = agent;
-  found.column = "doing";
+  if (found.column === "todo") enterColumn(found, "doing");
   found.updated_at = now();
   changed(cwd);
   return { ...found };

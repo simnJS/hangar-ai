@@ -34,6 +34,7 @@ const NOT_INSTALLED: &str = "git was not found on PATH";
 /// "there is no git on this machine" and "this folder is not a repository"
 /// look identical to a caller comparing messages, and `git_repo_info` reports
 /// them as two different fields.
+#[derive(Debug)]
 enum GitError {
     Missing,
     /// git ran and refused, carrying its own diagnostic.
@@ -805,14 +806,21 @@ fn parse_ls_files(output: &str) -> Vec<String> {
 ///
 /// git lists neither `.git` nor anything above the checkout, so this catches
 /// nothing in practice — but these strings become filesystem paths under a
-/// directory the user did not name, and that is worth four lines. Backslash
-/// counts as a separator too: on Windows it is one, and `..\x` would climb.
+/// directory the user did not name, and the diff view takes them from the UI.
+/// Backslash counts as a separator too: on Windows it is one, and `..\x` would
+/// climb. `.git` is matched without case, as the filesystems that ignore case
+/// would open it. On Windows a colon is refused outright: "C:x" is a path on
+/// another root that `join` would switch to, and "file:x" an NTFS stream.
 fn is_safe_entry(entry: &str) -> bool {
     let relative = entry.trim_end_matches('/');
     !relative.is_empty()
         && !Path::new(relative).is_absolute()
         && relative.split(['/', '\\']).all(|segment| {
-            !segment.is_empty() && segment != "." && segment != ".." && segment != ".git"
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && !segment.eq_ignore_ascii_case(".git")
+                && !(cfg!(windows) && segment.contains(':'))
         })
 }
 
@@ -1012,6 +1020,414 @@ pub async fn git_copy_untracked(
         entries.retain(|entry| seen.insert(entry.clone()));
 
         Ok(copy_entries(source, Path::new(&to), &entries, &patterns))
+    })
+    .await
+}
+
+/// git's empty tree in a SHA-1 repository: the answer when git cannot be asked
+/// for the one matching the repository's own object format.
+const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// Past these, a listing or a diff stops being something to read on screen and
+/// starts being something that freezes the window drawing it.
+const MAX_CHANGED_FILES: usize = 2000;
+const MAX_DIFF_BYTES: usize = 512 * 1024;
+
+/// What `changes` may read in all to count the lines of untracked files. A
+/// stray `target/` nobody ignored would otherwise be read in full before the
+/// list could show. Past it, files are listed without a count.
+const UNTRACKED_READ_BUDGET: u64 = 16 * 1024 * 1024;
+
+/// Enough of a file to tell text from binary, the way git does.
+const BINARY_SNIFF_BYTES: usize = 8000;
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFile {
+    /// Relative to the root of the working tree, in git's forward slashes.
+    pub path: String,
+    /// Where a renamed or copied file came from.
+    pub old_path: Option<String>,
+    /// git's letter — M, A, D, R, C, T, U — or "?" for an untracked file.
+    pub status: String,
+    /// None for a binary file, where a line count means nothing.
+    pub additions: Option<u32>,
+    pub deletions: Option<u32>,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Changes {
+    /// The working tree the paths are relative to.
+    pub root: String,
+    /// Short sha of the commit compared against; None before the first commit.
+    pub base: Option<String>,
+    pub files: Vec<ChangedFile>,
+    /// More files changed than `files` holds.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    /// Unified diff, as `git diff` prints it.
+    pub text: String,
+    pub binary: bool,
+    /// Cut at a line boundary past `MAX_DIFF_BYTES`.
+    pub truncated: bool,
+}
+
+/// Reads `diff --name-status -z`: a status token, then one path — two for a
+/// rename or a copy, the source first. The score glued to R and C ("R087") is
+/// dropped; the letter is what the list shows.
+fn parse_name_status(output: &str) -> Vec<ChangedFile> {
+    let mut tokens = output.split('\0').filter(|token| !token.is_empty());
+    let mut files = Vec::new();
+
+    while let Some(status) = tokens.next() {
+        let letter: String = status.chars().take(1).collect();
+        let Some(first) = tokens.next() else { break };
+        let (old_path, path) = if letter == "R" || letter == "C" {
+            let Some(second) = tokens.next() else { break };
+            (Some(first.to_string()), second.to_string())
+        } else {
+            (None, first.to_string())
+        };
+        files.push(ChangedFile {
+            path,
+            old_path,
+            status: letter,
+            ..ChangedFile::default()
+        });
+    }
+    files
+}
+
+/// Reads `diff --numstat -z`, keyed by the path a file has now.
+///
+/// A plain record is "added<TAB>deleted<TAB>path"; a rename leaves the path
+/// empty and puts the source and the destination in the next two tokens. A
+/// binary file counts "-" for both, which parses as None.
+fn parse_numstat(output: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {
+    let mut tokens = output.split('\0');
+    let mut stats = HashMap::new();
+
+    while let Some(record) = tokens.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let mut fields = record.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let path = if path.is_empty() {
+            let _source = tokens.next();
+            let Some(destination) = tokens.next() else {
+                break;
+            };
+            destination.to_string()
+        } else {
+            path.to_string()
+        };
+        stats.insert(path, (added.parse().ok(), deleted.parse().ok()));
+    }
+    stats
+}
+
+/// What git calls a binary file: a NUL byte near the start.
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0)
+}
+
+/// Reads at most `limit` bytes, plus one to learn whether there was more.
+fn read_head(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn count_lines(text: &[u8]) -> u32 {
+    let breaks = text.iter().filter(|byte| **byte == b'\n').count();
+    let unterminated = text.last().is_some_and(|byte| *byte != b'\n');
+    (breaks + usize::from(unterminated)) as u32
+}
+
+/// Line counts of the untracked files that made it into the list — git has no
+/// diff for them, so every line is an addition.
+///
+/// Run after the list is cut, and within `UNTRACKED_READ_BUDGET`: a file too
+/// big to show whole, or one past the budget, is only sniffed for binary
+/// content and keeps no count.
+fn count_untracked(root: &Path, files: &mut [ChangedFile]) {
+    let mut budget = UNTRACKED_READ_BUDGET;
+    for file in files.iter_mut().filter(|file| file.status == "?") {
+        let path = root.join(&file.path);
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let size = meta.len();
+        let countable = size <= MAX_DIFF_BYTES as u64 && size <= budget;
+        let limit = if countable {
+            size as usize
+        } else {
+            BINARY_SNIFF_BYTES
+        };
+        let Some(bytes) = read_head(&path, limit) else {
+            continue;
+        };
+        budget = budget.saturating_sub(bytes.len() as u64);
+        file.binary = looks_binary(&bytes);
+        if countable && !file.binary {
+            file.additions = Some(count_lines(&bytes));
+            file.deletions = Some(0);
+        }
+    }
+}
+
+/// Keeps a diff readable: cut at the last line that fits.
+fn cap_diff(text: String) -> FileDiff {
+    let binary = text.lines().any(|line| line.starts_with("Binary files "));
+    if text.len() <= MAX_DIFF_BYTES {
+        return FileDiff {
+            text,
+            binary,
+            truncated: false,
+        };
+    }
+    // A newline is one byte in UTF-8, so cutting after one never splits a
+    // character.
+    let cut = text.as_bytes()[..MAX_DIFF_BYTES]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |at| at + 1);
+    FileDiff {
+        text: text[..cut].to_string(),
+        binary,
+        truncated: true,
+    }
+}
+
+/// The diff git would print for a new file, built here because git has none
+/// for a file it does not track.
+fn untracked_diff(root: &Path, path: &str) -> FileDiff {
+    let Some(bytes) = read_head(&root.join(path), MAX_DIFF_BYTES) else {
+        return FileDiff::default();
+    };
+    let header = format!("diff --git a/{path} b/{path}\nnew file\n--- /dev/null\n+++ b/{path}\n");
+    if looks_binary(&bytes) {
+        return FileDiff {
+            text: format!("{header}Binary files /dev/null and b/{path} differ\n"),
+            binary: true,
+            truncated: false,
+        };
+    }
+
+    let truncated = bytes.len() > MAX_DIFF_BYTES;
+    let shown = &bytes[..bytes.len().min(MAX_DIFF_BYTES)];
+    let body = String::from_utf8_lossy(shown);
+    let lines: Vec<&str> = body.lines().collect();
+    let mut text = format!("{header}@@ -0,0 +1,{} @@\n", lines.len());
+    for line in lines {
+        text.push('+');
+        text.push_str(line);
+        text.push('\n');
+    }
+    FileDiff {
+        text,
+        binary: false,
+        truncated,
+    }
+}
+
+/// The top of the working tree holding `dir`. Every listing runs from there:
+/// `ls-files` only reports below the directory it runs in, and the diff paths
+/// are root-relative anyway.
+fn work_root(dir: &Path) -> Result<PathBuf, GitError> {
+    let toplevel = run_git(dir, &["rev-parse", "--show-toplevel"])?;
+    Ok(PathBuf::from(toplevel.trim()))
+}
+
+/// Where a diff starts.
+struct DiffFrom {
+    rev: String,
+    /// The empty tree of a repository with no commit yet: there is no sha to
+    /// show for it.
+    unborn: bool,
+}
+
+/// The empty tree in the repository's own object format — a SHA-256
+/// repository has a different one. stdin is closed for every git call, so
+/// `--stdin` hashes nothing.
+fn empty_tree(root: &Path) -> String {
+    run_git(root, &["hash-object", "-t", "tree", "--stdin"])
+        .ok()
+        .map(|sha| sha.trim().to_string())
+        .filter(|sha| !sha.is_empty())
+        .unwrap_or_else(|| EMPTY_TREE_SHA1.to_string())
+}
+
+/// The commit a diff starts from.
+///
+/// With `base`, where the branch left it — `merge-base base HEAD` — so the
+/// diff holds everything done on this branch, committed or not. Without it,
+/// HEAD: only what is not committed yet. An unborn HEAD falls back on the
+/// empty tree.
+fn diff_from(root: &Path, base: Option<&str>) -> Result<DiffFrom, GitError> {
+    if let Some(base) = base.map(str::trim).filter(|base| !base.is_empty()) {
+        // A leading dash would reach git as an option, not a ref.
+        if base.starts_with('-') {
+            return Err(GitError::Failed(format!("'{base}' is not a ref")));
+        }
+        let rev = run_git(root, &["merge-base", base, "HEAD"])?
+            .trim()
+            .to_string();
+        return Ok(DiffFrom { rev, unborn: false });
+    }
+    match run_git(root, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+        Ok(sha) if !sha.trim().is_empty() => Ok(DiffFrom {
+            rev: "HEAD".to_string(),
+            unborn: false,
+        }),
+        Err(GitError::Missing) => Err(GitError::Missing),
+        _ => Ok(DiffFrom {
+            rev: empty_tree(root),
+            unborn: true,
+        }),
+    }
+}
+
+fn changes(dir: &Path, base: Option<&str>) -> Result<Changes, GitError> {
+    let root = work_root(dir)?;
+    let DiffFrom { rev: from, unborn } = diff_from(&root, base)?;
+    let diff = |format: &'static str| {
+        run_git(
+            &root,
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-color",
+                "-M",
+                format,
+                "-z",
+                &from,
+                "--",
+            ],
+        )
+    };
+
+    let mut files = parse_name_status(&diff("--name-status")?);
+    let stats = parse_numstat(&diff("--numstat")?);
+    for file in &mut files {
+        if let Some((added, deleted)) = stats.get(&file.path) {
+            file.additions = *added;
+            file.deletions = *deleted;
+            file.binary = added.is_none() && deleted.is_none();
+        }
+    }
+
+    let untracked = run_git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    files.extend(
+        parse_ls_files(&untracked)
+            .into_iter()
+            .map(|path| ChangedFile {
+                path,
+                status: "?".to_string(),
+                ..ChangedFile::default()
+            }),
+    );
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let truncated = files.len() > MAX_CHANGED_FILES;
+    files.truncate(MAX_CHANGED_FILES);
+    // Only now, on what is left: the files cut above are never read.
+    count_untracked(&root, &mut files);
+
+    let base = if unborn {
+        None
+    } else {
+        run_git(&root, &["rev-parse", "--short", &from])
+            .ok()
+            .map(|sha| sha.trim().to_string())
+    };
+
+    Ok(Changes {
+        root: display(&root),
+        base,
+        files,
+        truncated,
+    })
+}
+
+fn file_diff(
+    dir: &Path,
+    file: &str,
+    old_path: Option<&str>,
+    untracked: bool,
+    base: Option<&str>,
+) -> Result<FileDiff, GitError> {
+    // Both come back from the UI, and the untracked one is read straight off
+    // the disk: nothing outside the working tree, nothing inside `.git`.
+    if !is_safe_entry(file) || old_path.is_some_and(|old| !is_safe_entry(old)) {
+        return Err(GitError::Failed(format!(
+            "'{file}' is not a path inside the working tree"
+        )));
+    }
+    let root = work_root(dir)?;
+    if untracked {
+        return Ok(untracked_diff(&root, file));
+    }
+
+    let from = diff_from(&root, base)?.rev;
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        "-M",
+        from.as_str(),
+        "--",
+        file,
+    ];
+    // Both ends of a rename, or git sees a deletion and an addition in two
+    // separate calls instead of one move.
+    if let Some(old) = old_path {
+        args.push(old);
+    }
+    Ok(cap_diff(run_git(&root, &args)?))
+}
+
+/// What changed in the working tree holding `path`: tracked changes against
+/// HEAD — or against where `base` forked, to take in the branch's commits too —
+/// plus the untracked files.
+#[tauri::command]
+pub async fn git_changes(path: String, base: Option<String>) -> Result<Changes, String> {
+    off_thread(move || Ok(changes(Path::new(&path), base.as_deref())?)).await
+}
+
+/// The unified diff of one file of `git_changes`, read-only.
+#[tauri::command]
+pub async fn git_file_diff(
+    path: String,
+    file: String,
+    old_path: Option<String>,
+    untracked: bool,
+    base: Option<String>,
+) -> Result<FileDiff, String> {
+    off_thread(move || {
+        Ok(file_diff(
+            Path::new(&path),
+            &file,
+            old_path.as_deref(),
+            untracked,
+            base.as_deref(),
+        )?)
     })
     .await
 }
@@ -1476,6 +1892,241 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);
+    }
+
+    #[test]
+    fn name_status_reads_renames_as_two_paths_and_drops_the_score() {
+        let files = parse_name_status("M\0src/a b.rs\0R087\0old/x.rs\0new/x.rs\0D\0gone.txt\0");
+
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].status, "M");
+        assert_eq!(files[0].path, "src/a b.rs");
+        assert_eq!(files[0].old_path, None);
+        assert_eq!(files[1].status, "R");
+        assert_eq!(files[1].old_path.as_deref(), Some("old/x.rs"));
+        assert_eq!(files[1].path, "new/x.rs");
+        assert_eq!(files[2].status, "D");
+    }
+
+    #[test]
+    fn numstat_keys_renames_by_their_new_path_and_binaries_by_none() {
+        let stats = parse_numstat(concat!(
+            "3\t1\tsrc/a.rs\0",
+            "0\t2\t\0old/x.rs\0new/x.rs\0",
+            "-\t-\tlogo.png\0"
+        ));
+
+        assert_eq!(stats.get("src/a.rs"), Some(&(Some(3), Some(1))));
+        assert_eq!(stats.get("new/x.rs"), Some(&(Some(0), Some(2))));
+        assert!(!stats.contains_key("old/x.rs"));
+        assert_eq!(stats.get("logo.png"), Some(&(None, None)));
+    }
+
+    #[test]
+    fn a_long_diff_is_cut_on_a_line_boundary() {
+        let line = "+é".repeat(40) + "\n";
+        let text = line.repeat(MAX_DIFF_BYTES / line.len() + 10);
+
+        let capped = cap_diff(text);
+
+        assert!(capped.truncated);
+        assert!(capped.text.len() <= MAX_DIFF_BYTES);
+        assert!(capped.text.ends_with('\n'));
+        assert!(!cap_diff("Binary files a/x and b/x differ\n".into()).truncated);
+        assert!(cap_diff("diff --git a/x b/x\nBinary files a/x and b/x differ\n".into()).binary);
+    }
+
+    #[test]
+    fn an_untracked_file_diffs_as_all_additions() {
+        let root = temp_dir("untracked");
+        write(&root, "notes.md", "one\ntwo\nthree");
+        std::fs::write(root.join("blob.bin"), [0u8, 1, 2, 3]).expect("write");
+
+        let text = untracked_diff(&root, "notes.md");
+        assert!(text.text.contains("@@ -0,0 +1,3 @@\n+one\n+two\n+three\n"));
+        assert!(!text.binary);
+
+        let untracked = |path: &str| ChangedFile {
+            path: path.to_string(),
+            status: "?".to_string(),
+            ..ChangedFile::default()
+        };
+        let mut files = vec![untracked("notes.md"), untracked("blob.bin")];
+        count_untracked(&root, &mut files);
+        assert_eq!((files[0].additions, files[0].deletions), (Some(3), Some(0)));
+        assert!(untracked_diff(&root, "blob.bin").binary);
+        assert!(files[1].binary);
+        assert_eq!(files[1].additions, None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Counting reads what it lists and no more: a file too big to show whole
+    /// is only sniffed, and tracked entries are not opened at all.
+    #[test]
+    fn counting_untracked_files_stays_within_its_reads() {
+        let root = temp_dir("count-budget");
+        write(&root, "big.txt", &"line\n".repeat(MAX_DIFF_BYTES / 5 + 10));
+        write(&root, "small.txt", "a\nb\n");
+
+        let mut files = vec![
+            ChangedFile {
+                path: "big.txt".into(),
+                status: "?".into(),
+                ..ChangedFile::default()
+            },
+            ChangedFile {
+                path: "small.txt".into(),
+                status: "M".into(),
+                ..ChangedFile::default()
+            },
+        ];
+        count_untracked(&root, &mut files);
+
+        assert_eq!(files[0].additions, None);
+        assert!(!files[0].binary);
+        // Tracked: its counts come from git, never from here.
+        assert_eq!(files[1].additions, None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dot_git_is_refused_whatever_its_case_and_drives_on_windows() {
+        assert!(!is_safe_entry(".GIT/config"));
+        assert!(!is_safe_entry("sub/.Git/HEAD"));
+        assert!(is_safe_entry(".github/workflows/ci.yml"));
+        #[cfg(windows)]
+        {
+            assert!(!is_safe_entry(r"C:foo\bar"));
+            assert!(!is_safe_entry("notes.txt:hidden"));
+        }
+    }
+
+    #[test]
+    fn a_diff_request_cannot_leave_the_working_tree() {
+        let root = temp_dir("escape");
+        for path in ["../secret", ".git/config", "/etc/passwd"] {
+            assert!(file_diff(&root, path, None, true, None).is_err());
+        }
+        assert!(file_diff(&root, "ok.txt", Some("../x"), false, None).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// git, isolated from the machine's config so a signing or hook setting
+    /// cannot change what the fixture repository looks like.
+    fn fixture_git(dir: &Path, args: &[&str]) -> bool {
+        let empty = dir.join(".fixture-gitconfig");
+        let _ = std::fs::write(&empty, "");
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", &empty)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+
+    /// End to end against a real repository: what an agent leaves behind —
+    /// an edit, a rename, a deletion, a new file — and the commits of a branch
+    /// when asked to compare with where it forked.
+    #[test]
+    fn changes_list_everything_an_agent_left_behind() {
+        let dir = temp_dir("changes");
+        if !fixture_git(&dir, &["init", "-q"]) {
+            // No git on this machine: nothing to test against.
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        std::fs::write(dir.join(".git/info/exclude"), ".fixture-gitconfig\n").expect("exclude");
+        for (key, value) in [("user.name", "t"), ("user.email", "t@example.com")] {
+            assert!(fixture_git(&dir, &["config", key, value]));
+        }
+        assert!(fixture_git(
+            &dir,
+            &["symbolic-ref", "HEAD", "refs/heads/main"]
+        ));
+
+        // Before the first commit, the empty tree is the base.
+        write(&dir, "keep.txt", "a\nb\nc\n");
+        let unborn = changes(&dir, None).expect("unborn changes");
+        assert_eq!(unborn.base, None);
+        assert_eq!(unborn.files.len(), 1);
+        assert_eq!(unborn.files[0].status, "?");
+
+        write(&dir, "move.txt", "same content\nover a few\nlines\n");
+        write(&dir, "drop.txt", "bye\n");
+        assert!(fixture_git(&dir, &["add", "."]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "init"]));
+
+        write(&dir, "keep.txt", "a\nB\nc\nd\n");
+        assert!(fixture_git(&dir, &["mv", "move.txt", "moved.txt"]));
+        std::fs::remove_file(dir.join("drop.txt")).expect("delete");
+        write(&dir, "new/fresh.rs", "fn main() {}\n");
+
+        let report = changes(&dir, None).expect("changes");
+        assert!(report.base.is_some());
+        let by_path: HashMap<&str, &ChangedFile> =
+            report.files.iter().map(|f| (f.path.as_str(), f)).collect();
+
+        let keep = by_path["keep.txt"];
+        assert_eq!(keep.status, "M");
+        assert_eq!((keep.additions, keep.deletions), (Some(2), Some(1)));
+        let moved = by_path["moved.txt"];
+        assert_eq!(moved.status, "R");
+        assert_eq!(moved.old_path.as_deref(), Some("move.txt"));
+        assert_eq!(by_path["drop.txt"].status, "D");
+        assert_eq!(by_path["new/fresh.rs"].status, "?");
+        assert_eq!(by_path["new/fresh.rs"].additions, Some(1));
+
+        let diff = file_diff(&dir, "keep.txt", None, false, None).expect("diff");
+        assert!(diff.text.contains("-b\n+B\n"));
+        let rename = file_diff(&dir, "moved.txt", Some("move.txt"), false, None).expect("rename");
+        assert!(rename.text.contains("rename from move.txt"));
+
+        // Asked from a subdirectory, the listing still covers the whole tree.
+        let nested = changes(&dir.join("new"), None).expect("nested");
+        assert_eq!(nested.files.len(), report.files.len());
+
+        // A branch with a commit of its own: HEAD hides it, the fork point
+        // does not.
+        assert!(fixture_git(&dir, &["checkout", "-q", "-b", "feature"]));
+        assert!(fixture_git(&dir, &["add", "-A"]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "work"]));
+        assert!(changes(&dir, None).expect("clean").files.is_empty());
+        let branch = changes(&dir, Some("main")).expect("since main");
+        assert!(branch.files.iter().any(|f| f.path == "keep.txt"));
+        assert!(changes(&dir, Some("--output=x")).is_err());
+        assert_eq!(empty_tree(&dir), EMPTY_TREE_SHA1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A SHA-256 repository has its own empty tree: the SHA-1 one would be an
+    /// object git cannot find there.
+    #[test]
+    fn an_unborn_sha256_repository_still_lists_its_files() {
+        let dir = temp_dir("sha256");
+        if !fixture_git(&dir, &["init", "-q", "--object-format=sha256"]) {
+            // No git, or one too old for SHA-256 repositories.
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        std::fs::write(dir.join(".git/info/exclude"), ".fixture-gitconfig\n").expect("exclude");
+        write(&dir, "first.txt", "hello\n");
+        assert!(fixture_git(&dir, &["add", "first.txt"]));
+
+        assert_ne!(empty_tree(&dir), EMPTY_TREE_SHA1);
+        let report = changes(&dir, None).expect("unborn sha256 changes");
+        assert_eq!(report.base, None);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].status, "A");
+        let diff = file_diff(&dir, "first.txt", None, false, None).expect("diff");
+        assert!(diff.text.contains("+hello"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A pattern nobody's files match is not an error, and neither is a

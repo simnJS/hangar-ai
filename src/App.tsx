@@ -7,11 +7,14 @@ import { SessionPicker } from "./components/SessionPicker";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { WorkspaceTerminals } from "./components/WorkspaceTerminals";
 import { BoardView } from "./components/BoardView";
+import { BoardDock } from "./components/BoardDock";
 import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
-import { detectAgents, detectShells, ptyWrite } from "./lib/ipc";
+import { bridgeEnqueue, detectAgents, detectShells, ptyWrite } from "./lib/ipc";
+import { getPaneActivity, useBridgedCount } from "./lib/agentState";
+import { Icon } from "./components/Icon";
 import {
   leafIds,
   MAX_PANES,
@@ -22,10 +25,11 @@ import {
 } from "./lib/layout";
 import { buildPresence, useDiscordPresence } from "./lib/discord";
 import { sidebarOrder } from "./lib/folders";
+import { findAgentPane } from "./lib/agentPane";
 import { mergeCommands, runSavedCommand } from "./lib/savedCommands";
 import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
-import { getTerminal } from "./lib/terminalRegistry";
+import { getTerminal, openFinder } from "./lib/terminalRegistry";
 import type { CommandId } from "./lib/shortcuts";
 import {
   useKeymap,
@@ -39,6 +43,8 @@ import { applyThemeToDocument, getTheme } from "./themes";
 import {
   AGENTS,
   DEFAULT_SETTINGS,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
   type LayoutSize,
   type Pane,
   type ShellInfo,
@@ -71,7 +77,11 @@ export default function App() {
   const [view, setView] = useState<"terminals" | "board" | "memory">("terminals");
   /** One focused pane per workspace: leaving and coming back lands you back. */
   const [focusByWorkspace, setFocusByWorkspace] = useState<Record<string, string>>({});
+  /** Workspaces whose focused pane fills the grid. A view, never saved. */
+  const [zoomByWorkspace, setZoomByWorkspace] = useState<Record<string, boolean>>({});
   const [pickerPaneId, setPickerPaneId] = useState<string | null>(null);
+  /** The reset button is asking "are you sure?" instead of acting. */
+  const [confirmReset, setConfirmReset] = useState(false);
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
@@ -89,6 +99,13 @@ export default function App() {
   useEffect(() => {
     applyThemeToDocument(theme);
   }, [theme]);
+
+  // Every interface font size in styles.css is multiplied by this; the
+  // terminals are sized by `fontSize` alone.
+  useEffect(() => {
+    const percent = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100));
+    document.documentElement.style.setProperty("--ui-scale", String(percent / 100));
+  }, [state.settings.uiScale]);
 
   useEffect(() => {
     detectAgents()
@@ -116,6 +133,12 @@ export default function App() {
 
   const focusPane = useCallback((workspaceId: string, paneId: string) => {
     setFocusByWorkspace((current) => ({ ...current, [workspaceId]: paneId }));
+  }, []);
+
+  const setZoom = useCallback((workspaceId: string, on: boolean) => {
+    setZoomByWorkspace((current) =>
+      Boolean(current[workspaceId]) === on ? current : { ...current, [workspaceId]: on },
+    );
   }, []);
 
   /**
@@ -242,6 +265,26 @@ export default function App() {
     };
   }, []);
 
+  /** The board's way to an assignee's pane: same landing as a notification. */
+  const findAgent = useCallback(
+    (assignee: string) => {
+      const target = findAgentPane(assignee, state.workspaces, state.activeWorkspaceId);
+      return target ? () => activateRef.current(target.workspaceId, target.paneId) : null;
+    },
+    [state.workspaces, state.activeWorkspaceId],
+  );
+
+  /** The board panel only ever sits beside the terminals. */
+  const dockShown = view === "terminals" && state.settings.boardDockOpen;
+  const toggleDock = () => {
+    if (view === "terminals") {
+      updateSettings({ boardDockOpen: !state.settings.boardDockOpen });
+      return;
+    }
+    setView("terminals");
+    updateSettings({ boardDockOpen: true });
+  };
+
   /** `dir` is only passed by the shortcuts that name a side; otherwise the
       longer side of the pane decides. */
   const splitPane = useCallback(
@@ -263,6 +306,33 @@ export default function App() {
     },
     [respawnPane, focusByWorkspace, focusPane],
   );
+
+  /** Panes running an agent — the ones a reset has a conversation to drop. */
+  const agentPanes = useMemo(() => panes.filter((p) => p.agent !== "shell"), [panes]);
+
+  /**
+   * Every agent of the workspace on a brand new conversation. The same respawn
+   * as a restart, minus the session id, so the launch has nothing to resume —
+   * the transcripts stay on disk and the session picker can still reopen them.
+   */
+  const resetAgents = () => {
+    if (!activeWorkspace) return;
+    for (const pane of agentPanes) {
+      replacePane(activeWorkspace.id, pane.id, { sessionId: null });
+    }
+    setConfirmReset(false);
+  };
+
+  /** The confirm button had the keyboard; hand it back to the terminal. */
+  const cancelReset = () => {
+    setConfirmReset(false);
+    if (focusedPaneId) getTerminal(focusedPaneId)?.focus();
+  };
+
+  // An armed confirmation is about the workspace it was armed on.
+  useEffect(() => {
+    setConfirmReset(false);
+  }, [activeWorkspace?.id, view]);
 
   /** Opening always names a category, so a shortcut lands where it promised. */
   const openSettings = useCallback((category = "general") => {
@@ -330,6 +400,7 @@ export default function App() {
 
     map["view.terminals"] = () => setView("terminals");
     map["view.board"] = () => setView("board");
+    map["view.boardDock"] = toggleDock;
     map["view.memory"] = () => setView("memory");
     map["view.mcp"] = () => setShowMcp(true);
 
@@ -342,6 +413,9 @@ export default function App() {
     map["pane.splitRight"] = () => splitPane(wsId, null, "row");
     map["pane.splitDown"] = () => splitPane(wsId, null, "col");
     map["pane.restartAll"] = () => panes.forEach((p) => replacePane(wsId, p.id, {}));
+    // Only arms the confirmation: the key never throws conversations away by
+    // itself.
+    if (agentPanes.length) map["pane.resetAll"] = () => setConfirmReset(true);
 
     for (let i = 0; i < Math.min(9, order.length); i++) {
       const id = order[i];
@@ -360,6 +434,7 @@ export default function App() {
 
     map["pane.restart"] = () => replacePane(wsId, focused, {});
     if (panes.length > 1) map["pane.close"] = () => closePane(wsId, focused);
+    if (panes.length > 1) map["pane.zoom"] = () => setZoom(wsId, !zoomByWorkspace[wsId]);
 
     const pane = panes.find((p) => p.id === focused);
     if (pane && AGENTS.find((agent) => agent.id === pane.agent)?.resumable) {
@@ -401,6 +476,7 @@ export default function App() {
     map["terminal.selectAll"] = () => term()?.selectAll();
     map["terminal.scrollTop"] = () => term()?.scrollToTop();
     map["terminal.scrollBottom"] = () => term()?.scrollToBottom();
+    map["terminal.find"] = () => openFinder(focused);
     map["terminal.copy"] = () => {
       const selection = term()?.getSelection();
       if (selection) navigator.clipboard.writeText(selection).catch(() => undefined);
@@ -420,14 +496,26 @@ export default function App() {
 
   const pendingChords = useShortcuts({ keymap, handlers: buildHandlers() });
 
-  function sendBroadcast() {
+  /**
+   * `whenFree` hands the line to each pane's hangar-bridge mod, which submits
+   * it once its Claude Code has finished what it is doing — instead of typing
+   * it into a permission dialog or over a half-written prompt. A pane without
+   * the mod has nobody to hold the line for it, and gets it typed as usual.
+   */
+  function sendBroadcast(whenFree = false) {
     const text = broadcast.trim();
     if (!text) return;
     for (const pane of panes) {
-      ptyWrite(pane.id, `${text}\r`).catch(() => undefined);
+      if (whenFree && getPaneActivity(pane.id)?.bridged) {
+        bridgeEnqueue(pane.id, text).catch(() => undefined);
+      } else {
+        ptyWrite(pane.id, `${text}\r`).catch(() => undefined);
+      }
     }
     setBroadcast("");
   }
+
+  const bridgedPanes = useBridgedCount(panes.map((p) => p.id));
 
   const pickerPane = panes.find((p) => p.id === pickerPaneId) ?? null;
 
@@ -475,6 +563,17 @@ export default function App() {
                 </button>
               </div>
 
+              <div className="layouts">
+                <button
+                  className={`layouts__btn layouts__btn--wide ${dockShown ? "is-active" : ""}`}
+                  onClick={toggleDock}
+                  aria-pressed={dockShown}
+                  title={withKeys(t("board.dockHint"), "view.boardDock")}
+                >
+                  ◧ {t("board.dock")}
+                </button>
+              </div>
+
               {view === "terminals" && (
                 <>
                   <div className="layouts" role="group" aria-label={t("topbar.layout")}>
@@ -504,6 +603,7 @@ export default function App() {
                     disabled={panes.length >= MAX_PANES}
                     title={withKeys(t("topbar.addPaneHint"), "pane.split")}
                   >
+                    <Icon name="plus" size={13} />
                     {t("topbar.addPane")}
                   </button>
 
@@ -514,37 +614,93 @@ export default function App() {
                     }
                     title={withKeys(t("topbar.restartAllHint"), "pane.restartAll")}
                   >
+                    <Icon name="restart" size={13} />
                     {t("topbar.restartAll")}
                   </button>
+
+                  {confirmReset ? (
+                    <>
+                      <button className="btn btn--ghost" onClick={cancelReset}>
+                        {t("create.cancel")}
+                      </button>
+                      <button
+                        className="btn btn--danger"
+                        onClick={resetAgents}
+                        onKeyDown={(event) => event.key === "Escape" && cancelReset()}
+                        // Armed from the keyboard as often as from a click, so
+                        // the answer is one Enter away either way.
+                        autoFocus
+                      >
+                        {t("topbar.resetAllConfirm", { n: agentPanes.length })}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn--ghost"
+                      onClick={() => setConfirmReset(true)}
+                      disabled={!agentPanes.length}
+                      title={
+                        agentPanes.length
+                          ? withKeys(t("topbar.resetAllHint"), "pane.resetAll")
+                          : t("topbar.resetAllNone")
+                      }
+                    >
+                      <Icon name="reset" size={13} />
+                      {t("topbar.resetAll")}
+                    </button>
+                  )}
                 </>
               )}
             </header>
 
-            {/* One grid per workspace ever opened, all but one hidden. They
-                are never unmounted: that would kill every PTY and lose the
-                running agents — on a workspace switch as much as on the
-                switch to the board. */}
-            {openWorkspaces.map((ws) => (
-              <WorkspaceTerminals
-                key={ws.id}
-                workspace={ws}
-                hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
-                settings={state.settings}
-                availableAgents={availableAgents}
-                shells={shells}
-                focusedPaneId={focusByWorkspace[ws.id] ?? null}
-                onFocusPane={(paneId) => focusPane(ws.id, paneId)}
-                onSplitPane={(paneId) => splitPane(ws.id, paneId)}
-                onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
-                onOpenSessions={setPickerPaneId}
-              />
-            ))}
+            {/* Always rendered, whatever the view: the grids below must keep
+                the same parent for good, and the board panel sits beside
+                them in this row. */}
+            <div className="workarea">
+              {/* One grid per workspace ever opened, all but one hidden. They
+                  are never unmounted: that would kill every PTY and lose the
+                  running agents — on a workspace switch as much as on the
+                  switch to the board. */}
+              {openWorkspaces.map((ws) => (
+                <WorkspaceTerminals
+                  key={ws.id}
+                  workspace={ws}
+                  hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
+                  settings={state.settings}
+                  availableAgents={availableAgents}
+                  shells={shells}
+                  focusedPaneId={focusByWorkspace[ws.id] ?? null}
+                  zoomed={Boolean(zoomByWorkspace[ws.id])}
+                  onZoomChange={(on) => setZoom(ws.id, on)}
+                  onFocusPane={(paneId) => focusPane(ws.id, paneId)}
+                  onSplitPane={(paneId) => splitPane(ws.id, paneId)}
+                  onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                  onOpenSessions={setPickerPaneId}
+                />
+              ))}
 
-            {view === "board" && (
-              <BoardView cwd={activeWorkspace.cwd} onOpenMcp={() => setShowMcp(true)} />
-            )}
+              {view === "board" && (
+                <BoardView
+                  cwd={activeWorkspace.cwd}
+                  onOpenMcp={() => setShowMcp(true)}
+                  findAgent={findAgent}
+                />
+              )}
 
-            {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+              {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+              {dockShown && (
+                <BoardDock
+                  cwd={activeWorkspace.cwd}
+                  onOpenMcp={() => setShowMcp(true)}
+                  findAgent={findAgent}
+                  width={state.settings.boardDockWidth}
+                  onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
+                  onClose={() => updateSettings({ boardDockOpen: false })}
+                  onExpand={() => setView("board")}
+                />
+              )}
+            </div>
 
             {view === "terminals" && (
             <footer className="broadcast">
@@ -556,12 +712,21 @@ export default function App() {
                 value={broadcast}
                 onChange={(e) => setBroadcast(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") sendBroadcast();
+                  if (e.key === "Enter") sendBroadcast(e.altKey);
                 }}
               />
               <button
+                className="btn btn--ghost"
+                onClick={() => sendBroadcast(true)}
+                disabled={!broadcast.trim()}
+                title={t("broadcast.whenFreeHint", { n: bridgedPanes })}
+              >
+                <Icon name="hourglass" size={12} />
+                {t("broadcast.whenFree")}
+              </button>
+              <button
                 className="btn btn--primary"
-                onClick={sendBroadcast}
+                onClick={() => sendBroadcast()}
                 disabled={!broadcast.trim()}
               >
                 {t("broadcast.send")}

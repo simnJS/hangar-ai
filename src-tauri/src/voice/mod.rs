@@ -11,6 +11,9 @@ mod capture;
 mod cleanup;
 mod engine;
 mod groq;
+/// Public for the same reason as `models`, and so `store.rs` can move a key
+/// left in state.json by an older version.
+pub mod key;
 mod local;
 /// Public so the command macros can name `voice::models::…` from `lib.rs`:
 /// re-exporting the functions here would leave the generated command items
@@ -274,9 +277,7 @@ fn usable(app: &AppHandle, config: &VoiceConfig) -> Result<(), String> {
         EngineKind::Local if !models::is_installed(app, &config.model) => {
             Err("the local model is not downloaded yet — Settings → Voice".into())
         }
-        EngineKind::Groq if config.api_key.trim().is_empty() => {
-            Err("no Groq API key — Settings → Voice".into())
-        }
+        EngineKind::Groq => key::require().map(|_| ()),
         _ => Ok(()),
     }
 }
@@ -287,10 +288,7 @@ fn build(app: &AppHandle, config: &VoiceConfig) -> Result<Box<dyn SttEngine>, St
             let path = models::model_file(app, &config.model)?;
             Ok(Box::new(local::LocalEngine::load(&path)?))
         }
-        EngineKind::Groq => Ok(Box::new(groq::GroqEngine::new(
-            &config.model,
-            &config.api_key,
-        )?)),
+        EngineKind::Groq => Ok(Box::new(groq::GroqEngine::new(&config.model))),
     }
 }
 

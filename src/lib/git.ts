@@ -70,6 +70,34 @@ export interface CopyResult {
   failed: number;
 }
 
+export interface ChangedFile {
+  /** Relative to the working tree root, forward slashes. */
+  path: string;
+  /** Where a renamed or copied file came from. */
+  oldPath: string | null;
+  /** git's letter (M, A, D, R, C, T, U), or "?" for an untracked file. */
+  status: string;
+  /** null for a binary file. */
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+}
+
+export interface Changes {
+  root: string;
+  /** Short sha compared against; null before the first commit. */
+  base: string | null;
+  files: ChangedFile[];
+  /** More files changed than are listed. */
+  truncated: boolean;
+}
+
+export interface FileDiff {
+  text: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
 /**
  * Never rejects for "not a repository" or "git is missing": both are states of
  * the report, so the panel can explain them instead of showing a failure.
@@ -127,3 +155,24 @@ export const gitWorktreeUnlock = (path: string, worktreePath: string) =>
  */
 export const gitCopyUntracked = (from: string, to: string, patterns: string[]) =>
   invoke<CopyResult>("git_copy_untracked", { from, to, patterns });
+
+/**
+ * Everything changed in the working tree holding `path`, untracked files
+ * included. Against HEAD by default — what is not committed yet; with `base`,
+ * against where the branch forked from it, so its commits are in too.
+ */
+export const gitChanges = (path: string, base: string | null) =>
+  invoke<Changes>("git_changes", { path, base });
+
+export const gitFileDiff = (
+  path: string,
+  file: ChangedFile,
+  base: string | null,
+) =>
+  invoke<FileDiff>("git_file_diff", {
+    path,
+    file: file.path,
+    oldPath: file.oldPath,
+    untracked: file.status === "?",
+    base,
+  });

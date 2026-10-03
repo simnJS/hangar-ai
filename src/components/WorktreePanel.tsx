@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Backdrop } from "./Backdrop";
+import { DiffView } from "./DiffView";
 import { useT, type Translator } from "../i18n";
 import {
   gitBranchDelete,
@@ -189,6 +190,8 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
   const [folderTouched, setFolderTouched] = useState(false);
   const [openAfter, setOpenAfter] = useState(true);
   const [copyUntracked, setCopyUntracked] = useState(true);
+  /** The worktree whose changes are on screen, in place of the panel. */
+  const [diffFor, setDiffFor] = useState<Worktree | null>(null);
   const t = useT();
 
   const timer = useRef<number | null>(null);
@@ -632,6 +635,19 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
       );
     });
 
+  // Instead of the panel rather than over it: two backdrops would both answer
+  // Escape. The panel stays mounted, so closing the diff lands back on it as
+  // it was.
+  if (diffFor) {
+    return (
+      <DiffView
+        cwd={diffFor.path}
+        label={diffFor.branch ?? lastSegment(diffFor.path)}
+        onClose={() => setDiffFor(null)}
+      />
+    );
+  }
+
   return (
     <Backdrop onClose={onClose}>
       <div className="modal modal--wide">
@@ -761,6 +777,18 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                         </div>
 
                         <div className="wt__actions">
+                          {/* A bare entry has no files to diff, and a prunable
+                              one no folder left to read them from. */}
+                          <button
+                            className="btn btn--tiny"
+                            title={t("diff.worktreeHint")}
+                            disabled={
+                              busy !== null || worktree.bare || worktree.prunable !== null
+                            }
+                            onClick={() => setDiffFor(worktree)}
+                          >
+                            {t("diff.worktree")}
+                          </button>
                           <button
                             className="btn btn--tiny"
                             title={t("worktrees.openWorkspaceHint")}

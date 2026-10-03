@@ -6,7 +6,7 @@ import { isMac } from "../../lib/keys";
 import { THEMES } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import { ShortcutsSettings } from "./ShortcutsSettings";
-import { VoiceCard } from "./VoiceCard";
+import { VoiceCard, VoiceKeyCard } from "./VoiceCard";
 import { voiceUnload } from "../../lib/ipc";
 import { resolveKeymap, shortcutLabel } from "../../lib/shortcuts";
 import {
@@ -14,6 +14,8 @@ import {
   CLOUD_MODELS,
   DEFAULT_CLEANUP_MODEL,
   DEFAULT_SETTINGS,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
   VOICE_LANGUAGES,
   type Settings,
   type ShellInfo,
@@ -293,6 +295,15 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               onChange: (value) => set("autoResume", value),
             },
             {
+              id: "claudeBridge",
+              kind: "toggle",
+              label: t("settings.claudeBridge"),
+              hint: t("settings.claudeBridgeHint"),
+              keywords: "mod plugin hangar-bridge claude code permission usage forfait",
+              value: settings.claudeBridge,
+              onChange: (value) => set("claudeBridge", value),
+            },
+            {
               id: "launchDelay",
               kind: "slider",
               label: t("settings.launchDelay"),
@@ -337,6 +348,25 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
       label: t("settings.catAppearance"),
       icon: "◑",
       sections: [
+        {
+          id: "interface",
+          title: t("settings.interface"),
+          items: [
+            {
+              id: "uiScale",
+              kind: "slider",
+              label: t("settings.uiScale"),
+              hint: t("settings.uiScaleHint"),
+              keywords: "zoom scale size taille texte text interface ui police font",
+              value: settings.uiScale,
+              min: UI_SCALE_MIN,
+              max: UI_SCALE_MAX,
+              step: 5,
+              display: `${settings.uiScale} %`,
+              onChange: (value) => set("uiScale", value),
+            },
+          ],
+        },
         {
           id: "theme",
           title: t("settings.theme"),
@@ -696,13 +726,17 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
           items: [
             {
               id: "voiceApiKey",
-              kind: "input",
+              kind: "custom",
               label: t("settings.voiceKey"),
-              hint: t("settings.voiceKeyHint"),
-              keywords: "groq api key clé token",
-              value: settings.voiceApiKey,
-              placeholder: t("settings.voiceKeyPlaceholder"),
-              onChange: (value) => set("voiceApiKey", value.trim()),
+              keywords: "groq api key clé token keychain trousseau",
+              render: () => (
+                <VoiceKeyCard
+                  t={t}
+                  legacyKey={settings.voiceApiKey?.trim() ?? ""}
+                  // Undefined rather than "": the field leaves state.json.
+                  dropLegacy={() => set("voiceApiKey", undefined)}
+                />
+              ),
             },
           ],
         },

@@ -7,6 +7,7 @@
  */
 import * as shell from "./shell";
 import * as board from "./board";
+import * as memory from "./memory";
 import {
   AVAILABLE_AGENTS,
   HOME,
@@ -28,6 +29,7 @@ const MCP_TARGETS = [
 /** Flipped by mcp_install so the panel reflects what you just did. */
 const configured = new Set(MCP_TARGETS.filter((t) => t.configured).map((t) => t.id));
 let instructionsWritten = false;
+let voiceKeySaved = false;
 
 export async function route(command: string, args: Record<string, any>): Promise<unknown> {
   switch (command) {
@@ -46,6 +48,15 @@ export async function route(command: string, args: Record<string, any>): Promise
       return undefined;
     case "pty_alive":
       return shell.alive(args.id);
+
+    /* ── hangar-bridge queue ── */
+    case "bridge_enqueue":
+      return shell.enqueue(args.paneId, args.text);
+    case "bridge_cancel":
+      shell.cancelQueued(args.paneId, args.id ?? null);
+      return undefined;
+    case "bridge_queue":
+      return shell.queued(args.paneId);
 
     /* ── machine ── */
     case "detect_agents":
@@ -119,17 +130,21 @@ export async function route(command: string, args: Record<string, any>): Promise
        the panel says so instead of inventing a repository. */
     case "git_repo_info":
       throw new Error("Worktrees need the desktop app. This is the browser demo.");
+    case "git_changes":
+    case "git_file_diff":
+      throw new Error("The diff view needs the desktop app. This is the browser demo.");
 
     /* ── global memory ──
-       Nothing behind the demo can keep a fact across sessions, and a mocked
-       store pretending otherwise would teach the wrong thing. The view is
-       always on screen, so it gets a sentence instead of the router's
-       "no such command". */
+       Seeded with what agents typically leave there, editable, and gone on
+       reload like the rest of the demo. */
     case "memory_load":
+      return memory.load();
     case "memory_create":
+      return memory.create(args.input);
     case "memory_update":
+      return memory.update(args.id, args.patch);
     case "memory_delete":
-      throw new Error("The memory needs the desktop app. This is the browser demo.");
+      return memory.remove(args.id);
 
     /* ── Discord ── */
     case "discord_presence_set":
@@ -160,6 +175,17 @@ export async function route(command: string, args: Record<string, any>): Promise
       throw new Error("The demo does not download models. Install the app for dictation.");
     case "voice_stop":
     case "voice_unload":
+      return undefined;
+    /* The panel only ever learns whether a key is saved, so a flag is all the
+       demo keeps. What a visitor pastes is dropped on the floor. */
+    case "voice_key_status":
+      return voiceKeySaved;
+    case "voice_key_set":
+      if (!String(args.key ?? "").trim()) throw new Error("the key is empty");
+      voiceKeySaved = true;
+      return undefined;
+    case "voice_key_clear":
+      voiceKeySaved = false;
       return undefined;
 
     default:

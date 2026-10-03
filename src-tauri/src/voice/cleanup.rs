@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::engine::VoiceConfig;
+use super::key;
 
 const ENDPOINT: &str = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -60,13 +61,11 @@ struct Message {
     content: String,
 }
 
-/// `None` whenever the cleaned text should not be used — no key, a failed
-/// request, an empty answer, or a model that answered rather than rewrote.
+/// `None` whenever the cleaned text should not be used — no key, a keychain
+/// that cannot be read, a failed request, an empty answer, or a model that
+/// answered rather than rewrote.
 pub fn run(config: &VoiceConfig, text: &str) -> Option<String> {
-    let key = config.api_key.trim();
-    if key.is_empty() {
-        return None;
-    }
+    let key = key::read().ok().flatten()?;
 
     let model = match config.cleanup_model.trim() {
         "" => DEFAULT_MODEL,

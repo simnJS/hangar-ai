@@ -33,22 +33,30 @@ The app updates itself from there, so this is a one-time download.
 - **Tiling panes** — 1, 2, 4 or 8 real terminals. Every split resizes on its own, and each
   pane picks its shell from whatever is installed: PowerShell, cmd, Git Bash, WSL, MSYS2 and
   Nushell on Windows; zsh, bash, fish, Nushell and pwsh everywhere else — opened as login
-  shells on macOS, so a pane starts with the PATH your terminal has.
+  shells on macOS, so a pane starts with the PATH your terminal has. Zoom one pane to the
+  whole grid and back, search its scrollback, or drop a file or a screenshot on it to paste
+  its path.
 - **Workspaces** — a project directory plus its pane layout, saved. Reopen one and every
   pane comes back with its agent.
 - **Session resume** — agents relaunch on the conversation they were in, with no session
   ids for you to track.
 - **Shared task board** — a kanban board per workspace that the agents themselves read and
-  write, over MCP.
-- **Broadcast** — one instruction, sent to every pane at once.
+  write, over MCP. Cards show who holds them and what blocks them, and the board can sit
+  in a panel beside the terminals.
+- **Agent state at a glance** — each pane says whether its agent is working, waiting for
+  your answer, or done and waiting for you; the sidebar counts the same for every
+  workspace, so a turn that ends in a workspace you left does not go unnoticed.
+- **Broadcast** — one instruction, sent to every pane at once, or held until each agent
+  is free.
 - **Dictation** — hold a key, speak, and it is typed into the focused pane. Runs on this
   machine through whisper.cpp, on a checkpoint downloaded once: 99 languages, no key, no
   connection, and nothing recorded leaves the computer. Groq's hosted Whisper is there as
   a fallback, and an optional pass can tidy the transcript — dropping the hesitations and
-  spelling `useEffect` the way you would type it.
+  spelling `useEffect` the way you would type it. The Groq key is kept in the system
+  keychain, never in the app's settings file.
 - **32 themes** — ported from the most-installed VS Code palettes, restyling the whole
   window rather than just the terminals. Font, size, line height, cursor and padding adjust
-  live.
+  live, and the interface has a size of its own.
 - **Rebindable shortcuts**, and an interface in English or French.
 - **Discord Rich Presence** — off unless you turn it on.
 
@@ -68,6 +76,29 @@ Every workspace gets a board, and agents work it over MCP:
 
 Claims are atomic: every change goes through a single lock, so two agents racing for the
 same task cannot both win it.
+
+## The Claude Code bridge
+
+Claude Code panes load a small [mod](https://code.claude.com/docs/en/plugins/mods/overview),
+`hangar-bridge`, which Hangar writes to `~/.hangar/mods/hangar-bridge` and hands to the
+panes it starts through `CLAUDE_CODE_PLUGIN_DIRS` — nothing is installed in Claude Code
+itself, and a `claude` started outside Hangar never sees it. From inside the session it
+tells Hangar:
+
+- when a turn starts and ends, and when a permission dialog is waiting for you — the
+  pane's state and its notification come from there rather than from a guess;
+- which session the pane is on, so a restart resumes the right conversation;
+- the context window's fill and the plan's 5-hour and weekly usage, shown at the bottom
+  of the sidebar;
+- which files it edits, so that an agent about to edit a file another pane just changed
+  asks you first.
+
+It also takes the prompts you broadcast "when free" and submits them once its session is
+idle. It needs Claude Code 2.1.287 or later; without it, or in a WSL pane, Hangar falls
+back to reading the pane's output as it does for every other agent. Settings → General →
+Claude Code bridge turns it off, and Hangar leaves it out by itself where the machine's
+managed settings forbid sideloaded plugins. Claude Code sessions
+are also named after their pane, so agents can message each other as `@<pane>`.
 
 ## Connecting agents
 
@@ -96,6 +127,8 @@ delimited block that leaves the rest of the file alone.
 |---|---|
 | `Ctrl`/`Cmd` + `1`…`8` | Focus pane N |
 | `Ctrl`/`Cmd` + `,` | Settings |
+| `Ctrl`+`Shift`+`Z` / `Cmd`+`Option`+`Z` | Zoom the focused pane, and back |
+| `Ctrl`+`Shift`+`F` / `Cmd`+`F` | Search the focused pane |
 | Double-click a split | Reset that boundary to 50/50 |
 | Double-click a workspace | Rename |
 

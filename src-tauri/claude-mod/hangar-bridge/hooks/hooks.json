@@ -1,0 +1,4 @@
+{
+  "description": "The hangar-bridge hooks module",
+  "modules": ["./register.js"]
+}

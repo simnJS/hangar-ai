@@ -10,6 +10,10 @@ export const ptySpawn = (args: {
   shell?: ShellInfo | null;
   cols: number;
   rows: number;
+  /** The pane's name, which the hangar-bridge mod reports edits under. */
+  name?: string;
+  /** False keeps the hangar-bridge mod out of this pane's Claude Code. */
+  bridge?: boolean;
 }) => invoke<void>("pty_spawn", args);
 
 export const ptyWrite = (id: string, data: string) =>
@@ -21,6 +25,23 @@ export const ptyResize = (id: string, cols: number, rows: number) =>
 export const ptyKill = (id: string) => invoke<void>("pty_kill", { id });
 
 export const ptyAlive = (id: string) => invoke<boolean>("pty_alive", { id });
+
+/** A prompt waiting in Hangar until the pane's Claude Code is free to take it. */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+}
+
+/** Queued for the pane's hangar-bridge mod, which submits it once idle. */
+export const bridgeEnqueue = (paneId: string, text: string) =>
+  invoke<QueuedPrompt>("bridge_enqueue", { paneId, text });
+
+/** One queued prompt by id, or the pane's whole queue without one. */
+export const bridgeCancel = (paneId: string, id?: string) =>
+  invoke<void>("bridge_cancel", { paneId, id: id ?? null });
+
+export const bridgeQueue = (paneId: string) =>
+  invoke<QueuedPrompt[]>("bridge_queue", { paneId });
 
 export const listSessions = (agent: string, cwd: string) =>
   invoke<AgentSession[]>("list_sessions", { agent, cwd });
@@ -83,3 +104,13 @@ export const voiceModels = () => invoke<VoiceModel[]>("voice_models");
 /** Resolves when the model is installed; progress arrives on `voice:download`. */
 export const voiceModelDownload = (id: string) =>
   invoke<void>("voice_model_download", { id });
+
+/**
+ * The Groq key lives in the system keychain, and the window never reads it
+ * back: only whether one is saved. Rejects when the keychain cannot be reached.
+ */
+export const voiceKeyStatus = () => invoke<boolean>("voice_key_status");
+
+export const voiceKeySet = (key: string) => invoke<void>("voice_key_set", { key });
+
+export const voiceKeyClear = () => invoke<void>("voice_key_clear");

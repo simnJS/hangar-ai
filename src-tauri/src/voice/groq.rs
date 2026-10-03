@@ -9,7 +9,7 @@
 use serde::Deserialize;
 
 use super::engine::SttEngine;
-use super::{capture::SAMPLE_RATE, wav};
+use super::{capture::SAMPLE_RATE, key, wav};
 
 const ENDPOINT: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
@@ -22,20 +22,17 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// is audio and cannot contain it, so there is nothing to escape.
 const BOUNDARY: &str = "----hangar-ai-voice-boundary";
 
+/// Holds no key: the engine stays loaded between dictations, and a key replaced
+/// or cleared in the settings has to take effect on the very next one.
 pub struct GroqEngine {
     model: String,
-    api_key: String,
 }
 
 impl GroqEngine {
-    pub fn new(model: &str, api_key: &str) -> Result<Self, String> {
-        if api_key.trim().is_empty() {
-            return Err("no Groq API key: add one in Settings → Voice".into());
-        }
-        Ok(Self {
+    pub fn new(model: &str) -> Self {
+        Self {
             model: model.to_string(),
-            api_key: api_key.trim().to_string(),
-        })
+        }
     }
 }
 
@@ -46,6 +43,7 @@ struct Transcription {
 
 impl SttEngine for GroqEngine {
     fn transcribe(&mut self, samples: &[f32], language: Option<&str>) -> Result<String, String> {
+        let api_key = key::require()?;
         let audio = wav::encode(samples, SAMPLE_RATE);
         let body = multipart(&audio, &self.model, language);
 
@@ -56,7 +54,7 @@ impl SttEngine for GroqEngine {
 
         let mut response = agent
             .post(ENDPOINT)
-            .header("authorization", &format!("Bearer {}", self.api_key))
+            .header("authorization", &format!("Bearer {api_key}"))
             .header(
                 "content-type",
                 &format!("multipart/form-data; boundary={BOUNDARY}"),

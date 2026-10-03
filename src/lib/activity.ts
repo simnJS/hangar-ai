@@ -28,6 +28,8 @@ export interface ActivityOptions {
   /** Read on each tick, so changing the setting applies without a restart. */
   idleMs: () => number;
   onSettle: () => void;
+  /** A burst just grew long enough to count as work. Once per burst. */
+  onBusy?: () => void;
 }
 
 export interface ActivityWatcher {
@@ -41,17 +43,20 @@ export interface ActivityWatcher {
 export function createActivityWatcher({
   idleMs,
   onSettle,
+  onBusy,
 }: ActivityOptions): ActivityWatcher {
   let ticker: number | null = null;
   let burstStartedAt = 0;
   let lastOutputAt = 0;
   let lastSettleAt = 0;
+  let busyReported = false;
 
   function stop() {
     if (ticker !== null) {
       window.clearInterval(ticker);
       ticker = null;
     }
+    busyReported = false;
   }
 
   function settle() {
@@ -69,6 +74,10 @@ export function createActivityWatcher({
       if (ticker === null) {
         burstStartedAt = now;
         ticker = window.setInterval(() => {
+          if (!busyReported && lastOutputAt - burstStartedAt >= MIN_BUSY_MS) {
+            busyReported = true;
+            onBusy?.();
+          }
           if (Date.now() - lastOutputAt < idleMs()) return;
           // The burst is measured up to its last byte, not to now, so the
           // silence itself never counts as working time.

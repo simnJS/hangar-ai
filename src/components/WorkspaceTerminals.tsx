@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CommandDialog } from "./CommandDialog";
+import { DiffView } from "./DiffView";
 import { PaneGrid } from "./PaneGrid";
 import { TerminalPane } from "./TerminalPane";
+import { dropText, watchFileDrops, type Point } from "../lib/fileDrop";
 import { leafIds, normalizeTree } from "../lib/layout";
 import { runSavedCommand } from "../lib/savedCommands";
 import { resolveShell } from "../lib/shells";
+import { getTerminal } from "../lib/terminalRegistry";
 import { useStore, type CommandScope } from "../store";
 import { getTheme } from "../themes";
 import type {
@@ -31,6 +34,9 @@ interface Props {
   availableAgents: string[];
   shells: ShellInfo[];
   focusedPaneId: string | null;
+  /** The focused pane fills the grid. The zoom follows the focus around. */
+  zoomed: boolean;
+  onZoomChange: (zoomed: boolean) => void;
   onFocusPane: (paneId: string) => void;
   onSplitPane: (paneId: string) => void;
   /** Restart a pane under a fresh id, optionally patching it first. */
@@ -45,6 +51,8 @@ export function WorkspaceTerminals({
   availableAgents,
   shells,
   focusedPaneId,
+  zoomed,
+  onZoomChange,
   onFocusPane,
   onSplitPane,
   onReplacePane,
@@ -72,11 +80,18 @@ export function WorkspaceTerminals({
     scope: CommandScope;
   } | null>(null);
 
+  /** The pane whose folder the diff view is showing, hosted here for the
+      same reason as the editor. */
+  const [diffPane, setDiffPane] = useState<Pane | null>(null);
+
   // Dropped rather than merely hidden when the workspace leaves the screen:
   // kept, it would come back with the grid — an editor the user walked away
   // from, holding whatever they had typed before switching.
   useEffect(() => {
-    if (hidden) setEditor(null);
+    if (hidden) {
+      setEditor(null);
+      setDiffPane(null);
+    }
   }, [hidden]);
 
   const panes = workspace.panes;
@@ -88,6 +103,82 @@ export function WorkspaceTerminals({
 
   /** Pane ids in reading order — drives the numbering shown on each pane. */
   const order = useMemo(() => leafIds(tree), [tree]);
+
+  const zoomedId = zoomed && panes.length > 1 ? focusedPaneId : null;
+
+  // A split, a close or a preset ends the zoom, as it does in tmux: the user
+  // asked for a change to the arrangement and expects to see it.
+  const paneCount = panes.length;
+  const countRef = useRef(paneCount);
+  useEffect(() => {
+    if (countRef.current === paneCount) return;
+    countRef.current = paneCount;
+    if (zoomed) onZoomChange(false);
+  }, [paneCount, zoomed, onZoomChange]);
+
+  function zoomTo(paneId: string | null) {
+    if (paneId) onFocusPane(paneId);
+    onZoomChange(paneId !== null);
+    // A mouse gesture asked for it, and a click on the header leaves the
+    // keyboard nowhere. Next frame, once the pane is displayed again: a
+    // hidden textarea cannot take the focus.
+    const target = paneId ?? focusedPaneId;
+    requestAnimationFrame(() => getTerminal(target)?.focus());
+  }
+
+  /** The pane a file drag is over, and how many files it carries. */
+  const [fileTarget, setFileTarget] = useState<{ paneId: string; count: number } | null>(
+    null,
+  );
+
+  // The listeners are registered once per visibility change; the drop itself
+  // has to see the panes, shells and settings as they are when it lands.
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
+  const dropRef = useRef<(paneId: string, paths: string[]) => void>(() => {});
+  dropRef.current = (paneId, paths) => {
+    const pane = panes.find((p) => p.id === paneId);
+    if (!pane) return;
+    const shell = resolveShell(shells, pane.shellId, workspace.shellId, settings.shellId);
+    onFocusPane(paneId);
+    const term = getTerminal(paneId);
+    // Through xterm, as a paste: an agent that brackets pastes sees one, which
+    // is how Claude Code tells a dropped image path from typed text.
+    term?.paste(dropText(paths, pane.agent, shell));
+    term?.focus();
+  };
+
+  // Only the workspace on screen listens: the drop lands on whatever pane is
+  // under the pointer, and a hidden grid has none.
+  useEffect(() => {
+    if (hidden) return;
+    const paneAt = ({ x, y }: Point) => {
+      const id = document
+        .elementFromPoint(x, y)
+        ?.closest<HTMLElement>("[data-slot]")?.dataset.slot;
+      return id && panesRef.current.some((p) => p.id === id) ? id : null;
+    };
+    const stop = watchFileDrops({
+      over: (point, count) => {
+        const paneId = point && paneAt(point);
+        setFileTarget((current) =>
+          !paneId
+            ? null
+            : current?.paneId === paneId && current.count === count
+              ? current
+              : { paneId, count },
+        );
+      },
+      drop: (paths, point) => {
+        const paneId = paneAt(point);
+        if (paneId) dropRef.current(paneId, paths);
+      },
+    });
+    return () => {
+      stop();
+      setFileTarget(null);
+    };
+  }, [hidden]);
 
   // A workspace can override the global theme, and hidden workspaces keep
   // their own: their terminals stay styled the way their owner set them.
@@ -106,6 +197,9 @@ export function WorkspaceTerminals({
         onMove={(dragId, targetId, zone) =>
           movePane(workspace.id, dragId, targetId, zone)
         }
+        zoomedId={zoomedId}
+        onZoom={zoomTo}
+        fileTarget={fileTarget}
         renderPane={(pane) => (
           <TerminalPane
             pane={pane}
@@ -119,8 +213,9 @@ export function WorkspaceTerminals({
             // Focus is per workspace, so a pane can be the focused one of a
             // workspace nobody is looking at. Each pane is told whether its
             // grid is on screen, which is what decides who takes the keyboard
-            // and whose hand-back is worth a notification.
-            visible={!hidden}
+            // and whose hand-back is worth a notification. A pane hidden
+            // behind a zoomed one is off screen just the same.
+            visible={!hidden && (!zoomedId || zoomedId === pane.id)}
             availableAgents={availableAgents}
             shells={shells}
             shell={resolveShell(
@@ -157,9 +252,18 @@ export function WorkspaceTerminals({
               removeSavedCommand(scope, workspace.id, command.id)
             }
             onAddCommand={() => setEditor({ command: null, scope: "workspace" })}
+            onShowDiff={() => setDiffPane(pane)}
           />
         )}
       />
+
+      {diffPane && !hidden && (
+        <DiffView
+          cwd={diffPane.cwd || workspace.cwd}
+          label={diffPane.name}
+          onClose={() => setDiffPane(null)}
+        />
+      )}
 
       {/* Not rendered while the workspace is off screen: a modal nobody can
           see would still be answering Escape for the workspace in front. */}

@@ -53,7 +53,9 @@ export type CommandId =
   | "pane.close"
   | "pane.restart"
   | "pane.restartAll"
+  | "pane.resetAll"
   | "pane.sessions"
+  | "pane.zoom"
   | "pane.next"
   | "pane.prev"
   | "pane.focusLeft"
@@ -73,6 +75,7 @@ export type CommandId =
   | "view.shortcuts"
   | "view.terminals"
   | "view.board"
+  | "view.boardDock"
   | "view.memory"
   | "view.mcp"
   | "view.broadcast"
@@ -82,6 +85,7 @@ export type CommandId =
   | "terminal.selectAll"
   | "terminal.scrollTop"
   | "terminal.scrollBottom"
+  | "terminal.find"
   | `command.run${Digit}`
   | "app.zoomIn"
   | "app.zoomOut"
@@ -198,10 +202,26 @@ export const COMMANDS: ShortcutCommand[] = [
     defaults: ["Mod+Alt+Shift+R"],
   },
   {
+    // Unbound by default: it throws away every conversation of the workspace,
+    // which is not something a stray chord should get one step closer to.
+    id: "pane.resetAll",
+    section: "panes",
+    labelKey: "cmd.pane.resetAll",
+    defaults: [],
+  },
+  {
     id: "pane.sessions",
     section: "panes",
     labelKey: "cmd.pane.sessions",
     defaults: ["Mod+Shift+S"],
+  },
+  {
+    id: "pane.zoom",
+    section: "panes",
+    labelKey: "cmd.pane.zoom",
+    // One key both ways, like tmux's `prefix z`. Cmd+Shift+Z is Redo on the
+    // macOS Edit menu, which takes it before the window ever sees it.
+    defaults: forPlatform(["Mod+Shift+Z"], ["Meta+Alt+Z"]),
   },
 
   {
@@ -319,6 +339,13 @@ export const COMMANDS: ShortcutCommand[] = [
     defaults: ["Mod+Alt+B"],
   },
   {
+    id: "view.boardDock",
+    section: "view",
+    labelKey: "cmd.view.boardDock",
+    // The board's own chord, shifted: the same board, kept beside the panes.
+    defaults: ["Mod+Alt+Shift+B"],
+  },
+  {
     id: "view.memory",
     section: "view",
     labelKey: "cmd.view.memory",
@@ -382,6 +409,14 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "terminal",
     labelKey: "cmd.terminal.scrollBottom",
     defaults: forPlatform(["Ctrl+End"], ["Meta+Down"]),
+  },
+  {
+    id: "terminal.find",
+    section: "terminal",
+    labelKey: "cmd.terminal.find",
+    // Shift on Windows for the same reason as copy: plain Ctrl+F is the
+    // shell's forward-char, and Windows Terminal already taught Ctrl+Shift+F.
+    defaults: forPlatform(["Ctrl+Shift+F"], ["Meta+F"]),
   },
 
   ...commandDigits,

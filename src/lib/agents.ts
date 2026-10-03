@@ -53,7 +53,16 @@ const isQuotable = (root: string) => !/["`$\r\n]/.test(root);
 export function launchCommand(
   agent: AgentId,
   sessionId: string | null,
-  options: { extraRoots?: string[]; commands?: Record<string, string> } = {},
+  options: {
+    extraRoots?: string[];
+    commands?: Record<string, string>;
+    /**
+     * The pane's name. Claude Code sessions on one machine can message each
+     * other by name, and naming each after its pane is what lets an agent
+     * reach the one next to it as `@<pane>`.
+     */
+    name?: string;
+  } = {},
 ): string | null {
   const command = agentCommand(agent, options.commands);
   if (!command) return null;
@@ -61,6 +70,12 @@ export function launchCommand(
   switch (agent) {
     case "claude": {
       const resume = sessionId ? ` --resume ${sessionId}` : "";
+      const name =
+        options.name && isQuotable(options.name)
+          ? /^[\w-]+$/.test(options.name)
+            ? ` --name ${options.name}`
+            : ` --name "${options.name}"`
+          : "";
       const roots = (options.extraRoots ?? []).filter(isQuotable);
       // `--add-dir` is variadic, so it comes last: a following flag — one the
       // custom command carries, or the resume above — would be swallowed as
@@ -68,7 +83,7 @@ export function launchCommand(
       const added = roots.length
         ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
         : "";
-      return `${command}${resume}${added}`;
+      return `${command}${resume}${name}${added}`;
     }
     case "codex":
       return sessionId ? `${command} resume ${sessionId}` : command;

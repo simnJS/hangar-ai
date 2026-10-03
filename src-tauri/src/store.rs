@@ -83,7 +83,16 @@ pub fn load_state(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
     }
     let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     match serde_json::from_str(&raw) {
-        Ok(value) => Ok(Some(value)),
+        Ok(mut value) => {
+            // Rewritten at once rather than left to the frontend's next save,
+            // so the plaintext copy is gone even if the app closes before then.
+            // A failed rewrite costs nothing more: the value handed back no
+            // longer carries the key, and that save drops it from the file.
+            if crate::voice::key::migrate(&mut value) {
+                let _ = write_state(&path, &value);
+            }
+            Ok(Some(value))
+        }
         Err(err) => {
             // The frontend starts empty when the load fails and saves that
             // empty state moments later, so leaving the unreadable file in
@@ -107,12 +116,15 @@ pub fn load_state(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
 
 #[tauri::command]
 pub fn save_state(app: AppHandle, state: serde_json::Value) -> Result<(), String> {
-    let path = state_path(&app)?;
+    write_state(&state_path(&app)?, &state)
+}
+
+fn write_state(path: &Path, state: &serde_json::Value) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    let body = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
     // Write-then-rename so a crash mid-save cannot truncate the real file.
     fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

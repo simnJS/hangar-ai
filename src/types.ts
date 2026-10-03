@@ -166,6 +166,12 @@ export interface Settings {
   agentCommands: Record<string, string>;
   /** Relaunch agents with their previous session when a workspace opens. */
   autoResume: boolean;
+  /**
+   * Load the hangar-bridge mod into the Claude Code each pane starts (see
+   * src-tauri/src/bridge.rs). On by default; the way out for a machine whose
+   * Claude Code refuses to start with a plugin directory it did not install.
+   */
+  claudeBridge: boolean;
   /** Wait before auto-launching agents, so the shell finishes its profile. */
   launchDelayMs: number;
   /** Raise a desktop notification when a pane hands control back. */
@@ -201,8 +207,13 @@ export interface Settings {
   voiceCloudModel: string;
   /** ISO code, or empty to let the model work it out. */
   voiceLanguage: string;
-  /** Also used by the cleanup pass, which talks to the same API. */
-  voiceApiKey: string;
+  /**
+   * Legacy: the Groq key, in plain text, as versions before the keychain kept
+   * it. load_state moves it to the system keychain and drops it; it is only
+   * still here when the keychain refused it, and is never used for dictation.
+   * The voice settings offer to delete it.
+   */
+  voiceApiKey?: string;
   /** Rewrite the transcript with a small model before it lands. */
   voiceCleanup: boolean;
   voiceCleanupModel: string;
@@ -227,6 +238,16 @@ export interface Settings {
    * card shows. Empty follows the one this app ships with.
    */
   discordAppId: string;
+  /** The board shown as a panel beside the terminals. */
+  boardDockOpen: boolean;
+  /** Its width in px, as last dragged. */
+  boardDockWidth: number;
+  /**
+   * Size of the interface text, in percent — sidebar, board, settings, pane
+   * headers. The terminals keep `fontSize`: the two are read at different
+   * distances and rarely want changing together.
+   */
+  uiScale: number;
 }
 
 export interface AppState {
@@ -273,6 +294,7 @@ export const DEFAULT_SETTINGS: Settings = {
   padding: 10,
   agentCommands: {},
   autoResume: true,
+  claudeBridge: true,
   launchDelayMs: 700,
   notifyOnIdle: true,
   notifyIdleMs: 3000,
@@ -284,7 +306,6 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceCloudModel: CLOUD_MODELS[0].id,
   voiceLanguage: "",
-  voiceApiKey: "",
   voiceCleanup: false,
   voiceCleanupModel: "",
   voiceCleanupHint: "",
@@ -293,4 +314,11 @@ export const DEFAULT_SETTINGS: Settings = {
   discordShowWorkspace: true,
   discordShowAgents: true,
   discordAppId: "",
+  boardDockOpen: false,
+  boardDockWidth: 420,
+  uiScale: 100,
 };
+
+/** Bounds of the interface size slider, in percent. */
+export const UI_SCALE_MIN = 90;
+export const UI_SCALE_MAX = 130;

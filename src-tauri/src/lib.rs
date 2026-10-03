@@ -1,4 +1,5 @@
 mod board;
+mod bridge;
 mod context;
 mod discord;
 mod endpoint;
@@ -41,6 +42,10 @@ pub fn run() {
             // login shell for its PATH takes a moment, and doing it now means
             // the window is never the thing waiting on it.
             std::thread::spawn(path_env::ensure);
+            // Written before the first pane asks for it, for the same reason.
+            std::thread::spawn(|| {
+                bridge::plugin_dir();
+            });
 
             let handle = app.handle().clone();
             let token = endpoint::generate_token();
@@ -49,6 +54,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 match server::start(handle, ui_store(), token).await {
                     Ok(port) => {
+                        bridge::set_endpoint(port, &advertised);
                         // Agents discover the live port/token here rather than
                         // having them baked into their config files.
                         if let Err(err) = endpoint::publish(port, &advertised) {
@@ -66,6 +72,9 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_alive,
+            bridge::bridge_enqueue,
+            bridge::bridge_cancel,
+            bridge::bridge_queue,
             sessions::list_sessions,
             sessions::detect_agents,
             context::context_usage,
@@ -93,6 +102,8 @@ pub fn run() {
             git::git_fetch,
             git::git_branch_delete,
             git::git_copy_untracked,
+            git::git_changes,
+            git::git_file_diff,
             memory::memory_load,
             memory::memory_create,
             memory::memory_update,
@@ -111,6 +122,9 @@ pub fn run() {
             voice::voice_unload,
             voice::models::voice_models,
             voice::models::voice_model_download,
+            voice::key::voice_key_status,
+            voice::key::voice_key_set,
+            voice::key::voice_key_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

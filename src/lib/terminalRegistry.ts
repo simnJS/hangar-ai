@@ -21,3 +21,20 @@ export function registerTerminal(id: string, term: Terminal): () => void {
 
 export const getTerminal = (id: string | null): Terminal | null =>
   (id && terminals.get(id)) || null;
+
+/**
+ * What opens each pane's search bar. The bar is state inside the pane, and the
+ * shortcut that asks for it is dispatched from the app, the same way as above.
+ */
+const finders = new Map<string, () => void>();
+
+export function registerFinder(id: string, open: () => void): () => void {
+  finders.set(id, open);
+  return () => {
+    if (finders.get(id) === open) finders.delete(id);
+  };
+}
+
+export function openFinder(id: string | null) {
+  if (id) finders.get(id)?.();
+}

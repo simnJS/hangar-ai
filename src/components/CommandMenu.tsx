@@ -4,6 +4,7 @@ import { useShortcutLabel } from "../lib/useShortcuts";
 import type { CommandId } from "../lib/shortcuts";
 import type { CommandScope } from "../store";
 import type { SavedCommand } from "../types";
+import { Icon } from "./Icon";
 
 /**
  * The saved commands of one pane, hanging off the ⚡ button of its header.
@@ -127,15 +128,17 @@ export function CommandMenu({
                 className="cmd-item__btn"
                 onClick={() => onEdit(command, scope)}
                 title={t("commands.edit")}
+                aria-label={t("commands.edit")}
               >
-                ✎
+                <Icon name="pencil" size={12} />
               </button>
               <button
                 className="cmd-item__btn cmd-item__btn--del"
                 onClick={() => onRemove(command, scope)}
                 title={t("commands.remove")}
+                aria-label={t("commands.remove")}
               >
-                ✕
+                <Icon name="close" size={12} />
               </button>
             </div>
           );

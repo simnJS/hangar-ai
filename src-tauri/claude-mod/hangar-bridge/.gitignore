@@ -1,0 +1,4 @@
+# Written by Claude Code each time it loads this directory with --plugin-dir:
+# the declarations of whichever version loaded it last.
+.claude-plugin/types/
+tsconfig.json

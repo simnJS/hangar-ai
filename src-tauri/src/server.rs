@@ -325,6 +325,69 @@ async fn delete_memory(
     Ok(Json(json!({ "ok": true })))
 }
 
+// ---------------------------------------------------------------------------
+// Bridge
+//
+// The hangar-bridge mod inside each pane's Claude Code reports here, keyed by
+// the pane id Hangar put in its environment (see bridge.rs).
+// ---------------------------------------------------------------------------
+
+/// One report from a pane's mod, relayed to the window as is. The window owns
+/// the meaning of each `kind`; only an edit is also remembered here, because
+/// the conflict question is asked of the API, not of the window.
+async fn bridge_event(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(pane): Path<String>,
+    Json(event): Json<serde_json::Value>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    let kind = event
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if kind.is_empty() {
+        return Err(bad(StatusCode::BAD_REQUEST, "an event needs a kind"));
+    }
+    if kind == "edit" {
+        if let Some(file) = event.get("file").and_then(|v| v.as_str()) {
+            let name = event.get("name").and_then(|v| v.as_str()).unwrap_or(&pane);
+            crate::bridge::record_edit(&pane, name, file);
+        }
+    }
+    let _ = state
+        .app
+        .emit("bridge:event", json!({ "paneId": pane, "event": event }));
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn bridge_next(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(pane): Path<String>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    let message = crate::bridge::take_next(&state.app, &pane);
+    Ok(Json(json!({ "message": message })))
+}
+
+#[derive(Deserialize)]
+struct ConflictQuery {
+    file: String,
+}
+
+async fn bridge_conflict(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(pane): Path<String>,
+    Query(q): Query<ConflictQuery>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    Ok(Json(
+        json!({ "owner": crate::bridge::conflict(&pane, &q.file) }),
+    ))
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
@@ -359,6 +422,9 @@ pub async fn start(
             "/api/memory/{id}",
             get(read_memory).patch(patch_memory).delete(delete_memory),
         )
+        .route("/api/bridge/{pane}/event", post(bridge_event))
+        .route("/api/bridge/{pane}/next", get(bridge_next))
+        .route("/api/bridge/{pane}/conflict", get(bridge_conflict))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

@@ -51,6 +51,24 @@ pub struct Task {
     pub updated_at: u64,
     #[serde(default)]
     pub order: f64,
+    /// When the task last entered `doing`; None anywhere else. Absent from
+    /// boards written before it existed, which then show no elapsed time
+    /// rather than a made-up one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doing_since: Option<u64>,
+}
+
+impl Task {
+    /// Moves the task, keeping `doing_since` true to the column it lands in.
+    /// Staying in `doing` keeps the original stamp.
+    fn enter_column(&mut self, column: String, stamp: u64) {
+        if column != "doing" {
+            self.doing_since = None;
+        } else if self.column != "doing" {
+            self.doing_since = Some(stamp);
+        }
+        self.column = column;
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -208,6 +226,7 @@ pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
         title: input.title,
         description: input.description,
         order: board.next_order(&column),
+        doing_since: (column == "doing").then_some(stamp),
         column,
         priority: input.priority.unwrap_or(1),
         assignee: None,
@@ -228,6 +247,7 @@ pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task,
         }
     }
     let task = board.find_mut(id).ok_or("task not found")?;
+    let stamp = now_ms();
 
     if let Some(v) = patch.title {
         task.title = v;
@@ -236,7 +256,7 @@ pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task,
         task.description = v;
     }
     if let Some(v) = patch.column {
-        task.column = v;
+        task.enter_column(v, stamp);
     }
     if let Some(v) = patch.priority {
         task.priority = v;
@@ -256,7 +276,7 @@ pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task,
     if let Some(v) = patch.order {
         task.order = v;
     }
-    task.updated_at = now_ms();
+    task.updated_at = stamp;
     Ok(task.clone())
 }
 
@@ -276,11 +296,12 @@ pub fn claim_task(board: &mut Board, id: &str, agent: &str) -> Result<Task, Stri
     match &task.assignee {
         Some(owner) if owner != agent => Err(format!("already claimed by {owner}")),
         _ => {
+            let stamp = now_ms();
             task.assignee = Some(agent.to_string());
             if task.column == "todo" {
-                task.column = "doing".into();
+                task.enter_column("doing".into(), stamp);
             }
-            task.updated_at = now_ms();
+            task.updated_at = stamp;
             Ok(task.clone())
         }
     }
@@ -388,6 +409,72 @@ mod tests {
         assert_eq!(board.tasks.len(), 1);
         assert_eq!(board.tasks[0].title, "tache courante");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    fn todo_task(board: &mut Board) -> String {
+        create_task(
+            board,
+            NewTask {
+                title: "t".into(),
+                description: String::new(),
+                column: None,
+                priority: None,
+                labels: vec![],
+                depends_on: vec![],
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    fn move_to(board: &mut Board, id: &str, column: &str) -> Task {
+        patch_task(
+            board,
+            id,
+            TaskPatch {
+                column: Some(column.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn claiming_starts_the_doing_clock_and_leaving_doing_stops_it() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        assert_eq!(board.tasks[0].doing_since, None);
+
+        let claimed = claim_task(&mut board, &id, "ava").unwrap();
+        assert!(claimed.doing_since.is_some());
+
+        assert_eq!(move_to(&mut board, &id, "review").doing_since, None);
+        assert!(move_to(&mut board, &id, "doing").doing_since.is_some());
+    }
+
+    #[test]
+    fn staying_in_doing_keeps_the_original_stamp() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        let since = claim_task(&mut board, &id, "ava").unwrap().doing_since;
+
+        assert_eq!(move_to(&mut board, &id, "doing").doing_since, since);
+        assert_eq!(
+            claim_task(&mut board, &id, "ava").unwrap().doing_since,
+            since
+        );
+    }
+
+    #[test]
+    fn a_task_written_before_doing_since_existed_still_loads() {
+        let board: Board = serde_json::from_str(
+            r#"{"tasks":[{"id":"a","title":"x","column":"doing","created_at":1,"updated_at":1}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(board.tasks[0].doing_since, None);
+        let written = serde_json::to_string(&board).unwrap();
+        assert!(!written.contains("doing_since"));
     }
 
     #[test]

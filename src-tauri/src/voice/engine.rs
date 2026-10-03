@@ -33,7 +33,7 @@ pub struct VoiceConfig {
     /// every engine: it saves Whisper a detection pass and stops it switching
     /// language mid-sentence on a bilingual speaker.
     pub language: Option<String>,
-    pub api_key: String,
+    // No API key: it is read from the keychain where it is used, see `key`.
     /// Send the transcript through a small model to clean it up.
     pub cleanup: bool,
     pub cleanup_model: String,

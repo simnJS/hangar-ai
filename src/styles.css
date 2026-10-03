@@ -2,7 +2,9 @@
    so switching a terminal theme restyles the whole window. */
 
 :root {
-  --sidebar-w: 248px;
+  /* Set from Settings.uiScale; every interface font size is multiplied by it. */
+  --ui-scale: 1;
+  --sidebar-w: calc(248px * var(--ui-scale));
   /* Squared-off everywhere: no rounding, panes share hairline separators. */
   --radius: 0;
   --radius-sm: 0;
@@ -23,7 +25,7 @@ body,
 
 body {
   font-family: var(--ui-font);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   color: var(--fg);
   background: var(--bg);
   overflow: hidden;
@@ -108,7 +110,7 @@ select {
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px 6px 16px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -134,7 +136,7 @@ select {
 .sidebar__empty {
   margin: 18px 10px;
   color: var(--fg-subtle);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   line-height: 1.6;
   /* Translations carry their own line breaks. */
   white-space: pre-line;
@@ -183,7 +185,7 @@ select {
 }
 
 .ws__path {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   white-space: nowrap;
   overflow: hidden;
@@ -197,19 +199,87 @@ select {
   border-radius: 0;
   background: var(--surface-active);
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-variant-numeric: tabular-nums;
+}
+
+/* The workspace's agents, from the panes' own states (lib/agentState). */
+.sidebar__activity {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.sidebar__activity-chip {
+  min-width: 15px;
+  padding: 1px 4px;
+  text-align: center;
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--bg);
+}
+
+.sidebar__activity-chip--waiting {
+  background: var(--warning);
+}
+
+.sidebar__activity-chip--yours {
+  background: var(--success);
+}
+
+.sidebar__activity-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+/* One line for the account behind every pane: the plan's usage windows. */
+.plan {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 0 2px 4px;
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--fg-subtle);
+  cursor: default;
+}
+
+.plan__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: calc(9.5px * var(--ui-scale));
+  font-weight: 650;
+}
+
+.plan__window strong {
+  color: var(--fg-muted);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__window--warn strong {
+  color: var(--warning);
+}
+
+.plan__window--hot strong {
+  color: var(--danger);
 }
 
 /* Row controls stay out of the way until the row is under the pointer, so a
    list of workspaces reads as names rather than as a wall of icons. */
 .ws__action {
+  display: grid;
+  place-items: center;
   border: 0;
   background: transparent;
   color: var(--fg-subtle);
   cursor: pointer;
-  padding: 0 2px;
-  font-size: 15px;
+  padding: 2px;
+  font-size: calc(15px * var(--ui-scale));
   line-height: 1;
   opacity: 0;
   transition: opacity var(--dur), color var(--dur);
@@ -287,7 +357,7 @@ select {
 .folder__chevron {
   flex: none;
   width: 10px;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   text-align: center;
   color: var(--fg-subtle);
   transition: transform var(--dur);
@@ -300,7 +370,7 @@ select {
 .folder__name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -323,7 +393,7 @@ select {
   margin: 0 0 4px;
   padding: 6px 9px;
   border: 1px dashed var(--border);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -356,7 +426,7 @@ select {
   place-items: center;
   margin-bottom: 4px;
   border: 1px dashed transparent;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -391,7 +461,7 @@ body.is-sorting * {
 
 .ctx-menu__head {
   padding: 3px 7px 4px;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -488,7 +558,7 @@ body.is-sorting * {
   border: 0;
   background: transparent;
   color: var(--fg-subtle);
-  font-size: 19px;
+  font-size: calc(19px * var(--ui-scale));
   line-height: 1;
   cursor: pointer;
   padding: 2px 6px;
@@ -528,12 +598,12 @@ body.is-sorting * {
 
 .topbar__name {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   font-weight: 650;
 }
 
 .topbar__path {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   white-space: nowrap;
   overflow: hidden;
@@ -585,7 +655,7 @@ body.is-sorting * {
 
 .placeholder h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
@@ -624,6 +694,126 @@ body.is-sorting * {
 /* The pane being dragged stays in place, dimmed, as its own drop origin. */
 .grid__slot.is-dragging {
   opacity: 0.45;
+}
+
+/* ---------- Pane zoom ---------- */
+
+/* One pane over the whole grid. The others are display:none rather than
+   unmounted, which keeps their PTYs alive and — since the fit addon ignores a
+   host it cannot measure — at the size they had. */
+.grid--zoomed {
+  --zoombar-h: 28px;
+}
+
+.grid__slot.is-behind {
+  display: none;
+}
+
+/* Nowhere to drop a pane while the others are out of sight. */
+.grid--zoomed .pane__bar {
+  cursor: default;
+}
+
+.zoombar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  height: var(--zoombar-h);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--accent);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.zoombar__tag {
+  flex: none;
+  height: 17px;
+  padding: 0 7px;
+  margin-right: 6px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.zoombar__tab {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 550;
+  padding: 3px 9px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+
+.zoombar__tab:hover {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.zoombar__tab.is-active {
+  color: var(--fg);
+  background: var(--surface-active);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.zoombar__spacer {
+  flex: 1;
+}
+
+.zoombar__restore {
+  flex: none;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 9px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+
+.zoombar__restore:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/* ---------- File drop ---------- */
+
+/* Over the pane a file dragged from the desktop would land on. Inert: the drop
+   is the native one, the pointer never reaches the page during it. */
+.grid__filedrop {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.grid__filedrop-label {
+  padding: 6px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--accent);
+  color: var(--fg);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 550;
 }
 
 .splitter {
@@ -754,7 +944,7 @@ body.is-dragging-pane .pane__bar {
   border-radius: 0;
   background: var(--surface-active);
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 650;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -769,7 +959,7 @@ body.is-dragging-pane .pane__bar {
   border: 0;
   background: transparent;
   color: var(--fg-muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   font-weight: 550;
   padding: 2px 4px;
   border-radius: 0;
@@ -796,10 +986,13 @@ body.is-dragging-pane .pane__bar {
 }
 
 .pane__session {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg-subtle);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-family: ui-monospace, Consolas, monospace;
   padding: 1px 6px;
   border-radius: 0;
@@ -822,47 +1015,107 @@ body.is-dragging-pane .pane__bar {
   flex: 1;
 }
 
+/* The app's SVG icons sit on the text baseline's centre, whatever the font. */
+.icon {
+  display: block;
+  flex: none;
+}
+
 .pane__warn {
   display: grid;
   place-items: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 0;
-  background: var(--warning);
-  color: var(--bg);
-  font-size: 10px;
-  font-weight: 700;
+  color: var(--warning);
 }
 
 .pane__attn {
   display: grid;
   place-items: center;
-  width: 15px;
-  height: 15px;
   color: var(--warning);
-  font-size: 11px;
-  line-height: 1;
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-.pane__status {
+/*
+ * Where the pane stands: the shell's life until it runs, then the agent's
+ * state. Only `waiting` adds a word — it is the one that needs an answer.
+ */
+.pane__state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pane__state-dot {
   width: 7px;
   height: 7px;
-  border-radius: 0;
   background: var(--fg-subtle);
 }
 
-.pane__status--starting {
+.pane__state--starting .pane__state-dot {
   background: var(--warning);
   animation: pulse 1.1s ease-in-out infinite;
 }
 
-.pane__status--running {
+.pane__state--running .pane__state-dot {
   background: var(--success);
 }
 
-.pane__status--exited {
+.pane__state--exited .pane__state-dot {
   background: var(--danger);
+}
+
+.pane__state--idle .pane__state-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-subtle);
+}
+
+.pane__state--working .pane__state-dot {
+  background: var(--accent);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.pane__state--yours .pane__state-dot {
+  background: var(--success);
+}
+
+.pane__state--waiting {
+  padding: 1px 5px 1px 4px;
+  background: var(--warning);
+  color: var(--bg);
+}
+
+.pane__state--waiting .pane__state-dot {
+  background: var(--bg);
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+.pane__state-word {
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Prompts held for the agent; a click drops them. */
+.pane__queue {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 0;
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+
+.pane__queue:hover {
+  color: var(--bg);
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 /*
@@ -900,7 +1153,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .pane__ctxpct {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -913,14 +1166,22 @@ body.is-dragging-pane .pane__bar {
 }
 
 .pane__action {
+  display: grid;
+  place-items: center;
   border: 0;
   background: transparent;
   color: var(--fg-subtle);
   cursor: pointer;
-  font-size: 13px;
-  padding: 2px 5px;
+  font-size: calc(13px * var(--ui-scale));
+  padding: 3px 4px;
   border-radius: 0;
   transition: color var(--dur), background var(--dur);
+}
+
+.pane__action:focus-visible,
+.pane__queue:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .pane__action:hover {
@@ -953,6 +1214,117 @@ body.is-dragging-pane .pane__bar {
   background: transparent !important;
 }
 
+/* The terminal and what floats over it. */
+.pane__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Terminal search ---------- */
+
+/* Top right of the terminal, clear of its scrollbar, and shrinking with the
+   pane: an 8-pane layout leaves little room. */
+.term-search {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 5;
+  max-width: calc(100% - 28px);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 10px 26px -18px var(--shadow);
+}
+
+.term-search__input {
+  flex: 0 1 180px;
+  min-width: 48px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: calc(12px * var(--ui-scale));
+  outline: none;
+}
+
+.term-search__input:focus {
+  border-color: var(--accent);
+}
+
+.term-search__input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.term-search__count {
+  flex: none;
+  min-width: 44px;
+  padding: 0 6px;
+  text-align: center;
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.term-search__count.is-missed {
+  color: var(--danger);
+}
+
+.term-search__opt,
+.term-search__btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+
+.term-search__opt {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.term-search__opt:hover,
+.term-search__btn:hover:enabled {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.term-search__opt.is-on {
+  color: var(--accent);
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+.term-search__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.term-search__sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--border-strong);
+}
+
 /* ---------- Broadcast bar ---------- */
 
 .broadcast {
@@ -966,7 +1338,7 @@ body.is-dragging-pane .pane__bar {
 
 .broadcast__icon {
   color: var(--accent);
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-scale));
 }
 
 .broadcast__input {
@@ -1031,7 +1403,7 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   font-weight: 650;
 }
 
@@ -1057,7 +1429,7 @@ body.is-dragging-pane .pane__bar {
 
 .settings__search-icon {
   color: var(--fg-subtle);
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   line-height: 1;
 }
 
@@ -1120,7 +1492,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .settings__nav-icon {
-  width: 15px;
+  width: calc(15px * var(--ui-scale));
   text-align: center;
   color: var(--fg-subtle);
 }
@@ -1131,7 +1503,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .settings__nav-count {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
 }
@@ -1152,7 +1524,7 @@ body.is-dragging-pane .pane__bar {
 
 .settings__page-title {
   margin: 0;
-  font-size: 19px;
+  font-size: calc(19px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -1170,7 +1542,7 @@ body.is-dragging-pane .pane__bar {
 
 .set-section__title {
   margin: 0;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1179,7 +1551,7 @@ body.is-dragging-pane .pane__bar {
 
 .set-section__hint {
   margin: -4px 0 0;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -1196,7 +1568,7 @@ body.is-dragging-pane .pane__bar {
 .theme-group__label {
   display: block;
   margin-bottom: 7px;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1230,7 +1602,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .theme-card__name {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   font-weight: 550;
 }
 
@@ -1279,7 +1651,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .set-row__hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -1333,14 +1705,14 @@ body.is-dragging-pane .pane__bar {
 .set-value {
   min-width: 62px;
   text-align: right;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
 }
 
 .set-text {
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
@@ -1447,7 +1819,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .font-card__name {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -1557,7 +1929,7 @@ body.is-dragging-pane .pane__bar {
   height: 24px;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 700;
   color: var(--accent-fg);
   background: var(--accent);
@@ -1580,7 +1952,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .dc-card__head {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1589,18 +1961,18 @@ body.is-dragging-pane .pane__bar {
 }
 
 .dc-card__name {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--ui-scale));
   color: var(--fg);
 }
 
 .dc-card__details,
 .dc-card__state {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
 .dc-card__time {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-subtle);
   font-variant-numeric: tabular-nums;
 }
@@ -1610,7 +1982,7 @@ body.is-dragging-pane .pane__bar {
   align-self: flex-start;
   margin-top: 8px;
   padding: 4px 12px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg);
   background: var(--surface-hover);
   border: 1px solid var(--border);
@@ -1621,7 +1993,7 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
@@ -1701,13 +2073,13 @@ body.is-dragging-pane .pane__bar {
 
 .modal__head h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   font-weight: 650;
 }
 
 .modal__sub {
   margin: 0 14px 10px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   font-family: ui-monospace, Consolas, monospace;
   white-space: nowrap;
@@ -1736,7 +2108,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .modal__note {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -1768,7 +2140,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .session__meta {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   font-family: ui-monospace, Consolas, monospace;
 }
@@ -1803,6 +2175,7 @@ body.is-dragging-pane .pane__bar {
 
 .board {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1823,23 +2196,56 @@ body.is-dragging-pane .pane__bar {
 
 .board__hint {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg-subtle);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
+.board__filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.board__filter {
+  max-width: calc(160px * var(--ui-scale));
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: calc(11.5px * var(--ui-scale));
+  outline: none;
+  cursor: pointer;
+}
+
+.board__filter:focus-visible {
+  border-color: var(--accent-ring);
+}
+
+/* A filter left on hides cards; it has to be visible from across the room. */
+.board__filter.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Capped: stretched over a wide screen, four columns are mostly empty space.
+   The separators are borders rather than a gap over a coloured background,
+   which would paint the room left over after the last column. */
 .board__columns {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1px;
-  background: var(--border);
+  grid-template-columns: repeat(4, minmax(0, 360px));
+  background: var(--bg);
 }
 
 .column {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  border-right: 1px solid var(--border);
   background: var(--bg);
   transition: background var(--dur);
 }
@@ -1857,7 +2263,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .column__name {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1868,7 +2274,7 @@ body.is-dragging-pane .pane__bar {
   padding: 0 6px;
   background: var(--surface-active);
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-variant-numeric: tabular-nums;
 }
 
@@ -1904,9 +2310,25 @@ body.is-dragging-pane .pane__bar {
   border-left: 2px solid var(--accent);
 }
 
+/* Waiting on other work: board_next_task will not hand it out. */
+.card--blocked {
+  border-left: 2px solid var(--warning);
+}
+
 .card__title {
   margin: 0;
   line-height: 1.45;
+}
+
+.card__blocked {
+  margin: 5px 0 0;
+  color: var(--warning);
+  font-size: calc(11px * var(--ui-scale));
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card__meta {
@@ -1925,7 +2347,7 @@ body.is-dragging-pane .pane__bar {
   padding: 1px 6px;
   background: var(--surface-active);
   color: var(--fg-subtle);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   white-space: nowrap;
 }
 
@@ -1939,6 +2361,20 @@ body.is-dragging-pane .pane__bar {
   background: color-mix(in srgb, var(--warning) 22%, transparent);
   color: var(--warning);
   font-weight: 600;
+}
+
+button.chip--link {
+  border: 0;
+  font: inherit;
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.chip--link:hover,
+button.chip--link:focus-visible {
+  text-decoration: underline;
+  outline: none;
 }
 
 .column__add {
@@ -1959,6 +2395,366 @@ body.is-dragging-pane .pane__bar {
   border-style: solid;
   border-color: var(--accent-ring);
   background: var(--bg-sunken);
+}
+
+/* ---------- Board panel beside the terminals ---------- */
+
+/* Holds the grids, the full-width views and the panel, in one row. */
+.workarea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.workarea > .memory {
+  min-width: 0;
+}
+
+/* Keeps its width: the terminals are the ones that give way, down to what
+   the max-width leaves them. */
+.board-dock {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  max-width: calc(100% - 320px);
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.board-dock__grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 5px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  transition: background var(--dur);
+}
+
+.board-dock__grip::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.board-dock__grip:hover,
+.board-dock__grip:focus-visible,
+.board-dock__grip.is-active {
+  background: var(--accent);
+  outline: none;
+}
+
+body.is-dragging-pane .board-dock__grip {
+  pointer-events: none;
+}
+
+.board--dock .board__bar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.board--dock .board__count {
+  white-space: nowrap;
+}
+
+.board--dock .board__filter {
+  max-width: calc(130px * var(--ui-scale));
+}
+
+.board__dock-actions {
+  display: flex;
+  gap: 2px;
+}
+
+/* Too narrow for four columns side by side: they stack, and the panel
+   scrolls as a whole rather than column by column. */
+.board--dock .board__columns {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.board--dock .column {
+  flex: none;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.board--dock .column__list {
+  flex: none;
+  overflow: visible;
+}
+
+.column__head--toggle {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.column__head--toggle:hover,
+.column__head--toggle:focus-visible {
+  background: var(--surface-hover);
+  outline: none;
+}
+
+.column--folded .column__head--toggle {
+  border-bottom: 0;
+}
+
+.column__caret {
+  display: inline-block;
+  width: 1.2em;
+}
+
+/* ---------- Diff view ---------- */
+
+.modal--diff {
+  width: min(1240px, 95vw);
+  height: 84vh;
+  max-height: 84vh;
+}
+
+.diff__label {
+  margin-left: 10px;
+  color: var(--fg-subtle);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 400;
+}
+
+.diff__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.diff__root {
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.diff__seg {
+  flex: none;
+}
+
+.diff__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: calc(11.5px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.diff__base {
+  color: var(--fg-subtle);
+}
+
+.diff__add,
+.diff__del {
+  font-variant-numeric: tabular-nums;
+}
+
+.diff__add {
+  color: var(--success);
+}
+
+.diff__del {
+  color: var(--danger);
+}
+
+.diff__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 30%) 1fr;
+}
+
+.diff__files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+  border-right: 1px solid var(--border);
+}
+
+.diff__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  font-size: calc(12px * var(--ui-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff__file:hover {
+  background: var(--surface-hover);
+}
+
+.diff__file.is-active {
+  background: var(--accent-soft);
+}
+
+.diff__file:focus-visible {
+  outline: 1px solid var(--accent-ring);
+  outline-offset: -1px;
+}
+
+.diff__status {
+  flex: none;
+  width: 1.4em;
+  color: var(--fg-subtle);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 700;
+  text-align: center;
+}
+
+.diff__status--M {
+  color: var(--warning);
+}
+
+.diff__status--A,
+.diff__status--new {
+  color: var(--success);
+}
+
+.diff__status--D,
+.diff__status--U {
+  color: var(--danger);
+}
+
+.diff__status--R,
+.diff__status--C {
+  color: var(--accent);
+}
+
+.diff__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff__dir {
+  color: var(--fg-subtle);
+}
+
+.diff__counts {
+  flex: none;
+  display: flex;
+  gap: 5px;
+  font-size: calc(10.5px * var(--ui-scale));
+}
+
+.diff__view {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.5;
+}
+
+.diff__row td {
+  padding: 0 8px;
+  white-space: pre;
+  vertical-align: top;
+}
+
+/* Numbers and signs stay out of a copied selection: what gets copied is code. */
+.diff__num {
+  width: 1%;
+  min-width: 3ch;
+  color: var(--fg-subtle);
+  text-align: right;
+  user-select: none;
+}
+
+.diff__row td.diff__sign {
+  width: 1%;
+  padding: 0 4px;
+  color: var(--fg-subtle);
+  user-select: none;
+}
+
+.diff__code {
+  width: 100%;
+}
+
+.diff__row--add {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+}
+
+.diff__row--add .diff__sign {
+  color: var(--success);
+}
+
+.diff__row--del {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.diff__row--del .diff__sign {
+  color: var(--danger);
+}
+
+.diff__row--hunk td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.diff__row--note td {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.diff__empty {
+  margin: 0;
+  padding: 28px 16px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+.diff__note {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--warning);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.diff__error {
+  margin: 12px;
 }
 
 /* ---------- Task dialog ---------- */
@@ -2023,11 +2819,11 @@ body.is-dragging-pane .pane__bar {
 .thread__author {
   font-weight: 600;
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
 }
 
 .thread__time {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -2088,7 +2884,7 @@ body.is-dragging-pane .pane__bar {
 
 .target__badge {
   font-style: normal;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 500;
   padding: 0 5px;
   background: var(--accent-soft);
@@ -2107,7 +2903,7 @@ body.is-dragging-pane .pane__bar {
 
 .target__path {
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2148,7 +2944,7 @@ body.is-dragging-pane .pane__bar {
   background: var(--bg);
   border: 1px solid var(--border);
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   overflow-x: auto;
   white-space: pre;
   user-select: all;
@@ -2193,7 +2989,7 @@ body.is-dragging-pane .pane__bar {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -2204,7 +3000,7 @@ body.is-dragging-pane .pane__bar {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -2239,7 +3035,7 @@ body.is-dragging-pane .pane__bar {
   flex: 1;
   min-width: 0;
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .layouts--lg {
@@ -2249,7 +3045,7 @@ body.is-dragging-pane .pane__bar {
 .layouts--lg .layouts__btn {
   min-width: 46px;
   padding: 6px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
 }
 
 .agent-counters {
@@ -2280,7 +3076,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .counter__missing {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-style: normal;
   font-weight: 500;
   color: var(--warning);
@@ -2301,7 +3097,7 @@ body.is-dragging-pane .pane__bar {
   border: 1px solid var(--border);
   background: var(--bg);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   line-height: 1;
   transition: background var(--dur), border-color var(--dur), opacity var(--dur);
 }
@@ -2349,7 +3145,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .preview__tag {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -2358,7 +3154,7 @@ body.is-dragging-pane .pane__bar {
   position: absolute;
   top: 4px;
   left: 6px;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--fg-subtle);
@@ -2393,7 +3189,7 @@ body.is-dragging-pane .pane__bar {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .notice__text {
@@ -2408,7 +3204,7 @@ body.is-dragging-pane .pane__bar {
 
 .btn--tiny {
   padding: 3px 9px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
 }
 
 .roots {
@@ -2451,7 +3247,7 @@ body.is-dragging-pane .pane__bar {
 
 .root__name {
   font-weight: 550;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .root__path {
@@ -2459,12 +3255,12 @@ body.is-dragging-pane .pane__bar {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
 .root__tag {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -2520,7 +3316,7 @@ body.is-dragging-pane .pane__bar {
 .keymap__state {
   flex: 0 0 auto;
   padding: 5px 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--fg-subtle);
   border: 1px solid var(--border);
 }
@@ -2533,7 +3329,7 @@ body.is-dragging-pane .pane__bar {
 
 .keymap__group-title {
   margin: 0 0 5px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -2582,7 +3378,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .key-row__tag {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--accent);
@@ -2597,7 +3393,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .key-row__none {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   font-style: italic;
   color: var(--fg-subtle);
 }
@@ -2631,7 +3427,7 @@ body.is-dragging-pane .pane__bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--danger);
 }
 
@@ -2686,7 +3482,7 @@ body.is-dragging-pane .pane__bar {
 .kbd-seq kbd {
   padding: 3px 5px;
   font-family: var(--ui-font);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   line-height: 1;
   white-space: nowrap;
   color: var(--fg);
@@ -2722,11 +3518,11 @@ body.is-dragging-pane .pane__bar {
 }
 
 .key-rec__prompt {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
 }
 
 .key-rec__hint {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -2740,7 +3536,7 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
   background: var(--bg-sunken);
   border: 1px solid var(--border-strong);
@@ -2790,7 +3586,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .voice-pill__text {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .voice-pill__sep {
@@ -2855,6 +3651,12 @@ body.is-dragging-pane .pane__bar {
   .voice-pill__bars i {
     transition: none;
   }
+  /* The colour already tells the state; the blinking only adds urgency. */
+  .pane__attn,
+  .pane__state-dot,
+  .sidebar__activity-dot {
+    animation: none !important;
+  }
 }
 
 /* The local model block in the settings ---------------------------------- */
@@ -2876,11 +3678,11 @@ body.is-dragging-pane .pane__bar {
 }
 
 .vm__name {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
 }
 
 .vm__state {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -2890,7 +3692,7 @@ body.is-dragging-pane .pane__bar {
 
 .vm__meta {
   margin: 0;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.5;
   color: var(--fg-subtle);
   /* Twenty-five language codes wrap; without this they push the card wide. */
@@ -2906,7 +3708,7 @@ body.is-dragging-pane .pane__bar {
 
 .vm__note {
   margin: 0;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
@@ -2973,7 +3775,7 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
 }
 
@@ -3083,7 +3885,7 @@ body.is-dragging-pane .pane__bar {
 .memory__hint {
   flex: 1;
   color: var(--fg-subtle);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 /* A refused write — a limit, a missing title — says so where it happened. */
@@ -3132,7 +3934,7 @@ body.is-dragging-pane .pane__bar {
 .memory__empty h3 {
   margin: 0 0 8px;
   color: var(--fg);
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
 }
 
 .memory__empty p {
@@ -3187,7 +3989,7 @@ body.is-dragging-pane .pane__bar {
 .mem__caret {
   flex: none;
   color: var(--fg-subtle);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
 }
 
 .mem__title {
@@ -3199,7 +4001,7 @@ body.is-dragging-pane .pane__bar {
 .mem__time {
   flex: none;
   color: var(--fg-subtle);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   white-space: nowrap;
 }
 
@@ -3250,7 +4052,7 @@ body.is-dragging-pane .pane__bar {
 
 .mem__created {
   color: var(--fg-subtle);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
 }
 
 /* ---------- Saved commands ---------- */
@@ -3293,7 +4095,7 @@ body.is-dragging-pane .pane__bar {
 
 .cmd-menu__head {
   padding: 3px 7px;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -3348,7 +4150,7 @@ body.is-dragging-pane .pane__bar {
 
 .cmd-item__cmd {
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   color: var(--fg-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3357,11 +4159,11 @@ body.is-dragging-pane .pane__bar {
 
 .cmd-item__tag {
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
 }
 
 .cmd-item__keys {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--fg-subtle);
   font-family: ui-monospace, Consolas, monospace;
   white-space: nowrap;
@@ -3372,11 +4174,13 @@ body.is-dragging-pane .pane__bar {
    the keyboard could never reach them. */
 .cmd-item__btn {
   flex: none;
+  display: grid;
+  place-items: center;
   padding: 3px 5px;
   border: 0;
   background: transparent;
   color: var(--fg-subtle);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   cursor: pointer;
   opacity: 0;
   transition: opacity var(--dur), color var(--dur), background var(--dur);
@@ -3411,5 +4215,5 @@ body.is-dragging-pane .pane__bar {
 
 .text-input--mono {
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }

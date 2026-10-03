@@ -72,6 +72,12 @@ whisper-rs = { version = "0.16", default-features = false }
 # number that matters is physical cores, not logical — see voice/local.rs.
 num_cpus = "1.17"
 
+# The Groq key, in the OS keychain instead of state.json — see voice/key.rs.
+# `v1` is the set of native stores: Windows Credential Manager, the macOS
+# Keychain, and the Secret Service on Linux through zbus, which is pure Rust and
+# needs no libdbus on the build machine.
+keyring = { version = "4.2", default-features = false, features = ["v1"] }
+
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.
 [target.'cfg(unix)'.dependencies]

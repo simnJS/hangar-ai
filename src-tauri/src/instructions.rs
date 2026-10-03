@@ -87,6 +87,14 @@ Before editing a central file, check with `board_list_tasks` that no other agent
 a `doing` task covering the same area. If one does, leave a comment on their task
 rather than editing the same files at the same time.
 
+### Talking to the agent next door
+
+Claude Code sessions in Hangar.AI are named after their pane. When another agent needs
+to know something now (you changed a file it is working on, you answered its question),
+message it directly with `SendMessage` to the name of its pane, for example `@alice`;
+`/list-agents` shows who is reachable. The board stays the record: write the same thing
+there if it matters beyond this moment.
+
 ## Global memory
 
 You also have a **persistent global memory**, reached through the MCP tools prefixed

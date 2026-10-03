@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { Translator } from "../../i18n";
-import { voiceModelDownload, voiceModels } from "../../lib/ipc";
+import {
+  voiceKeyClear,
+  voiceKeySet,
+  voiceKeyStatus,
+  voiceModelDownload,
+  voiceModels,
+} from "../../lib/ipc";
 import type { VoiceDownload, VoiceModel } from "../../lib/voice";
 
 /**
@@ -108,6 +114,188 @@ export function VoiceCard({ t, selected }: { t: Translator; selected: string }) 
               : t("settings.voiceDownload", { size: formatBytes(model.approxBytes) })}
           </button>
           {!model.installed && <span className="vm__note">{t("settings.voiceMissing")}</span>}
+        </div>
+      )}
+
+      {error && <p className="vm__note vm__note--error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The Groq key, which lives in the system keychain.
+ *
+ * A card rather than a text field: a field would have to hold the key to show
+ * it, and the window is not given it back once saved. So it says whether one
+ * is there, and offers to replace or clear it.
+ */
+export function VoiceKeyCard({
+  t,
+  legacyKey,
+  dropLegacy,
+}: {
+  t: Translator;
+  /** A plaintext key an older version left in state.json, still there only
+      because the keychain refused it at launch. */
+  legacyKey: string;
+  dropLegacy: () => void;
+}) {
+  /** `null` until the keychain answers, and while it cannot be reached. */
+  const [saved, setSaved] = useState<boolean | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [replacing, setReplacing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () =>
+    voiceKeyStatus()
+      .then((present) => {
+        setSaved(present);
+        setUnavailable(null);
+      })
+      .catch((err) => {
+        setSaved(null);
+        setUnavailable(String(err));
+      });
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function act(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  }
+
+  async function save(key: string) {
+    const ok = await act(() => voiceKeySet(key.trim()));
+    if (!ok) return;
+    setDraft("");
+    setReplacing(false);
+    // Whatever the keychain now holds supersedes the plaintext copy.
+    if (legacyKey) dropLegacy();
+  }
+
+  async function clear() {
+    setArmed(false);
+    await act(voiceKeyClear);
+  }
+
+  const asking = saved === false || replacing;
+
+  return (
+    <div className="vm">
+      <div className="vm__head">
+        <span className={`vm__state ${saved ? "is-ready" : ""}`}>
+          {unavailable
+            ? t("settings.voiceKeyUnavailableShort")
+            : saved === null
+              ? ""
+              : saved
+                ? t("settings.voiceKeySaved")
+                : t("settings.voiceKeyNone")}
+        </span>
+      </div>
+
+      <p className="vm__meta">{t("settings.voiceKeyHint")}</p>
+
+      {unavailable && (
+        <p className="vm__note vm__note--error">
+          {t("settings.voiceKeyUnavailable", { error: unavailable })}
+        </p>
+      )}
+
+      {legacyKey !== "" && (
+        <>
+          <p className="vm__note vm__note--error">{t("settings.voiceKeyLegacy")}</p>
+          <div className="vm__actions">
+            {!unavailable && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={() => save(legacyKey)}
+              >
+                {t("settings.voiceKeyLegacyMove")}
+              </button>
+            )}
+            <button type="button" className="btn btn--danger" onClick={dropLegacy}>
+              {t("settings.voiceKeyLegacyDrop")}
+            </button>
+          </div>
+        </>
+      )}
+
+      {!unavailable && asking && (
+        <div className="vm__actions">
+          <input
+            type="password"
+            className="set-input"
+            style={{ flex: "1 1 220px", width: "auto" }}
+            value={draft}
+            placeholder={t("settings.voiceKeyPlaceholder")}
+            aria-label={t("settings.voiceKey")}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && draft.trim()) save(draft);
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={busy || !draft.trim()}
+            onClick={() => save(draft)}
+          >
+            {t("settings.voiceKeySave")}
+          </button>
+          {replacing && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                setReplacing(false);
+                setDraft("");
+              }}
+            >
+              {t("create.cancel")}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!unavailable && saved && !replacing && (
+        <div className="vm__actions">
+          <button type="button" className="btn" onClick={() => setReplacing(true)}>
+            {t("settings.voiceKeyReplace")}
+          </button>
+          {armed ? (
+            <>
+              <button type="button" className="btn btn--ghost" onClick={() => setArmed(false)}>
+                {t("create.cancel")}
+              </button>
+              <button type="button" className="btn btn--danger" disabled={busy} onClick={clear}>
+                {t("settings.voiceKeyClearConfirm")}
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn" onClick={() => setArmed(true)}>
+              {t("settings.voiceKeyClear")}
+            </button>
+          )}
         </div>
       )}
 

@@ -32,6 +32,7 @@ mock/notification.ts  stays silent rather than prompting a visitor
 backend/index.ts      one switch over every command src-tauri exposes
 backend/state.ts      the workspaces, shells and sessions a machine reported
 backend/board.ts      the task board, in memory, raising board:changed
+backend/memory.ts     the global memory, seeded, raising memory:changed
 backend/shell.ts      the pseudo-terminal: a shell, and an agent mode
 backend/replies.ts    what the agents answer
 ```

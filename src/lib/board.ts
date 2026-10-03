@@ -27,6 +27,22 @@ export interface Task {
   created_at: number;
   updated_at: number;
   order: number;
+  /** When the task last entered `doing`. Missing outside `doing`, and on
+      tasks moved there before the board recorded it. */
+  doing_since?: number | null;
+}
+
+/**
+ * The dependencies still holding a task back, as `next_task` sees them: any
+ * id that is not a done task, including one that no longer exists — a deleted
+ * dependency blocks forever, which is exactly what needs showing.
+ */
+export function blockersOf(task: Task, byId: Map<string, Task>): (Task | string)[] {
+  return task.depends_on.flatMap((id): (Task | string)[] => {
+    const dep = byId.get(id);
+    if (!dep) return [id];
+    return dep.column === "done" ? [] : [dep];
+  });
 }
 
 export interface TaskPatch {

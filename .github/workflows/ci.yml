@@ -44,6 +44,12 @@ jobs:
       - name: Typecheck and build
         run: pnpm build
 
+      # The frontend's pure logic, under Node: the split tree, keybindings, the
+      # sidebar order, hand-back detection. The tests themselves were already
+      # type-checked by the step above, which covers everything under src/.
+      - name: Unit tests
+        run: pnpm test
+
       # The same command Vercel runs, so a site that will not build is a red
       # check on the commit rather than a failed production deployment nobody
       # is told about. It is what caught nothing on the day five of them went

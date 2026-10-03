@@ -125,6 +125,8 @@ const INHERITED_SESSION_MARKERS: &[&str] = &[
     "CLAUDE_PID",
 ];
 
+// The arguments are the command's IPC fields, named as the frontend sends them.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn pty_spawn(
     app: AppHandle,
@@ -134,6 +136,8 @@ pub fn pty_spawn(
     shell: Option<crate::shells::ShellInfo>,
     cols: u16,
     rows: u16,
+    name: Option<String>,
+    bridge: Option<bool>,
 ) -> Result<(), String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
@@ -191,6 +195,10 @@ pub fn pty_spawn(
     cmd.env("TERM", "xterm-256color");
     for marker in INHERITED_SESSION_MARKERS {
         cmd.env_remove(marker);
+    }
+    // Lets a Claude Code started in this pane load the hangar-bridge mod.
+    if bridge != Some(false) {
+        crate::bridge::apply_env(&mut cmd, &id, name.as_deref());
     }
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
@@ -292,6 +300,7 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_kill(app: AppHandle, manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+    crate::bridge::forget(&id);
     // Taken out under the lock, reaped outside it: `wait` blocks until the
     // shell is really gone, and a shell that takes its time — one still
     // tearing down a child agent — would otherwise hold the manager and

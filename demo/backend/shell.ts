@@ -42,6 +42,78 @@ const sessions = new Map<string, Session>();
 
 const out = (s: Session, data: string) => dispatch("pty:output", { id: s.id, data });
 
+/*
+ * The hangar-bridge mod, faked: a real Claude Code reports its turns and
+ * usage to the app, so the demo's does too, and holds the prompts queued
+ * "for when it is free" the way the mod does.
+ */
+const queues = new Map<string, { id: string; text: string }[]>();
+const usage = new Map<string, { tokens: number; turns: number }>();
+let queuedIds = 0;
+
+function bridge(s: Session, event: unknown) {
+  if (s.mode === "claude") dispatch("bridge:event", { paneId: s.id, event });
+}
+
+function reportUsage(s: Session) {
+  const u = usage.get(s.id) ?? { tokens: 38_000, turns: 0 };
+  usage.set(s.id, u);
+  bridge(s, {
+    kind: "usage",
+    context: { tokens: u.tokens, window: 1_000_000, percent: Math.round(u.tokens / 10_000) },
+    rateLimits: [
+      { kind: "five_hour", percentUsed: 34 + u.turns * 3, resetsAt: new Date(Date.now() + 2.5 * 3600e3).toISOString() },
+      { kind: "seven_day", percentUsed: 21 + u.turns, resetsAt: new Date(Date.now() + 3 * 86400e3).toISOString() },
+    ],
+    costUsd: u.tokens / 40_000,
+  });
+}
+
+function queueChanged(id: string) {
+  dispatch("bridge:queue", { paneId: id, pending: queues.get(id) ?? [] });
+}
+
+/** First readable line of what a reply printed, as the mod reports it. */
+function headline(steps: Step[], ctx: Ctx): string {
+  for (const step of [...steps].reverse()) {
+    if (!step.text) continue;
+    const text = typeof step.text === "function" ? step.text(ctx) : step.text;
+    // eslint-disable-next-line no-control-regex
+    const line = text.replace(/\x1b\[[0-9;]*m/g, "").split(/\r?\n/).find((l) => l.trim());
+    if (line) return line.trim();
+  }
+  return "";
+}
+
+/** Runs the next queued prompt once the agent is free, as the mod would. */
+function drain(s: Session) {
+  const queue = queues.get(s.id);
+  if (s.mode !== "claude" || s.busy || !queue?.length) return;
+  const next = queue.shift()!;
+  queueChanged(s.id);
+  out(s, next.text + "\r\n");
+  const steps = agentCommand(s, next.text);
+  if (steps !== "handled" && steps.length) {
+    run(s, steps, { cwd: s.cwd, agent: s.mode });
+  }
+}
+
+export function enqueue(id: string, text: string) {
+  const queued = { id: `q${++queuedIds}`, text };
+  queues.set(id, [...(queues.get(id) ?? []), queued]);
+  queueChanged(id);
+  const s = sessions.get(id);
+  if (s) setTimeout(() => drain(s), 300);
+  return queued;
+}
+
+export function cancelQueued(id: string, queuedId: string | null) {
+  queues.set(id, queuedId ? (queues.get(id) ?? []).filter((q) => q.id !== queuedId) : []);
+  queueChanged(id);
+}
+
+export const queued = (id: string) => queues.get(id) ?? [];
+
 /** The shell's own prompt, in the dialect of whichever shell the pane picked. */
 function prompt(s: Session): string {
   if (s.mode !== "shell") {
@@ -79,6 +151,7 @@ function clearTimers(s: Session) {
 /** Plays a transcript out over time, then hands the prompt back. */
 function run(s: Session, steps: Step[], ctx: Ctx) {
   s.busy = true;
+  bridge(s, { kind: "turn", phase: "start" });
   let at = 0;
   for (const step of steps) {
     at += step.after;
@@ -96,6 +169,20 @@ function run(s: Session, steps: Step[], ctx: Ctx) {
       s.busy = false;
       s.timers = [];
       out(s, "\r\n" + prompt(s));
+      const u = usage.get(s.id);
+      if (u) {
+        u.tokens += 6_500;
+        u.turns += 1;
+      }
+      reportUsage(s);
+      bridge(s, {
+        kind: "turn",
+        phase: "end",
+        reason: "answer",
+        durationMs: at + 320,
+        answer: headline(steps, ctx),
+      });
+      drain(s);
     }, at + 320),
   );
 }
@@ -131,6 +218,13 @@ function enterAgent(s: Session, mode: Exclude<Mode, "shell">, resumeId: string |
       s.busy = false;
       s.timers = [];
       out(s, "\r\n" + prompt(s));
+      bridge(s, {
+        kind: "hello",
+        sessionId: resumed?.id ?? `demo-${s.id.slice(0, 8)}`,
+        model: "claude-opus-5-5",
+        version: "2.1.288",
+      });
+      reportUsage(s);
     }, 260),
   );
 }
@@ -246,6 +340,7 @@ function agentCommand(s: Session, line: string): Step[] | "handled" {
   const a = AGENTS[s.mode];
 
   if (text === "/exit" || text === "/quit") {
+    bridge(s, { kind: "end", reason: "prompt_input_exit" });
     s.mode = "shell";
     return [{ after: 60, text: `\r\n${C.dim}left ${a.label}${C.reset}` }];
   }
@@ -386,6 +481,8 @@ export function kill(id: string): void {
   if (!s) return;
   clearTimers(s);
   sessions.delete(id);
+  queues.delete(id);
+  usage.delete(id);
   dispatch("pty:exit", { id });
 }
 

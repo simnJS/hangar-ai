@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   computeLayout,
+  leafIds,
   MIN_PANE_PX,
   ratioAt,
   withRatio,
@@ -20,6 +21,8 @@ import {
   type Rect,
   type Zone,
 } from "../lib/layout";
+import { useShortcutTitle } from "../lib/useShortcuts";
+import { useT } from "../i18n";
 import type { Pane, SplitNode } from "../types";
 
 /**
@@ -56,6 +59,14 @@ function slotStyle(rect: Rect): CSSProperties {
     height: percent(rect.height),
   };
 }
+
+/** The zoomed pane: everything under the zoom bar. */
+const ZOOMED_SLOT: CSSProperties = {
+  left: 0,
+  top: "var(--zoombar-h)",
+  width: "100%",
+  height: "calc(100% - var(--zoombar-h))",
+};
 
 function handleStyle(handle: Handle): CSSProperties {
   return handle.dir === "row"
@@ -94,6 +105,16 @@ interface Props {
   renderPane: (pane: Pane) => ReactNode;
   onTreeChange: (tree: SplitNode) => void;
   onMove: (dragId: string, targetId: string, zone: Zone) => void;
+  /**
+   * The pane drawn over the whole grid, or null for the arrangement itself.
+   * Purely a way of looking at the tree: the others stay mounted, hidden, and
+   * keep the size they had, so their PTYs are neither killed nor resized.
+   */
+  zoomedId?: string | null;
+  /** Zooms onto a pane, or with null puts every pane back on screen. */
+  onZoom?: (paneId: string | null) => void;
+  /** The pane a file dragged from the desktop would land on, if dropped now. */
+  fileTarget?: { paneId: string; count: number } | null;
   hidden?: boolean;
 }
 
@@ -103,14 +124,31 @@ export function PaneGrid({
   renderPane,
   onTreeChange,
   onMove,
+  zoomedId = null,
+  onZoom,
+  fileTarget = null,
   hidden,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [target, setTarget] = useState<DragTarget | null>(null);
+  const t = useT();
+  const withKeys = useShortcutTitle();
 
   const layout = useMemo(() => computeLayout(tree), [tree]);
+  /** Reading order, which is the order the zoom bar lists the panes in. */
+  const order = useMemo(() => leafIds(tree), [tree]);
+
+  const zoomed = zoomedId && layout.rects[zoomedId] ? zoomedId : null;
+  const zoomedRef = useRef(zoomed);
+  zoomedRef.current = zoomed;
+
+  /**
+   * The header the last press landed on. A double-click is only a zoom when it
+   * lands on that same bar: anywhere in the terminal it selects a word.
+   */
+  const pressedRef = useRef<{ paneId: string; bar: Element } | null>(null);
 
   // Read through a ref so a drag started earlier always sees the live tree.
   const treeRef = useRef(tree);
@@ -196,6 +234,10 @@ export function PaneGrid({
       // pointer from those controls.
       if ((event.target as Element).closest("button, select, input, a")) return;
 
+      pressedRef.current = { paneId, bar: event.currentTarget };
+      // Nowhere to drop it: every other pane is out of sight.
+      if (zoomedRef.current) return;
+
       // Same reasoning as the splitter: captured, the bar keeps receiving the
       // pointer outside the window, so the drag cannot survive its own release.
       const bar = event.currentTarget;
@@ -275,26 +317,86 @@ export function PaneGrid({
       ? zoneRect(layout.rects[target.paneId], target.zone)
       : null;
 
+  function toggleZoom(paneId: string, event: React.MouseEvent) {
+    const pressed = pressedRef.current;
+    const hit = event.target as Element;
+    if (!onZoom || pressed?.paneId !== paneId || !pressed.bar.contains(hit)) return;
+    if (hit.closest("button, select, input, a")) return;
+    // The second press of a double-click has already selected the word under it.
+    window.getSelection()?.removeAllRanges();
+    onZoom(zoomed === paneId ? null : paneId);
+  }
+
+  const names = new Map(panes.map((pane) => [pane.id, pane.name]));
+
   return (
     <DragContext.Provider value={drag}>
-      <div className="grid" ref={hostRef} style={{ display: hidden ? "none" : "block" }}>
+      <div
+        className={`grid ${zoomed ? "grid--zoomed" : ""}`}
+        ref={hostRef}
+        style={{ display: hidden ? "none" : "block" }}
+      >
         {/* Stable order, keyed by pane id: React never remounts a terminal. */}
         {panes.map((pane) => {
           const rect = layout.rects[pane.id];
           if (!rect) return null;
+          const behind = zoomed !== null && zoomed !== pane.id;
           return (
             <div
               key={pane.id}
-              className={`grid__slot ${dragId === pane.id ? "is-dragging" : ""}`}
+              className={`grid__slot ${dragId === pane.id ? "is-dragging" : ""} ${behind ? "is-behind" : ""}`}
               data-slot={pane.id}
-              style={slotStyle(rect)}
+              style={zoomed === pane.id ? ZOOMED_SLOT : slotStyle(rect)}
+              onDoubleClick={(event) => toggleZoom(pane.id, event)}
             >
               {renderPane(pane)}
+              {fileTarget?.paneId === pane.id && (
+                <div className="grid__filedrop" aria-hidden>
+                  <span className="grid__filedrop-label">
+                    {t("drop.paste", { n: Math.max(1, fileTarget.count) })}
+                  </span>
+                </div>
+              )}
             </div>
           );
         })}
 
-        {layout.handles.map((handle) => (
+        {/* Without it a zoomed grid looks like a workspace that lost its other
+            panes. Mouse presses are kept off the buttons' focus: the keyboard
+            stays with the terminal, which is where it is wanted next. */}
+        {zoomed && onZoom && (
+          <div
+            className="zoombar"
+            role="toolbar"
+            aria-label={t("zoom.bar")}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <span className="zoombar__tag" title={t("zoom.others", { n: order.length - 1 })}>
+              {t("zoom.tag")}
+            </span>
+            {order.map((id) => (
+              <button
+                key={id}
+                className={`zoombar__tab ${id === zoomed ? "is-active" : ""}`}
+                aria-pressed={id === zoomed}
+                onClick={() => onZoom(id)}
+                title={t("zoom.show", { name: names.get(id) ?? "" })}
+              >
+                {names.get(id)}
+              </button>
+            ))}
+            <span className="zoombar__spacer" />
+            <button
+              className="zoombar__restore"
+              onClick={() => onZoom(null)}
+              title={withKeys(t("zoom.restore"), "pane.zoom")}
+            >
+              {t("zoom.restore")}
+            </button>
+          </div>
+        )}
+
+        {!zoomed && layout.handles.map((handle) => (
           <div
             key={handle.key}
             data-handle={handle.key}

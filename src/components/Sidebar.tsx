@@ -4,6 +4,8 @@ import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
 import { FolderIcon, FolderMenu } from "./FolderMenu";
+import { Icon } from "./Icon";
+import { usePlanLimits, useWorkspaceActivity } from "../lib/agentState";
 import type { Workspace, WorkspaceFolder } from "../types";
 
 interface Props {
@@ -277,37 +279,41 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
                 {ws.cwd}
               </span>
             </div>
+            <WorkspaceActivityBadge workspaceId={ws.id} />
             <span className="ws__badge">{ws.panes.length}</span>
             {/* Double-click renames too, but nothing on the row says so. */}
             <button
               className="ws__action"
               title={t("sidebar.rename")}
+              aria-label={t("sidebar.rename")}
               onClick={(e) => {
                 e.stopPropagation();
                 startRename(ws.id, ws.name);
               }}
             >
-              ✎
+              <Icon name="pencil" size={12} />
             </button>
             <button
               className="ws__action"
               title={t("worktrees.action")}
+              aria-label={t("worktrees.action")}
               onClick={(e) => {
                 e.stopPropagation();
                 setWorktreesFor(ws.id);
               }}
             >
-              ⎇
+              <Icon name="branch" size={12} />
             </button>
             <button
               className="ws__action ws__remove"
               title={t("sidebar.remove")}
+              aria-label={t("sidebar.remove")}
               onClick={(e) => {
                 e.stopPropagation();
                 removeWorkspace(ws.id);
               }}
             >
-              ×
+              <Icon name="close" size={12} />
             </button>
           </>
         )}
@@ -354,22 +360,24 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
               <button
                 className="ws__action"
                 title={t("sidebar.renameFolder")}
+                aria-label={t("sidebar.renameFolder")}
                 onClick={(e) => {
                   e.stopPropagation();
                   startRename(folder.id, folder.name);
                 }}
               >
-                ✎
+                <Icon name="pencil" size={12} />
               </button>
               <button
                 className="ws__action ws__remove"
                 title={t("sidebar.removeFolder")}
+                aria-label={t("sidebar.removeFolder")}
                 onClick={(e) => {
                   e.stopPropagation();
                   removeFolder(folder.id);
                 }}
               >
-                ×
+                <Icon name="close" size={12} />
               </button>
             </>
           )}
@@ -427,10 +435,12 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
       </nav>
 
       <div className="sidebar__footer">
+        <PlanLimits />
         <button className="btn btn--primary btn--block" onClick={onNewWorkspace}>
           {t("sidebar.new")}
         </button>
         <button className="btn btn--ghost btn--block" onClick={onOpenSettings}>
+          <Icon name="settings" size={13} />
           {t("sidebar.settings")}
         </button>
       </div>
@@ -461,5 +471,77 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
         />
       )}
     </aside>
+  );
+}
+
+/**
+ * What a workspace's agents are up to, readable from any other workspace:
+ * their terminals keep running out of sight. The states that want you come
+ * first and carry a count; work in progress is a dot.
+ */
+function WorkspaceActivityBadge({ workspaceId }: { workspaceId: string }) {
+  const { working, waiting, yours } = useWorkspaceActivity(workspaceId);
+  const t = useT();
+  if (!working && !waiting && !yours) return null;
+  const parts = [
+    waiting && t("sidebar.activityWaiting", { n: waiting }),
+    yours && t("sidebar.activityYours", { n: yours }),
+    working && t("sidebar.activityWorking", { n: working }),
+  ].filter(Boolean);
+  const label = parts.join(" · ");
+  return (
+    <span className="sidebar__activity" title={label} role="status" aria-label={label}>
+      {waiting > 0 && (
+        <span className="sidebar__activity-chip sidebar__activity-chip--waiting">
+          {waiting}
+        </span>
+      )}
+      {yours > 0 && (
+        <span className="sidebar__activity-chip sidebar__activity-chip--yours">{yours}</span>
+      )}
+      {working > 0 && <span className="sidebar__activity-dot" aria-hidden="true" />}
+    </span>
+  );
+}
+
+/**
+ * The plan's rate-limit windows, as the last Claude Code session to report
+ * saw them — one account behind every pane, so one line for all of them.
+ * Nothing shows until a pane with the hangar-bridge mod has reported.
+ */
+function PlanLimits() {
+  const plan = usePlanLimits();
+  const t = useT();
+  if (!plan) return null;
+  const label = (kind: string) =>
+    kind === "five_hour"
+      ? t("sidebar.planFiveHour")
+      : kind === "seven_day"
+        ? t("sidebar.planWeek")
+        : kind.replace(/_/g, " ");
+  const resets = plan.limits
+    .filter((limit) => limit.resetsAt)
+    .map((limit) =>
+      t("sidebar.planResets", {
+        window: label(limit.kind),
+        time: new Date(limit.resetsAt as string).toLocaleString(),
+      }),
+    );
+  const title = [t("sidebar.planHint"), ...resets].join("\n");
+  return (
+    <div className="plan" title={title}>
+      <span className="plan__label">{t("sidebar.plan")}</span>
+      {plan.limits.map((limit) => {
+        const pct = Math.round(limit.percentUsed);
+        return (
+          <span
+            key={limit.kind}
+            className={`plan__window ${pct >= 90 ? "plan__window--hot" : pct >= 70 ? "plan__window--warn" : ""}`}
+          >
+            {label(limit.kind)} <strong>{pct}%</strong>
+          </span>
+        );
+      })}
+    </div>
   );
 }

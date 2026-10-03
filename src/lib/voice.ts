@@ -18,12 +18,12 @@ import type { Settings, VoiceEngine } from "../types";
 
 export type VoicePhase = "idle" | "recording" | "transcribing";
 
-/** What the Rust side is given for a dictation. Mirrors `VoiceConfig`. */
+/** What the Rust side is given for a dictation. Mirrors `VoiceConfig`. No key:
+    Rust reads it from the system keychain itself. */
 export interface VoiceConfig {
   engine: VoiceEngine;
   model: string;
   language: string | null;
-  apiKey: string;
   cleanup: boolean;
   cleanupModel: string;
   cleanupHint: string;
@@ -53,7 +53,6 @@ export function voiceConfig(settings: Settings): VoiceConfig {
     engine: settings.voiceEngine,
     model: local ? settings.voiceModel : settings.voiceCloudModel,
     language: settings.voiceLanguage || null,
-    apiKey: settings.voiceApiKey,
     cleanup: settings.voiceCleanup,
     cleanupModel: settings.voiceCleanupModel,
     cleanupHint: settings.voiceCleanupHint,
