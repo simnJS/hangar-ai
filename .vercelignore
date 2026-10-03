@@ -7,5 +7,3 @@ dist
 node_modules
 .hangar
 .iabench
-# The cloud backend deploys as its own Vercel project rooted at cloud/.
-cloud
