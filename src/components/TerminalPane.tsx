@@ -16,6 +16,7 @@ import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
 import { createActivityWatcher } from "../lib/activity";
 import { notify } from "../lib/notify";
 import { usePaneDrag } from "./PaneGrid";
+import { CommandMenu } from "./CommandMenu";
 import {
   claim,
   isResumable,
@@ -26,11 +27,13 @@ import {
 } from "../lib/agents";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
+import type { CommandScope } from "../store";
 import type { TerminalTheme } from "../themes";
 import {
   AGENTS,
   type AgentId,
   type Pane,
+  type SavedCommand,
   type Settings,
   type ShellInfo,
 } from "../types";
@@ -60,6 +63,9 @@ interface Props {
   shell: ShellInfo | null;
   /** False when this is the last pane left: a workspace keeps at least one. */
   canClose: boolean;
+  /** Saved commands of the workspace, listed before the global ones. */
+  workspaceCommands: SavedCommand[];
+  globalCommands: SavedCommand[];
   onFocus: () => void;
   onAgentChange: (agent: AgentId) => void;
   onShellChange: (shellId: string | null) => void;
@@ -68,6 +74,11 @@ interface Props {
   onSplit: () => void;
   onClose: () => void;
   onOpenSessions: () => void;
+  /** Writes the command out — to this pane, or to all of them if it says so. */
+  onRunCommand: (command: SavedCommand) => void;
+  onEditCommand: (command: SavedCommand, scope: CommandScope) => void;
+  onRemoveCommand: (command: SavedCommand, scope: CommandScope) => void;
+  onAddCommand: () => void;
 }
 
 export function TerminalPane({
@@ -84,6 +95,8 @@ export function TerminalPane({
   shells,
   shell,
   canClose,
+  workspaceCommands,
+  globalCommands,
   onFocus,
   onAgentChange,
   onShellChange,
@@ -92,15 +105,22 @@ export function TerminalPane({
   onSplit,
   onClose,
   onOpenSessions,
+  onRunCommand,
+  onEditCommand,
+  onRemoveCommand,
+  onAddCommand,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const commandsRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<Status>("starting");
   /** The pane handed control back while you were looking somewhere else. */
   const [attention, setAttention] = useState(false);
   /** Where the agent stands in its context window, from its transcript. */
   const [context, setContext] = useState<ContextGauge | null>(null);
+  /** Open per pane, not per workspace: two panes can have their own menu. */
+  const [commandsOpen, setCommandsOpen] = useState(false);
   const drag = usePaneDrag();
   const t = useT();
   const shortcut = useShortcutLabel();
@@ -497,6 +517,29 @@ export function TerminalPane({
     };
   }, [pane.id, pane.sessionId, pane.agent, status, visible, paneCwd]);
 
+  // The menu is placed from the button's position on screen, and a hidden
+  // workspace has none — leaving it open would put it back somewhere else
+  // entirely on the way back.
+  useEffect(() => {
+    if (!visible) setCommandsOpen(false);
+  }, [visible]);
+
+  /**
+   * Focus is handed back explicitly rather than left to the effect above: the
+   * pane was already the focused one in most cases, so nothing it depends on
+   * changed, and the keyboard would stay with the ⚡ button — which the click
+   * that opened the menu gave it, and which swallows everything typed at it.
+   */
+  function closeCommands() {
+    setCommandsOpen(false);
+    termRef.current?.focus();
+  }
+
+  function runCommand(command: SavedCommand) {
+    onRunCommand(command);
+    closeCommands();
+  }
+
   return (
     <section
       className={`pane ${focused ? "pane--focused" : ""} ${attention ? "pane--attn" : ""}`}
@@ -612,6 +655,18 @@ export function TerminalPane({
           </span>
         )}
         <span className={`pane__status pane__status--${status}`} title={status} />
+        {/* A button among the other pane actions, which the header's drag
+            already steps aside for — it ignores a press that lands on one. */}
+        <button
+          ref={commandsRef}
+          className={`pane__action ${commandsOpen ? "is-open" : ""}`}
+          onClick={() => (commandsOpen ? closeCommands() : setCommandsOpen(true))}
+          title={t("commands.menu")}
+          aria-haspopup="menu"
+          aria-expanded={commandsOpen}
+        >
+          ⚡
+        </button>
         <button
           className="pane__action"
           onClick={onRestart}
@@ -641,6 +696,27 @@ export function TerminalPane({
         ref={hostRef}
         style={{ padding: settings.padding, background: theme.xterm.background }}
       />
+
+      {/* Outside the header on purpose: nested in it, a press anywhere in the
+          menu that is not on a control would reach the bar's drag handler. */}
+      {commandsOpen && (
+        <CommandMenu
+          anchorRef={commandsRef}
+          workspaceCommands={workspaceCommands}
+          globalCommands={globalCommands}
+          onRun={runCommand}
+          onEdit={(command, scope) => {
+            setCommandsOpen(false);
+            onEditCommand(command, scope);
+          }}
+          onRemove={onRemoveCommand}
+          onAdd={() => {
+            setCommandsOpen(false);
+            onAddCommand();
+          }}
+          onClose={closeCommands}
+        />
+      )}
     </section>
   );
 }

@@ -73,6 +73,23 @@ export interface Pane {
   title: string | null;
 }
 
+/**
+ * A command kept around to be run again — `pnpm tauri dev`, `cargo check`, the
+ * prompt an agent gets asked the same way every morning.
+ *
+ * `command` is typed into a pane verbatim; `autoRun` decides whether the Enter
+ * that runs it is sent along or left to the user, and `broadcast` sends it to
+ * every pane of the workspace rather than to the one it was launched from.
+ */
+export interface SavedCommand {
+  id: string;
+  /** What the menu entry reads. Empty falls back to the command itself. */
+  label: string;
+  command: string;
+  autoRun: boolean;
+  broadcast: boolean;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -93,6 +110,11 @@ export interface Workspace {
    * split owns its own ratio, so resizing one boundary leaves the rest alone.
    */
   tree: SplitNode | null;
+  /**
+   * Saved commands belonging to this project, listed before the global ones —
+   * the useful ones are usually the ones a single repository needs.
+   */
+  savedCommands: SavedCommand[];
 }
 
 export type SplitNode =
@@ -142,6 +164,12 @@ export interface Settings {
    * reaches everyone who never touched it. An empty array disables a command.
    */
   keybindings: Record<string, string[]>;
+  /**
+   * Saved commands every workspace offers, after its own. A command that is
+   * about the tool rather than the project — `git status`, a prompt you reuse
+   * — belongs here.
+   */
+  savedCommands: SavedCommand[];
   /**
    * Dictation. Off until asked for: it wants a microphone, and either a model
    * downloaded or a key pasted, so turning it on is a decision rather than a
@@ -232,6 +260,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyIdleMs: 3000,
   notifyOnlyWhenAway: true,
   keybindings: {},
+  savedCommands: [],
   voiceEnabled: false,
   voiceEngine: "local",
   voiceModel: DEFAULT_VOICE_MODEL,

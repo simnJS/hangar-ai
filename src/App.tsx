@@ -21,6 +21,7 @@ import {
   type Direction,
 } from "./lib/layout";
 import { buildPresence, useDiscordPresence } from "./lib/discord";
+import { mergeCommands, runSavedCommand } from "./lib/savedCommands";
 import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal } from "./lib/terminalRegistry";
@@ -362,6 +363,16 @@ export default function App() {
     const pane = panes.find((p) => p.id === focused);
     if (pane && AGENTS.find((agent) => agent.id === pane.agent)?.resumable) {
       map["pane.sessions"] = () => setPickerPaneId(focused);
+    }
+
+    // Counted through in the order the pane menu lists them — this workspace's
+    // commands, then the global ones — so the third entry and the third key
+    // are always the same command. Nothing is bound to them by default.
+    const saved = mergeCommands(activeWorkspace, state.settings);
+    for (let i = 0; i < Math.min(9, saved.length); i++) {
+      const command = saved[i];
+      map[`command.run${i + 1}` as CommandId] = () =>
+        runSavedCommand(command, command.broadcast ? panes.map((p) => p.id) : [focused]);
     }
 
     const toward = (dir: Direction, act: (neighbour: string) => void) => () => {

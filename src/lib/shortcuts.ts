@@ -24,6 +24,7 @@ export type ShortcutSection =
   | "workspaces"
   | "view"
   | "terminal"
+  | "commands"
   | "voice"
   | "app";
 
@@ -33,6 +34,9 @@ export const SECTIONS: ShortcutSection[] = [
   "workspaces",
   "view",
   "terminal",
+  // Nine commands of their own, and what they run is the user's own list:
+  // dropped into "Terminal" they would bury the four keys that act on it.
+  "commands",
   // A section for one command, because the alternative was filing dictation
   // under "Window" next to zoom and full screen, where nobody looking for it
   // would ever think to look.
@@ -78,6 +82,7 @@ export type CommandId =
   | "terminal.selectAll"
   | "terminal.scrollTop"
   | "terminal.scrollBottom"
+  | `command.run${Digit}`
   | "app.zoomIn"
   | "app.zoomOut"
   | "app.zoomReset"
@@ -114,6 +119,21 @@ const focusDigits: ShortcutCommand[] = DIGITS.map((n) => ({
   labelKey: "cmd.pane.focusN",
   labelParams: { n },
   defaults: [`Mod+${n}`],
+}));
+
+/**
+ * Unbound out of the box, unlike the other two digit families.
+ *
+ * Which command is the third one is the user's own arrangement, and it changes
+ * the moment they save a fourth — so shipping nine chords for it would spend
+ * keys the shell wants on a list that may well be empty.
+ */
+const commandDigits: ShortcutCommand[] = DIGITS.map((n) => ({
+  id: `command.run${n}` as CommandId,
+  section: "commands",
+  labelKey: "cmd.command.runN",
+  labelParams: { n },
+  defaults: [],
 }));
 
 const workspaceDigits: ShortcutCommand[] = DIGITS.map((n) => ({
@@ -363,6 +383,8 @@ export const COMMANDS: ShortcutCommand[] = [
     labelKey: "cmd.terminal.scrollBottom",
     defaults: forPlatform(["Ctrl+End"], ["Meta+Down"]),
   },
+
+  ...commandDigits,
 
   {
     id: "app.zoomIn",

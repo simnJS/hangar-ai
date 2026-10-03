@@ -27,6 +27,7 @@ import {
   type AppState,
   type LayoutSize,
   type Pane,
+  type SavedCommand,
   type Settings,
   type SplitNode,
   type Workspace,
@@ -70,6 +71,7 @@ export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
     themeId: null,
     shellId: draft.shellId,
     tree: presetTree(panes.map((pane) => pane.id)),
+    savedCommands: [],
   };
 };
 
@@ -78,7 +80,15 @@ const hydrateWorkspace = (ws: Workspace): Workspace => ({
   ...nameWorkspacePanes(ws),
   // Absent from everything saved before workspaces could hold extra roots.
   extraRoots: ws.extraRoots ?? [],
+  // Same, for the workspaces stored before commands could be saved.
+  savedCommands: ws.savedCommands ?? [],
 });
+
+/** Where a saved command lives: with its project, or with the settings. */
+export type CommandScope = "workspace" | "global";
+
+/** A saved command as the dialog hands it over — the id is the store's. */
+export type SavedCommandDraft = Omit<SavedCommand, "id">;
 
 const EMPTY: AppState = {
   workspaces: [],
@@ -134,6 +144,35 @@ interface StoreValue {
     patch?: Partial<Pane>,
   ) => string | null;
   updateSettings: (patch: Partial<Settings>) => void;
+  /**
+   * Saved commands. Every one of these takes the scope it acts on plus the
+   * workspace it was launched from — `workspaceId` is only read for the
+   * workspace scope, and the caller always has one to give.
+   */
+  addSavedCommand: (
+    scope: CommandScope,
+    workspaceId: string,
+    draft: SavedCommandDraft,
+  ) => string;
+  updateSavedCommand: (
+    scope: CommandScope,
+    workspaceId: string,
+    id: string,
+    patch: Partial<SavedCommandDraft>,
+  ) => void;
+  removeSavedCommand: (scope: CommandScope, workspaceId: string, id: string) => void;
+  /**
+   * Sends a command over to the other scope, keeping its id and landing it at
+   * the end of the list it arrives in. Changing where a command is saved is an
+   * edit like any other, which is why it is a move rather than a delete and a
+   * create: the shortcut numbering is the only thing that shifts.
+   */
+  moveSavedCommand: (
+    from: CommandScope,
+    to: CommandScope,
+    workspaceId: string,
+    id: string,
+  ) => void;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -199,6 +238,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         workspaces: prev.workspaces.map((ws) => (ws.id === id ? fn(ws) : ws)),
       })),
     [update],
+  );
+
+  /** Rewrites one of the two saved-command lists, whichever `scope` names. */
+  const mapCommands = useCallback(
+    (
+      scope: CommandScope,
+      workspaceId: string,
+      fn: (commands: SavedCommand[]) => SavedCommand[],
+    ) => {
+      if (scope === "global") {
+        update((prev) => ({
+          ...prev,
+          settings: { ...prev.settings, savedCommands: fn(prev.settings.savedCommands) },
+        }));
+        return;
+      }
+      mapWorkspace(workspaceId, (ws) => ({
+        ...ws,
+        savedCommands: fn(ws.savedCommands),
+      }));
+    },
+    [mapWorkspace, update],
   );
 
   const value = useMemo<StoreValue>(() => {
@@ -363,8 +424,68 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateSettings(patch) {
         update((prev) => ({ ...prev, settings: { ...prev.settings, ...patch } }));
       },
+
+      addSavedCommand(scope, workspaceId, draft) {
+        const command: SavedCommand = { ...draft, id: newId() };
+        mapCommands(scope, workspaceId, (commands) => [...commands, command]);
+        return command.id;
+      },
+
+      updateSavedCommand(scope, workspaceId, id, patch) {
+        mapCommands(scope, workspaceId, (commands) =>
+          commands.map((command) =>
+            command.id === id ? { ...command, ...patch } : command,
+          ),
+        );
+      },
+
+      removeSavedCommand(scope, workspaceId, id) {
+        mapCommands(scope, workspaceId, (commands) =>
+          commands.filter((command) => command.id !== id),
+        );
+      },
+
+      moveSavedCommand(from, to, workspaceId, id) {
+        if (from === to) return;
+        // One updater rather than a remove and an add: both lists are rewritten
+        // against the same snapshot, so the command is never in both at once
+        // and never in neither.
+        update((prev) => {
+          const workspace = prev.workspaces.find((ws) => ws.id === workspaceId) ?? null;
+          // A workspace closed since the menu was opened has nowhere to take it.
+          if (to === "workspace" && !workspace) return prev;
+          const source =
+            from === "global" ? prev.settings.savedCommands : (workspace?.savedCommands ?? []);
+          const moved = source.find((command) => command.id === id);
+          if (!moved) return prev;
+
+          const drop = (commands: SavedCommand[]) =>
+            commands.filter((command) => command.id !== id);
+          const append = (commands: SavedCommand[]) => [...drop(commands), moved];
+
+          return {
+            ...prev,
+            settings: {
+              ...prev.settings,
+              savedCommands:
+                to === "global"
+                  ? append(prev.settings.savedCommands)
+                  : drop(prev.settings.savedCommands),
+            },
+            workspaces: prev.workspaces.map((ws) =>
+              ws.id === workspaceId
+                ? {
+                    ...ws,
+                    savedCommands:
+                      to === "workspace" ? append(ws.savedCommands) : drop(ws.savedCommands),
+                  }
+                : ws,
+            ),
+          };
+        });
+      },
     };
-  }, [state, hydrated, mapWorkspace, update]);
+  }, [state, hydrated, mapCommands, mapWorkspace, update]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

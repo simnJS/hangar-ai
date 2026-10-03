@@ -39,6 +39,7 @@ export const SEED_STATE: AppState = {
       themeId: null,
       shellId: "pwsh",
       tree: null,
+      savedCommands: [],
       panes: [
         pane("pane-1", "one", "claude", "01J8Z4-pty-bridge"),
         pane("pane-2", "two", "codex", "01J8Z6-board-tests"),
@@ -54,6 +55,7 @@ export const SEED_STATE: AppState = {
       themeId: null,
       shellId: "pwsh",
       tree: null,
+      savedCommands: [],
       panes: [pane("pane-5", "one", "claude"), pane("pane-6", "two", "shell")],
     },
   ],
