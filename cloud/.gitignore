@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Env files: everything here comes from `vercel env pull`, nothing is committed.
+.env
+.env.*
+
+# TypeScript / test caches
+*.tsbuildinfo
+coverage/
+
+# Vercel CLI link state
+.vercel
+
+.vercel
+.env*
