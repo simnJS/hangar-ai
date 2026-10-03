@@ -4,7 +4,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
-import { ptyKill, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
+import { contextUsage, ptyKill, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
+import {
+  computeContextGauge,
+  formatTokens,
+  type ContextGauge,
+} from "../lib/context";
 import { subscribePty } from "../lib/ptyBus";
 import { registerTerminal } from "../lib/terminalRegistry";
 import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
@@ -94,6 +99,8 @@ export function TerminalPane({
   const [status, setStatus] = useState<Status>("starting");
   /** The pane handed control back while you were looking somewhere else. */
   const [attention, setAttention] = useState(false);
+  /** Where the agent stands in its context window, from its transcript. */
+  const [context, setContext] = useState<ContextGauge | null>(null);
   const drag = usePaneDrag();
   const t = useT();
   const shortcut = useShortcutLabel();
@@ -458,6 +465,38 @@ export function TerminalPane({
     return () => window.removeEventListener("focus", clear);
   }, [focused, visible]);
 
+  // The transcript is the agent's own account of its context, polled at a
+  // walking pace — a gauge needs no more — and only while the pane is on
+  // screen with its shell alive. A pane that goes hidden keeps its last
+  // honest reading and picks up again when shown.
+  useEffect(() => {
+    if (!pane.sessionId || !isResumable(pane.agent)) {
+      // Gemini and opencode keep no readable transcript, and before a session
+      // is captured there is nothing to read: no gauge beats a made-up zero.
+      setContext(null);
+      return;
+    }
+    if (!visible || status !== "running") return;
+    const sessionId = pane.sessionId;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const usage = await contextUsage(pane.agent, sessionId, paneCwd);
+        if (!cancelled) {
+          setContext(usage ? computeContextGauge(pane.agent, usage) : null);
+        }
+      } catch {
+        /* transient read failure: keep the last honest reading */
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pane.id, pane.sessionId, pane.agent, status, visible, paneCwd]);
+
   return (
     <section
       className={`pane ${focused ? "pane--focused" : ""} ${attention ? "pane--attn" : ""}`}
@@ -532,6 +571,32 @@ export function TerminalPane({
           >
             {pane.sessionId ? `⟲ ${pane.sessionId.slice(0, 8)}` : t("pane.newSession")}
           </button>
+        )}
+
+        {context && (
+          <span
+            className={`pane__ctx ${
+              context.pct >= 90
+                ? "pane__ctx--hot"
+                : context.pct >= 70
+                  ? "pane__ctx--warn"
+                  : ""
+            }`}
+            title={t("pane.context", {
+              used: formatTokens(context.usedTokens),
+              window: formatTokens(context.window),
+              pct: context.pct,
+              model: context.model ?? pane.agent,
+            })}
+          >
+            <span className="pane__ctxbar">
+              <span
+                className="pane__ctxfill"
+                style={{ width: `${context.pct}%` }}
+              />
+            </span>
+            <span className="pane__ctxpct">{context.pct}%</span>
+          </span>
         )}
 
         <span className="pane__spacer" />

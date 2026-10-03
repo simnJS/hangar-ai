@@ -65,6 +65,8 @@ const en = {
   "pane.spawnFailed": "Failed to start shell",
   "pane.notOnPath": "{agent} not found on PATH",
   "pane.attention": "Finished while you were away",
+  "pane.context":
+    "Context: {used} of {window} tokens ({pct}%) · {model} — the agent compacts automatically as it nears the limit",
 
   "notify.title": "{name} · {agent}",
   "notify.settled": "Finished — waiting for you",
@@ -563,6 +565,8 @@ const fr: Record<Key, string> = {
   "pane.spawnFailed": "Échec du démarrage du shell",
   "pane.notOnPath": "{agent} introuvable dans le PATH",
   "pane.attention": "A terminé pendant ton absence",
+  "pane.context":
+    "Contexte : {used} sur {window} tokens ({pct} %) · {model} — l'agent compacte automatiquement en approchant la limite",
 
   "notify.title": "{name} · {agent}",
   "notify.settled": "A terminé — il t'attend",

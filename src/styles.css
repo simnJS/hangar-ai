@@ -653,6 +653,47 @@ body.is-dragging-pane .pane__bar {
   background: var(--danger);
 }
 
+/*
+ * Context gauge: how full the agent's window is, read from its transcript.
+ * Sized to survive an 8-pane layout — a short bar and a percentage, the
+ * numbers behind them in the tooltip.
+ */
+.pane__ctx {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pane__ctxbar {
+  width: 36px;
+  height: 4px;
+  background: var(--surface-active);
+  overflow: hidden;
+}
+
+.pane__ctxfill {
+  display: block;
+  height: 100%;
+  background: var(--success);
+  transition: width var(--dur) ease;
+}
+
+.pane__ctx--warn .pane__ctxfill {
+  background: var(--warning);
+}
+
+.pane__ctx--hot .pane__ctxfill {
+  background: var(--danger);
+}
+
+.pane__ctxpct {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.25;

@@ -16,7 +16,7 @@ pub struct AgentSession {
 /// Claude Code flattens the project path into a single directory name by
 /// replacing every non-alphanumeric character with a dash.
 /// `C:\Users\me\Proj` -> `C--Users-me-Proj`
-fn encode_project_dir(cwd: &str) -> String {
+pub(crate) fn encode_project_dir(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
@@ -174,7 +174,7 @@ fn uuid_from_filename(path: &Path) -> Option<String> {
     Some(parts[parts.len() - 5..].join("-"))
 }
 
-fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+pub(crate) fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     if depth > 4 {
         return;
     }

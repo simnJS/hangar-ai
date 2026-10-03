@@ -97,7 +97,7 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
 /// pane's IPC, lives on. A `git fetch` against a slow remote, or the checkout
 /// a `worktree add` performs, would freeze the whole app for its duration;
 /// voice_start draws the same line for the same reason.
-async fn off_thread<T: Send + 'static>(
+pub(crate) async fn off_thread<T: Send + 'static>(
     task: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(task)

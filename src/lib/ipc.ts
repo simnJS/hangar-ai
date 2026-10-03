@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ContextUsage } from "./context";
 import type { DiscordPresence, DiscordStatus } from "./discord";
 import type { VoiceConfig, VoiceModel } from "./voice";
 import type { AgentSession, AppState, ShellInfo, WorkspaceRoot } from "../types";
@@ -25,6 +26,14 @@ export const listSessions = (agent: string, cwd: string) =>
   invoke<AgentSession[]>("list_sessions", { agent, cwd });
 
 export const detectAgents = () => invoke<string[]>("detect_agents");
+
+/**
+ * What the agent's own transcript says its context holds. `null` is every
+ * "show nothing" answer: no transcript for this agent, none written yet, no
+ * usage line so far.
+ */
+export const contextUsage = (agent: string, sessionId: string, cwd: string) =>
+  invoke<ContextUsage | null>("context_usage", { agent, sessionId, cwd });
 
 export const detectShells = () => invoke<ShellInfo[]>("detect_shells");
 

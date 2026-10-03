@@ -1,4 +1,5 @@
 mod board;
+mod context;
 mod discord;
 mod endpoint;
 mod git;
@@ -67,6 +68,7 @@ pub fn run() {
             pty::pty_alive,
             sessions::list_sessions,
             sessions::detect_agents,
+            context::context_usage,
             shells::detect_shells,
             store::load_state,
             store::save_state,
