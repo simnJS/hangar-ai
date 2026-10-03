@@ -378,6 +378,8 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
         layout: 1,
         agents: [origin?.panes[0]?.agent ?? "shell"],
         shellId: origin?.shellId ?? null,
+        // Filed next to it too, so a project's branches stay together.
+        folderId: origin?.folderId ?? null,
       });
     }
   }

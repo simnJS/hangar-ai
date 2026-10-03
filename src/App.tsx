@@ -21,6 +21,7 @@ import {
   type Direction,
 } from "./lib/layout";
 import { buildPresence, useDiscordPresence } from "./lib/discord";
+import { sidebarOrder } from "./lib/folders";
 import { mergeCommands, runSavedCommand } from "./lib/savedCommands";
 import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
@@ -309,7 +310,7 @@ export default function App() {
     // to the terminal instead of being swallowed by a feature nobody enabled.
     if (state.settings.voiceEnabled) map["voice.dictate"] = voice.press;
 
-    const workspaces = state.workspaces;
+    const workspaces = sidebarOrder(state.workspaces, state.folders);
     for (let i = 0; i < Math.min(9, workspaces.length); i++) {
       const { id } = workspaces[i];
       map[`workspace.go${i + 1}` as CommandId] = () => setActiveWorkspace(id);

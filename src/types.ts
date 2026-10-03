@@ -115,6 +115,22 @@ export interface Workspace {
    * the useful ones are usually the ones a single repository needs.
    */
   savedCommands: SavedCommand[];
+  /** The sidebar folder it is filed under. null sits at the top level. */
+  folderId: string | null;
+}
+
+/**
+ * A sidebar group of workspaces. One level deep only: a folder holds
+ * workspaces, never other folders.
+ *
+ * It owns nothing — deleting one sends its workspaces back to the top level —
+ * and its contents are not listed here: each workspace names its folder, and
+ * the order of `AppState.workspaces` is the order inside every folder.
+ */
+export interface WorkspaceFolder {
+  id: string;
+  name: string;
+  collapsed: boolean;
 }
 
 export type SplitNode =
@@ -215,6 +231,8 @@ export interface Settings {
 
 export interface AppState {
   workspaces: Workspace[];
+  /** In sidebar order. */
+  folders: WorkspaceFolder[];
   activeWorkspaceId: string | null;
   settings: Settings;
 }

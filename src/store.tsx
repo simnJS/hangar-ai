@@ -31,6 +31,7 @@ import {
   type Settings,
   type SplitNode,
   type Workspace,
+  type WorkspaceFolder,
 } from "./types";
 
 const newId = () => crypto.randomUUID();
@@ -55,6 +56,8 @@ export interface WorkspaceDraft {
   /** One agent per pane, in grid order. */
   agents: AgentId[];
   shellId: string | null;
+  /** The sidebar folder to file it under. Left out, it lands at the top level. */
+  folderId?: string | null;
 }
 
 export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
@@ -72,17 +75,35 @@ export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
     shellId: draft.shellId,
     tree: presetTree(panes.map((pane) => pane.id)),
     savedCommands: [],
+    folderId: draft.folderId ?? null,
   };
 };
 
-/** Brings a stored workspace up to the shape the current version expects. */
-const hydrateWorkspace = (ws: Workspace): Workspace => ({
+/**
+ * Brings a stored workspace up to the shape the current version expects.
+ * `folders` holds the folder ids the same file stores.
+ */
+const hydrateWorkspace = (ws: Workspace, folders: Set<string>): Workspace => ({
   ...nameWorkspacePanes(ws),
   // Absent from everything saved before workspaces could hold extra roots.
   extraRoots: ws.extraRoots ?? [],
   // Same, for the workspaces stored before commands could be saved.
   savedCommands: ws.savedCommands ?? [],
+  // Absent before folders existed. A folder the file no longer has would hide
+  // the workspace from every list, so it falls back to the top level.
+  folderId: ws.folderId && folders.has(ws.folderId) ? ws.folderId : null,
 });
+
+/** `item` moved — or added — just before `beforeId`, or last when there is no such entry. */
+function placeBefore<T extends { id: string }>(
+  list: T[],
+  item: T,
+  beforeId: string | null,
+): T[] {
+  const rest = list.filter((entry) => entry.id !== item.id);
+  const at = beforeId === null ? -1 : rest.findIndex((entry) => entry.id === beforeId);
+  return at < 0 ? [...rest, item] : [...rest.slice(0, at), item, ...rest.slice(at)];
+}
 
 /** Where a saved command lives: with its project, or with the settings. */
 export type CommandScope = "workspace" | "global";
@@ -92,6 +113,7 @@ export type SavedCommandDraft = Omit<SavedCommand, "id">;
 
 const EMPTY: AppState = {
   workspaces: [],
+  folders: [],
   activeWorkspaceId: null,
   settings: DEFAULT_SETTINGS,
 };
@@ -104,6 +126,18 @@ interface StoreValue {
   removeWorkspace: (id: string) => void;
   updateWorkspace: (id: string, patch: Partial<Workspace>) => void;
   setActiveWorkspace: (id: string | null) => void;
+  /** Appends a folder, expanded, and returns its id. */
+  addFolder: (name: string) => string;
+  updateFolder: (id: string, patch: Partial<Omit<WorkspaceFolder, "id">>) => void;
+  /** Deletes a folder. Its workspaces go back to the top level, untouched. */
+  removeFolder: (id: string) => void;
+  /** Places a folder just before `beforeId`, or last when that is null. */
+  moveFolder: (id: string, beforeId: string | null) => void;
+  /**
+   * Files a workspace under `folderId` — null for the top level — just before
+   * `beforeId`, or last in that folder when that is null.
+   */
+  moveWorkspace: (id: string, folderId: string | null, beforeId: string | null) => void;
   /**
    * Rebuilds an even arrangement with exactly `count` panes. Any pane it has to
    * create copies the agent of `modelPaneId` — the one you are working in —
@@ -202,9 +236,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .then((loaded) => {
         if (cancelled) return;
         if (loaded) {
+          const folders = loaded.folders ?? [];
+          const folderIds = new Set(folders.map((folder) => folder.id));
           update(() => ({
             // Workspaces stored before panes had names get them here.
-            workspaces: (loaded.workspaces ?? []).map(hydrateWorkspace),
+            workspaces: (loaded.workspaces ?? []).map((ws) => hydrateWorkspace(ws, folderIds)),
+            folders,
             activeWorkspaceId: loaded.activeWorkspaceId ?? null,
             // Merge so settings added in later versions get their defaults.
             settings: { ...DEFAULT_SETTINGS, ...(loaded.settings ?? {}) },
@@ -301,6 +338,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       setActiveWorkspace(id) {
         update((prev) => ({ ...prev, activeWorkspaceId: id }));
+      },
+
+      addFolder(name) {
+        const folder: WorkspaceFolder = { id: newId(), name, collapsed: false };
+        update((prev) => ({ ...prev, folders: [...prev.folders, folder] }));
+        return folder.id;
+      },
+
+      updateFolder(id, patch) {
+        update((prev) => ({
+          ...prev,
+          folders: prev.folders.map((folder) =>
+            folder.id === id ? { ...folder, ...patch } : folder,
+          ),
+        }));
+      },
+
+      removeFolder(id) {
+        update((prev) => ({
+          ...prev,
+          folders: prev.folders.filter((folder) => folder.id !== id),
+          workspaces: prev.workspaces.map((ws) =>
+            ws.folderId === id ? { ...ws, folderId: null } : ws,
+          ),
+        }));
+      },
+
+      moveFolder(id, beforeId) {
+        update((prev) => {
+          const folder = prev.folders.find((entry) => entry.id === id);
+          if (!folder || beforeId === id) return prev;
+          return { ...prev, folders: placeBefore(prev.folders, folder, beforeId) };
+        });
+      },
+
+      moveWorkspace(id, folderId, beforeId) {
+        update((prev) => {
+          const ws = prev.workspaces.find((entry) => entry.id === id);
+          if (!ws || beforeId === id) return prev;
+          // A folder deleted while the workspace was on its way leaves it at
+          // the top level rather than filed under nothing.
+          const target =
+            folderId !== null && prev.folders.some((folder) => folder.id === folderId)
+              ? folderId
+              : null;
+          return {
+            ...prev,
+            workspaces: placeBefore(prev.workspaces, { ...ws, folderId: target }, beforeId),
+          };
+        });
       },
 
       applyPreset(workspaceId, count, modelPaneId) {

@@ -30,6 +30,7 @@ const pane = (
 /** `tree: null` lets lib/layout build the preset arrangement for the count. */
 export const SEED_STATE: AppState = {
   activeWorkspaceId: "ws-hangar",
+  folders: [],
   workspaces: [
     {
       id: "ws-hangar",
@@ -40,6 +41,7 @@ export const SEED_STATE: AppState = {
       shellId: "pwsh",
       tree: null,
       savedCommands: [],
+      folderId: null,
       panes: [
         pane("pane-1", "one", "claude", "01J8Z4-pty-bridge"),
         pane("pane-2", "two", "codex", "01J8Z6-board-tests"),
@@ -56,6 +58,7 @@ export const SEED_STATE: AppState = {
       shellId: "pwsh",
       tree: null,
       savedCommands: [],
+      folderId: null,
       panes: [pane("pane-5", "one", "claude"), pane("pane-6", "two", "shell")],
     },
   ],
