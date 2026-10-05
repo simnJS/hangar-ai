@@ -388,6 +388,46 @@ async fn bridge_conflict(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Pane control
+//
+// The panes belong to the window's store, so these routes only relay: see
+// control.rs.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ControlQuery {
+    /// The caller's workspace, as the MCP proxy appends it to every URL. Used
+    /// when the request names no workspace of its own.
+    #[serde(default)]
+    cwd: String,
+}
+
+async fn control(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(op): Path<String>,
+    Query(q): Query<ControlQuery>,
+    Json(mut args): Json<serde_json::Value>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    if !args.is_object() {
+        args = json!({});
+    }
+    if args.get("callerCwd").is_none() && !q.cwd.is_empty() {
+        args["callerCwd"] = json!(q.cwd);
+    }
+    crate::control::ask(&state.app, &op, args)
+        .await
+        .map(Json)
+        .map_err(|err| match err {
+            crate::control::ControlError::Refused(message) => bad(StatusCode::BAD_REQUEST, message),
+            crate::control::ControlError::Unavailable(message) => {
+                bad(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+        })
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
@@ -425,6 +465,7 @@ pub async fn start(
         .route("/api/bridge/{pane}/event", post(bridge_event))
         .route("/api/bridge/{pane}/next", get(bridge_next))
         .route("/api/bridge/{pane}/conflict", get(bridge_conflict))
+        .route("/api/control/{op}", post(control))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

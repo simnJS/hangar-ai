@@ -318,6 +318,21 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
           ],
         },
         {
+          id: "agentControl",
+          title: t("settings.agentControlSection"),
+          items: [
+            {
+              id: "agentPaneControl",
+              kind: "toggle",
+              label: t("settings.agentPaneControl"),
+              hint: t("settings.agentPaneControlHint"),
+              keywords: "mcp agents panes terminals orchestrate orchestrer contrôle control pilot",
+              value: settings.agentPaneControl,
+              onChange: (value) => set("agentPaneControl", value),
+            },
+          ],
+        },
+        {
           id: "agentCommands",
           title: t("settings.agentCommands"),
           hint: t("settings.agentCommandsHint"),

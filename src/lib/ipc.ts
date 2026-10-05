@@ -114,3 +114,7 @@ export const voiceKeyStatus = () => invoke<boolean>("voice_key_status");
 export const voiceKeySet = (key: string) => invoke<void>("voice_key_set", { key });
 
 export const voiceKeyClear = () => invoke<void>("voice_key_clear");
+
+/** The tail of a live pane's output, and the byte count it reaches. */
+export const ptyHistory = (id: string) =>
+  invoke<{ data: string; end: number }>("pty_history", { id });

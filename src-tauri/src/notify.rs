@@ -68,7 +68,12 @@ fn send(
 fn reveal(app: &tauri::AppHandle, target: Activated) {
     use tauri::{Emitter, Manager, UserAttentionType};
 
-    if let Some(window) = app.get_webview_window("main") {
+    // A workspace open in a window of its own is shown there, not in the
+    // main window.
+    let window = app
+        .get_webview_window(&crate::windows::label(&target.workspace_id))
+        .or_else(|| app.get_webview_window("main"));
+    if let Some(window) = window {
         let _ = window.show();
         let _ = window.unminimize();
         // Windows hands the foreground to whichever process owns the current

@@ -117,6 +117,20 @@ export interface Workspace {
   savedCommands: SavedCommand[];
   /** The sidebar folder it is filed under. null sits at the top level. */
   folderId: string | null;
+  /**
+   * Shown in a window of its own — on a second screen, typically — instead of
+   * in the main window. Reopened there on the next launch.
+   */
+  detached?: boolean;
+  /** Where that window last stood, in logical pixels. */
+  windowBounds?: WindowBounds | null;
+}
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /**
@@ -248,6 +262,12 @@ export interface Settings {
    * distances and rarely want changing together.
    */
   uiScale: number;
+  /**
+   * Agents may list, open, close, restart and type into panes through the MCP
+   * server. On by default — orchestrating other agents is what it is for — and
+   * each call still goes through the agent's own permission prompts.
+   */
+  agentPaneControl: boolean;
 }
 
 export interface AppState {
@@ -317,6 +337,7 @@ export const DEFAULT_SETTINGS: Settings = {
   boardDockOpen: false,
   boardDockWidth: 420,
   uiScale: 100,
+  agentPaneControl: true,
 };
 
 /** Bounds of the interface size slider, in percent. */

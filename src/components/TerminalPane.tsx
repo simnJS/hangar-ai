@@ -9,12 +9,15 @@ import "@xterm/xterm/css/xterm.css";
 import {
   bridgeCancel,
   contextUsage,
+  ptyAlive,
+  ptyHistory,
   ptyKill,
   ptyResize,
   ptySpawn,
   ptyWrite,
   type QueuedPrompt,
 } from "../lib/ipc";
+import { isHandingOver } from "../lib/windows";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
   clearPaneActivity,
@@ -297,7 +300,17 @@ export function TerminalPane({
       /* host not measured yet; the observer below will retry */
     }
 
+    /**
+     * Set while a taken-over pane's history is replayed. That history holds
+     * the queries the program sent when it started — cursor position, terminal
+     * attributes — and xterm answers each one as it reads it. Those answers
+     * are long overdue: let through, they reach the program as keystrokes and
+     * garble whatever is typed next.
+     */
+    let replaying = false;
+
     term.onData((data) => {
+      if (replaying) return;
       ptyWrite(pane.id, data).catch(() => undefined);
     });
 
@@ -494,11 +507,26 @@ export function TerminalPane({
     // started a conversation, so it is not worth a look at the transcripts.
     let printedSinceLastLook = false;
 
+    /**
+     * Output held back while a running pane is being taken over, until its
+     * history is on screen; then, what that history already covered. Starts
+     * holding, because whether the pane is already running is only known
+     * after the subscription is in place.
+     */
+    let held: { data: string; seq: number }[] | null = [];
+    let replayedTo = -1;
+    const replayed = (seq: number) => typeof seq === "number" && seq <= replayedTo;
+
     (async () => {
       try {
         const stop = await subscribePty(
           pane.id,
-          (data) => {
+          (data, seq) => {
+            if (held) {
+              held.push({ data, seq });
+              return;
+            }
+            if (replayed(seq)) return;
             term.write(data);
             watcher.push();
             printedSinceLastLook = true;
@@ -538,46 +566,80 @@ export function TerminalPane({
         }
         unsubscribeBridge = stopBridge;
 
+        /**
+         * Already running: another window let go of this pane — its workspace
+         * moved to this window — or this window was reloaded. The pane is
+         * taken over as it stands: no spawn and no agent launch, just what it
+         * printed last, then the live output from where that left off.
+         */
+        const adopted = await ptyAlive(pane.id).catch(() => false);
+        if (disposed) return;
+        if (adopted) {
+          const history = await ptyHistory(pane.id).catch(() => null);
+          if (disposed) return;
+          if (history) {
+            replaying = true;
+            // The callback runs once xterm has parsed the whole history, and
+            // so once it has answered everything in it.
+            term.write(history.data, () => {
+              replaying = false;
+            });
+            replayedTo = history.end;
+          }
+          // The size it had in the other window is not this one's.
+          ptyResize(pane.id, term.cols, term.rows).catch(() => undefined);
+          setStatus("running");
+        }
+        const pending = held ?? [];
+        held = null;
+        for (const chunk of pending) {
+          if (!replayed(chunk.seq)) term.write(chunk.data);
+        }
+
         // Snapshot before launching, so a brand new transcript stands out.
         const known = isResumable(pane.agent)
           ? await knownSessionIds(pane.agent, paneCwd)
           : new Set<string>();
         if (disposed) return;
 
-        await ptySpawn({
-          id: pane.id,
-          cwd: paneCwd,
-          shell: shellRef.current,
-          cols: term.cols,
-          rows: term.rows,
-          name: pane.name,
-          bridge: settingsRef.current.claudeBridge,
-        });
-        // Same race as the subscription above: a cleanup that ran during the
-        // spawn killed an id the backend did not know yet, so the shell it
-        // just registered would outlive the pane. Killing again is free when
-        // the id is already gone.
-        if (disposed) {
-          ptyKill(pane.id).catch(() => undefined);
+        if (!adopted) {
+          await ptySpawn({
+            id: pane.id,
+            cwd: paneCwd,
+            shell: shellRef.current,
+            cols: term.cols,
+            rows: term.rows,
+            name: pane.name,
+            bridge: settingsRef.current.claudeBridge,
+          });
+          // Same race as the subscription above: a cleanup that ran during the
+          // spawn killed an id the backend did not know yet, so the shell it
+          // just registered would outlive the pane. Killing again is free when
+          // the id is already gone.
+          if (disposed) {
+            if (!isHandingOver(pane.id)) ptyKill(pane.id).catch(() => undefined);
+            return;
+          }
+          setStatus("running");
+
+          if (pane.agent === "shell") return;
+
+          // Let the shell profile settle before typing into it.
+          await sleep(settingsRef.current.launchDelayMs, controller.signal);
+          if (disposed || controller.signal.aborted) return;
+
+          const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
+          const command = launchCommand(pane.agent, resumeId, {
+            extraRoots: extraRootsRef.current,
+            commands: settingsRef.current.agentCommands,
+            name: pane.name,
+          });
+          if (command) {
+            if (resumeId) claim(resumeId);
+            await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);
+          }
+        } else if (pane.agent === "shell") {
           return;
-        }
-        setStatus("running");
-
-        if (pane.agent === "shell") return;
-
-        // Let the shell profile settle before typing into it.
-        await sleep(settingsRef.current.launchDelayMs, controller.signal);
-        if (disposed || controller.signal.aborted) return;
-
-        const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
-        const command = launchCommand(pane.agent, resumeId, {
-          extraRoots: extraRootsRef.current,
-          commands: settingsRef.current.agentCommands,
-          name: pane.name,
-        });
-        if (command) {
-          if (resumeId) claim(resumeId);
-          await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);
         }
 
         // Watched for as long as the pane lives, resumed or not: /new inside
@@ -633,7 +695,8 @@ export function TerminalPane({
       unsubscribe?.();
       unsubscribeBridge?.();
       if (conflictWith) setConflict(conflictWith, null);
-      ptyKill(pane.id).catch(() => undefined);
+      // A pane moving to another window keeps running there.
+      if (!isHandingOver(pane.id)) ptyKill(pane.id).catch(() => undefined);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -701,7 +764,14 @@ export function TerminalPane({
     if (reportsActivity) setPaneActivity(pane.id, { workspaceId, activity, bridged });
     else clearPaneActivity(pane.id);
   }, [pane.id, workspaceId, activity, bridged, reportsActivity]);
-  useEffect(() => () => clearPaneActivity(pane.id), [pane.id]);
+  // A pane moving to another window keeps its state: that window reports it
+  // from now on, and clearing it here could land after its first report.
+  useEffect(
+    () => () => {
+      if (!isHandingOver(pane.id)) clearPaneActivity(pane.id);
+    },
+    [pane.id],
+  );
 
   // The transcript is the agent's own account of its context, polled at a
   // walking pace — a gauge needs no more — and only while the pane is on

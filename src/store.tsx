@@ -8,7 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { emit, listen } from "@tauri-apps/api/event";
 import { loadState, saveState } from "./lib/ipc";
+import { WINDOW_LABEL, isMainWindow } from "./lib/windows";
 import {
   insertLeaf,
   leafIds,
@@ -120,6 +122,13 @@ const EMPTY: AppState = {
 
 interface StoreValue {
   state: AppState;
+  /**
+   * The state as every write so far left it, including the ones of this very
+   * tick that React has not rendered yet. For code that writes and then needs
+   * to read back what it wrote, like an agent creating a pane and asking for
+   * its name.
+   */
+  snapshot: () => AppState;
   hydrated: boolean;
   activeWorkspace: Workspace | null;
   addWorkspace: (draft: WorkspaceDraft) => string;
@@ -158,6 +167,8 @@ interface StoreValue {
       near?: string | null;
       dir?: "row" | "col";
       cwd?: string | null;
+      /** Used when no other pane of the workspace has it already. */
+      name?: string;
     },
   ) => string | null;
   closePane: (workspaceId: string, paneId: string) => void;
@@ -224,40 +235,126 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * which applies its function to the ref immediately.
    */
   const latest = useRef<AppState>(EMPTY);
+  const hydratedRef = useRef(false);
+  hydratedRef.current = hydrated;
 
-  const update = useCallback((fn: (prev: AppState) => AppState) => {
-    latest.current = fn(latest.current);
-    setState(latest.current);
+  /**
+   * Every window holds a copy of the state (lib/windows). A write goes out to
+   * the others once per tick, whole: the state is a few kilobytes, and a
+   * whole state cannot be applied out of order the way a patch could.
+   */
+  const broadcastQueued = useRef(false);
+  const broadcast = useCallback(() => {
+    if (broadcastQueued.current) return;
+    broadcastQueued.current = true;
+    queueMicrotask(() => {
+      broadcastQueued.current = false;
+      emit("store:state", { from: WINDOW_LABEL, state: latest.current }).catch(() => undefined);
+    });
   }, []);
+
+  const update = useCallback(
+    (fn: (prev: AppState) => AppState) => {
+      latest.current = fn(latest.current);
+      setState(latest.current);
+      broadcast();
+    },
+    [broadcast],
+  );
+
+  const load = useCallback(
+    (loaded: AppState | null) => {
+      if (!loaded) return;
+      const folders = loaded.folders ?? [];
+      const folderIds = new Set(folders.map((folder) => folder.id));
+      update(() => ({
+        // Workspaces stored before panes had names get them here.
+        workspaces: (loaded.workspaces ?? []).map((ws) => hydrateWorkspace(ws, folderIds)),
+        folders,
+        activeWorkspaceId: loaded.activeWorkspaceId ?? null,
+        // Merge so settings added in later versions get their defaults.
+        settings: { ...DEFAULT_SETTINGS, ...(loaded.settings ?? {}) },
+      }));
+    },
+    [update],
+  );
+
+  /**
+   * The main window is the one source of truth: it adopts what another window
+   * changed and sends it back out, so every window ends on the main one's
+   * version even when two of them wrote in the same instant. A workspace
+   * window only ever adopts what comes from the main one.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const stops: (() => void)[] = [];
+    const keep = (stop: () => void) => (cancelled ? stop() : stops.push(stop));
+
+    listen<{ from: string; state: AppState }>("store:state", (event) => {
+      const { from, state: incoming } = event.payload;
+      if (from === WINDOW_LABEL) return;
+      if (!isMainWindow && from !== "main") return;
+      latest.current = incoming;
+      setState(incoming);
+      if (isMainWindow) broadcast();
+      else setHydrated(true);
+    })
+      .then((stop) => {
+        keep(stop);
+        // Asked only once listening, or the answer could come back before
+        // anything is there to hear it.
+        if (!isMainWindow && !cancelled) {
+          emit("store:hello", { from: WINDOW_LABEL }).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
+
+    if (isMainWindow) {
+      // A window that just opened asks for the state rather than reading the
+      // file, which can be up to a debounce behind.
+      listen("store:hello", () => {
+        if (hydratedRef.current) broadcast();
+      })
+        .then(keep)
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      stops.forEach((stop) => stop());
+    };
+  }, [broadcast]);
 
   useEffect(() => {
     let cancelled = false;
-    loadState()
-      .then((loaded) => {
-        if (cancelled) return;
-        if (loaded) {
-          const folders = loaded.folders ?? [];
-          const folderIds = new Set(folders.map((folder) => folder.id));
-          update(() => ({
-            // Workspaces stored before panes had names get them here.
-            workspaces: (loaded.workspaces ?? []).map((ws) => hydrateWorkspace(ws, folderIds)),
-            folders,
-            activeWorkspaceId: loaded.activeWorkspaceId ?? null,
-            // Merge so settings added in later versions get their defaults.
-            settings: { ...DEFAULT_SETTINGS, ...(loaded.settings ?? {}) },
-          }));
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => !cancelled && setHydrated(true));
+    if (isMainWindow) {
+      loadState()
+        .then((loaded) => !cancelled && load(loaded))
+        .catch(() => undefined)
+        .finally(() => !cancelled && setHydrated(true));
+      return () => {
+        cancelled = true;
+      };
+    }
+    // A workspace window: the main window answers its hello with the live
+    // state. The file is only the fallback for a main window that never does.
+    const fallback = window.setTimeout(() => {
+      if (cancelled || hydratedRef.current) return;
+      loadState()
+        .then((loaded) => !cancelled && !hydratedRef.current && load(loaded))
+        .catch(() => undefined)
+        .finally(() => !cancelled && setHydrated(true));
+    }, 2500);
     return () => {
       cancelled = true;
+      window.clearTimeout(fallback);
     };
-  }, [update]);
+  }, [load]);
 
-  // Debounced persistence; never writes before the initial load has landed.
+  // Debounced persistence, by the main window alone; never writes before the
+  // initial load has landed.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !isMainWindow) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveState(state).catch(() => undefined);
@@ -305,6 +402,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return {
       state,
+      snapshot: () => latest.current,
       hydrated,
       activeWorkspace,
 
@@ -443,9 +541,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // Splitting a Claude Code pane asks for another one, not for a bare
           // prompt. An explicit agent from the caller still wins.
           const inherited = ws.panes.find((p) => p.id === near)?.agent;
+          const wanted = opts.name?.trim();
+          const taken = paneNames(ws.panes);
           const named = {
             ...pane,
-            name: pickPaneName(paneNames(ws.panes)),
+            name: wanted && !taken.includes(wanted) ? wanted : pickPaneName(taken),
             agent: opts.agent ?? inherited ?? "shell",
             // Left alone by default: a pane follows the workspace root.
             cwd: opts.cwd ?? pane.cwd,

@@ -29,7 +29,7 @@ tauri-plugin-dialog = "2.7.2"
 dirs = "6.0.0"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
 toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"

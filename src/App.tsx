@@ -12,7 +12,31 @@ import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
-import { bridgeEnqueue, detectAgents, detectShells, ptyWrite } from "./lib/ipc";
+import {
+  bridgeEnqueue,
+  detectAgents,
+  detectShells,
+  dirExists,
+  ptyAlive,
+  ptyKill,
+  ptyWrite,
+} from "./lib/ipc";
+import { usePaneControl } from "./lib/control";
+import {
+  canDetach,
+  closeWorkspaceWindow,
+  focusWorkspaceWindow,
+  isMainWindow,
+  localTerminal,
+  markHandover,
+  openWorkspaceWindow,
+  remoteTerminal,
+  serveTerminals,
+  windowWorkspaceId,
+  WINDOW_LABEL,
+} from "./lib/windows";
+import { emit } from "@tauri-apps/api/event";
+import { applyRemoteActivity, relayActivity, type PaneActivity } from "./lib/agentState";
 import { getPaneActivity, useBridgedCount } from "./lib/agentState";
 import { Icon } from "./components/Icon";
 import {
@@ -59,8 +83,10 @@ const FONT_MAX = 24;
 export default function App() {
   const {
     state,
+    snapshot,
     hydrated,
-    activeWorkspace,
+    activeWorkspace: storeActiveWorkspace,
+    updateWorkspace,
     respawnPane,
     applyPreset,
     addPane,
@@ -75,6 +101,22 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
   const [view, setView] = useState<"terminals" | "board" | "memory">("terminals");
+
+  /**
+   * The workspace this window draws. A workspace window draws the one it was
+   * opened for; the main window draws the active one — unless that one is
+   * shown in a window of its own, in which case the main window says so
+   * (`elsewhere`) instead of drawing its terminals a second time.
+   */
+  const ownWorkspace = windowWorkspaceId
+    ? (state.workspaces.find((ws) => ws.id === windowWorkspaceId) ?? null)
+    : null;
+  const elsewhere = isMainWindow && storeActiveWorkspace?.detached ? storeActiveWorkspace : null;
+  const activeWorkspace = windowWorkspaceId
+    ? ownWorkspace
+    : elsewhere
+      ? null
+      : storeActiveWorkspace;
   /** One focused pane per workspace: leaving and coming back lands you back. */
   const [focusByWorkspace, setFocusByWorkspace] = useState<Record<string, string>>({});
   /** Workspaces whose focused pane fills the grid. A view, never saved. */
@@ -193,6 +235,7 @@ export default function App() {
         }),
       [state.settings, activeWorkspace, focusedPaneId, t],
     ),
+    isMainWindow,
   );
 
   /**
@@ -205,8 +248,14 @@ export default function App() {
     if (id) setOpenedIds((current) => (current.includes(id) ? current : [...current, id]));
   }, [state.activeWorkspaceId]);
 
+  // A workspace window mounts its own workspace and nothing else; the main
+  // window mounts every workspace visited, except the ones in a window of
+  // their own — two terminals on one PTY would both write to it.
   const openWorkspaces = useMemo(
-    () => state.workspaces.filter((ws) => openedIds.includes(ws.id)),
+    () =>
+      windowWorkspaceId
+        ? state.workspaces.filter((ws) => ws.id === windowWorkspaceId)
+        : state.workspaces.filter((ws) => openedIds.includes(ws.id) && !ws.detached),
     [state.workspaces, openedIds],
   );
 
@@ -229,9 +278,25 @@ export default function App() {
    */
   const activateRef = useRef<(workspaceId: string, paneId: string) => void>(() => {});
   activateRef.current = (workspaceId, paneId) => {
-    const workspace = state.workspaces.find((ws) => ws.id === workspaceId);
+    // The snapshot, not the render's state: an agent that just created the
+    // pane asks for it before React has drawn it.
+    const workspace = snapshot().workspaces.find((ws) => ws.id === workspaceId);
     // Deleted since the toast went out: the raised window is all it gets.
     if (!workspace) return;
+    // A workspace window only ever shows its own workspace, and never moves
+    // the main window's selection.
+    if (windowWorkspaceId) {
+      if (workspaceId !== windowWorkspaceId) return;
+      setView("terminals");
+      if (workspace.panes.some((p) => p.id === paneId)) focusPane(workspaceId, paneId);
+      return;
+    }
+    // Shown in a window of its own: that window is the one to bring forward.
+    if (workspace.detached) {
+      focusWorkspaceWindow(workspaceId).catch(() => undefined);
+      emit("window:focus-pane", { workspaceId, paneId }).catch(() => undefined);
+      return;
+    }
     // Anything drawn over the terminals goes: the settings page is a
     // fullscreen layer, and a click that promised a pane must not land on it.
     setShowSettings(false);
@@ -307,6 +372,226 @@ export default function App() {
     [respawnPane, focusByWorkspace, focusPane],
   );
 
+  // Agents driving the panes over MCP (lib/control). Everything is read when a
+  // request lands, hence the refs.
+  const focusRef = useRef(focusByWorkspace);
+  focusRef.current = focusByWorkspace;
+  const openedRef = useRef(openedIds);
+  openedRef.current = openedIds;
+  // Defined further down, with the rest of the window handling.
+  const detachRef = useRef<(workspaceId: string) => Promise<void>>(async () => undefined);
+  const reattachRef = useRef<(workspaceId: string) => void>(() => undefined);
+  usePaneControl(
+    hydrated
+      ? {
+          snapshot,
+          enabled: () => snapshot().settings.agentPaneControl !== false,
+          addPane,
+          closePane,
+          respawnPane: (workspaceId, paneId, patch) => {
+            const nextId = respawnPane(workspaceId, paneId, patch);
+            if (nextId && focusRef.current[workspaceId] === paneId) focusPane(workspaceId, nextId);
+            return nextId;
+          },
+          openWorkspace: (id) =>
+            setOpenedIds((current) => (current.includes(id) ? current : [...current, id])),
+          isOpen: (id) =>
+            openedRef.current.includes(id) ||
+            Boolean(snapshot().workspaces.find((ws) => ws.id === id)?.detached),
+          activate: (workspaceId, paneId) => activateRef.current(workspaceId, paneId),
+          // A detached workspace's terminals are drawn by its own window.
+          terminal: async (paneId) => {
+            const term = getTerminal(paneId);
+            return term ? localTerminal(term) : remoteTerminal(paneId);
+          },
+          write: ptyWrite,
+          alive: ptyAlive,
+          activity: getPaneActivity,
+          enqueue: bridgeEnqueue,
+          dirExists,
+          canDetach: () => canDetach,
+          detach: (id) => detachRef.current(id),
+          reattach: (id) => reattachRef.current(id),
+          // Said on screen: panes appearing and vanishing on their own would
+          // otherwise look like a bug.
+          announce: (event) =>
+            setNotice(
+              t(`control.${event.kind}`, {
+                by: event.by ?? t("control.someone"),
+                pane: event.pane,
+                workspace: event.workspace,
+              }),
+            ),
+          sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+        }
+      : null,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Workspaces in windows of their own (lib/windows). Moving one never
+  // restarts its panes: the window it leaves marks them as handed over, so
+  // unmounting does not kill them, and the window it lands in takes the
+  // running PTYs over.
+  // ---------------------------------------------------------------------------
+
+  /** Main window: sends a workspace to a window of its own. */
+  const detach = useCallback(
+    async (workspaceId: string) => {
+      const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
+      if (!ws || ws.detached) return;
+      markHandover(ws.panes.map((pane) => pane.id));
+      updateWorkspace(ws.id, { detached: true });
+      // The main window moves on to a workspace it can still show.
+      const next = sidebarOrder(snapshot().workspaces, snapshot().folders).find(
+        (entry) => entry.id !== ws.id && !entry.detached,
+      );
+      if (next) setActiveWorkspace(next.id);
+      try {
+        await openWorkspaceWindow(ws.id, ws.name, ws.windowBounds);
+      } catch (err) {
+        // No window: it comes straight back, its panes still running.
+        updateWorkspace(ws.id, { detached: false });
+        setActiveWorkspace(ws.id);
+        setNotice(t("window.openFailed", { error: String(err) }));
+      }
+    },
+    [snapshot, updateWorkspace, setActiveWorkspace, t],
+  );
+
+  /** Either window: brings a workspace back into the main window. */
+  const reattach = useCallback(
+    (workspaceId: string) => {
+      const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
+      if (ws) {
+        markHandover(ws.panes.map((pane) => pane.id));
+        updateWorkspace(ws.id, { detached: false });
+        setActiveWorkspace(ws.id);
+      }
+      // From its own window, give the change a moment to reach the main window
+      // before this one goes.
+      window.setTimeout(() => closeWorkspaceWindow(workspaceId).catch(() => undefined), 150);
+    },
+    [snapshot, updateWorkspace, setActiveWorkspace],
+  );
+  detachRef.current = detach;
+  reattachRef.current = reattach;
+
+  // Main window, once loaded: the workspaces that were in windows of their own
+  // when the app last closed get those windows back. The browser demo has only
+  // the one window, so it takes them in.
+  const reopened = useRef(false);
+  useEffect(() => {
+    if (!isMainWindow || !hydrated || reopened.current) return;
+    reopened.current = true;
+    for (const ws of snapshot().workspaces.filter((entry) => entry.detached)) {
+      if (!canDetach) {
+        updateWorkspace(ws.id, { detached: false });
+        continue;
+      }
+      openWorkspaceWindow(ws.id, ws.name, ws.windowBounds).catch(() =>
+        updateWorkspace(ws.id, { detached: false }),
+      );
+    }
+  }, [hydrated, snapshot, updateWorkspace]);
+
+  // Main window: picking a detached workspace in the sidebar brings its
+  // window forward.
+  useEffect(() => {
+    if (elsewhere) focusWorkspaceWindow(elsewhere.id).catch(() => undefined);
+  }, [elsewhere?.id]);
+
+  // Activity is worked out by whichever window draws the pane; the main
+  // window's sidebar counts detached workspaces too.
+  useEffect(() => {
+    if (isMainWindow) {
+      const stop = listen<{ from: string; paneId: string; value: PaneActivity | null }>(
+        "agent:activity",
+        (event) => {
+          if (event.payload.from !== WINDOW_LABEL) {
+            applyRemoteActivity(event.payload.paneId, event.payload.value);
+          }
+        },
+      );
+      return () => {
+        stop.then((off) => off()).catch(() => undefined);
+      };
+    }
+    relayActivity((paneId, value) => {
+      emit("agent:activity", { from: WINDOW_LABEL, paneId, value }).catch(() => undefined);
+    });
+    // The main window carries out the agents' requests; this one lends it the
+    // terminals it draws.
+    const stopServing = serveTerminals(getTerminal);
+    return () => {
+      relayActivity(null);
+      stopServing();
+    };
+  }, []);
+
+  // Workspace window: everything that is about its own window.
+  const lastPanes = useRef<string[]>([]);
+  if (ownWorkspace) lastPanes.current = ownWorkspace.panes.map((pane) => pane.id);
+  useEffect(() => {
+    if (!windowWorkspaceId) return;
+    const id = windowWorkspaceId;
+    const win = getCurrentWindow();
+    const stops: Promise<() => void>[] = [];
+
+    // Its close button hands the workspace back rather than ending anything.
+    stops.push(listen("window:close-requested", () => reattach(id)));
+    // The main window pointing at one of its panes (a notification, an agent).
+    stops.push(
+      listen<{ workspaceId: string; paneId: string }>("window:focus-pane", (event) => {
+        if (event.payload.workspaceId === id) activateRef.current(id, event.payload.paneId);
+      }),
+    );
+
+    // Where it stands, so it reopens there.
+    let timer = 0;
+    const remember = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(async () => {
+        try {
+          const [position, size, scale] = await Promise.all([
+            win.outerPosition(),
+            win.innerSize(),
+            win.scaleFactor(),
+          ]);
+          const at = position.toLogical(scale);
+          const extent = size.toLogical(scale);
+          updateWorkspace(id, {
+            windowBounds: { x: at.x, y: at.y, width: extent.width, height: extent.height },
+          });
+        } catch {
+          /* the window is going away */
+        }
+      }, 700);
+    };
+    stops.push(win.onMoved(remember));
+    stops.push(win.onResized(remember));
+
+    return () => {
+      window.clearTimeout(timer);
+      stops.forEach((stop) => stop.then((off) => off()).catch(() => undefined));
+    };
+  }, [reattach, updateWorkspace]);
+
+  // Workspace window whose workspace was deleted from the main window: its
+  // panes die with it — nobody else draws them — and the window closes.
+  useEffect(() => {
+    if (!windowWorkspaceId || !hydrated || ownWorkspace) return;
+    for (const paneId of lastPanes.current) ptyKill(paneId).catch(() => undefined);
+    closeWorkspaceWindow(windowWorkspaceId).catch(() => undefined);
+  }, [hydrated, ownWorkspace]);
+
+  // Workspace window: its title follows a rename.
+  useEffect(() => {
+    if (!ownWorkspace) return;
+    getCurrentWindow()
+      .setTitle(`${ownWorkspace.name} — Hangar.AI`)
+      .catch(() => undefined);
+  }, [ownWorkspace?.name]);
+
   /** Panes running an agent — the ones a reset has a conversation to drop. */
   const agentPanes = useMemo(() => panes.filter((p) => p.agent !== "shell"), [panes]);
 
@@ -380,7 +665,15 @@ export default function App() {
     // to the terminal instead of being swallowed by a feature nobody enabled.
     if (state.settings.voiceEnabled) map["voice.dictate"] = voice.press;
 
-    const workspaces = sidebarOrder(state.workspaces, state.folders);
+    // A workspace window shows one workspace and no settings: those keys are
+    // the main window's.
+    if (windowWorkspaceId) {
+      delete map["view.settings"];
+      delete map["view.shortcuts"];
+      delete map["workspace.new"];
+    }
+
+    const workspaces = windowWorkspaceId ? [] : sidebarOrder(state.workspaces, state.folders);
     for (let i = 0; i < Math.min(9, workspaces.length); i++) {
       const { id } = workspaces[i];
       map[`workspace.go${i + 1}` as CommandId] = () => setActiveWorkspace(id);
@@ -524,12 +817,15 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <UpdateBanner />
-      <Sidebar
-        onOpenSettings={() => openSettings()}
-        onNewWorkspace={() => setShowCreate(true)}
-      />
+    <div className={`app ${windowWorkspaceId ? "app--window" : ""}`}>
+      {/* One update banner and one sidebar, both the main window's. */}
+      {isMainWindow && <UpdateBanner />}
+      {isMainWindow && (
+        <Sidebar
+          onOpenSettings={() => openSettings()}
+          onNewWorkspace={() => setShowCreate(true)}
+        />
+      )}
 
       <main className="main">
         {activeWorkspace ? (
@@ -572,6 +868,24 @@ export default function App() {
                 >
                   ◧ {t("board.dock")}
                 </button>
+                {canDetach && (
+                  <button
+                    className="layouts__btn layouts__btn--wide"
+                    onClick={() => void detach(activeWorkspace.id)}
+                    title={t("window.detachHint")}
+                  >
+                    ⧉ {t("window.detach")}
+                  </button>
+                )}
+                {windowWorkspaceId && (
+                  <button
+                    className="layouts__btn layouts__btn--wide"
+                    onClick={() => reattach(activeWorkspace.id)}
+                    title={t("window.reattachHint")}
+                  >
+                    ⤓ {t("window.reattach")}
+                  </button>
+                )}
               </div>
 
               {view === "terminals" && (
@@ -734,6 +1048,26 @@ export default function App() {
             </footer>
             )}
           </>
+        ) : elsewhere ? (
+          <div className="placeholder">
+            <h2>{t("window.elsewhereTitle", { name: elsewhere.name })}</h2>
+            <p>{t("window.elsewhereBody")}</p>
+            <div className="placeholder__actions">
+              <button
+                className="btn btn--primary"
+                onClick={() => focusWorkspaceWindow(elsewhere.id).catch(() => undefined)}
+              >
+                {t("window.show")}
+              </button>
+              <button className="btn" onClick={() => reattach(elsewhere.id)}>
+                {t("window.bringBack")}
+              </button>
+            </div>
+          </div>
+        ) : windowWorkspaceId ? (
+          <div className="placeholder">
+            <p>{t("app.loading")}</p>
+          </div>
         ) : (
           <div className="placeholder">
             <h2>{t("placeholder.title")}</h2>

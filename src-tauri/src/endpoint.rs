@@ -32,7 +32,14 @@ fn legacy_endpoint_path() -> Option<PathBuf> {
 /// been updated. Writing both locations and reading either keeps every
 /// combination working; once only post-rename binaries are in play, the legacy
 /// path can go.
+///
+/// `HANGAR_ENDPOINT_FILE` replaces both, for a development build run next to
+/// an installed Hangar: sharing the file would hand every agent of the
+/// installed app over to the build, and closing the build would delete it.
 fn endpoint_paths() -> Vec<PathBuf> {
+    if let Some(file) = std::env::var_os("HANGAR_ENDPOINT_FILE").filter(|v| !v.is_empty()) {
+        return vec![PathBuf::from(file)];
+    }
     [endpoint_path(), legacy_endpoint_path()]
         .into_iter()
         .flatten()

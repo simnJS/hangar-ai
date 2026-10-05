@@ -44,7 +44,20 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function setPaneActivity(paneId: string, value: PaneActivity) {
+/**
+ * Told about every change the panes of this window make, so it can pass them
+ * on to the other windows: a workspace in a window of its own still counts in
+ * the main window's sidebar. Changes coming from another window go through
+ * `applyRemoteActivity`, which does not pass them on again.
+ */
+let relay: ((paneId: string, value: PaneActivity | null) => void) | null = null;
+
+export function relayActivity(fn: typeof relay) {
+  relay = fn;
+}
+
+function apply(paneId: string, value: PaneActivity | null): boolean {
+  if (value === null) return panes.delete(paneId);
   const current = panes.get(paneId);
   if (
     current &&
@@ -52,14 +65,26 @@ export function setPaneActivity(paneId: string, value: PaneActivity) {
     current.bridged === value.bridged &&
     current.workspaceId === value.workspaceId
   ) {
-    return;
+    return false;
   }
   panes.set(paneId, value);
+  return true;
+}
+
+export function setPaneActivity(paneId: string, value: PaneActivity) {
+  if (!apply(paneId, value)) return;
   changed();
+  relay?.(paneId, value);
 }
 
 export function clearPaneActivity(paneId: string) {
-  if (panes.delete(paneId)) changed();
+  if (!apply(paneId, null)) return;
+  changed();
+  relay?.(paneId, null);
+}
+
+export function applyRemoteActivity(paneId: string, value: PaneActivity | null) {
+  if (apply(paneId, value)) changed();
 }
 
 export function getPaneActivity(paneId: string): PaneActivity | undefined {

@@ -280,6 +280,11 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
               </span>
             </div>
             <WorkspaceActivityBadge workspaceId={ws.id} />
+            {ws.detached && (
+              <span className="ws__window" title={t("window.inOwnWindow")} aria-label={t("window.inOwnWindow")}>
+                ⧉
+              </span>
+            )}
             <span className="ws__badge">{ws.panes.length}</span>
             {/* Double-click renames too, but nothing on the row says so. */}
             <button

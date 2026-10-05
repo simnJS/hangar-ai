@@ -1,6 +1,7 @@
 mod board;
 mod bridge;
 mod context;
+mod control;
 mod discord;
 mod endpoint;
 mod git;
@@ -16,6 +17,7 @@ mod sessions;
 mod shells;
 mod store;
 mod voice;
+mod windows;
 mod workspace_file;
 
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -75,6 +77,11 @@ pub fn run() {
             bridge::bridge_enqueue,
             bridge::bridge_cancel,
             bridge::bridge_queue,
+            control::control_reply,
+            windows::open_workspace_window,
+            windows::focus_workspace_window,
+            windows::close_workspace_window,
+            pty::pty_history,
             sessions::list_sessions,
             sessions::detect_agents,
             context::context_usage,
@@ -129,17 +136,29 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            if let RunEvent::WindowEvent {
-                event: WindowEvent::Destroyed,
-                ..
-            } = event
-            {
-                pty::kill_all(&app.state::<pty::PtyManager>());
-                // Stale endpoint files would make agents try to reach a dead port.
-                endpoint::clear();
-                // Discord drops the presence when the pipe dies anyway; this
-                // just takes it down before the window is gone from screen.
-                app.state::<discord::DiscordPresence>().stop();
+            let RunEvent::WindowEvent { label, event, .. } = event else {
+                return;
+            };
+            match event {
+                // A workspace window hands its panes back before it goes.
+                WindowEvent::CloseRequested { api, .. } if windows::is_workspace_window(&label) => {
+                    api.prevent_close();
+                    windows::on_close_requested(app, &label);
+                }
+                // Only the main window's end is the app's: it owns the store,
+                // so the workspace windows go with it, and nothing is left to
+                // draw the terminals. A workspace window closing leaves its
+                // panes running for the main window to take back.
+                WindowEvent::Destroyed if label == "main" => {
+                    pty::kill_all(&app.state::<pty::PtyManager>());
+                    // Stale endpoint files would make agents try to reach a dead port.
+                    endpoint::clear();
+                    // Discord drops the presence when the pipe dies anyway; this
+                    // just takes it down before the window is gone from screen.
+                    app.state::<discord::DiscordPresence>().stop();
+                    app.exit(0);
+                }
+                _ => {}
             }
         });
 }

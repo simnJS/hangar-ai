@@ -17,6 +17,49 @@ struct PtySession {
     /// a moment — it can be holding a chunk read just before it — and this is
     /// what stops those last events from landing in whatever holds the id next.
     live: Arc<AtomicBool>,
+    /// What the pane printed last, for a window that takes it over.
+    history: Arc<Mutex<History>>,
+}
+
+/// How much of a pane's output is kept for a window that takes the pane over
+/// — a workspace moved to a window of its own, or a window reloaded. Enough
+/// for a screenful of an agent's interface and the scrollback above it.
+const HISTORY_BYTES: usize = 256 * 1024;
+
+/// The tail of a pane's output, and how many bytes it has printed in all.
+///
+/// `end` is what lets a window that subscribed to the live output before
+/// asking for the history put the two together: every `pty:output` carries
+/// the total it brings the pane to, so a chunk the history already holds is
+/// recognised and dropped instead of printed twice.
+#[derive(Default)]
+struct History {
+    text: String,
+    end: u64,
+}
+
+impl History {
+    fn push(&mut self, chunk: &str) -> u64 {
+        self.text.push_str(chunk);
+        self.end += chunk.len() as u64;
+        // Trimmed in batches rather than on every chunk, and at a line break
+        // so the replay does not start halfway through an escape sequence.
+        if self.text.len() > HISTORY_BYTES * 2 {
+            let mut cut = self.text.len() - HISTORY_BYTES;
+            while !self.text.is_char_boundary(cut) {
+                cut += 1;
+            }
+            let cut = self.text[cut..].find('\n').map_or(cut, |at| cut + at + 1);
+            self.text.drain(..cut);
+        }
+        self.end
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub struct PtyHistory {
+    data: String,
+    end: u64,
 }
 
 /// Everything the manager tracks, behind one lock: an id is live, being reaped,
@@ -73,6 +116,8 @@ const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 struct PtyOutput {
     id: String,
     data: String,
+    /// Bytes the pane has printed in all, this chunk included.
+    seq: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -196,6 +241,18 @@ pub fn pty_spawn(
     for marker in INHERITED_SESSION_MARKERS {
         cmd.env_remove(marker);
     }
+    // Who this pane is, for an agent in it that asks Hangar to act on its own
+    // pane, or signs its board claims. Set whether or not the bridge mod comes
+    // along, and never inherited from a Hangar started inside another pane.
+    cmd.env("HANGAR_PANE_ID", &id);
+    match name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        Some(name) => cmd.env("HANGAR_PANE_NAME", name),
+        None => cmd.env_remove("HANGAR_PANE_NAME"),
+    }
     // Lets a Claude Code started in this pane load the hangar-bridge mod.
     if bridge != Some(false) {
         crate::bridge::apply_env(&mut cmd, &id, name.as_deref());
@@ -209,6 +266,7 @@ pub fn pty_spawn(
     drop(pair.slave);
 
     let live = Arc::new(AtomicBool::new(true));
+    let history = Arc::new(Mutex::new(History::default()));
     manager.lock().sessions.insert(
         id.clone(),
         PtySession {
@@ -216,6 +274,7 @@ pub fn pty_spawn(
             writer,
             child,
             live: live.clone(),
+            history: history.clone(),
         },
     );
 
@@ -238,11 +297,16 @@ pub fn pty_spawn(
                     pending.extend_from_slice(&buf[..n]);
                     let text = take_utf8(&mut pending);
                     if !text.is_empty() {
+                        // Recorded before it is sent: a window reading the
+                        // history in between finds the chunk there, and drops
+                        // the event when it arrives.
+                        let seq = history.lock().unwrap().push(&text);
                         let _ = reader_app.emit(
                             "pty:output",
                             PtyOutput {
                                 id: reader_id.clone(),
                                 data: text,
+                                seq,
                             },
                         );
                     }
@@ -372,6 +436,18 @@ fn reap_process_group(session: &PtySession) {
 #[cfg(not(unix))]
 fn reap_process_group(_session: &PtySession) {}
 
+/// The tail of a live pane's output, for a window taking the pane over.
+#[tauri::command]
+pub fn pty_history(manager: State<'_, PtyManager>, id: String) -> Result<PtyHistory, String> {
+    let registry = manager.lock();
+    let session = registry.sessions.get(&id).ok_or("pty not found")?;
+    let history = session.history.lock().unwrap();
+    Ok(PtyHistory {
+        data: history.text.clone(),
+        end: history.end,
+    })
+}
+
 #[tauri::command]
 pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {
     manager.lock().sessions.contains_key(&id)
@@ -383,5 +459,31 @@ pub fn kill_all(manager: &PtyManager) {
     for (_, mut session) in registry.sessions.drain() {
         session.live.store(false, Ordering::Relaxed);
         let _ = session.child.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_keeps_a_bounded_tail_cut_at_a_line() {
+        let mut history = History::default();
+        let line = "é".repeat(50) + "\n";
+        let mut total = 0u64;
+        for _ in 0..(HISTORY_BYTES * 3 / line.len()) {
+            total = history.push(&line);
+        }
+
+        assert_eq!(total, history.end);
+        assert_eq!(
+            history.end as usize,
+            line.len() * (HISTORY_BYTES * 3 / line.len())
+        );
+        assert!(history.text.len() <= HISTORY_BYTES * 2);
+        assert!(history.text.len() >= HISTORY_BYTES - line.len());
+        // Whole lines only, so a replay never opens mid-sequence.
+        assert!(history.text.starts_with('é'));
+        assert!(history.text.ends_with('\n'));
     }
 }

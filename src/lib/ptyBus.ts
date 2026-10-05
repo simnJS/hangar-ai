@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 
-type Handler = (data: string) => void;
+/** `seq` is how many bytes the pane has printed once this chunk is in. */
+type Handler = (data: string, seq: number) => void;
 
 const outputHandlers = new Map<string, Handler>();
 const exitHandlers = new Map<string, () => void>();
@@ -14,8 +15,8 @@ let ready: Promise<void> | null = null;
 function ensureBus(): Promise<void> {
   if (!ready) {
     ready = (async () => {
-      await listen<{ id: string; data: string }>("pty:output", (event) => {
-        outputHandlers.get(event.payload.id)?.(event.payload.data);
+      await listen<{ id: string; data: string; seq: number }>("pty:output", (event) => {
+        outputHandlers.get(event.payload.id)?.(event.payload.data, event.payload.seq);
       });
       await listen<{ id: string }>("pty:exit", (event) => {
         exitHandlers.get(event.payload.id)?.();

@@ -665,6 +665,23 @@ body.is-sorting * {
   line-height: 1.7;
 }
 
+.placeholder__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* The sidebar's mark on a workspace shown in a window of its own. */
+.ws__window {
+  color: var(--accent);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+/* A workspace in a window of its own: no sidebar, the workspace takes it all. */
+.app--window {
+  grid-template-columns: 1fr;
+}
+
 /* ---------- Pane grid ---------- */
 
 /* Panes are flat, absolutely positioned siblings whose rectangles come from

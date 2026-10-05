@@ -140,19 +140,22 @@ export function buildPresence({
  * rebuilt on every render, so an identity check would republish constantly and
  * an update every few seconds is all Discord accepts.
  */
-export function useDiscordPresence(presence: DiscordPresence | null) {
+/** `owner` is false in a workspace window: there is one presence, and the main
+    window speaks for it — a second window publishing would clear it. */
+export function useDiscordPresence(presence: DiscordPresence | null, owner = true) {
   const payload = presence ? JSON.stringify(presence) : "";
 
   useEffect(() => {
+    if (!owner) return;
     setDiscordPresence(payload ? (JSON.parse(payload) as DiscordPresence) : null).catch(
       () => undefined,
     );
-  }, [payload]);
+  }, [payload, owner]);
 
   useEffect(
     () => () => {
-      setDiscordPresence(null).catch(() => undefined);
+      if (owner) setDiscordPresence(null).catch(() => undefined);
     },
-    [],
+    [owner],
   );
 }

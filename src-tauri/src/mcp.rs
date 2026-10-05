@@ -34,8 +34,12 @@ fn workspace_cwd() -> String {
         .unwrap_or_default()
 }
 
+/// The name an agent signs with when it gives none. The pane's own name comes
+/// before the generic fallback: it is what the board's assignee chip can lead
+/// back to a pane with, and what pane_list calls that agent.
 fn agent_name() -> String {
-    env_var(&["HANGAR_AGENT", "IABENCH_AGENT"]).unwrap_or_else(|| "agent".to_string())
+    env_var(&["HANGAR_AGENT", "IABENCH_AGENT", "HANGAR_PANE_NAME"])
+        .unwrap_or_else(|| "agent".to_string())
 }
 
 struct Api {
@@ -157,6 +161,14 @@ fn urlencode(value: &str) -> String {
 }
 
 fn tool_definitions() -> Value {
+    let workspace_arg = json!({
+        "type": "string",
+        "description": "Workspace name or folder. Defaults to the one you are working in."
+    });
+    let pane_arg = json!({
+        "type": "string",
+        "description": "Pane name, as pane_list shows it (an id works too)."
+    });
     json!([
         {
             "name": "board_list_tasks",
@@ -321,6 +333,118 @@ fn tool_definitions() -> Value {
                 "properties": { "id": { "type": "string" } },
                 "required": ["id"]
             }
+        },
+        {
+            "name": "workspace_list",
+            "description": "List the workspaces open in Hangar.AI — name, folder, number of panes — and which one you are in. The pane tools act on your own workspace unless you name another one.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "pane_list",
+            "description": "List the panes (terminals) of a workspace: name, the agent running in it, its folder, whether its process is alive, and — when Hangar can tell — what the agent is doing: working, waiting (for a permission or an answer), yours (finished its turn), idle. Every other pane tool addresses panes by these names. Your own pane is marked you=true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "workspace": workspace_arg }
+            }
+        },
+        {
+            "name": "pane_create",
+            "description": "Open a new pane in a workspace and start an agent in it, or a plain shell. Use it to hand work to another agent: with a prompt, a Claude Code pane starts on it as soon as it is ready; for other agents, send the prompt with pane_send once pane_read shows them started. Give a cwd (a worktree, for instance) to keep two agents out of each other's files. A workspace holds at most 16 panes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "enum": ["claude", "codex", "gemini", "opencode", "shell"],
+                        "description": "What to run. Defaults to the agent of the pane it is split from."
+                    },
+                    "name": { "type": "string", "description": "Name for the pane, unique in its workspace. Defaults to the next free first name." },
+                    "cwd": { "type": "string", "description": "Folder to start in, absolute or relative to the workspace root. Defaults to the workspace root." },
+                    "prompt": { "type": "string", "description": "First message for a Claude Code pane, submitted once its session is ready." },
+                    "near": { "type": "string", "description": "Name of the pane to split. Defaults to the last one." },
+                    "direction": { "type": "string", "enum": ["right", "down"], "description": "Which side of `near` the new pane goes. Default right." },
+                    "focus": { "type": "boolean", "description": "Bring the new pane to the front. Default false." },
+                    "workspace": workspace_arg
+                }
+            }
+        },
+        {
+            "name": "pane_close",
+            "description": "Close a pane: its terminal and whatever runs in it are killed. A Claude Code or Codex conversation stays on disk and can be resumed from the session picker. The last pane of a workspace cannot be closed. Closing your own pane ends your session.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "pane": pane_arg, "workspace": workspace_arg },
+                "required": ["pane"]
+            }
+        },
+        {
+            "name": "pane_restart",
+            "description": "Restart a pane's terminal. By default its agent resumes the conversation it had; fresh=true starts a new conversation instead (a reset); agent switches the pane to another agent, also fresh. The pane keeps its name.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pane": pane_arg,
+                    "fresh": { "type": "boolean", "description": "Start a new conversation rather than resuming. Default false." },
+                    "agent": { "type": "string", "enum": ["claude", "codex", "gemini", "opencode", "shell"] },
+                    "workspace": workspace_arg
+                },
+                "required": ["pane"]
+            }
+        },
+        {
+            "name": "pane_send",
+            "description": "Type into a pane as if at its keyboard. `text` is pasted and, unless submit=false, followed by Enter. `keys` are pressed after the text, in order — ['escape'] interrupts Claude Code, ['ctrl+c'] stops a command, ['down', 'enter'] picks the next option of a menu. With when_idle=true (Claude Code panes only) the text is queued instead, and submitted once that agent has finished its current turn rather than interrupting it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pane": pane_arg,
+                    "text": { "type": "string" },
+                    "submit": { "type": "boolean", "description": "Press Enter after the text. Default true." },
+                    "keys": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["enter", "escape", "tab", "shift+tab", "backspace", "up", "down", "left", "right", "ctrl+c", "ctrl+d"]
+                        }
+                    },
+                    "when_idle": { "type": "boolean", "description": "Queue the text until the Claude Code session is idle. Default false." },
+                    "workspace": workspace_arg
+                },
+                "required": ["pane"]
+            }
+        },
+        {
+            "name": "pane_read",
+            "description": "Read what a pane's terminal shows: its last lines, as plain text. Use it to check on an agent you started or on a command you sent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pane": pane_arg,
+                    "lines": { "type": "integer", "description": "How many lines from the bottom. Default 60, maximum 1000." },
+                    "workspace": workspace_arg
+                },
+                "required": ["pane"]
+            }
+        },
+        {
+            "name": "workspace_window",
+            "description": "Move a workspace into a window of its own (detach=true) — to put it on a second screen, for instance — or back into Hangar's main window (detach=false). Its panes and agents keep running through the move.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "detach": { "type": "boolean", "description": "true for a window of its own, false for the main window. Default true." },
+                    "workspace": workspace_arg
+                }
+            }
+        },
+        {
+            "name": "pane_focus",
+            "description": "Show a pane to the user: switch Hangar's window to its workspace and focus it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "pane": pane_arg, "workspace": workspace_arg },
+                "required": ["pane"]
+            }
         }
     ])
 }
@@ -435,6 +559,21 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
         "memory_delete" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
             api.delete(&format!("/api/memory/{id}"))
+        }
+        op if crate::control::OPERATIONS.contains(&op) => {
+            let mut body = if args.is_object() {
+                args.clone()
+            } else {
+                json!({})
+            };
+            // Who is asking, so "my workspace" and "you" mean something. Read
+            // from the pane's environment, which the model cannot dress up.
+            body["caller"] = json!({
+                "paneId": env_var(&["HANGAR_PANE_ID"]),
+                "paneName": env_var(&["HANGAR_PANE_NAME"]),
+                "cwd": workspace_cwd(),
+            });
+            api.send("POST", &format!("/api/control/{op}"), body)
         }
         other => Err(format!("unknown tool '{other}'")),
     }
