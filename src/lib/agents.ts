@@ -57,9 +57,9 @@ export function launchCommand(
     extraRoots?: string[];
     commands?: Record<string, string>;
     /**
-     * The pane's name. Claude Code sessions on one machine can message each
-     * other by name, and naming each after its pane is what lets an agent
-     * reach the one next to it as `@<pane>`.
+     * The session's name — see `sessionName` in lib/paneNames. Claude Code
+     * sessions on one machine can message each other by name, and naming each
+     * after its pane is what lets an agent reach another one.
      */
     name?: string;
   } = {},

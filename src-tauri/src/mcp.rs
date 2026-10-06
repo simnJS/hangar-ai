@@ -167,7 +167,7 @@ fn tool_definitions() -> Value {
     });
     let pane_arg = json!({
         "type": "string",
-        "description": "Pane name, as pane_list shows it (an id works too)."
+        "description": "Pane name, as pane_list shows it (an id works too). Names are unique across workspaces, so a pane is found wherever it is."
     });
     json!([
         {
@@ -358,7 +358,7 @@ fn tool_definitions() -> Value {
                         "enum": ["claude", "codex", "gemini", "opencode", "shell"],
                         "description": "What to run. Defaults to the agent of the pane it is split from."
                     },
-                    "name": { "type": "string", "description": "Name for the pane, unique in its workspace. Defaults to the next free first name." },
+                    "name": { "type": "string", "description": "Name for the pane, unique across every workspace. Defaults to the next free first name." },
                     "cwd": { "type": "string", "description": "Folder to start in, absolute or relative to the workspace root. Defaults to the workspace root." },
                     "prompt": { "type": "string", "description": "First message for a Claude Code pane, submitted once its session is ready." },
                     "near": { "type": "string", "description": "Name of the pane to split. Defaults to the last one." },

@@ -204,6 +204,7 @@ export function WorkspaceTerminals({
           <TerminalPane
             pane={pane}
             workspaceId={workspace.id}
+            workspaceName={workspace.name}
             index={Math.max(0, order.indexOf(pane.id))}
             cwd={workspace.cwd}
             extraRoots={workspace.extraRoots}

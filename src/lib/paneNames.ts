@@ -7,9 +7,17 @@ import type { Pane, Workspace } from "../types";
  * every index after it shifts, so "pane 3" means something else a second
  * later. A name is attached to the pane itself and survives all of it, which
  * is what makes it usable in a sentence — "Leo is done, Ava is still running".
+ *
+ * A name is unique across every workspace, not only within its own: Claude
+ * Code sessions reach each other by name, and two "Ava" running in two
+ * workspaces could not be told apart.
  */
 
-/** Short, unambiguous, easy to say out loud. One per pane, up to MAX_PANES. */
+/**
+ * Short, unambiguous, easy to say out loud. The first sixteen are the ones
+ * panes were named with before names became unique across workspaces, kept
+ * first and in order so existing panes keep theirs.
+ */
 export const PANE_NAMES = [
   "Ava",
   "Max",
@@ -27,9 +35,41 @@ export const PANE_NAMES = [
   "Cleo",
   "Rex",
   "Wren",
+  "Ada",
+  "Ben",
+  "Cora",
+  "Dex",
+  "Emma",
+  "Gus",
+  "Hugo",
+  "Iris",
+  "Jack",
+  "Kai",
+  "Lola",
+  "Milo",
+  "Otto",
+  "Quinn",
+  "Rosa",
+  "Seth",
+  "Tara",
+  "Vera",
+  "Will",
+  "Yara",
+  "Zack",
+  "Bram",
+  "Ezra",
+  "Faye",
+  "Hana",
+  "Juno",
+  "Kit",
+  "Lars",
+  "Omar",
+  "Ruby",
+  "Tess",
+  "Vic",
 ];
 
-/** First free name in a workspace; falls back to "Ava 2" once the list runs out. */
+/** First free name; falls back to "Ava 2" once the list runs out. */
 export function pickPaneName(taken: Iterable<string>): string {
   const used = new Set(taken);
   const free = PANE_NAMES.find((name) => !used.has(name));
@@ -42,24 +82,70 @@ export function pickPaneName(taken: Iterable<string>): string {
   }
 }
 
-/** Gives every pane a name, keeping the ones already stored. */
-export function nameWorkspacePanes(workspace: Workspace): Workspace {
-  const panes = workspace.panes ?? [];
-  // The normalised list goes back out even when there was nothing to name: a
-  // stored workspace without `panes` would otherwise stay undefined and take
-  // down everything that counts its panes.
-  if (panes.every((pane) => pane.name)) return { ...workspace, panes };
+/** The next `count` free names, in the order panes would be given them. */
+export function pickPaneNames(count: number, taken: Iterable<string>): string[] {
+  const used = new Set(taken);
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const name = pickPaneName(used);
+    used.add(name);
+    names.push(name);
+  }
+  return names;
+}
 
-  const taken = new Set(panes.map((pane) => pane.name).filter(Boolean));
-  return {
-    ...workspace,
-    panes: panes.map((pane) => {
-      if (pane.name) return pane;
-      const name = pickPaneName(taken);
-      taken.add(name);
-      return { ...pane, name };
-    }),
-  };
+/** Every name in use, in every workspace. */
+export const allPaneNames = (workspaces: Workspace[]) =>
+  workspaces.flatMap((ws) => (ws.panes ?? []).map((pane) => pane.name).filter(Boolean));
+
+/**
+ * Gives every pane a name no other pane has, in any workspace. Names already
+ * stored are kept where they are the first of their kind — in the order the
+ * workspaces are listed — and only the later duplicates, plus the panes that
+ * had no name at all, get a new one. Returns the same objects when nothing
+ * had to change.
+ */
+export function uniquePaneNames(workspaces: Workspace[]): Workspace[] {
+  const seen = new Set<string>();
+  const clashing = new Set<Pane>();
+  for (const ws of workspaces) {
+    for (const pane of ws.panes ?? []) {
+      if (!pane.name || seen.has(pane.name)) clashing.add(pane);
+      else seen.add(pane.name);
+    }
+  }
+  if (clashing.size === 0) return workspaces;
+
+  return workspaces.map((ws) => {
+    const panes = ws.panes ?? [];
+    if (!panes.some((pane) => clashing.has(pane))) return { ...ws, panes };
+    return {
+      ...ws,
+      panes: panes.map((pane) => {
+        if (!clashing.has(pane)) return pane;
+        const name = pickPaneName(seen);
+        seen.add(name);
+        return { ...pane, name };
+      }),
+    };
+  });
 }
 
 export const paneNames = (panes: Pane[]) => panes.map((pane) => pane.name);
+
+/**
+ * The name a Claude Code session runs under — what other sessions list and
+ * message it by: the pane's name, then its workspace's. The workspace is there
+ * for the agents, so one can tell which project the agent it is about to write
+ * to works on; the interface keeps showing the pane's name alone.
+ *
+ * Characters a shell would read as quoting or expansion are left out of the
+ * workspace part, so the name can always go on the command line.
+ */
+export function sessionName(paneName: string, workspaceName: string): string {
+  const workspace = workspaceName
+    .replace(/["'`$\\%!^&|<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return workspace ? `${paneName} (${workspace})` : paneName;
+}

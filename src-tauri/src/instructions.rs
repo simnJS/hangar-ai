@@ -89,11 +89,13 @@ rather than editing the same files at the same time.
 
 ### Talking to the agent next door
 
-Claude Code sessions in Hangar.AI are named after their pane. When another agent needs
-to know something now (you changed a file it is working on, you answered its question),
-message it directly with `SendMessage` to the name of its pane, for example `@alice`;
-`/list-agents` shows who is reachable. The board stays the record: write the same thing
-there if it matters beyond this moment.
+Claude Code sessions in Hangar.AI are named after their pane and its workspace, for
+example `Ava (Shop)`. A pane's first name is unique across every workspace, so `Ava` is
+one agent and the workspace in brackets tells you which project it works on. When another
+agent needs to know something now (you changed a file it is working on, you answered its
+question), message it directly with `SendMessage` to that name; `/list-agents` shows who
+is reachable. The board stays the record: write the same thing there if it matters beyond
+this moment.
 
 ## Global memory
 

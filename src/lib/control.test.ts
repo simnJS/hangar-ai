@@ -168,7 +168,11 @@ describe("runControl", () => {
     await expect(
       runControl("pane_create", { ...fromAva, agent: "codex", prompt: "hi" }, deps),
     ).rejects.toThrow(/Claude Code/);
-    await expect(runControl("pane_create", { ...fromAva, name: "max" }, deps)).rejects.toThrow(/already has/);
+    await expect(runControl("pane_create", { ...fromAva, name: "max" }, deps)).rejects.toThrow(/already named/);
+    // Taken in another workspace counts too: names are unique across Hangar.
+    await expect(
+      runControl("pane_create", { ...fromAva, workspace: "Shop", name: "Max" }, deps),
+    ).rejects.toThrow(/in "Hangar"/);
     await expect(runControl("pane_create", { ...fromAva, cwd: "missing" }, deps)).rejects.toThrow(/No such folder/);
     await expect(runControl("pane_create", { ...fromAva, agent: "vim" }, deps)).rejects.toThrow(/Unknown agent/);
     expect(log.some((entry) => entry.startsWith("add:"))).toBe(false);
@@ -184,6 +188,13 @@ describe("runControl", () => {
     await expect(runControl("pane_close", { ...fromAva, pane: "Zed" }, deps)).rejects.toThrow(
       /No pane "Zed".*"Ava", "Max"/,
     );
+  });
+
+  it("finds a pane by name in another workspace when the caller's has none", async () => {
+    const { deps, log } = setup();
+    const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\dev\shop" } };
+    await runControl("pane_close", { ...fromShop, pane: "Max" }, deps);
+    expect(log).toContain("close:w1:p2");
   });
 
   it("restarts, resets and switches agents", async () => {

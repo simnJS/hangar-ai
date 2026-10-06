@@ -18,6 +18,7 @@ import {
   type QueuedPrompt,
 } from "../lib/ipc";
 import { isHandingOver } from "../lib/windows";
+import { sessionName } from "../lib/paneNames";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
   clearPaneActivity,
@@ -69,6 +70,8 @@ interface Props {
   pane: Pane;
   /** Owning workspace — where a click on this pane's notification has to land. */
   workspaceId: string;
+  /** Goes into the name a Claude Code session runs under, never on screen. */
+  workspaceName: string;
   cwd: string;
   /** Folders of the workspace that the terminal did not open in. */
   extraRoots: string[];
@@ -111,6 +114,7 @@ interface Props {
 export function TerminalPane({
   pane,
   workspaceId,
+  workspaceName,
   cwd,
   extraRoots,
   settings,
@@ -192,6 +196,8 @@ export function TerminalPane({
   bridgedRef.current = bridged;
   const sessionIdRef = useRef(pane.sessionId);
   sessionIdRef.current = pane.sessionId;
+  const workspaceNameRef = useRef(workspaceName);
+  workspaceNameRef.current = workspaceName;
 
   const jumpKeys = index < 9 ? shortcut(`pane.focus${index + 1}` as CommandId) : "";
 
@@ -632,7 +638,9 @@ export function TerminalPane({
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,
-            name: pane.name,
+            // Read when the agent starts: a workspace renamed later shows up
+            // on the next launch.
+            name: sessionName(pane.name, workspaceNameRef.current),
           });
           if (command) {
             if (resumeId) claim(resumeId);

@@ -8,10 +8,12 @@ import type { Workspace } from "../types";
  * guess is unambiguous — focusing the wrong agent is worse than offering no
  * shortcut at all:
  *
- * 1. a pane of the active workspace whose name is in the assignee ("Ava",
- *    "claude:ava", "hangar-ava"); the longest name wins, so "Ava 2" beats "Ava";
- * 2. "<workspace>-<pane>" for any workspace — every workspace has an "Ava", so
- *    a bare name is never looked up outside the one on screen;
+ * 1. a workspace and one of its panes, in either order — "hangar-ava", or
+ *    "Ava (Hangar)", the name a Claude Code session runs under — which also
+ *    tells apart two panes a board from before names were unique names alike;
+ * 2. a pane whose name is in the assignee ("Ava", "claude:ava") — in the
+ *    active workspace first, then in any other, since pane names are unique
+ *    across workspaces; the longest name wins, so "Ava 2" beats "Ava";
  * 3. the only pane of the active workspace running the agent the assignee
  *    names ("claude", "codex-1").
  */
@@ -45,28 +47,38 @@ export function findAgentPane(
   if (!said.length) return null;
   const active = workspaces.find((ws) => ws.id === activeId) ?? null;
 
-  if (active) {
-    let best: { paneId: string; length: number }[] = [];
-    for (const pane of active.panes) {
-      const name = words(pane.name);
-      if (!containsRun(said, name)) continue;
-      if (!best.length || name.length > best[0].length) best = [];
-      if (!best.length || name.length === best[0].length) {
-        best.push({ paneId: pane.id, length: name.length });
+  const named = (candidates: Workspace[]): PaneTarget | null => {
+    let best: (PaneTarget & { length: number })[] = [];
+    for (const ws of candidates) {
+      for (const pane of ws.panes) {
+        const name = words(pane.name);
+        if (!containsRun(said, name)) continue;
+        if (!best.length || name.length > best[0].length) best = [];
+        if (!best.length || name.length === best[0].length) {
+          best.push({ workspaceId: ws.id, paneId: pane.id, length: name.length });
+        }
       }
     }
-    if (best.length === 1) return { workspaceId: active.id, paneId: best[0].paneId };
-  }
+    return best.length === 1 ? { workspaceId: best[0].workspaceId, paneId: best[0].paneId } : null;
+  };
 
   for (const ws of workspaces) {
     const prefix = words(ws.name);
     if (!prefix.length) continue;
-    for (const pane of ws.panes) {
-      if (containsRun(said, [...prefix, ...words(pane.name)])) {
+    // Longest name first, so "Ava 2" is not taken for "Ava".
+    const panes = [...ws.panes].sort((a, b) => words(b.name).length - words(a.name).length);
+    for (const pane of panes) {
+      const name = words(pane.name);
+      if (containsRun(said, [...prefix, ...name]) || containsRun(said, [...name, ...prefix])) {
         return { workspaceId: ws.id, paneId: pane.id };
       }
     }
   }
+
+  const here = active ? named([active]) : null;
+  if (here) return here;
+  const anywhere = named(workspaces);
+  if (anywhere) return anywhere;
 
   if (active) {
     const running = active.panes.filter(

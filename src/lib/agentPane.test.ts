@@ -47,12 +47,22 @@ describe("findAgentPane", () => {
     expect(findAgentPane("ava", all, "front")?.paneId).toBe("front:Ava");
   });
 
-  it("only looks outside the active workspace when the workspace is named", () => {
-    expect(findAgentPane("Leo", all, "front")).toBeNull();
+  it("finds a name that only one workspace has, wherever it is", () => {
+    expect(findAgentPane("Leo", all, "front")).toEqual({ workspaceId: "back", paneId: "back:Leo" });
     expect(findAgentPane("hangar-leo", all, "front")).toEqual({
       workspaceId: "back",
       paneId: "back:Leo",
     });
+  });
+
+  it("reads a Claude Code session name, workspace and all", () => {
+    // The fixture still has an "Ava" in both workspaces, as a board from
+    // before names were unique might: the workspace settles it.
+    expect(findAgentPane("Ava (Hangar)", all, "front")).toEqual({
+      workspaceId: "back",
+      paneId: "back:Ava",
+    });
+    expect(findAgentPane("Ava 2 (Storefront)", all, "back")?.paneId).toBe("front:Ava 2");
   });
 
   it("falls back on the agent kind only when one pane runs it", () => {

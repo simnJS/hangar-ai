@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop } from "./Backdrop";
 import { useT } from "../i18n";
 import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
-import { PANE_NAMES } from "../lib/paneNames";
+import { allPaneNames, pickPaneNames } from "../lib/paneNames";
 import { useStore, type WorkspaceDraft } from "../store";
 import {
   AGENTS,
@@ -40,7 +40,7 @@ interface Props {
 }
 
 export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
-  const { addWorkspace } = useStore();
+  const { addWorkspace, state } = useStore();
 
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
@@ -51,6 +51,10 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
   const [fileError, setFileError] = useState<string | null>(null);
   const [shellId, setShellId] = useState<string | null>(null);
   const [layout, setLayout] = useState<LayoutSize>(4);
+  const names = useMemo(
+    () => pickPaneNames(layout, allPaneNames(state.workspaces)),
+    [layout, state.workspaces],
+  );
   // One entry per pane: the source of truth the counters and preview share.
   const [assignments, setAssignments] = useState<AgentId[]>(() =>
     Array.from({ length: 4 }, () => "shell" as AgentId),
@@ -374,6 +378,8 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
               className="preview"
               style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
             >
+              {/* Pane names are unique across workspaces: these are the next
+                  free ones, the same the store will hand out. */}
               {assignments.map((agent, index) => (
                 <button
                   key={index}
@@ -383,7 +389,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                 >
                   <span className="preview__tag">{AGENT_SHORT[agent]}</span>
                   {/* The names the panes will actually be created with. */}
-                  <span className="preview__num">{PANE_NAMES[index] ?? index + 1}</span>
+                  <span className="preview__num">{names[index] ?? index + 1}</span>
                 </button>
               ))}
             </div>

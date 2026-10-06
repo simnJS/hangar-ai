@@ -22,7 +22,7 @@ import {
   renameLeaf,
   type Zone,
 } from "./lib/layout";
-import { nameWorkspacePanes, paneNames, pickPaneName } from "./lib/paneNames";
+import { allPaneNames, paneNames, pickPaneName, uniquePaneNames } from "./lib/paneNames";
 import {
   DEFAULT_SETTINGS,
   type AgentId,
@@ -38,7 +38,7 @@ import {
 
 const newId = () => crypto.randomUUID();
 
-/** `taken` holds the names already used in the target workspace. */
+/** `taken` holds the names already in use, in every workspace. */
 export const makePane = (agent: AgentId = "shell", taken: Iterable<string> = []): Pane => ({
   id: newId(),
   name: pickPaneName(taken),
@@ -62,10 +62,12 @@ export interface WorkspaceDraft {
   folderId?: string | null;
 }
 
-export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
+/** `taken` holds the pane names the other workspaces already use. */
+export const makeWorkspace = (draft: WorkspaceDraft, taken: Iterable<string> = []): Workspace => {
+  const others = [...taken];
   const panes: Pane[] = [];
   for (let i = 0; i < draft.layout; i++) {
-    panes.push(makePane(draft.agents[i] ?? "shell", paneNames(panes)));
+    panes.push(makePane(draft.agents[i] ?? "shell", [...others, ...paneNames(panes)]));
   }
   return {
     id: newId(),
@@ -86,7 +88,10 @@ export const makeWorkspace = (draft: WorkspaceDraft): Workspace => {
  * `folders` holds the folder ids the same file stores.
  */
 const hydrateWorkspace = (ws: Workspace, folders: Set<string>): Workspace => ({
-  ...nameWorkspacePanes(ws),
+  ...ws,
+  // A stored workspace without `panes` would take down everything that
+  // counts them. Names are settled afterwards, across every workspace.
+  panes: ws.panes ?? [],
   // Absent from everything saved before workspaces could hold extra roots.
   extraRoots: ws.extraRoots ?? [],
   // Same, for the workspaces stored before commands could be saved.
@@ -268,8 +273,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const folders = loaded.folders ?? [];
       const folderIds = new Set(folders.map((folder) => folder.id));
       update(() => ({
-        // Workspaces stored before panes had names get them here.
-        workspaces: (loaded.workspaces ?? []).map((ws) => hydrateWorkspace(ws, folderIds)),
+        // Panes stored without a name, or under one another workspace had
+        // first — names used to be unique per workspace only — get one here.
+        workspaces: uniquePaneNames(
+          (loaded.workspaces ?? []).map((ws) => hydrateWorkspace(ws, folderIds)),
+        ),
         folders,
         activeWorkspaceId: loaded.activeWorkspaceId ?? null,
         // Merge so settings added in later versions get their defaults.
@@ -407,7 +415,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeWorkspace,
 
       addWorkspace(draft) {
-        const ws = makeWorkspace(draft);
+        const ws = makeWorkspace(draft, allPaneNames(latest.current.workspaces));
         update((prev) => ({
           ...prev,
           workspaces: [...prev.workspaces, ws],
@@ -490,6 +498,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       applyPreset(workspaceId, count, modelPaneId) {
         const size = Math.min(MAX_PANES, Math.max(1, Math.round(count)));
+        // Read now: `mapWorkspace` applies its function synchronously, against
+        // the very state this is taken from.
+        const others = allPaneNames(
+          latest.current.workspaces.filter((entry) => entry.id !== workspaceId),
+        );
         mapWorkspace(workspaceId, (ws) => {
           // Reading order, not creation order: the panes you see first are the
           // ones a smaller preset keeps. Sorting by id order instead would drop
@@ -510,7 +523,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const model =
             arranged.find((pane) => pane.id === modelPaneId) ?? panes[panes.length - 1];
           const agent = model?.agent ?? "shell";
-          while (panes.length < size) panes.push(makePane(agent, paneNames(panes)));
+          while (panes.length < size) {
+            panes.push(makePane(agent, [...others, ...paneNames(panes)]));
+          }
           return { ...ws, panes, tree: presetTree(panes.map((pane) => pane.id)) };
         });
       },
@@ -528,6 +543,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // so it is also the only one that knows whether the pane made it in:
         // two adds in the same tick can leave the second one out at MAX_PANES.
         let inserted = false;
+        const others = allPaneNames(
+          latest.current.workspaces.filter((entry) => entry.id !== workspaceId),
+        );
 
         mapWorkspace(workspaceId, (ws) => {
           if (ws.panes.length >= MAX_PANES) return ws;
@@ -542,7 +560,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // prompt. An explicit agent from the caller still wins.
           const inherited = ws.panes.find((p) => p.id === near)?.agent;
           const wanted = opts.name?.trim();
-          const taken = paneNames(ws.panes);
+          const taken = [...others, ...paneNames(ws.panes)];
           const named = {
             ...pane,
             name: wanted && !taken.includes(wanted) ? wanted : pickPaneName(taken),

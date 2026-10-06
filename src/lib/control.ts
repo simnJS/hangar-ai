@@ -163,6 +163,13 @@ function workspaceFor(state: AppState, args: Record<string, unknown>, caller: Ca
     return found;
   }
   const mine = callerWorkspace(state, caller);
+  // Pane names are unique across workspaces, so a pane named without its
+  // workspace is found wherever it is — the caller's own workspace first.
+  const pane = text(args.pane);
+  if (pane && !(mine && hasPane(mine, pane))) {
+    const holders = state.workspaces.filter((ws) => hasPane(ws, pane));
+    if (holders.length === 1) return holders[0];
+  }
   if (!mine) {
     throw new Error(
       `Could not tell which workspace you are in. Pass "workspace", one of: ${names}.`,
@@ -170,6 +177,9 @@ function workspaceFor(state: AppState, args: Record<string, unknown>, caller: Ca
   }
   return mine;
 }
+
+const hasPane = (ws: Workspace, ref: string) =>
+  ws.panes.some((pane) => pane.id === ref || same(pane.name, ref));
 
 function paneIn(ws: Workspace, ref: unknown): Pane {
   const wanted = text(ref);
@@ -261,8 +271,10 @@ export async function runControl(
       }
       const agent = agentArg(args.agent);
       const name = text(args.name) ?? undefined;
-      if (name && ws.panes.some((pane) => same(pane.name, name))) {
-        throw new Error(`"${ws.name}" already has a pane named "${name}".`);
+      // Unique across every workspace: other sessions reach a pane by name.
+      const holder = name ? state.workspaces.find((entry) => hasPane(entry, name)) : undefined;
+      if (holder) {
+        throw new Error(`A pane is already named "${name}" (in "${holder.name}"); pane names are unique across Hangar.`);
       }
       let cwd: string | null = null;
       const folder = text(args.cwd);
