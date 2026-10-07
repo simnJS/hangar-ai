@@ -200,6 +200,55 @@ pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
     }
 }
 
+/// Whether the conversation a pane is about to resume has a transcript left:
+/// `Some(false)` only when it is nowhere on disk, `None` when that cannot be
+/// told.
+///
+/// Claude Code takes its session id at startup but writes nothing until the
+/// first message. A pane reset and then left alone keeps an id with no
+/// conversation behind it, and `--resume` on that id only prints "No
+/// conversation found". Every project directory is searched, not just the
+/// pane's: a transcript filed under another spelling of the path is still
+/// worth handing to the agent.
+#[tauri::command]
+pub fn session_exists(agent: String, id: String) -> Option<bool> {
+    // Joined into a path below: anything but a plain id is not ours to judge.
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let home = home()?;
+    match agent.as_str() {
+        "claude" => claude_transcript_exists(&home.join(".claude").join("projects"), &id),
+        "codex" => codex_transcript_exists(&home.join(".codex").join("sessions"), &id),
+        _ => None,
+    }
+}
+
+fn claude_transcript_exists(projects: &Path, id: &str) -> Option<bool> {
+    let file = format!("{id}.jsonl");
+    let entries = fs::read_dir(projects).ok()?;
+    Some(
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.path().join(&file).is_file()),
+    )
+}
+
+fn codex_transcript_exists(root: &Path, id: &str) -> Option<bool> {
+    // An unreadable root says nothing about the session; an empty walk would.
+    fs::read_dir(root).ok()?;
+    let mut files = Vec::new();
+    collect_jsonl(root, &mut files, 0);
+    Some(files.iter().any(|path| {
+        path.file_stem()
+            .is_some_and(|stem| stem.to_string_lossy().ends_with(id))
+    }))
+}
+
 /// Reports which agent CLIs are actually on PATH, so the UI can grey out the rest.
 #[tauri::command]
 pub fn detect_agents() -> Vec<String> {
@@ -226,4 +275,76 @@ pub fn detect_agents() -> Vec<String> {
         })
         .map(|(name, _)| name.to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!("hangar-sessions-{tag}-{nanos}"));
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    /// The case a reset leaves behind: an id Claude Code handed out, and no
+    /// transcript anywhere because nobody wrote to it.
+    #[test]
+    fn a_claude_session_with_no_transcript_is_reported_gone() {
+        let projects = temp_dir("claude");
+        let here = projects.join("C--repo");
+        let elsewhere = projects.join("C--other-spelling");
+        fs::create_dir_all(&here).expect("project dir");
+        fs::create_dir_all(&elsewhere).expect("project dir");
+        fs::write(elsewhere.join("kept-1.jsonl"), "{}\n").expect("transcript");
+
+        assert_eq!(claude_transcript_exists(&projects, "kept-1"), Some(true));
+        assert_eq!(
+            claude_transcript_exists(&projects, "never-written"),
+            Some(false)
+        );
+        // No directory to look in is not proof of anything.
+        assert_eq!(
+            claude_transcript_exists(&projects.join("missing"), "kept-1"),
+            None
+        );
+
+        fs::remove_dir_all(&projects).ok();
+    }
+
+    #[test]
+    fn a_codex_session_is_found_by_the_id_ending_its_rollout_name() {
+        let root = temp_dir("codex");
+        let day = root.join("2026").join("10").join("07");
+        fs::create_dir_all(&day).expect("day dir");
+        fs::write(
+            day.join("rollout-2026-10-07T10-00-00-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl"),
+            "{}\n",
+        )
+        .expect("rollout");
+
+        assert_eq!(
+            codex_transcript_exists(&root, "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"),
+            Some(true)
+        );
+        assert_eq!(
+            codex_transcript_exists(&root, "0199a1b2-0000-7e5f-8a9b-0c1d2e3f4a5b"),
+            Some(false)
+        );
+        assert_eq!(codex_transcript_exists(&root.join("missing"), "x"), None);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn an_id_that_is_not_plain_is_left_to_the_agent() {
+        assert_eq!(session_exists("claude".into(), "../escape".into()), None);
+        assert_eq!(session_exists("claude".into(), String::new()), None);
+        assert_eq!(session_exists("gemini".into(), "abc".into()), None);
+    }
 }

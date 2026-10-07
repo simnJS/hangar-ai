@@ -46,6 +46,11 @@ export const bridgeQueue = (paneId: string) =>
 export const listSessions = (agent: string, cwd: string) =>
   invoke<AgentSession[]>("list_sessions", { agent, cwd });
 
+/** `false` only when the conversation has no transcript left anywhere;
+    `null` when that cannot be told. */
+export const sessionExists = (agent: string, id: string) =>
+  invoke<boolean | null>("session_exists", { agent, id });
+
 export const detectAgents = () => invoke<string[]>("detect_agents");
 
 /**

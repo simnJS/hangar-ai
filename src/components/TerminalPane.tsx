@@ -15,6 +15,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  sessionExists,
   type QueuedPrompt,
 } from "../lib/ipc";
 import { isHandingOver } from "../lib/windows";
@@ -97,7 +98,8 @@ interface Props {
   onFocus: () => void;
   onAgentChange: (agent: AgentId) => void;
   onShellChange: (shellId: string | null) => void;
-  onSessionCaptured: (sessionId: string) => void;
+  /** `null` when the conversation the pane held has nothing left to resume. */
+  onSessionCaptured: (sessionId: string | null) => void;
   onRestart: () => void;
   onSplit: () => void;
   onClose: () => void;
@@ -630,11 +632,26 @@ export function TerminalPane({
 
           if (pane.agent === "shell") return;
 
+          // Claude Code names a session the moment it starts but writes its
+          // transcript only on the first message, so a pane reset and left
+          // alone holds an id with nothing behind it, and resuming that only
+          // prints "No conversation found". Asked while the shell settles.
+          const saved = settingsRef.current.autoResume ? pane.sessionId : null;
+          const behind =
+            saved && isResumable(pane.agent)
+              ? sessionExists(pane.agent, saved).catch(() => null)
+              : null;
+
           // Let the shell profile settle before typing into it.
           await sleep(settingsRef.current.launchDelayMs, controller.signal);
           if (disposed || controller.signal.aborted) return;
 
-          const resumeId = settingsRef.current.autoResume ? pane.sessionId : null;
+          let resumeId = saved;
+          if (resumeId && (await behind) === false) {
+            if (disposed) return;
+            resumeId = null;
+            onSessionCaptured(null);
+          }
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,

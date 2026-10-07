@@ -83,6 +83,7 @@ pub fn run() {
             windows::close_workspace_window,
             pty::pty_history,
             sessions::list_sessions,
+            sessions::session_exists,
             sessions::detect_agents,
             context::context_usage,
             shells::detect_shells,

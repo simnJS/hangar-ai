@@ -73,6 +73,9 @@ export async function route(command: string, args: Record<string, any>): Promise
       return [];
     case "list_sessions":
       return SESSIONS[args.agent] ?? [];
+    case "session_exists":
+      // No transcripts on disk to look at: every saved session is resumed.
+      return null;
 
     /* ── persistence ── */
     case "load_state":
