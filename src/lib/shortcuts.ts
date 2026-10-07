@@ -54,6 +54,7 @@ export type CommandId =
   | "pane.restart"
   | "pane.restartAll"
   | "pane.resetAll"
+  | "pane.tidy"
   | "pane.sessions"
   | "pane.zoom"
   | "pane.next"
@@ -208,6 +209,12 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "panes",
     labelKey: "cmd.pane.resetAll",
     defaults: [],
+  },
+  {
+    id: "pane.tidy",
+    section: "panes",
+    labelKey: "cmd.pane.tidy",
+    defaults: ["Mod+Alt+G"],
   },
   {
     id: "pane.sessions",

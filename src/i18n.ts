@@ -53,6 +53,8 @@ const en = {
   "view.group": "View",
   "topbar.layout": "Layout",
   "topbar.restartAll": "Restart all",
+  "topbar.tidy": "Tidy",
+  "topbar.tidyHint": "Lay every pane out as an even grid again; nothing restarts",
   "topbar.restartAllHint": "Restart every pane",
   "topbar.resetAll": "Reset agents",
   "topbar.resetAllHint":
@@ -371,6 +373,7 @@ const en = {
   "cmd.pane.restart": "Restart the focused pane",
   "cmd.pane.restartAll": "Restart every pane",
   "cmd.pane.resetAll": "Start every agent on a new conversation",
+  "cmd.pane.tidy": "Tidy the panes into an even grid",
   "cmd.pane.sessions": "Pick the session to resume",
   "cmd.pane.zoom": "Fill the grid with the focused pane, or go back",
   "cmd.pane.next": "Next pane",
@@ -748,6 +751,8 @@ const fr: Record<Key, string> = {
   "view.group": "Vue",
   "topbar.layout": "Disposition",
   "topbar.restartAll": "Tout relancer",
+  "topbar.tidy": "Réorganiser",
+  "topbar.tidyHint": "Remettre tous les panneaux en grille régulière, sans rien relancer",
   "topbar.restartAllHint": "Relancer tous les panneaux",
   "topbar.resetAll": "Réinitialiser les agents",
   "topbar.resetAllHint":
@@ -1067,6 +1072,7 @@ const fr: Record<Key, string> = {
   "cmd.pane.restart": "Relancer le panneau actif",
   "cmd.pane.restartAll": "Relancer tous les panneaux",
   "cmd.pane.resetAll": "Relancer chaque agent sur une nouvelle conversation",
+  "cmd.pane.tidy": "Réorganiser les panneaux en grille régulière",
   "cmd.pane.sessions": "Choisir la session à reprendre",
   "cmd.pane.zoom": "Afficher le panneau actif sur toute la grille, ou revenir",
   "cmd.pane.next": "Panneau suivant",

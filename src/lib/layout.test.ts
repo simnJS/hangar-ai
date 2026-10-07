@@ -57,6 +57,29 @@ describe("presetTree", () => {
     const { rects } = computeLayout(presetTree(["a", "b", "c"]));
     expect(rects.c).toEqual({ left: 0, top: 0.5, width: 1, height: 0.5 });
   });
+
+  // What the "Tidy" button does: a grid pulled out of shape by splits and
+  // drags comes back even, and every pane keeps its place in reading order.
+  it("tidies a lopsided tree into an even grid, in reading order", () => {
+    const lopsided = split(
+      "row",
+      leaf("a"),
+      split("col", leaf("b"), split("row", leaf("c"), split("col", leaf("d"), leaf("e"), 0.2), 0.8), 0.3),
+      0.15,
+    );
+    const tidy = presetTree(leafIds(normalizeTree(panes("a", "b", "c", "d", "e"), lopsided)));
+
+    expect(leafIds(tidy)).toEqual(["a", "b", "c", "d", "e"]);
+    const { rects } = computeLayout(tidy);
+    for (const id of ["a", "b", "c"]) {
+      expect(rects[id].width).toBeCloseTo(1 / 3);
+      expect(rects[id].height).toBeCloseTo(0.5);
+    }
+    for (const id of ["d", "e"]) {
+      expect(rects[id].width).toBeCloseTo(0.5);
+      expect(rects[id].top).toBeCloseTo(0.5);
+    }
+  });
 });
 
 describe("splitting and closing", () => {

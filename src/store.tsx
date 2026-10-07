@@ -158,6 +158,11 @@ interface StoreValue {
    * because a preset is how you ask for more of what you already have.
    */
   applyPreset: (workspaceId: string, count: number, modelPaneId?: string | null) => void;
+  /**
+   * Lays the panes out as the even grid their number calls for, in the order
+   * they are read on screen. Nothing is created, closed or restarted.
+   */
+  tidyLayout: (workspaceId: string) => void;
   setTree: (workspaceId: string, tree: SplitNode) => void;
   /**
    * Splits `near` (or the last pane) in two and returns the new pane id, or
@@ -528,6 +533,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           return { ...ws, panes, tree: presetTree(panes.map((pane) => pane.id)) };
         });
+      },
+
+      tidyLayout(workspaceId) {
+        // Same ids, so every terminal stays mounted and is only resized.
+        mapWorkspace(workspaceId, (ws) => ({
+          ...ws,
+          tree: presetTree(leafIds(normalizeTree(ws.panes, ws.tree))),
+        }));
       },
 
       setTree(workspaceId, tree) {

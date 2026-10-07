@@ -89,6 +89,7 @@ export default function App() {
     updateWorkspace,
     respawnPane,
     applyPreset,
+    tidyLayout,
     addPane,
     closePane,
     movePane,
@@ -709,6 +710,7 @@ export default function App() {
     // Only arms the confirmation: the key never throws conversations away by
     // itself.
     if (agentPanes.length) map["pane.resetAll"] = () => setConfirmReset(true);
+    if (panes.length > 1) map["pane.tidy"] = () => tidyLayout(wsId);
 
     for (let i = 0; i < Math.min(9, order.length); i++) {
       const id = order[i];
@@ -909,6 +911,16 @@ export default function App() {
                         {size}
                       </button>
                     ))}
+                    {/* For the counts no preset matches, and for a grid that
+                        splits and moves have pulled out of shape. */}
+                    <button
+                      className="layouts__btn layouts__btn--wide"
+                      onClick={() => tidyLayout(activeWorkspace.id)}
+                      disabled={panes.length < 2}
+                      title={withKeys(t("topbar.tidyHint"), "pane.tidy")}
+                    >
+                      ⊞ {t("topbar.tidy")}
+                    </button>
                   </div>
 
                   <button
