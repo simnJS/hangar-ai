@@ -78,6 +78,7 @@ export type CommandId =
   | "view.board"
   | "view.boardDock"
   | "view.memory"
+  | "view.loadout"
   | "view.mcp"
   | "view.broadcast"
   | "terminal.clear"
@@ -360,6 +361,13 @@ export const COMMANDS: ShortcutCommand[] = [
     // knowledge it holds — the one Mod+Alt letter left that types nothing on
     // an AZERTY keyboard, where Ctrl+Alt is AltGr.
     defaults: ["Mod+Alt+K"],
+  },
+  {
+    id: "view.loadout",
+    section: "view",
+    labelKey: "cmd.view.loadout",
+    // Only offered where Loadout is installed, so it claims no chord of its own.
+    defaults: [],
   },
   {
     id: "view.mcp",

@@ -10,6 +10,8 @@ import { BoardView } from "./components/BoardView";
 import { BoardDock } from "./components/BoardDock";
 import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
+import { LoadoutView } from "./components/LoadoutView";
+import { loadoutLocate } from "./lib/loadout";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
 import {
@@ -101,7 +103,14 @@ export default function App() {
   const [settingsCategory, setSettingsCategory] = useState("general");
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
-  const [view, setView] = useState<"terminals" | "board" | "memory">("terminals");
+  const [view, setView] = useState<"terminals" | "board" | "memory" | "loadout">("terminals");
+  /** Loadout's engine is installed: only then is its tab offered. */
+  const [hasLoadout, setHasLoadout] = useState(false);
+  useEffect(() => {
+    loadoutLocate()
+      .then((path) => setHasLoadout(Boolean(path)))
+      .catch(() => setHasLoadout(false));
+  }, []);
 
   /**
    * The workspace this window draws. A workspace window draws the one it was
@@ -696,6 +705,7 @@ export default function App() {
     map["view.board"] = () => setView("board");
     map["view.boardDock"] = toggleDock;
     map["view.memory"] = () => setView("memory");
+    if (hasLoadout) map["view.loadout"] = () => setView("loadout");
     map["view.mcp"] = () => setShowMcp(true);
 
     // Everything below acts on panes, which are only on screen — and are only
@@ -859,6 +869,14 @@ export default function App() {
                 >
                   {t("view.memory")}
                 </button>
+                {hasLoadout && (
+                  <button
+                    className={`layouts__btn layouts__btn--wide ${view === "loadout" ? "is-active" : ""}`}
+                    onClick={() => setView("loadout")}
+                  >
+                    {t("view.loadout")}
+                  </button>
+                )}
               </div>
 
               <div className="layouts">
@@ -1014,6 +1032,10 @@ export default function App() {
               )}
 
               {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+              {view === "loadout" && hasLoadout && (
+                <LoadoutView key={activeWorkspace.cwd} cwd={activeWorkspace.cwd} />
+              )}
 
               {dockShown && (
                 <BoardDock
