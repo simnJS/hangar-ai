@@ -50,6 +50,7 @@ const en = {
   "view.terminals": "Terminals",
   "view.board": "Board",
   "view.memory": "Memory",
+  "view.loadout": "Loadout",
   "view.group": "View",
   "topbar.layout": "Layout",
   "topbar.restartAll": "Restart all",
@@ -397,6 +398,7 @@ const en = {
   "cmd.view.board": "Show the board",
   "cmd.view.boardDock": "Show or hide the board beside the terminals",
   "cmd.view.memory": "Show the memory",
+  "cmd.view.loadout": "Show the Loadout",
   "cmd.view.mcp": "Open the MCP connection",
   "cmd.view.broadcast": "Focus the broadcast field",
   "cmd.terminal.clear": "Clear the terminal",
@@ -599,6 +601,27 @@ const en = {
     "Agents fill this in over MCP with the memory_* tools: what is worth keeping across sessions — decisions, pitfalls, the conventions of a project. Everything written here is shared by every workspace, and you can add an entry yourself.",
   "memory.noResults": "Nothing matches “{q}”.",
 
+  "loadout.title": "Loadout",
+  "loadout.preset": "Project type",
+  "loadout.choosePreset": "Equip this project as…",
+  "loadout.equip": "Equip",
+  "loadout.equipping": "Equipping…",
+  "loadout.equipHint": "Writes the plugins into this project's .claude/settings.json",
+  "loadout.equippedNotice":
+    "Equipped with {plugins}. Commit .claude/settings.json so everyone gets it; open sessions pick it up after /reload-plugins.",
+  "loadout.refresh": "Check again",
+  "loadout.checking": "Checking this machine…",
+  "loadout.firstCheck":
+    "Checking what this machine can do — the private plugins are asked about on GitHub, which takes a few seconds.",
+  "loadout.fixes": "To enable what is missing",
+  "loadout.needs": "needs {label}",
+  "loadout.asksFirst": "paid, asks first",
+  "loadout.session": "checked inside a Claude session",
+  "loadout.equipped": "equipped",
+  "loadout.available": "not equipped",
+  "loadout.locked": "no access",
+  "loadout.lockedHint": "Its repository is private: ask the catalog owner for access.",
+
   "mcp.title": "Connect agents to the board",
   "mcp.intro":
     "Hangar.AI registers itself as an MCP server in each tool's configuration. The port and token are never written to those files: they are resolved at launch, so the configuration stays valid across restarts.",
@@ -748,6 +771,7 @@ const fr: Record<Key, string> = {
   "view.terminals": "Terminaux",
   "view.board": "Tableau",
   "view.memory": "Mémoire",
+  "view.loadout": "Loadout",
   "view.group": "Vue",
   "topbar.layout": "Disposition",
   "topbar.restartAll": "Tout relancer",
@@ -1096,6 +1120,7 @@ const fr: Record<Key, string> = {
   "cmd.view.board": "Afficher le tableau",
   "cmd.view.boardDock": "Afficher ou masquer le tableau à côté des terminaux",
   "cmd.view.memory": "Afficher la mémoire",
+  "cmd.view.loadout": "Afficher le Loadout",
   "cmd.view.mcp": "Ouvrir la connexion MCP",
   "cmd.view.broadcast": "Aller au champ de diffusion",
   "cmd.terminal.clear": "Effacer le terminal",
@@ -1299,6 +1324,27 @@ const fr: Record<Key, string> = {
   "memory.emptyBody":
     "Les agents la remplissent via MCP avec les outils memory_* : ce qui mérite de survivre à une session — décisions, pièges, conventions d'un projet. Tout ce qui est écrit ici est partagé par tous les workspaces, et tu peux ajouter une entrée toi-même.",
   "memory.noResults": "Rien ne correspond à « {q} ».",
+
+  "loadout.title": "Loadout",
+  "loadout.preset": "Type de projet",
+  "loadout.choosePreset": "Équiper ce projet en…",
+  "loadout.equip": "Équiper",
+  "loadout.equipping": "Équipement…",
+  "loadout.equipHint": "Écrit les plugins dans le .claude/settings.json du projet",
+  "loadout.equippedNotice":
+    "Équipé avec {plugins}. Commitez .claude/settings.json pour que tout le monde l'ait ; les sessions ouvertes le prennent après /reload-plugins.",
+  "loadout.refresh": "Revérifier",
+  "loadout.checking": "Vérification de la machine…",
+  "loadout.firstCheck":
+    "Vérification de ce que la machine sait faire — les plugins privés sont demandés à GitHub, ce qui prend quelques secondes.",
+  "loadout.fixes": "Pour activer ce qui manque",
+  "loadout.needs": "requiert {label}",
+  "loadout.asksFirst": "payant, demande avant",
+  "loadout.session": "vérifié dans une session Claude",
+  "loadout.equipped": "équipé",
+  "loadout.available": "non équipé",
+  "loadout.locked": "pas d'accès",
+  "loadout.lockedHint": "Son dépôt est privé : demandez l'accès au propriétaire du catalogue.",
 
   "mcp.title": "Connecter les agents au tableau",
   "mcp.intro":

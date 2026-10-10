@@ -7,6 +7,7 @@ mod endpoint;
 mod git;
 mod install;
 mod instructions;
+mod loadout;
 mod mcp;
 mod memory;
 mod notify;
@@ -121,6 +122,10 @@ pub fn run() {
             install::mcp_manual_commands,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
+            loadout::loadout_locate,
+            loadout::loadout_status,
+            loadout::loadout_presets,
+            loadout::loadout_equip,
             notify::notify_send,
             discord::discord_presence_set,
             discord::discord_presence_status,
