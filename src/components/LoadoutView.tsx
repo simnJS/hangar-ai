@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import {
   loadoutEquip,
   loadoutPresets,
+  loadoutPrompts,
   loadoutStatus,
   missingFixes,
+  pick,
   presetIsEquipped,
+  type LoadoutPrompt,
   type LoadoutPlugin,
   type LoadoutStatus,
   type Preset,
   type ProviderUse,
 } from "../lib/loadout";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 
 interface Props {
   /** Active workspace: the project whose `.claude/settings.json` is read and
@@ -85,6 +88,62 @@ function PluginCard({ plugin }: { plugin: LoadoutPlugin }) {
   );
 }
 
+function PromptCard({ prompt }: { prompt: LoadoutPrompt }) {
+  const t = useT();
+  const locale = useLocale();
+  const [copied, setCopied] = useState(false);
+  const text = pick(prompt.text, locale);
+
+  function copy() {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  }
+
+  return (
+    <article className={`lo-prompt ${prompt.soon ? "lo-prompt--soon" : ""}`}>
+      <header className="lo-prompt__head">
+        <h4 className="lo-prompt__title">{pick(prompt.title, locale)}</h4>
+        {prompt.tutorial && <em className="lo-badge">{t("loadout.tutorial")}</em>}
+        {prompt.soon && <em className="lo-badge lo-badge--muted">{t("loadout.soon")}</em>}
+        {/* A tutorial is read, not pasted; a prompt not usable yet is not offered. */}
+        {!prompt.tutorial && !prompt.soon && (
+          <button className="btn btn--ghost lo-prompt__copy" onClick={copy}>
+            {copied ? t("loadout.copied") : t("loadout.copy")}
+          </button>
+        )}
+      </header>
+      <p className="lo-prompt__when">{pick(prompt.when, locale)}</p>
+      <pre className="lo-prompt__text">{text}</pre>
+      {!prompt.tutorial && !prompt.soon && text.includes("{skill}") && (
+        <p className="lo-prompt__hint">{t("loadout.skillPlaceholder")}</p>
+      )}
+    </article>
+  );
+}
+
+/** Collapsed by default: it is read once in a while, the status every time. */
+function PromptsPanel({ prompts }: { prompts: LoadoutPrompt[] }) {
+  const t = useT();
+  return (
+    <details className="lo-prompts">
+      <summary>
+        <span className="lo-prompts__title">{t("loadout.prompts")}</span>
+        <span className="lo-prompts__sub">{t("loadout.promptsHint")}</span>
+      </summary>
+      <div className="lo-prompts__list">
+        {prompts.map((prompt) => (
+          <PromptCard key={prompt.id} prompt={prompt} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function LoadoutView({ cwd }: Props) {
   const t = useT();
   const [status, setStatus] = useState<LoadoutStatus | null>(() => lastStatus.get(cwd) ?? null);
@@ -94,6 +153,8 @@ export function LoadoutView({ cwd }: Props) {
   const [preset, setPreset] = useState("");
   const [equipping, setEquipping] = useState(false);
   const [equipped, setEquipped] = useState<string | null>(null);
+  /** `null` until known, and for an engine without prompts: no panel either way. */
+  const [prompts, setPrompts] = useState<LoadoutPrompt[] | null>(null);
 
   const refresh = useCallback(() => {
     setChecking(true);
@@ -115,6 +176,9 @@ export function LoadoutView({ cwd }: Props) {
     loadoutPresets()
       .then(setPresets)
       .catch(() => setPresets({}));
+    loadoutPrompts()
+      .then((found) => setPrompts(found?.prompts ?? null))
+      .catch(() => setPrompts(null));
   }, []);
 
   async function equip() {
@@ -174,6 +238,8 @@ export function LoadoutView({ cwd }: Props) {
 
       <div className="loadout__body">
         {!status && !error && <p className="loadout__none">{t("loadout.firstCheck")}</p>}
+
+        {prompts && prompts.length > 0 && <PromptsPanel prompts={prompts} />}
 
         {fixes.length > 0 && (
           <section className="lo-fixes">

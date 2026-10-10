@@ -621,6 +621,13 @@ const en = {
   "loadout.available": "not equipped",
   "loadout.locked": "no access",
   "loadout.lockedHint": "Its repository is private: ask the catalog owner for access.",
+  "loadout.prompts": "Prune first",
+  "loadout.promptsHint": "Ready-to-copy prompts to keep your setup lean before adding to it",
+  "loadout.tutorial": "tutorial",
+  "loadout.soon": "soon",
+  "loadout.copy": "Copy",
+  "loadout.copied": "Copied",
+  "loadout.skillPlaceholder": "Replace {skill} with the skill's name before sending.",
 
   "mcp.title": "Connect agents to the board",
   "mcp.intro":
@@ -1345,6 +1352,13 @@ const fr: Record<Key, string> = {
   "loadout.available": "non équipé",
   "loadout.locked": "pas d'accès",
   "loadout.lockedHint": "Son dépôt est privé : demandez l'accès au propriétaire du catalogue.",
+  "loadout.prompts": "Élaguer en amont",
+  "loadout.promptsHint": "Des prompts prêts à copier pour garder un setup léger avant d'y ajouter",
+  "loadout.tutorial": "tutoriel",
+  "loadout.soon": "bientôt",
+  "loadout.copy": "Copier",
+  "loadout.copied": "Copié",
+  "loadout.skillPlaceholder": "Remplacez {skill} par le nom du skill avant d'envoyer.",
 
   "mcp.title": "Connecter les agents au tableau",
   "mcp.intro":

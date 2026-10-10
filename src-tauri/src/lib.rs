@@ -126,6 +126,7 @@ pub fn run() {
             loadout::loadout_status,
             loadout::loadout_presets,
             loadout::loadout_equip,
+            loadout::loadout_prompts,
             notify::notify_send,
             discord::discord_presence_set,
             discord::discord_presence_status,

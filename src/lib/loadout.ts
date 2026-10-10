@@ -107,3 +107,25 @@ export function presetIsEquipped(preset: Preset, status: LoadoutStatus): boolean
   const equipped = new Set(status.plugins.filter((p) => p.equipped).map((p) => p.name));
   return preset.plugins.every((name) => equipped.has(name));
 }
+
+/** A text the catalog gives in both of the app's languages. */
+export type Localized = { fr: string; en: string };
+
+export interface LoadoutPrompt {
+  id: string;
+  /** Instructions for the person to follow, not a prompt to paste. */
+  tutorial: boolean;
+  /** Announced, not usable yet. */
+  soon: boolean;
+  title: Localized;
+  when: Localized;
+  /** Line breaks as `\n`; may hold `{skill}`, which the person replaces. */
+  text: Localized;
+}
+
+/** The catalog's ready-to-copy prompts, or `null` from an engine that has none. */
+export const loadoutPrompts = () =>
+  invoke<{ prompts: LoadoutPrompt[] } | null>("loadout_prompts");
+
+/** The app's language, falling back to English when the catalog lacks it. */
+export const pick = (text: Localized, locale: "en" | "fr"): string => text[locale] || text.en;

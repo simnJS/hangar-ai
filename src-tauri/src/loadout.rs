@@ -116,10 +116,7 @@ fn fill_how(status: &mut Value, providers: &Value) {
                 if entry.contains_key("how") {
                     continue;
                 }
-                let found = entry
-                    .get("provider")
-                    .and_then(Value::as_str)
-                    .and_then(&how);
+                let found = entry.get("provider").and_then(Value::as_str).and_then(&how);
                 if let Some(found) = found {
                     entry.insert("how".into(), found);
                 }
@@ -162,6 +159,23 @@ pub async fn loadout_presets() -> Result<Value, String> {
     off_thread(|| run_json(&["presets", "--json"])).await
 }
 
+/// Ready-to-copy prompts for keeping a setup lean (the catalog's `prompts`),
+/// or `None` from an engine that predates them — the panel is then hidden.
+#[tauri::command]
+pub async fn loadout_prompts() -> Result<Option<Value>, String> {
+    off_thread(|| match run_json(&["prompts", "--json"]) {
+        Ok(prompts) => Ok(Some(prompts)),
+        Err(err) if is_unknown_command(&err) => Ok(None),
+        Err(err) => Err(err),
+    })
+    .await
+}
+
+/// How an engine says it has no such command: `loadout: unknown command "x"`.
+fn is_unknown_command(err: &str) -> bool {
+    err.contains("unknown command")
+}
+
 /// Equips the workspace with a preset (or a single plugin): the engine writes
 /// its `.claude/settings.json` and reports `{ file, plugins, written }`.
 #[tauri::command]
@@ -196,6 +210,14 @@ mod tests {
     fn without_an_error_line_the_last_word_is_kept() {
         assert_eq!(diagnostic(b"something\nwent wrong\n"), "went wrong");
         assert_eq!(diagnostic(b""), "loadout.mjs failed");
+    }
+
+    #[test]
+    fn an_older_engine_is_told_apart_from_a_failure() {
+        assert!(is_unknown_command(
+            "loadout: unknown command \"prompts\" (status, equip, presets, lint, readme)"
+        ));
+        assert!(!is_unknown_command("Node.js was not found on PATH"));
     }
 
     #[test]

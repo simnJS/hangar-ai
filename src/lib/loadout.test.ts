@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { missingFixes, presetIsEquipped, type LoadoutStatus, type ProviderUse } from "./loadout";
+import { missingFixes, pick, presetIsEquipped, type LoadoutStatus, type ProviderUse } from "./loadout";
 
 const use = (provider: string, state: ProviderUse["state"], how?: string): ProviderUse => ({
   provider,
@@ -67,5 +67,12 @@ describe("presetIsEquipped", () => {
   it("is true only when every plugin of the preset is equipped", () => {
     expect(presetIsEquipped({ label: "", plugins: ["media"] }, status)).toBe(true);
     expect(presetIsEquipped({ label: "", plugins: ["media", "minecraft"] }, status)).toBe(false);
+  });
+});
+
+describe("pick", () => {
+  it("uses the app's language, English when the catalog has none", () => {
+    expect(pick({ fr: "Élaguer", en: "Prune" }, "fr")).toBe("Élaguer");
+    expect(pick({ fr: "", en: "Prune" }, "fr")).toBe("Prune");
   });
 });
