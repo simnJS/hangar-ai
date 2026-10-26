@@ -68,12 +68,6 @@ const PATHS = {
       <path d="M10 2.75v10.5M11.5 5.2h.9M11.5 7.2h.9" />
     </>
   ),
-  boardPanel: (
-    <>
-      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.2" />
-      <path d="M9.5 2.75v10.5M11.2 5.5h1.4M11.2 7.7h1.4M11.2 9.9h1.4" />
-    </>
-  ),
   board: (
     <>
       <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.2" />

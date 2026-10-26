@@ -126,7 +126,7 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.shortcuts": "keyboard",
   "view.terminals": "terminal",
   "view.board": "board",
-  "view.boardDock": "boardPanel",
+  "view.boardDock": "board",
   "view.memory": "bookmark",
   "view.mcp": "plug",
   "view.broadcast": "broadcast",
