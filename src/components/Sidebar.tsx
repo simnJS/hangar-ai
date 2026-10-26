@@ -938,7 +938,19 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
         <WorktreePanel
           workspaceId={worktreesWs.id}
           cwd={worktreesWs.cwd}
-          onClose={() => setWorktreesFor(null)}
+          onClose={() => {
+            const key = rowKey("ws", worktreesWs.id);
+            setWorktreesFor(null);
+            // Opened from the row's menu, which is gone: the dialog's own
+            // restore has nowhere to go, so the row takes the keyboard back —
+            // unless whatever closed the panel already put it somewhere.
+            requestAnimationFrame(() => {
+              const at = document.activeElement;
+              if (at && at !== document.body) return;
+              const row = treeRef.current?.querySelector(`[data-key="${CSS.escape(key)}"]`);
+              focusRow(row ? key : tabKey);
+            });
+          }}
         />
       )}
 
