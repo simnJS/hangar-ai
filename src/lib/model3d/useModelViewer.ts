@@ -238,9 +238,11 @@ export function useModelLoads(viewer: ModelViewer | null) {
 }
 
 /**
- * Renders snapshots for agents: of any open model, loaded first when it is
- * not — the one in front or not, the panel shown or not. The user's view is
- * never touched (ModelViewer.snapshot).
+ * Renders snapshots for agents: of any model open in the window, loaded first
+ * when it is not — the one in front or not, its workspace on screen or not,
+ * the panel shown or not. The user's view is never touched
+ * (ModelViewer.snapshot). Which workspace's model an agent may ask for is
+ * lib/modelHost's business.
  */
 export function useSnapshotter(
   ready: RefObject<{ promise: Promise<ModelViewer> } | null>,
@@ -256,10 +258,10 @@ export function useSnapshotter(
       // The file may be rewritten while it loads: whatever revision the
       // store holds once a load lands is the one pictured.
       for (let attempt = 0; attempt < 3; attempt++) {
-        const model = getModels().models.find((entry) => entry.id === id);
+        const model = getModels().all.find((entry) => entry.id === id);
         if (!model) throw new Error("That model is no longer open in Hangar.");
         await ensureRef.current(model, viewer);
-        const latest = getModels().models.find((entry) => entry.id === id);
+        const latest = getModels().all.find((entry) => entry.id === id);
         if (!latest || viewer.has(id, latest.revision)) break;
       }
       return viewer.snapshot(id, options, readViewerTheme().background);

@@ -37,7 +37,13 @@ export interface Caller {
 
 export type ControlEvent =
   | { kind: "created" | "closed" | "restarted" | "reset"; by: string | null; pane: string; workspace: string }
-  | { kind: "modelShown" | "modelClosed"; by: string | null; file: string; workspace: string };
+  | {
+      /** "Elsewhere": in a workspace that is not the one on screen, which the line names. */
+      kind: "modelShown" | "modelClosed" | "modelShownElsewhere" | "modelClosedElsewhere";
+      by: string | null;
+      file: string;
+      workspace: string;
+    };
 
 export interface ControlDeps {
   snapshot: () => AppState;
@@ -83,10 +89,10 @@ export interface ControlDeps {
   /** Every worktree of the repository holding `path`; rejects outside one. */
   worktrees: (path: string) => Promise<Worktree[]>;
   /**
-   * The 3D preview of this window for null, or of the window a detached
-   * workspace is shown in; null when that window does not answer.
+   * A workspace's 3D preview: in this window, or in the window of its own a
+   * detached workspace is shown in; null when that window does not answer.
    */
-  modelHost: (detachedWorkspaceId: string | null) => Promise<ModelHost | null>;
+  modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
 }
 
 export const DISABLED =
@@ -288,10 +294,6 @@ const inside = (path: string, roots: string[]) => {
 
 const basename = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 
-/** The window whose preview shows a workspace's models: its own window when
-    it is detached, otherwise this one (null). */
-export const modelWindowOf = (ws: Workspace): string | null => (ws.detached ? ws.id : null);
-
 /**
  * The folders an agent may show models from: its workspace's main folder,
  * extra roots and pane folders, plus every worktree of their repositories —
@@ -337,8 +339,12 @@ function callerFolder(ws: Workspace, caller: Caller): string {
   return pane ? effectiveCwd(ws, pane) : (caller.cwd ?? ws.cwd);
 }
 
+/**
+ * The workspace's own preview — never the one on screen, nor another
+ * workspace's — drawn by its window of its own when it has one.
+ */
 async function previewOf(ws: Workspace, deps: ControlDeps): Promise<ModelHost> {
-  const host = await deps.modelHost(modelWindowOf(ws));
+  const host = await deps.modelHost(ws.id, Boolean(ws.detached));
   if (host) return host;
   throw new Error(
     `"${ws.name}" is shown in a window of its own, and that window is not answering, so the 3D ` +
@@ -440,17 +446,32 @@ async function modelShow(
   const format = modelFormatOf(file.path) ?? modelFormatOf(path)!;
 
   const preview = await previewOf(ws, deps);
+  // Showing a model in a workspace is using it, as sending to its panes is.
+  // Asleep, it wakes the way pane_send wakes it: its window does not load
+  // models for a workspace whose memory it gave back.
+  const woke = deps.asleep(ws.id);
+  if (woke) deps.openWorkspace(ws.id);
+  deps.touch(ws.id);
   const id = await preview.show({
     path: file.path,
     title,
     format,
-    workspaceId: ws.id,
     openedBy: caller.paneName,
     modifiedMs: file.modifiedMs,
   });
-  deps.announce({ kind: "modelShown", by: caller.paneName, file: title, workspace: ws.name });
+  deps.announce({
+    kind: onScreen(deps.snapshot(), ws) ? "modelShown" : "modelShownElsewhere",
+    by: caller.paneName,
+    file: title,
+    workspace: ws.name,
+  });
 
   const settled = await preview.whenSettled(id, SETTLE_MS);
+  if (settled?.status === "error") {
+    throw new Error(`The 3D preview could not load ${title}: ${settled.error ?? "unknown error"}`);
+  }
+  // Asked once the load is over, when the window has drawn what it opened.
+  const seen = await sight(ws, preview, woke);
   if (!settled) {
     return {
       opened: true,
@@ -458,15 +479,53 @@ async function modelShow(
       path: file.path,
       format,
       title,
-      note:
+      ...seen,
+      note: [
         `The preview is still loading it after ${SETTLE_MS / 1000} s; a big file takes a while. ` +
-        "model_snapshot waits for the load, so call it when you want to look.",
+          "model_snapshot waits for the load, so call it when you want to look.",
+        seen.note,
+      ]
+        .filter(Boolean)
+        .join(" "),
     };
   }
-  if (settled.status === "error") {
-    throw new Error(`The 3D preview could not load ${title}: ${settled.error ?? "unknown error"}`);
-  }
-  return { opened: true, path: file.path, format, title: settled.title, info: settled.info };
+  return { opened: true, path: file.path, format, title: settled.title, info: settled.info, ...seen };
+}
+
+/** The workspace is the one its window shows: the main window's active one, or one of its own. */
+const onScreen = (state: AppState, ws: Workspace) =>
+  Boolean(ws.detached) || state.activeWorkspaceId === ws.id;
+
+/**
+ * Whether the user can see the model just shown, told to the agent straight:
+ * a model shown in a workspace that is not on screen waits there, and an
+ * agent saying "look at the preview" would send the user looking for nothing.
+ */
+async function sight(
+  ws: Workspace,
+  preview: ModelHost,
+  woke: boolean,
+): Promise<{ workspace: string; visible: boolean; woke?: true; note?: string }> {
+  const where = await preview.list().catch(() => null);
+  const visible = Boolean(where?.shown);
+  const notes = [
+    woke
+      ? `"${ws.name}" was asleep: it is waking up now, its agents resuming their sessions.`
+      : null,
+    visible
+      ? null
+      : where?.onScreen
+        ? `"${ws.name}" is on screen, but its 3D preview is not: another view is open, or there is ` +
+          "no room beside the terminals. The preview's toolbar button tells the user there is a model to see."
+        : `It is open in the 3D preview of "${ws.name}", which is not the workspace on screen: the user ` +
+          "sees it when they go to that workspace. Tell them it is there if they should look now.",
+  ].filter(Boolean);
+  return {
+    workspace: ws.name,
+    visible,
+    ...(woke ? { woke: true as const } : {}),
+    ...(notes.length ? { note: notes.join(" ") } : {}),
+  };
 }
 
 async function modelSnapshot(
@@ -482,14 +541,16 @@ async function modelSnapshot(
   const { models, activeId } = await preview.list();
   const given = text(args.path);
   if (!models.length) {
-    throw new Error("No 3D model is open. Show one with model_show, then take the snapshot.");
+    throw new Error(
+      `No 3D model is open in "${ws.name}". Show one with model_show, then take the snapshot.`,
+    );
   }
   const model = given
     ? findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))
     : (models.find((entry) => entry.id === activeId) ?? models[models.length - 1]);
 
-  // On screen, so the viewer has it loaded, and so the user sees what the
-  // agent is looking at.
+  // In front in its workspace's preview, so the user sees what the agent is
+  // looking at — there, without the preview coming over another workspace.
   await preview.reveal(model.id);
   // An agent iterating on a file snapshots right after writing it, before the
   // panel's own polling has noticed: load the new version first.
@@ -520,8 +581,8 @@ async function modelSnapshot(
     const message = messageOf(err);
     if (/not mounted/i.test(message)) {
       throw new Error(
-        `The 3D preview is not on screen in the window that shows "${ws.name}", so ${model.title} ` +
-          "cannot be rendered. Call model_show for it, then try again.",
+        `The 3D preview did not come up in the window that shows "${ws.name}", so ${model.title} ` +
+          "cannot be rendered. Try model_snapshot again in a moment.",
       );
     }
     throw new Error(`Could not render ${model.title}: ${message}`);
@@ -538,15 +599,15 @@ async function modelClose(
   const preview = await previewOf(ws, deps);
   const { models } = await preview.list();
   const given = text(args.path);
-  // Without a path, the caller's own workspace's models only: the main
-  // window's panel also holds those other workspaces' agents showed.
+  // The caller's own workspace's preview only, the one listed: without a
+  // path, everything in it.
   const closing = given
     ? [findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))]
-    : models.filter((model) => model.workspaceId === ws.id);
+    : models;
   if (!closing.length) return { closed: [], open: models.length };
   await preview.close(closing.map((model) => model.id));
   deps.announce({
-    kind: "modelClosed",
+    kind: onScreen(deps.snapshot(), ws) ? "modelClosed" : "modelClosedElsewhere",
     by: caller.paneName,
     file: closing.map((model) => model.title).join(", "),
     workspace: ws.name,

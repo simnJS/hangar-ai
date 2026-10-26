@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./components/Sidebar";
@@ -42,8 +42,10 @@ import { gitWorktreeList } from "./lib/git";
 import { modelStat } from "./lib/modelFiles";
 import {
   grantModelRoots,
+  handBackModels,
   localModelHost,
   remoteModelHost,
+  serveModelHandovers,
   serveModelHost,
 } from "./lib/modelHost";
 import {
@@ -77,7 +79,15 @@ import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal, openFinder } from "./lib/terminalRegistry";
 import { placeSidePanels } from "./lib/sidePanels";
-import { closeAllModels, setModelPanel, useModels } from "./lib/modelStore";
+import {
+  closeWorkspaceModels,
+  markModelsSeen,
+  noteModelView,
+  pruneModels,
+  setModelPanel,
+  useAnyModels,
+  useModels,
+} from "./lib/modelStore";
 import { focusRegion, nextRegion, regionOf, type Region } from "./lib/regions";
 import type { CommandId } from "./lib/shortcuts";
 import {
@@ -423,9 +433,16 @@ export default function App() {
     [state.workspaces, state.activeWorkspaceId],
   );
 
-  /** The models agents opened in this window, and the 3D preview's state. */
-  const models = useModels();
+  /**
+   * The 3D preview of the workspace on screen: its models, the one in front,
+   * its panel. Every workspace has its own; the window's one viewer holds the
+   * models of them all.
+   */
+  const modelsOf = activeWorkspace?.id ?? null;
+  const models = useModels(modelsOf);
   const modelsOpen = models.models.length > 0;
+  /** Any workspace's, in this window: the viewer stays up for their snapshots. */
+  const windowModels = useAnyModels();
   /** Over the whole work area: only ever in the terminals view. */
   const modelExpanded = modelsOpen && models.expanded && view === "terminals";
 
@@ -487,34 +504,50 @@ export default function App() {
     view === "terminals" &&
     modelsOpen &&
     (modelExpanded || (modelDrawer ? drawer === "model" : models.panelOpen));
+  /** The workspace on screen's panel, which is all the user can reach. */
+  const setModelsPanel = (patch: { open?: boolean; expanded?: boolean }) => {
+    if (modelsOf) setModelPanel(modelsOf, patch);
+  };
   const toggleModels = () => {
     if (view !== "terminals") {
       setView("terminals");
-      setModelPanel({ open: true });
+      setModelsPanel({ open: true });
       if (modelDrawer) setDrawer("model");
       return;
     }
-    if (modelExpanded) return setModelPanel({ open: false });
+    if (modelExpanded) return setModelsPanel({ open: false });
     if (modelDrawer) setDrawer((open) => (open === "model" ? null : "model"));
-    else setModelPanel({ open: !models.panelOpen });
+    else setModelsPanel({ open: !models.panelOpen });
   };
   const closeModelPanel = () => {
-    if (modelExpanded || !modelDrawer) setModelPanel({ open: false });
+    if (modelExpanded || !modelDrawer) setModelsPanel({ open: false });
     else setDrawer(null);
   };
-  const toggleModelExpand = () => setModelPanel({ open: true, expanded: !models.expanded });
+  const toggleModelExpand = () => setModelsPanel({ open: true, expanded: !models.expanded });
 
-  /** Something an agent opened or changed is waiting behind the toolbar button. */
-  const modelsKey = models.models.map((model) => `${model.id}:${model.revision}`).join(" ");
-  const [modelsUnseen, setModelsUnseen] = useState(false);
+  /**
+   * Something an agent opened or changed is waiting behind the toolbar button
+   * — in this workspace: what it showed in another waits in that one. Seen as
+   * soon as the panel is on screen, before the paint that would light it.
+   */
+  const modelsUnseen = models.unseen && !modelShown;
+  useLayoutEffect(() => {
+    if (modelsOf && modelShown && models.unseen) markModelsSeen(modelsOf);
+  }, [modelsOf, modelShown, models.unseen]);
+  // A drawer opened on one workspace's preview does not come over the next
+  // workspace's terminals: that one's preview is its own.
   useEffect(() => {
-    setModelsUnseen(Boolean(modelsKey) && !modelShown);
-    // Only a change in what is open counts, not the panel being hidden.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelsKey]);
+    setDrawer((open) => (open === "model" ? null : open));
+  }, [modelsOf]);
+  // For the agents' answers: whether the model they showed is in sight.
   useEffect(() => {
-    if (modelShown) setModelsUnseen(false);
-  }, [modelShown]);
+    noteModelView(modelsOf, modelShown);
+  }, [modelsOf, modelShown]);
+  // A workspace deleted takes its models with it.
+  const workspaceIds = state.workspaces.map((ws) => ws.id).join(" ");
+  useEffect(() => {
+    pruneModels(workspaceIds ? workspaceIds.split(" ") : []);
+  }, [workspaceIds]);
 
   const toggleNavigator = () =>
     updateSettings({ navigatorOpen: !state.settings.navigatorOpen });
@@ -663,8 +696,8 @@ export default function App() {
           modelStat,
           worktrees: gitWorktreeList,
           // A detached workspace's preview is drawn by its own window.
-          modelHost: async (workspaceId) =>
-            workspaceId ? remoteModelHost(workspaceId) : localModelHost,
+          modelHost: async (workspaceId, detached) =>
+            detached ? remoteModelHost(workspaceId) : localModelHost(workspaceId),
         }
       : null,
   );
@@ -762,8 +795,11 @@ export default function App() {
           }
         },
       );
+      // A workspace's models follow it into its window and back.
+      const stopModels = serveModelHandovers();
       return () => {
         stop.then((off) => off()).catch(() => undefined);
+        stopModels();
       };
     }
     relayActivity((paneId, value) => {
@@ -779,6 +815,13 @@ export default function App() {
       stopModels?.();
     };
   }, []);
+
+  // Workspace window: its workspace going back into the main window takes its
+  // 3D preview along, before this window closes.
+  const ownDetached = ownWorkspace ? Boolean(ownWorkspace.detached) : null;
+  useEffect(() => {
+    if (windowWorkspaceId && ownDetached === false) handBackModels(windowWorkspaceId);
+  }, [ownDetached]);
 
   // Workspace window: everything that is about its own window.
   const lastPanes = useRef<string[]>([]);
@@ -959,7 +1002,7 @@ export default function App() {
     // through, and the palette does not offer them.
     if (modelsOpen) {
       map["view.modelPreview"] = toggleModels;
-      map["view.closeModels"] = closeAllModels;
+      map["view.closeModels"] = () => closeWorkspaceModels(wsId);
     }
     map["view.memory"] = () => setView("memory");
     map["view.stats"] = () => setView("stats");
@@ -1202,11 +1245,13 @@ export default function App() {
                     page has a project filter of its own. */}
                 {view === "stats" && <StatsView workspaces={state.workspaces} />}
 
-                {/* Mounted while any model is open, shown or not: the loaded
-                    models stay on the GPU, and agents' snapshots render
-                    whatever the user is looking at. */}
-                {modelsOpen && (
+                {/* Mounted while any workspace of the window has a model
+                    open, shown or not: the models loaded stay on the GPU, and
+                    agents' snapshots render whatever the user is looking at.
+                    It draws the preview of the workspace on screen. */}
+                {windowModels && (
                   <ModelPanel
+                    workspaceId={activeWorkspace.id}
                     shown={modelShown}
                     drawer={modelDrawer}
                     expanded={modelExpanded}
@@ -1296,6 +1341,23 @@ export default function App() {
                 {t("window.bringBack")}
               </button>
             </div>
+            {/* Out of sight: the other workspaces' snapshots still render. */}
+            {windowModels && (
+              <ModelPanel
+                workspaceId={null}
+                shown={false}
+                drawer={false}
+                expanded={false}
+                width={state.settings.modelPanelWidth}
+                drawnWidth={0}
+                maxWidth={state.settings.modelPanelWidth}
+                scale={uiScale}
+                paneId={null}
+                onResize={() => undefined}
+                onClose={() => undefined}
+                onToggleExpand={() => undefined}
+              />
+            )}
           </div>
         ) : windowWorkspaceId ? (
           <div className="placeholder">

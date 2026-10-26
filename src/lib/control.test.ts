@@ -3,7 +3,6 @@ import {
   DISABLED,
   callerWorkspace,
   modelRoots,
-  modelWindowOf,
   resolvePath,
   runControl,
   type ControlDeps,
@@ -80,28 +79,41 @@ function openModel(id: string, path: string, patch: Partial<OpenModel> = {}): Op
 }
 
 /**
- * A window's preview, in memory. A load ends the way `settle` says: loaded,
- * failed, or still going when the caller stops waiting.
+ * A window's previews, in memory, reached through the workspace the host was
+ * asked for: it lists that workspace's models only. A load ends the way
+ * `settle` says: loaded, failed, or still going when the caller stops waiting.
  */
 function fakePreview(log: string[]) {
   const preview = {
     models: [] as OpenModel[],
     activeId: null as string | null,
+    /** The workspace the last host was asked for. */
+    workspace: "w1",
+    /** Its workspace on screen, and its panel with it. */
+    onScreen: true,
+    shown: true,
     settle: "ready" as "ready" | "error" | "timeout",
     snapshotError: null as string | null,
     host: null as unknown as ModelHost,
   };
   let next = 1;
   preview.host = {
-    list: async () => ({ models: [...preview.models], activeId: preview.activeId }),
+    list: async () => ({
+      models: preview.models.filter((model) => model.workspaceId === preview.workspace),
+      activeId: preview.activeId,
+      onScreen: preview.onScreen,
+      shown: preview.shown,
+    }),
     show: async (model) => {
-      log.push(`show:${model.path}:${model.title}:${model.openedBy}:${model.workspaceId}`);
-      const existing = preview.models.find((entry) => entry.path === model.path);
+      log.push(`show:${model.path}:${model.title}:${model.openedBy}:${preview.workspace}`);
+      const existing = preview.models.find(
+        (entry) => entry.path === model.path && entry.workspaceId === preview.workspace,
+      );
       const id = existing?.id ?? `m${next++}`;
       if (!existing) {
         preview.models.push(
           openModel(id, model.path, {
-            workspaceId: model.workspaceId,
+            workspaceId: preview.workspace,
             openedBy: model.openedBy,
             status: "loading",
             info: null,
@@ -249,8 +261,9 @@ function setup(overrides: Partial<ControlDeps> = {}) {
         worktree("C:\\dev\\hangar-wt\\old", { prunable: "gitdir file points to non-existent location" }),
       ];
     },
-    modelHost: async (detachedWorkspaceId) => {
-      log.push(`host:${detachedWorkspaceId ?? "here"}`);
+    modelHost: async (workspaceId, detached) => {
+      log.push(`host:${workspaceId}:${detached ? "own window" : "here"}`);
+      preview.workspace = workspaceId;
       return preview.host;
     },
     ...overrides,
@@ -547,10 +560,52 @@ describe("model_show", () => {
       format: "glb",
       title: "chair.glb",
       info: INFO,
+      workspace: "Hangar",
+      visible: true,
     });
+    expect(log).toContain("host:w1:here");
     expect(log).toContain("show:C:\\dev\\hangar\\assets\\chair.glb:chair.glb:Ava:w1");
     expect(log).toContain("announce:modelShown:chair.glb:Ava");
     expect(log).toContain("settle:m1:45000");
+    // Showing a model there is using the workspace.
+    expect(log).toContain("touch:w1");
+    expect(log).not.toContain("open:w1");
+  });
+
+  it("opens it in the caller's own workspace, and says so when that one is not on screen", async () => {
+    const { deps, log, preview } = setup();
+    preview.onScreen = false;
+    preview.shown = false;
+    const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+    const result = (await runControl("model_show", { ...fromShop, path: "car.glb" }, deps)) as any;
+    expect(result).toMatchObject({ opened: true, workspace: "Shop", visible: false, info: INFO });
+    expect(result.note).toMatch(/open in the 3D preview of "Shop", which is not the workspace on screen/);
+    expect(log).toContain("host:w2:here");
+    expect(log).toContain("show:C:\\dev\\shop\\car.glb:car.glb:Ava:w2");
+    // Hangar is the one on screen: the line at the bottom names Shop.
+    expect(log).toContain("announce:modelShownElsewhere:car.glb:Ava");
+  });
+
+  it("says so when the workspace is on screen but its preview is not", async () => {
+    const { deps, preview } = setup();
+    preview.shown = false;
+    const result = (await runControl("model_show", { ...fromAva, path: "chair.glb" }, deps)) as any;
+    expect(result).toMatchObject({ workspace: "Hangar", visible: false });
+    expect(result.note).toMatch(/"Hangar" is on screen, but its 3D preview is not.*toolbar button/);
+  });
+
+  it("wakes a sleeping workspace it shows a model in, as pane_send does", async () => {
+    const { deps, log, sleeping } = setup();
+    sleeping.add("w2");
+    const result = (await runControl(
+      "model_show",
+      { ...fromAva, workspace: "Shop", path: "C:\\dev\\shop\\car.glb" },
+      deps,
+    )) as any;
+    expect(log).toContain("open:w2");
+    expect(log).toContain("touch:w2");
+    expect(result).toMatchObject({ workspace: "Shop", woke: true });
+    expect(result.note).toMatch(/"Shop" was asleep: it is waking up now/);
   });
 
   it("reads a relative path from the caller's pane folder, not from the root its server reports", async () => {
@@ -632,12 +687,10 @@ describe("model_show", () => {
 
   it("shows a detached workspace's model in that workspace's window", async () => {
     const { deps, log, patch } = setup();
-    expect(modelWindowOf(deps.snapshot().workspaces[0])).toBeNull();
     patch("w1", { detached: true });
-    expect(modelWindowOf(deps.snapshot().workspaces[0])).toBe("w1");
     await runControl("model_show", { ...fromAva, path: "chair.glb" }, deps);
-    expect(log).toContain("host:w1");
-    expect(log).not.toContain("host:here");
+    expect(log).toContain("host:w1:own window");
+    expect(log).not.toContain("host:w1:here");
   });
 
   it("says so when that window does not answer", async () => {
@@ -720,13 +773,31 @@ describe("model_snapshot", () => {
     await expect(runControl("model_snapshot", fromAva, deps)).rejects.toThrow(/a\.glb failed to load: not a glTF file/);
   });
 
-  it("explains a preview that is not on screen", async () => {
+  it("explains a preview that did not come up", async () => {
     const { deps, preview } = setup();
     preview.models = [openModel("m1", "C:\\dev\\hangar\\a.glb")];
     preview.snapshotError = "the 3D preview is not mounted";
     await expect(runControl("model_snapshot", fromAva, deps)).rejects.toThrow(
-      /not on screen in the window that shows "Hangar"/,
+      /did not come up in the window that shows "Hangar"/,
     );
+  });
+
+  it("renders the caller's workspace's model, never another workspace's", async () => {
+    const { deps, log, preview } = setup();
+    preview.models = [
+      openModel("m1", "C:\\dev\\hangar\\a.glb"),
+      openModel("m2", "C:\\dev\\shop\\car.glb", { workspaceId: "w2" }),
+    ];
+    preview.activeId = "m2";
+    const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+    const result = (await runControl("model_snapshot", fromShop, deps)) as any;
+    expect(result.path).toBe("C:\\dev\\shop\\car.glb");
+    expect(log).toContain("host:w2:here");
+    expect(log).toContain("snapshot:m2:iso:1024x768");
+    await expect(
+      runControl("model_snapshot", { ...fromShop, path: "C:\\dev\\hangar\\a.glb" }, deps),
+    ).rejects.toThrow(/No open model matches/);
+    expect(log.filter((entry) => entry.startsWith("snapshot:"))).toEqual(["snapshot:m2:iso:1024x768"]);
   });
 });
 
@@ -765,9 +836,24 @@ describe("model_close", () => {
       openModel("m3", "C:\\dev\\hangar\\b.glb"),
     ];
     const result = await runControl("model_close", fromAva, deps);
-    expect(result).toEqual({ closed: ["C:\\dev\\hangar\\a.glb", "C:\\dev\\hangar\\b.glb"], open: 1 });
+    expect(result).toEqual({ closed: ["C:\\dev\\hangar\\a.glb", "C:\\dev\\hangar\\b.glb"], open: 0 });
     expect(log).toContain("closeModels:m1,m3");
     expect(log).toContain("announce:modelClosed:a.glb, b.glb:Ava");
+    expect(preview.models.map((model) => model.id)).toEqual(["m2"]);
+  });
+
+  it("closes in the caller's workspace only, and names it when it is not on screen", async () => {
+    const { deps, log, preview } = setup();
+    preview.models = [
+      openModel("m1", "C:\\dev\\hangar\\car.glb"),
+      openModel("m2", "C:\\dev\\shop\\car.glb", { workspaceId: "w2" }),
+    ];
+    const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+    const result = await runControl("model_close", { ...fromShop, path: "car.glb" }, deps);
+    expect(result).toEqual({ closed: ["C:\\dev\\shop\\car.glb"], open: 0 });
+    expect(log).toContain("closeModels:m2");
+    expect(log).toContain("announce:modelClosedElsewhere:car.glb:Ava");
+    expect(preview.models.map((model) => model.id)).toEqual(["m1"]);
   });
 
   it("has nothing to do when nothing is open, but refuses a path that is not", async () => {

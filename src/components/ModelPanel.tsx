@@ -24,11 +24,13 @@ import {
   useViewer,
   useViewerTheme,
 } from "../lib/model3d/useModelViewer";
+import { useAsleep } from "../lib/hibernateStore";
 import { captureName, copyPng, savePng } from "../lib/modelCapture";
 import {
   activateModel,
   closeModel,
   reloadModel,
+  useAllModels,
   useModels,
   type ModelInfo,
   type OpenModel,
@@ -43,17 +45,27 @@ import { DEFAULT_SETTINGS } from "../types";
  * the terminals — or a drawer over them when there is no room, or the whole
  * work area when expanded. lib/sidePanels decides which; App passes it in.
  *
- * It stays mounted, hidden, for as long as a model is open, even while
- * another view is on screen: the loaded models stay on the GPU so a tab or a
- * view switch is instant, and an agent's snapshot can be rendered whatever
- * the user is looking at. The engine itself (lib/model3d/engine, three.js)
- * arrives with the first panel, through a dynamic import.
+ * Each workspace has its own preview (lib/modelStore), and the panel draws
+ * the one of the workspace on screen. There is one panel per window all the
+ * same, and one viewer in it — one WebGL context, one three.js scene — which
+ * holds the models of every workspace: a switch of workspace is a switch of
+ * tab, and the engine's own budget (KEEP_LOADED) bounds the GPU memory
+ * however many workspaces have models open.
+ *
+ * It stays mounted, hidden, for as long as any workspace of the window has a
+ * model open, even while another view or workspace is on screen: the loaded
+ * models stay on the GPU so a switch is instant, and an agent's snapshot can
+ * be rendered whatever the user is looking at. The engine itself
+ * (lib/model3d/engine, three.js) arrives with the first panel, through a
+ * dynamic import.
  */
 
 /** In interface points, like the width itself. */
 const KEY_STEP = 24;
 
 interface Props {
+  /** The workspace on screen, whose preview the panel draws; null for none. */
+  workspaceId: string | null;
   /** On screen: docked, an open drawer, or expanded. */
   shown: boolean;
   /** No room beside the terminals: drawn over them while it is asked for. */
@@ -76,7 +88,9 @@ interface Props {
 
 export function ModelPanel(props: Props) {
   const { shown, drawer, expanded, paneId } = props;
-  const { models, activeId } = useModels();
+  const { models, activeId } = useModels(props.workspaceId);
+  const everyModel = useAllModels();
+  const asleep = useAsleep();
   const t = useT();
   const locale = useLocale();
   const asideRef = useRef<HTMLElement>(null);
@@ -92,11 +106,25 @@ export function ModelPanel(props: Props) {
   const active = models.find((model) => model.id === activeId) ?? null;
   const missing = useModelWatch(active, shown);
 
-  // Closed tabs let go of their models.
-  const openKey = models.map((model) => model.id).join(" ");
+  // Closed tabs let go of their models, and so does a workspace put to sleep:
+  // its models stay listed, and load again once it is back on screen.
+  const awake = everyModel.filter((model) => !asleep.has(model.workspaceId));
+  const openKey = awake.map((model) => model.id).join(" ");
   useEffect(() => {
     forget(new Set(openKey ? openKey.split(" ") : []));
   }, [openKey, forget]);
+
+  // A model an agent opened in a workspace that is not on screen loads all
+  // the same: the agent hears what the viewer found, and the user finds it
+  // ready. The one in front is loaded below.
+  const pending = awake.filter((model) => model.status === "loading" && model.id !== activeId);
+  const pendingKey = pending.map((model) => `${model.id}:${model.revision}`).join(" ");
+  useEffect(() => {
+    if (!viewer) return;
+    for (const model of pending) ensure(model, viewer).catch(() => undefined);
+    // The models change on every store write; which revisions wait is what counts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, pendingKey, ensure]);
 
   // The model in front is loaded and shown; while a newer version loads, the
   // previous one stays on screen.
