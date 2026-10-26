@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./Icon";
+import { StateGlyph, type GlyphState } from "./StateGlyph";
 
 /** Kept between the menu and the window edges. */
 const MARGIN = 8;
@@ -9,6 +10,8 @@ export type NavigatorMenuEntry =
       kind: "item";
       label: string;
       icon?: IconName;
+      /** An agent's state, drawn where an icon would be. */
+      glyph?: GlyphState;
       onSelect: () => void;
       /** Destroys something: drawn in the danger colour. */
       danger?: boolean;
@@ -179,6 +182,7 @@ export function NavigatorMenu({
           >
             <span className="ctx-menu__icon">
               {entry.icon && <Icon name={entry.icon} size={14} />}
+              {entry.glyph && <StateGlyph state={entry.glyph} size={7} />}
             </span>
             <span className="ctx-menu__label">{entry.label}</span>
             {entry.checked && (

@@ -7,20 +7,15 @@ import { WorktreePanel } from "./WorktreePanel";
 import { Icon } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
-import { NavigatorActivityLine, NavigatorAgentRow, NavigatorPaneWatch } from "./NavigatorAgents";
+import { agentsIn, bringForward, BUSY, NavigatorStatus, whoIs } from "./NavigatorStatus";
 import { NavigatorPlan } from "./NavigatorPlan";
-import {
-  buildNavTree,
-  rowKey,
-  type NavFolder,
-  type NavRow,
-  type NavWorkspace,
-} from "./NavigatorModel";
-import { getPaneActivity } from "../lib/agentState";
+import { buildNavTree, namesakeHints, rowKey, type NavFolder } from "./NavigatorModel";
+import { useAgentsIn } from "../lib/agentState";
 import { useAsleep } from "../lib/hibernateStore";
 import { proseTime } from "../lib/inspectorFormat";
 import { mcpScopeClear } from "../lib/mcpScope";
 import { useShortcutTitle } from "../lib/useShortcuts";
+import type { Workspace } from "../types";
 
 interface Props {
   onOpenSettings: () => void;
@@ -42,12 +37,12 @@ interface DragItem {
  * Where a drag lands if released now. `row` sits beside another entry of the
  * same kind — before it, or after it when `after` is set. `into` files a
  * workspace last in a folder, `root` sends it last to the top level (or a
- * folder last among folders).
+ * folder last among folders), dropped on the heading or under the list.
  */
 type DropTarget =
   | { kind: "row"; id: string; after: boolean }
   | { kind: "into"; folderId: string }
-  | { kind: "root" };
+  | { kind: "root"; heading: boolean };
 
 /** The context menu on screen: whose, where, and whether a key opened it. */
 interface MenuState {
@@ -74,17 +69,17 @@ function swallowNextClick() {
   window.setTimeout(() => window.removeEventListener("click", swallow, true), 0);
 }
 
-const wantsYou = (paneId: string) => {
-  const activity = getPaneActivity(paneId)?.activity;
-  return activity === "waiting" || activity === "yours";
-};
-
 /**
- * The navigator: the workspaces, their folders and, under each one opened,
- * its agents and what they are doing — a source list in the manner of
- * Xcode's. It is a tree to assistive technology and to the keyboard: one tab
- * stop, arrows to move, Right and Left to open and fold, Enter to go, F2 to
- * rename, the menu key for the rest.
+ * The navigator: the workspaces, filed or not in folders, each with a word on
+ * what its agents are doing — a source list in the manner of Xcode's. The
+ * workspaces in no folder come first; a folder is a heading over its own,
+ * level with them rather than indented, so that a heading never passes for a
+ * project. The agents themselves are listed where they work: pane headers,
+ * inspector, status bar, palette.
+ *
+ * It is a tree to assistive technology and to the keyboard: one tab stop,
+ * arrows to move, Right and Left to open and fold a folder, Enter to go, F2
+ * to rename, the menu key for the rest.
  */
 export function Sidebar({
   onOpenSettings,
@@ -115,15 +110,8 @@ export function Sidebar({
   const [drag, setDrag] = useState<{ item: DragItem; target: DropTarget | null } | null>(
     null,
   );
-  /**
-   * Workspaces opened by hand, by id. The active one is open whatever this
-   * says. A view, like the zoom: nothing here is saved.
-   */
-  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [attentionOnly, setAttentionOnly] = useState(false);
-  /** Bumped when a pane changes state while the list depends on it. */
-  const [activityTick, setActivityTick] = useState(0);
   /** The row the keyboard is on, which is the tree's one tab stop. */
   const [cursor, setCursor] = useState<string | null>(null);
   const [version, setVersion] = useState("");
@@ -142,6 +130,9 @@ export function Sidebar({
   const uid = useId();
   /** Workspaces put to sleep for being left alone (lib/hibernate). */
   const asleep = useAsleep();
+  // Only the view narrowed to the agents that want you depends on every
+  // pane's state at once; otherwise this asks for nothing and never changes.
+  const wanting = useAgentsIn(attentionOnly ? state.workspaces.map((ws) => ws.id) : []);
 
   // A drag is committed from listeners installed when it started; they must
   // place it against the list as it is on release, not as it was then.
@@ -161,19 +152,16 @@ export function Sidebar({
       buildNavTree({
         workspaces: state.workspaces,
         folders: state.folders,
-        activeId,
-        opened,
         query,
         attentionOnly,
-        wantsYou,
+        wantsYou: (paneId) => wanting.waiting.includes(paneId) || wanting.yours.includes(paneId),
       }),
-    // `activityTick` stands for the panes' states, which `wantsYou` reads
-    // outside React.
-    [state.workspaces, state.folders, activeId, opened, query, attentionOnly, activityTick],
+    [state.workspaces, state.folders, query, attentionOnly, wanting],
   );
-  const bumpActivity = useCallback(() => setActivityTick((n) => n + 1), []);
 
   const rowsByKey = useMemo(() => new Map(tree.rows.map((row) => [row.key, row])), [tree]);
+  /** A word after the names that several workspaces share, to tell them apart. */
+  const hints = useMemo(() => namesakeHints(state.workspaces), [state.workspaces]);
   const activeKey = activeId ? rowKey("ws", activeId) : null;
   const tabKey =
     cursor && rowsByKey.has(cursor)
@@ -229,12 +217,6 @@ export function Sidebar({
     return id;
   }
 
-  function toggleWorkspace(row: NavRow | NavWorkspace) {
-    const id = "workspace" in row ? row.workspace.id : row.id;
-    if (!row.foldable) return;
-    setOpened((prev) => ({ ...prev, [id]: !row.expanded }));
-  }
-
   function toggleFolder(folderId: string) {
     // Under a filter a folder is held open: folding it would hide the matches.
     if (filtered) return;
@@ -281,7 +263,7 @@ export function Sidebar({
     const box = el.getBoundingClientRect();
     const after = y > box.top + box.height / 2;
 
-    if (drop === "root") return { kind: "root" };
+    if (drop === "root") return { kind: "root", heading: id === "heading" };
     if (item.kind === "folder") {
       return drop === "folder" && id !== item.id ? { kind: "row", id, after } : null;
     }
@@ -372,13 +354,6 @@ export function Sidebar({
     window.addEventListener("blur", lostFocus);
   }
 
-  function activateRow(row: NavRow) {
-    if (row.kind === "folder") return toggleFolder(row.id);
-    if (row.kind === "ws") return setActiveWorkspace(row.id);
-    const workspaceId = row.parent ? rowsByKey.get(row.parent)?.id : null;
-    if (workspaceId) onFocusPane(workspaceId, row.id);
-  }
-
   function onTreeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     if (target.closest("input") || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -401,28 +376,21 @@ export function Sidebar({
         focusRow(tree.rows[tree.rows.length - 1]?.key);
         break;
       case "ArrowRight":
-        if (row.kind === "pane") break;
-        if (!row.expanded) {
-          if (row.kind === "folder") toggleFolder(row.id);
-          else toggleWorkspace(row);
-        } else if (tree.rows[at + 1]?.parent === row.key) {
-          focusRow(tree.rows[at + 1].key);
-        }
+        // A workspace is a leaf; a folder opens, then steps into what it holds.
+        if (row.kind !== "folder") break;
+        if (!row.expanded) toggleFolder(row.id);
+        else if (tree.rows[at + 1]?.parent === row.key) focusRow(tree.rows[at + 1].key);
         break;
       case "ArrowLeft":
-        if (row.expanded && row.foldable) {
-          if (row.kind === "folder") toggleFolder(row.id);
-          else toggleWorkspace(row);
-        } else {
-          focusRow(row.parent);
-        }
+        if (row.kind === "folder" && row.expanded && row.foldable) toggleFolder(row.id);
+        else focusRow(row.parent);
         break;
       case "Enter":
       case " ":
-        activateRow(row);
+        if (row.kind === "folder") toggleFolder(row.id);
+        else setActiveWorkspace(row.id);
         break;
       case "F2": {
-        if (row.kind === "pane") return;
         const entity =
           row.kind === "folder"
             ? state.folders.find((folder) => folder.id === row.id)
@@ -438,8 +406,8 @@ export function Sidebar({
 
   /**
    * One handler for the whole tree, so the menu key on a focused row works
-   * like a right-click on it. An agent row has no menu of its own; the
-   * webview's (reload, inspect) has no business in the list either.
+   * like a right-click on it. The webview's own menu (reload, inspect) has no
+   * business in the list.
    */
   function onTreeContextMenu(event: React.MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
@@ -447,9 +415,9 @@ export function Sidebar({
     event.preventDefault();
     const item = target.closest<HTMLElement>('[role="treeitem"]');
     const row = item?.dataset.key ? rowsByKey.get(item.dataset.key) : undefined;
-    if (!item || !row || row.kind === "pane") return;
-    const head = item.querySelector(".nav-ws__head, .nav-folder__head") ?? item;
-    openMenu(row.kind === "folder" ? "folder" : "workspace", row.id, head, event);
+    if (!item || !row) return;
+    const anchor = item.querySelector(".nav-folder__head") ?? item;
+    openMenu(row.kind === "folder" ? "folder" : "workspace", row.id, anchor, event);
   }
 
   function renameField(hint: string, selectAll: boolean) {
@@ -504,15 +472,14 @@ export function Sidebar({
     return `${base}--drop-${target.after ? "after" : "before"}`;
   }
 
-  function renderWorkspace(entry: NavWorkspace, level: number) {
-    const ws = entry.workspace;
+  function renderWorkspace(ws: Workspace, level: number) {
     const key = rowKey("ws", ws.id);
     const active = ws.id === activeId;
     const dragged = drag?.item.kind === "workspace" && drag.item.id === ws.id;
     const id = `${uid}-${ws.id}`;
-    const focusedPane = focusByWorkspace[ws.id];
     const sleep = asleep.get(ws.id);
     const sleepTitle = sleep ? t("sidebar.asleep", { time: proseTime(sleep.at, locale) }) : "";
+    const hint = hints.get(ws.id);
 
     return (
       <div
@@ -525,119 +492,77 @@ export function Sidebar({
         ]
           .filter(Boolean)
           .join(" ")}
-        style={{ "--nav-level": level - 1 } as React.CSSProperties}
         role="treeitem"
         aria-level={level}
-        aria-expanded={entry.expanded}
         aria-current={active ? "true" : undefined}
-        aria-labelledby={`${id}-name`}
-        aria-describedby={`${id}-window ${id}-asleep ${id}-path ${id}-activity`}
+        aria-labelledby={`${id}-name ${id}-hint`}
+        aria-describedby={`${id}-window ${id}-asleep ${id}-status`}
+        // The folder it opens in, which the row does not spell out: only a
+        // tooltip, for the rare look it is worth.
+        title={ws.cwd}
         tabIndex={tabKey === key ? 0 : -1}
         data-key={key}
         data-drop="workspace"
         data-id={ws.id}
+        onClick={() => setActiveWorkspace(ws.id)}
+        onPointerDown={(e) => beginDrag({ kind: "workspace", id: ws.id }, e)}
+        onDoubleClick={(e) => {
+          // The summary and the "…" carry their own meaning; the rest of the
+          // row opens the rename field.
+          if ((e.target as Element).closest(".nav-ctl")) return;
+          startRename(ws.id, ws.name);
+        }}
       >
-        <div
-          className="nav-ws__head"
-          onClick={() => setActiveWorkspace(ws.id)}
-          onPointerDown={(e) => beginDrag({ kind: "workspace", id: ws.id }, e)}
-          onDoubleClick={(e) => {
-            // The chevron and the "…" carry their own meaning; the rest of
-            // the row opens the rename field.
-            if ((e.target as Element).closest(".nav-ctl")) return;
-            startRename(ws.id, ws.name);
-          }}
-        >
-          <span
-            className={[
-              "nav-disc",
-              entry.expanded && "nav-disc--open",
-              entry.foldable && "nav-ctl",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            title={
-              entry.foldable ? t(entry.expanded ? "sidebar.collapse" : "sidebar.expand") : undefined
-            }
-            aria-hidden="true"
-            onClick={(e) => {
-              // Folding is not choosing: the workspace on screen stays.
-              e.stopPropagation();
-              toggleWorkspace(entry);
-            }}
-          >
-            <Icon name="chevronRight" size={12} />
-          </span>
-          <span className="nav-ws__icon">
-            <Icon name="workspace" size={14} />
-          </span>
-          {renaming === ws.id ? (
-            renameField(t("sidebar.renameHint"), false)
-          ) : (
-            <>
-              <span className="nav-ws__title">
-                <span className="nav-ws__name" id={`${id}-name`}>
-                  {ws.name}
-                </span>
-                {ws.detached && (
-                  <span
-                    className="ws__window"
-                    id={`${id}-window`}
-                    role="img"
-                    title={t("window.inOwnWindow")}
-                    aria-label={t("window.inOwnWindow")}
-                  >
-                    <Icon name="window" size={12} />
-                  </span>
-                )}
-                {sleep && (
-                  <span
-                    className="nav-ws__asleep"
-                    id={`${id}-asleep`}
-                    role="img"
-                    title={sleepTitle}
-                    aria-label={sleepTitle}
-                  >
-                    <Icon name="moon" size={12} />
-                  </span>
-                )}
+        <span className="nav-ws__icon" aria-hidden="true">
+          <Icon name="workspace" size={14} />
+        </span>
+        {renaming === ws.id ? (
+          renameField(t("sidebar.renameHint"), false)
+        ) : (
+          <>
+            <span className="nav-ws__label">
+              <span className="nav-ws__name" id={`${id}-name`}>
+                {ws.name}
               </span>
-              <span className="nav-end">
+              {hint && (
+                <span className="nav-ws__hint" id={`${id}-hint`}>
+                  {hint}
+                </span>
+              )}
+            </span>
+            <span className="nav-end">
+              {ws.detached && (
                 <span
-                  className="nav-badge"
-                  title={t("sidebar.paneCount", { n: ws.panes.length })}
-                  aria-hidden="true"
+                  className="nav-mark"
+                  id={`${id}-window`}
+                  role="img"
+                  title={t("window.inOwnWindow")}
+                  aria-label={t("window.inOwnWindow")}
                 >
-                  {ws.panes.length}
+                  <Icon name="window" size={12} />
                 </span>
-                {moreButton("workspace", ws.id)}
-              </span>
-            </>
-          )}
-          <span className="nav-ws__path" id={`${id}-path`} title={ws.cwd}>
-            <bdi>{ws.cwd}</bdi>
-          </span>
-          <NavigatorActivityLine workspaceId={ws.id} id={`${id}-activity`} />
-        </div>
-
-        {entry.expanded && entry.panes.length > 0 && (
-          <div className="nav-ws__agents" role="group">
-            {entry.panes.map((pane) => {
-              const paneKey = rowKey("pane", pane.id);
-              return (
-                <NavigatorAgentRow
-                  key={pane.id}
-                  pane={pane}
-                  rowKey={paneKey}
-                  level={level + 1}
-                  selected={active && focusedPane === pane.id}
-                  asleep={Boolean(sleep)}
-                  tabbable={tabKey === paneKey}
-                  onActivate={() => onFocusPane(ws.id, pane.id)}
-                />
-              );
-            })}
-          </div>
+              )}
+              {sleep && (
+                <span
+                  className="nav-mark"
+                  id={`${id}-asleep`}
+                  role="img"
+                  title={sleepTitle}
+                  aria-label={sleepTitle}
+                >
+                  <Icon name="moon" size={12} />
+                </span>
+              )}
+              <NavigatorStatus
+                workspaces={[ws]}
+                id={`${id}-status`}
+                activeId={activeId}
+                focusByWorkspace={focusByWorkspace}
+                onFocusPane={onFocusPane}
+              />
+              {moreButton("workspace", ws.id)}
+            </span>
+          </>
         )}
       </div>
     );
@@ -648,10 +573,9 @@ export function Sidebar({
     const key = rowKey("folder", folder.id);
     const dragged = drag?.item.kind === "folder" && drag.item.id === folder.id;
     const into = drag?.target?.kind === "into" && drag.target.folderId === folder.id;
+    const filed = state.workspaces.filter((ws) => ws.folderId === folder.id);
     // Folded away, the workspace on screen would otherwise be nowhere to see.
-    const holdsActive =
-      !entry.expanded &&
-      state.workspaces.some((ws) => ws.folderId === folder.id && ws.id === activeId);
+    const holdsActive = !entry.expanded && filed.some((ws) => ws.id === activeId);
     const nameId = `${uid}-${folder.id}-name`;
 
     return (
@@ -662,6 +586,7 @@ export function Sidebar({
         aria-level={1}
         aria-expanded={entry.expanded}
         aria-labelledby={nameId}
+        aria-describedby={entry.expanded ? undefined : `${uid}-${folder.id}-status`}
         tabIndex={tabKey === key ? 0 : -1}
         data-key={key}
       >
@@ -679,15 +604,6 @@ export function Sidebar({
           onClick={() => toggleFolder(folder.id)}
           onPointerDown={(e) => beginDrag({ kind: "folder", id: folder.id }, e)}
         >
-          <span
-            className={`nav-disc ${entry.expanded ? "nav-disc--open" : ""}`}
-            aria-hidden="true"
-          >
-            <Icon name="chevronRight" size={12} />
-          </span>
-          <span className="nav-folder__icon">
-            <Icon name="folder" size={14} />
-          </span>
           {renaming === folder.id ? (
             renameField(t("sidebar.renameHint"), true)
           ) : (
@@ -695,8 +611,28 @@ export function Sidebar({
               <span className="nav-folder__name" id={nameId}>
                 {folder.name}
               </span>
+              <span
+                className={`nav-disc ${entry.expanded ? "nav-disc--open" : ""}`}
+                aria-hidden="true"
+              >
+                <Icon name="chevronRight" size={10} />
+              </span>
               <span className="nav-end">
-                <span className="nav-badge" aria-hidden="true">
+                {/* Folded, it still says when one of its agents wants you. */}
+                {!entry.expanded && (
+                  <NavigatorStatus
+                    workspaces={filed}
+                    id={`${uid}-${folder.id}-status`}
+                    activeId={activeId}
+                    focusByWorkspace={focusByWorkspace}
+                    onFocusPane={onFocusPane}
+                  />
+                )}
+                <span
+                  className="nav-count"
+                  title={t("sidebar.folderSize", { n: entry.size })}
+                  aria-hidden="true"
+                >
                   {entry.size}
                 </span>
                 {moreButton("folder", folder.id)}
@@ -719,11 +655,40 @@ export function Sidebar({
     );
   }
 
+  /**
+   * The agents of these workspaces that are doing something, to go to from
+   * the keyboard: what a click on the row's summary does with the pointer.
+   */
+  function agentEntries(workspaces: Workspace[]): NavigatorMenuEntry[] {
+    const items = BUSY.flatMap((busy) =>
+      agentsIn(workspaces, busy).map(
+        (pane): NavigatorMenuEntry => ({
+          kind: "item",
+          label: pane.name,
+          glyph: busy,
+          title: whoIs(t, busy, [pane]),
+          takesFocus: true,
+          onSelect: () => {
+            const ws = workspaces.find((entry) => entry.panes.includes(pane));
+            if (ws) bringForward(onFocusPane, ws.id, pane.id);
+          },
+        }),
+      ),
+    );
+    if (!items.length) return [];
+    return [{ kind: "heading", label: t("sidebar.goTo") }, ...items, { kind: "separator" }];
+  }
+
   function menuEntries(current: MenuState): NavigatorMenuEntry[] {
     if (current.kind === "folder") {
       const folder = state.folders.find((entry) => entry.id === current.id);
       if (!folder) return [];
+      // Open, its workspaces' own rows and menus say it.
+      const folded = folder.collapsed && !filtered;
       return [
+        ...(folded
+          ? agentEntries(state.workspaces.filter((ws) => ws.folderId === folder.id))
+          : []),
         {
           kind: "item",
           label: t("sidebar.menuRename"),
@@ -750,6 +715,7 @@ export function Sidebar({
         ? ws.folderId
         : null;
     return [
+      ...agentEntries([ws]),
       {
         kind: "item",
         label: t("sidebar.menuRename"),
@@ -824,6 +790,8 @@ export function Sidebar({
       )?.name ?? "")
     : "";
   const filterActive = query.trim() !== "" || attentionOnly;
+  const draggingWorkspace = drag?.item.kind === "workspace" && state.folders.length > 0;
+  const rootDrop = drag?.target?.kind === "root" ? drag.target : null;
 
   return (
     <aside className="sidebar" aria-label={t("sidebar.label")}>
@@ -845,7 +813,13 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="nav-section">
+      {/* The heading of the workspaces filed nowhere, which sit right under
+          it: dropping one on it takes it out of its folder. */}
+      <div
+        className={`nav-section ${rootDrop?.heading ? "nav-section--drop" : ""}`}
+        data-drop={draggingWorkspace ? "root" : undefined}
+        data-id="heading"
+      >
         <span id={`${uid}-section`}>{t("sidebar.workspaces")}</span>
         <button
           className="nav-tb nav-section__add"
@@ -873,8 +847,8 @@ export function Sidebar({
             }
           }}
         >
+          {tree.loose.map((ws) => renderWorkspace(ws, 1))}
           {tree.folders.map(renderFolder)}
-          {tree.loose.map((entry) => renderWorkspace(entry, 1))}
         </div>
 
         {state.workspaces.length === 0 && <p className="nav-empty">{t("sidebar.empty")}</p>}
@@ -899,12 +873,12 @@ export function Sidebar({
         )}
 
         {/* The space under the list: dropping there takes a workspace out of
-            its folder, which no row can offer once every one is filed. */}
+            its folder too, back with the loose ones at the top. */}
         <div
-          className={`nav-root ${drag?.target?.kind === "root" ? "nav-root--drop" : ""}`}
+          className={`nav-root ${rootDrop && !rootDrop.heading ? "nav-root--drop" : ""}`}
           data-drop="root"
         >
-          {drag?.item.kind === "workspace" && state.folders.length > 0 && t("sidebar.noFolder")}
+          {draggingWorkspace && t("sidebar.noFolder")}
         </div>
       </div>
 
@@ -1010,14 +984,6 @@ export function Sidebar({
           }}
         />
       )}
-
-      {/* Only this view depends on every pane's state at once. */}
-      {attentionOnly &&
-        state.workspaces.flatMap((ws) =>
-          ws.panes.map((pane) => (
-            <NavigatorPaneWatch key={pane.id} paneId={pane.id} onChange={bumpActivity} />
-          )),
-        )}
     </aside>
   );
 }

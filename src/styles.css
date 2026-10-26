@@ -91,14 +91,17 @@ select {
 /* ---------- Sidebar ---------- */
 
 /* The navigator (components/Sidebar.tsx): a source list in the manner of
-   Xcode's. Rows are 24px at 100 %, every length follows the interface size,
-   and colour is left to the agents' states. */
+   Xcode's. A workspace is one row of 28px at 100 %, every length follows the
+   interface size, and colour is left to the agents' states. */
 .sidebar {
-  --nav-row: calc(24px * var(--ui-scale));
-  --nav-disc: calc(14px * var(--ui-scale));
-  --nav-glyph: calc(14px * var(--ui-scale));
-  --nav-gap: calc(6px * var(--ui-scale));
-  --nav-indent: calc(14px * var(--ui-scale));
+  --nav-row: calc(28px * var(--ui-scale));
+  --nav-glyph: calc(16px * var(--ui-scale));
+  --nav-gap: calc(8px * var(--ui-scale));
+  /* From a row's edge to its icon, and to a heading's first letter: they
+     line up, so the eye runs straight down the left edge of the list. */
+  --nav-pad: calc(8px * var(--ui-scale));
+  /* Where a workspace's name starts, which a drop marker starts at too. */
+  --nav-name-x: calc(var(--nav-pad) + var(--nav-glyph) + var(--nav-gap));
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -175,17 +178,34 @@ select {
   outline-offset: -1px;
 }
 
+/* The list's two kinds of heading, the workspaces filed nowhere and each
+   folder, in the small capitals of a group label: a heading has no icon and
+   no path, and never passes for a project. */
+.nav-section,
+.nav-folder__head {
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
 .nav-section {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: calc(26px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
   margin: calc(2px * var(--ui-scale)) calc(8px * var(--ui-scale)) 0;
-  padding: 0 calc(2px * var(--ui-scale)) 0 calc(8px * var(--ui-scale));
-  font-size: calc(11px * var(--ui-scale));
-  font-weight: 600;
-  color: var(--fg-muted);
+  padding: 0 calc(2px * var(--ui-scale)) 0 var(--nav-pad);
+  border-radius: var(--radius);
+}
+
+/* A workspace dragged onto it leaves its folder for the top of the list. */
+.nav-section--drop {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+  color: var(--fg);
 }
 
 .nav-section .nav-tb {
@@ -259,290 +279,235 @@ select {
   outline-offset: 2px;
 }
 
-/* Rows. A workspace's name, path and activity line share one hit area, and
-   everything under it — path, agents — starts where the name starts. */
+/* A workspace: one row, its icon, its name, and at its end what its agents
+   are doing. Its folder is in the tooltip, not under its name. */
 
 .nav-ws {
-  --nav-x: calc(4px * var(--ui-scale) + var(--nav-level, 0) * var(--nav-indent));
-  --nav-name-x: calc(var(--nav-x) + var(--nav-disc) + var(--nav-glyph) + 2 * var(--nav-gap));
+  /* What the row is drawn on, which its "…" covers the name with. */
+  --nav-row-bg: var(--chrome);
   position: relative;
-  border-radius: var(--radius);
-  outline: none;
-}
-
-.nav-ws__head,
-.nav-folder__head {
   display: grid;
-  grid-template-columns: var(--nav-disc) var(--nav-glyph) minmax(0, 1fr) auto;
-  grid-template-rows: var(--nav-row);
+  grid-template-columns: var(--nav-glyph) minmax(0, 1fr) auto;
   align-items: center;
   column-gap: var(--nav-gap);
-  border-radius: var(--radius);
-  transition: background var(--dur) var(--ease);
-}
-
-.nav-ws__head {
-  padding: 0 calc(6px * var(--ui-scale)) calc(4px * var(--ui-scale)) var(--nav-x);
+  height: var(--nav-row);
   margin-bottom: 1px;
+  padding: 0 calc(4px * var(--ui-scale)) 0 var(--nav-pad);
+  border-radius: var(--radius);
+  color: var(--fg-secondary);
+  outline: none;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-.nav-ws__head:hover,
-.nav-folder__head:hover {
-  background: var(--surface-hover);
+.nav-ws:hover {
+  --nav-row-bg: var(--surface-hover);
+  background: var(--nav-row-bg);
+  color: var(--fg);
 }
 
-/* The workspace on screen: one quiet card around it and its agents, its name
-   a step bolder. The pane in front inside it takes the stronger fill. */
-.nav-ws--active {
-  background: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+/* The workspace on screen: the selected row of the list. */
+.nav-ws--active,
+.nav-ws--active:hover {
+  --nav-row-bg: var(--surface-active);
+  background: var(--nav-row-bg);
+  color: var(--fg);
 }
 
-.nav-ws:focus-visible > .nav-ws__head,
+.nav-ws:focus-visible,
 .nav-folder:focus-visible > .nav-folder__head {
   outline: 2px solid var(--accent-ring);
   outline-offset: -2px;
 }
 
-.nav-disc {
-  display: grid;
-  place-items: center;
-  height: var(--nav-disc);
-  color: var(--fg-subtle);
-  transition: transform var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
-.nav-disc--open {
-  transform: rotate(90deg);
-}
-
-.nav-disc.nav-ctl:hover {
-  color: var(--fg);
-}
-
-.nav-ws__icon,
-.nav-folder__icon {
+.nav-ws__icon {
   display: grid;
   place-items: center;
   color: var(--fg-muted);
 }
 
-.nav-ws__title {
+.nav-ws--active .nav-ws__icon {
+  color: var(--accent-hi);
+}
+
+/* As much of the row as the summary leaves it; a long name loses its end. */
+.nav-ws__label {
   display: flex;
-  align-items: center;
-  gap: calc(5px * var(--ui-scale));
+  align-items: baseline;
+  gap: calc(6px * var(--ui-scale));
   min-width: 0;
 }
 
-.nav-ws__name,
-.nav-folder__name {
+.nav-ws__name {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: calc(12.5px * var(--ui-scale));
   font-weight: 500;
 }
 
-.nav-ws--active > .nav-ws__head .nav-ws__name {
+.nav-ws--active .nav-ws__name {
   font-weight: 600;
 }
 
-/* The count, and the "…" that takes its place under the pointer: one cell,
-   so nothing moves when it shows. */
-.nav-end {
-  display: grid;
-  justify-items: end;
-  align-items: center;
-}
-
-.nav-end > * {
-  grid-area: 1 / 1;
-}
-
-.nav-badge {
-  min-width: calc(18px * var(--ui-scale));
-  padding: 0 calc(5px * var(--ui-scale));
-  border-radius: var(--radius-xs);
-  background: var(--line);
-  color: var(--fg-muted);
-  font-family: var(--mono);
-  font-size: calc(10.5px * var(--ui-scale));
-  font-weight: 500;
-  line-height: calc(16px * var(--ui-scale));
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.nav-more {
-  display: grid;
-  place-items: center;
-  width: calc(20px * var(--ui-scale));
-  height: calc(18px * var(--ui-scale));
-  border-radius: var(--radius-xs);
-  color: var(--fg-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
-}
-
-.nav-more:hover {
-  background: var(--surface-active);
-  color: var(--fg);
-}
-
-.nav-ws__head:hover .nav-more,
-.nav-folder__head:hover .nav-more,
-.nav-ws:focus-visible > .nav-ws__head .nav-more,
-.nav-folder:focus-visible > .nav-folder__head .nav-more {
-  opacity: 1;
-}
-
-.nav-ws__head:hover .nav-badge,
-.nav-folder__head:hover .nav-badge,
-.nav-ws:focus-visible > .nav-ws__head .nav-badge,
-.nav-folder:focus-visible > .nav-folder__head .nav-badge {
-  visibility: hidden;
-}
-
-.nav-ws__path,
-.nav-ws__activity {
-  grid-column: 3 / -1;
-  min-width: 0;
+/* After a name another workspace has too, the folder that tells them apart. */
+.nav-ws__hint {
+  flex: none;
+  max-width: 50%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-muted);
 }
 
-/* Long paths lose their start, not the project folder that ends them. */
-.nav-ws__path {
-  margin-top: calc(-3px * var(--ui-scale));
-  direction: rtl;
-  text-align: left;
-  font-family: var(--mono);
-  font-size: calc(10.5px * var(--ui-scale));
-  line-height: 1.45;
-  color: var(--fg-subtle);
-}
-
-.nav-ws__path bdi {
-  direction: ltr;
-}
-
-.nav-ws__activity {
+/* Whatever ends a row or a heading: marks, the agents' summary, the count. */
+.nav-end {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: calc(6px * var(--ui-scale));
-  font-size: calc(11px * var(--ui-scale));
-  line-height: 1.45;
-}
-
-.nav-ws__activity-text {
+  justify-content: flex-end;
+  gap: calc(2px * var(--ui-scale));
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-/* A state written out takes the colour of its glyph. */
-.nav-state--working {
-  color: var(--state-working);
+/* In its own window, asleep: an icon each, in the quiet grey. */
+.nav-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(18px * var(--ui-scale));
+  color: var(--fg-muted);
 }
 
-.nav-state--waiting {
+/* The agents' summary (components/NavigatorStatus.tsx): a glyph and a count
+   per state, coloured like the glyph when it wants you, grey when it only
+   works. Each one is a button for the pointer. */
+.nav-status {
+  display: flex;
+  align-items: center;
+  gap: calc(1px * var(--ui-scale));
+}
+
+.nav-status__item {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 0 calc(5px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1;
+  cursor: pointer;
+  transition: box-shadow var(--dur) var(--ease);
+}
+
+/* An outline rather than a fill: the count keeps its contrast on any row. */
+.nav-status__item:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.nav-status__item--waiting {
   color: var(--state-waiting);
 }
 
-.nav-state--yours {
+.nav-status__item--yours {
   color: var(--state-yours);
 }
 
-.nav-state--idle {
-  color: var(--state-idle);
+.nav-status__item--working {
+  color: var(--fg-muted);
 }
 
-.nav-ws__agents {
-  padding-bottom: calc(4px * var(--ui-scale));
-}
-
-.nav-agent {
-  display: flex;
-  align-items: center;
-  gap: calc(6px * var(--ui-scale));
-  height: var(--nav-row);
-  margin-bottom: 1px;
-  padding: 0 calc(6px * var(--ui-scale)) 0 var(--nav-name-x);
-  border-radius: var(--radius);
-  white-space: nowrap;
-  outline: none;
-  transition: background var(--dur) var(--ease);
-}
-
-.nav-agent:hover {
-  background: var(--surface-hover);
-}
-
-.nav-agent--selected,
-.nav-agent--selected:hover {
-  background: var(--surface-active);
-}
-
-/* The selection is a step further from the text than the column: the kind
-   of agent comes up a step with it, so it still reads. */
-.nav-agent--selected .nav-agent__kind {
+/* The two quietest greys are only held to the plain surfaces, not to a
+   row's fill. */
+.nav-ws:hover .nav-ws__hint,
+.nav-ws--active .nav-ws__hint,
+.nav-ws:hover .nav-status__item--working,
+.nav-ws--active .nav-status__item--working {
   color: var(--fg-secondary);
 }
 
-.nav-agent:focus-visible {
-  outline: 2px solid var(--accent-ring);
-  outline-offset: -2px;
+/* Read with its row by a screen reader, not shown. */
+.nav-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
-/* As wide as the longest of the names panes are given (lib/paneNames), so the
-   kinds of agent line up in a column. */
-.nav-agent__name {
-  flex: none;
-  width: calc(36px * var(--ui-scale));
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* A folder's size. */
+.nav-count {
+  min-width: calc(18px * var(--ui-scale));
+  /* Its last digit under the summary's, as the status item pads it. */
+  padding-right: calc(5px * var(--ui-scale));
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-align: right;
+  color: var(--fg-subtle);
 }
 
-.nav-agent__kind {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: calc(11px * var(--ui-scale));
-  color: var(--fg-muted);
-}
-
-.nav-agent__state {
-  flex: none;
-  padding-left: calc(6px * var(--ui-scale));
-  font-size: calc(11px * var(--ui-scale));
-}
-
-/* A workspace asleep (lib/hibernate): its rows go quiet, a moon where the
-   state glyph was — in the glyph's own box, so the names stay in column. */
-.nav-agent__moon {
-  display: grid;
+/* The "…" under the pointer, laid over the end of the name rather than
+   beside what ends the row: the summary never moves away from a pointer on
+   its way to it. */
+.nav-more {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 2px * var(--ui-scale));
+  display: none;
   place-items: center;
-  flex: none;
-  width: calc(8px * var(--ui-scale));
-  color: var(--fg-subtle);
-}
-
-.nav-agent--asleep .nav-agent__name {
+  width: calc(20px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  margin-top: calc(-9px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  background: var(--nav-row-bg, var(--chrome));
+  /* The name fades out under it instead of being cut. */
+  box-shadow: calc(-10px * var(--ui-scale)) 0 calc(8px * var(--ui-scale))
+    calc(-2px * var(--ui-scale)) var(--nav-row-bg, var(--chrome));
   color: var(--fg-muted);
+  cursor: pointer;
 }
 
-.nav-state--asleep {
-  color: var(--fg-subtle);
+.nav-ws--active .nav-more {
+  color: var(--fg-secondary);
+}
+
+.nav-more:hover {
+  color: var(--fg);
+}
+
+.nav-ws:hover .nav-more,
+.nav-ws:focus-visible .nav-more,
+.nav-folder__head:hover .nav-more,
+.nav-folder:focus-visible > .nav-folder__head .nav-more {
+  display: grid;
 }
 
 .nav-rename {
-  grid-column: 3 / -1;
+  grid-column: 2 / -1;
+  flex: 1;
   width: 100%;
   min-width: 0;
   height: calc(20px * var(--ui-scale));
+  /* Not the heading's capitals: the name is typed as it will be kept. */
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg);
   padding: 0 calc(5px * var(--ui-scale));
   border: 0;
   border-radius: var(--radius-xs);
@@ -752,31 +717,69 @@ select {
 
 /* ---------- Sidebar folders ---------- */
 
+/* A folder is a heading over its workspaces, which sit level with the ones
+   filed nowhere rather than a step in: the space above it, and the heading
+   itself, are what group them. */
 .nav-folder {
   position: relative;
+  margin-top: calc(10px * var(--ui-scale));
   border-radius: var(--radius);
   outline: none;
 }
 
 .nav-folder__head {
   position: relative;
-  padding: 0 calc(6px * var(--ui-scale)) 0 calc(4px * var(--ui-scale));
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
   margin-bottom: 1px;
-  color: var(--fg-muted);
+  padding: 0 calc(4px * var(--ui-scale)) 0 var(--nav-pad);
+  border-radius: var(--radius);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .nav-folder__head:hover {
-  color: var(--fg);
+  color: var(--fg-secondary);
+}
+
+.nav-folder__name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-folder__head .nav-end {
+  margin-left: auto;
+}
+
+/* Folded with an agent that wants you, it says that rather than its size. */
+.nav-status ~ .nav-count {
+  display: none;
+}
+
+/* Right after the name, turned down while the folder is open. */
+.nav-disc {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--fg-subtle);
+  transition: transform var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.nav-disc--open {
+  transform: rotate(90deg);
+}
+
+.nav-folder__head:hover .nav-disc {
+  color: var(--fg-secondary);
 }
 
 /* Folded away, the folder still says it holds the workspace on screen. */
-.nav-folder__head--current {
-  background: var(--surface-hover);
+.nav-folder__head--current,
+.nav-folder__head--current .nav-disc {
   color: var(--fg);
-}
-
-.nav-folder__head--current .nav-folder__name {
-  font-weight: 600;
 }
 
 .nav-folder__body {
@@ -786,10 +789,9 @@ select {
 .nav-folder__empty {
   display: flex;
   align-items: center;
-  height: calc(22px * var(--ui-scale));
-  margin: 0 0 calc(4px * var(--ui-scale))
-    calc(4px * var(--ui-scale) + var(--nav-indent) + var(--nav-disc) + var(--nav-glyph) + 2 * var(--nav-gap));
-  padding: 0 calc(8px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  margin: 0 0 calc(4px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale)) 0 var(--nav-pad);
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-sm);
   font-size: calc(11px * var(--ui-scale));
@@ -811,12 +813,17 @@ select {
   content: "";
   position: absolute;
   z-index: 1;
-  left: var(--nav-name-x, calc(44px * var(--ui-scale)));
+  left: var(--nav-name-x);
   right: calc(4px * var(--ui-scale));
   height: 2px;
   border-radius: 1px;
   background: var(--accent);
   pointer-events: none;
+}
+
+.nav-folder__head--drop-before::before,
+.nav-folder__head--drop-after::after {
+  left: var(--nav-pad);
 }
 
 .nav-ws--drop-before::before,
@@ -1177,22 +1184,6 @@ body.is-sorting * {
   display: flex;
   gap: 8px;
   margin-top: 8px;
-}
-
-/* The navigator's mark on a workspace shown in a window of its own. */
-.ws__window {
-  display: grid;
-  place-items: center;
-  flex: none;
-  color: var(--fg-muted);
-}
-
-/* And on one put to sleep, its agents stopped until it opens again. */
-.nav-ws__asleep {
-  display: grid;
-  place-items: center;
-  flex: none;
-  color: var(--fg-muted);
 }
 
 /* A workspace in a window of its own: no sidebar, the workspace takes it all. */

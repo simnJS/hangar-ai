@@ -169,6 +169,51 @@ export function useWorkspaceActivity(workspaceId: string): WorkspaceActivity {
   return useSyncExternalStore(subscribe, () => summarize(workspaceId));
 }
 
+/** The panes, by id, that are working, waiting, or done, in no particular order. */
+export interface AgentRoster {
+  working: string[];
+  waiting: string[];
+  yours: string[];
+}
+
+const EMPTY_ROSTER: AgentRoster = { working: [], waiting: [], yours: [] };
+const rosters = new Map<string, { version: number; value: AgentRoster }>();
+
+const sameIds = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((id, i) => id === b[i]);
+
+function rosterOf(workspaceIds: readonly string[]): AgentRoster {
+  if (!workspaceIds.length) return EMPTY_ROSTER;
+  const key = workspaceIds.join("\n");
+  const cached = rosters.get(key);
+  if (cached && cached.version === version) return cached.value;
+  const wanted = new Set(workspaceIds);
+  const value: AgentRoster = { working: [], waiting: [], yours: [] };
+  for (const [paneId, pane] of panes) {
+    if (!wanted.has(pane.workspaceId) || pane.activity === "idle") continue;
+    value[pane.activity].push(paneId);
+  }
+  // Same object while the same panes are in the same states, as above.
+  const kept =
+    cached &&
+    sameIds(cached.value.working, value.working) &&
+    sameIds(cached.value.waiting, value.waiting) &&
+    sameIds(cached.value.yours, value.yours)
+      ? cached.value
+      : value;
+  rosters.set(key, { version, value: kept });
+  return kept;
+}
+
+/**
+ * Which panes of these workspaces are working, waiting, or done: the
+ * navigator's summary of a workspace, or of a folded folder, names them.
+ * Re-renders only when one of them changes state.
+ */
+export function useAgentsIn(workspaceIds: readonly string[]): AgentRoster {
+  return useSyncExternalStore(subscribe, () => rosterOf(workspaceIds));
+}
+
 /** How many of these panes have a Claude Code that loaded the mod. */
 export function useBridgedCount(paneIds: string[]): number {
   return useSyncExternalStore(
