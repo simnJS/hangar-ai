@@ -170,24 +170,38 @@ const INHERITED_SESSION_MARKERS: &[&str] = &[
     "CLAUDE_PID",
 ];
 
-/// Arguments a shell gets on top of the ones recorded for it.
+/// The arguments a shell is started with: the ones recorded for it, plus
+/// `-NoLogo` for PowerShell.
 ///
 /// PowerShell greets every new pane with its version and, once the profile
 /// takes more than half a second, with how long it took: two lines of noise in
 /// a pane an agent is about to take over. `-NoLogo` drops both and changes
 /// nothing else. It is added here rather than when shells are detected, so
-/// panes whose shell was recorded before get it too.
-fn extra_shell_args(program: &str, args: &[String]) -> Vec<&'static str> {
+/// panes whose shell was recorded before get it too, and it goes where it
+/// cannot change the meaning of the rest: after a leading `-Login`, which
+/// PowerShell honours only as its very first argument, and before everything
+/// else, since all that follows `-Command` or `-File` belongs to them.
+fn shell_args(program: &str, recorded: &[String]) -> Vec<String> {
     let stem = std::path::Path::new(program)
         .file_stem()
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     let is_powershell = stem == "pwsh" || stem == "powershell";
-    if is_powershell && !args.iter().any(|a| a.eq_ignore_ascii_case("-nologo")) {
-        vec!["-NoLogo"]
-    } else {
-        Vec::new()
+    // PowerShell takes any unambiguous start of a parameter's name, after
+    // `-`, `--` or `/`; "nol" is already NoLogo's alone.
+    let names_nologo = |arg: &String| {
+        let name = arg.trim_start_matches(['-', '/']).to_ascii_lowercase();
+        name.len() >= 3 && "nologo".starts_with(&name)
+    };
+    let mut args = recorded.to_vec();
+    if is_powershell && !recorded.iter().any(names_nologo) {
+        let login = recorded.first().is_some_and(|first| {
+            let name = first.trim_start_matches('-').to_ascii_lowercase();
+            first.starts_with('-') && (name == "l" || name == "login")
+        });
+        args.insert(usize::from(login), "-NoLogo".to_string());
     }
+    args
 }
 
 // The arguments are the command's IPC fields, named as the frontend sends them.
@@ -250,10 +264,7 @@ pub fn pty_spawn(
         .ok_or("no usable shell found on this system")?;
 
     let mut cmd = CommandBuilder::new(&shell.program);
-    for arg in extra_shell_args(&shell.program, &shell.args) {
-        cmd.arg(arg);
-    }
-    for arg in &shell.args {
+    for arg in shell_args(&shell.program, &shell.args) {
         cmd.arg(arg);
     }
     if std::path::Path::new(&cwd).is_dir() {
@@ -546,25 +557,59 @@ pub fn kill_all(manager: &PtyManager) {
 mod tests {
     use super::*;
 
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|a| a.to_string()).collect()
+    }
+
     #[test]
     fn powershell_starts_without_its_banner() {
-        let none: Vec<String> = Vec::new();
         assert_eq!(
-            extra_shell_args(r"C:\Program Files\PowerShell\7\pwsh.exe", &none),
+            shell_args(r"C:\Program Files\PowerShell\7\pwsh.exe", &[]),
             ["-NoLogo"]
         );
         assert_eq!(
-            extra_shell_args(
+            shell_args(
                 r"C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe",
-                &none
+                &[]
             ),
             ["-NoLogo"]
         );
-        assert_eq!(extra_shell_args("/usr/local/bin/pwsh", &none), ["-NoLogo"]);
-        // Asked for already, in whatever case: not twice.
-        assert!(extra_shell_args("pwsh", &["-nologo".to_string()]).is_empty());
-        assert!(extra_shell_args(r"C:\Windows\System32\cmd.exe", &none).is_empty());
-        assert!(extra_shell_args("/bin/bash", &none).is_empty());
+        assert_eq!(shell_args("/usr/local/bin/pwsh", &[]), ["-NoLogo"]);
+    }
+
+    #[test]
+    fn nologo_never_changes_what_the_recorded_arguments_mean() {
+        // Everything after -Command or -File is theirs: it goes first.
+        assert_eq!(
+            shell_args("pwsh", &args(&["-NoExit", "-Command", "echo hi"])),
+            ["-NoLogo", "-NoExit", "-Command", "echo hi"]
+        );
+        // -Login counts only as the very first argument.
+        assert_eq!(
+            shell_args("/usr/bin/pwsh", &args(&["-l"])),
+            ["-l", "-NoLogo"]
+        );
+        assert_eq!(
+            shell_args("/usr/bin/pwsh", &args(&["-Login", "-NoExit"])),
+            ["-Login", "-NoLogo", "-NoExit"]
+        );
+        // Asked for already, in any spelling PowerShell takes: left as it is.
+        for spelling in ["-nologo", "-NoLogo", "--nologo", "/NoLogo", "-nol"] {
+            assert_eq!(
+                shell_args("pwsh", &args(&[spelling])),
+                [spelling],
+                "{spelling}"
+            );
+        }
+        // Not a PowerShell: untouched.
+        assert_eq!(
+            shell_args(
+                r"C:\Program Files\Git\bin\bash.exe",
+                &args(&["--login", "-i"])
+            ),
+            ["--login", "-i"]
+        );
+        assert!(shell_args(r"C:\Windows\System32\cmd.exe", &[]).is_empty());
     }
 
     #[test]
