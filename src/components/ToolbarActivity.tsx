@@ -106,14 +106,9 @@ export function ToolbarActivity({
     let strong = false;
     if (activity === "waiting") {
       // The state word already says it waits for you; what is left to say is
-      // what for — the tool, or the other pane's file.
-      if (latest?.kind === "permission") {
-        const { tool, conflict } = latest.params;
-        detail = conflict
-          ? `· ${t("toolbar.activity.conflict", { name: conflict })}`
-          : tool
-            ? `· ${tool}`
-            : null;
+      // what for: the tool.
+      if (latest?.kind === "permission" && latest.params.tool) {
+        detail = `· ${latest.params.tool}`;
       }
     } else if (task && activity === "working") {
       detail = t("toolbar.activity.on", { title: task.title });

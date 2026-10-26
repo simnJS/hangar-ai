@@ -28,10 +28,6 @@ export type BridgeEvent =
       kind: "permission";
       waiting: boolean;
       tool?: string;
-      /** The question is ours: another pane edited the file. Its name… */
-      conflict?: string;
-      /** …and its id, so that pane can show it is in the way. */
-      conflictPane?: string;
     }
   | {
       kind: "usage";
@@ -39,7 +35,14 @@ export type BridgeEvent =
       rateLimits: RateLimit[];
       costUsd: number | null;
     }
-  | { kind: "edit"; file: string }
+  | {
+      kind: "edit";
+      file: string;
+      /** Another pane edited this file lately: its name… */
+      overlap?: string;
+      /** …and its id, so that pane can show it. */
+      overlapPane?: string;
+    }
   /** A queued prompt the session refused (a hook dropped it, or it failed). */
   | { kind: "dropped"; text: string; reason: string }
   | { kind: "end"; reason: string };

@@ -173,37 +173,50 @@ test('an edit nobody else is on goes through and is reported', async ($, on) => 
   expect(events(sent)).toEqual([{ kind: 'edit', file: '/repo/src/App.tsx', name: 'alice' }])
 })
 
-test("asked about another pane's file, leaving it refuses the edit", async ($, on) => {
+test("an edit to a file another pane just changed goes through at once and tells the model", async ($, on) => {
   const { sent } = setup(on, PANE_ENV, { conflict: { owner: { paneId: 'pane-2', name: 'bob', agoMs: 120000 } } })
-  on('tool.call', ($, e) =>
-    e.tool === 'AskUserQuestion'
-      ? { result: { answers: { [e.questions[0].question]: 'Leave it to bob' } } }
-      : { result: 'edited' },
-  )
+  const asked: string[] = []
+  on('tool.call', ($, e) => {
+    if (e.tool === 'AskUserQuestion') asked.push(e.questions[0].question)
+    return { result: 'edited' }
+  })
 
   await start($)
   const out = await $.tool.call({ tool: 'Write', file_path: '/repo/src/App.tsx', content: 'x' })
 
-  expect(out.deny).toMatch(/pane "bob"/)
+  // Nobody is asked anything: an unattended agent must never be held.
+  expect(asked).toEqual([])
+  expect(out.result).toBe('edited')
+  expect(out.context).toHaveLength(1)
+  expect(out.context?.[0]).toMatch(/pane "bob" also edited \/repo\/src\/App\.tsx 2 min ago/)
+  expect(out.context?.[0]).toMatch(/Read the file again/)
   expect(events(sent)).toEqual([
-    { kind: 'permission', waiting: true, tool: 'Write', conflict: 'bob', conflictPane: 'pane-2' },
-    { kind: 'permission', waiting: false },
+    { kind: 'edit', file: '/repo/src/App.tsx', name: 'alice', overlap: 'bob', overlapPane: 'pane-2' },
   ])
 })
 
-test("asked about another pane's file, editing anyway lets it through", async ($, on) => {
-  const { sent } = setup(on, PANE_ENV, { conflict: { owner: { paneId: 'pane-2', name: 'bob', agoMs: 60000 } } })
-  on('tool.call', ($, e) =>
-    e.tool === 'AskUserQuestion'
-      ? { result: { answers: { [e.questions[0].question]: 'Edit it anyway' } } }
-      : { result: 'edited' },
-  )
+test("another pane's edit from long ago is not mentioned", async ($, on) => {
+  const { sent } = setup(on, PANE_ENV, {
+    conflict: { owner: { paneId: 'pane-2', name: 'bob', agoMs: 16 * 60 * 1000 } },
+  })
+  on('tool.call', () => ({ result: 'edited' }))
 
   await start($)
   const out = await $.tool.call({ tool: 'Edit', file_path: '/repo/x.ts', old_string: 'a', new_string: 'b' })
 
   expect(out).toEqual({ result: 'edited' })
-  expect(events(sent).at(-1)).toEqual({ kind: 'edit', file: '/repo/x.ts', name: 'alice' })
+  expect(events(sent)).toEqual([{ kind: 'edit', file: '/repo/x.ts', name: 'alice' }])
+})
+
+test('a refused edit is neither reported nor annotated', async ($, on) => {
+  const { sent } = setup(on, PANE_ENV, { conflict: { owner: { paneId: 'pane-2', name: 'bob', agoMs: 1000 } } })
+  on('tool.call', () => ({ deny: 'not allowed' }))
+
+  await start($)
+  const out = await $.tool.call({ tool: 'Edit', file_path: '/repo/x.ts', old_string: 'a', new_string: 'b' })
+
+  expect(out).toEqual({ deny: 'not allowed' })
+  expect(events(sent)).toEqual([])
 })
 
 /** A queue that hands out these lines once each, then nothing. */

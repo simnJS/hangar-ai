@@ -29,13 +29,12 @@ export type PaneEventDetail =
       /** `failed` covers an error and a refusal alike. */
       params: { outcome: "answer" | "aborted" | "failed"; answer: string | null };
     }
-  | {
-      kind: "permission";
-      /** `conflict` names the pane whose file this one asks to edit. */
-      params: { tool: string | null; conflict: string | null };
-    }
-  /** The file's base name, which is all a line of history has room for. */
-  | { kind: "edit"; params: { file: string } }
+  | { kind: "permission"; params: { tool: string | null } }
+  /**
+   * The file's base name, which is all a line of history has room for, and
+   * the pane that had edited it just before, when one had.
+   */
+  | { kind: "edit"; params: { file: string; overlap?: string | null } }
   | { kind: "queued"; params: { text: string } }
   | { kind: "dropped"; params: { text: string } }
   /** Claude Code quit back to its shell, or the shell itself ended. */
@@ -64,12 +63,15 @@ export function paneEventText(event: PaneEventDetail, t: Translator): string {
       return answer || t(outcome === "answer" ? "pane.event.turnEnd" : "pane.event.failed");
     }
     case "permission": {
-      const { tool, conflict } = event.params;
-      if (conflict) return t("pane.event.conflict", { name: conflict });
+      const { tool } = event.params;
       return tool ? t("pane.event.permission", { tool }) : t("pane.event.permissionAny");
     }
-    case "edit":
-      return t("pane.event.edit", { file: event.params.file });
+    case "edit": {
+      const { file, overlap } = event.params;
+      return overlap
+        ? t("pane.event.editShared", { file, name: overlap })
+        : t("pane.event.edit", { file });
+    }
     case "queued":
       return t("pane.event.queued", { text: event.params.text });
     case "dropped":

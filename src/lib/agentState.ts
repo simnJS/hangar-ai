@@ -97,20 +97,36 @@ export function usePaneActivity(paneId: string | null): PaneActivity | undefined
 }
 
 /**
- * Panes another pane is asking about: "you edited this file, may I?". Keyed
- * by the pane that edited it, valued with the name of the pane asking.
+ * Panes whose file another pane just edited too. Keyed by the pane that had
+ * edited it first, valued with the name of the pane that followed. Nothing
+ * was stopped — both edits went through — so the mark only says it, and
+ * clears itself.
  */
 const conflicts = new Map<string, string>();
+const conflictTimers = new Map<string, number>();
+/** Long enough to be noticed on a glance at the grid, short of becoming noise. */
+const OVERLAP_SHOWN_MS = 2 * 60 * 1000;
 
-export function setConflict(paneId: string, askedBy: string | null) {
-  if (askedBy === null ? !conflicts.delete(paneId) : conflicts.get(paneId) === askedBy) {
-    return;
-  }
-  if (askedBy !== null) conflicts.set(paneId, askedBy);
+function setConflict(paneId: string, by: string | null) {
+  if (by === null ? !conflicts.delete(paneId) : conflicts.get(paneId) === by) return;
+  if (by !== null) conflicts.set(paneId, by);
   changed();
 }
 
-/** The name of the pane asking to edit a file this one is editing, if any. */
+/** Marks `paneId` as overlapped by `by` for a couple of minutes. */
+export function flagOverlap(paneId: string, by: string) {
+  setConflict(paneId, by);
+  window.clearTimeout(conflictTimers.get(paneId));
+  conflictTimers.set(
+    paneId,
+    window.setTimeout(() => {
+      conflictTimers.delete(paneId);
+      setConflict(paneId, null);
+    }, OVERLAP_SHOWN_MS),
+  );
+}
+
+/** The name of the pane that just edited a file this one had edited, if any. */
 export function useConflict(paneId: string): string | null {
   return useSyncExternalStore(subscribe, () => conflicts.get(paneId) ?? null);
 }

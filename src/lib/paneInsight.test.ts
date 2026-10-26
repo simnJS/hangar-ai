@@ -40,12 +40,19 @@ describe("paneEventText", () => {
     expect(end("aborted", "Half an answer")).toBe("pane.event.aborted");
   });
 
-  it("names what a permission is for, a conflict first", () => {
-    const ask = (tool: string | null, conflict: string | null) =>
-      text({ kind: "permission", params: { tool, conflict } });
-    expect(ask("Edit", "Ben")).toBe("pane.event.conflict(Ben)");
-    expect(ask("Edit", null)).toBe("pane.event.permission(Edit)");
-    expect(ask(null, null)).toBe("pane.event.permissionAny");
+  it("names what a permission is for", () => {
+    const ask = (tool: string | null) => text({ kind: "permission", params: { tool } });
+    expect(ask("Edit")).toBe("pane.event.permission(Edit)");
+    expect(ask(null)).toBe("pane.event.permissionAny");
+  });
+
+  it("says when an edit followed another pane's on the same file", () => {
+    expect(text({ kind: "edit", params: { file: "NOTES.md", overlap: "Ava" } })).toBe(
+      "pane.event.editShared(NOTES.md,Ava)",
+    );
+    expect(text({ kind: "edit", params: { file: "NOTES.md", overlap: null } })).toBe(
+      "pane.event.edit(NOTES.md)",
+    );
   });
 
   it("words the rest with their one parameter", () => {

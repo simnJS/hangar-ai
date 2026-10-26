@@ -7,8 +7,9 @@
 // just passes its event through.
 //
 // Everything is reported, nothing is decided: no hook changes a tool call, a
-// permission or a prompt, except the one that asks the user before editing a
-// file another pane is editing — and only when the user answers to leave it.
+// permission or a prompt, and none ever waits for a person. The one about a
+// file another pane just edited only adds a note for the model to the edit's
+// result.
 
 /**
  * `{ base, token, pane, name }` once session.start has found this session is
@@ -223,10 +224,13 @@ export function register(on) {
     return next(e)
   })
 
-  // Two agents editing one file overwrite each other. Before an edit, ask
-  // Hangar whether another pane changed this file recently; if so, put it to
-  // the user instead of deciding. No answer, or a dismissed question, lets
-  // the edit through: the guard must never leave an agent stuck on its own.
+  // Two agents on one file can undo each other's intent, but not each other's
+  // bytes: Edit replaces one exact passage, and Claude Code tells the model
+  // when a file changed since it read it. So nothing here stops an edit or
+  // waits for an answer — a question held agents nobody was watching. Instead
+  // Hangar is asked whether another pane changed this file lately, and if so
+  // the model hears it with the edit's result: who, how long ago, and to read
+  // the file again and coordinate before going further.
   on('tool.call', { tool: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] }, async ($, e, next) => {
     const file = e.file_path || e.notebook_path
     if (!file || !bridge) return next(e)
@@ -240,36 +244,25 @@ export function register(on) {
     } catch {
       owner = null
     }
-
-    if (owner && owner.agoMs < CONFLICT_WINDOW_MS) {
-      const minutes = Math.max(1, Math.round(owner.agoMs / 60000))
-      const leave = 'Leave it to ' + owner.name
-      let answer = 'Edit it anyway'
-      await setWaiting($, true, { tool: e.tool, conflict: owner.name, conflictPane: owner.paneId })
-      try {
-        answer = await $.ui.ask(
-          'The agent in pane "' + owner.name + '" edited ' + file + ' ' + minutes +
-            ' min ago. Edit it anyway?',
-          ['Edit it anyway', leave],
-        )
-      } catch {
-        answer = 'Edit it anyway'
-      }
-      await setWaiting($, false)
-      if (answer === leave) {
-        return {
-          deny:
-            'The user asked to leave ' + file + ' to the agent in pane "' + owner.name +
-            '", which is editing it. Coordinate with it first (message @' + owner.name +
-            ') or work on something else.',
-        }
-      }
-    }
+    const shared = owner && owner.agoMs < CONFLICT_WINDOW_MS ? owner : null
 
     const result = await next(e)
-    if (!result.deny && !result.isError) {
-      await send($, { kind: 'edit', file, name: bridge.name })
-    }
-    return result
+    if (result.deny || result.isError) return result
+
+    await send(
+      $,
+      shared
+        ? { kind: 'edit', file, name: bridge.name, overlap: shared.name, overlapPane: shared.paneId }
+        : { kind: 'edit', file, name: bridge.name },
+    )
+    if (!shared) return result
+
+    const minutes = Math.max(1, Math.round(shared.agoMs / 60000))
+    const note =
+      'Hangar: the agent in pane "' + shared.name + '" also edited ' + file + ' ' + minutes +
+      ' min ago. Your change went through. Read the file again before changing it further, ' +
+      'keep their changes, and if you are both working on the same part, agree on it with @' +
+      shared.name + ' first.'
+    return { ...result, context: [...(result.context || []), note] }
   })
 }

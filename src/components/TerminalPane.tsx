@@ -23,7 +23,7 @@ import { sessionName } from "../lib/paneNames";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
   clearPaneActivity,
-  setConflict,
+  flagOverlap,
   setPaneActivity,
   setPlanLimits,
   useConflict,
@@ -479,8 +479,6 @@ export function TerminalPane({
     let bridgeModel: string | null = null;
     /** The conversation the pane's history last said it was in. */
     let reportedSession: string | null = null;
-    /** The pane whose file this one is asking about, while it asks. */
-    let conflictWith: string | null = null;
     function captureSession(sessionId: string) {
       // Typed into the shell on the next launch, after --resume: anything but
       // a plain id is refused rather than quoted.
@@ -543,27 +541,10 @@ export function TerminalPane({
           }
           break;
         case "permission":
-          // Whichever way the question ends, the pane it was about is no
-          // longer in anyone's way.
-          if (conflictWith) {
-            setConflict(conflictWith, null);
-            conflictWith = null;
-          }
-          if (event.waiting && event.conflictPane) {
-            conflictWith = event.conflictPane;
-            setConflict(conflictWith, pane.name);
-          }
           if (event.waiting) {
             setActivity("waiting");
-            record({
-              kind: "permission",
-              params: { tool: event.tool || null, conflict: event.conflict || null },
-            });
-            announce(
-              event.conflict
-                ? tRef.current("notify.conflict", { name: event.conflict })
-                : tRef.current("notify.permission", { tool: event.tool ?? "" }),
-            );
+            record({ kind: "permission", params: { tool: event.tool || null } });
+            announce(tRef.current("notify.permission", { tool: event.tool ?? "" }));
           } else if (activityRef.current === "waiting") {
             setActivity("working");
           }
@@ -589,7 +570,13 @@ export function TerminalPane({
         }
         case "edit":
           recordEditedFile(pane.id, event.file);
-          record({ kind: "edit", params: { file: fileBaseName(event.file) } });
+          record({
+            kind: "edit",
+            params: { file: fileBaseName(event.file), overlap: event.overlap ?? null },
+          });
+          // The pane that had edited it first says so for a moment. Nothing
+          // waits on it: the mod told this agent, and both edits went through.
+          if (event.overlapPane) flagOverlap(event.overlapPane, pane.name);
           break;
         case "dropped":
           record({ kind: "dropped", params: { text: firstLine(event.text) } });
@@ -597,10 +584,6 @@ export function TerminalPane({
           break;
         case "end":
           // Claude Code exited; whatever runs in the pane next is a shell.
-          if (conflictWith) {
-            setConflict(conflictWith, null);
-            conflictWith = null;
-          }
           setBridged(false);
           setBridgeContext(null);
           setActivity("idle");
@@ -646,10 +629,6 @@ export function TerminalPane({
             // A Claude Code killed mid-turn never says goodbye: its last
             // report would otherwise hold the pane, and the sidebar, at
             // "working" until a restart.
-            if (conflictWith) {
-              setConflict(conflictWith, null);
-              conflictWith = null;
-            }
             setBridged(false);
             setActivity("idle");
             updatePaneInsight(pane.id, { turnStartedAt: null });
@@ -828,7 +807,6 @@ export function TerminalPane({
       unregister();
       unsubscribe?.();
       unsubscribeBridge?.();
-      if (conflictWith) setConflict(conflictWith, null);
       // A pane moving to another window keeps running there.
       if (!isHandingOver(pane.id)) ptyKill(pane.id).catch(() => undefined);
       term.dispose();
