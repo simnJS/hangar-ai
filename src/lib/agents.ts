@@ -62,6 +62,12 @@ export function launchCommand(
      * after its pane is what lets an agent reach another one.
      */
     name?: string;
+    /**
+     * The MCP config file this session loads instead of every other one,
+     * already quoted for the pane's shell (`quoteArg` in lib/mcpScope).
+     * Absent, Claude Code starts with its own servers, as it always did.
+     */
+    mcpConfig?: string;
   } = {},
 ): string | null {
   const command = agentCommand(agent, options.commands);
@@ -76,6 +82,11 @@ export function launchCommand(
             ? ` --name ${options.name}`
             : ` --name "${options.name}"`
           : "";
+      // `--mcp-config` is variadic as well; the flag right behind it closes
+      // its list, and `--strict-mcp-config` is what makes it the only source.
+      const mcp = options.mcpConfig
+        ? ` --mcp-config ${options.mcpConfig} --strict-mcp-config`
+        : "";
       const roots = (options.extraRoots ?? []).filter(isQuotable);
       // `--add-dir` is variadic, so it comes last: a following flag — one the
       // custom command carries, or the resume above — would be swallowed as
@@ -83,7 +94,7 @@ export function launchCommand(
       const added = roots.length
         ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
         : "";
-      return `${command}${resume}${name}${added}`;
+      return `${command}${resume}${name}${mcp}${added}`;
     }
     case "codex":
       return sessionId ? `${command} resume ${sessionId}` : command;

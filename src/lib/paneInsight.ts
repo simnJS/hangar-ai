@@ -101,7 +101,15 @@ export interface PaneInsight {
   lastAnswer: string | null;
   /** When the running turn started; null between turns. */
   turnStartedAt: number | null;
+  /** The MCP servers its Claude Code was started with; null for other agents. */
+  mcp: PaneMcp | null;
 }
+
+/**
+ * `inherit`: Claude Code's own configuration. `custom`: the servers the
+ * workspace chose, Hangar's included, as they went into the launch.
+ */
+export type PaneMcp = { mode: "inherit" } | { mode: "custom"; servers: string[] };
 
 /** Enough history to read back over a coffee, not a transcript. */
 export const MAX_EVENTS = 40;
@@ -118,6 +126,7 @@ export const EMPTY_INSIGHT: PaneInsight = {
   events: [],
   lastAnswer: null,
   turnStartedAt: null,
+  mcp: null,
 };
 
 const insights = new Map<string, PaneInsight>();
