@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { ContextGauge } from "./context";
 import type { QueuedPrompt } from "./ipc";
+import type { Translator } from "../i18n";
 
 /**
  * Everything a pane knows about the agent in it, beyond the four-way state of
@@ -14,22 +15,68 @@ import type { QueuedPrompt } from "./ipc";
  * pane its own window draws.
  */
 
-export type PaneEventKind =
-  | "session"
-  | "turn-start"
-  | "turn-end"
-  | "permission"
-  | "edit"
-  | "queued"
-  | "dropped"
-  | "exit";
+/**
+ * What happened in a pane, and the facts it is about — never the sentence
+ * itself. The history outlives a change of language, so it is worded only
+ * when it is shown (paneEventText), in the language of that moment.
+ */
+export type PaneEventDetail =
+  /** `id` is the short form the pane header shows. */
+  | { kind: "session"; params: { id: string; resumed: boolean } }
+  | { kind: "turn-start"; params: Record<string, never> }
+  | {
+      kind: "turn-end";
+      /** `failed` covers an error and a refusal alike. */
+      params: { outcome: "answer" | "aborted" | "failed"; answer: string | null };
+    }
+  | {
+      kind: "permission";
+      /** `conflict` names the pane whose file this one asks to edit. */
+      params: { tool: string | null; conflict: string | null };
+    }
+  /** The file's base name, which is all a line of history has room for. */
+  | { kind: "edit"; params: { file: string } }
+  | { kind: "queued"; params: { text: string } }
+  | { kind: "dropped"; params: { text: string } }
+  /** Claude Code quit back to its shell, or the shell itself ended. */
+  | { kind: "exit"; params: { what: "agent" | "shell" } };
 
-export interface PaneEvent {
+export type PaneEvent = PaneEventDetail & {
   /** Epoch milliseconds. */
   at: number;
-  kind: PaneEventKind;
-  /** One line, already worded for display. */
-  text: string;
+};
+
+export type PaneEventKind = PaneEvent["kind"];
+
+/** The line the inspector and the toolbar show for an event. */
+export function paneEventText(event: PaneEventDetail, t: Translator): string {
+  switch (event.kind) {
+    case "session":
+      return event.params.resumed
+        ? t("pane.event.resumed", { id: event.params.id })
+        : t("pane.event.newSession");
+    case "turn-start":
+      return t("pane.event.turnStart");
+    case "turn-end": {
+      const { outcome, answer } = event.params;
+      if (outcome === "aborted") return t("pane.event.aborted");
+      // The answer's first line says more than "Finished" ever could.
+      return answer || t(outcome === "answer" ? "pane.event.turnEnd" : "pane.event.failed");
+    }
+    case "permission": {
+      const { tool, conflict } = event.params;
+      if (conflict) return t("pane.event.conflict", { name: conflict });
+      return tool ? t("pane.event.permission", { tool }) : t("pane.event.permissionAny");
+    }
+    case "edit":
+      return t("pane.event.edit", { file: event.params.file });
+    case "queued":
+      return t("pane.event.queued", { text: event.params.text });
+    case "dropped":
+      return t("pane.event.dropped", { text: event.params.text });
+    case "exit":
+      return t(event.params.what === "agent" ? "pane.event.end" : "pane.event.exit");
+  }
 }
 
 export interface PaneInsight {
@@ -123,9 +170,9 @@ export function updatePaneInsight(paneId: string, patch: Partial<PaneInsight>) {
 }
 
 /** Adds a line to the pane's history, newest first. */
-export function recordPaneEvent(paneId: string, kind: PaneEventKind, text: string, at = Date.now()) {
+export function recordPaneEvent(paneId: string, event: PaneEventDetail, at = Date.now()) {
   const before = current(paneId);
-  const events = [{ at, kind, text }, ...before.events].slice(0, MAX_EVENTS);
+  const events = [{ ...event, at }, ...before.events].slice(0, MAX_EVENTS);
   set(paneId, { ...before, events });
 }
 

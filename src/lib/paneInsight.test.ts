@@ -1,13 +1,65 @@
 import { describe, expect, it } from "vitest";
+import type { Translator } from "../i18n";
 import {
   EMPTY_INSIGHT,
   MAX_EVENTS,
   clearPaneInsight,
   getPaneInsight,
+  paneEventText,
   recordEditedFile,
   recordPaneEvent,
   updatePaneInsight,
+  type PaneEventDetail,
 } from "./paneInsight";
+
+/** The key and its parameters, so a test reads which sentence was picked. */
+const t: Translator = (key, params) =>
+  params ? `${key}(${Object.values(params).join(",")})` : key;
+
+describe("paneEventText", () => {
+  const text = (event: PaneEventDetail) => paneEventText(event, t);
+
+  it("words a session as new or resumed", () => {
+    expect(text({ kind: "session", params: { id: "01J8Z4", resumed: false } })).toBe(
+      "pane.event.newSession",
+    );
+    expect(text({ kind: "session", params: { id: "01J8Z4", resumed: true } })).toBe(
+      "pane.event.resumed(01J8Z4)",
+    );
+  });
+
+  it("shows a turn's answer, or how it ended when there is none", () => {
+    expect(text({ kind: "turn-start", params: {} })).toBe("pane.event.turnStart");
+    const end = (outcome: "answer" | "aborted" | "failed", answer: string | null) =>
+      text({ kind: "turn-end", params: { outcome, answer } });
+    expect(end("answer", "Tests pass")).toBe("Tests pass");
+    expect(end("answer", null)).toBe("pane.event.turnEnd");
+    expect(end("failed", null)).toBe("pane.event.failed");
+    expect(end("failed", "Rate limited")).toBe("Rate limited");
+    // An interrupted turn says so, whatever it had written by then.
+    expect(end("aborted", "Half an answer")).toBe("pane.event.aborted");
+  });
+
+  it("names what a permission is for, a conflict first", () => {
+    const ask = (tool: string | null, conflict: string | null) =>
+      text({ kind: "permission", params: { tool, conflict } });
+    expect(ask("Edit", "Ben")).toBe("pane.event.conflict(Ben)");
+    expect(ask("Edit", null)).toBe("pane.event.permission(Edit)");
+    expect(ask(null, null)).toBe("pane.event.permissionAny");
+  });
+
+  it("words the rest with their one parameter", () => {
+    expect(text({ kind: "edit", params: { file: "i18n.ts" } })).toBe("pane.event.edit(i18n.ts)");
+    expect(text({ kind: "queued", params: { text: "run the tests" } })).toBe(
+      "pane.event.queued(run the tests)",
+    );
+    expect(text({ kind: "dropped", params: { text: "run the tests" } })).toBe(
+      "pane.event.dropped(run the tests)",
+    );
+    expect(text({ kind: "exit", params: { what: "agent" } })).toBe("pane.event.end");
+    expect(text({ kind: "exit", params: { what: "shell" } })).toBe("pane.event.exit");
+  });
+});
 
 describe("paneInsight", () => {
   it("is empty for a pane that never reported", () => {
@@ -31,11 +83,21 @@ describe("paneInsight", () => {
   });
 
   it("lists events newest first and caps the history", () => {
-    for (let i = 0; i < MAX_EVENTS + 5; i++) recordPaneEvent("b", "edit", `e${i}`, i);
+    for (let i = 0; i < MAX_EVENTS + 5; i++) {
+      recordPaneEvent("b", { kind: "edit", params: { file: `e${i}` } }, i);
+    }
     const { events } = getPaneInsight("b");
     expect(events).toHaveLength(MAX_EVENTS);
-    expect(events[0].text).toBe(`e${MAX_EVENTS + 4}`);
+    expect(events[0]).toEqual({ kind: "edit", params: { file: `e${MAX_EVENTS + 4}` }, at: MAX_EVENTS + 4 });
     clearPaneInsight("b");
+  });
+
+  it("keeps what happened, not a sentence about it", () => {
+    recordPaneEvent("d", { kind: "turn-end", params: { outcome: "answer", answer: "Done" } }, 1);
+    const [event] = getPaneInsight("d").events;
+    expect(event).not.toHaveProperty("text");
+    expect(paneEventText(event, t)).toBe("Done");
+    clearPaneInsight("d");
   });
 
   it("lists an edited file once, at the top", () => {

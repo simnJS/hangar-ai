@@ -36,7 +36,7 @@ import {
   recordEditedFile,
   recordPaneEvent,
   updatePaneInsight,
-  type PaneEventKind,
+  type PaneEventDetail,
 } from "../lib/paneInsight";
 import { subscribePty } from "../lib/ptyBus";
 import { registerFinder, registerTerminal } from "../lib/terminalRegistry";
@@ -462,11 +462,13 @@ export function TerminalPane({
      * A line in the pane's history, for the inspector. An agent that saves a
      * file five times running gets one line for it, not five.
      */
-    function record(kind: PaneEventKind, text: string) {
+    function record(event: PaneEventDetail) {
       if (disposed) return;
       const last = getPaneInsight(pane.id).events[0];
-      if (kind === "edit" && last?.kind === "edit" && last.text === text) return;
-      recordPaneEvent(pane.id, kind, text);
+      if (event.kind === "edit" && last?.kind === "edit" && last.params.file === event.params.file) {
+        return;
+      }
+      recordPaneEvent(pane.id, event);
     }
 
     /**
@@ -486,10 +488,8 @@ export function TerminalPane({
       claim(sessionId);
       onSessionCaptured(sessionId);
     }
-    function sessionLine(sessionId: string, resumed: boolean) {
-      return resumed
-        ? tRef.current("pane.event.resumed", { id: shortSessionId(sessionId) })
-        : tRef.current("pane.event.newSession");
+    function sessionEvent(sessionId: string, resumed: boolean): PaneEventDetail {
+      return { kind: "session", params: { id: shortSessionId(sessionId), resumed } };
     }
     function onBridgeEvent(event: BridgeEvent) {
       if (disposed) return;
@@ -506,7 +506,7 @@ export function TerminalPane({
             sessionSince: Date.now(),
             turnStartedAt: null,
           });
-          record("session", sessionLine(event.sessionId, resumed));
+          record(sessionEvent(event.sessionId, resumed));
           captureSession(event.sessionId);
           break;
         }
@@ -516,7 +516,7 @@ export function TerminalPane({
           if (reportedSession !== null && event.sessionId !== reportedSession) {
             reportedSession = event.sessionId;
             updatePaneInsight(pane.id, { sessionSince: Date.now() });
-            record("session", sessionLine(event.sessionId, event.source === "resume"));
+            record(sessionEvent(event.sessionId, event.source === "resume"));
           }
           captureSession(event.sessionId);
           break;
@@ -524,19 +524,18 @@ export function TerminalPane({
           if (event.phase === "start") {
             setActivity("working");
             updatePaneInsight(pane.id, { turnStartedAt: Date.now() });
-            record("turn-start", tRef.current("pane.event.turnStart"));
+            record({ kind: "turn-start", params: {} });
           } else {
             const answer = firstLine(event.answer);
             updatePaneInsight(pane.id, { turnStartedAt: null, lastAnswer: answer || null });
-            record(
-              "turn-end",
-              event.reason === "aborted"
-                ? tRef.current("pane.event.aborted")
-                : answer ||
-                    tRef.current(
-                      event.reason === "answer" ? "pane.event.turnEnd" : "pane.event.failed",
-                    ),
-            );
+            record({
+              kind: "turn-end",
+              params: {
+                outcome:
+                  event.reason === "answer" || event.reason === "aborted" ? event.reason : "failed",
+                answer: answer || null,
+              },
+            });
             handBack(
               event.answer ||
                 tRef.current(event.reason === "aborted" ? "notify.aborted" : "notify.settled"),
@@ -556,14 +555,10 @@ export function TerminalPane({
           }
           if (event.waiting) {
             setActivity("waiting");
-            record(
-              "permission",
-              event.conflict
-                ? tRef.current("pane.event.conflict", { name: event.conflict })
-                : event.tool
-                  ? tRef.current("pane.event.permission", { tool: event.tool })
-                  : tRef.current("pane.event.permissionAny"),
-            );
+            record({
+              kind: "permission",
+              params: { tool: event.tool || null, conflict: event.conflict || null },
+            });
             announce(
               event.conflict
                 ? tRef.current("notify.conflict", { name: event.conflict })
@@ -594,10 +589,10 @@ export function TerminalPane({
         }
         case "edit":
           recordEditedFile(pane.id, event.file);
-          record("edit", tRef.current("pane.event.edit", { file: fileBaseName(event.file) }));
+          record({ kind: "edit", params: { file: fileBaseName(event.file) } });
           break;
         case "dropped":
-          record("dropped", tRef.current("pane.event.dropped", { text: firstLine(event.text) }));
+          record({ kind: "dropped", params: { text: firstLine(event.text) } });
           announce(tRef.current("notify.dropped", { text: event.text }));
           break;
         case "end":
@@ -611,7 +606,7 @@ export function TerminalPane({
           setActivity("idle");
           reportedSession = null;
           updatePaneInsight(pane.id, { turnStartedAt: null });
-          record("exit", tRef.current("pane.event.end"));
+          record({ kind: "exit", params: { what: "agent" } });
           break;
       }
     }
@@ -658,7 +653,7 @@ export function TerminalPane({
             setBridged(false);
             setActivity("idle");
             updatePaneInsight(pane.id, { turnStartedAt: null });
-            record("exit", tRef.current("pane.event.exit"));
+            record({ kind: "exit", params: { what: "shell" } });
           },
         );
         // The cleanup may have run during that await, in which case it saw
@@ -774,7 +769,7 @@ export function TerminalPane({
             // the id it really landed on; the other agents only have this.
             if (pane.agent !== "claude" || !settingsRef.current.claudeBridge) {
               updatePaneInsight(pane.id, { sessionSince: Date.now() });
-              record("session", sessionLine(resumeId ?? "", resumeId !== null));
+              record(sessionEvent(resumeId ?? "", resumeId !== null));
             }
           }
         } else if (pane.agent === "shell") {
@@ -974,11 +969,7 @@ export function TerminalPane({
     queueRef.current = queue;
     updatePaneInsight(pane.id, { queue });
     for (const entry of added) {
-      recordPaneEvent(
-        pane.id,
-        "queued",
-        tRef.current("pane.event.queued", { text: firstLine(entry.text) }),
-      );
+      recordPaneEvent(pane.id, { kind: "queued", params: { text: firstLine(entry.text) } });
     }
   }, [pane.id, queue]);
 

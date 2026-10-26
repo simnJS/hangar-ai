@@ -8,7 +8,7 @@ import { formatTokens, type ContextGauge } from "../lib/context";
 import { bridgeCancel, type QueuedPrompt } from "../lib/ipc";
 import type { RateLimit } from "../lib/bridge";
 import type { Task } from "../lib/board";
-import type { PaneEvent } from "../lib/paneInsight";
+import { paneEventText, type PaneEvent } from "../lib/paneInsight";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import {
   clockTime,
@@ -486,7 +486,7 @@ export const ActivitySection = memo(function ActivitySection({
                 {clockTime(event.at, locale)}
               </time>
               <i className={`insp-event__dot insp-event__dot--${event.kind}`} aria-hidden="true" />
-              <span className="insp-event__text">{event.text}</span>
+              <span className="insp-event__text">{paneEventText(event, t)}</span>
             </li>
           ))}
         </ol>
