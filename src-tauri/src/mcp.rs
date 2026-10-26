@@ -6,10 +6,17 @@
 //! claims stay atomic across all panes.
 
 use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// ureq stops reading a body at 10 MB unless told otherwise, and a
+/// model_snapshot answer carries its PNG in base64: at 2048 pixels a side, a
+/// detailed model can pass that. The API is on loopback and its answers are
+/// the app's own, so the limit only has to stop a runaway.
+const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// First of `names` that is set and not empty.
 ///
@@ -123,6 +130,9 @@ fn read_api_response(mut response: ureq::http::Response<ureq::Body>) -> Result<V
     let status = response.status();
     let text = response
         .body_mut()
+        .with_config()
+        .limit(MAX_RESPONSE_BYTES)
+        .lossy_utf8(true)
         .read_to_string()
         .map_err(|e| e.to_string())?;
 
@@ -445,8 +455,111 @@ fn tool_definitions() -> Value {
                 "properties": { "pane": pane_arg, "workspace": workspace_arg },
                 "required": ["pane"]
             }
+        },
+        {
+            "name": "model_show",
+            "description": "Show the user a 3D model in Hangar's preview panel, beside the terminals. Call it whenever you create, export, change or find a model the user should look at, instead of handing them a file path. It reads glTF (.glb, or .gltf with its .bin and textures beside it), .obj with its .mtl, .stl, .ply, .fbx and .usdz, up to 256 MB, from your workspace's folders and its git worktrees. Showing a model that is already open brings it forward and reloads it; an open model also reloads by itself when its file changes on disk, so re-exporting is enough to refresh it. The answer says what the viewer found: format, triangles, vertices, meshes, materials, animation clip names, and the bounding box size and centre in the file's units. Check those against what you meant to build: a centimetre/metre mix-up shows as a size a hundred times off. A very large model can answer status 'loading' before it is done. To see the model yourself, call model_snapshot.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The model file: absolute, or relative to your working directory." },
+                    "title": { "type": "string", "description": "Name for its tab. Defaults to the file name." }
+                },
+                "required": ["path"]
+            }
+        },
+        {
+            "name": "model_snapshot",
+            "description": "Render an open 3D model to a PNG and look at it: the image comes back in the result, followed by the model's stats as text. Use it to check your own work before telling the user it is done — shape, proportions, orientation, materials, missing or black textures — and again after each change. The camera frames the model's bounding box from a fixed angle: front, back, left, right, top, bottom, or iso, a three-quarter view from above. The user's own view in the panel is left as it was. The model must be open already: call model_show first. A bigger image costs more of your context, and the default 1024×768 is enough for most checks.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Which open model, as you gave it to model_show. Defaults to the one in front." },
+                    "angle": {
+                        "type": "string",
+                        "enum": ["front", "back", "left", "right", "top", "bottom", "iso"],
+                        "description": "Where the camera looks from. Default iso."
+                    },
+                    "width": { "type": "integer", "maximum": 2048, "description": "Image width in pixels. Default 1024, maximum 2048." },
+                    "height": { "type": "integer", "maximum": 2048, "description": "Image height in pixels. Default 768, maximum 2048." }
+                }
+            }
+        },
+        {
+            "name": "model_close",
+            "description": "Close a model in Hangar's 3D preview. Without a path it closes every model open for your workspace, and leaves the ones other workspaces have open; the panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The model to close, as you gave it to model_show. Omit it to close every model open for your workspace." }
+                }
+            }
         }
     ])
+}
+
+/// A relative `path` argument, made absolute against `base`.
+///
+/// The window would resolve it against `caller.cwd`, and that is the
+/// workspace root whenever the MCP config pins `HANGAR_WORKSPACE` — not the
+/// worktree or subfolder the agent is working in. This process was started in
+/// the agent's own folder, so resolving here is what "relative to your working
+/// directory" means. A path with a root is left alone, `/c/Users/…` from Git
+/// Bash included: the app reads that one as a Windows path itself.
+fn absolutize_path(args: &mut Value, base: &Path) {
+    let Some(path) = args.get("path").and_then(Value::as_str) else {
+        return;
+    };
+    let given = Path::new(path);
+    if path.trim().is_empty() || given.is_absolute() || given.has_root() {
+        return;
+    }
+    // Rebuilt from its components, so `models/chair.glb` joins a Windows
+    // folder with backslashes throughout rather than half of each.
+    let joined: PathBuf = base.join(given).components().collect();
+    args["path"] = json!(joined.to_string_lossy());
+}
+
+/// The content of a call that succeeded.
+///
+/// A result is its JSON as text, except one that carries a `png`: that is a
+/// picture the model asked to see (model_snapshot renders one), and as text it
+/// would be a few hundred kilobytes of base64 that nobody can look at. It
+/// becomes an image block, and the rest of the result follows as text.
+fn success_content(mut value: Value) -> Value {
+    let png = match value
+        .as_object_mut()
+        .and_then(|fields| fields.remove("png"))
+    {
+        Some(Value::String(png)) => png,
+        Some(other) => {
+            // Not a picture after all; the result stays as it came.
+            value["png"] = other;
+            return json!([text_block(&value)]);
+        }
+        None => return json!([text_block(&value)]),
+    };
+    let declared = value
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .unwrap_or("image/png")
+        .to_string();
+    // The block wants bare base64; a data URL carries its own type.
+    let (mime_type, data) = match png
+        .strip_prefix("data:")
+        .and_then(|url| url.split_once(";base64,"))
+    {
+        Some((mime_type, data)) => (mime_type.to_string(), data.to_string()),
+        None => (declared, png),
+    };
+    json!([
+        { "type": "image", "data": data, "mimeType": mime_type },
+        text_block(&value)
+    ])
+}
+
+fn text_block(value: &Value) -> Value {
+    json!({ "type": "text", "text": serde_json::to_string_pretty(value).unwrap_or_default() })
 }
 
 fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
@@ -573,6 +686,11 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
                 "paneName": env_var(&["HANGAR_PANE_NAME"]),
                 "cwd": workspace_cwd(),
             });
+            if op.starts_with("model_") {
+                if let Ok(here) = std::env::current_dir() {
+                    absolutize_path(&mut body, &here);
+                }
+            }
             api.send("POST", &format!("/api/control/{op}"), body)
         }
         other => Err(format!("unknown tool '{other}'")),
@@ -607,18 +725,15 @@ fn handle(request: &Value) -> Option<Value> {
 
             // Tool failures are reported inside the result with isError, not as
             // JSON-RPC errors, so the model can read and react to them.
-            let (text, is_error) = match outcome {
-                Ok(value) => (
-                    serde_json::to_string_pretty(&value).unwrap_or_default(),
-                    false,
-                ),
-                Err(err) => (err, true),
+            let (content, is_error) = match outcome {
+                Ok(value) => (success_content(value), false),
+                Err(err) => (json!([{ "type": "text", "text": err }]), true),
             };
 
             respond(
                 id,
                 json!({
-                    "content": [{ "type": "text", "text": text }],
+                    "content": content,
                     "isError": is_error
                 }),
             )
@@ -652,6 +767,124 @@ pub fn run_stdio() {
         if let Some(response) = handle(&request) {
             let _ = writeln!(stdout, "{response}");
             let _ = stdout.flush();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(name: &str) -> Value {
+        tool_definitions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no tool named {name}"))
+    }
+
+    /// The window's answer to model_snapshot, as the agent must receive it: a
+    /// picture it can look at, and the stats beside it without the base64.
+    #[test]
+    fn a_result_carrying_a_png_becomes_an_image_and_its_stats_as_text() {
+        let content = success_content(json!({
+            "png": "iVBORw0KGgo=",
+            "mimeType": "image/png",
+            "path": "C:\\proj\\chair.glb",
+            "angle": "iso",
+            "info": { "triangles": 1200 }
+        }));
+
+        let blocks = content.as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0],
+            json!({ "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" })
+        );
+        assert_eq!(blocks[1]["type"], "text");
+        let stats: Value = serde_json::from_str(blocks[1]["text"].as_str().unwrap()).unwrap();
+        assert!(stats.get("png").is_none());
+        assert_eq!(stats["angle"], "iso");
+        assert_eq!(stats["info"]["triangles"], 1200);
+    }
+
+    #[test]
+    fn a_png_without_a_declared_type_is_a_png_and_a_data_url_keeps_its_own() {
+        let bare = success_content(json!({ "png": "AAAA" }));
+        assert_eq!(bare[0]["mimeType"], "image/png");
+        assert_eq!(bare[1]["text"], "{}");
+
+        let url = success_content(json!({ "png": "data:image/jpeg;base64,/9j/", "w": 1 }));
+        assert_eq!(url[0]["data"], "/9j/");
+        assert_eq!(url[0]["mimeType"], "image/jpeg");
+    }
+
+    #[test]
+    fn a_result_without_a_picture_stays_text() {
+        for value in [
+            json!({ "panes": [{ "name": "Ava" }] }),
+            json!({ "png": null, "note": "nothing rendered" }),
+            json!([1, 2, 3]),
+        ] {
+            let content = success_content(value.clone());
+            assert_eq!(content.as_array().unwrap().len(), 1, "{value}");
+            assert_eq!(content[0]["type"], "text");
+            let text: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(text, value);
+        }
+    }
+
+    /// An operation the window knows but no tool offers is one no agent can
+    /// ever call.
+    #[test]
+    fn every_window_operation_is_offered_as_a_tool() {
+        for op in crate::control::OPERATIONS {
+            assert_eq!(tool(op)["name"], *op);
+        }
+    }
+
+    #[test]
+    fn the_model_tools_ask_for_what_the_window_reads() {
+        assert_eq!(
+            tool("model_show")["inputSchema"]["required"],
+            json!(["path"])
+        );
+        let snapshot = &tool("model_snapshot")["inputSchema"];
+        assert_eq!(
+            snapshot["properties"]["angle"]["enum"],
+            json!(["front", "back", "left", "right", "top", "bottom", "iso"])
+        );
+        assert_eq!(snapshot["properties"]["width"]["maximum"], 2048);
+        assert_eq!(snapshot["properties"]["height"]["maximum"], 2048);
+        assert!(snapshot.get("required").is_none());
+        assert!(tool("model_close")["inputSchema"].get("required").is_none());
+    }
+
+    #[test]
+    fn a_relative_model_path_is_resolved_where_the_agent_works() {
+        let here = std::env::temp_dir().join("work");
+        let expected = json!(here.join("models").join("chair.glb").to_string_lossy());
+
+        for given in ["models/chair.glb", "./models/chair.glb"] {
+            let mut args = json!({ "path": given, "title": "Chair" });
+            absolutize_path(&mut args, &here);
+            assert_eq!(args["path"], expected, "{given}");
+            assert_eq!(args["title"], "Chair");
+        }
+
+        let absolute = here.join("chair.glb").to_string_lossy().into_owned();
+        for untouched in [
+            json!({ "path": absolute }),
+            // Git Bash's spelling of a Windows path; the app translates it.
+            json!({ "path": "/c/Users/me/chair.glb" }),
+            json!({ "path": "" }),
+            json!({ "angle": "iso" }),
+        ] {
+            let mut args = untouched.clone();
+            absolutize_path(&mut args, &here);
+            assert_eq!(args, untouched);
         }
     }
 }

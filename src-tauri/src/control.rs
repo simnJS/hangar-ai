@@ -1,5 +1,6 @@
 //! Agents driving the panes: listing, creating, closing, restarting them,
-//! typing into them and reading them back.
+//! typing into them and reading them back — and showing the user a 3D model
+//! in the window's preview, which lives in the same store.
 //!
 //! The panes are not Rust's to touch. They live in the window's store — their
 //! names, their agents, the split tree, the sessions to resume — and a pane
@@ -30,11 +31,31 @@ pub const OPERATIONS: &[&str] = &[
     "pane_read",
     "pane_focus",
     "workspace_window",
+    "model_show",
+    "model_snapshot",
+    "model_close",
 ];
 
 /// Long enough for a window that is busy repainting eight streaming panes;
 /// short enough that an agent whose window is gone hears about it.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The 3D preview's operations wait on the viewer, and a model's first load
+/// — parsing a few hundred megabytes of FBX, uploading it to the GPU — takes
+/// longer than anything a pane does; a snapshot of a model still loading waits
+/// for that load first. The window stops waiting on the viewer before this —
+/// 45 s for a show, 40 s for a snapshot, in src/lib/control.ts — and answers
+/// with what it has, so this only runs out when the window itself has stopped
+/// answering.
+const MODEL_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn answer_timeout(op: &str) -> Duration {
+    if op.starts_with("model_") {
+        MODEL_ANSWER_TIMEOUT
+    } else {
+        ANSWER_TIMEOUT
+    }
+}
 
 type Answer = Result<Value, String>;
 
@@ -110,7 +131,7 @@ pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, Contro
             "could not reach the window: {err}"
         )));
     }
-    wait(&id, receiver, ANSWER_TIMEOUT).await
+    wait(&id, receiver, answer_timeout(op)).await
 }
 
 /// The window's answer to a `control:request`. An id nobody waits for any
@@ -162,5 +183,14 @@ mod tests {
         // Must not panic, and must not resurrect anything.
         control_reply(id.clone(), true, None, None);
         assert!(!pending().lock().unwrap().contains_key(&id));
+    }
+
+    #[test]
+    fn the_preview_is_given_longer_than_the_panes() {
+        for op in ["model_show", "model_snapshot", "model_close"] {
+            assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
+            assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
+        }
+        assert_eq!(answer_timeout("pane_read"), Duration::from_secs(20));
     }
 }
