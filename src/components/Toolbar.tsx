@@ -229,14 +229,11 @@ export function Toolbar({
         )}
 
         <div className="toolbar__title">
-          <h1 className="toolbar__name" title={workspace.name}>
+          {/* The name alone: its folder is a detail, in the tooltip here and
+              in the inspector's session. */}
+          <h1 className="toolbar__name" title={`${workspace.name}\n${workspace.cwd}`}>
             {workspace.name}
           </h1>
-          <span className="toolbar__path" title={workspace.cwd}>
-            {/* Isolated left-to-right inside a right-to-left box, so the
-                ellipsis eats the start of the path and nothing else moves. */}
-            <span dir="ltr">{workspace.cwd}</span>
-          </span>
         </div>
 
         <div

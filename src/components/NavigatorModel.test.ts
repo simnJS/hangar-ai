@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AgentId, Pane, SplitNode, Workspace, WorkspaceFolder } from "../types";
-import { buildNavTree, fold, readingOrder, type NavInput } from "./NavigatorModel";
+import {
+  buildNavTree,
+  fold,
+  namesakeHints,
+  readingOrder,
+  type NavInput,
+} from "./NavigatorModel";
 
 const pane = (id: string, name: string, agent: AgentId = "claude"): Pane => ({
   id,
@@ -47,8 +53,6 @@ const docs = ws("docs", [pane("p7", "Gus")]);
 const input = (patch: Partial<NavInput> = {}): NavInput => ({
   workspaces: [hangar, store, docs],
   folders: [folder("clients")],
-  activeId: "hangar",
-  opened: {},
   query: "",
   attentionOnly: false,
   wantsYou: () => false,
@@ -81,28 +85,48 @@ describe("fold", () => {
   });
 });
 
+describe("namesakeHints", () => {
+  const at = (id: string, name: string, cwd: string) => ({ ...ws(id, []), name, cwd });
+  const hints = (...list: Workspace[]) => Object.fromEntries(namesakeHints(list));
+
+  it("says nothing for a name no other workspace has", () => {
+    expect(hints(at("a", "api", "C:\\work\\api"), at("b", "web", "C:\\work\\web"))).toEqual({});
+  });
+
+  it("names the folder that differs, and only that one", () => {
+    expect(
+      hints(
+        at("a", "api", "C:\\work\\api"),
+        at("b", "API", "C:\\perso\\api"),
+        at("c", "web", "C:\\web"),
+      ),
+    ).toEqual({ a: "work", b: "perso" });
+  });
+
+  it("passes over a folder that only repeats the name", () => {
+    expect(hints(at("a", "api", "C:\\dev\\api"), at("b", "api", "C:\\dev\\api-v2"))).toEqual({
+      b: "api-v2",
+    });
+  });
+
+  it("numbers namesakes opened on the same folder", () => {
+    expect(
+      hints(
+        at("a", "api", "C:\\dev\\api"),
+        at("b", "api", "C:/dev/api/"),
+        at("c", "api", "D:\\x\\api"),
+      ),
+    ).toEqual({ a: "1", b: "2", c: "x" });
+  });
+});
+
 describe("buildNavTree without a filter", () => {
-  it("lists folders first, opens the active workspace and only it", () => {
-    expect(keys()).toEqual([
-      "folder:clients",
-      "ws:storefront",
-      "ws:hangar",
-      "pane:p1",
-      "pane:p2",
-      "pane:p3",
-      "pane:p4",
-      "ws:docs",
-    ]);
+  it("lists the loose workspaces first, then each folder with its own", () => {
+    expect(keys()).toEqual(["ws:hangar", "ws:docs", "folder:clients", "ws:storefront"]);
   });
 
-  it("keeps the active workspace open and unfoldable", () => {
-    const tree = buildNavTree(input({ opened: { hangar: false } }));
-    const active = tree.loose.find((entry) => entry.workspace.id === "hangar");
-    expect(active).toMatchObject({ expanded: true, foldable: false });
-  });
-
-  it("opens the other workspaces opened by hand", () => {
-    expect(keys({ opened: { docs: true } })).toContain("pane:p7");
+  it("lists workspaces only, never their agents", () => {
+    expect(buildNavTree(input()).rows.map((r) => r.kind)).not.toContain("pane");
   });
 
   it("keeps an empty folder, and a collapsed one shut", () => {
@@ -116,44 +140,43 @@ describe("buildNavTree without a filter", () => {
 
   it("files a workspace whose folder is gone with the loose ones", () => {
     const orphan = ws("orphan", [], { folderId: "deleted" });
-    expect(keys({ workspaces: [orphan], activeId: null })).toEqual(["folder:clients", "ws:orphan"]);
+    expect(keys({ workspaces: [orphan] })).toEqual(["ws:orphan", "folder:clients"]);
   });
 
   it("records each row's parent for the keyboard", () => {
     const rows = buildNavTree(input()).rows;
     expect(rows.find((r) => r.key === "ws:storefront")?.parent).toBe("folder:clients");
-    expect(rows.find((r) => r.key === "pane:p2")?.parent).toBe("ws:hangar");
     expect(rows.find((r) => r.key === "ws:docs")?.parent).toBeNull();
+    expect(rows.find((r) => r.key === "folder:clients")).toMatchObject({
+      parent: null,
+      expanded: true,
+      foldable: true,
+    });
   });
 });
 
 describe("buildNavTree with a query", () => {
-  it("keeps a workspace found through an agent, open on that agent only", () => {
-    const tree = buildNavTree(input({ query: "eve" }));
-    expect(tree.rows.map((r) => r.key)).toEqual(["folder:clients", "ws:storefront", "pane:p5"]);
-    expect(tree.folders[0].workspaces[0]).toMatchObject({ expanded: true, foldable: false });
+  it("finds a workspace by its name, without case or accents", () => {
+    expect(keys({ query: "DOCS" })).toEqual(["ws:docs"]);
+    expect(keys({ query: "hang" })).toEqual(["ws:hangar"]);
   });
 
-  it("matches the kind of agent too, without case or accents", () => {
-    expect(keys({ query: "CODEX" })).toEqual(["ws:hangar", "pane:p2"]);
-    expect(keys({ query: "cleo" })).toEqual(["ws:hangar", "pane:p3"]);
-  });
-
-  it("keeps every agent of a workspace whose own name matches", () => {
-    const tree = buildNavTree(input({ query: "hang" }));
-    expect(tree.loose.map((e) => [e.workspace.id, e.panes.length])).toEqual([["hangar", 4]]);
-  });
-
-  it("leaves a workspace matched by name folded as it was", () => {
-    expect(keys({ query: "docs" })).toEqual(["ws:docs"]);
-    expect(keys({ query: "docs", opened: { docs: true } })).toEqual(["ws:docs", "pane:p7"]);
+  it("finds a workspace through one of its agents, by name or kind", () => {
+    expect(keys({ query: "eve" })).toEqual(["folder:clients", "ws:storefront"]);
+    expect(keys({ query: "cleo" })).toEqual(["ws:hangar"]);
+    expect(keys({ query: "CODEX" })).toEqual(["ws:hangar"]);
   });
 
   it("shows a folder whose name matches, open, with all it holds", () => {
     const tree = buildNavTree(input({ query: "client", folders: [folder("clients", true)] }));
     expect(tree.folders).toHaveLength(1);
-    expect(tree.folders[0].expanded).toBe(true);
-    expect(tree.folders[0].workspaces.map((e) => e.panes.length)).toEqual([2]);
+    expect(tree.folders[0]).toMatchObject({ expanded: true, size: 1 });
+    expect(tree.rows.map((r) => r.key)).toEqual(["folder:clients", "ws:storefront"]);
+  });
+
+  it("holds folders open and unfoldable while it filters", () => {
+    const tree = buildNavTree(input({ query: "eve", folders: [folder("clients", true)] }));
+    expect(tree.rows[0]).toMatchObject({ key: "folder:clients", expanded: true, foldable: false });
   });
 
   it("hides folders with nothing that matches, and says it is filtering", () => {
@@ -169,25 +192,21 @@ describe("buildNavTree with a query", () => {
 describe("buildNavTree with only the agents that want you", () => {
   const wantsYou = (id: string) => id === "p2" || id === "p5";
 
-  it("keeps only those agents, their workspaces open", () => {
+  it("keeps only the workspaces where one does", () => {
     expect(keys({ attentionOnly: true, wantsYou })).toEqual([
+      "ws:hangar",
       "folder:clients",
       "ws:storefront",
-      "pane:p5",
-      "ws:hangar",
-      "pane:p2",
     ]);
   });
 
   it("drops the active workspace too when nobody in it waits", () => {
-    expect(keys({ attentionOnly: true, wantsYou: (id) => id === "p7" })).toEqual([
-      "ws:docs",
-      "pane:p7",
-    ]);
+    expect(keys({ attentionOnly: true, wantsYou: (id) => id === "p7" })).toEqual(["ws:docs"]);
   });
 
   it("combines with the query", () => {
-    expect(keys({ attentionOnly: true, wantsYou, query: "ben" })).toEqual(["ws:hangar", "pane:p2"]);
+    expect(keys({ attentionOnly: true, wantsYou, query: "ben" })).toEqual(["ws:hangar"]);
+    expect(keys({ attentionOnly: true, wantsYou, query: "gus" })).toEqual([]);
   });
 
   it("does not keep a folder for its name alone", () => {

@@ -8,14 +8,14 @@ const folder = (id: string): WorkspaceFolder => ({ id, name: id, collapsed: fals
 const ids = (list: Workspace[]) => list.map((workspace) => workspace.id);
 
 describe("sidebarOrder", () => {
-  it("lists each folder's workspaces in folder order, then the loose ones", () => {
+  it("lists the loose workspaces, then each folder's in folder order", () => {
     const workspaces = [ws("loose1"), ws("b1", "B"), ws("a1", "A"), ws("loose2"), ws("a2", "A")];
     expect(ids(sidebarOrder(workspaces, [folder("A"), folder("B")]))).toEqual([
+      "loose1",
+      "loose2",
       "a1",
       "a2",
       "b1",
-      "loose1",
-      "loose2",
     ]);
   });
 
@@ -26,7 +26,7 @@ describe("sidebarOrder", () => {
 
   it("keeps a workspace whose folder is gone, with the loose ones", () => {
     const workspaces = [ws("orphan", "deleted"), ws("a1", "A"), ws("loose")];
-    expect(ids(sidebarOrder(workspaces, [folder("A")]))).toEqual(["a1", "orphan", "loose"]);
+    expect(ids(sidebarOrder(workspaces, [folder("A")]))).toEqual(["orphan", "loose", "a1"]);
   });
 
   it("lists every workspace exactly once", () => {

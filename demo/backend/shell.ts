@@ -9,7 +9,7 @@
  * Rust side does it, so TerminalPane and xterm are none the wiser.
  */
 import { dispatch } from "../mock/event";
-import { replyFor, C, type Ctx, type Step } from "./replies";
+import { replyFor, C, say, type Ctx, type Step } from "./replies";
 import { SESSIONS } from "./state";
 import type { ShellInfo } from "../../src/types";
 
@@ -31,6 +31,8 @@ interface Session {
   timers: ReturnType<typeof setTimeout>[];
   history: string[];
   historyAt: number;
+  /** A permission prompt on screen: the rest of the turn waits for its answer. */
+  asking: { rest: Step[]; ctx: Ctx } | null;
 }
 
 const AGENTS: Record<string, { label: string; glyph: string; color: string; version: string }> = {
@@ -150,12 +152,17 @@ function clearTimers(s: Session) {
   s.timers = [];
 }
 
-/** Plays a transcript out over time, then hands the prompt back. */
-function run(s: Session, steps: Step[], ctx: Ctx) {
+/**
+ * Plays a transcript out over time, then hands the prompt back. A step that
+ * asks for permission stops it there until the prompt is answered (`answer`),
+ * which plays the rest as the same turn: `continued`.
+ */
+function run(s: Session, steps: Step[], ctx: Ctx, continued = false) {
   s.busy = true;
-  bridge(s, { kind: "turn", phase: "start" });
+  if (!continued) bridge(s, { kind: "turn", phase: "start" });
+  const stop = steps.findIndex((step) => step.ask);
   let at = 0;
-  for (const step of steps) {
+  for (const step of stop < 0 ? steps : steps.slice(0, stop + 1)) {
     at += step.after;
     s.timers.push(
       setTimeout(() => {
@@ -165,6 +172,17 @@ function run(s: Session, steps: Step[], ctx: Ctx) {
         }
       }, at),
     );
+  }
+  if (stop >= 0) {
+    s.timers.push(
+      setTimeout(() => {
+        s.busy = false;
+        s.timers = [];
+        s.asking = { rest: steps.slice(stop + 1), ctx };
+        bridge(s, { kind: "permission", waiting: true, tool: steps[stop].ask });
+      }, at + 120),
+    );
+    return;
   }
   s.timers.push(
     setTimeout(() => {
@@ -186,6 +204,23 @@ function run(s: Session, steps: Step[], ctx: Ctx) {
       });
       drain(s);
     }, at + 320),
+  );
+}
+
+/** The permission prompt answered: the turn goes on, or stops there. */
+function answer(s: Session, allowed: boolean) {
+  const asking = s.asking;
+  if (!asking) return;
+  s.asking = null;
+  bridge(s, { kind: "permission", waiting: false });
+  out(s, `\r\n  ${C.dim}${allowed ? "Yes" : "No"}${C.reset}`);
+  run(
+    s,
+    allowed
+      ? asking.rest
+      : [{ after: 400, text: say("Left it alone. Tell me how you'd rather go about it.") }],
+    asking.ctx,
+    true,
   );
 }
 
@@ -227,6 +262,8 @@ function enterAgent(s: Session, mode: Exclude<Mode, "shell">, resumeId: string |
         version: "2.1.288",
       });
       reportUsage(s);
+      // Prompts queued before it started run now, as the mod runs them.
+      drain(s);
     }, 260),
   );
 }
@@ -393,6 +430,7 @@ export function spawn(args: {
     timers: [],
     history: [],
     historyAt: 0,
+    asking: null,
   };
   sessions.set(s.id, s);
   s.timers.push(
@@ -416,11 +454,29 @@ export function write(id: string, data: string): void {
       clearTimers(s);
       s.busy = false;
       s.line = "";
+      if (s.asking) {
+        s.asking = null;
+        bridge(s, { kind: "permission", waiting: false });
+        bridge(s, { kind: "turn", phase: "end", reason: "aborted", durationMs: 0, answer: "" });
+      }
       out(s, `${C.dim}^C${C.reset}\r\n` + prompt(s).replace(/^\r\n/, ""));
       continue;
     }
 
     if (s.busy) continue;
+
+    // A permission prompt takes one key, as Claude Code's does: 1 or Enter
+    // allows, 2, 3 or Escape refuses, anything else is ignored.
+    if (s.asking) {
+      // Escape alone refuses; an arrow key's sequence is not an answer.
+      if (ch === "\x1b") {
+        if (data.length === 1) answer(s, false);
+        break;
+      }
+      if (ch === "1" || ch === "\r") answer(s, true);
+      else if (ch === "2" || ch === "3") answer(s, false);
+      continue;
+    }
 
     // Arrow keys walk the history; everything else in an escape sequence is
     // swallowed rather than echoed as garbage.

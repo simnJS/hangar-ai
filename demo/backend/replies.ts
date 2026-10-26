@@ -30,6 +30,11 @@ export interface Step {
   after: number;
   text?: string | ((ctx: Ctx) => string);
   fx?: (ctx: Ctx) => void;
+  /**
+   * The agent stops here to ask permission to use this tool, its prompt in
+   * `text`, until it is answered in the pane (backend/shell).
+   */
+  ask?: string;
 }
 
 const C = {
@@ -81,6 +86,58 @@ function tests(): Step[] {
     },
     { after: 400, text: nl(`\r\n  Two agents can't both win a claim now. The second gets an error\r\n  instead of a task someone else is already holding.`) },
   ];
+}
+
+/** Claude Code's permission prompt for a shell command, as it draws it. */
+const permission = (command: string, why: string) =>
+  nl() +
+  nl(`  ${C.bold}Bash command${C.reset}`) +
+  nl(`    ${command}`) +
+  nl(`    ${C.dim}${why}${C.reset}`) +
+  nl() +
+  nl(`  Do you want to proceed?`) +
+  nl(`  ${C.cyan}❯ 1. Yes${C.reset}`) +
+  nl(`    2. Yes, and don't ask again for ${command.split(" ").slice(0, 2).join(" ")} commands`) +
+  nl(`    3. No, and tell Claude what to do differently ${C.dim}(esc)${C.reset}`);
+
+/** Stops halfway to ask before it runs the suite: the pane waits for you. */
+function checkout(): Step[] {
+  return [
+    { after: 600, text: tool("Grep(pattern: \"applyCoupon\")", "5 files") },
+    { after: 900, text: tool("Read(src/checkout/cart.ts)", "Read 238 lines") },
+    { after: 900, text: say("The coupon is applied before the tax is worked out, twice on a reload.") },
+    { after: 800, text: tool("Edit(src/checkout/cart.ts)", "+9 −4") },
+    {
+      after: 700,
+      ask: "Bash",
+      text: permission("pnpm vitest run src/checkout", "Run the checkout suite"),
+    },
+    { after: 900, text: nl(`  ${C.dim}✓ src/checkout/cart.test.ts (18 tests)${C.reset}`) },
+    { after: 600, text: nl(`  ${C.dim}✓ src/checkout/coupon.test.ts (7 tests)${C.reset}`) },
+    { after: 500, text: ok("25 passed in 1.9s") },
+    { after: 500, text: nl(`\r\n  A reload no longer takes the coupon off twice.`) },
+  ];
+}
+
+/** A long turn, minutes of it, so it is still at work when you look. */
+function migration(): Step[] {
+  const steps: Step[] = [
+    { after: 700, text: tool("Read(db/schema.sql)", "Read 412 lines") },
+    { after: 1200, text: say("Invoices keep their amounts as floats. Moving them to integer cents.") },
+    { after: 1500, text: tool("Write(db/migrations/0042_invoice_cents.sql)", "Wrote 38 lines") },
+    { after: 1800, text: tool("Bash(pnpm db:migrate --dry-run)", "1 migration to apply") },
+  ];
+  for (let batch = 1; batch <= 40; batch++) {
+    steps.push({
+      after: 6000,
+      text: nl(`  ${C.dim}backfilling invoices · ${(batch * 2500).toLocaleString("en-US")} / 100,000${C.reset}`),
+    });
+  }
+  steps.push(
+    { after: 900, text: ok("100,000 invoices in cents, totals unchanged") },
+    { after: 500, text: nl(`\r\n  The old column stays until the next release reads only the new one.`) },
+  );
+  return steps;
 }
 
 function refactor(subject: string): Step[] {
@@ -341,6 +398,9 @@ export function replyFor(agent: string, prompt: string): Step[] {
     return showModel(french);
   if (has(p, [" hello", " hi ", " hey", " salut", " bonjour", "who are you", "what can you", "help me", "qui es"]))
     return capabilities(agent);
+  // The jobs backend/scene hands out when the demo opens.
+  if (has(p, ["checkout", "coupon"])) return checkout();
+  if (has(p, ["migrat", "backfill"])) return migration();
   if (has(p, ["board", "next task", "take the next", "claim", "todo", "tâche", "tache"]))
     return boardWork();
   if (has(p, ["test", "spec", "suite"])) return tests();
