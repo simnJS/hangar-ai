@@ -83,19 +83,19 @@ const en = {
   "topbar.restartAllHint": "Restart every pane",
   "topbar.resetAll": "Reset agents",
   "topbar.resetAllHint":
-    "Start every agent of this workspace on a new conversation. Shells are left alone, and the old conversations stay resumable from each pane's session picker.",
+    "Start every agent of this workspace on a new session. Shells are left alone; the old sessions can still be resumed from each pane's session picker.",
   "topbar.resetAllNone": "No agent pane to reset in this workspace",
   "topbar.resetAllConfirm_one": "Reset {n} agent",
   "topbar.resetAllConfirm_other": "Reset {n} agents",
-  "topbar.addPane": "Terminal",
+  "topbar.addPane": "Pane",
   "topbar.addPaneHint": "Split the focused pane",
   "topbar.presetHint_one": "Even layout, {n} pane",
   "topbar.presetHint_other": "Even layout, {n} panes",
   // toolbar.*, status.*, palette.* — toolbar, status bar and command palette.
   "toolbar.showNavigator": "Show the navigator",
   "toolbar.tidyHint": "Tidy — lay every pane out as an even grid again; nothing restarts",
-  "toolbar.newTerminal": "New terminal",
-  "toolbar.newTerminalHint": "New terminal — splits the focused pane",
+  "toolbar.newTerminal": "New pane",
+  "toolbar.newTerminalHint": "New pane — splits the focused pane",
   "toolbar.more": "More actions",
   "toolbar.menu": "Workspace actions",
   "toolbar.inspector": "Inspector",
@@ -103,7 +103,7 @@ const en = {
   "toolbar.resetTitle_one": "Reset {n} agent?",
   "toolbar.resetTitle_other": "Reset {n} agents?",
   "toolbar.resetBody":
-    "Each one starts on a new conversation. Shells are left alone, and the old conversations stay resumable from each pane's session picker.",
+    "Each one starts on a new session. Shells are left alone; the old sessions can still be resumed from each pane's session picker.",
   "toolbar.detach": "Open in a window",
   "toolbar.palette": "Command palette",
   "toolbar.activity.label": "Focused pane activity",
@@ -141,7 +141,7 @@ const en = {
 
   "placeholder.title": "No workspace open",
   "placeholder.body":
-    "Create a workspace from the sidebar: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
+    "Create a workspace from the navigator: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
 
   "broadcast.placeholder": "Send the same instruction to all {n} panes…",
   "broadcast.send": "Broadcast",
@@ -381,7 +381,7 @@ const en = {
   "settings.interface": "Interface",
   "settings.uiScale": "Interface size",
   "settings.uiScaleHint":
-    "Text of the sidebar, board, menus and settings. The terminals keep their own size, under Terminal › Typography.",
+    "Text of the navigator, board, menus and settings. The terminals keep their own size, under Terminal › Typography.",
   "settings.showNavigator": "Show the navigator",
   "settings.showNavigatorHint": "Workspaces and their agents, on the left",
   "settings.showInspector": "Show the inspector",
@@ -473,7 +473,7 @@ const en = {
   "cmd.pane.close": "Close the focused pane",
   "cmd.pane.restart": "Restart the focused pane",
   "cmd.pane.restartAll": "Restart every pane",
-  "cmd.pane.resetAll": "Start every agent on a new conversation",
+  "cmd.pane.resetAll": "Start every agent on a new session",
   "cmd.pane.tidy": "Tidy the panes into an even grid",
   "cmd.pane.sessions": "Pick the session to resume",
   "cmd.pane.zoom": "Fill the grid with the focused pane, or go back",
@@ -546,7 +546,7 @@ const en = {
   "create.fileFound": "{name} sits in this folder",
   "create.fileUse": "Open it",
   "create.fileFailed": "{name} could not be read",
-  "create.rootsHint": "terminals open in the main folder; the others go to Claude Code",
+  "create.rootsHint": "panes open in the main folder; the other folders go to Claude Code",
   "create.rootMain": "main",
   "create.rootExtra": "extra",
   "create.rootMissing": "missing",
@@ -556,7 +556,7 @@ const en = {
   "create.shellDetected_other": "{n} detected on this machine",
   "create.shellDefault": "Default ({name})",
   "create.shellNone": "none",
-  "create.terminals": "Number of terminals",
+  "create.terminals": "Number of panes",
   "create.agents": "Agent split",
   "create.freeSlots_one": "{n} pane left as a plain shell",
   "create.freeSlots_other": "{n} panes left as plain shells",
@@ -624,7 +624,7 @@ const en = {
   "board.dockHint": "Keep the board beside the terminals",
   "board.dockExpand": "Open the full board",
   "board.dockHide": "Hide the board panel",
-  "board.dockResize": "Drag to resize the board panel, double-click to reset",
+  "board.dockResize": "Resize the board panel · double-click for the default width",
 
   "diff.title": "Changes",
   "diff.loading": "Reading the changes…",
@@ -670,7 +670,8 @@ const en = {
   "window.reattachHint": "Bring this workspace back into the main window. Its agents keep running.",
   "window.show": "Show its window",
   "window.elsewhereTitle": "{name} is open in its own window",
-  "window.elsewhereBody": "Its terminals run there. Closing that window brings the workspace back here, agents still running.",
+  "window.elsewhereBody":
+    "Its panes run there. Closing that window brings the workspace back here, agents still running.",
   "window.openFailed": "Could not open the window: {error}",
   "window.inOwnWindow": "Open in a window of its own",
   "window.bringBack": "Bring it back here",
@@ -748,9 +749,9 @@ const en = {
   "inspector.section.files": "Changed files",
   "inspector.section.activity": "Recent activity",
   "inspector.resume": "Resumes",
-  "inspector.resumeNew": "New conversation",
+  "inspector.resumeNew": "New session",
   "inspector.resumeChange": "Change…",
-  "inspector.resumeChangeHint": "Pick the conversation this pane resumes",
+  "inspector.resumeChangeHint": "Pick the session this pane resumes",
   "inspector.since": "Since",
   "inspector.model": "Model",
   "inspector.shell": "Shell",
@@ -806,7 +807,7 @@ const en = {
   "inspector.status.C": "copied",
   "inspector.status.U": "in conflict",
   "inspector.activityEmpty":
-    "Nothing yet. Turns, permissions and edits show up here once Claude Code loads the hangar-bridge mod.",
+    "Nothing yet. Prompts, permissions and edits show up here once Claude Code loads the hangar-bridge mod.",
   "inspector.activityQuiet": "Nothing yet.",
   "inspector.activityOther":
     "{agent} does not report what it does. Only Claude Code does, through the hangar-bridge mod.",
@@ -853,7 +854,7 @@ const en = {
   "worktrees.openWorkspaceHint":
     "opens it in a workspace of its own, or activates the one already on it",
   "worktrees.openPane": "Open in a pane",
-  "worktrees.openPaneHint": "adds a terminal on this worktree to the current workspace",
+  "worktrees.openPaneHint": "Adds a pane on this worktree to the active workspace",
   "worktrees.openPaneCurrent": "this workspace already opens here",
   "worktrees.paneFull": "This workspace cannot take another pane.",
   "worktrees.lock": "Lock",
@@ -927,6 +928,45 @@ const en = {
 
 type Key = keyof typeof en;
 
+/**
+ * French glossary: one word per thing, everywhere. New strings keep to it.
+ *
+ * - pane: « panneau », never « pane » nor « terminal ». One tile of the
+ *   grid, running an agent or a shell: « Nouveau panneau », « Nombre de
+ *   panneaux », « le panneau de Ben ». The focused one is the « panneau
+ *   actif ».
+ * - « terminal », « terminaux »: only what is inside a pane (its text, font,
+ *   search, history) and the « Terminaux » view that shows the grid.
+ * - The side panels are named after what they hold, never « panneau »: the
+ *   « navigateur » on the left (not « barre latérale »), the « inspecteur »
+ *   on the right, and the « tableau latéral », the board docked beside the
+ *   grid. Their group of commands is « Affichage ».
+ * - workspace: « workspace » (masculine), never « espace de travail ».
+ * - board: « tableau », columns « À faire », « En cours », « Revue »,
+ *   « Terminé ». A task's tag is a « label »; a memory entry's, an
+ *   « étiquette ».
+ * - agent: the program a pane runs (Claude Code, Codex…). A first name
+ *   (Ava, Ben) names the pane, not the agent.
+ * - session: a resumable agent conversation, with an id: « Nouvelle
+ *   session », « Sessions de Claude Code », « sélecteur de sessions ». Not
+ *   « conversation » in a label.
+ * - prompt: « prompt » (masculine). The shell's own prompt is « l'invite ».
+ * - « Relancer » restarts the same session, « Réinitialiser » starts a new
+ *   one, « Rétablir » restores defaults; a plan window has a « remise à
+ *   zéro ».
+ * - changes: « modifications » in sentences; « diff » only names the
+ *   line-by-line view.
+ * - settings: « Réglages », never « Paramètres ». Focused: « actif ».
+ *
+ * Voice: the user is « tu ». Buttons, menu items and commands are
+ * infinitives (« Relancer le panneau »). Settings hints and tooltips are
+ * sentences starting with a capital, with no final period unless there are
+ * two; a hint set inline after a field's label (form-hint) stays lowercase.
+ * Times in prose read « à 20 h 01 ».
+ *
+ * Typography is t()'s job (lib/typography): write plain spaces before
+ * ? ! ; : » %, after «, and between a number and its unit.
+ */
 const fr: Record<Key, string> = {
   "app.loading": "Chargement…",
 
@@ -986,19 +1026,19 @@ const fr: Record<Key, string> = {
   "topbar.restartAllHint": "Relancer tous les panneaux",
   "topbar.resetAll": "Réinitialiser les agents",
   "topbar.resetAllHint":
-    "Relancer chaque agent de ce workspace sur une nouvelle conversation. Les shells ne bougent pas, et les anciennes conversations restent reprenables depuis le sélecteur de sessions de chaque panneau.",
+    "Relancer chaque agent de ce workspace sur une nouvelle session. Les shells ne bougent pas ; les anciennes sessions restent reprenables depuis le sélecteur de sessions de chaque panneau.",
   "topbar.resetAllNone": "Aucun agent à réinitialiser dans ce workspace",
   "topbar.resetAllConfirm_one": "Réinitialiser {n} agent",
   "topbar.resetAllConfirm_other": "Réinitialiser {n} agents",
-  "topbar.addPane": "Terminal",
+  "topbar.addPane": "Panneau",
   "topbar.addPaneHint": "Diviser le panneau actif",
   "topbar.presetHint_one": "Disposition régulière, {n} panneau",
   "topbar.presetHint_other": "Disposition régulière, {n} panneaux",
   // toolbar.*, status.*, palette.* — barre d'outils, barre d'état, palette.
   "toolbar.showNavigator": "Afficher le navigateur",
   "toolbar.tidyHint": "Réorganiser — remettre tous les panneaux en grille régulière, sans rien relancer",
-  "toolbar.newTerminal": "Nouveau terminal",
-  "toolbar.newTerminalHint": "Nouveau terminal — divise le panneau actif",
+  "toolbar.newTerminal": "Nouveau panneau",
+  "toolbar.newTerminalHint": "Nouveau panneau — divise le panneau actif",
   "toolbar.more": "Plus d'actions",
   "toolbar.menu": "Actions du workspace",
   "toolbar.inspector": "Inspecteur",
@@ -1006,7 +1046,7 @@ const fr: Record<Key, string> = {
   "toolbar.resetTitle_one": "Réinitialiser {n} agent ?",
   "toolbar.resetTitle_other": "Réinitialiser {n} agents ?",
   "toolbar.resetBody":
-    "Chacun repart sur une nouvelle conversation. Les shells ne bougent pas, et les anciennes conversations restent reprenables depuis le sélecteur de sessions de chaque panneau.",
+    "Chacun repart sur une nouvelle session. Les shells ne bougent pas ; les anciennes sessions restent reprenables depuis le sélecteur de sessions de chaque panneau.",
   "toolbar.detach": "Ouvrir dans une fenêtre",
   "toolbar.palette": "Palette de commandes",
   "toolbar.activity.label": "Activité du panneau actif",
@@ -1044,7 +1084,7 @@ const fr: Record<Key, string> = {
 
   "placeholder.title": "Aucun workspace ouvert",
   "placeholder.body":
-    "Crée un workspace depuis la barre latérale : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
+    "Crée un workspace depuis le navigateur : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
 
   "broadcast.placeholder": "Envoyer la même instruction aux {n} panneaux…",
   "broadcast.send": "Diffuser",
@@ -1055,7 +1095,7 @@ const fr: Record<Key, string> = {
     "Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneaux ont un Claude Code capable de la garder ; les autres la reçoivent tout de suite.",
 
   "pane.agent": "Agent lancé dans ce panneau",
-  "pane.missing": " (absent)",
+  "pane.missing": " (non installé)",
   "pane.shell": "Shell",
   "pane.inherited": "{name} (hérité)",
   "pane.shellTitle": "Shell : {program}",
@@ -1171,7 +1211,7 @@ const fr: Record<Key, string> = {
   "settings.notifyAwayHint": "fenêtre au premier plan, la pastille du panneau suffit",
 
   "discord.working": "Pilote ses agents de code",
-  "discord.noWorkspace": "Aucun espace ouvert",
+  "discord.noWorkspace": "Aucun workspace ouvert",
   "discord.idle": "Au repos",
   "discord.panes_one": "{n} panneau",
   "discord.panes_other": "{n} panneaux",
@@ -1184,10 +1224,10 @@ const fr: Record<Key, string> = {
   "settings.catDiscord": "Discord",
   "settings.discord": "Rich Presence",
   "settings.discordHint":
-    "Publie l'espace de travail ouvert sur ton statut Discord, via l'application Discord installée sur cette machine. Rien d'autre ne quitte l'ordinateur, et rien du tout tant que ce n'est pas activé.",
+    "Publie le workspace ouvert sur ton statut Discord, via l'application Discord installée sur cette machine. Rien d'autre ne quitte l'ordinateur, et rien du tout tant que ce n'est pas activé.",
   "settings.discordEnable": "Publier sur Discord",
   "settings.discordEnableHint": "nécessite l'application Discord ouverte sur cette machine",
-  "settings.discordWorkspace": "Nommer l'espace de travail",
+  "settings.discordWorkspace": "Nommer le workspace",
   "settings.discordWorkspaceHint": "désactivé, la carte reste générique — aucun nom de projet",
   "settings.discordAgents": "Nommer les agents",
   "settings.discordAgentsHint": "désactivé, seul leur nombre est indiqué",
@@ -1206,12 +1246,12 @@ const fr: Record<Key, string> = {
   "voice.recording": "À l'écoute — relâche pour transcrire, Échap pour annuler",
   "voice.transcribing": "Transcription…",
   "voice.failed": "Dictée échouée : {error}",
-  "voice.noPane": "Ouvre un terminal pour y dicter",
+  "voice.noPane": "Ouvre un panneau pour y dicter",
 
   "settings.catVoice": "Voix",
   "settings.voice": "Dictée",
   "settings.voiceHint":
-    "Maintiens le raccourci, parle, relâche. Ce que tu dis est tapé dans le terminal actif, et le micro n'est ouvert que tant que la touche est enfoncée. Tant que le moteur est local, rien ne quitte la machine.",
+    "Maintiens le raccourci, parle, relâche. Ce que tu dis est tapé dans le panneau actif, et le micro n'est ouvert que tant que la touche est enfoncée. Tant que le moteur est local, rien ne quitte la machine.",
   "settings.voiceEnable": "Activer la dictée",
   "settings.voiceEnableHint": "attribue le raccourci et demande l'accès au micro",
   "settings.voiceEngine": "Moteur",
@@ -1285,7 +1325,7 @@ const fr: Record<Key, string> = {
   "settings.interface": "Interface",
   "settings.uiScale": "Taille de l'interface",
   "settings.uiScaleHint":
-    "Texte de la barre latérale, du tableau, des menus et des réglages. Les terminaux gardent leur propre taille, dans Terminal › Typographie.",
+    "Texte du navigateur, du tableau, des menus et des réglages. Les terminaux gardent leur propre taille, dans Terminal › Typographie.",
   "settings.showNavigator": "Afficher le navigateur",
   "settings.showNavigatorHint": "Les workspaces et leurs agents, à gauche",
   "settings.showInspector": "Afficher l'inspecteur",
@@ -1365,7 +1405,7 @@ const fr: Record<Key, string> = {
   "keymap.section.panes": "Panneaux",
   "keymap.section.navigation": "Déplacements",
   "keymap.section.workspaces": "Workspaces",
-  "keymap.section.view": "Vues & panneaux",
+  "keymap.section.view": "Affichage",
   "keymap.section.terminal": "Terminal",
   "keymap.section.commands": "Commandes enregistrées",
   "keymap.section.voice": "Voix",
@@ -1377,7 +1417,7 @@ const fr: Record<Key, string> = {
   "cmd.pane.close": "Fermer le panneau actif",
   "cmd.pane.restart": "Relancer le panneau actif",
   "cmd.pane.restartAll": "Relancer tous les panneaux",
-  "cmd.pane.resetAll": "Relancer chaque agent sur une nouvelle conversation",
+  "cmd.pane.resetAll": "Relancer chaque agent sur une nouvelle session",
   "cmd.pane.tidy": "Réorganiser les panneaux en grille régulière",
   "cmd.pane.sessions": "Choisir la session à reprendre",
   "cmd.pane.zoom": "Afficher le panneau actif sur toute la grille, ou revenir",
@@ -1419,7 +1459,7 @@ const fr: Record<Key, string> = {
   "cmd.app.zoomOut": "Réduire le texte",
   "cmd.app.zoomReset": "Taille de texte par défaut",
   "cmd.app.fullscreen": "Plein écran",
-  "cmd.voice.dictate": "Dicter dans le terminal actif",
+  "cmd.voice.dictate": "Dicter dans le panneau actif",
 
   "settings.version": "Version",
   "settings.maintenance": "Maintenance",
@@ -1451,17 +1491,17 @@ const fr: Record<Key, string> = {
   "create.fileUse": "L'ouvrir",
   "create.fileFailed": "{name} n'a pas pu être lu",
   "create.rootsHint":
-    "les terminaux s'ouvrent dans le dossier principal ; les autres vont à Claude Code",
+    "les panneaux s'ouvrent dans le dossier principal ; les autres dossiers vont à Claude Code",
   "create.rootMain": "principal",
   "create.rootExtra": "en plus",
   "create.rootMissing": "introuvable",
   "create.name": "Nom",
   "create.namePlaceholder": "Mon projet",
-  "create.shellDetected_one": "{n} détecté sur ce PC",
-  "create.shellDetected_other": "{n} détectés sur ce PC",
+  "create.shellDetected_one": "{n} détecté sur cette machine",
+  "create.shellDetected_other": "{n} détectés sur cette machine",
   "create.shellDefault": "Par défaut ({name})",
   "create.shellNone": "aucun",
-  "create.terminals": "Nombre de terminaux",
+  "create.terminals": "Nombre de panneaux",
   "create.agents": "Répartition des agents",
   "create.freeSlots_one": "{n} panneau en shell simple",
   "create.freeSlots_other": "{n} panneaux en shell simple",
@@ -1486,7 +1526,7 @@ const fr: Record<Key, string> = {
   "board.dependsOn": "Dépend d'autres tâches, toutes terminées",
   "board.blockedBy": "Bloquée par {tasks}",
   "board.missingTask": "une tâche supprimée",
-  "board.focusAgent": "Afficher le pane de {name}",
+  "board.focusAgent": "Afficher le panneau de {name}",
   "board.doingSince": "En cours depuis le {date}",
   "board.elapsedNow": "< 1 min",
   "board.elapsedMinutes": "{m} min",
@@ -1522,14 +1562,14 @@ const fr: Record<Key, string> = {
   "board.loading": "Lecture du tableau…",
   "board.emptyTitle": "Aucune tâche sur ce tableau",
   "board.emptyBody":
-    "Ajoute la première toi-même, ou connecte tes agents : via MCP, ils créent des tâches, les prennent et rendent compte ici, et chaque pane voit le même tableau.",
+    "Ajoute la première toi-même, ou connecte tes agents : via MCP, ils créent des tâches, les prennent et rendent compte ici, et chaque panneau voit le même tableau.",
   "board.emptyAdd": "Ajouter une tâche",
   "board.emptyMcp": "Connecter les agents…",
-  "board.dock": "Panneau tableau",
+  "board.dock": "Tableau latéral",
   "board.dockHint": "Garder le tableau à côté des terminaux",
   "board.dockExpand": "Ouvrir le tableau en entier",
-  "board.dockHide": "Masquer le panneau du tableau",
-  "board.dockResize": "Glisser pour redimensionner le panneau, double-clic pour revenir à la largeur par défaut",
+  "board.dockHide": "Masquer le tableau latéral",
+  "board.dockResize": "Redimensionner le tableau latéral · double-clic pour la largeur par défaut",
 
   "diff.title": "Modifications",
   "diff.loading": "Lecture des modifications…",
@@ -1575,14 +1615,15 @@ const fr: Record<Key, string> = {
   "window.reattachHint": "Ramener ce workspace dans la fenêtre principale. Ses agents continuent de tourner.",
   "window.show": "Afficher sa fenêtre",
   "window.elsewhereTitle": "{name} est ouvert dans sa propre fenêtre",
-  "window.elsewhereBody": "Ses terminaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.",
+  "window.elsewhereBody":
+    "Ses panneaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.",
   "window.openFailed": "Impossible d'ouvrir la fenêtre : {error}",
   "window.inOwnWindow": "Ouvert dans sa propre fenêtre",
   "window.bringBack": "Le ramener ici",
-  "settings.agentControlSection": "Agents et panes",
-  "settings.agentPaneControl": "Laisser les agents gérer les panes",
+  "settings.agentControlSection": "Agents et panneaux",
+  "settings.agentPaneControl": "Laisser les agents gérer les panneaux",
   "settings.agentPaneControlHint":
-    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panes de tes workspaces et y écrire — pour lancer d'autres agents, par exemple. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
+    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panneaux de tes workspaces et y écrire — pour lancer d'autres agents, par exemple. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
 
   "task.title": "Tâche",
   "task.name": "Titre",
@@ -1645,7 +1686,8 @@ const fr: Record<Key, string> = {
   "inspector.close": "Masquer l'inspecteur",
   "inspector.resize": "Redimensionner l'inspecteur · double-clic pour la largeur par défaut",
   "inspector.noPane": "Aucun panneau actif",
-  "inspector.noPaneBody": "Clique sur un panneau pour voir ici sa session, son contexte et ses changements.",
+  "inspector.noPaneBody":
+    "Clique sur un panneau pour voir ici sa session, son contexte et ses modifications.",
   "inspector.section.session": "Session",
   "inspector.section.terminal": "Terminal",
   "inspector.section.context": "Contexte et coût",
@@ -1654,9 +1696,9 @@ const fr: Record<Key, string> = {
   "inspector.section.files": "Fichiers modifiés",
   "inspector.section.activity": "Activité récente",
   "inspector.resume": "Reprise",
-  "inspector.resumeNew": "Nouvelle conversation",
+  "inspector.resumeNew": "Nouvelle session",
   "inspector.resumeChange": "Changer…",
-  "inspector.resumeChangeHint": "Choisir la conversation que reprend ce panneau",
+  "inspector.resumeChangeHint": "Choisir la session que reprend ce panneau",
   "inspector.since": "Depuis",
   "inspector.model": "Modèle",
   "inspector.shell": "Shell",
@@ -1712,7 +1754,7 @@ const fr: Record<Key, string> = {
   "inspector.status.C": "copié",
   "inspector.status.U": "en conflit",
   "inspector.activityEmpty":
-    "Rien pour l'instant. Tours, permissions et modifications s'affichent ici dès que Claude Code charge le mod hangar-bridge.",
+    "Rien pour l'instant. Prompts, permissions et modifications s'affichent ici dès que Claude Code charge le mod hangar-bridge.",
   "inspector.activityQuiet": "Rien pour l'instant.",
   "inspector.activityOther":
     "{agent} ne raconte pas ce qu'il fait. Seul Claude Code le fait, via le mod hangar-bridge.",
@@ -1760,7 +1802,7 @@ const fr: Record<Key, string> = {
   "worktrees.openWorkspaceHint":
     "l'ouvre dans un workspace à lui, ou active celui qui y est déjà",
   "worktrees.openPane": "Ouvrir dans un panneau",
-  "worktrees.openPaneHint": "ajoute un terminal sur ce worktree au workspace courant",
+  "worktrees.openPaneHint": "Ajoute au workspace actif un panneau ouvert sur ce worktree",
   "worktrees.openPaneCurrent": "ce workspace s'ouvre déjà ici",
   "worktrees.paneFull": "Ce workspace ne peut pas accueillir un panneau de plus.",
   "worktrees.lock": "Verrouiller",
@@ -1784,7 +1826,7 @@ const fr: Record<Key, string> = {
   "worktrees.branch": "Branche",
   "worktrees.branchPlaceholder": "feature/…",
   "worktrees.groupLocal": "Locales",
-  "worktrees.groupRemote": "Remotes",
+  "worktrees.groupRemote": "Distantes",
   "worktrees.baseLabel": "Basée sur",
   "worktrees.base": "Branche courante ({branch})",
   "worktrees.sanitized": "Sera créée sous « {name} »",
