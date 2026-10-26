@@ -43,8 +43,7 @@ function parseTags(raw: string): string[] {
 /** Same rule as the MCP search: every term has to appear somewhere. */
 function matches(entry: MemoryEntry, terms: string[]): boolean {
   if (!terms.length) return true;
-  const haystack =
-    `${entry.title}\n${entry.content}\n${entry.tags.join(" ")}`.toLowerCase();
+  const haystack = `${entry.title}\n${entry.content}\n${entry.tags.join(" ")}`.toLowerCase();
   return terms.every((term) => haystack.includes(term));
 }
 
@@ -95,15 +94,11 @@ export function MemoryView({ cwd }: Props) {
     };
   }, [refresh]);
 
-  const terms = useMemo(
-    () => query.trim().toLowerCase().split(/\s+/).filter(Boolean),
-    [query],
-  );
+  const terms = useMemo(() => query.trim().toLowerCase().split(/\s+/).filter(Boolean), [query]);
 
   const all = useMemo(() => entries ?? [], [entries]);
   const visible = useMemo(
-    () =>
-      all.filter((entry) => matches(entry, terms)).sort((a, b) => b.updated_at - a.updated_at),
+    () => all.filter((entry) => matches(entry, terms)).sort((a, b) => b.updated_at - a.updated_at),
     [all, terms],
   );
 

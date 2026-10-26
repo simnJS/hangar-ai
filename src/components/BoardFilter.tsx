@@ -43,7 +43,12 @@ export function BoardFilter({ name, title, value, options, active, onChange }: P
   const current = options.find((option) => option.value === value) ?? options[0];
 
   function show() {
-    setCursor(Math.max(0, options.findIndex((option) => option.value === value)));
+    setCursor(
+      Math.max(
+        0,
+        options.findIndex((option) => option.value === value),
+      ),
+    );
     setAlignEnd(false);
     setOpen(true);
   }

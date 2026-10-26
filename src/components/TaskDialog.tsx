@@ -232,7 +232,11 @@ export function TaskDialog({
                   return (
                     <li key={dep.id} className={done ? "task__dep task__dep--done" : "task__dep"}>
                       <span className="task__dep-mark" aria-hidden>
-                        {done ? <BoardIcon name="check" size={11} /> : <BoardIcon name="lock" size={11} />}
+                        {done ? (
+                          <BoardIcon name="check" size={11} />
+                        ) : (
+                          <BoardIcon name="lock" size={11} />
+                        )}
                       </span>
                       <span className="task__dep-id">#{shortTaskId(dep.id)}</span>
                       <span className="task__dep-title">{dep.title}</span>
@@ -258,7 +262,10 @@ export function TaskDialog({
                   <li key={entry.id} className="task__message">
                     <div className="task__message-head">
                       <span className="task__author">{entry.author}</span>
-                      <time className="task__time" dateTime={new Date(entry.created_at).toISOString()}>
+                      <time
+                        className="task__time"
+                        dateTime={new Date(entry.created_at).toISOString()}
+                      >
                         {when(entry.created_at)}
                       </time>
                     </div>

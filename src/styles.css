@@ -3196,7 +3196,7 @@ body.is-dragging-pane .board-dock__grip {
   min-height: calc(30px * var(--ui-scale));
   padding: 0 4px 0 12px;
   background: var(--pane-head);
-  box-shadow: inset 0 -1px 0 var(--sep);
+  box-shadow: inset 0 -1px 0 var(--line);
 }
 
 .board__title {
@@ -5488,6 +5488,11 @@ select.task__input {
 .memory__input--tags {
   font-family: var(--mono);
   font-size: calc(12px * var(--ui-scale));
+}
+
+/* The tags are typed in mono, like the chips they become; the hint is prose. */
+.memory__input--tags::placeholder {
+  font-family: var(--ui-font);
 }
 
 /* One fact per row: what it says on the left, where it came from on the

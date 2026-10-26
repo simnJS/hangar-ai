@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import {
   BOARD_COLUMNS,
@@ -313,10 +314,7 @@ export function BoardView({
               </span>
             )}
             {task.comments.length > 0 && (
-              <span
-                className="card__stat"
-                title={t("board.comments", { n: task.comments.length })}
-              >
+              <span className="card__stat" title={t("board.comments", { n: task.comments.length })}>
                 <BoardIcon name="bubble" size={11} />
                 {task.comments.length}
               </span>
@@ -513,12 +511,7 @@ export function BoardView({
               {filters}
             </div>
           )}
-          <button
-            type="button"
-            className="board__mcp"
-            onClick={onOpenMcp}
-            title={t("board.mcp")}
-          >
+          <button type="button" className="board__mcp" onClick={onOpenMcp} title={t("board.mcp")}>
             <BoardIcon name="plug" size={12} />
             <span className="board__mcp-text">{t("board.hint")}</span>
           </button>
@@ -555,17 +548,21 @@ export function BoardView({
         </div>
       )}
 
-      {openTask && (
-        <TaskDialog
-          cwd={cwd}
-          task={openTask}
-          allTasks={all}
-          onClose={() => setOpenTaskId(null)}
-          onChanged={refresh}
-          assigneePane={openTask.assignee ? paneFor(openTask.assignee) : null}
-          onFocusAgent={openTask.assignee ? (findAgent?.(openTask.assignee) ?? null) : null}
-        />
-      )}
+      {/* Out of the board's own box: the board is a size container, and the
+          dialog must cover the window whatever its ancestors contain. */}
+      {openTask &&
+        createPortal(
+          <TaskDialog
+            cwd={cwd}
+            task={openTask}
+            allTasks={all}
+            onClose={() => setOpenTaskId(null)}
+            onChanged={refresh}
+            assigneePane={openTask.assignee ? paneFor(openTask.assignee) : null}
+            onFocusAgent={openTask.assignee ? (findAgent?.(openTask.assignee) ?? null) : null}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
