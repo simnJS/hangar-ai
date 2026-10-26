@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useT } from "../i18n";
+import { Glyph } from "./settings/icons";
 
 type Stage = "idle" | "available" | "downloading" | "ready" | "failed";
 
@@ -60,32 +61,50 @@ export function UpdateBanner() {
 
   if (stage === "idle" || !update) return null;
 
+  // A capsule floating over the corner of the window: it never reflows the
+  // panes when it appears, and it stays out of the way of the status bar.
   return (
-    <div className="update">
+    <div className={`update update--${stage}`} role="status">
+      <Glyph
+        name={stage === "failed" ? "alert" : stage === "ready" ? "check" : "download"}
+        className="update__icon"
+      />
+
       {stage === "available" && (
         <>
           <span className="update__text">
             {t("update.available", { version: update.version })}
           </span>
-          <button className="btn btn--ghost" onClick={() => setStage("idle")}>
+          <button type="button" className="btn btn--ghost" onClick={() => setStage("idle")}>
             {t("update.later")}
           </button>
-          <button className="btn btn--primary" onClick={install}>
+          <button type="button" className="btn btn--primary" onClick={install}>
             {t("update.install")}
           </button>
         </>
       )}
 
       {stage === "downloading" && (
-        <span className="update__text">
-          {t("update.downloading", { progress: progress > 0 ? `${progress}%` : "" })}
-        </span>
+        <>
+          <span className="update__text">
+            {t("update.downloading", { progress: progress > 0 ? `${progress}%` : "" })}
+          </span>
+          <span
+            className="update__bar"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <i style={{ width: `${progress}%` }} />
+          </span>
+        </>
       )}
 
       {stage === "ready" && (
         <>
           <span className="update__text">{t("update.ready")}</span>
-          <button className="btn btn--primary" onClick={() => relaunch()}>
+          <button type="button" className="btn btn--primary" onClick={() => relaunch()}>
             {t("update.restart")}
           </button>
         </>
@@ -96,7 +115,7 @@ export function UpdateBanner() {
           <span className="update__text update__text--error" title={error ?? ""}>
             {t("update.failed")}
           </span>
-          <button className="btn btn--ghost" onClick={() => setStage("available")}>
+          <button type="button" className="btn btn--ghost" onClick={() => setStage("available")}>
             {t("update.retry")}
           </button>
         </>

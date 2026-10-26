@@ -3,12 +3,13 @@ import { LOCALES, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
-import { THEMES } from "../../themes";
+import { mix, THEMES, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
+import type { GlyphName } from "./icons";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import { VoiceCard, VoiceKeyCard } from "./VoiceCard";
 import { voiceUnload } from "../../lib/ipc";
-import { resolveKeymap, shortcutLabel } from "../../lib/shortcuts";
+import { resolveKeymap, shortcutLabel, type CommandId } from "../../lib/shortcuts";
 import {
   AGENTS,
   CLOUD_MODELS,
@@ -84,7 +85,14 @@ export type SettingItem =
       onAct: () => void;
     })
   /** Full-width block for anything that does not fit a label/control row. */
-  | (Omit<ItemBase, "label"> & { kind: "custom"; label?: string; render: () => ReactNode });
+  | (Omit<ItemBase, "label"> & {
+      kind: "custom";
+      label?: string;
+      /** Drawn straight on the page rather than inside a grouped box: for a
+          block that is a box of its own (a preview, the shortcut editor). */
+      bare?: boolean;
+      render: () => ReactNode;
+    });
 
 export interface SettingSection {
   id: string;
@@ -96,7 +104,7 @@ export interface SettingSection {
 export interface SettingCategory {
   id: string;
   label: string;
-  icon: string;
+  icon: GlyphName;
   sections: SettingSection[];
 }
 
@@ -124,6 +132,41 @@ const FONT_STACKS = [
   { label: "System", value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
 ];
 
+/**
+ * A theme drawn as the window it would give: a navigator column, a few lines of
+ * terminal output in the theme's own colours, and its accent. Swatches alone
+ * said which colours a palette holds, not what working in it looks like.
+ */
+function ThemePreview({ theme }: { theme: TerminalTheme }) {
+  const bg = theme.xterm.background ?? "#1a1b26";
+  const fg = theme.xterm.foreground ?? "#c0caf5";
+  // The same step applyThemeToDocument takes for the chrome, so the preview's
+  // navigator sits on the shade the real one will.
+  const chrome = mix(bg, theme.appearance === "dark" ? "#ffffff" : "#000000", 0.04);
+  const dim = mix(fg, bg, 0.5);
+  const lines: [string | undefined, number][] = [
+    [theme.xterm.blue, 44],
+    [dim, 70],
+    [theme.xterm.green, 36],
+    [dim, 58],
+    [theme.xterm.yellow, 26],
+  ];
+  return (
+    <span className="theme-card__preview" style={{ background: bg }} aria-hidden="true">
+      <span className="theme-card__nav" style={{ background: chrome }}>
+        <i style={{ background: theme.accent }} />
+        <i style={{ background: dim }} />
+        <i style={{ background: dim }} />
+      </span>
+      <span className="theme-card__lines">
+        {lines.map(([color, width], i) => (
+          <i key={i} style={{ background: color ?? fg, width: `${width}%` }} />
+        ))}
+      </span>
+    </span>
+  );
+}
+
 /** Dark and light palettes are listed apart: the two rarely interest the same user. */
 function ThemeGrid({
   t,
@@ -146,33 +189,17 @@ function ThemeGrid({
             </span>
             <div className="theme-grid">
               {themes.map((theme) => {
-                const swatches = [
-                  theme.xterm.red,
-                  theme.xterm.green,
-                  theme.xterm.yellow,
-                  theme.xterm.blue,
-                  theme.xterm.magenta,
-                  theme.xterm.cyan,
-                ];
                 const active = activeId === theme.id;
                 return (
                   <button
                     key={theme.id}
                     type="button"
                     className={`theme-card ${active ? "is-active" : ""}`}
+                    aria-pressed={active}
                     onClick={() => onPick(theme.id)}
-                    style={{
-                      background: theme.xterm.background,
-                      color: theme.xterm.foreground,
-                      borderColor: active ? theme.accent : "transparent",
-                    }}
                   >
+                    <ThemePreview theme={theme} />
                     <span className="theme-card__name">{theme.name}</span>
-                    <span className="theme-card__swatches">
-                      {swatches.map((color, i) => (
-                        <i key={i} style={{ background: color }} />
-                      ))}
-                    </span>
                   </button>
                 );
               })}
@@ -252,6 +279,14 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
   const pickTheme = (id: string) =>
     pinnedThemeId !== null ? patchWorkspace({ themeId: id }) : set("themeId", id);
 
+  // The keymap as the user has it, so a hint that names a key stays true after
+  // the command has been rebound — and says nothing once it is unbound.
+  const keymap = resolveKeymap(settings.keybindings);
+  const withKey = (hint: string, id: CommandId) => {
+    const keys = shortcutLabel(keymap, id);
+    return keys ? `${hint} · ${keys}` : hint;
+  };
+
   const shellChoices: Choice[] = shells.map((shell) => ({
     value: shell.id,
     label: shell.label,
@@ -261,7 +296,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "general",
       label: t("settings.catGeneral"),
-      icon: "◈",
+      icon: "general",
       sections: [
         {
           id: "language",
@@ -361,7 +396,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "appearance",
       label: t("settings.catAppearance"),
-      icon: "◑",
+      icon: "appearance",
       sections: [
         {
           id: "interface",
@@ -379,6 +414,24 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               step: 5,
               display: `${settings.uiScale} %`,
               onChange: (value) => set("uiScale", value),
+            },
+            {
+              id: "navigatorOpen",
+              kind: "toggle",
+              label: t("settings.showNavigator"),
+              hint: withKey(t("settings.showNavigatorHint"), "view.navigator"),
+              keywords: "navigator navigateur sidebar barre latérale workspaces panneau gauche left",
+              value: settings.navigatorOpen,
+              onChange: (value) => set("navigatorOpen", value),
+            },
+            {
+              id: "inspectorOpen",
+              kind: "toggle",
+              label: t("settings.showInspector"),
+              hint: withKey(t("settings.showInspectorHint"), "view.inspector"),
+              keywords: "inspector inspecteur panneau droite right details détails",
+              value: settings.inspectorOpen,
+              onChange: (value) => set("inspectorOpen", value),
             },
           ],
         },
@@ -416,7 +469,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "terminal",
       label: t("settings.catTerminal"),
-      icon: "❯",
+      icon: "terminal",
       sections: [
         {
           id: "preview",
@@ -425,6 +478,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
             {
               id: "termPreview",
               kind: "custom",
+              bare: true,
               keywords: "preview aperçu",
               render: () => <TerminalPreview settings={settings} />,
             },
@@ -541,7 +595,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shell",
       label: t("settings.catShell"),
-      icon: "$",
+      icon: "shell",
       sections: [
         {
           id: "shell",
@@ -589,7 +643,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "notifications",
       label: t("settings.catNotifications"),
-      icon: "◎",
+      icon: "notifications",
       sections: [
         {
           id: "notifications",
@@ -630,7 +684,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "voice",
       label: t("settings.catVoice"),
-      icon: "🎙",
+      icon: "voice",
       sections: [
         {
           id: "voice",
@@ -653,7 +707,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               // Read from the live keymap rather than the defaults: the whole
               // point of the row is to answer "which key was it again", and it
               // has to stay right after the command has been rebound.
-              value: shortcutLabel(resolveKeymap(settings.keybindings), "voice.dictate"),
+              value: shortcutLabel(keymap, "voice.dictate"),
             },
             {
               id: "voiceEngine",
@@ -795,7 +849,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "discord",
       label: t("settings.catDiscord"),
-      icon: "❖",
+      icon: "discord",
       sections: [
         {
           id: "discordPreview",
@@ -804,6 +858,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
             {
               id: "discordCard",
               kind: "custom",
+              bare: true,
               keywords: "discord rich presence statut status carte card",
               render: () => {
                 // Built as if it were on, so the toggles below can be judged
@@ -879,7 +934,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shortcuts",
       label: t("settings.catShortcuts"),
-      icon: "⌨",
+      icon: "shortcuts",
       sections: [
         {
           id: "keymap",
@@ -894,6 +949,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               // conflicts, which no label-and-control row could hold.
               id: "keymap",
               kind: "custom",
+              bare: true,
               keywords:
                 "shortcut shortcuts keyboard key keys binding keymap raccourci raccourcis clavier touche ctrl alt shift",
               render: () => <ShortcutsSettings />,
@@ -906,7 +962,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "about",
       label: t("settings.catAbout"),
-      icon: "ⓘ",
+      icon: "about",
       sections: [
         {
           id: "about",

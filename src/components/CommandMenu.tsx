@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useT } from "../i18n";
+import { arrowStep, stepIndex } from "../lib/menuNav";
 import { useShortcutLabel } from "../lib/useShortcuts";
 import type { CommandId } from "../lib/shortcuts";
 import type { CommandScope } from "../store";
@@ -71,7 +72,24 @@ export function CommandMenu({
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      const menu = menuRef.current;
+      // Closing hands focus back to the pane's terminal (the header's
+      // onClose), wherever it was in the menu.
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Up and Down walk the entries, from the button as well as from inside,
+      // the way a menu answers the keyboard.
+      const step = arrowStep(event.key);
+      const active = document.activeElement;
+      if (!step || !menu) return;
+      if (active !== anchorRef.current && !menu.contains(active)) return;
+      const items = [...menu.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
+      const next = stepIndex(items.indexOf(active as HTMLButtonElement), items.length, step, true);
+      if (next === null) return;
+      event.preventDefault();
+      items[next].focus();
     }
     function onPointer(event: PointerEvent) {
       const target = event.target as Node;
@@ -91,9 +109,10 @@ export function CommandMenu({
 
   const section = (commands: SavedCommand[], scope: CommandScope, offset: number) => {
     if (!commands.length) return null;
+    const headId = `cmd-menu-${scope}`;
     return (
-      <div className="cmd-menu__group">
-        <span className="cmd-menu__head">
+      <div className="cmd-menu__group" role="group" aria-labelledby={headId}>
+        <span className="cmd-menu__head" id={headId}>
           {t(scope === "workspace" ? "commands.scopeWorkspace" : "commands.scopeGlobal")}
         </span>
         {commands.map((command, index) => {
@@ -108,38 +127,53 @@ export function CommandMenu({
             <div className="cmd-item" key={command.id}>
               <button
                 className="cmd-item__run"
+                role="menuitem"
                 onClick={() => onRun(command)}
                 title={t(command.broadcast ? "commands.runHintAll" : "commands.runHint", {
                   command: command.command,
                 })}
               >
-                <span className="cmd-item__label">{label || command.command}</span>
-                {label && <span className="cmd-item__cmd">{command.command}</span>}
+                {label ? (
+                  <>
+                    <span className="cmd-item__label">{label}</span>
+                    <span className="cmd-item__cmd">{command.command}</span>
+                  </>
+                ) : (
+                  <span className="cmd-item__label cmd-item__label--mono">
+                    {command.command}
+                  </span>
+                )}
+                {command.broadcast && (
+                  <span className="cmd-item__tag" title={t("commands.broadcast")}>
+                    ⇉
+                  </span>
+                )}
               </button>
 
-              {command.broadcast && (
-                <span className="cmd-item__tag" title={t("commands.broadcast")}>
-                  ⇉
+              {/* The key and the edit buttons share one slot: the key at rest,
+                  the buttons once the row is pointed at or focused, so neither
+                  pushes the text around when the other appears. */}
+              <span className="cmd-item__end">
+                {keys && <span className="cmd-item__keys">{keys}</span>}
+                <span className="cmd-item__actions">
+                  <button
+                    className="cmd-item__btn"
+                    onClick={() => onEdit(command, scope)}
+                    title={t("commands.edit")}
+                    aria-label={t("commands.edit")}
+                  >
+                    <Icon name="pencil" size={12} />
+                  </button>
+                  <button
+                    className="cmd-item__btn cmd-item__btn--del"
+                    onClick={() => onRemove(command, scope)}
+                    title={t("commands.remove")}
+                    aria-label={t("commands.remove")}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
                 </span>
-              )}
-              {keys && <span className="cmd-item__keys">{keys}</span>}
-
-              <button
-                className="cmd-item__btn"
-                onClick={() => onEdit(command, scope)}
-                title={t("commands.edit")}
-                aria-label={t("commands.edit")}
-              >
-                <Icon name="pencil" size={12} />
-              </button>
-              <button
-                className="cmd-item__btn cmd-item__btn--del"
-                onClick={() => onRemove(command, scope)}
-                title={t("commands.remove")}
-                aria-label={t("commands.remove")}
-              >
-                <Icon name="close" size={12} />
-              </button>
+              </span>
             </div>
           );
         })}
@@ -163,7 +197,8 @@ export function CommandMenu({
       {section(workspaceCommands, "workspace", 0)}
       {section(globalCommands, "global", workspaceCommands.length)}
 
-      <button className="cmd-menu__add" onClick={onAdd}>
+      <button className="cmd-menu__add" role="menuitem" onClick={onAdd}>
+        <Icon name="plus" size={12} />
         {t("commands.add")}
       </button>
     </div>

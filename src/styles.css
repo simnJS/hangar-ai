@@ -2385,176 +2385,246 @@ body.is-dragging-pane .pane__bar {
 
 /* ---------- Settings page ---------- */
 
-/* Fullscreen, above the workspace but below the modals. The terminals stay
-   mounted underneath: opening the settings never disturbs a running agent. */
-.settings {
-  position: fixed;
-  inset: 0;
+/* The settings are a window over the workspace, laid out like the system's
+   own: categories on the left, the chosen one's grouped rows on the right.
+   Above the workspace but below the dialogs; the terminals stay mounted
+   underneath, so opening the settings never disturbs a running agent. */
+.modal-backdrop.modal-backdrop--settings {
   z-index: 30;
+}
+
+.settings {
+  /* Content on a well, rows on raised groups — in the light the other way
+     round: white groups on a grey page, the way the system draws them. */
+  --settings-page: var(--bg-sunken);
+  --group-bg: var(--raised);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: var(--bg);
-  animation: settings-in 150ms ease;
+  grid-template-columns: calc(200px * var(--ui-scale)) minmax(0, 1fr);
+  width: min(calc(980px * var(--ui-scale)), 100%);
+  height: min(calc(700px * var(--ui-scale)), 100%);
+  background: var(--chrome);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 0 0 1px var(--float-ring, transparent),
+    0 28px 70px -18px var(--shadow),
+    0 10px 28px -14px var(--shadow);
+  overflow: hidden;
+  animation: modal-in 180ms var(--ease);
 }
 
-@keyframes settings-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
+@supports (color: light-dark(red, red)) {
+  .settings {
+    --settings-page: light-dark(var(--chrome-bar), var(--bg-sunken));
+    --group-bg: light-dark(var(--bg), var(--raised));
   }
 }
 
-@keyframes slide-in {
-  from {
-    transform: translateX(14px);
-    opacity: 0;
-  }
-}
-
-.settings__head {
+.settings__side {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 11px 16px;
-  background: var(--bg-sunken);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  min-height: 0;
+  background: var(--chrome);
+  border-right: 1px solid var(--sep);
 }
 
-.settings__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: calc(14px * var(--ui-scale));
-  font-weight: 650;
-}
-
-.settings__title-icon {
-  color: var(--accent);
-}
-
-.settings__search {
+.settings__search,
+.keymap__search {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
-  width: min(340px, 42vw);
-  padding: 4px 6px 4px 9px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  transition: border-color var(--dur);
+  height: calc(28px * var(--ui-scale));
+  padding: 0 4px 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  transition: border-color var(--dur), box-shadow var(--dur);
 }
 
-.settings__search:focus-within {
-  border-color: var(--accent-ring);
+.settings__search {
+  margin: 12px 10px 10px;
 }
 
-.settings__search-icon {
-  color: var(--fg-subtle);
-  font-size: calc(14px * var(--ui-scale));
-  line-height: 1;
+.settings__search:focus-within,
+.keymap__search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.settings__search input {
+.settings__search-icon,
+.keymap__search-icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+.settings__search input,
+.keymap__search input {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
-  padding: 2px 0;
   background: transparent;
   outline: none;
+  font-size: calc(12px * var(--ui-scale));
 }
 
-.settings__search input::placeholder {
+.settings__search input::placeholder,
+.keymap__search input::placeholder {
   color: var(--fg-subtle);
 }
 
-.settings__body {
+/* Round, filled, inside the field: the system's own clear button. */
+.settings__search-clear {
+  flex: none;
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  min-height: 0;
+  place-items: center;
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
 }
 
-.settings__rail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px 10px;
-  background: var(--bg-sunken);
-  border-right: 1px solid var(--border);
+.settings__search-clear:hover {
+  background: var(--border-strong);
+  color: var(--fg);
+}
+
+.settings__search-clear:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.settings__search-clear .glyph-icon {
+  width: calc(10px * var(--ui-scale));
+  height: calc(10px * var(--ui-scale));
+  stroke-width: 2.5;
 }
 
 .settings__nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  padding: 0 8px 12px;
+}
+
+.settings__cat {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
+  gap: 8px;
+  height: calc(28px * var(--ui-scale));
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
   text-align: left;
   cursor: pointer;
   transition: background var(--dur), color var(--dur);
 }
 
-.settings__nav:hover {
+.settings__cat:hover {
   background: var(--surface-hover);
-  color: var(--fg);
 }
 
-.settings__nav.is-active {
-  background: var(--surface-active);
-  border-color: var(--border);
-  color: var(--fg);
+.settings__cat.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-hi);
+  font-weight: 500;
 }
 
-.settings__nav.is-active .settings__nav-icon {
-  color: var(--accent);
+.settings__cat:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
-.settings__nav-icon {
+.settings__cat-icon {
   width: calc(15px * var(--ui-scale));
-  text-align: center;
-  color: var(--fg-subtle);
+  height: calc(15px * var(--ui-scale));
+  color: var(--fg-muted);
 }
 
-.settings__nav-label {
+.settings__cat.is-active .settings__cat-icon {
+  color: var(--accent-hi);
+}
+
+.settings__cat-label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.settings__nav-count {
+.settings__cat-count {
+  font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--text-hint);
   font-variant-numeric: tabular-nums;
+}
+
+.settings__cat.is-active .settings__cat-count {
+  color: inherit;
+}
+
+.settings__main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--settings-page);
+}
+
+.settings__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: calc(48px * var(--ui-scale));
+  padding: 0 10px 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings__content {
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .settings__page {
   display: grid;
   gap: 24px;
   align-content: start;
-  max-width: 820px;
+  max-width: calc(680px * var(--ui-scale));
   margin: 0 auto;
-  padding: 24px 30px 64px;
-}
-
-.settings__page-title {
-  margin: 0;
-  font-size: calc(19px * var(--ui-scale));
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  padding: 20px 24px 40px;
 }
 
 .settings__empty {
-  padding: 48px 30px;
+  margin: 0;
+  padding: 56px 30px;
   text-align: center;
-  color: var(--fg-subtle);
+  color: var(--text-hint);
 }
 
 .set-section {
@@ -2562,95 +2632,174 @@ body.is-dragging-pane .pane__bar {
   gap: 8px;
 }
 
+.set-section__head {
+  display: grid;
+  gap: 2px;
+  padding: 0 4px;
+}
+
 .set-section__title {
   margin: 0;
-  font-size: calc(10.5px * var(--ui-scale));
+  font-size: calc(13px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  color: var(--fg);
 }
 
 .set-section__hint {
-  margin: -4px 0 0;
+  margin: 0;
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  line-height: 1.45;
+  color: var(--text-hint);
 }
 
-.set-section__rows {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
+/* The grouped box: rows on a rounded surface, split by inset hairlines. */
+.set-group {
+  background: var(--group-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.set-section__bare {
+  display: grid;
+  gap: 10px;
 }
 
 .theme-groups {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .theme-group__label {
   display: block;
-  margin-bottom: 7px;
-  font-size: calc(10px * var(--ui-scale));
+  margin-bottom: 10px;
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  color: var(--text-hint);
 }
 
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(calc(104px * var(--ui-scale)), 1fr));
+  gap: 14px 12px;
 }
 
+/* A thumbnail with its name under it, as the system shows wallpapers: the
+   picture is what you choose by, the name only confirms it. */
 .theme-card {
   display: grid;
-  gap: 8px;
-  padding: 10px 11px;
-  border-radius: 0;
-  border: 1.5px solid transparent;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: calc(11.5px * var(--ui-scale));
+  text-align: center;
   cursor: pointer;
-  text-align: left;
-  transition: transform var(--dur), box-shadow var(--dur);
 }
 
-.theme-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px -8px var(--shadow);
+.theme-card:focus-visible {
+  outline: none;
 }
 
-.theme-card.is-active {
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.theme-card__preview {
+  display: flex;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line-strong), 0 1px 3px -1px var(--shadow);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color var(--dur), box-shadow var(--dur);
+}
+
+.theme-card:hover .theme-card__preview {
+  box-shadow: 0 0 0 1px var(--border-strong), 0 4px 10px -4px var(--shadow);
+}
+
+.theme-card:focus-visible .theme-card__preview {
+  outline-color: var(--accent-ring);
+}
+
+.theme-card.is-active .theme-card__preview {
+  outline-color: var(--accent);
+}
+
+.theme-card.is-active:focus-visible .theme-card__preview {
+  box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 7px var(--accent-soft);
+}
+
+.theme-card__nav {
+  flex: 0 0 30%;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 8px 5px;
+}
+
+.theme-card__nav i,
+.theme-card__lines i {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.theme-card__nav i:nth-child(1) {
+  width: 55%;
+}
+
+.theme-card__nav i:nth-child(2) {
+  width: 85%;
+  opacity: 0.6;
+}
+
+.theme-card__nav i:nth-child(3) {
+  width: 70%;
+  opacity: 0.6;
+}
+
+.theme-card__lines {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 8px 7px;
 }
 
 .theme-card__name {
-  font-size: calc(11.5px * var(--ui-scale));
-  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.theme-card__swatches {
-  display: flex;
-  gap: 3px;
-}
-
-.theme-card__swatches i {
-  width: 11px;
-  height: 5px;
-  border-radius: 0;
+.theme-card.is-active .theme-card__name {
+  color: var(--fg);
+  font-weight: 600;
 }
 
 /* ---------- Settings rows & controls ---------- */
 
+/* Label and hint on the left, the control on the right. */
 .set-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 22px;
-  padding: 11px 14px;
+  gap: 20px;
+  min-height: calc(42px * var(--ui-scale));
+  padding: 8px 12px;
 }
 
-.set-row + .set-row {
-  border-top: 1px solid var(--border);
+/* Inset at both ends, like the system's grouped lists: the line separates
+   two rows, it does not cut the box in two. */
+.set-row + .set-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--line);
 }
 
 /* Anything too wide for a label/control pair: theme grid, preview… The flex
@@ -2660,118 +2809,268 @@ body.is-dragging-pane .pane__bar {
   align-items: normal;
   justify-content: normal;
   gap: 10px;
+  padding: 12px;
+}
+
+.set-row--bare {
+  padding: 0;
 }
 
 .set-row__text {
   display: grid;
   gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
 .set-row__label {
+  font-size: calc(13px * var(--ui-scale));
   color: var(--fg);
 }
 
 .set-row__hint {
-  font-size: calc(11px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--text-hint);
 }
 
 .set-row__control {
   display: flex;
-  flex: 0 0 auto;
+  flex: none;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  min-width: 236px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.set-select {
+/* The controls that take a width take the same one, so a page of them lines
+   up down its right edge. */
+.set-row--select .set-row__control,
+.set-row--input .set-row__control,
+.set-row--slider .set-row__control {
+  width: calc(240px * var(--ui-scale));
+  max-width: 48%;
+}
+
+/* Fields, in the settings and in every dialog: 26px, a hairline, and the
+   accent ring when they have the keyboard. */
+.set-input,
+.text-input,
+.picker__path,
+.set-select__field {
   width: 100%;
-  padding: 5px 8px;
+  min-height: calc(26px * var(--ui-scale));
+  padding: 3px 8px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.4;
   outline: none;
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+
+.set-input:focus,
+.text-input:focus,
+.picker__path:focus,
+.set-select__field:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.set-input::placeholder,
+.text-input::placeholder,
+.picker__path::placeholder {
+  color: var(--fg-subtle);
+}
+
+/* The chevrons are drawn by the wrapper: a native arrow cannot be recoloured,
+   and would stay the platform's grey on every theme. */
+.set-select {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.set-select__field {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: calc(24px * var(--ui-scale));
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
-.set-select:focus-visible {
-  border-color: var(--accent-ring);
+.set-select__field option {
+  background: var(--chrome);
+  color: var(--fg);
 }
 
-.set-select option {
-  background: var(--bg-sunken);
+.set-select::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: calc(10px * var(--ui-scale));
+  height: calc(10px * var(--ui-scale));
+  transform: translateY(-50%);
+  background: var(--fg-muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
 }
 
-.set-input {
-  width: 100%;
-  padding: 5px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  outline: none;
-}
-
-.set-input:focus-visible {
-  border-color: var(--accent-ring);
-}
-
+/* A track filled up to the knob (--fill, set from the value), so the slider
+   reads as a level rather than as a knob floating on a line. */
 .set-range {
+  -webkit-appearance: none;
+  appearance: none;
   flex: 1;
   min-width: 0;
-  accent-color: var(--accent);
+  height: calc(18px * var(--ui-scale));
+  margin: 0;
+  background: transparent;
   cursor: pointer;
+}
+
+.set-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--fill, 0%),
+    var(--border-strong) var(--fill, 0%)
+  );
+}
+
+.set-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.set-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* White in every theme, as the system draws it: the knob is a physical part
+   of the control, not a colour that means something. */
+.set-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  margin-top: calc(2px - 7px * var(--ui-scale));
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: box-shadow var(--dur);
+}
+
+.set-range::-moz-range-thumb {
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.set-range:focus-visible {
+  outline: none;
+}
+
+.set-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring), 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.set-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring), 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .set-value {
-  min-width: 62px;
+  flex: none;
+  min-width: calc(52px * var(--ui-scale));
   text-align: right;
-  font-size: calc(11.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .set-text {
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--mono);
   font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
+  font-variant-ligatures: none;
 }
 
+/* Segmented control. The chosen segment is lifted off the track: lighter on
+   a dark theme, white on a light one. */
 .seg {
-  display: flex;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  --seg-track: var(--bg);
+  --seg-on: color-mix(in srgb, var(--fg) 17%, var(--chrome));
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  height: calc(26px * var(--ui-scale));
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--seg-track);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+@supports (color: light-dark(red, red)) {
+  .seg {
+    --seg-track: light-dark(var(--surface-active), var(--bg));
+    --seg-on: light-dark(var(--bg), color-mix(in srgb, var(--fg) 17%, var(--chrome)));
+  }
 }
 
 .seg__btn {
-  padding: 5px 11px;
+  min-width: 0;
+  padding: 0 10px;
   border: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--fg-muted);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
   transition: background var(--dur), color var(--dur);
 }
 
-.seg__btn + .seg__btn {
-  border-left: 1px solid var(--border);
-}
-
 .seg__btn:hover {
-  background: var(--surface-hover);
   color: var(--fg);
 }
 
 .seg__btn.is-active {
-  background: var(--accent-soft);
+  background: var(--seg-on);
   color: var(--fg);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line-strong);
+}
+
+.seg__btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
+}
+
+.seg--numbers .seg__btn {
+  min-width: calc(34px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
 }
 
 /* The checkbox covers the track, so the whole switch is the hit area. */
 .switch {
   position: relative;
   display: inline-flex;
+  flex: none;
 }
 
 .switch input {
@@ -2784,54 +3083,62 @@ body.is-dragging-pane .pane__bar {
 
 .switch__track {
   display: flex;
-  width: 34px;
-  height: 18px;
-  padding: 1px;
-  background: var(--surface-active);
-  border: 1px solid var(--border-strong);
-  transition: background var(--dur), border-color var(--dur);
+  align-items: center;
+  width: calc(30px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background var(--dur), box-shadow var(--dur);
 }
 
+/* White in every theme, like the slider's knob. */
 .switch__knob {
-  width: 14px;
-  height: 14px;
-  background: var(--fg-subtle);
-  transition: transform var(--dur), background var(--dur);
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  transition: transform var(--dur) var(--ease);
 }
 
 .switch input:checked + .switch__track {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-.switch input:checked + .switch__track .switch__knob {
-  transform: translateX(16px);
   background: var(--accent);
 }
 
+.switch input:checked + .switch__track .switch__knob {
+  transform: translateX(calc(12px * var(--ui-scale)));
+}
+
 .switch input:focus-visible + .switch__track {
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.switch input:disabled + .switch__track {
+  opacity: 0.45;
 }
 
 .font-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--ui-scale)), 1fr));
+  gap: 8px;
 }
 
 .font-card {
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--fg);
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur), border-color var(--dur);
+  transition: border-color var(--dur), box-shadow var(--dur);
 }
 
 .font-card:hover {
-  background: var(--surface-hover);
   border-color: var(--border-strong);
 }
 
@@ -2840,22 +3147,32 @@ body.is-dragging-pane .pane__bar {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.font-card:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
 .font-card__name {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-hint);
+}
+
+.font-card.is-active .font-card__name {
+  color: var(--accent-hi);
 }
 
 .font-card__sample {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
 }
 
 /* Typography, cursor and padding, shown on the live theme. */
 .term-preview {
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   color: var(--fg);
   overflow: hidden;
   white-space: nowrap;
@@ -2915,47 +3232,50 @@ body.is-dragging-pane .pane__bar {
   /* Roughly the width Discord gives it: stretched to the page it stops
      reading as the card it is meant to preview. */
   max-width: 400px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
+  background: var(--group-bg, var(--raised));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   transition: opacity var(--dur) ease;
 }
 
 /* Off is a preview, not a state: dimmed enough to read as inactive, legible
    enough to judge the toggles by. */
 .dc-card.is-off {
-  opacity: 0.45;
+  opacity: 0.5;
 }
 
 .dc-card__art {
   position: relative;
   flex: none;
-  width: 76px;
-  height: 76px;
+  width: 72px;
+  height: 72px;
   display: grid;
   place-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
 }
 
 .dc-card__icon {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  border-radius: inherit;
 }
 
 .dc-card__badge {
   position: absolute;
-  right: -7px;
-  bottom: -7px;
-  width: 24px;
-  height: 24px;
+  right: -6px;
+  bottom: -6px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   font-size: calc(11px * var(--ui-scale));
   font-weight: 700;
   color: var(--accent-fg);
   background: var(--accent);
-  border: 2px solid var(--bg-sunken);
+  border: 2px solid var(--group-bg, var(--raised));
   border-radius: 50%;
 }
 
@@ -2974,16 +3294,14 @@ body.is-dragging-pane .pane__bar {
 }
 
 .dc-card__head {
-  font-size: calc(10px * var(--ui-scale));
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--text-hint);
   margin-bottom: 2px;
 }
 
 .dc-card__name {
-  font-size: calc(13.5px * var(--ui-scale));
+  font-size: calc(13px * var(--ui-scale));
   color: var(--fg);
 }
 
@@ -2995,7 +3313,7 @@ body.is-dragging-pane .pane__bar {
 
 .dc-card__time {
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--text-hint);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3003,11 +3321,11 @@ body.is-dragging-pane .pane__bar {
 .dc-card__button {
   align-self: flex-start;
   margin-top: 8px;
-  padding: 4px 12px;
+  padding: 3px 12px;
   font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg);
-  background: var(--surface-hover);
-  border: 1px solid var(--border);
+  background: var(--surface-active);
+  border-radius: var(--radius-sm);
 }
 
 .dc-status {
@@ -3015,16 +3333,18 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   gap: 8px;
   margin: 0;
+  padding: 0 4px;
   font-size: calc(11.5px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
 .dc-status__dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: none;
   border-radius: 50%;
-  background: var(--fg-subtle);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-subtle);
 }
 
 .dc-status--on .dc-status__dot {
@@ -3035,6 +3355,7 @@ body.is-dragging-pane .pane__bar {
 /* Retrying, not broken: the pulse says something is still happening. */
 .dc-status--waiting .dc-status__dot {
   background: var(--warning);
+  box-shadow: none;
   animation: dc-pulse 1.8s ease-in-out infinite;
 }
 
@@ -3043,7 +3364,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .dc-status__hint {
-  color: var(--fg-subtle);
+  color: var(--text-hint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3055,17 +3376,68 @@ body.is-dragging-pane .pane__bar {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .dc-status--waiting .dc-status__dot {
+    animation: none;
+  }
+}
+
 /* ---------- Session modal ---------- */
+
+/* Every dialog shares this system (components/Backdrop): a translucent scrim
+   with a light blur, and a chrome panel whose title bar and footer are set
+   off by hairlines, actions at the bottom right. */
+
+/* The glyphs of components/settings/icons, sized with the interface. */
+.glyph-icon {
+  flex: none;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+}
+
+/* What floats over the window — dialogs, menus, capsules — gets a dark outer
+   edge under its light hairline on a dark theme, the double edge that keeps
+   a panel from melting into what is behind it. On a light theme the shadow
+   does that alone. */
+.modal-backdrop,
+.cmd-menu,
+.update,
+.voice-pill {
+  --float-ring: transparent;
+  /* Secondary text: hints, paths, metadata. Between --fg-muted and --fg, so
+     it still reads at 4.5:1 on a raised group, which --fg-subtle does not. */
+  --text-hint: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+
+@supports (color: light-dark(red, red)) {
+  .modal-backdrop,
+  .cmd-menu,
+  .update,
+  .voice-pill {
+    --float-ring: light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.55));
+  }
+}
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(2px);
+  z-index: 40;
   display: grid;
   place-items: center;
-  z-index: 40;
-  animation: fade-in 140ms ease;
+  padding: 24px;
+  /* The same veil reads twice as heavy over white, so a light theme gets a
+     lighter one. */
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  outline: none;
+  animation: fade-in var(--dur) var(--ease);
+}
+
+@supports (color: light-dark(red, red)) {
+  .modal-backdrop {
+    background: light-dark(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.36));
+  }
 }
 
 @keyframes fade-in {
@@ -3074,85 +3446,226 @@ body.is-dragging-pane .pane__bar {
   }
 }
 
+@keyframes slide-in {
+  from {
+    transform: translateX(14px);
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
 .modal {
-  width: min(560px, 90vw);
-  max-height: 74vh;
+  /* Lists and grouped boxes inside a dialog sit in a well: darker than the
+     panel on a dark theme, white on a light one. */
+  --group-bg: var(--bg);
+  width: min(calc(520px * var(--ui-scale)), 100%);
+  max-height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 24px 60px -24px var(--shadow);
+  background: var(--chrome);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 0 0 1px var(--float-ring, transparent),
+    0 24px 64px -16px var(--shadow),
+    0 8px 24px -12px var(--shadow);
   overflow: hidden;
+  animation: modal-in 180ms var(--ease);
+}
+
+.modal--list {
+  width: min(calc(560px * var(--ui-scale)), 100%);
 }
 
 .modal__head {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px 6px;
+  gap: 12px;
+  min-height: calc(48px * var(--ui-scale));
+  padding: 8px 10px 8px 18px;
+  border-bottom: 1px solid var(--line);
 }
 
+.modal__titles {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.modal__title,
 .modal__head h2 {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: calc(13px * var(--ui-scale));
-  font-weight: 650;
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal__sub {
-  margin: 0 14px 10px;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
-  font-family: ui-monospace, Consolas, monospace;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--text-hint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Dialogs that still put the subtitle under the bar rather than in it: the
+   two read as one title block, with the hairline under both. */
+.modal__head:has(+ .modal__sub) {
+  min-height: 0;
+  padding-bottom: 2px;
+  border-bottom: 0;
+}
+
+.modal__head + .modal__sub {
+  flex: none;
+  padding: 0 18px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal__close,
+.modal__head .icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(26px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.modal__close:hover,
+.modal__head .icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.modal__close:focus-visible,
+.modal__head .icon-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
 }
 
 .modal__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 10px 10px;
   display: grid;
+  align-content: start;
   gap: 4px;
+  padding: 10px;
+}
+
+/* A form is the body and the footer at once, without a box of its own. */
+.modal__form {
+  display: contents;
+}
+
+.modal__body--list {
+  gap: 1px;
+  padding: 6px;
+}
+
+.modal__sep {
+  height: 1px;
+  margin: 4px 8px;
+  border: 0;
+  background: var(--line);
+}
+
+.modal__intro {
+  margin: 0;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.55;
+  color: var(--fg-muted);
 }
 
 .modal__empty {
-  padding: 18px 6px;
+  margin: 0;
+  padding: 20px 8px;
   text-align: center;
-  color: var(--fg-subtle);
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-hint);
 }
 
 .modal__foot {
-  padding: 9px 14px;
-  border-top: 1px solid var(--border);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: calc(52px * var(--ui-scale));
+  padding: 10px 14px 10px 18px;
+  border-top: 1px solid var(--line);
 }
 
+/* A sentence about the dialog sits left, away from the buttons. */
 .modal__note {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  margin-right: auto;
+  min-width: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-hint);
 }
 
+/* One session per line: what it was about, then when and which, in the
+   tone of metadata. */
 .session {
   display: grid;
-  gap: 2px;
-  padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+  grid-template-columns: calc(16px * var(--ui-scale)) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: calc(30px * var(--ui-scale));
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--radius);
   background: transparent;
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur), border-color var(--dur);
+  transition: background var(--dur), color var(--dur);
 }
 
 .session:hover {
   background: var(--surface-hover);
 }
 
-.session.is-active {
-  background: var(--accent-soft);
-  border-color: var(--accent-ring);
+.session__check {
+  display: grid;
+  place-items: center;
+  color: var(--accent-hi);
+}
+
+.session__check .glyph-icon {
+  width: calc(13px * var(--ui-scale));
+  height: calc(13px * var(--ui-scale));
+  stroke-width: 2.25;
+}
+
+.session.is-active .session__label {
+  font-weight: 600;
 }
 
 .session__label {
@@ -3161,36 +3674,164 @@ body.is-dragging-pane .pane__bar {
   white-space: nowrap;
 }
 
+.session__label em {
+  font-style: normal;
+  color: var(--text-hint);
+}
+
+/* The new-session row explains itself in a sentence, not in metadata. */
+.session__meta.session__meta--text {
+  font-family: inherit;
+  font-size: calc(12px * var(--ui-scale));
+}
+
 .session__meta {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--text-hint);
+  white-space: nowrap;
+}
+
+/* The keyboard's row is the menu highlight, like the palette's. */
+.session:focus-visible {
+  outline: none;
+  background: var(--accent);
+}
+
+.session:focus-visible .session__check,
+.session:focus-visible .session__meta,
+.session:focus-visible .session__label em {
+  color: inherit;
+}
+
+.session:focus-visible .session__meta {
+  opacity: 0.8;
+}
+
+/* Text on the accent: white wherever the accent is dark enough to carry it,
+   as the system does, and near-black on the pale accents (Gruvbox, Nord…)
+   where white would wash out. Engines without relative colours fall back on
+   the theme's own --accent-fg. */
+.session:focus-visible,
+.cmd-item:hover,
+.cmd-item:focus-within,
+.cmd-menu__add:hover,
+.cmd-menu__add:focus-visible,
+.check:checked::after {
+  color: var(--accent-fg);
+}
+
+@supports (color: oklch(from red l c h)) {
+  .session:focus-visible,
+  .cmd-item:hover,
+  .cmd-item:focus-within,
+  .cmd-menu__add:hover,
+  .cmd-menu__add:focus-visible,
+  .check:checked::after {
+    color: oklch(from var(--accent) clamp(0, (0.68 - l) * 1000, 1) 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal,
+  .settings,
+  .cmd-menu,
+  .update,
+  .voice-pill {
+    animation: none;
+  }
 }
 
 /* ---------- Update banner ---------- */
 
-/* Floats above the layout so it never reflows the panes when it appears. */
+/* A capsule floating over the bottom-right corner, clear of the status bar:
+   it never reflows the panes when it appears, and the corner is where a
+   notice that can wait is expected to sit. */
 .update {
   position: fixed;
-  top: 12px;
   right: 16px;
+  bottom: calc(36px * var(--ui-scale) + 14px);
   z-index: 60;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--accent-ring);
-  box-shadow: 0 12px 30px -14px var(--shadow);
-  animation: slide-in 200ms ease;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  height: calc(40px * var(--ui-scale));
+  padding: 0 6px 0 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chrome-bar) 88%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    0 0 0 1px var(--float-ring, transparent),
+    0 14px 34px -12px var(--shadow),
+    0 4px 10px -6px var(--shadow);
+  animation: update-in 220ms var(--ease);
+}
+
+@keyframes update-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.update--downloading {
+  padding-right: 16px;
+}
+
+.update__icon {
+  color: var(--accent-hi);
+}
+
+.update--ready .update__icon {
+  color: var(--success);
+}
+
+.update--failed .update__icon {
+  color: var(--danger);
 }
 
 .update__text {
-  color: var(--fg-muted);
+  min-width: 0;
+  margin-right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
 }
 
 .update__text--error {
   color: var(--danger);
+}
+
+/* Pills inside the pill: a square button in a round capsule looks dropped in. */
+.update .btn {
+  min-height: calc(28px * var(--ui-scale));
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.update__bar {
+  flex: none;
+  width: calc(96px * var(--ui-scale));
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+
+.update__bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms linear;
 }
 
 /* ---------- Kanban board ---------- */
@@ -3866,29 +4507,94 @@ body.is-dragging-pane .board-dock__grip {
 
 /* ---------- MCP install panel ---------- */
 
+.modal__body--stack {
+  gap: 14px;
+  padding: 16px 18px 18px;
+}
+
 .form-hint--block {
   display: block;
   line-height: 1.6;
   margin: 4px 0 10px;
 }
 
+/* Checkbox, drawn so it follows the theme like the switch does. */
+.check {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  margin: 0;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  cursor: pointer;
+  transition: background var(--dur), border-color var(--dur);
+}
+
+.check:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.check:checked::after {
+  content: "";
+  width: 72%;
+  height: 72%;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.check:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* One grouped list per kind of thing to write: the tools, then the playbook. */
 .targets {
   display: grid;
-  gap: 5px;
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .target {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 9px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  gap: 10px;
+  padding: 9px 12px;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
-.target--done {
-  opacity: 0.72;
+.target .check {
+  margin-top: calc(2px * var(--ui-scale));
+}
+
+.target + .target::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(36px * var(--ui-scale));
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.target:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.target--done .target__label {
+  color: var(--fg-muted);
 }
 
 .target__meta {
@@ -3900,33 +4606,46 @@ body.is-dragging-pane .board-dock__grip {
 .target__label {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-weight: 550;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 500;
 }
 
+/* A tag: neutral by default, coloured only when it reports a state. */
 .target__badge {
   font-style: normal;
-  font-size: calc(10px * var(--ui-scale));
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 500;
-  padding: 0 5px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-active);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.target__badge--ok {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
 }
 
 .target__badge--muted {
-  background: var(--surface-active);
-  color: var(--fg-subtle);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-hint);
 }
 
 .target__badge--alert {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 
 .target__path {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--text-hint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3942,31 +4661,81 @@ body.is-dragging-pane .board-dock__grip {
 
 .reports {
   display: grid;
-  gap: 3px;
-  padding: 9px 11px;
-  margin: 10px 0;
-  background: var(--surface);
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
 }
 
 .reports p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   margin: 0;
+  font-size: calc(12px * var(--ui-scale));
 }
 
-.report--ok {
+.report--ok .report__icon {
   color: var(--success);
 }
 
-.report--fail {
+.report--fail .report__icon {
   color: var(--danger);
 }
 
-.snippet {
-  margin: 4px 0 0;
-  padding: 8px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  font-family: ui-monospace, Consolas, monospace;
+.report__id {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.report__message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.report--fail .report__message {
+  color: var(--danger);
+}
+
+.reports .reports__hint {
+  margin-top: 4px;
+  color: var(--text-hint);
+}
+
+.manual {
+  display: grid;
+  gap: 6px;
+}
+
+.manual__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 0;
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.snippet {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--fg-muted);
   overflow-x: auto;
   white-space: pre;
   user-select: all;
@@ -3980,26 +4749,20 @@ body.is-dragging-pane .board-dock__grip {
 /* ---------- Workspace creation dialog ---------- */
 
 .modal--wide {
-  width: min(620px, 92vw);
+  width: min(calc(640px * var(--ui-scale)), 100%);
 }
 
+/* Stacked form: a label over its field, rows split by hairlines. */
 .modal__body--form {
-  display: grid;
-  gap: 2px;
-  padding: 6px 16px 14px;
-}
-
-.modal__foot--actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 0;
+  padding: 4px 18px 14px;
 }
 
 .form-row {
   display: grid;
-  gap: 7px;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .form-row:last-child {
@@ -4011,69 +4774,91 @@ body.is-dragging-pane .board-dock__grip {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  font-size: calc(10.5px * var(--ui-scale));
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg-muted);
 }
 
 .form-hint {
   text-transform: none;
   letter-spacing: 0;
-  font-weight: 500;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-weight: 400;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--text-hint);
 }
 
-.text-input,
-.picker__path {
-  width: 100%;
-  padding: 8px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  outline: none;
-  transition: border-color var(--dur), box-shadow var(--dur);
+/* Aligned form, the way the system lays out a dialog: labels right-aligned
+   in a column of their own, fields and their hints in the other. Each label
+   is as tall as a field, so it lines up with the control rather than with
+   the hint under it. */
+.form-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 14px;
+  padding: 18px 22px 20px;
 }
 
-.text-input:focus,
-.picker__path:focus {
-  border-color: var(--accent-ring);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.form-grid__label {
+  justify-self: end;
+  max-width: calc(180px * var(--ui-scale));
+  font-size: calc(13px * var(--ui-scale));
+  line-height: calc(26px * var(--ui-scale));
+  color: var(--fg-muted);
+  text-align: right;
 }
 
-.text-input::placeholder,
-.picker__path::placeholder {
-  color: var(--fg-subtle);
+.form-grid__field {
+  display: grid;
+  justify-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-grid__field > .seg {
+  justify-self: start;
+}
+
+.form-grid__field--inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: calc(26px * var(--ui-scale));
+}
+
+.form-grid__field--inline .set-select {
+  flex: 0 1 calc(260px * var(--ui-scale));
 }
 
 .picker {
   display: flex;
-  gap: 7px;
+  gap: 6px;
 }
 
 .picker__path {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--mono);
   font-size: calc(11.5px * var(--ui-scale));
+  font-variant-ligatures: none;
 }
 
-.layouts--lg {
-  justify-self: start;
+.text-input--mono {
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  font-variant-ligatures: none;
 }
 
-.layouts--lg .layouts__btn {
-  min-width: 46px;
-  padding: 6px 0;
-  font-size: calc(13px * var(--ui-scale));
-}
-
+/* Agent split: one grouped box, two columns, a stepper per agent. */
 .agent-counters {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .counter {
@@ -4081,125 +4866,155 @@ body.is-dragging-pane .board-dock__grip {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 7px 9px 7px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  min-width: 0;
+  min-height: calc(38px * var(--ui-scale));
+  padding: 4px 8px 4px 12px;
 }
 
-.counter.is-missing {
-  opacity: 0.62;
+.counter:nth-child(even) {
+  box-shadow: inset 1px 0 0 var(--line);
+}
+
+.counter:nth-child(n + 3) {
+  border-top: 1px solid var(--line);
 }
 
 .counter__name {
   display: grid;
-  gap: 1px;
-  font-weight: 550;
+  min-width: 0;
+  font-size: calc(13px * var(--ui-scale));
+}
+
+.counter.is-missing .counter__name {
+  color: var(--fg-muted);
 }
 
 .counter__missing {
-  font-size: calc(10px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   font-style: normal;
-  font-weight: 500;
   color: var(--warning);
 }
 
-.counter__controls {
-  display: flex;
+.stepper {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
+  height: calc(24px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--chrome);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
-.counter__btn {
-  width: 22px;
-  height: 22px;
+.stepper__btn {
   display: grid;
   place-items: center;
-  border-radius: 0;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  width: calc(24px * var(--ui-scale));
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
   cursor: pointer;
-  font-size: calc(13px * var(--ui-scale));
-  line-height: 1;
-  transition: background var(--dur), border-color var(--dur), opacity var(--dur);
+  transition: background var(--dur), color var(--dur), opacity var(--dur);
 }
 
-.counter__btn:hover:not(:disabled) {
-  background: var(--accent-soft);
-  border-color: var(--accent-ring);
+.stepper__btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--fg);
 }
 
-.counter__btn:disabled {
-  opacity: 0.32;
+.stepper__btn:disabled {
+  opacity: 0.35;
   cursor: default;
 }
 
-.counter__value {
-  min-width: 22px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
+.stepper__btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
-/* Mirrors the real grid: hairline gaps over a border-colored background. */
+.stepper__btn .glyph-icon {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+}
+
+.stepper__value {
+  min-width: calc(20px * var(--ui-scale));
+  text-align: center;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* The grid the workspace will open with, drawn the way the window draws it:
+   panes on a separator, each with its header — first name, then agent. */
 .preview {
   display: grid;
   gap: 1px;
   aspect-ratio: 16 / 7;
-  background: var(--border-strong);
-  border: 1px solid var(--border-strong);
+  background: var(--sep);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .preview__cell {
-  position: relative;
-  display: grid;
-  place-items: center;
-  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
   border: 0;
-  background: var(--surface);
-  color: var(--fg-muted);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
   cursor: pointer;
-  transition: background var(--dur), border-color var(--dur), color var(--dur);
+  transition: box-shadow var(--dur);
+}
+
+.preview__head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  height: calc(20px * var(--ui-scale));
+  padding: 0 7px;
+  line-height: calc(20px * var(--ui-scale));
+  background: var(--pane-head);
+  box-shadow: inset 0 -1px 0 var(--sep);
+}
+
+.preview__name {
+  flex: none;
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.preview__agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-hint);
+}
+
+.preview__cell.is-shell .preview__name {
+  color: var(--fg-muted);
+  font-weight: 500;
 }
 
 .preview__cell:hover {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.preview__tag {
-  font-size: calc(12px * var(--ui-scale));
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.preview__num {
-  position: absolute;
-  top: 4px;
-  left: 6px;
-  font-size: calc(9.5px * var(--ui-scale));
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--fg-subtle);
-}
-
-.preview__cell--claude {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.preview__cell--codex {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
-}
-
-.preview__cell--gemini {
-  background: color-mix(in srgb, var(--warning) 15%, transparent);
-  color: var(--warning);
-}
-
-.preview__cell--opencode {
-  background: color-mix(in srgb, var(--danger) 15%, transparent);
-  color: var(--danger);
+.preview__cell:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
 }
 
 .notice {
@@ -4207,11 +5022,13 @@ body.is-dragging-pane .board-dock__grip {
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 6px 6px 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  font-size: calc(11.5px * var(--ui-scale));
+  min-height: calc(30px * var(--ui-scale));
+  padding: 3px 4px 3px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--group-bg, var(--bg));
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg-muted);
 }
 
 .notice__text {
@@ -4221,17 +5038,52 @@ body.is-dragging-pane .board-dock__grip {
 
 .notice--error {
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--danger);
 }
 
-.btn--tiny {
-  padding: 3px 9px;
-  font-size: calc(11px * var(--ui-scale));
+.notice__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(22px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
 }
 
+.notice__close:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.notice__close:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
+}
+
+.notice__close .glyph-icon {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+}
+
+.btn--tiny {
+  min-height: calc(22px * var(--ui-scale));
+  padding: 0 9px;
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+/* The roots of a .code-workspace, one per line; the main one is selected. */
 .roots {
   display: grid;
-  gap: 4px;
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .root {
@@ -4239,65 +5091,71 @@ body.is-dragging-pane .board-dock__grip {
   /* The path takes what is left, so a long one truncates instead of pushing
      the tag out of the row. */
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 9px;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 6px 9px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg-muted);
-  cursor: pointer;
+  min-height: calc(30px * var(--ui-scale));
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
   text-align: left;
-  transition: border-color var(--dur), background var(--dur);
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.root + .root {
+  border-top: 1px solid var(--line);
 }
 
 .root:hover:not(:disabled) {
-  border-color: var(--accent-ring);
+  background: var(--surface-hover);
+}
+
+.root:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
 .root.is-main {
-  border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent);
 }
 
 .root.is-missing {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
 }
 
 .root__name {
-  font-weight: 550;
-  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 500;
+  font-size: calc(12.5px * var(--ui-scale));
 }
 
 .root__path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--text-hint);
 }
 
 .root__tag {
-  font-size: calc(9.5px * var(--ui-scale));
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-hint);
 }
 
 .root.is-main .root__tag {
-  color: var(--accent);
+  color: var(--accent-hi);
+  font-weight: 500;
 }
 
 /* ---------- Keyboard shortcuts ---------- */
 
 .keymap {
   display: grid;
-  gap: 16px;
+  gap: 22px;
   width: 100%;
 }
 
@@ -4308,102 +5166,104 @@ body.is-dragging-pane .board-dock__grip {
 }
 
 .keymap__search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   flex: 1;
   min-width: 0;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  height: calc(26px * var(--ui-scale));
 }
 
-.keymap__search:focus-within {
-  border-color: var(--accent);
-}
-
-.keymap__search-icon {
-  color: var(--fg-subtle);
-}
-
-.keymap__search input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 0;
-  border: 0;
-  background: transparent;
-  outline: none;
-}
-
+/* A status, not a control: a quiet pill that turns red when it has
+   something to report. */
 .keymap__state {
-  flex: 0 0 auto;
-  padding: 5px 8px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(22px * var(--ui-scale));
+  padding: 0 9px;
+  border-radius: 999px;
   font-size: calc(11px * var(--ui-scale));
-  color: var(--fg-subtle);
-  border: 1px solid var(--border);
+  color: var(--text-hint);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  white-space: nowrap;
 }
 
 .keymap__state.is-conflict {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  font-weight: 500;
 }
 
 .keymap__group-title {
-  margin: 0 0 5px;
-  font-size: calc(10.5px * var(--ui-scale));
+  margin: 0 0 8px;
+  padding: 0 4px;
+  font-size: calc(13px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  color: var(--fg);
 }
 
 .keymap__list {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border);
+  background: var(--group-bg, var(--raised));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .keymap__empty {
   margin: 0;
-  color: var(--fg-subtle);
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-hint);
 }
 
 /* Wrapping, so a conflict note takes the whole width under the row it warns
    about rather than squeezing the keys next to it. */
 .key-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  padding: 7px 10px;
+  gap: 6px 16px;
+  min-height: calc(36px * var(--ui-scale));
+  padding: 5px 8px 5px 12px;
 }
 
-.key-row + .key-row {
-  border-top: 1px solid var(--border);
+.key-row + .key-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--line);
 }
 
 .key-row:hover {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
 
 .key-row.is-conflict {
-  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .key-row__text {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
+  font-size: calc(13px * var(--ui-scale));
 }
 
 .key-row__tag {
-  font-size: calc(10px * var(--ui-scale));
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--accent);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-active);
+  color: var(--fg-muted);
 }
 
 .key-row__binds {
@@ -4415,28 +5275,37 @@ body.is-dragging-pane .board-dock__grip {
 }
 
 .key-row__none {
-  font-size: calc(11px * var(--ui-scale));
-  font-style: italic;
-  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-hint);
 }
 
 .key-row__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid transparent;
+  display: inline-grid;
+  place-items: center;
+  width: calc(22px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
   cursor: pointer;
-  transition: color var(--dur), background var(--dur), border-color var(--dur);
+  transition: color var(--dur), background var(--dur), opacity var(--dur);
+}
+
+.key-row__btn .glyph-icon {
+  width: calc(13px * var(--ui-scale));
+  height: calc(13px * var(--ui-scale));
 }
 
 .key-row__btn:hover:not(:disabled) {
   color: var(--fg);
   background: var(--surface-hover);
-  border-color: var(--border);
+}
+
+.key-row__btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
 }
 
 .key-row__btn:disabled {
@@ -4444,12 +5313,30 @@ body.is-dragging-pane .board-dock__grip {
   cursor: default;
 }
 
+/* Record and restore wait until the row is pointed at or focused: a list of
+   sixty commands is read far more often than it is edited. They keep their
+   place meanwhile, so nothing moves when they appear. */
+.key-row__btn--quiet,
+.key-row__btn--quiet:disabled {
+  opacity: 0;
+}
+
+.key-row:hover .key-row__btn--quiet,
+.key-row:focus-within .key-row__btn--quiet {
+  opacity: 1;
+}
+
+.key-row:hover .key-row__btn--quiet:disabled,
+.key-row:focus-within .key-row__btn--quiet:disabled {
+  opacity: 0.3;
+}
+
 .key-row__warn {
   flex: 1 0 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: calc(11px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--danger);
 }
 
@@ -4457,42 +5344,73 @@ body.is-dragging-pane .board-dock__grip {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
-  text-decoration: underline;
+  color: var(--accent-hi);
+  font-weight: 500;
   cursor: pointer;
+}
+
+.key-row__link:hover {
+  text-decoration: underline;
+}
+
+.key-row__link:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .key-bind {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 3px 2px 5px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  gap: 2px;
 }
 
-.key-bind.is-conflict {
+.key-bind.is-conflict kbd {
   border-color: var(--danger);
+  color: var(--danger);
 }
 
 .key-bind__x {
-  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+  padding: 0;
   border: 0;
+  border-radius: 50%;
   background: transparent;
-  color: var(--fg-subtle);
-  line-height: 1;
+  color: var(--fg-muted);
   cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur), color var(--dur), background var(--dur);
+}
+
+.key-bind__x .glyph-icon {
+  width: calc(10px * var(--ui-scale));
+  height: calc(10px * var(--ui-scale));
+  stroke-width: 2.4;
+}
+
+.key-row:hover .key-bind__x,
+.key-row:focus-within .key-bind__x {
+  opacity: 1;
 }
 
 .key-bind__x:hover {
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.key-bind__x:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
 }
 
 /* Chords of a sequence are spaced apart; the keys inside one are not. */
 .kbd-seq {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
 }
 
 .kbd-chord {
@@ -4502,15 +5420,21 @@ body.is-dragging-pane .board-dock__grip {
 }
 
 .kbd-seq kbd {
-  padding: 3px 5px;
-  font-family: var(--ui-font);
+  display: inline-grid;
+  place-items: center;
+  min-width: calc(20px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  padding: 0 5px;
+  font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
   line-height: 1;
   white-space: nowrap;
   color: var(--fg);
   background: var(--surface-active);
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  box-shadow: 0 1px 0 var(--line-strong);
 }
 
 .kbd-seq .kbd--ghost {
@@ -4521,14 +5445,18 @@ body.is-dragging-pane .board-dock__grip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 5px;
+  min-height: calc(26px * var(--ui-scale));
+  padding: 2px 2px 2px 9px;
+  border-radius: var(--radius);
   border: 1px solid var(--accent);
   background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .key-rec__dot {
   width: 7px;
   height: 7px;
+  border-radius: 50%;
   background: var(--danger);
   animation: rec-pulse 1.2s ease-in-out infinite;
 }
@@ -4539,13 +5467,19 @@ body.is-dragging-pane .board-dock__grip {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .key-rec__dot {
+    animation: none;
+  }
+}
+
 .key-rec__prompt {
-  font-size: calc(11px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .key-rec__hint {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-hint);
 }
 
 /* Half-typed sequence, floating just above the status bar: a pill, like
@@ -4579,48 +5513,80 @@ body.is-dragging-pane .board-dock__grip {
 
 /* Dictation ------------------------------------------------------------- */
 
-/* Sits where the chord hint sits, and is mutually exclusive with it in
-   practice: both are the same kind of transient badge about what the keyboard
-   is currently doing.
+/* A capsule floating at the bottom centre, clear of the status bar, where the
+   chord hint also appears: both are the same kind of transient badge about
+   what the keyboard is currently doing, and in practice never show together.
 
-   Rounded, unlike everything else in this interface — `--radius` is 0 by
-   design. That is the point: it is not part of the window, it is a thing that
-   appears over it for three seconds, and the shape says so before the content
-   does. */
+   Rounded where the window is square: it is not part of the window, it is a
+   thing that appears over it for three seconds, and the shape says so before
+   the content does. */
 .voice-pill {
   position: fixed;
   left: 50%;
-  bottom: 58px;
+  bottom: calc(36px * var(--ui-scale) + 14px);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 9px;
-  height: 30px;
-  padding: 0 13px;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  height: calc(34px * var(--ui-scale));
+  padding: 0 14px 0 12px;
   border-radius: 999px;
   color: var(--fg-muted);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 12px 30px -14px var(--shadow);
+  background: color-mix(in srgb, var(--chrome-bar) 86%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    0 0 0 1px var(--float-ring, transparent),
+    0 14px 34px -12px var(--shadow),
+    0 4px 10px -6px var(--shadow);
   z-index: 31;
+  animation: pill-in 180ms var(--ease);
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
 }
 
 /* Raised above the recording pill, which it can briefly overlap when a
    dictation fails on the way out. Text, not bars: an error has to be read. */
 .voice-pill--notice {
-  bottom: 96px;
+  bottom: calc(70px * var(--ui-scale) + 22px);
+  gap: 8px;
+  padding: 0 16px 0 12px;
   color: var(--danger);
-  border-color: var(--danger);
+}
+
+/* The warning sign is drawn here rather than in the markup, which App owns:
+   a mask over the current colour, so it follows the theme's red. */
+.voice-pill--notice::before {
+  content: "";
+  flex: none;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E")
+    center / contain no-repeat;
 }
 
 .voice-pill__text {
-  font-size: calc(11.5px * var(--ui-scale));
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12px * var(--ui-scale));
 }
 
 .voice-pill__sep {
   width: 1px;
-  height: 14px;
-  background: var(--border-strong);
+  height: calc(16px * var(--ui-scale));
+  background: var(--line-strong);
   flex: none;
 }
 
@@ -4629,7 +5595,7 @@ body.is-dragging-pane .board-dock__grip {
   align-items: center;
   gap: 2px;
   /* Fixed, so the pill does not breathe with the voice inside it. */
-  height: 18px;
+  height: calc(18px * var(--ui-scale));
   flex: none;
 }
 
@@ -4689,13 +5655,12 @@ body.is-dragging-pane .board-dock__grip {
 
 /* The local model block in the settings ---------------------------------- */
 
+/* Drawn straight on its settings row: the grouped box around it is already
+   the card, and a second border inside it would only add a frame. */
 .vm {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
 }
 
 .vm__head {
@@ -4707,11 +5672,13 @@ body.is-dragging-pane .board-dock__grip {
 
 .vm__name {
   font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
 }
 
 .vm__state {
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--text-hint);
+  font-variant-numeric: tabular-nums;
 }
 
 .vm__state.is-ready {
@@ -4722,7 +5689,7 @@ body.is-dragging-pane .board-dock__grip {
   margin: 0;
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.5;
-  color: var(--fg-subtle);
+  color: var(--text-hint);
   /* Twenty-five language codes wrap; without this they push the card wide. */
   overflow-wrap: anywhere;
 }
@@ -4730,7 +5697,7 @@ body.is-dragging-pane .board-dock__grip {
 .vm__actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   flex-wrap: wrap;
 }
 
@@ -4746,7 +5713,8 @@ body.is-dragging-pane .board-dock__grip {
 
 .vm__bar {
   height: 4px;
-  background: var(--surface-active);
+  border-radius: 2px;
+  background: var(--border-strong);
   overflow: hidden;
 }
 
@@ -5094,134 +6062,204 @@ body.is-dragging-pane .board-dock__grip {
 
 /* Placed from the button's rect in viewport coordinates: a pane can be a
    quarter of the window, and the menu has to overhang it rather than be
-   clipped to its width. */
+   clipped to its width. Drawn as the system draws a menu: a translucent
+   rounded panel, 26px rows, the accent under the pointer. */
 .cmd-menu {
   position: fixed;
   z-index: 35;
-  width: 268px;
+  width: calc(300px * var(--ui-scale));
+  max-width: calc(100vw - 16px);
   max-height: 60vh;
   overflow-y: auto;
   display: grid;
-  gap: 2px;
-  padding: 4px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 18px 40px -18px var(--shadow);
-  animation: fade-in 100ms ease;
+  /* A long command truncates inside its row instead of widening the track. */
+  grid-template-columns: minmax(0, 1fr);
+  padding: 5px;
+  background: color-mix(in srgb, var(--chrome-bar) 92%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--float-ring, transparent),
+    0 18px 40px -12px var(--shadow),
+    0 6px 14px -8px var(--shadow);
+  scrollbar-width: thin;
+  animation: menu-in 120ms var(--ease);
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 .cmd-menu__group {
   display: grid;
-  gap: 1px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.cmd-menu__group + .cmd-menu__group {
-  margin-top: 4px;
-  padding-top: 5px;
-  border-top: 1px solid var(--border);
+.cmd-menu__group + .cmd-menu__group::before {
+  content: "";
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line-strong);
 }
 
 .cmd-menu__head {
-  padding: 3px 7px;
-  font-size: calc(9.5px * var(--ui-scale));
+  padding: 4px 8px 3px;
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
-}
-
-.cmd-menu__add {
-  margin-top: 4px;
-  padding: 7px;
-  border: 0;
-  border-top: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg-muted);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur), color var(--dur);
-}
-
-.cmd-menu__add:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
+  color: var(--text-hint);
 }
 
 .cmd-item {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-right: 2px;
+  gap: 4px;
+  height: calc(26px * var(--ui-scale));
+  padding-right: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
 }
 
-.cmd-item:hover {
-  background: var(--surface-hover);
+/* The pointer's row and the keyboard's row are one highlight. */
+.cmd-item:hover,
+.cmd-item:focus-within {
+  background: var(--accent);
 }
 
 .cmd-item__run {
   flex: 1;
   min-width: 0;
-  display: grid;
-  gap: 1px;
-  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 0 0 8px;
   border: 0;
   background: transparent;
+  color: inherit;
+  font-size: calc(12px * var(--ui-scale));
   text-align: left;
   cursor: pointer;
 }
 
+.cmd-item__run:focus-visible {
+  outline: none;
+}
+
 .cmd-item__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 62%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* No label: the command names the entry, in the face it is typed in. */
+.cmd-item__label--mono {
+  max-width: none;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  font-variant-ligatures: none;
+}
+
 .cmd-item__cmd {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--text-hint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cmd-item__tag {
-  color: var(--accent);
+  flex: none;
+  margin-left: auto;
   font-size: calc(11px * var(--ui-scale));
+  color: var(--text-hint);
+}
+
+.cmd-item:hover .cmd-item__cmd,
+.cmd-item:focus-within .cmd-item__cmd,
+.cmd-item:hover .cmd-item__tag,
+.cmd-item:focus-within .cmd-item__tag {
+  color: inherit;
+  opacity: 0.78;
+}
+
+/* The key and the edit buttons share one slot: the key at rest, the buttons
+   once the row is pointed at or focused. They stay in the tab order while
+   invisible, or the keyboard could never reach them. */
+.cmd-item__end {
+  flex: none;
+  display: grid;
+  align-items: center;
+  justify-items: end;
+}
+
+.cmd-item__end > * {
+  grid-area: 1 / 1;
 }
 
 .cmd-item__keys {
-  font-size: calc(10px * var(--ui-scale));
-  color: var(--fg-subtle);
-  font-family: ui-monospace, Consolas, monospace;
-  white-space: nowrap;
-}
-
-/* Kept out of the way until the row is pointed at — with eight commands the
-   list is read far more often than it is edited. Focus brings them back, or
-   the keyboard could never reach them. */
-.cmd-item__btn {
-  flex: none;
-  display: grid;
-  place-items: center;
-  padding: 3px 5px;
-  border: 0;
-  background: transparent;
-  color: var(--fg-subtle);
+  padding: 0 5px;
+  font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dur), color var(--dur), background var(--dur);
+  color: var(--text-hint);
+  white-space: nowrap;
+  transition: opacity var(--dur);
 }
 
-.cmd-item:hover .cmd-item__btn,
-.cmd-item__btn:focus-visible {
+.cmd-item__actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+
+.cmd-item:hover .cmd-item__actions,
+.cmd-item:focus-within .cmd-item__actions {
   opacity: 1;
 }
 
+.cmd-item:hover .cmd-item__keys,
+.cmd-item:focus-within .cmd-item__keys {
+  opacity: 0;
+}
+
+.cmd-item__btn {
+  display: grid;
+  place-items: center;
+  width: calc(20px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.cmd-item__btn .icon {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+}
+
 .cmd-item__btn:hover {
-  color: var(--fg);
-  background: var(--surface-active);
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.cmd-item__btn:focus-visible {
+  outline: 1.5px solid currentColor;
+  outline-offset: -1.5px;
 }
 
 .cmd-item__btn--del:hover {
@@ -5229,19 +6267,44 @@ body.is-dragging-pane .board-dock__grip {
   background: var(--danger);
 }
 
-/* A label that describes the switch beside it, rather than one above a field. */
-.form-row--toggle {
-  grid-template-columns: 1fr auto;
+.cmd-menu__add {
+  position: relative;
+  display: flex;
   align-items: center;
+  gap: 8px;
+  height: calc(26px * var(--ui-scale));
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: calc(12px * var(--ui-scale));
+  text-align: left;
+  cursor: pointer;
 }
 
-.form-row--toggle .form-label {
-  display: grid;
-  gap: 3px;
-  justify-items: start;
+.cmd-menu__add .icon {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
 }
 
-.text-input--mono {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: calc(11.5px * var(--ui-scale));
+/* Set apart from the commands above it, when there are any. */
+.cmd-menu__group ~ .cmd-menu__add {
+  margin-top: 11px;
+}
+
+.cmd-menu__group ~ .cmd-menu__add::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 6px;
+  right: 6px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.cmd-menu__add:hover,
+.cmd-menu__add:focus-visible {
+  outline: none;
+  background: var(--accent);
 }

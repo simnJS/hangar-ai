@@ -223,7 +223,7 @@ const en = {
   "search.invalid": "Invalid regex",
 
   "commands.menu": "Saved commands",
-  "commands.add": "＋ Add…",
+  "commands.add": "New command…",
   "commands.edit": "Edit",
   "commands.remove": "Delete",
   "commands.runHint": "Send to this pane: {command}",
@@ -356,6 +356,8 @@ const en = {
 
   "settings.title": "Settings",
   "settings.close": "Close",
+  // The close button every dialog shares (components/Backdrop › ModalHead).
+  "modal.close": "Close",
   "settings.search": "Search a setting…",
   "settings.searchClear": "Clear the search",
   "settings.noResults": "Nothing matches “{q}”.",
@@ -372,6 +374,10 @@ const en = {
   "settings.uiScale": "Interface size",
   "settings.uiScaleHint":
     "Text of the sidebar, board, menus and settings. The terminals keep their own size, under Terminal › Typography.",
+  "settings.showNavigator": "Show the navigator",
+  "settings.showNavigatorHint": "Workspaces and their agents, on the left",
+  "settings.showInspector": "Show the inspector",
+  "settings.showInspectorHint": "What the focused agent is doing, on the right",
   "settings.theme": "Theme",
   "settings.themeHint": "Terminal palette — the whole window follows it.",
   "settings.themePerWorkspace": "specific to this workspace",
@@ -548,6 +554,8 @@ const en = {
   "create.freeSlots_other": "{n} panes left as plain shells",
   "create.allAssigned": "every pane is assigned",
   "create.notInstalled": "not installed",
+  "create.less": "One {agent} fewer",
+  "create.more": "One more {agent}",
   "create.layout": "Arrangement",
   "create.layoutHint": "click a cell to change its agent",
   "create.cancel": "Cancel",
@@ -1092,7 +1100,7 @@ const fr: Record<Key, string> = {
   "search.invalid": "Regex invalide",
 
   "commands.menu": "Commandes enregistrées",
-  "commands.add": "＋ Ajouter…",
+  "commands.add": "Nouvelle commande…",
   "commands.edit": "Modifier",
   "commands.remove": "Supprimer",
   "commands.runHint": "Envoyer dans ce panneau : {command}",
@@ -1226,6 +1234,8 @@ const fr: Record<Key, string> = {
 
   "settings.title": "Réglages",
   "settings.close": "Fermer",
+  // Le bouton de fermeture commun à tous les dialogues (components/Backdrop › ModalHead).
+  "modal.close": "Fermer",
   "settings.search": "Rechercher un réglage…",
   "settings.searchClear": "Effacer la recherche",
   "settings.noResults": "Aucun réglage ne correspond à « {q} ».",
@@ -1242,6 +1252,10 @@ const fr: Record<Key, string> = {
   "settings.uiScale": "Taille de l'interface",
   "settings.uiScaleHint":
     "Texte de la barre latérale, du tableau, des menus et des réglages. Les terminaux gardent leur propre taille, dans Terminal › Typographie.",
+  "settings.showNavigator": "Afficher le navigateur",
+  "settings.showNavigatorHint": "Les workspaces et leurs agents, à gauche",
+  "settings.showInspector": "Afficher l'inspecteur",
+  "settings.showInspectorHint": "Ce que fait l'agent actif, à droite",
   "settings.theme": "Thème",
   "settings.themeHint": "Palette des terminaux — toute la fenêtre la suit.",
   "settings.themePerWorkspace": "spécifique à ce workspace",
@@ -1419,6 +1433,8 @@ const fr: Record<Key, string> = {
   "create.freeSlots_other": "{n} panneaux en shell simple",
   "create.allAssigned": "tous les panneaux sont attribués",
   "create.notInstalled": "non installé",
+  "create.less": "Un {agent} de moins",
+  "create.more": "Un {agent} de plus",
   "create.layout": "Disposition",
   "create.layoutHint": "clique une case pour changer son agent",
   "create.cancel": "Annuler",

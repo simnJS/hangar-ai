@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Backdrop } from "./Backdrop";
+import { Backdrop, ModalHead } from "./Backdrop";
+import { Glyph } from "./settings/icons";
 import { useT } from "../i18n";
 import {
   agentInstructionsStatus,
@@ -83,22 +84,19 @@ export function McpPanel({ cwd, onClose }: Props) {
     mcpTargets(cwd).then(setTargets).catch(() => undefined);
   }
 
+
   return (
     <Backdrop onClose={onClose}>
-      <div className="modal modal--wide">
-        <header className="modal__head">
-          <h2>{t("mcp.title")}</h2>
-          <button className="icon-btn" onClick={onClose}>
-            ×
-          </button>
-        </header>
+      <div
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mcp-title"
+      >
+        <ModalHead id="mcp-title" title={t("mcp.title")} sub={cwd} onClose={onClose} />
 
-        <p className="modal__sub" title={cwd}>
-          {cwd}
-        </p>
-
-        <div className="modal__body modal__body--form">
-          <p className="form-hint form-hint--block">{t("mcp.intro")}</p>
+        <div className="modal__body modal__body--stack" data-modal-body>
+          <p className="modal__intro">{t("mcp.intro")}</p>
 
           <div className="targets">
             {targets.map((target) => (
@@ -110,6 +108,7 @@ export function McpPanel({ cwd, onClose }: Props) {
               >
                 <input
                   type="checkbox"
+                  className="check"
                   checked={selected.has(target.id)}
                   onChange={() => toggle(target.id)}
                 />
@@ -122,7 +121,7 @@ export function McpPanel({ cwd, onClose }: Props) {
                       </em>
                     )}
                     {target.configured && !target.stale && (
-                      <em className="target__badge">{t("mcp.configured")}</em>
+                      <em className="target__badge target__badge--ok">{t("mcp.configured")}</em>
                     )}
                     {!target.detected && !target.configured && (
                       <em className="target__badge target__badge--muted">
@@ -143,51 +142,57 @@ export function McpPanel({ cwd, onClose }: Props) {
             ))}
           </div>
 
-          <label className={`target ${playbookPresent ? "target--done" : ""}`}>
-            <input
-              type="checkbox"
-              checked={writePlaybook}
-              onChange={(e) => setWritePlaybook(e.target.checked)}
-            />
-            <span className="target__meta">
-              <span className="target__label">
-                {t("mcp.playbook")}
-                {playbookPresent && (
-                  <em className="target__badge">{t("mcp.alreadyThere")}</em>
-                )}
+          <div className="targets">
+            <label className={`target ${playbookPresent ? "target--done" : ""}`}>
+              <input
+                type="checkbox"
+                className="check"
+                checked={writePlaybook}
+                onChange={(e) => setWritePlaybook(e.target.checked)}
+              />
+              <span className="target__meta">
+                <span className="target__label">
+                  {t("mcp.playbook")}
+                  {playbookPresent && (
+                    <em className="target__badge target__badge--ok">{t("mcp.alreadyThere")}</em>
+                  )}
+                </span>
+                <span className="target__path">{t("mcp.playbookHint")}</span>
               </span>
-              <span className="target__path">{t("mcp.playbookHint")}</span>
-            </span>
-          </label>
+            </label>
+          </div>
 
           {reports && (
-            <div className="reports">
+            <div className="reports" role="status">
               {reports.map((report) => (
                 <p key={report.id} className={report.ok ? "report--ok" : "report--fail"}>
-                  {report.ok ? "✓" : "✕"} {report.id} — {report.message}
+                  <Glyph name={report.ok ? "check" : "alert"} className="report__icon" />
+                  <span className="report__id">{report.id}</span>
+                  <span className="report__message">{report.message}</span>
                 </p>
               ))}
-              <p className="form-hint">{t("mcp.restartHint")}</p>
+              <p className="reports__hint">{t("mcp.restartHint")}</p>
             </div>
           )}
 
           {manual && (
-            <section className="form-row">
-              <span className="form-label">
+            <section className="manual">
+              <h3 className="manual__title">
                 {t("mcp.manual")}
                 <span className="form-hint">{t("mcp.manualHint")}</span>
-              </span>
+              </h3>
               <pre className="snippet">{manual.claude}</pre>
               <pre className="snippet">{manual.codex}</pre>
             </section>
           )}
         </div>
 
-        <footer className="modal__foot modal__foot--actions">
-          <button className="btn btn--ghost" onClick={onClose}>
+        <footer className="modal__foot">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
             {t("mcp.close")}
           </button>
           <button
+            type="button"
             className="btn btn--primary"
             onClick={install}
             disabled={busy || selected.size === 0}
