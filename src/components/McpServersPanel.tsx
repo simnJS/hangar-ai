@@ -258,6 +258,15 @@ export function McpServersPanel({ workspace, onRestart, onClose }: Props) {
               </ul>
             )}
 
+            {/* --strict-mcp-config drops every source but the file, and the
+                list above only covers the three the file is built from. */}
+            {discovery && mcp.mode === "custom" && (
+              <p className="mcps__note">
+                <Icon name="info" size={12} />
+                {t("mcpScope.strictNote")}
+              </p>
+            )}
+
             {discovery?.unreadable.map((path) => (
               <p key={path} className="mcps__alert" role="alert">
                 <Icon name="alert" size={12} />

@@ -12,6 +12,11 @@
   overflow-y: auto;
 }
 
+/* A short window scrolls the body; nothing in it gets squeezed instead. */
+.mcps > * {
+  flex-shrink: 0;
+}
+
 /* The two modes, and what the chosen one means in a sentence beside it. */
 .mcps__mode {
   display: flex;
@@ -204,6 +209,21 @@
   padding: 12px;
   font-size: calc(12px * var(--ui-scale));
   color: var(--fg-secondary);
+}
+
+.mcps__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: calc(11px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--fg-secondary);
+}
+
+.mcps__note .icon {
+  flex: none;
+  margin-top: calc(2px * var(--ui-scale));
 }
 
 .mcps__alert {

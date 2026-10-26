@@ -923,6 +923,8 @@ const en = {
   "mcpScope.custom": "Chosen here",
   "mcpScope.inheritHint": "Every server Claude Code is configured with for this folder.",
   "mcpScope.customHint": "Only the servers switched on below, and Hangar's own.",
+  "mcpScope.strictNote":
+    "Chosen here, Claude Code also leaves out its plugins' servers and the claude.ai connectors.",
   "mcpScope.listTitle": "Servers",
   "mcpScope.presets": "Presets",
   "mcpScope.all": "All",
@@ -2021,6 +2023,8 @@ const fr: Record<Key, string> = {
   "mcpScope.custom": "Choisis ici",
   "mcpScope.inheritHint": "Tous les serveurs que Claude Code connaît pour ce dossier.",
   "mcpScope.customHint": "Seulement les serveurs activés ci-dessous, plus celui de Hangar.",
+  "mcpScope.strictNote":
+    "En mode choisi, Claude Code laisse aussi de côté les serveurs de ses plugins et les connecteurs claude.ai.",
   "mcpScope.listTitle": "Serveurs",
   "mcpScope.presets": "Préréglages",
   "mcpScope.all": "Tous",
