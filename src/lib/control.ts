@@ -2,7 +2,11 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { PaneActivity } from "./agentState";
+import type { Worktree } from "./git";
 import { leafIds, MAX_PANES, normalizeTree } from "./layout";
+import { MAX_MODEL_BYTES, MODEL_FORMATS, modelFormatOf, type ModelFileInfo } from "./modelFiles";
+import type { ModelHost } from "./modelHost";
+import type { OpenModel, SnapshotAngle } from "./modelStore";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
 
@@ -32,7 +36,8 @@ export interface Caller {
 }
 
 export type ControlEvent =
-  | { kind: "created" | "closed" | "restarted" | "reset"; by: string | null; pane: string; workspace: string };
+  | { kind: "created" | "closed" | "restarted" | "reset"; by: string | null; pane: string; workspace: string }
+  | { kind: "modelShown" | "modelClosed"; by: string | null; file: string; workspace: string };
 
 export interface ControlDeps {
   snapshot: () => AppState;
@@ -64,6 +69,20 @@ export interface ControlDeps {
   reattach: (workspaceId: string) => void;
   announce: (event: ControlEvent) => void;
   sleep: (ms: number) => Promise<void>;
+  /**
+   * Lets Rust serve models from these folders on behalf of this workspace,
+   * keeping what the other workspaces were granted (lib/modelHost).
+   */
+  modelAllowRoots: (workspaceId: string, roots: string[]) => Promise<void>;
+  /** Canonical path, size and mtime; rejects outside the allowed folders. */
+  modelStat: (path: string) => Promise<ModelFileInfo>;
+  /** Every worktree of the repository holding `path`; rejects outside one. */
+  worktrees: (path: string) => Promise<Worktree[]>;
+  /**
+   * The 3D preview of this window for null, or of the window a detached
+   * workspace is shown in; null when that window does not answer.
+   */
+  modelHost: (detachedWorkspaceId: string | null) => Promise<ModelHost | null>;
 }
 
 export const DISABLED =
@@ -210,6 +229,309 @@ function keySequence(name: string, applicationCursor: boolean): string {
     );
   }
   return key;
+}
+
+/* ── 3D models ─────────────────────────────────────────────────── */
+
+/** How long model_show waits for the viewer before answering "loading". The
+    MCP side gives a model_* call 60 s in all. */
+const SETTLE_MS = 45_000;
+/** Shorter for a snapshot, which still has to render once the load is done. */
+const SNAPSHOT_SETTLE_MS = 40_000;
+
+const ANGLES: SnapshotAngle[] = ["front", "back", "left", "right", "top", "bottom", "iso"];
+const SNAPSHOT_WIDTH = 1024;
+const SNAPSHOT_HEIGHT = 768;
+const SNAPSHOT_MIN = 64;
+const SNAPSHOT_MAX = 2048;
+
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/**
+ * `path` read from `base`, with `.` and `..` folded away so that a check on
+ * the result cannot be walked out of. A Windows path keeps backslashes.
+ */
+export function resolvePath(base: string, path: string): string {
+  const full = /^([a-zA-Z]:[\\/]|[\\/])/.test(path) ? path : `${base}/${path}`;
+  const unc = /^[\\/]{2}[^\\/]/.test(full);
+  const [head, ...rest] = full.split(/[\\/]+/);
+  const separator = unc || /^[a-zA-Z]:$/.test(head) ? "\\" : "/";
+  const parts: string[] = [];
+  for (const part of rest) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return `${unc ? separator : ""}${[head, ...parts].join(separator)}`;
+}
+
+/** For comparing: Rust's canonical paths carry Windows' `\\?\` prefix. */
+const comparable = (path: string) =>
+  normalize(path.replace(/^\\\\\?\\(UNC\\)?/i, (_, unc) => (unc ? "\\\\" : "")));
+
+const inside = (path: string, roots: string[]) => {
+  const target = comparable(path);
+  return roots.some((root) => {
+    const base = comparable(root);
+    return target === base || target.startsWith(`${base}/`);
+  });
+};
+
+const basename = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+
+/** The window whose preview shows a workspace's models: its own window when
+    it is detached, otherwise this one (null). */
+export const modelWindowOf = (ws: Workspace): string | null => (ws.detached ? ws.id : null);
+
+/**
+ * The folders an agent may show models from: its workspace's main folder,
+ * extra roots and pane folders, plus every worktree of their repositories —
+ * an agent working in a worktree must not be refused its own files. A folder
+ * that is not a repository, or a machine without git, just adds none.
+ */
+export async function modelRoots(
+  ws: Workspace,
+  deps: Pick<ControlDeps, "worktrees">,
+): Promise<string[]> {
+  const repos = [ws.cwd, ...ws.extraRoots];
+  const panes = ws.panes
+    .map((pane) => pane.cwd)
+    .filter((cwd): cwd is string => Boolean(cwd))
+    .map((cwd) => resolvePath(ws.cwd, cwd));
+  const listed = await Promise.all(
+    repos.map((repo) =>
+      Promise.resolve()
+        .then(() => deps.worktrees(repo))
+        .catch(() => [] as Worktree[]),
+    ),
+  );
+  const trees = listed
+    .flat()
+    .filter((tree) => !tree.bare && !tree.prunable)
+    .map((tree) => tree.path);
+  const seen = new Set<string>();
+  return [...repos, ...panes, ...trees].filter((root) => {
+    const key = comparable(root);
+    if (!root.trim() || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Where a relative path is read from: the caller's pane folder — where Hangar
+ * launched the agent, a worktree for instance — rather than the folder its
+ * MCP server reports, which a project-wide config pins to the workspace root.
+ */
+function callerFolder(ws: Workspace, caller: Caller): string {
+  const pane = caller.paneId ? ws.panes.find((entry) => entry.id === caller.paneId) : undefined;
+  return pane ? effectiveCwd(ws, pane) : (caller.cwd ?? ws.cwd);
+}
+
+async function previewOf(ws: Workspace, deps: ControlDeps): Promise<ModelHost> {
+  const host = await deps.modelHost(modelWindowOf(ws));
+  if (host) return host;
+  throw new Error(
+    `"${ws.name}" is shown in a window of its own, and that window is not answering, so the 3D ` +
+      "preview cannot open there. Try again in a few seconds.",
+  );
+}
+
+/** An open model by path, relative or absolute, or by its file name alone
+    when only one open model has it. */
+function findModel(models: OpenModel[], given: string, base: string): OpenModel {
+  const target = comparable(resolvePath(base, given));
+  const exact = models.find((model) => comparable(model.path) === target);
+  if (exact) return exact;
+  // The same file reached through a link, or named without its folder.
+  const name = basename(given).toLowerCase();
+  const named = models.filter(
+    (model) => basename(model.path).toLowerCase() === name || same(model.title, given),
+  );
+  if (named.length === 1) return named[0];
+  throw new Error(
+    models.length
+      ? `No open model matches "${given}". Open: ${models.map((model) => model.path).join(", ")}.`
+      : `No 3D model is open, so none matches "${given}". Show it with model_show first.`,
+  );
+}
+
+function sizeArg(value: unknown, fallback: number): number {
+  const wanted = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(wanted)) return fallback;
+  return Math.min(SNAPSHOT_MAX, Math.max(SNAPSHOT_MIN, Math.round(wanted)));
+}
+
+function angleArg(value: unknown): SnapshotAngle {
+  const wanted = text(value)?.toLowerCase();
+  if (!wanted) return "iso";
+  if (!(ANGLES as string[]).includes(wanted)) {
+    throw new Error(`Unknown angle "${wanted}". One of: ${ANGLES.join(", ")}.`);
+  }
+  return wanted as SnapshotAngle;
+}
+
+async function modelShow(
+  ws: Workspace,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const given = text(args.path);
+  if (!given) {
+    throw new Error("Give the path of the model to show, absolute or relative to your folder.");
+  }
+  const path = resolvePath(callerFolder(ws, caller), given);
+  if (!modelFormatOf(path)) {
+    throw new Error(
+      `"${given}" is not a 3D model the preview can open. Formats: ${MODEL_FORMATS.join(", ")}.`,
+    );
+  }
+
+  const roots = await modelRoots(ws, deps);
+  const outside = () =>
+    new Error(
+      `${path} is outside your workspace. The preview only opens models from ${roots.join(", ")} ` +
+        "(and their subfolders). Move or copy the file into one of them, then show it from there.",
+    );
+  await deps.modelAllowRoots(ws.id, roots);
+  // Rust is the real gate, on the canonical path. The folders it allows are
+  // every workspace's that showed a model, though, and this one is checked
+  // against the caller's own: the path as given, or where its links lead.
+  const givenInside = inside(path, roots);
+  let file: ModelFileInfo;
+  try {
+    file = await deps.modelStat(path);
+  } catch (err) {
+    // Refused for being out of bounds, or missing out of bounds: either way,
+    // the workspace is the thing worth naming.
+    if (!givenInside) throw outside();
+    throw new Error(messageOf(err));
+  }
+  if (!givenInside && !inside(file.path, roots)) throw outside();
+  const title = text(args.title) ?? basename(file.path);
+  if (file.size > MAX_MODEL_BYTES) {
+    const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+    throw new Error(
+      `${title} is ${mb(file.size)} MB, and the preview opens models up to ${mb(MAX_MODEL_BYTES)} MB. ` +
+        "Export a lighter version (decimated, or compressed with Draco or meshopt) and show that.",
+    );
+  }
+  const format = modelFormatOf(file.path) ?? modelFormatOf(path)!;
+
+  const preview = await previewOf(ws, deps);
+  const id = await preview.show({
+    path: file.path,
+    title,
+    format,
+    workspaceId: ws.id,
+    openedBy: caller.paneName,
+    modifiedMs: file.modifiedMs,
+  });
+  deps.announce({ kind: "modelShown", by: caller.paneName, file: title, workspace: ws.name });
+
+  const settled = await preview.whenSettled(id, SETTLE_MS);
+  if (!settled) {
+    return {
+      opened: true,
+      status: "loading",
+      path: file.path,
+      format,
+      title,
+      note:
+        `The preview is still loading it after ${SETTLE_MS / 1000} s; a big file takes a while. ` +
+        "model_snapshot waits for the load, so call it when you want to look.",
+    };
+  }
+  if (settled.status === "error") {
+    throw new Error(`The 3D preview could not load ${title}: ${settled.error ?? "unknown error"}`);
+  }
+  return { opened: true, path: file.path, format, title: settled.title, info: settled.info };
+}
+
+async function modelSnapshot(
+  ws: Workspace,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const angle = angleArg(args.angle);
+  const width = sizeArg(args.width, SNAPSHOT_WIDTH);
+  const height = sizeArg(args.height, SNAPSHOT_HEIGHT);
+  const preview = await previewOf(ws, deps);
+  const { models, activeId } = await preview.list();
+  const given = text(args.path);
+  if (!models.length) {
+    throw new Error("No 3D model is open. Show one with model_show, then take the snapshot.");
+  }
+  const model = given
+    ? findModel(models, given, callerFolder(ws, caller))
+    : (models.find((entry) => entry.id === activeId) ?? models[models.length - 1]);
+
+  // On screen, so the viewer has it loaded, and so the user sees what the
+  // agent is looking at.
+  await preview.reveal(model.id);
+  // An agent iterating on a file snapshots right after writing it, before the
+  // panel's own polling has noticed: load the new version first.
+  const fresh = await deps.modelStat(model.path).catch(() => null);
+  const rewritten = Boolean(fresh && fresh.modifiedMs > model.modifiedMs);
+  if (fresh && rewritten) await preview.reload(model.id, fresh.modifiedMs);
+  const ready =
+    rewritten || model.status === "loading"
+      ? await preview.whenSettled(model.id, SNAPSHOT_SETTLE_MS)
+      : model;
+  if (!ready) {
+    throw new Error(
+      `${model.title} is still loading after ${SNAPSHOT_SETTLE_MS / 1000} s. ` +
+        "Try model_snapshot again in a moment.",
+    );
+  }
+  if (ready.status === "error") {
+    throw new Error(
+      `${model.title} failed to load: ${ready.error ?? "unknown error"}. ` +
+        "Fix the file, then call model_show again.",
+    );
+  }
+
+  let png: string;
+  try {
+    png = await preview.snapshot(model.id, { angle, width, height });
+  } catch (err) {
+    const message = messageOf(err);
+    if (/not mounted/i.test(message)) {
+      throw new Error(
+        `The 3D preview is not on screen in the window that shows "${ws.name}", so ${model.title} ` +
+          "cannot be rendered. Call model_show for it, then try again.",
+      );
+    }
+    throw new Error(`Could not render ${model.title}: ${message}`);
+  }
+  return { png, mimeType: "image/png", path: model.path, angle, width, height, info: ready.info };
+}
+
+async function modelClose(
+  ws: Workspace,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const preview = await previewOf(ws, deps);
+  const { models } = await preview.list();
+  const given = text(args.path);
+  // Without a path, the caller's own workspace's models only: the main
+  // window's panel also holds those other workspaces' agents showed.
+  const closing = given
+    ? [findModel(models, given, callerFolder(ws, caller))]
+    : models.filter((model) => model.workspaceId === ws.id);
+  if (!closing.length) return { closed: [], open: models.length };
+  await preview.close(closing.map((model) => model.id));
+  deps.announce({
+    kind: "modelClosed",
+    by: caller.paneName,
+    file: closing.map((model) => model.title).join(", "),
+    workspace: ws.name,
+  });
+  return { closed: closing.map((model) => model.path), open: models.length - closing.length };
 }
 
 export async function runControl(
@@ -426,6 +748,15 @@ export async function runControl(
       deps.activate(ws.id, pane.id);
       return { focused: pane.name, workspace: ws.name };
     }
+
+    case "model_show":
+      return modelShow(ws, args, caller, deps);
+
+    case "model_snapshot":
+      return modelSnapshot(ws, args, caller, deps);
+
+    case "model_close":
+      return modelClose(ws, args, caller, deps);
 
     default:
       throw new Error(`Unknown operation "${op}".`);

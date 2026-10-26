@@ -683,6 +683,8 @@ const en = {
   "control.closed": "{by} closed {pane} in {workspace}",
   "control.restarted": "{by} restarted {pane} in {workspace}",
   "control.reset": "{by} reset {pane} in {workspace}",
+  "control.modelShown": "{by} showed you {file}",
+  "control.modelClosed": "{by} closed {file}",
   "control.someone": "An agent",
   "window.detach": "New window",
   "window.detachHint": "Open this workspace in a window of its own — on another screen, say. Its agents keep running.",
@@ -698,7 +700,7 @@ const en = {
   "settings.agentControlSection": "Agents and panes",
   "settings.agentPaneControl": "Let agents manage the panes",
   "settings.agentPaneControlHint":
-    "Through Hangar's MCP server, an agent can list, open, close, restart and type into the panes of your workspaces — to run other agents, for instance. Each of those calls still goes through the agent's own permission prompts.",
+    "Through Hangar's MCP server, an agent can list, open, close, restart and type into the panes of your workspaces — to run other agents, for instance — and show you 3D models in the preview. Each of those calls still goes through the agent's own permission prompts.",
 
   "task.title": "Task",
   "task.name": "Title",
@@ -1650,6 +1652,8 @@ const fr: Record<Key, string> = {
   "control.closed": "{by} a fermé {pane} dans {workspace}",
   "control.restarted": "{by} a relancé {pane} dans {workspace}",
   "control.reset": "{by} a réinitialisé {pane} dans {workspace}",
+  "control.modelShown": "{by} t'a ouvert {file}",
+  "control.modelClosed": "{by} a fermé {file}",
   "control.someone": "Un agent",
   "window.detach": "Nouvelle fenêtre",
   "window.detachHint": "Ouvrir ce workspace dans sa propre fenêtre — sur un autre écran, par exemple. Ses agents continuent de tourner.",
@@ -1665,7 +1669,7 @@ const fr: Record<Key, string> = {
   "settings.agentControlSection": "Agents et panneaux",
   "settings.agentPaneControl": "Laisser les agents gérer les panneaux",
   "settings.agentPaneControlHint":
-    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panneaux de tes workspaces et y écrire — pour lancer d'autres agents, par exemple. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
+    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panneaux de tes workspaces et y écrire — pour lancer d'autres agents, par exemple — et t'ouvrir des modèles 3D dans l'aperçu. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
 
   "task.title": "Tâche",
   "task.name": "Titre",

@@ -7,6 +7,7 @@
  */
 import * as shell from "./shell";
 import * as board from "./board";
+import * as control from "./control";
 import * as memory from "./memory";
 import {
   AVAILABLE_AGENTS,
@@ -119,6 +120,10 @@ export async function route(command: string, args: Record<string, any>): Promise
         codex: 'codex mcp add hangar -- "C:\\Program Files\\Hangar.AI\\hangar-ai.exe" --mcp',
         workspace: args.workspaceCwd ?? "C:\\dev\\hangar-ai",
       };
+    /* The app's answer to a tool call a demo agent made (backend/control). */
+    case "control_reply":
+      control.reply(args.id, args.ok, args.value, args.error ?? null);
+      return undefined;
     case "agent_instructions_status":
       return instructionsWritten;
     case "write_agent_instructions":
