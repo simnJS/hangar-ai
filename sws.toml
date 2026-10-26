@@ -1,0 +1,25 @@
+# static-web-server (image Docker) : mêmes en-têtes que vercel.json
+[general]
+host = "::"
+port = 80
+root = "/public"
+log-level = "warn"
+cache-control-headers = false
+compression = true
+health = true
+
+[advanced]
+
+[[advanced.headers]]
+source = "**"
+[advanced.headers.headers]
+Cache-Control = "public, max-age=0, must-revalidate"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "strict-origin-when-cross-origin"
+X-Frame-Options = "SAMEORIGIN"
+Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+
+[[advanced.headers]]
+source = "/logo.svg"
+[advanced.headers.headers]
+Cache-Control = "public, max-age=604800"
