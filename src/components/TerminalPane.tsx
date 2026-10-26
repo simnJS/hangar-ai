@@ -77,6 +77,7 @@ import {
   sleep,
   watchForSession,
 } from "../lib/agents";
+import { mcpScopeWrite, quoteArg, shellFamily, workspaceMcp } from "../lib/mcpScope";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
 import type { CommandScope } from "../store";
@@ -86,6 +87,7 @@ import {
   type AgentId,
   type Pane,
   type SavedCommand,
+  type WorkspaceMcp,
   type Settings,
   type ShellInfo,
 } from "../types";
@@ -101,6 +103,8 @@ interface Props {
   cwd: string;
   /** Folders of the workspace that the terminal did not open in. */
   extraRoots: string[];
+  /** The MCP servers the workspace's Claude Code panes start with. */
+  mcp?: WorkspaceMcp;
   settings: Settings;
   theme: TerminalTheme;
   focused: boolean;
@@ -149,6 +153,7 @@ export function TerminalPane({
   workspaceName,
   cwd,
   extraRoots,
+  mcp,
   settings,
   theme,
   focused,
@@ -232,6 +237,8 @@ export function TerminalPane({
   shellRef.current = shell;
   const extraRootsRef = useRef(extraRoots);
   extraRootsRef.current = extraRoots;
+  const mcpRef = useRef(mcp);
+  mcpRef.current = mcp;
   // The terminal effect runs once per pane id, so whatever it reads later must
   // come through a ref rather than the closure captured on mount.
   const focusedRef = useRef(focused);
@@ -483,6 +490,52 @@ export function TerminalPane({
         return;
       }
       recordPaneEvent(pane.id, event);
+    }
+
+    /**
+     * The `--mcp-config` argument for this launch, when the workspace chose
+     * its servers (lib/mcpScope). The file is written again now, from Claude
+     * Code's configuration as it stands, so a server edited since the last
+     * launch comes as it is today.
+     *
+     * Whatever goes wrong — a WSL pane, a path the shell cannot be handed, a
+     * failed write — the agent still starts, with its own servers, and the
+     * pane says so instead of leaving it to look like the choice applied.
+     */
+    async function mcpLaunchConfig(): Promise<string | undefined> {
+      const scope = workspaceMcp({ mcp: mcpRef.current });
+      if (scope.mode === "inherit") {
+        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        return undefined;
+      }
+      const warn = (text: string) => term.writeln(`\x1b[33m${text}\x1b[0m`);
+      const family = shellFamily(shellRef.current);
+      if (family === "wsl") {
+        warn(tRef.current("mcpScope.warnWsl"));
+        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        return undefined;
+      }
+      try {
+        const file = await mcpScopeWrite({
+          workspaceId,
+          workspaceCwd: cwd,
+          cwd: paneCwd,
+          enabled: scope.enabled,
+        });
+        const quoted = quoteArg(file.path, family);
+        if (!quoted) throw new Error(tRef.current("mcpScope.warnQuote"));
+        if (file.missing.length) {
+          warn(tRef.current("mcpScope.warnMissing", { names: file.missing.join(", ") }));
+        }
+        updatePaneInsight(pane.id, { mcp: { mode: "custom", servers: file.servers } });
+        return quoted;
+      } catch (err) {
+        if (!disposed) {
+          warn(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
+          updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        }
+        return undefined;
+      }
     }
 
     /**
@@ -757,12 +810,15 @@ export function TerminalPane({
             resumeId = null;
             onSessionCaptured(null);
           }
+          const mcpConfig = pane.agent === "claude" ? await mcpLaunchConfig() : undefined;
+          if (disposed) return;
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,
             // Read when the agent starts: a workspace renamed later shows up
             // on the next launch.
             name: sessionName(pane.name, workspaceNameRef.current),
+            mcpConfig,
           });
           if (command) {
             if (resumeId) claim(resumeId);

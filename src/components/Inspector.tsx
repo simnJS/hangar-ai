@@ -57,6 +57,8 @@ export interface InspectorProps {
   onClose: () => void;
   onOpenBoard: () => void;
   onOpenSessions: (paneId: string) => void;
+  /** Opens the choice of MCP servers for the workspace. */
+  onOpenMcpServers?: () => void;
 }
 
 /**
@@ -220,6 +222,7 @@ function PaneInspector({
   onClose,
   onOpenBoard,
   onOpenSessions,
+  onOpenMcpServers,
 }: InspectorProps & { pane: Pane }) {
   const t = useT();
   const { state } = useStore();
@@ -233,6 +236,7 @@ function PaneInspector({
   const toggle = useLatest(onToggleSection);
   const openBoard = useLatest(onOpenBoard);
   const openSessions = useLatest(onOpenSessions);
+  const openMcpServers = useLatest(() => onOpenMcpServers?.());
 
   const task = useMemo(
     () => taskForPane(tasks, pane.id, workspaces, activeWorkspaceId),
@@ -287,6 +291,8 @@ function PaneInspector({
             model={insight.model}
             folder={folder}
             onOpenSessions={openSessions}
+            mcp={pane.agent === "claude" ? insight.mcp : null}
+            onOpenMcpServers={onOpenMcpServers ? openMcpServers : undefined}
             collapsed={folded.has("session")}
             onToggle={toggle}
           />

@@ -31,6 +31,20 @@ const MCP_TARGETS = [
 // The 3D preview loads models from Rust's URL scheme; here, from the bundle.
 model.installModelScheme();
 
+/**
+ * What Claude Code would load in a demo workspace: the kind of mix a machine
+ * collects over a few projects. Nothing here is read from anywhere.
+ */
+const MCP_SERVERS = [
+  { name: "hangar", scope: "project", transport: "stdio", summary: "hangar-ai", status: "active", hangar: true, source: ".mcp.json" },
+  { name: "bridgememory", scope: "user", transport: "stdio", summary: "node index.js", status: "active", hangar: false, source: "~/.claude.json" },
+  { name: "mcp-atlassian", scope: "user", transport: "stdio", summary: "uvx mcp-atlassian", status: "active", hangar: false, source: "~/.claude.json" },
+  { name: "rea", scope: "user", transport: "stdio", summary: "rea", status: "active", hangar: false, source: "~/.claude.json" },
+  { name: "robloxstudio", scope: "user", transport: "stdio", summary: "npx robloxstudio-mcp", status: "active", hangar: false, source: "~/.claude.json" },
+  { name: "docs", scope: "user", transport: "http", summary: "mcp.example.com", status: "active", hangar: false, source: "~/.claude.json" },
+  { name: "playwright", scope: "project", transport: "stdio", summary: "npx @playwright/mcp", status: "unapproved", hangar: false, source: ".mcp.json" },
+];
+
 /** Flipped by mcp_install so the panel reflects what you just did. */
 const configured = new Set(MCP_TARGETS.filter((t) => t.configured).map((t) => t.id));
 let instructionsWritten = false;
@@ -127,6 +141,19 @@ export async function route(command: string, args: Record<string, any>): Promise
         codex: 'codex mcp add hangar -- "C:\\Program Files\\Hangar.AI\\hangar-ai.exe" --mcp',
         workspace: args.workspaceCwd ?? "C:\\dev\\hangar-ai",
       };
+    /* ── MCP servers per workspace ── */
+    case "mcp_servers":
+      return { servers: MCP_SERVERS, unreadable: [] };
+    case "mcp_scope_write": {
+      const enabled = new Set<string>(args.enabled ?? []);
+      return {
+        path: `${HOME}\\AppData\\Roaming\\com.simnjs.hangar\\mcp\\${args.workspaceId}.json`,
+        servers: ["hangar", ...MCP_SERVERS.filter((s) => !s.hangar && enabled.has(s.name)).map((s) => s.name)],
+        missing: [...enabled].filter((name) => !MCP_SERVERS.some((s) => s.name === name)),
+      };
+    }
+    case "mcp_scope_clear":
+      return undefined;
     /* The app's answer to a tool call a demo agent made (backend/control). */
     case "control_reply":
       control.reply(args.id, args.ok, args.value, args.error ?? null);

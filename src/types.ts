@@ -124,6 +124,22 @@ export interface Workspace {
   detached?: boolean;
   /** Where that window last stood, in logical pixels. */
   windowBounds?: WindowBounds | null;
+  /**
+   * The MCP servers its Claude Code panes start with (lib/mcpScope). Absent
+   * reads as `inherit`, which is what every workspace saved before this did.
+   */
+  mcp?: WorkspaceMcp;
+}
+
+/**
+ * `inherit` launches Claude Code as it always was, with whatever servers its
+ * own configuration gives it. `custom` launches it with only the servers
+ * named in `enabled` — plus Hangar's own, which is never left out.
+ */
+export interface WorkspaceMcp {
+  mode: "inherit" | "custom";
+  /** Server names, as Claude Code's configuration spells them. */
+  enabled: string[];
 }
 
 export interface WindowBounds {

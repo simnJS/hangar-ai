@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-const SERVER_KEY: &str = "hangar";
+pub(crate) const SERVER_KEY: &str = "hangar";
 
 /// Names this server has been registered under before, newest first.
 ///
@@ -19,7 +19,7 @@ const SERVER_KEY: &str = "hangar";
 /// of them points at a binary path from that era. Leaving them in place would
 /// declare a second server that fails to start on every agent launch, so an
 /// install removes them rather than adding beside them.
-const LEGACY_SERVER_KEYS: &[&str] = &["iabench"];
+pub(crate) const LEGACY_SERVER_KEYS: &[&str] = &["iabench"];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Format {
@@ -158,7 +158,7 @@ fn executable() -> Result<String, String> {
 /// The entry every JSON-shaped target gets. Note it carries no port or token:
 /// those are resolved at runtime from the endpoint file, so this stays valid
 /// across app restarts.
-fn server_entry(workspace_cwd: &str) -> Result<Value, String> {
+pub(crate) fn server_entry(workspace_cwd: &str) -> Result<Value, String> {
     Ok(json!({
         "command": executable()?,
         "args": ["--mcp"],

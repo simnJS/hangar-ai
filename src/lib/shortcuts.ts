@@ -71,6 +71,7 @@ export type CommandId =
   | "workspace.next"
   | "workspace.prev"
   | "workspace.new"
+  | "workspace.mcpServers"
   | `workspace.go${Digit}`
   | "view.settings"
   | "view.shortcuts"
@@ -325,6 +326,14 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "workspaces",
     labelKey: "cmd.workspace.new",
     defaults: ["Mod+Shift+N"],
+  },
+  {
+    // Unbound: a setting visited now and then is found in the palette and the
+    // navigator's menu, and no chord is worth spending on it.
+    id: "workspace.mcpServers",
+    section: "workspaces",
+    labelKey: "cmd.workspace.mcpServers",
+    defaults: [],
   },
   ...workspaceDigits,
 

@@ -222,6 +222,7 @@ export function WorkspaceTerminals({
             index={Math.max(0, order.indexOf(pane.id))}
             cwd={workspace.cwd}
             extraRoots={workspace.extraRoots}
+            mcp={workspace.mcp}
             settings={settings}
             theme={theme}
             focused={focusedPaneId === pane.id}
