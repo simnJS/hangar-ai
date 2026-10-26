@@ -603,6 +603,85 @@ body.is-sorting * {
   background: var(--surface-hover);
 }
 
+/* ---------- Agent state glyphs ---------- */
+
+/* components/StateGlyph.tsx. Shape and colour both say the state, so it
+   reads for anyone who cannot tell green from amber. */
+.glyph {
+  --glyph-size: 8px;
+  --glyph-c: var(--state-idle);
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: calc(var(--glyph-size) * var(--ui-scale));
+  height: calc(var(--glyph-size) * var(--ui-scale));
+  border-radius: 50%;
+  background: var(--glyph-c);
+}
+
+.glyph--working {
+  --glyph-c: var(--state-working);
+}
+
+/* A ring that grows and fades: something is happening, quietly. */
+.glyph--working::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--glyph-c);
+  opacity: 0;
+  animation: glyph-pulse 2.4s var(--ease) infinite;
+}
+
+/* The one state that needs you: a diamond, not a dot. */
+.glyph--waiting {
+  --glyph-c: var(--state-waiting);
+  border-radius: 1.5px;
+  transform: rotate(45deg) scale(0.86);
+}
+
+.glyph--yours {
+  --glyph-c: var(--state-yours);
+}
+
+.glyph--idle,
+.glyph--exited {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--state-idle);
+}
+
+.glyph--starting {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--state-idle);
+  animation: glyph-blink 1.2s steps(2, start) infinite;
+}
+
+@keyframes glyph-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes glyph-blink {
+  to {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glyph--working::after,
+  .glyph--starting {
+    animation: none;
+  }
+}
+
 /* ---------- Main area ---------- */
 
 .main {
