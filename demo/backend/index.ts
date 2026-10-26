@@ -53,6 +53,9 @@ export async function route(command: string, args: Record<string, any>): Promise
       return undefined;
     case "pty_alive":
       return shell.alive(args.id);
+    case "pty_has_children":
+      // The demo's shells are make-believe: nothing ever runs under them.
+      return [];
 
     /* ── hangar-bridge queue ── */
     case "bridge_enqueue":

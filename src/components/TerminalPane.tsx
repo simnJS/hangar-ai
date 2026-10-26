@@ -39,6 +39,15 @@ import {
   type PaneEventDetail,
 } from "../lib/paneInsight";
 import { subscribePty } from "../lib/ptyBus";
+import {
+  forgetPane,
+  mustResume,
+  noteAgentExited,
+  notePaneActivity,
+  notePaneMounted,
+  notePaneOutput,
+  touchWorkspace,
+} from "../lib/hibernateStore";
 import { registerFinder, registerTerminal } from "../lib/terminalRegistry";
 import { attachWebgl, WEBGL_PARK_MS } from "../lib/webgl";
 import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
@@ -340,6 +349,8 @@ export function TerminalPane({
     // Shortcuts that act on the terminal itself — clear, copy, scroll — are
     // dispatched from the app and look the instance up by pane id.
     const unregister = registerTerminal(pane.id, term);
+    // What lib/hibernate needs to tell a pane at rest from one in use.
+    notePaneMounted(pane.id);
 
     try {
       fit.fit();
@@ -358,6 +369,9 @@ export function TerminalPane({
 
     term.onData((data) => {
       if (replaying) return;
+      // Typing or pasting is using the workspace. Only on screen: a hidden
+      // pane's data is the terminal answering its own program.
+      if (visibleRef.current) touchWorkspace(workspaceId);
       ptyWrite(pane.id, data).catch(() => undefined);
     });
 
@@ -494,6 +508,7 @@ export function TerminalPane({
       if (event.kind !== "end") setBridged(true);
       switch (event.kind) {
         case "hello": {
+          noteAgentExited(pane.id, false);
           // Read before the capture below makes it this session's id.
           const resumed = event.sessionId === sessionIdRef.current;
           bridgeModel = event.model;
@@ -584,6 +599,7 @@ export function TerminalPane({
           break;
         case "end":
           // Claude Code exited; whatever runs in the pane next is a shell.
+          noteAgentExited(pane.id, true);
           setBridged(false);
           setBridgeContext(null);
           setActivity("idle");
@@ -614,6 +630,7 @@ export function TerminalPane({
         const stop = await subscribePty(
           pane.id,
           (data, seq) => {
+            notePaneOutput(pane.id);
             if (held) {
               held.push({ data, seq });
               return;
@@ -718,7 +735,12 @@ export function TerminalPane({
           // transcript only on the first message, so a pane reset and left
           // alone holds an id with nothing behind it, and resuming that only
           // prints "No conversation found". Asked while the shell settles.
-          const saved = settingsRef.current.autoResume ? pane.sessionId : null;
+          //
+          // A pane its workspace's sleep stopped resumes whatever the setting
+          // says: the sleep was not the user's doing, and must not cost them
+          // a conversation.
+          const owed = mustResume(pane.id);
+          const saved = settingsRef.current.autoResume || owed ? pane.sessionId : null;
           const behind =
             saved && isResumable(pane.agent)
               ? sessionExists(pane.agent, saved).catch(() => null)
@@ -727,6 +749,7 @@ export function TerminalPane({
           // Let the shell profile settle before typing into it.
           await sleep(settingsRef.current.launchDelayMs, controller.signal);
           if (disposed || controller.signal.aborted) return;
+          if (owed) mustResume(pane.id, true);
 
           let resumeId = saved;
           if (resumeId && (await behind) === false) {
@@ -805,6 +828,7 @@ export function TerminalPane({
       observer.disconnect();
       watcher.dispose();
       unregister();
+      forgetPane(pane.id);
       unsubscribe?.();
       unsubscribeBridge?.();
       // A pane moving to another window keeps running there.
@@ -876,6 +900,8 @@ export function TerminalPane({
     if (reportsActivity) setPaneActivity(pane.id, { workspaceId, activity, bridged });
     else clearPaneActivity(pane.id);
   }, [pane.id, workspaceId, activity, bridged, reportsActivity]);
+  // And for lib/hibernate, which needs to know since when it has rested.
+  useEffect(() => notePaneActivity(pane.id, activity), [pane.id, activity]);
   // A pane moving to another window keeps its state: that window reports it
   // from now on, and clearing it here could land after its first report.
   useEffect(
@@ -1159,7 +1185,10 @@ export function TerminalPane({
         // a shell whose command is done — your turn.
         attention ? `pane--attn pane--attn-${glyph === "waiting" ? "waiting" : "yours"}` : ""
       }`}
-      onMouseDown={onFocus}
+      onMouseDown={() => {
+        touchWorkspace(workspaceId);
+        onFocus();
+      }}
       aria-label={t("pane.label", { name: pane.name })}
     >
       <header

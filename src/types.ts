@@ -181,6 +181,15 @@ export interface Settings {
   /** Relaunch agents with their previous session when a workspace opens. */
   autoResume: boolean;
   /**
+   * Put a workspace nobody uses to sleep: its terminals close, its agents stop
+   * and give their memory back, and they resume their sessions when it opens
+   * again (lib/hibernate decides when it is safe). On by default — a dozen
+   * idle Claude Code sessions in workspaces left behind cost gigabytes.
+   */
+  hibernateIdle: boolean;
+  /** How long a workspace has to be left alone first, in minutes. */
+  hibernateAfterMin: number;
+  /**
    * Load the hangar-bridge mod into the Claude Code each pane starts (see
    * src-tauri/src/bridge.rs). On by default; the way out for a machine whose
    * Claude Code refuses to start with a plugin directory it did not install.
@@ -327,6 +336,8 @@ export const DEFAULT_SETTINGS: Settings = {
   padding: 10,
   agentCommands: {},
   autoResume: true,
+  hibernateIdle: true,
+  hibernateAfterMin: 10,
   claudeBridge: true,
   launchDelayMs: 700,
   notifyOnIdle: true,

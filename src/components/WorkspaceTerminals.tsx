@@ -6,6 +6,7 @@ import { TerminalPane } from "./TerminalPane";
 import { dropText, watchFileDrops, type Point } from "../lib/fileDrop";
 import { leafIds, normalizeTree } from "../lib/layout";
 import { runSavedCommand } from "../lib/savedCommands";
+import { touchWorkspace } from "../lib/hibernateStore";
 import { resolveShell } from "../lib/shells";
 import { getTerminal, registerDiffOpener } from "../lib/terminalRegistry";
 import { useStore, type CommandScope } from "../store";
@@ -255,12 +256,13 @@ export function WorkspaceTerminals({
             onOpenSessions={() => onOpenSessions(pane.id)}
             // A broadcast command goes to the whole workspace, which is the
             // broadcast field's target spelled once and kept.
-            onRunCommand={(command) =>
+            onRunCommand={(command) => {
+              touchWorkspace(workspace.id);
               runSavedCommand(
                 command,
                 command.broadcast ? panes.map((p) => p.id) : [pane.id],
-              )
-            }
+              );
+            }}
             onEditCommand={(command, scope) => setEditor({ command, scope })}
             onRemoveCommand={(command, scope) =>
               removeSavedCommand(scope, workspace.id, command.id)

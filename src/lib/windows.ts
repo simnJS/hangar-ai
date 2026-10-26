@@ -39,11 +39,19 @@ export const windowWorkspaceId: string | null = isMainWindow
 /** Moving a workspace out needs a second window, which the demo cannot open. */
 export const canDetach = label === "main";
 
+/** `resume`: the panes of a sleeping workspace, which start on their sessions. */
 export const openWorkspaceWindow = (
   workspaceId: string,
   title: string,
   bounds: WindowBounds | null | undefined,
-) => invoke<void>("open_workspace_window", { workspaceId, title, bounds: bounds ?? null });
+  resume: string[] = [],
+) =>
+  invoke<void>("open_workspace_window", {
+    workspaceId,
+    title,
+    bounds: bounds ?? null,
+    resume: resume.length ? resume : null,
+  });
 
 export const focusWorkspaceWindow = (workspaceId: string) =>
   invoke<boolean>("focus_workspace_window", { workspaceId });

@@ -91,15 +91,25 @@ fn second_screen(app: &AppHandle) -> Option<(Position, Size)> {
 
 /// Opens the window of a workspace, or brings it forward when it is already
 /// open.
+///
+/// `resume` names the panes of a workspace that was asleep: the window starts
+/// them on their sessions whatever the auto-resume setting says, as the main
+/// window would have (src/lib/hibernateStore.ts). Pane ids are checked like
+/// workspace ids, since they end up in the same address.
 #[tauri::command]
 pub async fn open_workspace_window(
     app: AppHandle,
     workspace_id: String,
     title: String,
     bounds: Option<Bounds>,
+    resume: Option<Vec<String>>,
 ) -> Result<(), String> {
     if !valid_id(&workspace_id) {
         return Err(format!("'{workspace_id}' is not a workspace id"));
+    }
+    let resume = resume.unwrap_or_default();
+    if let Some(bad) = resume.iter().find(|id| !valid_id(id)) {
+        return Err(format!("'{bad}' is not a pane id"));
     }
     let label = label(&workspace_id);
     if let Some(window) = app.get_webview_window(&label) {
@@ -107,7 +117,12 @@ pub async fn open_workspace_window(
         return Ok(());
     }
 
-    let url = WebviewUrl::App(format!("index.html?workspace={workspace_id}").into());
+    let query = if resume.is_empty() {
+        format!("workspace={workspace_id}")
+    } else {
+        format!("workspace={workspace_id}&resume={}", resume.join(","))
+    };
+    let url = WebviewUrl::App(format!("index.html?{query}").into());
     let mut builder = WebviewWindowBuilder::new(&app, &label, url)
         .title(format!("{title} — Hangar.AI"))
         .min_inner_size(640.0, 420.0);

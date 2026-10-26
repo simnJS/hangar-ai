@@ -22,9 +22,13 @@ export const ptyWrite = (id: string, data: string) =>
 export const ptyResize = (id: string, cols: number, rows: number) =>
   invoke<void>("pty_resize", { id, cols, rows });
 
-export const ptyKill = (id: string) => invoke<void>("pty_kill", { id });
+/** `tree` also ends everything the shell started: a pane put to sleep. */
+export const ptyKill = (id: string, tree = false) => invoke<void>("pty_kill", { id, tree });
 
 export const ptyAlive = (id: string) => invoke<boolean>("pty_alive", { id });
+
+/** The panes among `ids` whose shell still runs a process of its own. */
+export const ptyHasChildren = (ids: string[]) => invoke<string[]>("pty_has_children", { ids });
 
 /** A prompt waiting in Hangar until the pane's Claude Code is free to take it. */
 export interface QueuedPrompt {

@@ -6689,6 +6689,20 @@ select.task__input {
     center / contain no-repeat;
 }
 
+/* A workspace put to sleep (lib/hibernate): news, not a warning. The moon
+   is the navigator's mark for it. */
+.voice-pill--asleep {
+  color: var(--fg);
+}
+
+.voice-pill--asleep::before {
+  background: var(--fg-muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2.25a3.85 3.85 0 0 0 5.75 5.75A5.75 5.75 0 1 1 8 2.25z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2.25a3.85 3.85 0 0 0 5.75 5.75A5.75 5.75 0 1 1 8 2.25z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
 .voice-pill__text {
   min-width: 0;
   overflow: hidden;

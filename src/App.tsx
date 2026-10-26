@@ -27,6 +27,15 @@ import {
   ptyWrite,
 } from "./lib/ipc";
 import { usePaneControl } from "./lib/control";
+import {
+  carryResume,
+  isAsleep,
+  markAwake,
+  mustResume,
+  resumeOnWake,
+  touchWorkspace,
+} from "./lib/hibernateStore";
+import { useHibernation } from "./lib/useHibernation";
 import { gitWorktreeList } from "./lib/git";
 import { modelStat } from "./lib/modelFiles";
 import {
@@ -164,8 +173,14 @@ export default function App() {
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
   const [openedIds, setOpenedIds] = useState<string[]>([]);
-  /** Transient line at the bottom of the window — dictation errors, for now. */
-  const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * Transient line at the bottom of the window — dictation errors, for now.
+   * A workspace going to sleep is news rather than a problem, and comes
+   * without the warning sign.
+   */
+  const [notice, setNotice] = useState<string | { text: string; kind: "asleep" } | null>(
+    null,
+  );
   const broadcastRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
@@ -301,6 +316,27 @@ export default function App() {
         : state.workspaces.filter((ws) => openedIds.includes(ws.id) && !ws.detached),
     [state.workspaces, openedIds],
   );
+
+  // Workspaces left alone go to sleep, their agents stopped to free memory
+  // and resumed when they open again (lib/useHibernation). The main window's
+  // job alone: it is the one that mounts them.
+  useHibernation({
+    enabled: isMainWindow && hydrated && state.settings.hibernateIdle,
+    // At least a minute, whatever a hand-edited state.json says.
+    delayMs: Math.max(1, state.settings.hibernateAfterMin || 0) * 60_000,
+    activeId: state.activeWorkspaceId,
+    snapshot,
+    openedIds,
+    unmount: (id) => setOpenedIds((current) => current.filter((entry) => entry !== id)),
+    announce: (workspaces, agents) =>
+      setNotice({
+        kind: "asleep",
+        text:
+          workspaces.length === 1
+            ? t("hibernate.notice", { name: workspaces[0].name, n: agents })
+            : t("hibernate.noticeMany", { count: workspaces.length, n: agents }),
+      }),
+  });
 
   // Keep focus on a pane that still exists after a layout change.
   useEffect(() => {
@@ -586,6 +622,9 @@ export default function App() {
           respawnPane: (workspaceId, paneId, patch) => {
             const nextId = respawnPane(workspaceId, paneId, patch);
             if (nextId && focusRef.current[workspaceId] === paneId) focusPane(workspaceId, nextId);
+            // Restarted while its workspace slept: still owed its session,
+            // unless the restart asked for a fresh one.
+            if (nextId && patch.sessionId !== null) carryResume(paneId, nextId);
             return nextId;
           },
           openWorkspace: (id) =>
@@ -636,6 +675,12 @@ export default function App() {
       const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
       if (!ws || ws.detached) return;
       markHandover(ws.panes.map((pane) => pane.id));
+      // Asleep, it wakes in its new window: the sessions its panes are owed
+      // go with it, since this window will not be the one starting them.
+      const resume = isAsleep(ws.id)
+        ? ws.panes.filter((pane) => mustResume(pane.id, true)).map((pane) => pane.id)
+        : [];
+      markAwake(ws.id);
       updateWorkspace(ws.id, { detached: true });
       // The main window moves on to a workspace it can still show.
       const next = sidebarOrder(snapshot().workspaces, snapshot().folders).find(
@@ -643,9 +688,11 @@ export default function App() {
       );
       if (next) setActiveWorkspace(next.id);
       try {
-        await openWorkspaceWindow(ws.id, ws.name, ws.windowBounds);
+        await openWorkspaceWindow(ws.id, ws.name, ws.windowBounds, resume);
       } catch (err) {
-        // No window: it comes straight back, its panes still running.
+        // No window: it comes straight back, its panes still running — or,
+        // asleep, still owed their sessions.
+        resumeOnWake(resume);
         updateWorkspace(ws.id, { detached: false });
         setActiveWorkspace(ws.id);
         setNotice(t("window.openFailed", { error: String(err) }));
@@ -954,8 +1001,10 @@ export default function App() {
     const saved = mergeCommands(activeWorkspace, state.settings);
     for (let i = 0; i < Math.min(9, saved.length); i++) {
       const command = saved[i];
-      map[`command.run${i + 1}` as CommandId] = () =>
+      map[`command.run${i + 1}` as CommandId] = () => {
+        touchWorkspace(wsId);
         runSavedCommand(command, command.broadcast ? panes.map((p) => p.id) : [focused]);
+      };
     }
 
     const toward = (dir: Direction, act: (neighbour: string) => void) => () => {
@@ -1022,6 +1071,7 @@ export default function App() {
   function sendBroadcast(whenFree = false) {
     const text = broadcast.trim();
     if (!text) return;
+    if (activeWorkspace) touchWorkspace(activeWorkspace.id);
     for (const pane of panes) {
       if (whenFree && getPaneActivity(pane.id)?.bridged) {
         bridgeEnqueue(pane.id, text).catch(() => undefined);
@@ -1257,8 +1307,18 @@ export default function App() {
       {voice.phase !== "idle" && <VoiceHud phase={voice.phase} level={voice.level} />}
 
       {notice && (
-        <div className="voice-pill voice-pill--notice" role="status">
-          <span className="voice-pill__text">{notice}</span>
+        <div
+          className={[
+            "voice-pill voice-pill--notice",
+            typeof notice !== "string" && `voice-pill--${notice.kind}`,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          role="status"
+        >
+          <span className="voice-pill__text">
+            {typeof notice === "string" ? notice : notice.text}
+          </span>
         </div>
       )}
 
