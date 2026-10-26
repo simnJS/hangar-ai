@@ -35,7 +35,7 @@ use parse::{Agent, Digest};
 
 /// Bumped whenever a digest would come out differently for the same file —
 /// a parser fix — so the caches written before it are dropped, not trusted.
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 const CACHE_FILE: &str = "usage-stats-cache.json";
 /// Bytes hashed at the head of a file to tell an appended one from a
 /// rewritten one.

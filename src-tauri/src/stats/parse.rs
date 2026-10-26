@@ -703,7 +703,27 @@ pub fn read_into(digest: &mut Digest, reader: impl Read, finished: bool) -> std:
                 claude_line(line, digest, &mut seen)
             })
         }
-        Agent::Codex => for_each_line(reader, finished, |line| codex_line(line, digest)),
+        Agent::Codex => {
+            let consumed = for_each_line(reader, finished, |line| codex_line(line, digest))?;
+            name_early_calls(digest);
+            Ok(consumed)
+        }
+    }
+}
+
+/// Codex can report a count before the turn that names its model: those
+/// calls go to the first model the rollout names, once it has named one.
+fn name_early_calls(digest: &mut Digest) {
+    let Some(unknown) = digest.models.iter().position(|model| model == "unknown") else {
+        return;
+    };
+    let Some(named) = digest.models.iter().position(|model| model != "unknown") else {
+        return;
+    };
+    for call in &mut digest.calls {
+        if call.model as usize == unknown {
+            call.model = named as u16;
+        }
     }
 }
 
@@ -873,6 +893,26 @@ mod tests {
             (300, 1700, 30)
         );
         assert_eq!(digest.models[second.model as usize], "gpt-6-astra");
+    }
+
+    #[test]
+    fn a_count_before_the_first_turn_goes_to_the_model_named_next() {
+        let text = [
+            META.to_string(),
+            count("2026-10-02T09:00:01Z", 500, 0, 20),
+            turn("2026-10-02T09:00:02Z", "gpt-5.5"),
+            count("2026-10-02T09:00:10Z", 1000, 0, 50),
+        ]
+        .join(
+            "
+",
+        );
+        let digest = read(Agent::Codex, &text);
+        assert_eq!(digest.calls.len(), 2);
+        assert!(digest
+            .calls
+            .iter()
+            .all(|call| digest.models[call.model as usize] == "gpt-5.5"));
     }
 
     #[test]
