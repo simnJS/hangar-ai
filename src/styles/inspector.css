@@ -680,39 +680,6 @@ body.is-dragging-pane .inspector__grip {
   color: var(--fg-subtle);
 }
 
-/* Three rising bars, lit up to the priority. */
-.insp-prio {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 1.5px;
-  height: calc(9px * var(--ui-scale));
-}
-
-.insp-prio i {
-  width: 2.5px;
-  border-radius: 1px;
-  background: var(--line-strong);
-}
-
-.insp-prio i:nth-child(1) {
-  height: 44%;
-}
-
-.insp-prio i:nth-child(2) {
-  height: 72%;
-}
-
-.insp-prio i:nth-child(3) {
-  height: 100%;
-}
-
-.insp-prio[data-level="1"] i:nth-child(-n + 1),
-.insp-prio[data-level="2"] i:nth-child(-n + 2),
-.insp-prio[data-level="3"] i:nth-child(-n + 3) {
-  background: var(--fg-muted);
-}
-
 .insp-task__title {
   display: -webkit-box;
   margin: calc(3px * var(--ui-scale)) 0 calc(6px * var(--ui-scale));

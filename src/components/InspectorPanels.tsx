@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from "react";
+import { BoardPriority } from "./BoardPriority";
 import { Icon } from "./Icon";
 import { InspectorSection } from "./InspectorSection";
 import { StateGlyph } from "./StateGlyph";
@@ -8,15 +9,13 @@ import { bridgeCancel, type QueuedPrompt } from "../lib/ipc";
 import type { RateLimit } from "../lib/bridge";
 import type { Task } from "../lib/board";
 import type { PaneEvent } from "../lib/paneInsight";
+import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import {
   clockTime,
   formatCost,
-  formatElapsed,
   formatPercent,
   formatSince,
   planUsage,
-  priorityBars,
-  shortTaskId,
   spacedUnit,
   usageTone,
 } from "../lib/inspectorFormat";
@@ -293,7 +292,7 @@ export const ContextSection = memo(function ContextSection({
                 {formatCost(costUsd, locale)}
                 {since !== null && (
                   <small>
-                    {t("inspector.costOver", { duration: formatElapsed(now - since, t) })}
+                    {t("inspector.costOver", { duration: elapsedLabel(now - since, t) })}
                   </small>
                 )}
               </b>
@@ -377,17 +376,7 @@ export const TaskSection = memo(function TaskSection({
             <span className="insp-mono" title={t("inspector.taskId", { id: task.id })}>
               #{shortTaskId(task.id)}
             </span>
-            <span
-              className="insp-prio"
-              data-level={priorityBars(task.priority)}
-              role="img"
-              aria-label={t("inspector.taskPriority", { n: task.priority })}
-              title={t("inspector.taskPriority", { n: task.priority })}
-            >
-              <i />
-              <i />
-              <i />
-            </span>
+            <BoardPriority priority={task.priority} />
           </div>
           <p className="insp-task__title">{task.title}</p>
           <div className="insp-task__foot">
@@ -396,8 +385,10 @@ export const TaskSection = memo(function TaskSection({
               {task.column === "review" ? (
                 t("inspector.taskReview")
               ) : since !== null ? (
-                <span title={new Date(since).toLocaleString(locale)}>
-                  {t("inspector.taskDoing", { duration: formatElapsed(now - since, t) })}
+                <span
+                  title={t("board.doingSince", { date: new Date(since).toLocaleString(locale) })}
+                >
+                  {t("inspector.taskDoing", { duration: elapsedLabel(now - since, t) })}
                 </span>
               ) : (
                 t("inspector.taskDoingNow")
