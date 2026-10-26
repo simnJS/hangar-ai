@@ -17,7 +17,9 @@ import {
   MAX_PANES,
   moveLeaf,
   normalizeTree,
+  presetSize,
   presetTree,
+  readingOrder,
   removeLeaf,
   renameLeaf,
   type Zone,
@@ -502,7 +504,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
 
       applyPreset(workspaceId, count, modelPaneId) {
-        const size = Math.min(MAX_PANES, Math.max(1, Math.round(count)));
+        const size = presetSize(count);
         // Read now: `mapWorkspace` applies its function synchronously, against
         // the very state this is taken from.
         const others = allPaneNames(
@@ -510,14 +512,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         );
         mapWorkspace(workspaceId, (ws) => {
           // Reading order, not creation order: the panes you see first are the
-          // ones a smaller preset keeps. Sorting by id order instead would drop
-          // whichever terminals happened to be spawned last, which after a few
-          // moves has nothing to do with what is on screen.
-          const order = leafIds(normalizeTree(ws.panes, ws.tree));
-          const byId = new Map(ws.panes.map((pane) => [pane.id, pane]));
-          const arranged = order
-            .map((id) => byId.get(id))
-            .filter((pane): pane is Pane => Boolean(pane));
+          // ones a smaller preset keeps — and the ones the toolbar names when
+          // it asks before closing the others (lib/layout closedByPreset).
+          const arranged = readingOrder(ws.panes, ws.tree);
 
           // Same pane objects, same ids: the survivors keep their PTY and only
           // get resized. Only a shrinking preset ever closes anything.
