@@ -690,6 +690,23 @@ describe("model_close", () => {
     expect(log).toContain("announce:modelClosed:b.glb:Ava");
   });
 
+  it("finds a model however the agent spells its path, through Rust's canonical form", async () => {
+    const { deps, log, preview } = setup();
+    // Two files of the same name: only the canonical path can tell them apart.
+    preview.models = [
+      openModel("m1", "C:\dev\hangar\a\m.glb"),
+      openModel("m2", "C:\dev\hangar\b\m.glb"),
+    ];
+    const stat = deps.modelStat;
+    deps.modelStat = async (path) =>
+      path.includes("/c/dev/hangar/b/m.glb")
+        ? { path: "C:\dev\hangar\b\m.glb", size: 1, modifiedMs: 1 }
+        : stat(path);
+    const result = await runControl("model_close", { ...fromAva, path: "/c/dev/hangar/b/m.glb" }, deps);
+    expect(result).toEqual({ closed: ["C:\dev\hangar\b\m.glb"], open: 1 });
+    expect(log).toContain("closeModels:m2");
+  });
+
   it("closes all of the caller's workspace's models, and leaves the others'", async () => {
     const { deps, log, preview } = setup();
     preview.models = [

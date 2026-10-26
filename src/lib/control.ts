@@ -337,10 +337,21 @@ async function previewOf(ws: Workspace, deps: ControlDeps): Promise<ModelHost> {
   );
 }
 
-/** An open model by path, relative or absolute, or by its file name alone
-    when only one open model has it. */
-function findModel(models: OpenModel[], given: string, base: string): OpenModel {
-  const target = comparable(resolvePath(base, given));
+/**
+ * The form `model_show` stored a path in: Rust's canonical one, whatever
+ * casing, link or Git Bash spelling (/c/…) the agent used this time. Falls
+ * back to the plain resolution when the file is gone.
+ */
+async function canonicalPath(deps: ControlDeps, base: string, given: string): Promise<string> {
+  const resolved = resolvePath(base, given);
+  const file = await deps.modelStat(resolved).catch(() => null);
+  return file?.path ?? resolved;
+}
+
+/** An open model by path (already resolved, see canonicalPath), or by its
+    file name alone when only one open model has it. */
+function findModel(models: OpenModel[], given: string, resolved: string): OpenModel {
+  const target = comparable(resolved);
   const exact = models.find((model) => comparable(model.path) === target);
   if (exact) return exact;
   // The same file reached through a link, or named without its folder.
@@ -465,7 +476,7 @@ async function modelSnapshot(
     throw new Error("No 3D model is open. Show one with model_show, then take the snapshot.");
   }
   const model = given
-    ? findModel(models, given, callerFolder(ws, caller))
+    ? findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))
     : (models.find((entry) => entry.id === activeId) ?? models[models.length - 1]);
 
   // On screen, so the viewer has it loaded, and so the user sees what the
@@ -521,7 +532,7 @@ async function modelClose(
   // Without a path, the caller's own workspace's models only: the main
   // window's panel also holds those other workspaces' agents showed.
   const closing = given
-    ? [findModel(models, given, callerFolder(ws, caller))]
+    ? [findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))]
     : models.filter((model) => model.workspaceId === ws.id);
   if (!closing.length) return { closed: [], open: models.length };
   await preview.close(closing.map((model) => model.id));
