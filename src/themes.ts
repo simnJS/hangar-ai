@@ -1,4 +1,13 @@
 import type { ITheme } from "@xterm/xterm";
+import {
+  contrastRatio,
+  ensureContrast,
+  hueAndSaturation,
+  hueDistance,
+  mix,
+  toRgb,
+  withHue,
+} from "./lib/contrast";
 
 export interface TerminalTheme {
   id: string;
@@ -974,88 +983,71 @@ export const THEMES: TerminalTheme[] = [
 export const getTheme = (id: string): TerminalTheme =>
   THEMES.find((t) => t.id === id) ?? THEMES[0];
 
-const toRgb = (hex: string): [number, number, number] => {
-  const clean = hex.replace("#", "");
-  const full =
-    clean.length === 3
-      ? clean
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : clean;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-  ];
-};
 
-const toHex = ([r, g, b]: [number, number, number]) =>
-  "#" +
-  [r, g, b]
-    .map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0"))
-    .join("");
-
-/** Blends two colors; `amount` is how much of `b` to mix in. */
-export const mix = (a: string, b: string, amount: number): string => {
-  const [r1, g1, b1] = toRgb(a);
-  const [r2, g2, b2] = toRgb(b);
-  return toHex([
-    r1 + (r2 - r1) * amount,
-    g1 + (g2 - g1) * amount,
-    b1 + (b2 - b1) * amount,
-  ]);
-};
+export { mix };
 
 export const withAlpha = (hex: string, alpha: number): string => {
   const [r, g, b] = toRgb(hex);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+/** Text on the chrome reads at this ratio at least: WCAG's AA for body text. */
+export const TEXT_CONTRAST = 4.5;
+/** A state's dot, a bar, a frame: WCAG's 3:1 for what is not text. */
+export const FILL_CONTRAST = 3;
 
-/** Relative luminance, as WCAG defines it. */
-const luminance = (hex: string): number => {
-  const [r, g, b] = toRgb(hex).map((v) => {
-    const c = v / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-};
-
-/** WCAG contrast ratio between two colours, from 1 to 21. */
-export const contrastRatio = (a: string, b: string): number => {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-};
+/** Two hues closer than this pass for one colour at a glance. */
+const DISTINCT_HUE = 30;
+/** "Your turn" stays somewhere from cyan to blue, whatever it steers clear of. */
+const YOURS_HUES = { from: 165, to: 240 };
 
 /**
- * `color` moved `from` of the way toward `toward`, or further while that still
- * reads under 4.5:1 on one of `surfaces`. Text that must stay legible on a
- * theme whose own contrast is low gets there by leaning on its foreground;
- * `toward` itself is the last resort.
+ * The colour "your turn" starts from: the theme's cyan, or its blue, as long
+ * as it reads as neither the accent — which marks links, focus and the
+ * selection — nor working's green. A theme with no such colour has its cyan
+ * turned to the nearest hue clear of both.
  */
-export const legibleOn = (
-  surfaces: string[],
-  color: string,
-  toward: string,
-  from: number,
-): string => {
-  for (let step = 0; from + step * 0.02 < 1; step++) {
-    const candidate = mix(color, toward, from + step * 0.02);
-    if (surfaces.every((surface) => contrastRatio(candidate, surface) >= 4.5)) return candidate;
+function yoursBase(theme: TerminalTheme, working: string): string {
+  const accentHue = hueAndSaturation(theme.accent).hue;
+  const workingHue = hueAndSaturation(working).hue;
+  const apart = (hue: number) =>
+    Math.min(hueDistance(hue, accentHue), hueDistance(hue, workingHue));
+  const { cyan, brightCyan, blue, brightBlue } = theme.xterm;
+  // Some palettes fill these slots with a grey, or with what is really a
+  // pink: only a cyan or a blue worth the name is a candidate.
+  const candidates = [cyan, brightCyan, blue, brightBlue].filter((color): color is string => {
+    if (!color) return false;
+    const { hue, saturation } = hueAndSaturation(color);
+    return saturation >= 0.25 && hue >= YOURS_HUES.from && hue <= YOURS_HUES.to;
+  });
+  const ready = candidates.find((color) => apart(hueAndSaturation(color).hue) >= DISTINCT_HUE);
+  if (ready) return ready;
+
+  const base = candidates[0] ?? "#3fb8cf";
+  const baseHue = hueAndSaturation(base).hue;
+  let best = baseHue;
+  let bestScore = -Infinity;
+  for (let hue = YOURS_HUES.from; hue <= YOURS_HUES.to; hue++) {
+    // Clear of both, as near the theme's own hue as that allows; failing
+    // that, as far from the nearer of the two as the range goes.
+    const score = apart(hue) >= DISTINCT_HUE ? 1000 - hueDistance(hue, baseHue) : apart(hue);
+    if (score > bestScore) {
+      bestScore = score;
+      best = hue;
+    }
   }
-  return toward;
-};
+  return withHue(base, best);
+}
 
 /**
  * Every colour token of the app chrome, derived from the terminal palette, so
  * switching a terminal theme restyles the entire window rather than just the
  * panes. Computed here rather than with light-dark() or color-mix() in the
- * stylesheets, so a token never depends on what the web view supports.
+ * stylesheets, so a token never depends on what the web view supports. Pure,
+ * so a test can hold every bundled theme to the contrast it promises.
  */
-export function themeVars(theme: TerminalTheme): Record<string, string> {
+export function deriveChromeTokens(theme: TerminalTheme): Record<string, string> {
   const bg = theme.xterm.background ?? "#1a1b26";
-  const fg = theme.xterm.foreground ?? "#c0caf5";
   const isDark = theme.appearance === "dark";
   const lift = isDark ? "#ffffff" : "#000000";
 
@@ -1065,11 +1057,64 @@ export function themeVars(theme: TerminalTheme): Record<string, string> {
   const chrome = lifted(0.04);
   const chromeBar = lifted(0.06);
   const raised = lifted(0.07);
+  const paneHead = lifted(0.025);
   const bgSunken = mix(bg, isDark ? "#000000" : "#ffffff", 0.35);
-  const accentHi = isDark ? mix(theme.accent, "#ffffff", 0.22) : theme.accent;
-  const danger = theme.xterm.red ?? "#f7768e";
-  /** What secondary text sits on: the chrome, its bars, raised groups. */
-  const textSurfaces = [chrome, chromeBar, raised];
+
+  /**
+   * Every surface the chrome writes on: the navigator, inspector and status
+   * bar, the toolbar, raised groups and cards, pane headers. A colour is held
+   * to the least favourable of them: on a dark theme the lightest, on a light
+   * one the darkest.
+   */
+  const surfaces = [chrome, chromeBar, raised, paneHead];
+  /**
+   * A step further out: the selected row, and a hairline's tint laid over a
+   * raised group or the toolbar (a chip, the activity capsule). Whatever can
+   * be written there (body text, labels, state words, links, status colours)
+   * clears those as well. The two quietest greys answer to the plain surfaces
+   * only, so they stay a step below the labels; a rule that puts them on a
+   * fill takes --fg-secondary instead.
+   */
+  const selection = mix(bg, lift, 0.13);
+  const lineAlpha = isDark ? 0.07 : 0.08;
+  const tinted = mix(raised, lift, lineAlpha);
+  const anywhere = [...surfaces, selection, tinted];
+  const text = (color: string, toward?: string) =>
+    ensureContrast(color, anywhere, TEXT_CONTRAST, toward);
+  const fill = (color: string) => ensureContrast(color, anywhere, FILL_CONTRAST);
+
+  // The theme's foreground, unless it is too faint for the chrome (Solarized):
+  // body text there leans out to white or black until it reads.
+  const fg = text(theme.xterm.foreground ?? "#c0caf5");
+  /**
+   * Text a step back from the foreground: `amount` of the way to the
+   * background, or nearer the foreground until it reads on `on`. Leaning on
+   * the foreground rather than on white keeps the theme's tint in its greys.
+   */
+  const quieter = (amount: number, on: string[] = surfaces) =>
+    ensureContrast(mix(fg, bg, amount), on, TEXT_CONTRAST, fg);
+
+  // A light theme's "yellow" is often a dark brown that reads as body text,
+  // so light themes start from an amber that still looks like one.
+  const amber = isDark ? (theme.xterm.yellow ?? "#e7c06b") : "#b45309";
+  const green = theme.xterm.green ?? "#5fd27f";
+  const yours = yoursBase(theme, green);
+  const danger = text(theme.xterm.red ?? "#f7768e");
+  // Text on the accent (a primary button, a selected row): the accent darkened
+  // almost to black on a dark theme, white on a light one, unless the accent
+  // is too light or too dark for that to read; then the other one.
+  const darkOnAccent = ensureContrast(
+    mix(theme.accent, "#000000", 0.82),
+    theme.accent,
+    TEXT_CONTRAST,
+    "#000000",
+  );
+  const [preferred, other] = isDark ? [darkOnAccent, "#ffffff"] : ["#ffffff", darkOnAccent];
+  const onAccent =
+    contrastRatio(preferred, theme.accent) >= TEXT_CONTRAST ||
+    contrastRatio(preferred, theme.accent) >= contrastRatio(other, theme.accent)
+      ? preferred
+      : other;
 
   return {
     // The chrome around the terminals, in a few steps away from their
@@ -1077,7 +1122,7 @@ export function themeVars(theme: TerminalTheme): Record<string, string> {
     // the toolbar a step above, pane headers just off the terminal itself.
     "--chrome": chrome,
     "--chrome-bar": chromeBar,
-    "--pane-head": lifted(0.025),
+    "--pane-head": paneHead,
     "--pane-head-focus": lifted(0.045),
     "--raised": raised,
     // A card, a settings group: lifted off the page on a dark theme, a white
@@ -1085,61 +1130,64 @@ export function themeVars(theme: TerminalTheme): Record<string, string> {
     "--card": isDark ? raised : bg,
     // What sits between panes and columns: darker than anything around it.
     "--sep": mix(bg, "#000000", isDark ? 0.5 : 0.14),
-    "--line": withAlpha(lift, isDark ? 0.07 : 0.08),
+    "--line": withAlpha(lift, lineAlpha),
     "--line-strong": withAlpha(lift, isDark ? 0.12 : 0.14),
-    "--accent-hi": accentHi,
-    // An agent's state, always in these four: colour, plus a shape in the UI.
-    "--state-working": theme.xterm.green ?? "#5fd27f",
-    // A light theme's "yellow" is often a dark brown that reads as body text,
-    // so light themes get an amber chosen for 4.5:1 on white instead.
-    "--state-waiting": isDark ? (theme.xterm.yellow ?? "#e7c06b") : "#b45309",
-    "--state-yours": theme.accent,
-    // "Your turn" written in small type: the accent is too pale for that on a
-    // light theme's greys, so it leans toward the foreground until it reads.
-    "--state-yours-text": legibleOn(textSurfaces, accentHi, fg, 0.22),
-    "--state-idle": mix(fg, bg, 0.55),
+    "--accent-hi": text(isDark ? mix(theme.accent, "#ffffff", 0.22) : theme.accent),
+    // An agent's state, always in these four, and always with its shape in
+    // the UI. Each comes twice: the word, at 4.5:1 like any text, and the
+    // `-fill` of its glyph, a bar or a frame, held only to 3:1 so it keeps
+    // the theme's own vivid colour. "Your turn" has a hue of its own, so it
+    // never reads as a link or as the focus.
+    "--state-working": text(green),
+    "--state-working-fill": fill(green),
+    "--state-waiting": text(amber),
+    "--state-waiting-fill": fill(amber),
+    "--state-yours": text(yours),
+    "--state-yours-fill": fill(yours),
+    "--state-idle": quieter(0.55, anywhere),
+    "--state-idle-fill": fill(mix(fg, bg, 0.55)),
     "--bg": bg,
     "--bg-sunken": bgSunken,
     "--surface": mix(bg, lift, 0.04),
     "--surface-hover": mix(bg, lift, 0.08),
-    "--surface-active": mix(bg, lift, 0.13),
+    "--surface-active": selection,
     "--border": mix(bg, lift, 0.11),
     "--border-strong": mix(bg, lift, 0.2),
     "--fg": fg,
-    // Secondary text — hints, paths, metadata — a quarter of the way to the
-    // background, or nearer the foreground when the theme needs it to read
-    // at 4.5:1 on every chrome surface. --fg-muted is not held to that on the
-    // bars and raised groups, and stays for icons and quieter marks.
-    "--fg-secondary": legibleOn(textSurfaces, bg, fg, 0.76),
-    // Measured on --chrome, the darkest surface text sits on: muted clears
-    // 4.5:1 and subtle stays legible for metadata on every bundled theme.
-    "--fg-muted": mix(fg, bg, 0.33),
-    "--fg-subtle": mix(fg, bg, 0.5),
+    // Secondary text in three steps (labels, then metadata, then the quietest
+    // hints, paths and counts), each at 4.5:1 on every surface it is drawn
+    // on, which on a low-contrast theme draws them closer together.
+    "--fg-secondary": quieter(0.24, anywhere),
+    "--fg-muted": quieter(0.33),
+    "--fg-subtle": quieter(0.5),
     "--accent": theme.accent,
     "--accent-soft": withAlpha(theme.accent, 0.14),
     "--accent-ring": withAlpha(theme.accent, 0.45),
-    "--accent-fg": isDark ? mix(theme.accent, "#000000", 0.82) : "#ffffff",
+    "--accent-fg": onAccent,
     "--danger": danger,
     // Behind something destructive under the pointer, or a badge that warns.
     "--danger-soft": withAlpha(danger, 0.14),
-    "--success": theme.xterm.green ?? "#9ece6a",
-    // Same amber as --state-waiting on light themes, for the same reason.
-    "--warning": isDark ? (theme.xterm.yellow ?? "#e0af68") : "#b45309",
+    "--success": text(green),
+    // Same amber as --state-waiting, for the same reason.
+    "--warning": text(amber),
     "--shadow": isDark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.12)",
     // What floats over the window gets a dark outer edge under its light
     // hairline on a dark theme, so a panel never melts into what is behind
     // it; on a light theme the shadow does that almost alone.
     "--float-ring": isDark ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.05)",
     // A segmented control: a recessed track, and the chosen segment raised
-    // out of it — lighter on a dark theme, white on a light one.
+    // out of it — lighter on a dark theme, white on a light one. On a dark
+    // theme of little contrast it rises only as far as its label still reads.
     "--seg-track": isDark ? bg : mix(bg, lift, 0.13),
-    "--seg-thumb": isDark ? mix(chromeBar, fg, 0.17) : bgSunken,
+    "--seg-thumb": isDark
+      ? ensureContrast(mix(chromeBar, fg, 0.17), fg, TEXT_CONTRAST, chromeBar)
+      : bgSunken,
   };
 }
 
 export function applyThemeToDocument(theme: TerminalTheme) {
   const root = document.documentElement;
-  for (const [key, value] of Object.entries(themeVars(theme))) {
+  for (const [key, value] of Object.entries(deriveChromeTokens(theme))) {
     root.style.setProperty(key, value);
   }
   root.style.colorScheme = theme.appearance;

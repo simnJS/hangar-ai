@@ -1185,7 +1185,11 @@ export function TerminalPane({
 
   return (
     <section
-      className={`pane ${focused ? "pane--focused" : ""} ${attention ? "pane--attn" : ""}`}
+      className={`pane ${focused ? "pane--focused" : ""} ${
+        // The outline says what the pane wants: an answer, or — finished, or
+        // a shell whose command is done — your turn.
+        attention ? `pane--attn pane--attn-${glyph === "waiting" ? "waiting" : "yours"}` : ""
+      }`}
       onMouseDown={onFocus}
       aria-label={t("pane.label", { name: pane.name })}
     >

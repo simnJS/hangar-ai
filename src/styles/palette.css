@@ -177,7 +177,7 @@
 }
 
 .palette__state--yours {
-  color: var(--state-yours-text);
+  color: var(--state-yours);
 }
 
 .palette__keys {
@@ -201,11 +201,6 @@
 .palette__option.is-selected .palette__state,
 .palette__option.is-selected .palette__keys {
   color: var(--accent-fg);
-}
-
-.palette__option.is-selected .palette__detail,
-.palette__option.is-selected .palette__keys {
-  opacity: 0.9;
 }
 
 .palette__option.is-selected .palette__icon {

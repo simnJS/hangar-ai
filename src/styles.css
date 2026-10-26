@@ -236,17 +236,22 @@ select {
   overflow-wrap: anywhere;
 }
 
+/* A link is underlined before it is pointed at, faintly, so it is never
+   taken for a state word in a colour of its own. */
 .nav-link {
   padding: 0;
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--accent-hi);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-ring);
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .nav-link:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .nav-link:focus-visible {
@@ -450,7 +455,7 @@ select {
 }
 
 .nav-state--idle {
-  color: var(--fg-muted);
+  color: var(--state-idle);
 }
 
 .nav-ws__agents {
@@ -477,6 +482,12 @@ select {
 .nav-agent--selected,
 .nav-agent--selected:hover {
   background: var(--surface-active);
+}
+
+/* The selection is a step further from the text than the column: the kind
+   of agent comes up a step with it, so it still reads. */
+.nav-agent--selected .nav-agent__kind {
+  color: var(--fg-secondary);
 }
 
 .nav-agent:focus-visible {
@@ -698,9 +709,15 @@ select {
   background: var(--surface-hover);
 }
 
+/* The waiting diamond itself: grey like any tool until it filters, then in
+   the state's amber. */
+.nav-field__scope .glyph {
+  --glyph-c: currentColor;
+}
+
 .nav-field__scope[aria-pressed="true"] {
-  color: var(--state-waiting);
-  background: color-mix(in srgb, var(--state-waiting) 16%, transparent);
+  color: var(--state-waiting-fill);
+  background: color-mix(in srgb, var(--state-waiting-fill) 16%, transparent);
 }
 
 .nav-field__scope:focus-visible {
@@ -1022,7 +1039,7 @@ body.is-sorting * {
    reads for anyone who cannot tell green from amber. */
 .glyph {
   --glyph-size: 8px;
-  --glyph-c: var(--state-idle);
+  --glyph-c: var(--state-idle-fill);
   position: relative;
   display: inline-block;
   flex: none;
@@ -1033,7 +1050,7 @@ body.is-sorting * {
 }
 
 .glyph--working {
-  --glyph-c: var(--state-working);
+  --glyph-c: var(--state-working-fill);
 }
 
 /* A ring that grows and fades: something is happening, quietly. */
@@ -1049,24 +1066,24 @@ body.is-sorting * {
 
 /* The one state that needs you: a diamond, not a dot. */
 .glyph--waiting {
-  --glyph-c: var(--state-waiting);
+  --glyph-c: var(--state-waiting-fill);
   border-radius: 1.5px;
   transform: rotate(45deg) scale(0.86);
 }
 
 .glyph--yours {
-  --glyph-c: var(--state-yours);
+  --glyph-c: var(--state-yours-fill);
 }
 
 .glyph--idle,
 .glyph--exited {
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--state-idle);
+  box-shadow: inset 0 0 0 1.5px var(--state-idle-fill);
 }
 
 .glyph--starting {
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--state-idle);
+  box-shadow: inset 0 0 0 1.5px var(--state-idle-fill);
   animation: glyph-blink 1.2s steps(2, start) infinite;
 }
 
@@ -1530,12 +1547,17 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 66%, transparent);
 }
 
-/* A pane that finished while you were elsewhere keeps its outline until you
-   actually read it, so the desktop notification is never the only trace.
-   Amber, like everything that waits on you: in the accent it would pass for
-   the focused pane. */
-.pane--attn::after {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 80%, transparent);
+/* A pane that handed back while you were elsewhere keeps its outline until
+   you actually read it, so the desktop notification is never the only trace.
+   The outline says what it wants, in its state's colour: an answer (amber),
+   or your turn now that it is done. Never the accent: it would pass for the
+   focused pane. */
+.pane--attn-waiting::after {
+  box-shadow: inset 0 0 0 1px var(--state-waiting-fill);
+}
+
+.pane--attn-yours::after {
+  box-shadow: inset 0 0 0 1px var(--state-yours-fill);
 }
 
 /*
@@ -1697,7 +1719,7 @@ body.is-dragging-pane .pane__bar {
   border: 0;
   border-radius: var(--radius-xs);
   background: var(--line);
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
   font: inherit;
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
@@ -1777,7 +1799,7 @@ body.is-dragging-pane .pane__bar {
   flex: none;
   font-size: calc(11.5px * var(--ui-scale));
   font-weight: 500;
-  color: var(--fg-muted);
+  color: var(--state-idle);
 }
 
 .pane__state--working {
@@ -1789,7 +1811,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .pane__state--yours {
-  color: var(--accent-hi);
+  color: var(--state-yours);
 }
 
 /* Prompts held for the agent; a click drops them. */
@@ -1831,11 +1853,12 @@ body.is-dragging-pane .pane__bar {
   color: var(--warning);
 }
 
+/* A shell's bell: its command is done, the outline's "your turn" colour. */
 .pane__attn {
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--warning);
+  color: var(--state-yours-fill);
   animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -2227,10 +2250,11 @@ body.is-dragging-pane .pane__bar {
   transition: opacity var(--dur) var(--ease);
 }
 
-/* The panes you are not typing into step back a little. Their cursor is
-   already hollow: xterm draws it that way without the keyboard. */
+/* The panes you are not typing into step back a little: only a little, as a
+   theme's dim output is often near 3:1 already. Their cursor is already
+   hollow: xterm draws it that way without the keyboard. */
 .pane:not(.pane--focused) .pane__term {
-  opacity: 0.85;
+  opacity: 0.94;
 }
 
 .pane__term .xterm {
@@ -3911,9 +3935,13 @@ body.is-dragging-pane .pane__bar {
   outline-offset: 1px;
 }
 
-.board-filter__name,
 .board-filter__button .icon {
   color: var(--fg-subtle);
+}
+
+/* Written on the button's own fill, so a step up from the icon beside it. */
+.board-filter__name {
+  color: var(--fg-secondary);
 }
 
 .board-filter__value {
@@ -4059,7 +4087,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 /* The column's state, in the same colours as the agents': neutral for what
-   waits, working green for what is under way, the accent for what waits on
+   waits, working green for what is under way, "your turn" for what waits on
    you, and an empty ring for what is over. */
 .column__mark {
   flex: none;
@@ -4070,11 +4098,11 @@ body.is-dragging-pane .pane__bar {
 }
 
 .column--doing .column__mark {
-  background: var(--state-working);
+  background: var(--state-working-fill);
 }
 
 .column--review .column__mark {
-  background: var(--accent);
+  background: var(--state-yours-fill);
 }
 
 .column--done .column__mark {
@@ -4278,7 +4306,7 @@ body.is-dragging-pane .pane__bar {
   padding: 0 6px;
   border-radius: var(--radius-xs);
   background: var(--line);
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
   font-family: var(--mono);
   font-size: calc(10px * var(--ui-scale));
   font-weight: 500;
@@ -5259,11 +5287,11 @@ body.is-dragging-pane .board-dock__grip {
 }
 
 .task__mark--doing {
-  background: var(--state-working);
+  background: var(--state-working-fill);
 }
 
 .task__mark--review {
-  background: var(--accent);
+  background: var(--state-yours-fill);
 }
 
 .task__mark--done {
@@ -6446,11 +6474,14 @@ select.task__input {
   background: none;
   color: var(--accent-hi);
   font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-ring);
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .key-row__link:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .key-row__link:focus-visible {

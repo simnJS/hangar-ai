@@ -5,9 +5,8 @@
    scale, and the toolbar's narrow layouts are container queries written in
    em: its font size carries the scale, so they move with it. */
 
-/* Secondary text is --fg-secondary, which clears 4.5:1 on every surface
-   here; icons stay on --fg-muted, which is enough for a shape. "Your turn"
-   is --state-yours-text, the accent leaned toward --fg until it reads. */
+/* Secondary text is --fg-secondary, icons --fg-muted; like every text token
+   and state word, both clear 4.5:1 on every surface here (themes.ts). */
 
 /* ---- Toolbar ---- */
 
@@ -254,11 +253,11 @@
 }
 
 .activity__state--yours {
-  color: var(--state-yours-text);
+  color: var(--state-yours);
 }
 
 .activity__state--idle {
-  color: var(--fg-secondary);
+  color: var(--state-idle);
 }
 
 .activity__detail--strong {
@@ -313,7 +312,7 @@
 }
 
 .activity__badge--yours {
-  color: var(--state-yours-text);
+  color: var(--state-yours);
 }
 
 /* The context used, as a hairline along the bottom of the capsule. */
@@ -684,7 +683,7 @@
 }
 
 .status__summary--yours {
-  color: var(--state-yours-text);
+  color: var(--state-yours);
 }
 
 .status__items {

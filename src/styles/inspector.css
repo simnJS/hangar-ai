@@ -178,7 +178,9 @@ body.is-dragging-pane .inspector__grip {
   outline-offset: 1px;
 }
 
-/* A text action: accent text, nothing around it until it is pointed at. */
+/* A text action: accent text over a faint underline, nothing else around it
+   until it is pointed at. The underline keeps it apart from a state word,
+   which is coloured text too. */
 .insp-link {
   display: inline-flex;
   align-items: center;
@@ -190,13 +192,15 @@ body.is-dragging-pane .inspector__grip {
   color: var(--accent-hi);
   font-size: calc(11px * var(--ui-scale));
   font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-ring);
+  text-underline-offset: 2px;
   white-space: nowrap;
   cursor: pointer;
 }
 
 .insp-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: currentColor;
 }
 
 .insp-link .icon {
@@ -301,11 +305,11 @@ body.is-dragging-pane .inspector__grip {
 }
 
 .insp-state--yours {
-  color: var(--accent-hi);
+  color: var(--state-yours);
 }
 
 .insp-state--idle {
-  color: var(--fg-subtle);
+  color: var(--state-idle);
 }
 
 .insp-head__tools {
@@ -930,15 +934,15 @@ body.is-dragging-pane .inspector__grip {
 }
 
 .insp-event__dot--turn-start {
-  background: var(--state-working);
+  background: var(--state-working-fill);
 }
 
 .insp-event__dot--permission {
-  background: var(--state-waiting);
+  background: var(--state-waiting-fill);
 }
 
 .insp-event__dot--turn-end {
-  background: var(--state-yours);
+  background: var(--state-yours-fill);
 }
 
 .insp-event__dot--dropped {
@@ -947,7 +951,7 @@ body.is-dragging-pane .inspector__grip {
 
 .insp-event__dot--exit {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--state-idle);
+  box-shadow: inset 0 0 0 1px var(--state-idle-fill);
 }
 
 .insp-event__text {
