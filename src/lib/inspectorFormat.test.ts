@@ -5,6 +5,8 @@ import {
   formatSince,
   planUsage,
   prettyModel,
+  proseTime,
+  resetWhen,
   spacedUnit,
   usageTone,
 } from "./inspectorFormat";
@@ -74,18 +76,36 @@ describe("numbers", () => {
 });
 
 describe("time", () => {
+  const at = (day: number, hours: number, minutes: number) =>
+    new Date(2026, 9, day, hours, minutes).getTime();
+  const now = at(26, 15, 0);
+
+  it("writes a time in a sentence the way each language does", () => {
+    expect(proseTime(at(26, 20, 1), "fr")).toBe("20 h 01");
+    expect(proseTime(at(26, 9, 5), "fr")).toBe("9 h 05");
+    expect(proseTime(at(26, 20, 1), "en")).toMatch(/^8:01\sPM$/);
+  });
+
   it("words a start time relative to now", () => {
-    const now = new Date(2026, 9, 26, 15, 0).getTime();
     expect(formatSince(now - 20_000, now, t, "en")).toBe("inspector.justNow");
     expect(formatSince(now - 12 * 60_000, now, t, "en")).toBe("inspector.minutesAgo(12)");
-    expect(formatSince(new Date(2026, 9, 26, 13, 18).getTime(), now, t, "fr")).toBe(
-      "inspector.todayAt(13:18)",
+    expect(formatSince(at(26, 13, 18), now, t, "fr")).toBe("inspector.todayAt(13 h 18)");
+    expect(formatSince(at(25, 18, 2), now, t, "fr")).toBe("inspector.yesterdayAt(18 h 02)");
+    expect(formatSince(at(20, 9, 5), now, t, "fr")).toBe("inspector.dateAt(20 oct.,9 h 05)");
+  });
+
+  it("says when a plan window resets, nearest first", () => {
+    expect(resetWhen(at(26, 20, 1), now, t, "fr")).toBe(
+      "sidebar.planResetToday(20 h 01)",
     );
-    expect(formatSince(new Date(2026, 9, 25, 18, 2).getTime(), now, t, "fr")).toBe(
-      "inspector.yesterdayAt(18:02)",
+    expect(resetWhen(at(27, 1, 5), now, t, "fr")).toBe(
+      "sidebar.planResetTomorrow(1 h 05)",
     );
-    expect(formatSince(new Date(2026, 9, 20, 9, 5).getTime(), now, t, "fr")).toMatch(
-      /^inspector\.dateAt\(20 oct\.,09:05\)$/,
+    expect(resetWhen(at(30, 9, 0), now, t, "fr")).toBe(
+      "sidebar.planResetDay(vendredi,9 h 00)",
+    );
+    expect(resetWhen(at(26 + 9, 9, 0), now, t, "fr")).toBe(
+      "sidebar.planResetDate(4 nov.,9 h 00)",
     );
   });
 });

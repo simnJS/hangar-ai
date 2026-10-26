@@ -16,6 +16,7 @@ import {
   formatPercent,
   formatSince,
   planUsage,
+  resetWhen,
   spacedUnit,
   usageTone,
 } from "../lib/inspectorFormat";
@@ -205,19 +206,14 @@ function PlanMeter({
   const locale = useLocale();
   if (!limit) return null;
   const pct = limit.percentUsed;
-  const resets = limit.resetsAt ? new Date(limit.resetsAt) : null;
-  const hint =
-    resets && !Number.isNaN(resets.getTime())
-      ? t("inspector.planHintResets", {
-          window: name,
-          pct,
-          time: resets.toLocaleString(locale, {
-            weekday: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        })
-      : t("inspector.planHint", { window: name, pct });
+  const resets = limit.resetsAt ? new Date(limit.resetsAt).getTime() : NaN;
+  const hint = !Number.isNaN(resets)
+    ? t("inspector.planHintResets", {
+        window: name,
+        pct,
+        reset: resetWhen(resets, Date.now(), t, locale),
+      })
+    : t("inspector.planHint", { window: name, pct });
   return (
     <div className={`insp-meter insp-meter--${usageTone(pct)}`} title={hint}>
       <span>{label}</span>
