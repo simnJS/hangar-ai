@@ -5813,7 +5813,7 @@ select.task__input {
   width: min(calc(640px * var(--ui-scale)), 100%);
 }
 
-/* Stacked form: a label over its field, rows split by hairlines. */
+/* A panel body in sections, split by hairlines. */
 .modal__body--form {
   gap: 0;
   padding: 4px 18px 14px;
@@ -5830,19 +5830,7 @@ select.task__input {
   border-bottom: 0;
 }
 
-.form-label {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: calc(12px * var(--ui-scale));
-  font-weight: 500;
-  color: var(--fg-muted);
-}
-
 .form-hint {
-  text-transform: none;
-  letter-spacing: 0;
   font-weight: 400;
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.4;
@@ -5880,6 +5868,17 @@ select.task__input {
 
 .form-grid__field > .seg {
   justify-self: start;
+}
+
+/* A field with no label of its own — options, the form's own button — in
+   the field column all the same. */
+.form-grid__field--solo {
+  grid-column: 2;
+}
+
+/* A form grid inside a section that already has its padding. */
+.form-grid--flush {
+  padding: 0;
 }
 
 .form-grid__field--inline {
@@ -6913,36 +6912,6 @@ select.task__input {
   color: var(--danger);
 }
 
-/* The panel's own choice between a new branch and an existing one, drawn
-   like the diff's. */
-.modal--worktrees .seg {
-  align-self: start;
-  gap: 2px;
-  padding: 2px;
-  border: 0;
-  border-radius: var(--radius);
-  background: var(--line);
-}
-
-.modal--worktrees .seg__btn {
-  padding: 2px 10px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--fg-muted);
-  font-size: calc(12px * var(--ui-scale));
-}
-
-.modal--worktrees .seg__btn.is-active {
-  background: var(--raised);
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 0 var(--sep);
-}
-
-.modal--worktrees .seg__btn:focus-visible {
-  outline: 2px solid var(--accent-ring);
-  outline-offset: 0;
-}
-
 /* Full width under its row: git's refusal is a sentence, and the forced retry
    belongs next to the reason rather than back in the line of actions. */
 .wt__blocked {
@@ -6952,12 +6921,6 @@ select.task__input {
 /* The question the removal leaves behind, under the list it came from. */
 .wt__orphan {
   margin-top: 6px;
-}
-
-/* Sits with the field it judges rather than in the label above it. */
-.wt__hint {
-  display: block;
-  margin-top: -2px;
 }
 
 .wt__hint--error {
@@ -6975,10 +6938,6 @@ select.task__input {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-}
-
-.wt__check input {
-  accent-color: var(--accent);
 }
 
 .wt__create {

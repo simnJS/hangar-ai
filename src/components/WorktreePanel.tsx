@@ -919,153 +919,170 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                 )}
               </section>
 
+              {/* Laid out like every other dialog's form: labels right-aligned
+                  in a column of their own, each field and its hints in the
+                  other. */}
               <section className="form-row">
-                <span className="form-label">{t("worktrees.create")}</span>
+                <div className="form-grid form-grid--flush">
+                  <span className="form-grid__label" id="wt-mode">
+                    {t("worktrees.create")}
+                  </span>
+                  <div className="form-grid__field">
+                    <div className="seg" role="group" aria-labelledby="wt-mode">
+                      <button
+                        className={`seg__btn ${mode === "new" ? "is-active" : ""}`}
+                        aria-pressed={mode === "new"}
+                        onClick={() => setMode("new")}
+                      >
+                        {t("worktrees.modeNew")}
+                      </button>
+                      <button
+                        className={`seg__btn ${mode === "existing" ? "is-active" : ""}`}
+                        aria-pressed={mode === "existing"}
+                        onClick={() => setMode("existing")}
+                      >
+                        {t("worktrees.modeExisting")}
+                      </button>
+                    </div>
+                  </div>
 
-                <div className="seg" role="group" aria-label={t("worktrees.create")}>
-                  <button
-                    className={`seg__btn ${mode === "new" ? "is-active" : ""}`}
-                    aria-pressed={mode === "new"}
-                    onClick={() => setMode("new")}
-                  >
-                    {t("worktrees.modeNew")}
-                  </button>
-                  <button
-                    className={`seg__btn ${mode === "existing" ? "is-active" : ""}`}
-                    aria-pressed={mode === "existing"}
-                    onClick={() => setMode("existing")}
-                  >
-                    {t("worktrees.modeExisting")}
-                  </button>
-                </div>
-
-                <label className="form-label" htmlFor="wt-branch">
-                  {t("worktrees.branch")}
-                  {mode === "existing" && nothingToPick && (
-                    <span className="form-hint">{t("worktrees.noFreeBranch")}</span>
-                  )}
-                </label>
-
-                {mode === "new" ? (
-                  <>
-                    <input
-                      id="wt-branch"
-                      className="text-input"
-                      value={newBranch}
-                      spellCheck={false}
-                      placeholder={t("worktrees.branchPlaceholder")}
-                      onChange={(e) => setNewBranch(e.target.value)}
-                    />
-                    {sanitized !== "" && sanitized !== newBranch.trim() && (
-                      <span className="form-hint wt__hint">
+                  <label className="form-grid__label" htmlFor="wt-branch">
+                    {t("worktrees.branch")}
+                  </label>
+                  <div className="form-grid__field">
+                    {mode === "new" ? (
+                      <input
+                        id="wt-branch"
+                        className="text-input"
+                        value={newBranch}
+                        spellCheck={false}
+                        placeholder={t("worktrees.branchPlaceholder")}
+                        onChange={(e) => setNewBranch(e.target.value)}
+                      />
+                    ) : (
+                      <span className="set-select">
+                        <select
+                          id="wt-branch"
+                          className="set-select__field"
+                          value={existingRef}
+                          onChange={(e) => setExistingRef(e.target.value)}
+                        >
+                          <option value="">{t("worktrees.pickBranch")}</option>
+                          {locals.length > 0 && (
+                            <optgroup label={t("worktrees.groupLocal")}>
+                              {localOptions(true)}
+                            </optgroup>
+                          )}
+                          {remotes.length > 0 && (
+                            <optgroup label={t("worktrees.groupRemote")}>
+                              {remoteOptions(true)}
+                            </optgroup>
+                          )}
+                        </select>
+                      </span>
+                    )}
+                    {mode === "new" && sanitized !== "" && sanitized !== newBranch.trim() && (
+                      <span className="form-hint">
                         {t("worktrees.sanitized", { name: sanitized })}
                       </span>
                     )}
-
-                    <label className="form-label" htmlFor="wt-base">
-                      {t("worktrees.baseLabel")}
-                    </label>
-                    <select
-                      id="wt-base"
-                      className="text-input"
-                      value={newBase}
-                      onChange={(e) => setNewBase(e.target.value)}
-                    >
-                      <option value="">
-                        {t("worktrees.base", {
-                          branch: info.branch ?? info.head ?? "HEAD",
+                    {mode === "existing" && nothingToPick && (
+                      <span className="form-hint">{t("worktrees.noFreeBranch")}</span>
+                    )}
+                    {resolved.error && (
+                      <span className="form-hint wt__hint--error">{resolved.error}</span>
+                    )}
+                    {mode === "existing" && resolved.plan?.createBranch && (
+                      <span className="form-hint">
+                        {t("worktrees.willTrack", {
+                          name: resolved.plan.branch,
+                          remote: resolved.plan.baseRef ?? "",
                         })}
-                      </option>
-                      {locals.length > 0 && (
-                        <optgroup label={t("worktrees.groupLocal")}>
-                          {localOptions(false)}
-                        </optgroup>
-                      )}
-                      {remotes.length > 0 && (
-                        <optgroup label={t("worktrees.groupRemote")}>
-                          {remoteOptions(false)}
-                        </optgroup>
-                      )}
-                    </select>
-                  </>
-                ) : (
-                  <select
-                    id="wt-branch"
-                    className="text-input"
-                    value={existingRef}
-                    onChange={(e) => setExistingRef(e.target.value)}
-                  >
-                    <option value="">{t("worktrees.pickBranch")}</option>
-                    {locals.length > 0 && (
-                      <optgroup label={t("worktrees.groupLocal")}>
-                        {localOptions(true)}
-                      </optgroup>
+                      </span>
                     )}
-                    {remotes.length > 0 && (
-                      <optgroup label={t("worktrees.groupRemote")}>
-                        {remoteOptions(true)}
-                      </optgroup>
-                    )}
-                  </select>
-                )}
+                  </div>
 
-                {resolved.error && (
-                  <span className="form-hint wt__hint wt__hint--error">
-                    {resolved.error}
-                  </span>
-                )}
+                  {mode === "new" && (
+                    <>
+                      <label className="form-grid__label" htmlFor="wt-base">
+                        {t("worktrees.baseLabel")}
+                      </label>
+                      <div className="form-grid__field">
+                        <span className="set-select">
+                          <select
+                            id="wt-base"
+                            className="set-select__field"
+                            value={newBase}
+                            onChange={(e) => setNewBase(e.target.value)}
+                          >
+                            <option value="">
+                              {t("worktrees.base", {
+                                branch: info.branch ?? info.head ?? "HEAD",
+                              })}
+                            </option>
+                            {locals.length > 0 && (
+                              <optgroup label={t("worktrees.groupLocal")}>
+                                {localOptions(false)}
+                              </optgroup>
+                            )}
+                            {remotes.length > 0 && (
+                              <optgroup label={t("worktrees.groupRemote")}>
+                                {remoteOptions(false)}
+                              </optgroup>
+                            )}
+                          </select>
+                        </span>
+                      </div>
+                    </>
+                  )}
 
-                {mode === "existing" && resolved.plan?.createBranch && (
-                  <span className="form-hint wt__hint">
-                    {t("worktrees.willTrack", {
-                      name: resolved.plan.branch,
-                      remote: resolved.plan.baseRef ?? "",
-                    })}
-                  </span>
-                )}
+                  <label className="form-grid__label" htmlFor="wt-path">
+                    {t("worktrees.path")}
+                  </label>
+                  <div className="form-grid__field">
+                    <input
+                      id="wt-path"
+                      className="picker__path"
+                      value={path}
+                      spellCheck={false}
+                      onChange={(e) => {
+                        setFolderTouched(true);
+                        setFolder(e.target.value);
+                      }}
+                    />
+                    <span className="form-hint">{t("worktrees.pathHint")}</span>
+                  </div>
 
-                <label className="form-label" htmlFor="wt-path">
-                  {t("worktrees.path")}
-                  <span className="form-hint">{t("worktrees.pathHint")}</span>
-                </label>
-                <input
-                  id="wt-path"
-                  className="picker__path"
-                  value={path}
-                  spellCheck={false}
-                  onChange={(e) => {
-                    setFolderTouched(true);
-                    setFolder(e.target.value);
-                  }}
-                />
-
-                <label className="wt__check" title={t("worktrees.copyHint")}>
-                  <input
-                    type="checkbox"
-                    checked={copyUntracked}
-                    onChange={(e) => setCopyUntracked(e.target.checked)}
-                  />
-                  <span>{t("worktrees.copy")}</span>
-                </label>
-
-                <label className="wt__check">
-                  <input
-                    type="checkbox"
-                    checked={openAfter}
-                    onChange={(e) => setOpenAfter(e.target.checked)}
-                  />
-                  <span>{t("worktrees.openAfter")}</span>
-                </label>
-
-                <button
-                  className="btn btn--primary wt__create"
-                  disabled={!canCreate}
-                  onClick={() => void create()}
-                >
-                  {busy === "create"
-                    ? t("worktrees.creating")
-                    : t("worktrees.createSubmit")}
-                </button>
+                  <div className="form-grid__field form-grid__field--solo">
+                    <label className="wt__check" title={t("worktrees.copyHint")}>
+                      <input
+                        type="checkbox"
+                        className="check"
+                        checked={copyUntracked}
+                        onChange={(e) => setCopyUntracked(e.target.checked)}
+                      />
+                      <span>{t("worktrees.copy")}</span>
+                    </label>
+                    <label className="wt__check">
+                      <input
+                        type="checkbox"
+                        className="check"
+                        checked={openAfter}
+                        onChange={(e) => setOpenAfter(e.target.checked)}
+                      />
+                      <span>{t("worktrees.openAfter")}</span>
+                    </label>
+                    <button
+                      className="btn btn--primary wt__create"
+                      disabled={!canCreate}
+                      onClick={() => void create()}
+                    >
+                      {busy === "create"
+                        ? t("worktrees.creating")
+                        : t("worktrees.createSubmit")}
+                    </button>
+                  </div>
+                </div>
               </section>
             </>
           )}
