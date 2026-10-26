@@ -5,6 +5,7 @@ import {
   closeAllModels,
   closeModel,
   getModels,
+  hasSnapshotter,
   reloadModel,
   requestSnapshot,
   setModelPanel,
@@ -53,9 +54,6 @@ export interface ModelHost {
 const MOUNT_WAIT_MS = 4000;
 const MOUNT_POLL_MS = 150;
 
-/** What modelStore rejects with while no viewer is mounted. */
-const NOT_MOUNTED = /not mounted/i;
-
 const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 /** The preview of the window this code runs in. */
@@ -74,14 +72,10 @@ export const localModelHost: ModelHost = {
   snapshot: async (id, options) => {
     // A panel the user had hidden is mounting again: give it the time to
     // register its renderer instead of failing a request it can carry out.
-    for (let waited = 0; ; waited += MOUNT_POLL_MS) {
-      try {
-        return await requestSnapshot(id, options);
-      } catch (err) {
-        if (!NOT_MOUNTED.test(String(err)) || waited >= MOUNT_WAIT_MS) throw err;
-        await pause(MOUNT_POLL_MS);
-      }
+    for (let waited = 0; !hasSnapshotter() && waited < MOUNT_WAIT_MS; waited += MOUNT_POLL_MS) {
+      await pause(MOUNT_POLL_MS);
     }
+    return requestSnapshot(id, options);
   },
   close: async (ids) => {
     const open = getModels().models;
