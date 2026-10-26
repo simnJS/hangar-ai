@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useStore } from "../store";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
 import { Icon } from "./Icon";
@@ -17,6 +17,8 @@ import {
   type NavWorkspace,
 } from "./NavigatorModel";
 import { getPaneActivity } from "../lib/agentState";
+import { useAsleep } from "../lib/hibernateStore";
+import { proseTime } from "../lib/inspectorFormat";
 import { useShortcutTitle } from "../lib/useShortcuts";
 
 interface Props {
@@ -126,8 +128,11 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
   /** A row to give the focus back to once the next render has drawn it. */
   const pendingFocus = useRef<string | null>(null);
   const t = useT();
+  const locale = useLocale();
   const withKeys = useShortcutTitle();
   const uid = useId();
+  /** Workspaces put to sleep for being left alone (lib/hibernate). */
+  const asleep = useAsleep();
 
   // A drag is committed from listeners installed when it started; they must
   // place it against the list as it is on release, not as it was then.
@@ -497,6 +502,8 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
     const dragged = drag?.item.kind === "workspace" && drag.item.id === ws.id;
     const id = `${uid}-${ws.id}`;
     const focusedPane = focusByWorkspace[ws.id];
+    const sleep = asleep.get(ws.id);
+    const sleepTitle = sleep ? t("sidebar.asleep", { time: proseTime(sleep.at, locale) }) : "";
 
     return (
       <div
@@ -515,7 +522,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
         aria-expanded={entry.expanded}
         aria-current={active ? "true" : undefined}
         aria-labelledby={`${id}-name`}
-        aria-describedby={`${id}-window ${id}-path ${id}-activity`}
+        aria-describedby={`${id}-window ${id}-asleep ${id}-path ${id}-activity`}
         tabIndex={tabKey === key ? 0 : -1}
         data-key={key}
         data-drop="workspace"
@@ -574,6 +581,17 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
                     <Icon name="window" size={12} />
                   </span>
                 )}
+                {sleep && (
+                  <span
+                    className="nav-ws__asleep"
+                    id={`${id}-asleep`}
+                    role="img"
+                    title={sleepTitle}
+                    aria-label={sleepTitle}
+                  >
+                    <Icon name="moon" size={12} />
+                  </span>
+                )}
               </span>
               <span className="nav-end">
                 <span
@@ -604,6 +622,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
                   rowKey={paneKey}
                   level={level + 1}
                   selected={active && focusedPane === pane.id}
+                  asleep={Boolean(sleep)}
                   tabbable={tabKey === paneKey}
                   onActivate={() => onFocusPane(ws.id, pane.id)}
                 />

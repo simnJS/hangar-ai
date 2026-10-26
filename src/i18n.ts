@@ -57,6 +57,9 @@ const en = {
   "sidebar.hide": "Hide the navigator",
   "sidebar.version": "Hangar.AI {version}",
   "sidebar.stateYours": "Your turn",
+  "sidebar.stateAsleep": "Asleep",
+  "sidebar.asleep":
+    "Asleep since {time}: its agents were stopped to free memory, and resume their sessions when it opens",
   "sidebar.paneCount_one": "{n} pane",
   "sidebar.paneCount_other": "{n} panes",
   "sidebar.expand": "Show its agents",
@@ -1082,6 +1085,9 @@ const fr: Record<Key, string> = {
   "sidebar.hide": "Masquer le navigateur",
   "sidebar.version": "Hangar.AI {version}",
   "sidebar.stateYours": "À toi",
+  "sidebar.stateAsleep": "En veille",
+  "sidebar.asleep":
+    "En veille depuis {time} : les agents ont été arrêtés pour libérer la mémoire et reprendront leur session à l'ouverture",
   "sidebar.paneCount_one": "{n} panneau",
   "sidebar.paneCount_other": "{n} panneaux",
   "sidebar.expand": "Afficher ses agents",

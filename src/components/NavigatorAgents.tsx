@@ -6,6 +6,7 @@ import {
   type AgentActivity,
 } from "../lib/agentState";
 import { AGENTS, type Pane } from "../types";
+import { Icon } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 
 /** The word a row ends with: short, because the glyph already says most of it. */
@@ -34,6 +35,8 @@ interface AgentRowProps {
   level: number;
   /** The focused pane of the workspace on screen. */
   selected: boolean;
+  /** Its workspace was put to sleep: nothing runs in it until it opens. */
+  asleep?: boolean;
   tabbable: boolean;
   onActivate: () => void;
 }
@@ -49,6 +52,7 @@ export function NavigatorAgentRow({
   rowKey,
   level,
   selected,
+  asleep = false,
   tabbable,
   onActivate,
 }: AgentRowProps) {
@@ -56,21 +60,41 @@ export function NavigatorAgentRow({
   // A plain shell, or an agent that never said anything: nothing to report.
   const activity = usePaneActivity(pane.id)?.activity ?? "idle";
   const agent = AGENTS.find((a) => a.id === pane.agent)?.label ?? pane.agent;
+  // Asleep is not idle: an idle ring would say an agent is there, waiting.
+  const state = asleep ? t("sidebar.stateAsleep") : null;
   return (
     <div
-      className={`nav-agent ${selected ? "nav-agent--selected" : ""}`}
+      className={[
+        "nav-agent",
+        selected && "nav-agent--selected",
+        asleep && "nav-agent--asleep",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       role="treeitem"
       aria-level={level}
       aria-current={selected ? "true" : undefined}
       tabIndex={tabbable ? 0 : -1}
       data-key={rowKey}
-      title={`${pane.name} · ${agent} — ${longState(t, activity)}`}
+      title={`${pane.name} · ${agent} — ${state ?? longState(t, activity)}`}
       onClick={onActivate}
     >
-      <StateGlyph state={activity} />
+      {asleep ? (
+        <span className="nav-agent__moon" aria-hidden="true">
+          <Icon name="moon" size={10} />
+        </span>
+      ) : (
+        <StateGlyph state={activity} />
+      )}
       <span className="nav-agent__name">{pane.name}</span>
       <span className="nav-agent__kind">{agent}</span>
-      <span className={`nav-agent__state nav-state--${activity}`}>{shortState(t, activity)}</span>
+      {state ? (
+        <span className="nav-agent__state nav-state--asleep">{state}</span>
+      ) : (
+        <span className={`nav-agent__state nav-state--${activity}`}>
+          {shortState(t, activity)}
+        </span>
+      )}
     </div>
   );
 }

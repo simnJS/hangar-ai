@@ -520,6 +520,24 @@ select {
   font-size: calc(11px * var(--ui-scale));
 }
 
+/* A workspace asleep (lib/hibernate): its rows go quiet, a moon where the
+   state glyph was — in the glyph's own box, so the names stay in column. */
+.nav-agent__moon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(8px * var(--ui-scale));
+  color: var(--fg-subtle);
+}
+
+.nav-agent--asleep .nav-agent__name {
+  color: var(--fg-muted);
+}
+
+.nav-state--asleep {
+  color: var(--fg-subtle);
+}
+
 .nav-rename {
   grid-column: 3 / -1;
   width: 100%;
@@ -1163,6 +1181,14 @@ body.is-sorting * {
 
 /* The navigator's mark on a workspace shown in a window of its own. */
 .ws__window {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--fg-muted);
+}
+
+/* And on one put to sleep, its agents stopped until it opens again. */
+.nav-ws__asleep {
   display: grid;
   place-items: center;
   flex: none;
