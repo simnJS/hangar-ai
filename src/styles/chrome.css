@@ -65,18 +65,6 @@
   color: var(--fg);
 }
 
-/* Cut from the start: the end of a path is the part that names the project. */
-.toolbar__path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
-  font-family: var(--mono);
-  font-size: calc(10.5px * var(--ui-scale));
-  font-variant-ligatures: none;
-  color: var(--fg-secondary);
-}
-
 .toolbar__actions {
   display: flex;
   align-items: center;
