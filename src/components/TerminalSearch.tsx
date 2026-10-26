@@ -173,6 +173,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         className="term-search__input"
         value={query}
         placeholder={t("search.placeholder")}
+        aria-label={t("search.label")}
         spellCheck={false}
         aria-invalid={invalid}
         onChange={(event) => setQuery(event.target.value)}
@@ -207,6 +208,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
           refocus();
         }}
         title={t("search.case", { keys: formatBinding("Alt+C") })}
+        aria-label={t("search.case", { keys: formatBinding("Alt+C") })}
       >
         Aa
       </button>
@@ -219,6 +221,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
           refocus();
         }}
         title={t("search.regex", { keys: formatBinding("Alt+R") })}
+        aria-label={t("search.regex", { keys: formatBinding("Alt+R") })}
       >
         .*
       </button>
@@ -232,6 +235,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         }}
         disabled={!query || invalid}
         title={t("search.up", { keys: formatBinding("Enter") })}
+        aria-label={t("search.up", { keys: formatBinding("Enter") })}
       >
         <Chevron up />
       </button>
@@ -244,6 +248,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         }}
         disabled={!query || invalid}
         title={t("search.down", { keys: formatBinding("Shift+Enter") })}
+        aria-label={t("search.down", { keys: formatBinding("Shift+Enter") })}
       >
         <Chevron up={false} />
       </button>
@@ -251,6 +256,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         className="term-search__btn"
         onClick={() => onClose(query)}
         title={t("search.close", { keys: formatBinding("Escape") })}
+        aria-label={t("search.close", { keys: formatBinding("Escape") })}
       >
         <Cross />
       </button>

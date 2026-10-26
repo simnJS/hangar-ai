@@ -38,7 +38,8 @@ interface Props {
   zoomed: boolean;
   onZoomChange: (zoomed: boolean) => void;
   onFocusPane: (paneId: string) => void;
-  onSplitPane: (paneId: string) => void;
+  /** Without a direction, the pane's longer side decides. */
+  onSplitPane: (paneId: string, dir?: "row" | "col") => void;
   /** Restart a pane under a fresh id, optionally patching it first. */
   onReplacePane: (paneId: string, patch: Partial<Pane>) => void;
   onOpenSessions: (paneId: string) => void;
@@ -249,7 +250,7 @@ export function WorkspaceTerminals({
               updatePane(workspace.id, pane.id, { sessionId })
             }
             onRestart={() => onReplacePane(pane.id, {})}
-            onSplit={() => onSplitPane(pane.id)}
+            onSplit={(dir) => onSplitPane(pane.id, dir)}
             onClose={() => closePane(workspace.id, pane.id)}
             onOpenSessions={() => onOpenSessions(pane.id)}
             // A broadcast command goes to the whole workspace, which is the
@@ -266,6 +267,13 @@ export function WorkspaceTerminals({
             }
             onAddCommand={() => setEditor({ command: null, scope: "workspace" })}
             onShowDiff={() => setDiffPane(pane)}
+            zoomed={zoomedId === pane.id}
+            // Nothing to zoom out of, or onto, with a single pane.
+            onToggleZoom={
+              panes.length > 1
+                ? () => zoomTo(zoomedId === pane.id ? null : pane.id)
+                : undefined
+            }
           />
         )}
       />
