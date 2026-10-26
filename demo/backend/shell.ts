@@ -143,8 +143,8 @@ function banner(s: Session): string {
   const id = s.shell?.id ?? "pwsh";
   if (id === "cmd") return "Microsoft Windows [Version 10.0.26200.1234]\r\n";
   if (id === "wsl") return `${C.dim}Ubuntu 24.04.1 LTS${C.reset}\r\n`;
-  if (id === "git-bash" || id === "nu") return "";
-  return `${C.dim}PowerShell 7.4.6${C.reset}\r\n`;
+  // PowerShell starts with -NoLogo, as the app starts it (src-tauri/src/pty.rs).
+  return "";
 }
 
 function clearTimers(s: Session) {
