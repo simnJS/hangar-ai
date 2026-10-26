@@ -688,6 +688,7 @@ const en = {
   "task.send": "Send",
   "task.createdAt": "Created {date}",
   "task.delete": "Delete",
+  "task.deleteConfirm": "Confirm",
   "task.close": "Close",
   "task.labels": "Labels",
 
@@ -1592,6 +1593,7 @@ const fr: Record<Key, string> = {
   "task.send": "Envoyer",
   "task.createdAt": "Créée le {date}",
   "task.delete": "Supprimer",
+  "task.deleteConfirm": "Confirmer",
   "task.close": "Fermer",
   "task.labels": "Labels",
 

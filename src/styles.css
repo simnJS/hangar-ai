@@ -991,6 +991,12 @@ body.is-sorting * {
   background: var(--danger-soft);
 }
 
+/* The first step of a delete that asks twice: quiet until pointed at, its
+   confirmation is the .btn--danger that replaces it. */
+.btn--delete:hover:not(:disabled) {
+  color: var(--danger);
+}
+
 /* For a row of actions inside a list item. */
 .btn--tiny {
   min-height: calc(22px * var(--ui-scale));
@@ -7270,10 +7276,6 @@ select.task__input {
 .mem__main > .mem__actions {
   max-width: 72ch;
   margin-top: 6px;
-}
-
-.mem__delete:hover:not(:disabled) {
-  color: var(--danger);
 }
 
 .mem__editor {

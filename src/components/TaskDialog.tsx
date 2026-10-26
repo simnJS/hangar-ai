@@ -39,8 +39,13 @@ export function TaskDialog({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [comment, setComment] = useState("");
+  /** Delete asks twice, like the memory's: a task and its thread do not come back. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLOListElement>(null);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const askedToDelete = useRef(false);
   const id = useId();
   const t = useT();
   const locale = useLocale();
@@ -61,6 +66,18 @@ export function TaskDialog({
     dialogRef.current?.focus();
     return () => opener?.focus?.();
   }, []);
+
+  // The button that had the keyboard is replaced by the question and back:
+  // the keyboard follows, to Cancel rather than to the irreversible answer,
+  // then back to Delete.
+  useEffect(() => {
+    if (confirmDelete) {
+      askedToDelete.current = true;
+      cancelDeleteRef.current?.focus();
+    } else if (askedToDelete.current) {
+      deleteRef.current?.focus();
+    }
+  }, [confirmDelete]);
 
   // The newest message is the one worth reading: the thread opens on it, and
   // follows the ones that arrive while it is open.
@@ -294,9 +311,29 @@ export function TaskDialog({
 
         <footer className="task__foot">
           <span className="task__note">{t("task.createdAt", { date: when(task.created_at) })}</span>
-          <button className="btn btn--danger" onClick={remove}>
-            {t("task.delete")}
-          </button>
+          {confirmDelete ? (
+            <>
+              <button
+                ref={cancelDeleteRef}
+                className="btn btn--ghost"
+                onClick={() => setConfirmDelete(false)}
+              >
+                {t("create.cancel")}
+              </button>
+              <button className="btn btn--danger" onClick={remove}>
+                {t("task.deleteConfirm")}
+              </button>
+            </>
+          ) : (
+            <button
+              ref={deleteRef}
+              className="btn btn--ghost btn--delete"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Icon name="trash" size={11} />
+              {t("task.delete")}
+            </button>
+          )}
           <button className="btn btn--primary" onClick={onClose}>
             {t("task.close")}
           </button>

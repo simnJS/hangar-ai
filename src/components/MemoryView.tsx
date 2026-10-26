@@ -433,7 +433,7 @@ export function MemoryView({ cwd }: Props) {
                           </>
                         ) : (
                           <button
-                            className="btn btn--ghost mem__delete"
+                            className="btn btn--ghost btn--delete"
                             onClick={() => setArmedId(entry.id)}
                           >
                             <Icon name="trash" size={11} />
