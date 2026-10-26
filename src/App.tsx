@@ -11,6 +11,7 @@ import { BoardDock } from "./components/BoardDock";
 import { ModelPanel } from "./components/ModelPanel";
 import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
+import { McpServersPanel } from "./components/McpServersPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
 import { Toolbar, type View } from "./components/Toolbar";
@@ -127,6 +128,8 @@ export default function App() {
   const [settingsCategory, setSettingsCategory] = useState("general");
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
+  /** The workspace whose MCP servers are being chosen (McpServersPanel). */
+  const [mcpServersFor, setMcpServersFor] = useState<string | null>(null);
   const [view, setView] = useState<View>("terminals");
   const [paletteOpen, setPaletteOpen] = useState(false);
   /**
@@ -344,6 +347,7 @@ export default function App() {
     // fullscreen layer, and a click that promised a pane must not land on it.
     setShowSettings(false);
     setShowMcp(false);
+    setMcpServersFor(null);
     setShowCreate(false);
     setPickerPaneId(null);
     setActiveWorkspace(workspaceId);
@@ -909,6 +913,7 @@ export default function App() {
     }
     map["view.memory"] = () => setView("memory");
     map["view.mcp"] = () => setShowMcp(true);
+    map["workspace.mcpServers"] = () => setMcpServersFor(wsId);
 
     // Everything below acts on panes, which are only on screen — and are only
     // what a keystroke can be about — in the terminals view.
@@ -1035,6 +1040,7 @@ export default function App() {
   const bridgedPanes = useBridgedCount(panes.map((p) => p.id));
 
   const pickerPane = panes.find((p) => p.id === pickerPaneId) ?? null;
+  const mcpServersWs = state.workspaces.find((ws) => ws.id === mcpServersFor) ?? null;
 
   if (!hydrated) {
     return <div className="boot">{t("app.loading")}</div>;
@@ -1056,6 +1062,7 @@ export default function App() {
           onNewWorkspace={() => setShowCreate(true)}
           focusByWorkspace={focusByWorkspace}
           onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
+          onOpenMcpServers={setMcpServersFor}
         />
       )}
 
@@ -1200,6 +1207,7 @@ export default function App() {
                   onClose={closeInspector}
                   onOpenBoard={() => setView("board")}
                   onOpenSessions={setPickerPaneId}
+                  onOpenMcpServers={() => setMcpServersFor(activeWorkspace.id)}
                 />
               )}
             </div>
@@ -1307,6 +1315,17 @@ export default function App() {
 
       {showMcp && activeWorkspace && (
         <McpPanel cwd={activeWorkspace.cwd} onClose={() => setShowMcp(false)} />
+      )}
+
+      {mcpServersWs && (
+        <McpServersPanel
+          workspace={mcpServersWs}
+          // The same respawn as a restart: each pane resumes its session.
+          onRestart={(paneIds) =>
+            paneIds.forEach((paneId) => replacePane(mcpServersWs.id, paneId, {}))
+          }
+          onClose={() => setMcpServersFor(null)}
+        />
       )}
 
       {pickerPane && activeWorkspace && (

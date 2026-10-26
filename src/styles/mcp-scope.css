@@ -1,0 +1,295 @@
+/* ---------- MCP servers of a workspace (McpServersPanel) ---------- */
+
+.modal--mcps {
+  width: min(calc(600px * var(--ui-scale)), 100%);
+}
+
+.mcps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+}
+
+/* The two modes, and what the chosen one means in a sentence beside it. */
+.mcps__mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.mcps__mode-hint {
+  flex: 1;
+  min-width: calc(180px * var(--ui-scale));
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--fg-secondary);
+}
+
+.mcps__group {
+  display: grid;
+  gap: 6px;
+}
+
+.mcps__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: calc(24px * var(--ui-scale));
+}
+
+.mcps__group-title {
+  margin: 0;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.mcps__presets {
+  display: flex;
+  gap: 4px;
+}
+
+/* A preset that describes the choice as it stands reads as selected. */
+.mcps__preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent-hi);
+}
+
+/* One well, one hairline between rows, inset past nothing: the name leads. */
+.mcps__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--group-bg, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.mcps__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: calc(44px * var(--ui-scale));
+  padding: 6px 12px;
+  transition: background var(--dur);
+}
+
+.mcps__row + .mcps__row::before,
+.mcps__row + .mcps__empty::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.mcps__row:hover:not(.mcps__row--hangar) {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.mcps__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.mcps__row--hangar .mcps__main {
+  cursor: default;
+}
+
+.mcps__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.mcps__name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A server that will not start reads quieter than one that will. */
+.mcps__row.is-off .mcps__name-text {
+  color: var(--fg-muted);
+}
+
+.mcps__badge {
+  flex: none;
+  font-style: normal;
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+.mcps__badge--app {
+  box-shadow: none;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.mcps__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+.mcps__scope {
+  flex: none;
+}
+
+.mcps__transport,
+.mcps__summary {
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-ligatures: none;
+}
+
+.mcps__transport {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+.mcps__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Separators drawn between the parts, so none dangles when one is missing. */
+.mcps__meta > * + *::before {
+  content: "·";
+  margin-right: 6px;
+  font-family: var(--ui-font);
+  color: var(--fg-subtle);
+}
+
+.mcps__summary--prose {
+  font-family: var(--ui-font);
+  font-size: calc(11px * var(--ui-scale));
+  white-space: normal;
+}
+
+.mcps__empty {
+  position: relative;
+  padding: 12px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+.mcps__alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mcps__alert .icon {
+  flex: none;
+  margin-top: calc(2px * var(--ui-scale));
+}
+
+/* What the choice costs, in processes: figures first, set like a meter. */
+.mcps__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(110px * var(--ui-scale)), 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.mcps__stat {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 9px 12px 10px;
+  box-shadow: -1px 0 0 var(--line);
+}
+
+.mcps__stat-n {
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.mcps__stat-label {
+  font-size: calc(11px * var(--ui-scale));
+  line-height: 1.35;
+  color: var(--fg-secondary);
+}
+
+.mcps__stat-figures {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+/* What Claude Code's own configuration would start: green when the choice
+   starts fewer, quiet when it starts more. */
+.mcps__stat-was {
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-secondary);
+}
+
+.mcps__stat-was--less {
+  color: var(--success);
+}
+
+.mcps__busy {
+  color: var(--state-working);
+}
+
+/* The note takes what the two buttons leave, and wraps rather than pushing them. */
+.modal--mcps .modal__foot .modal__note {
+  flex: 1;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcps__row {
+    transition: none;
+  }
+}

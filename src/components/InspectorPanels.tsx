@@ -8,7 +8,7 @@ import { formatTokens, type ContextGauge } from "../lib/context";
 import { bridgeCancel, type QueuedPrompt } from "../lib/ipc";
 import type { RateLimit } from "../lib/bridge";
 import type { Task } from "../lib/board";
-import { paneEventText, type PaneEvent } from "../lib/paneInsight";
+import { paneEventText, type PaneEvent, type PaneMcp } from "../lib/paneInsight";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import {
   clockTime,
@@ -78,6 +78,8 @@ export const SessionSection = memo(function SessionSection({
   model,
   folder,
   onOpenSessions,
+  mcp,
+  onOpenMcpServers,
   collapsed,
   onToggle,
 }: Foldable & {
@@ -88,6 +90,9 @@ export const SessionSection = memo(function SessionSection({
   model: string | null;
   folder: string;
   onOpenSessions: (paneId: string) => void;
+  /** The MCP servers its Claude Code started with; null for other agents. */
+  mcp: PaneMcp | null;
+  onOpenMcpServers?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -132,6 +137,29 @@ export const SessionSection = memo(function SessionSection({
           <Row label={t("inspector.model")}>
             <span className="insp-mono" title={model}>
               {model}
+            </span>
+          </Row>
+        )}
+        {mcp && (
+          <Row label={t("inspector.mcp")}>
+            <span className="insp-kv__split">
+              {mcp.mode === "custom" ? (
+                <span className="insp-mono insp-kv__clip" title={mcp.servers.join(", ")}>
+                  {mcp.servers.join(", ")}
+                </span>
+              ) : (
+                <span className="insp-kv__faint insp-kv__clip">{t("inspector.mcpInherit")}</span>
+              )}
+              {onOpenMcpServers && (
+                <button
+                  type="button"
+                  className="insp-link"
+                  title={t("inspector.mcpChangeHint")}
+                  onClick={onOpenMcpServers}
+                >
+                  {t("inspector.mcpChange")}
+                </button>
+              )}
             </span>
           </Row>
         )}

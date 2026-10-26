@@ -17,6 +17,7 @@ import {
   type NavWorkspace,
 } from "./NavigatorModel";
 import { getPaneActivity } from "../lib/agentState";
+import { mcpScopeClear } from "../lib/mcpScope";
 import { useShortcutTitle } from "../lib/useShortcuts";
 
 interface Props {
@@ -26,6 +27,8 @@ interface Props {
   focusByWorkspace: Record<string, string>;
   /** Brings a pane forward, switching workspace if it has to. */
   onFocusPane: (workspaceId: string, paneId: string) => void;
+  /** Opens the choice of MCP servers for a workspace. */
+  onOpenMcpServers: (workspaceId: string) => void;
 }
 
 interface DragItem {
@@ -81,7 +84,13 @@ const wantsYou = (paneId: string) => {
  * stop, arrows to move, Right and Left to open and fold, Enter to go, F2 to
  * rename, the menu key for the rest.
  */
-export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFocusPane }: Props) {
+export function Sidebar({
+  onOpenSettings,
+  onNewWorkspace,
+  focusByWorkspace,
+  onFocusPane,
+  onOpenMcpServers,
+}: Props) {
   const {
     state,
     activeWorkspace,
@@ -736,6 +745,13 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
         takesFocus: true,
         onSelect: () => setWorktreesFor(ws.id),
       },
+      {
+        kind: "item",
+        label: t("mcpScope.menu"),
+        icon: "plug",
+        takesFocus: true,
+        onSelect: () => onOpenMcpServers(ws.id),
+      },
       { kind: "separator" },
       // Dragging does the same, but a menu is the one way to find out
       // folders exist.
@@ -773,7 +789,11 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
         label: t("sidebar.remove"),
         icon: "trash",
         danger: true,
-        onSelect: () => removeWorkspace(ws.id),
+        onSelect: () => {
+          removeWorkspace(ws.id);
+          // The copies of its MCP servers' entries go with it (lib/mcpScope).
+          mcpScopeClear(ws.id).catch(() => undefined);
+        },
       },
     ];
   }
