@@ -3,7 +3,7 @@ import { LOCALES, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
-import { THEMES, themeVars, type TerminalTheme } from "../../themes";
+import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
@@ -140,7 +140,7 @@ const FONT_STACKS = [
 function ThemePreview({ theme }: { theme: TerminalTheme }) {
   // The tokens the real window would take, so the preview's navigator sits
   // on the shade the real one will.
-  const vars = themeVars(theme);
+  const vars = deriveChromeTokens(theme);
   const bg = vars["--bg"];
   const fg = vars["--fg"];
   const chrome = vars["--chrome"];

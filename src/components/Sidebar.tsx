@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
 import { Icon } from "./Icon";
+import { StateGlyph } from "./StateGlyph";
 import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
 import { NavigatorActivityLine, NavigatorAgentRow, NavigatorPaneWatch } from "./NavigatorAgents";
 import { NavigatorPlan } from "./NavigatorPlan";
@@ -921,7 +922,8 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
             aria-label={t("sidebar.attention")}
             onClick={() => setAttentionOnly((on) => !on)}
           >
-            <Icon name="alert" size={14} />
+            {/* The waiting state's own diamond: this keeps only what waits. */}
+            <StateGlyph state="waiting" size={9} />
           </button>
         </div>
         <button

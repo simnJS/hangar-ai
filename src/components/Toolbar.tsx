@@ -307,7 +307,7 @@ export function Toolbar({
           title={withKeys(t("board.dockHint"), "view.boardDock")}
           aria-label={t("board.dock")}
         >
-          <Icon name="boardPanel" size={16} />
+          <Icon name="board" size={16} />
         </button>
         <button
           type="button"
