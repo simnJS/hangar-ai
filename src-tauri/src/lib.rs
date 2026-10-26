@@ -8,6 +8,7 @@ mod git;
 mod install;
 mod instructions;
 mod mcp;
+mod mcp_scope;
 mod memory;
 mod model;
 mod notify;
@@ -126,6 +127,9 @@ pub fn run() {
             install::mcp_targets,
             install::mcp_install,
             install::mcp_manual_commands,
+            mcp_scope::mcp_servers,
+            mcp_scope::mcp_scope_write,
+            mcp_scope::mcp_scope_clear,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
             notify::notify_send,
