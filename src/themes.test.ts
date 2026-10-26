@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrastRatio, hueAndSaturation, hueDistance } from "./lib/contrast";
+import { contrastRatio, hueAndSaturation, hueDistance, perceivedLightness } from "./lib/contrast";
 import {
   FILL_CONTRAST,
   TEXT_CONTRAST,
@@ -160,5 +160,37 @@ describe("deriveChromeTokens, on the themes the app is designed in", () => {
     expect(dark["--card"]).toBe(dark["--raised"]);
     const light = deriveChromeTokens(getTheme("github-light"));
     expect(light["--card"]).toBe(light["--bg"]);
+  });
+});
+
+describe("the statistics' colours", () => {
+  it("step away from the card in order on every theme, the faintest still at 2:1", () => {
+    for (const theme of THEMES) {
+      const vars = deriveChromeTokens(theme);
+      const card = vars["--card"];
+      const steps = ["--viz-1", "--viz-2", "--viz-3", "--viz-4"].map((token) => vars[token]);
+      const away = steps.map((color) =>
+        Math.abs(perceivedLightness(color) - perceivedLightness(card)),
+      );
+      // Far enough apart to tell neighbours in a stacked column at a glance.
+      for (let step = 1; step < steps.length; step++) {
+        expect(away[step] - away[step - 1], `${theme.id} step ${step}`).toBeGreaterThanOrEqual(0.06);
+      }
+      expect(contrastRatio(steps[0], card), theme.id).toBeGreaterThanOrEqual(2);
+      expect(contrastRatio(steps[3], card), theme.id).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("darken or brighten the heatmap with the value, from an empty cell up", () => {
+    for (const theme of THEMES) {
+      const vars = deriveChromeTokens(theme);
+      const card = vars["--card"];
+      const away = [1, 2, 3, 4, 5].map((level) =>
+        Math.abs(perceivedLightness(vars[`--viz-heat-${level}`]) - perceivedLightness(card)),
+      );
+      for (let level = 1; level < away.length; level++) {
+        expect(away[level], `${theme.id} level ${level + 1}`).toBeGreaterThan(away[level - 1]);
+      }
+    }
   });
 });

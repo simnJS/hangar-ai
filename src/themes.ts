@@ -5,6 +5,7 @@ import {
   hueAndSaturation,
   hueDistance,
   mix,
+  perceivedLightness,
   toRgb,
   withHue,
 } from "./lib/contrast";
@@ -1116,6 +1117,57 @@ export function deriveChromeTokens(theme: TerminalTheme): Record<string, string>
       ? preferred
       : other;
 
+  /**
+   * The statistics' data colours, all of one hue — the accent's — in steps
+   * away from the card they are drawn on: brighter on a dark theme, deeper on
+   * a light one. A chart there encodes "how much", and so does lightness, so
+   * the page keeps the rest of the chrome's quiet without a palette of its
+   * own. The strongest step is the accent held to 3:1 on the card; the
+   * faintest still reads at 2:1, the floor for a mark a label or a table
+   * also carries.
+   */
+  const card = isDark ? raised : bg;
+  const toward = (top: string, amount: number) => mix(card, top, amount);
+  // Where the ramp starts: 40 % of the way to the top, or further when a pale
+  // accent needs it to reach 2:1.
+  const vizStartFor = (top: string) => {
+    let start = 0.4;
+    while (start < 0.7 && contrastRatio(toward(top, start), card) < 2) start += 0.01;
+    return start;
+  };
+  const spanOf = (top: string) =>
+    Math.abs(perceivedLightness(top) - perceivedLightness(toward(top, vizStartFor(top))));
+  // A ramp too short to tell its four steps apart at a glance (0.065 of
+  // perceived lightness each, with room to spare) has its top pushed out,
+  // brighter on a dark theme and deeper on a light one, until it is not.
+  let vizTop = fill(isDark ? mix(theme.accent, "#ffffff", 0.12) : theme.accent);
+  for (let push = 0; push < 8 && spanOf(vizTop) < 0.2; push++) {
+    vizTop = mix(vizTop, isDark ? "#ffffff" : "#000000", 0.06);
+  }
+  /**
+   * `count` steps from `start` of the way to the top up to the top itself,
+   * at even distances of perceived lightness rather than of the mix: a mix
+   * toward a vivid colour bunches its last steps together.
+   */
+  const ramp = (start: number, count: number) => {
+    const from = perceivedLightness(toward(vizTop, start));
+    const to = perceivedLightness(vizTop);
+    return Array.from({ length: count }, (_, index) => {
+      const target = from + ((to - from) * index) / (count - 1);
+      let [low, high] = [start, 1];
+      for (let round = 0; round < 20; round++) {
+        const middle = (low + high) / 2;
+        if ((perceivedLightness(toward(vizTop, middle)) - target) * (to - from) < 0) low = middle;
+        else high = middle;
+      }
+      return toward(vizTop, (low + high) / 2);
+    });
+  };
+  const series = ramp(vizStartFor(vizTop), 4).map((color) => ensureContrast(color, card, 2, vizTop));
+  // The heatmap starts fainter: a quiet hour is meant to be barely there,
+  // and its cells carry their values in a tooltip and a table.
+  const heat = ramp(0.24, 5);
+
   return {
     // The chrome around the terminals, in a few steps away from their
     // background: the navigator, inspector and status bar sit on `--chrome`,
@@ -1182,6 +1234,22 @@ export function deriveChromeTokens(theme: TerminalTheme): Record<string, string>
     "--seg-thumb": isDark
       ? ensureContrast(mix(chromeBar, fg, 0.17), fg, TEXT_CONTRAST, chromeBar)
       : bgSunken,
+    // The statistics (see vizStep above). Four ordered steps for the token
+    // kinds, cheapest nearest the card; six for the activity heatmap, the
+    // first an empty cell; a grey for whatever steps back while something
+    // else is picked out, and the line of a sparkline.
+    "--viz-1": series[0],
+    "--viz-2": series[1],
+    "--viz-3": series[2],
+    "--viz-4": series[3],
+    "--viz-heat-0": mix(card, lift, isDark ? 0.05 : 0.06),
+    "--viz-heat-1": heat[0],
+    "--viz-heat-2": heat[1],
+    "--viz-heat-3": heat[2],
+    "--viz-heat-4": heat[3],
+    "--viz-heat-5": heat[4],
+    "--viz-mute": ensureContrast(mix(card, fg, 0.22), card, 1.6, fg),
+    "--viz-line": ensureContrast(mix(card, fg, 0.42), card, 3, fg),
   };
 }
 
