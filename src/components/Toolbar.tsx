@@ -116,15 +116,15 @@ export function Toolbar({
   }, [confirmReset]);
 
   /**
-   * Escape gives the keyboard back to the button that opened the menu. A reset
-   * armed from a shortcut or the palette had no button: calling it off hands
-   * the keyboard back to the terminal, which is what App's cancel does.
+   * Escape and Tab give the keyboard back to the button that opened the menu.
+   * A reset armed from a shortcut or the palette had no button: calling it off
+   * hands the keyboard back to the terminal, which is what App's cancel does.
    */
   const closeMenu = (reason: MenuCloseReason) => {
     const fromButton = menuOpen;
     if (confirmReset) onCancelReset();
     setMenuOpen(false);
-    if (reason === "escape" && fromButton) moreRef.current?.focus();
+    if ((reason === "escape" || reason === "tab") && fromButton) moreRef.current?.focus();
   };
 
   /** A menu entry runs once the menu is gone, so it never fights it for focus. */
@@ -337,17 +337,18 @@ export function Toolbar({
               {t("toolbar.resetBody")}
             </p>
             <div className="tmenu__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => closeMenu("escape")}>
-                {t("create.cancel")}
-              </button>
               <button
                 type="button"
-                className="btn btn--danger"
-                onClick={onReset}
-                // Armed from the keyboard as often as from a click, so the
-                // answer is one Enter away either way.
+                className="btn btn--ghost"
+                onClick={() => closeMenu("escape")}
+                // The safe answer has the keyboard: every conversation of the
+                // workspace is one deliberate Tab and Enter away, never two
+                // Enters from the "…" button.
                 autoFocus
               >
+                {t("create.cancel")}
+              </button>
+              <button type="button" className="btn btn--danger" onClick={onReset}>
                 {t("topbar.resetAllConfirm", { n: agentPaneCount })}
               </button>
             </div>
@@ -393,21 +394,8 @@ export function Toolbar({
                 <div className="tmenu__sep" role="separator" />
               </>
             )}
-            <button
-              type="button"
-              role="menuitem"
-              className="tmenu__item tmenu__item--danger"
-              onClick={onArmReset}
-              disabled={!agentPaneCount}
-              title={agentPaneCount ? t("topbar.resetAllHint") : t("topbar.resetAllNone")}
-            >
-              <Icon name="reset" size={14} />
-              <span className="tmenu__label">{t("toolbar.resetAll")}</span>
-              {resetKeys && <kbd className="tmenu__keys">{resetKeys}</kbd>}
-            </button>
             {(canDetach || inOwnWindow) && (
               <>
-                <div className="tmenu__sep" role="separator" />
                 {canDetach && (
                   <button
                     type="button"
@@ -432,9 +420,9 @@ export function Toolbar({
                     <span className="tmenu__label">{t("window.reattach")}</span>
                   </button>
                 )}
+                <div className="tmenu__sep" role="separator" />
               </>
             )}
-            <div className="tmenu__sep" role="separator" />
             <button
               type="button"
               role="menuitem"
@@ -444,6 +432,21 @@ export function Toolbar({
               <Icon name="search" size={14} />
               <span className="tmenu__label">{t("toolbar.palette")}</span>
               {paletteKeys && <kbd className="tmenu__keys">{paletteKeys}</kbd>}
+            </button>
+            {/* Last, on its own, where the menu's first focus and a stray
+                Enter never land: it throws away every conversation. */}
+            <div className="tmenu__sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="tmenu__item tmenu__item--danger"
+              onClick={onArmReset}
+              disabled={!agentPaneCount}
+              title={agentPaneCount ? t("topbar.resetAllHint") : t("topbar.resetAllNone")}
+            >
+              <Icon name="reset" size={14} />
+              <span className="tmenu__label">{t("toolbar.resetAll")}</span>
+              {resetKeys && <kbd className="tmenu__keys">{resetKeys}</kbd>}
             </button>
           </ToolbarMenu>
         ))}

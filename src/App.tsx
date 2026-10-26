@@ -623,7 +623,7 @@ export default function App() {
     setConfirmReset(false);
   };
 
-  /** The confirm button had the keyboard; hand it back to the terminal. */
+  /** The confirmation had the keyboard; hand it back to the terminal. */
   const cancelReset = () => {
     setConfirmReset(false);
     if (focusedPaneId) getTerminal(focusedPaneId)?.focus();

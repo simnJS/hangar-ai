@@ -15,18 +15,25 @@ import { createPortal } from "react-dom";
  * button: the toolbar sits above the terminal grid, whose panes stack their
  * own layers, and a menu rendered in place could end up drawn under them.
  *
- * It closes on Escape, on a press anywhere else and when the focus leaves it,
- * and says which, so the owner can decide where the focus goes next — back to
- * the button for Escape, wherever the user clicked otherwise.
+ * It closes on Escape, on Tab, on a press anywhere else and when the focus
+ * leaves it, and says which, so the owner can decide where the focus goes
+ * next — back to the button for Escape and Tab, wherever the user clicked
+ * otherwise.
+ *
+ * Being portalled, it is the last thing in the document: Tab out of it would
+ * land on nothing, or on the browser itself. So a menu closes on Tab instead
+ * of letting it through, and a question keeps Tab between its own buttons.
  */
 
-export type MenuCloseReason = "escape" | "outside" | "blur";
+export type MenuCloseReason = "escape" | "tab" | "outside" | "blur";
 
 /** Breathing room between the menu and its button, and the window edges. */
 const GAP = 6;
 const MARGIN = 8;
 
 const ITEMS = '[role="menuitem"]:not(:disabled)';
+/** What Tab walks in a question: its buttons, and a field if it has one. */
+const CONTROLS = "button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])";
 
 export function ToolbarMenu({
   anchorRef,
@@ -108,6 +115,20 @@ export function ToolbarMenu({
       closeRef.current("escape");
       return;
     }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      if (role === "menu") {
+        closeRef.current("tab");
+        return;
+      }
+      const controls = [...(ref.current?.querySelectorAll<HTMLElement>(CONTROLS) ?? [])];
+      if (!controls.length) return;
+      const at = controls.indexOf(document.activeElement as HTMLElement);
+      const step = event.shiftKey ? -1 : 1;
+      const next = at < 0 ? (event.shiftKey ? controls.length - 1 : 0) : at + step;
+      controls[(next + controls.length) % controls.length].focus();
+      return;
+    }
     if (role !== "menu") return;
     const items = [...(ref.current?.querySelectorAll<HTMLElement>(ITEMS) ?? [])];
     if (!items.length) return;
@@ -120,7 +141,6 @@ export function ToolbarMenu({
     else if (event.key === "ArrowUp") go(at < 0 ? -1 : at - 1);
     else if (event.key === "Home") go(0);
     else if (event.key === "End") go(-1);
-    // Tab leaves a menu rather than walking it; the blur below closes it.
   }
 
   return createPortal(
