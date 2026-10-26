@@ -632,6 +632,8 @@ export default function App() {
           isOpen: (id) =>
             openedRef.current.includes(id) ||
             Boolean(snapshot().workspaces.find((ws) => ws.id === id)?.detached),
+          asleep: isAsleep,
+          touch: touchWorkspace,
           activate: (workspaceId, paneId) => activateRef.current(workspaceId, paneId),
           // A detached workspace's terminals are drawn by its own window.
           terminal: async (paneId) => {

@@ -52,6 +52,10 @@ export interface ControlDeps {
   /** Mounts a workspace's terminals without switching to it. */
   openWorkspace: (workspaceId: string) => void;
   isOpen: (workspaceId: string) => boolean;
+  /** Put to sleep for being left alone (lib/hibernate); opening it wakes it. */
+  asleep: (workspaceId: string) => boolean;
+  /** An agent acting on a workspace is using it: its sleep waits. */
+  touch: (workspaceId: string) => void;
   /** Switches the window to the workspace and focuses the pane. */
   activate: (workspaceId: string, paneId: string) => void;
   /** The pane's terminal, in this window or in the one that draws it. */
@@ -87,6 +91,11 @@ export interface ControlDeps {
 
 export const DISABLED =
   "Pane control is turned off in Hangar.AI (Settings › General › Agents). Ask the user to turn it on.";
+
+/** Said wherever a sleeping workspace is the reason nothing runs. */
+const ASLEEP =
+  "Hangar put it to sleep to free memory, as nobody had used it for a while: its agents were stopped, " +
+  "and resume their sessions as soon as it opens. pane_send, pane_create and pane_restart open it.";
 
 const AGENT_IDS = AGENTS.map((agent) => agent.id) as string[];
 
@@ -564,6 +573,7 @@ export async function runControl(
         panes: ws.panes.length,
         active: ws.id === state.activeWorkspaceId,
         open: deps.isOpen(ws.id),
+        asleep: deps.asleep(ws.id),
         yours: ws.id === mine?.id,
         id: ws.id,
       })),
@@ -571,6 +581,9 @@ export async function runControl(
   }
 
   const ws = workspaceFor(state, args, caller);
+  // What an agent does to a workspace's panes counts as using it, like typing
+  // into them would — reading them does not.
+  if (op === "pane_send" || op === "pane_create" || op === "pane_restart") deps.touch(ws.id);
 
   switch (op) {
     case "pane_list": {
@@ -589,11 +602,18 @@ export async function runControl(
           };
         }),
       );
+      const asleep = !open && deps.asleep(ws.id);
       return {
-        workspace: { name: ws.name, cwd: ws.cwd, open },
+        workspace: { name: ws.name, cwd: ws.cwd, open, ...(asleep ? { asleep } : {}) },
         // Not mounted yet: its terminals start the first time it is shown, or
         // as soon as an agent creates, sends to or restarts one of its panes.
-        ...(open ? {} : { note: "This workspace is not open yet, so none of its panes is running." }),
+        ...(open
+          ? {}
+          : {
+              note: asleep
+                ? `This workspace is asleep, so none of its panes is running. ${ASLEEP}`
+                : "This workspace is not open yet, so none of its panes is running.",
+            }),
         panes,
       };
     }
@@ -696,15 +716,21 @@ export async function runControl(
         }
         if (keys.length > 0) throw new Error("Keys cannot be queued: send them without when_idle.");
         await deps.enqueue(pane.id, body);
-        return { queued: true, pane: pane.name };
+        // Held for a Claude Code that is not running, it would wait for good.
+        const starting = !deps.isOpen(ws.id);
+        if (starting) deps.openWorkspace(ws.id);
+        return { queued: true, pane: pane.name, ...(starting ? { starting } : {}) };
       }
 
       const term = await deps.terminal(pane.id);
       if (!term) {
         if (!deps.isOpen(ws.id)) {
+          const asleep = deps.asleep(ws.id);
           deps.openWorkspace(ws.id);
           throw new Error(
-            `"${ws.name}" was not open: its panes are starting now. Send again in a few seconds.`,
+            asleep
+              ? `"${ws.name}" was asleep: its agents are resuming their sessions now. Send again in a few seconds.`
+              : `"${ws.name}" was not open: its panes are starting now. Send again in a few seconds.`,
           );
         }
         throw new Error(`"${pane.name}" has no terminal yet. Send again in a moment.`);
@@ -732,7 +758,9 @@ export async function runControl(
         throw new Error(
           deps.isOpen(ws.id)
             ? `"${pane.name}" has no terminal yet.`
-            : `"${ws.name}" is not open, so "${pane.name}" has shown nothing yet.`,
+            : deps.asleep(ws.id)
+              ? `"${ws.name}" is asleep, so "${pane.name}" shows nothing. ${ASLEEP}`
+              : `"${ws.name}" is not open, so "${pane.name}" has shown nothing yet.`,
         );
       }
       const wanted = typeof args.lines === "number" ? Math.floor(args.lines) : READ_DEFAULT;

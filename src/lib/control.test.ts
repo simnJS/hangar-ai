@@ -172,6 +172,8 @@ function setup(overrides: Partial<ControlDeps> = {}) {
   const log: string[] = [];
   const typed: string[] = [];
   const opened = new Set(["w1"]);
+  /** Put to sleep for being left alone. */
+  const sleeping = new Set<string>();
   let next = 10;
 
   const deps: ControlDeps = {
@@ -200,6 +202,8 @@ function setup(overrides: Partial<ControlDeps> = {}) {
       log.push(`open:${id}`);
     },
     isOpen: (id) => opened.has(id),
+    asleep: (id) => sleeping.has(id),
+    touch: (id) => log.push(`touch:${id}`),
     activate: (workspaceId, paneId) => log.push(`activate:${workspaceId}:${paneId}`),
     terminal: async (paneId) =>
       paneId === "p1" || paneId === "p2" ? localTerminal(terminal([["$ ls"], ["a.txt"]], typed)) : null,
@@ -260,7 +264,7 @@ function setup(overrides: Partial<ControlDeps> = {}) {
       workspaces: state.workspaces.map((ws) => (ws.id === workspaceId ? { ...ws, ...change } : ws)),
     };
   };
-  return { deps, log, typed, preview, patch, mtimes };
+  return { deps, log, typed, preview, patch, mtimes, sleeping };
 }
 
 const fromAva = { caller: { paneId: "p1", paneName: "Ava", cwd: "C:\\dev\\hangar" } };
@@ -399,6 +403,52 @@ describe("runControl", () => {
       runControl("pane_send", { ...fromAva, workspace: "Shop", pane: "Ava", text: "hi" }, deps),
     ).rejects.toThrow(/starting now/);
     expect(log).toContain("open:w2");
+  });
+
+  it("says a sleeping workspace is asleep and how it wakes, without waking it", async () => {
+    const { deps, log, sleeping } = setup();
+    sleeping.add("w2");
+    const list = (await runControl("workspace_list", fromAva, deps)) as any;
+    expect(list.workspaces.map((ws: any) => [ws.name, ws.asleep])).toEqual([
+      ["Hangar", false],
+      ["Shop", true],
+    ]);
+    const panes = (await runControl("pane_list", { ...fromAva, workspace: "Shop" }, deps)) as any;
+    expect(panes.workspace).toMatchObject({ open: false, asleep: true });
+    expect(panes.note).toMatch(/asleep.*resume their sessions.*pane_send/);
+    await expect(
+      runControl("pane_read", { ...fromAva, workspace: "Shop", pane: "Ava" }, deps),
+    ).rejects.toThrow(/is asleep/);
+    // Looking is not using: neither wakes it, and neither counts as use.
+    expect(log.filter((entry) => /^(open|touch):/.test(entry))).toEqual([]);
+  });
+
+  it("wakes a sleeping workspace when sent to, and counts that as use", async () => {
+    const { deps, log, sleeping } = setup();
+    sleeping.add("w2");
+    await expect(
+      runControl("pane_send", { ...fromAva, workspace: "Shop", pane: "Ava", text: "hi" }, deps),
+    ).rejects.toThrow(/resuming their sessions/);
+    expect(log).toEqual(expect.arrayContaining(["touch:w2", "open:w2"]));
+  });
+
+  it("counts creating and restarting panes as use of their workspace", async () => {
+    const { deps, log } = setup();
+    await runControl("pane_restart", { ...fromAva, pane: "Max" }, deps);
+    await runControl("pane_create", { ...fromAva, workspace: "Shop" }, deps);
+    expect(log.filter((entry) => entry.startsWith("touch:"))).toEqual(["touch:w1", "touch:w2"]);
+  });
+
+  it("starts a closed workspace for a prompt queued until its Claude Code is free", async () => {
+    const { deps, log, patch } = setup();
+    patch("w2", { panes: [pane("p3", "Ava", "claude")] });
+    const out = await runControl(
+      "pane_send",
+      { ...fromAva, workspace: "Shop", pane: "Ava", text: "go", when_idle: true },
+      deps,
+    );
+    expect(out).toEqual({ queued: true, pane: "Ava", starting: true });
+    expect(log).toEqual(expect.arrayContaining(["enqueue:p3:go", "open:w2"]));
   });
 
   it("reads the bottom of a terminal", async () => {
