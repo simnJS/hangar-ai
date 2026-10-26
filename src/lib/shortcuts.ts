@@ -77,6 +77,8 @@ export type CommandId =
   | "view.terminals"
   | "view.board"
   | "view.boardDock"
+  | "view.modelPreview"
+  | "view.closeModels"
   | "view.memory"
   | "view.mcp"
   | "view.broadcast"
@@ -408,6 +410,22 @@ export const COMMANDS: ShortcutCommand[] = [
     labelKey: "cmd.view.boardDock",
     // The board's own chord, shifted: the same board, kept beside the panes.
     defaults: ["Mod+Alt+Shift+B"],
+  },
+  {
+    id: "view.modelPreview",
+    section: "view",
+    labelKey: "cmd.view.modelPreview",
+    // P for preview: a Mod+Alt letter that types nothing on AZERTY's AltGr,
+    // and that neither platform keeps for itself.
+    defaults: ["Mod+Alt+P"],
+  },
+  {
+    // Unbound by default: the palette is where it is found, and a stray chord
+    // should not close what an agent is in the middle of showing.
+    id: "view.closeModels",
+    section: "view",
+    labelKey: "cmd.view.closeModels",
+    defaults: [],
   },
   {
     id: "view.memory",

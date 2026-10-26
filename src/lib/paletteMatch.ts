@@ -23,6 +23,8 @@ export const COMMAND_SYNONYMS: Partial<Record<CommandId, readonly string[]>> = {
   "view.terminals": ["grille", "grid"],
   "view.board": ["kanban", "tâches", "tasks", "todo"],
   "view.boardDock": ["kanban", "tâches", "tasks", "dock"],
+  "view.modelPreview": ["modèle", "model", "maillage", "mesh", "glb", "gltf", "fbx", "obj", "viewer"],
+  "view.closeModels": ["modèle", "model", "3d"],
   "view.memory": ["notes", "souvenirs", "knowledge"],
   "view.mcp": ["serveur", "server", "connecter", "connect", "intégration", "integration"],
   "view.broadcast": ["diffusion", "envoyer à tous", "send to all", "everyone"],

@@ -40,6 +40,12 @@ export interface ToolbarProps {
   onFocusPane: (paneId: string) => void;
   dockShown: boolean;
   onToggleDock: () => void;
+  /** An agent has a model open: the 3D preview's button is there at all. */
+  modelsOpen: boolean;
+  modelShown: boolean;
+  /** Opened or rewritten since the preview was last on screen. */
+  modelsUnseen: boolean;
+  onToggleModels: () => void;
   /** The main window can send this workspace to a window of its own. */
   canDetach: boolean;
   onDetach: () => void;
@@ -75,6 +81,10 @@ export function Toolbar({
   onFocusPane,
   dockShown,
   onToggleDock,
+  modelsOpen,
+  modelShown,
+  modelsUnseen,
+  onToggleModels,
   canDetach,
   onDetach,
   inOwnWindow,
@@ -342,6 +352,19 @@ export function Toolbar({
 
         <span className="toolbar__sep" aria-hidden="true" />
 
+        {modelsOpen && (
+          <button
+            type="button"
+            className={`tbtn tbtn--toggle ${modelsUnseen ? "tbtn--unseen" : ""}`}
+            onClick={onToggleModels}
+            aria-pressed={modelShown}
+            data-drawer-toggle=""
+            title={withKeys(t("model.toggleHint"), "view.modelPreview")}
+            aria-label={t("model.panel")}
+          >
+            <Icon name="cube" size={16} />
+          </button>
+        )}
         <button
           type="button"
           className="tbtn tbtn--toggle"

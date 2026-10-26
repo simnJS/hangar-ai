@@ -134,6 +134,8 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.terminals": "terminal",
   "view.board": "board",
   "view.boardDock": "board",
+  "view.modelPreview": "cube",
+  "view.closeModels": "close",
   "view.memory": "bookmark",
   "view.mcp": "plug",
   "view.broadcast": "broadcast",
@@ -167,6 +169,7 @@ const ALIASES: Partial<Record<CommandId, TranslateKey[]>> = {
   "pane.resetAll": ["topbar.resetAll"],
   "pane.tidy": ["topbar.tidy"],
   "view.boardDock": ["board.dock"],
+  "view.modelPreview": ["model.panel"],
   "view.inspector": ["toolbar.inspector"],
   "view.broadcast": ["broadcast.send"],
 };

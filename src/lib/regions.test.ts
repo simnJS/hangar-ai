@@ -7,7 +7,8 @@ describe("nextRegion", () => {
   it("walks the regions as they sit on screen", () => {
     expect(nextRegion(all, "navigator", 1)).toBe("toolbar");
     expect(nextRegion(all, "toolbar", 1)).toBe("main");
-    expect(nextRegion(all, "main", 1)).toBe("dock");
+    expect(nextRegion(all, "main", 1)).toBe("model");
+    expect(nextRegion(all, "model", 1)).toBe("dock");
     expect(nextRegion(all, "dock", 1)).toBe("inspector");
     expect(nextRegion(all, "inspector", 1)).toBe("status");
   });
