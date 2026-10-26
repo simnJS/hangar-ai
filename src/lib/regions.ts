@@ -3,8 +3,9 @@ import { focusablesIn } from "./focusable";
 /**
  * The window's regions, in the order F6 walks them, which is the order they
  * are read in: the navigator down the left, the toolbar, the panes (or the
- * board or memory view in their place), the 3D preview, the board panel and
- * the inspector on the right, and the status bar along the bottom.
+ * board, memory or statistics view in their place), the 3D preview, the
+ * board panel and the inspector on the right, and the status bar along the
+ * bottom.
  *
  * Tab cannot do this: a terminal keeps Tab for the shell, so without F6 the
  * keyboard has no way out of a pane and into the panels around it.

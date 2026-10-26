@@ -80,6 +80,7 @@ export type CommandId =
   | "view.modelPreview"
   | "view.closeModels"
   | "view.memory"
+  | "view.stats"
   | "view.mcp"
   | "view.broadcast"
   | "view.palette"
@@ -435,6 +436,14 @@ export const COMMANDS: ShortcutCommand[] = [
     // knowledge it holds — the one Mod+Alt letter left that types nothing on
     // an AZERTY keyboard, where Ctrl+Alt is AltGr.
     defaults: ["Mod+Alt+K"],
+  },
+  {
+    id: "view.stats",
+    section: "view",
+    labelKey: "cmd.view.stats",
+    // U for usage — S is the session picker's, under Mod+Shift — and, like
+    // the other views', a Mod+Alt letter AZERTY's AltGr types nothing with.
+    defaults: ["Mod+Alt+U"],
   },
   {
     id: "view.mcp",

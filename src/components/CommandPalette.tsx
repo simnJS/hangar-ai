@@ -137,6 +137,7 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.modelPreview": "cube",
   "view.closeModels": "close",
   "view.memory": "bookmark",
+  "view.stats": "chart",
   "view.mcp": "plug",
   "view.broadcast": "broadcast",
   "view.navigator": "sidebarLeft",

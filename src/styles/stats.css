@@ -1,0 +1,1087 @@
+/* ---------- Usage statistics ---------- */
+
+/* The page: a bar of controls that scopes everything under it, then cards
+   on the work area's own background. Every colour of the data is a step of
+   the accent (--viz-*, see themes.ts): one hue, so the page stays as quiet
+   as the chrome around it and colour still only says "how much". */
+
+.stats {
+  /* The page under the cards: the work area's own background on a dark
+     theme, where cards lift off it; a grey on a light one, where they are
+     white sheets on it, the way the settings draw their groups. */
+  --stats-page: var(--bg);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--stats-page);
+}
+
+@supports (color: light-dark(red, red)) {
+  .stats {
+    --stats-page: light-dark(var(--chrome-bar), var(--bg));
+  }
+}
+
+/* Read by a screen reader, never drawn. */
+.stats-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- The bar ---- */
+
+.stats__bar {
+  container: statsbar / inline-size;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--ui-scale));
+  min-width: 0;
+  min-height: calc(44px * var(--ui-scale));
+  padding: 0 calc(12px * var(--ui-scale)) 0 calc(16px * var(--ui-scale));
+  background: var(--pane-head);
+  box-shadow: inset 0 -1px 0 var(--sep);
+  white-space: nowrap;
+}
+
+.stats__title {
+  flex: none;
+  margin: 0 calc(4px * var(--ui-scale)) 0 0;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.stats__choice .segmented__btn {
+  padding: 0 calc(9px * var(--ui-scale));
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.stats__project {
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--ui-scale));
+  min-width: 0;
+}
+
+/* The project filter: a field-like button, so it reads as a choice. */
+.stats__picker {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  min-width: 0;
+  max-width: calc(260px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale)) 0 calc(9px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--line);
+  color: var(--fg-secondary);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur), box-shadow var(--dur);
+}
+
+.stats__picker:hover:not(:disabled),
+.stats__picker.is-open {
+  background: var(--line-strong);
+  color: var(--fg);
+}
+
+/* A filter that is on says so in the accent: it changes every number. */
+.stats__picker.is-filtered {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+  color: var(--fg);
+}
+
+.stats__picker .icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+
+.stats__picker.is-filtered .icon:first-child {
+  color: var(--accent-hi);
+}
+
+.stats__picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats__picker:focus-visible,
+.stats__clear:focus-visible,
+.scard__more:focus-visible,
+.slist__project:focus-visible,
+.rank__row--button:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.stats__clear {
+  width: calc(24px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+}
+
+.stats__check {
+  display: inline-grid;
+  place-items: center;
+  width: calc(14px * var(--ui-scale));
+  color: var(--accent-hi);
+}
+
+.stats__bar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--ui-scale));
+  min-width: 0;
+}
+
+.stats__status {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(7px * var(--ui-scale));
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.stats__status.is-busy {
+  color: var(--fg-muted);
+}
+
+/* Reading the transcripts: a ring turning, never a bar that pretends to
+   know how far along it is. */
+.stats__spinner {
+  flex: none;
+  width: calc(10px * var(--ui-scale));
+  height: calc(10px * var(--ui-scale));
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: stats-spin 0.9s linear infinite;
+}
+
+@keyframes stats-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Narrow: the status goes first, then the title. */
+@container statsbar (width < 52em) {
+  .stats__status {
+    display: none;
+  }
+}
+
+@container statsbar (width < 40em) {
+  .stats__title {
+    display: none;
+  }
+}
+
+/* ---- The page ---- */
+
+.stats__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  transition: opacity var(--dur) var(--ease);
+}
+
+/* What the cache said, while the disk is read: kept on screen, held back —
+   after a beat, so a quick look at the disk never makes the page flicker. */
+.stats__scroll.is-stale {
+  opacity: 0.62;
+  transition-delay: 300ms;
+}
+
+.stats__page {
+  container: statspage / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: calc(14px * var(--ui-scale));
+  max-width: calc(1240px * var(--ui-scale));
+  margin: 0 auto;
+  padding: calc(18px * var(--ui-scale)) calc(20px * var(--ui-scale)) calc(32px * var(--ui-scale));
+}
+
+.stats__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.stats__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: calc(12px * var(--ui-scale));
+}
+
+.stats__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(14px * var(--ui-scale));
+  align-items: start;
+}
+
+.stats__col {
+  display: flex;
+  flex-direction: column;
+  gap: calc(14px * var(--ui-scale));
+  min-width: 0;
+}
+
+@container statspage (width < 760px) {
+  .stats__kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stats__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A card: lifted off the page on a dark theme, a white sheet on a light one. */
+.kpi,
+.scard {
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px var(--shadow);
+}
+
+/* ---- Key figures ---- */
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--ui-scale));
+  padding: calc(13px * var(--ui-scale)) calc(15px * var(--ui-scale)) calc(14px * var(--ui-scale));
+}
+
+.kpi__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kpi__label {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+}
+
+/* The figure itself: proportional digits, which read tighter this large. */
+.kpi__value {
+  margin: calc(2px * var(--ui-scale)) 0 0;
+  color: var(--fg);
+  font-size: calc(26px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi__trend,
+.kpi__detail {
+  margin: 0;
+  min-width: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+}
+
+.kpi__trend {
+  margin-top: calc(4px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+/* Up or down is not good or bad here — more work done, more tokens spent —
+   so the arrow wears no colour. */
+.kpi__arrow {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 0.72em;
+  transform: translateY(-1px);
+  color: var(--fg-muted);
+}
+
+.kpi__change {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi__detail {
+  color: var(--fg-muted);
+}
+
+/* The one line that says what the cost is not. */
+.kpi__detail--note {
+  color: var(--fg-subtle);
+}
+
+/* ---- Cards ---- */
+
+.scard {
+  display: flex;
+  flex-direction: column;
+  gap: calc(12px * var(--ui-scale));
+  padding: calc(13px * var(--ui-scale)) calc(15px * var(--ui-scale)) calc(15px * var(--ui-scale));
+}
+
+.scard__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.scard__titles {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: calc(8px * var(--ui-scale));
+  flex-wrap: wrap;
+}
+
+.scard__title {
+  margin: 0;
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.scard__title--sub {
+  margin-top: calc(6px * var(--ui-scale));
+  padding-top: calc(12px * var(--ui-scale));
+  border-top: 1px solid var(--line);
+}
+
+.scard__hint {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.scard__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--ui-scale));
+}
+
+.scard__toggle {
+  width: calc(26px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+}
+
+.scard__empty,
+.scard__note {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.scard__note {
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.scard__more {
+  align-self: flex-start;
+  margin: calc(-4px * var(--ui-scale)) 0 0 calc(-6px * var(--ui-scale));
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: calc(12px * var(--ui-scale));
+  cursor: pointer;
+}
+
+.scard__more:hover {
+  color: var(--fg);
+  background: var(--line);
+}
+
+/* ---- Legend, axes, readout ---- */
+
+.viz-legend {
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--ui-scale));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-secondary);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.viz-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+}
+
+.viz-legend__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+@container statspage (width < 900px) {
+  .viz-legend {
+    display: none;
+  }
+}
+
+.viz-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.viz-axis {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.viz-tick {
+  fill: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+/* The readout: values first, then what they are. */
+.viz-tip {
+  position: absolute;
+  top: calc(4px * var(--ui-scale));
+  z-index: 2;
+  min-width: calc(170px * var(--ui-scale));
+  margin-left: calc(14px * var(--ui-scale));
+  padding: calc(8px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-bar);
+  box-shadow: 0 12px 28px -10px var(--shadow), 0 2px 8px var(--shadow);
+  color: var(--fg);
+  font-size: calc(11.5px * var(--ui-scale));
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.viz-tip--left {
+  margin-left: 0;
+  transform: translateX(calc(-100% - 14px * var(--ui-scale)));
+}
+
+.viz-tip__title {
+  margin: 0 0 calc(5px * var(--ui-scale));
+  color: var(--fg-secondary);
+  font-weight: 600;
+}
+
+.viz-tip__row {
+  display: grid;
+  grid-template-columns: 10px auto 1fr;
+  align-items: center;
+  column-gap: calc(8px * var(--ui-scale));
+  margin: calc(2px * var(--ui-scale)) 0 0;
+}
+
+/* A short stroke of the series' colour: a key, not a box. */
+.viz-tip__key {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.viz-tip__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.viz-tip__label {
+  color: var(--fg-muted);
+}
+
+.viz-tip__row--total {
+  margin-top: calc(5px * var(--ui-scale));
+  padding-top: calc(5px * var(--ui-scale));
+  border-top: 1px solid var(--line);
+}
+
+/* ---- Columns ---- */
+
+.viz-columns {
+  position: relative;
+  min-height: calc(214px * var(--ui-scale));
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.viz-columns:focus-visible,
+.viz-heat__grid:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.viz-columns__svg {
+  display: block;
+}
+
+.viz-columns__band {
+  fill: var(--line);
+}
+
+.viz-columns__col {
+  transition: opacity var(--dur) var(--ease);
+}
+
+.viz-columns__col.is-dim {
+  opacity: 0.5;
+}
+
+/* Over an empty chart: what the period is missing, and what to try. */
+.viz-empty {
+  position: absolute;
+  inset: 0 0 calc(28px * var(--ui-scale)) calc(52px * var(--ui-scale));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--fg-subtle);
+  font-size: calc(12px * var(--ui-scale));
+  text-align: center;
+  pointer-events: none;
+}
+
+.viz-empty strong {
+  color: var(--fg-secondary);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+}
+
+/* ---- Tables, the charts' twins ---- */
+
+.viz-table {
+  max-height: calc(260px * var(--ui-scale));
+  overflow: auto;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.viz-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-table th,
+.viz-table td {
+  padding: calc(5px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.viz-table th:first-child {
+  text-align: left;
+}
+
+.viz-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  color: var(--fg-muted);
+  font-weight: 500;
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+}
+
+.viz-table tbody th {
+  color: var(--fg-secondary);
+  font-weight: 500;
+}
+
+.viz-table--wide td {
+  min-width: calc(44px * var(--ui-scale));
+}
+
+/* ---- Heatmap ---- */
+
+.viz-heat {
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--ui-scale));
+}
+
+.viz-heat__grid {
+  --heat-cell: calc(15px * var(--ui-scale));
+  --heat-head: calc(14px * var(--ui-scale) + 2px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.viz-heat__hours,
+.viz-heat__row {
+  display: grid;
+  grid-template-columns: 40px repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  align-items: center;
+}
+
+.viz-heat__hours {
+  height: calc(14px * var(--ui-scale));
+}
+
+.viz-heat__hours span {
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-heat__day {
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+  text-transform: capitalize;
+}
+
+.viz-heat__cell {
+  height: var(--heat-cell);
+  border-radius: 3px;
+}
+
+.viz-heat__cell.is-active {
+  box-shadow: 0 0 0 1.5px var(--fg);
+}
+
+.viz-heat__legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.viz-heat__legend span:first-child {
+  margin-right: 4px;
+}
+
+.viz-heat__legend span:last-child {
+  margin-left: 4px;
+}
+
+.viz-heat__swatch {
+  width: calc(11px * var(--ui-scale));
+  height: calc(11px * var(--ui-scale));
+  border-radius: 3px;
+}
+
+/* ---- Sparkline ---- */
+
+.viz-spark {
+  flex: none;
+  overflow: visible;
+}
+
+.viz-spark polyline {
+  stroke: var(--viz-line);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.viz-spark circle {
+  fill: var(--viz-4);
+  stroke: var(--card);
+  stroke-width: 2;
+}
+
+/* ---- Rankings ---- */
+
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--ui-scale));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rank__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  row-gap: calc(5px * var(--ui-scale));
+  column-gap: 12px;
+  padding: calc(6px * var(--ui-scale)) 0;
+}
+
+.rank__row--button {
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: calc(6px * var(--ui-scale)) 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.rank__row--button:hover {
+  background: var(--line);
+}
+
+.is-selected > .rank__row--button {
+  background: var(--accent-soft);
+}
+
+.rank__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rank__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 500;
+}
+
+.rank__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.rank__numbers {
+  display: flex;
+  align-items: baseline;
+  gap: calc(10px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.rank__value {
+  color: var(--fg);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.rank__share {
+  min-width: calc(34px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  text-align: right;
+}
+
+.rank__badge {
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.rank__track {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--viz-heat-0);
+  overflow: hidden;
+}
+
+.rank__fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--viz-4);
+  transition: width 220ms var(--ease), background var(--dur);
+}
+
+/* One project picked: it keeps the accent, the others step back. */
+.rank--picking li:not(.is-selected) .rank__fill {
+  background: var(--viz-mute);
+}
+
+/* ---- Sessions ---- */
+
+.slist {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slist__row {
+  display: grid;
+  grid-template-columns: calc(18px * var(--ui-scale)) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: calc(10px * var(--ui-scale));
+  padding: calc(7px * var(--ui-scale)) 0;
+  border-top: 1px solid var(--line);
+}
+
+.slist__row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.slist__rank {
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.slist__main {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--ui-scale));
+  min-width: 0;
+}
+
+.slist__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 500;
+}
+
+.slist__meta {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.slist__sep {
+  color: var(--fg-subtle);
+}
+
+.slist__project {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  height: calc(17px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  color: var(--fg-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.slist__project:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.slist__date {
+  font-variant-numeric: tabular-nums;
+}
+
+.slist__numbers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(2px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.slist__value {
+  color: var(--fg);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.slist__active {
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+/* ---- Method ---- */
+
+.stats__method {
+  display: flex;
+  flex-direction: column;
+  gap: calc(5px * var(--ui-scale));
+  max-width: 92ch;
+  padding: calc(4px * var(--ui-scale)) 2px 0;
+  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.5;
+}
+
+.stats__method p {
+  margin: 0;
+}
+
+.stats__method-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  color: var(--fg-muted);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.stats__method-scan {
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+}
+
+/* ---- Whole-page states ---- */
+
+.stats__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(8px * var(--ui-scale));
+  min-height: 100%;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.stats__state-icon {
+  display: grid;
+  place-items: center;
+  width: calc(48px * var(--ui-scale));
+  height: calc(48px * var(--ui-scale));
+  margin-bottom: calc(6px * var(--ui-scale));
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--fg-muted);
+}
+
+.stats__state-icon.is-busy {
+  color: var(--accent-hi);
+  animation: stats-breathe 1.6s var(--ease) infinite alternate;
+}
+
+@keyframes stats-breathe {
+  from {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  to {
+    box-shadow: 0 0 0 9px var(--accent-soft);
+  }
+}
+
+.stats__state-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.stats__state-body {
+  max-width: 52ch;
+  margin: 0 0 calc(6px * var(--ui-scale));
+  color: var(--fg-muted);
+  font-size: calc(12.5px * var(--ui-scale));
+  line-height: 1.5;
+}
+
+.stats__sources {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--ui-scale));
+  margin: calc(4px * var(--ui-scale)) 0 0;
+  padding: calc(8px * var(--ui-scale)) calc(12px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--line);
+  list-style: none;
+  text-align: left;
+}
+
+.stats__sources li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(16px * var(--ui-scale));
+}
+
+.stats__source-root {
+  color: var(--fg-secondary);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.stats__source-count {
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats__spinner {
+    animation-duration: 2.4s;
+  }
+  .stats__state-icon.is-busy {
+    animation: none;
+  }
+  .rank__fill,
+  .viz-columns__col,
+  .stats__scroll {
+    transition: none;
+  }
+}

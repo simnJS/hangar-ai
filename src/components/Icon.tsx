@@ -108,6 +108,14 @@ const PATHS = {
     </>
   ),
   bookmark: <path d="M3 3.5A1.5 1.5 0 0 1 4.5 2h7a1.5 1.5 0 0 1 1.5 1.5v9.7l-5-2.6-5 2.6z" />,
+  // Three columns rising from a baseline: the statistics.
+  chart: <path d="M2.5 13.5h11M4.6 11V8.2M8 11V3.9M11.4 11V6.4" />,
+  table: (
+    <>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.2" />
+      <path d="M1.75 6.25h12.5M1.75 9.75h12.5M6 6.25v7" />
+    </>
+  ),
   trash: (
     <path d="M2.75 4.25h10.5M6.25 4.25v-1.5h3.5v1.5M4.25 4.25l.6 8.3a1 1 0 0 0 1 .95h4.3a1 1 0 0 0 1-.95l.6-8.3" />
   ),
