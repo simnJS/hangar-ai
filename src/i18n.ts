@@ -236,6 +236,7 @@ const en = {
 
   "commands.menu": "Saved commands",
   "commands.add": "New command…",
+  "commands.empty": "Keep the commands you type often here: one click sends them to this pane.",
   "commands.edit": "Edit",
   "commands.remove": "Delete",
   "commands.runHint": "Send to this pane: {command}",
@@ -1184,6 +1185,8 @@ const fr: Record<Key, string> = {
 
   "commands.menu": "Commandes enregistrées",
   "commands.add": "Nouvelle commande…",
+  "commands.empty":
+    "Garde ici les commandes que tu tapes souvent : un clic les envoie dans ce panneau.",
   "commands.edit": "Modifier",
   "commands.remove": "Supprimer",
   "commands.runHint": "Envoyer dans ce panneau : {command}",

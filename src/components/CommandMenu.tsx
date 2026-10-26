@@ -181,12 +181,17 @@ export function CommandMenu({
     );
   };
 
+  // With nothing saved yet, a line says what the menu is for, rather than
+  // leaving a lone "New command…" to explain itself.
+  const empty = !workspaceCommands.length && !globalCommands.length;
+
   return (
     <div
       className="cmd-menu"
       ref={menuRef}
       role="menu"
       aria-label={t("commands.menu")}
+      aria-describedby={empty ? "cmd-menu-empty" : undefined}
       style={{
         left: at?.left ?? 0,
         top: at?.top ?? 0,
@@ -196,6 +201,12 @@ export function CommandMenu({
     >
       {section(workspaceCommands, "workspace", 0)}
       {section(globalCommands, "global", workspaceCommands.length)}
+
+      {empty && (
+        <p className="cmd-menu__empty" id="cmd-menu-empty">
+          {t("commands.empty")}
+        </p>
+      )}
 
       <button className="cmd-menu__add" role="menuitem" onClick={onAdd}>
         <Icon name="plus" size={12} />
