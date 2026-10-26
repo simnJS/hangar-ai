@@ -12,10 +12,12 @@ mod memory;
 mod model;
 mod notify;
 mod path_env;
+mod pricing;
 mod pty;
 mod server;
 mod sessions;
 mod shells;
+mod stats;
 mod store;
 mod voice;
 mod windows;
@@ -90,6 +92,7 @@ pub fn run() {
             sessions::session_exists,
             sessions::detect_agents,
             context::context_usage,
+            stats::usage_stats,
             shells::detect_shells,
             store::load_state,
             store::save_state,
