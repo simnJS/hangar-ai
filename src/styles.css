@@ -1945,7 +1945,7 @@ body.is-dragging-pane .pane__bar {
 
 .pane__action--close:hover:enabled {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
 }
 
 /*
@@ -2392,7 +2392,7 @@ body.is-dragging-pane .pane__bar {
   /* Content on a well, rows on raised groups — in the light the other way
      round: white groups on a grey page, the way the system draws them. */
   --settings-page: var(--bg-sunken);
-  --group-bg: var(--raised);
+  --group-bg: var(--card);
   display: grid;
   grid-template-columns: calc(200px * var(--ui-scale)) minmax(0, 1fr);
   width: min(calc(980px * var(--ui-scale)), 100%);
@@ -2401,7 +2401,7 @@ body.is-dragging-pane .pane__bar {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);
   box-shadow:
-    0 0 0 1px var(--float-ring, transparent),
+    0 0 0 1px var(--float-ring),
     0 28px 70px -18px var(--shadow),
     0 10px 28px -14px var(--shadow);
   overflow: hidden;
@@ -2411,7 +2411,6 @@ body.is-dragging-pane .pane__bar {
 @supports (color: light-dark(red, red)) {
   .settings {
     --settings-page: light-dark(var(--chrome-bar), var(--bg-sunken));
-    --group-bg: light-dark(var(--bg), var(--raised));
   }
 }
 
@@ -2559,7 +2558,7 @@ body.is-dragging-pane .pane__bar {
 .settings__cat-count {
   font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2615,7 +2614,7 @@ body.is-dragging-pane .pane__bar {
   margin: 0;
   padding: 56px 30px;
   text-align: center;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .set-section {
@@ -2640,7 +2639,7 @@ body.is-dragging-pane .pane__bar {
   margin: 0;
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.45;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* The grouped box: rows on a rounded surface, split by inset hairlines. */
@@ -2665,7 +2664,7 @@ body.is-dragging-pane .pane__bar {
   margin-bottom: 10px;
   font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .theme-grid {
@@ -2822,7 +2821,7 @@ body.is-dragging-pane .pane__bar {
 .set-row__hint {
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.4;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .set-row__control {
@@ -3004,8 +3003,6 @@ body.is-dragging-pane .pane__bar {
 /* Segmented control. The chosen segment is lifted off the track: lighter on
    a dark theme, white on a light one. */
 .seg {
-  --seg-track: var(--bg);
-  --seg-on: color-mix(in srgb, var(--fg) 17%, var(--chrome));
   display: inline-flex;
   align-items: stretch;
   gap: 2px;
@@ -3014,13 +3011,6 @@ body.is-dragging-pane .pane__bar {
   border-radius: var(--radius);
   background: var(--seg-track);
   box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-
-@supports (color: light-dark(red, red)) {
-  .seg {
-    --seg-track: light-dark(var(--surface-active), var(--bg));
-    --seg-on: light-dark(var(--bg), color-mix(in srgb, var(--fg) 17%, var(--chrome)));
-  }
 }
 
 .seg__btn {
@@ -3042,7 +3032,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .seg__btn.is-active {
-  background: var(--seg-on);
+  background: var(--seg-thumb);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line-strong);
 }
@@ -3145,7 +3135,7 @@ body.is-dragging-pane .pane__bar {
 
 .font-card__name {
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .font-card.is-active .font-card__name {
@@ -3287,7 +3277,7 @@ body.is-dragging-pane .pane__bar {
 .dc-card__head {
   font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   margin-bottom: 2px;
 }
 
@@ -3304,7 +3294,7 @@ body.is-dragging-pane .pane__bar {
 
 .dc-card__time {
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3355,7 +3345,7 @@ body.is-dragging-pane .pane__bar {
 }
 
 .dc-status__hint {
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3378,29 +3368,6 @@ body.is-dragging-pane .pane__bar {
 /* Every dialog shares this system (components/Backdrop): a translucent scrim
    with a light blur, and a chrome panel whose title bar and footer are set
    off by hairlines, actions at the bottom right. */
-
-/* What floats over the window — dialogs, menus, capsules — gets a dark outer
-   edge under its light hairline on a dark theme, the double edge that keeps
-   a panel from melting into what is behind it. On a light theme the shadow
-   does that alone. */
-.modal-backdrop,
-.cmd-menu,
-.update,
-.voice-pill {
-  --float-ring: transparent;
-  /* Secondary text: hints, paths, metadata. Between --fg-muted and --fg, so
-     it still reads at 4.5:1 on a raised group, which --fg-subtle does not. */
-  --text-hint: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
-}
-
-@supports (color: light-dark(red, red)) {
-  .modal-backdrop,
-  .cmd-menu,
-  .update,
-  .voice-pill {
-    --float-ring: light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.55));
-  }
-}
 
 .modal-backdrop {
   position: fixed;
@@ -3456,7 +3423,7 @@ body.is-dragging-pane .pane__bar {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);
   box-shadow:
-    0 0 0 1px var(--float-ring, transparent),
+    0 0 0 1px var(--float-ring),
     0 24px 64px -16px var(--shadow),
     0 8px 24px -12px var(--shadow);
   overflow: hidden;
@@ -3504,7 +3471,7 @@ body.is-dragging-pane .pane__bar {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3591,7 +3558,7 @@ body.is-dragging-pane .pane__bar {
   padding: 20px 8px;
   text-align: center;
   font-size: calc(12px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .modal__foot {
@@ -3610,7 +3577,7 @@ body.is-dragging-pane .pane__bar {
   margin-right: auto;
   min-width: 0;
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* One session per line: what it was about, then when and which, in the
@@ -3658,7 +3625,7 @@ body.is-dragging-pane .pane__bar {
 
 .session__label em {
   font-style: normal;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* The new-session row explains itself in a sentence, not in metadata. */
@@ -3671,7 +3638,7 @@ body.is-dragging-pane .pane__bar {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   white-space: nowrap;
 }
 
@@ -3736,7 +3703,7 @@ body.is-dragging-pane .pane__bar {
   backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--line-strong);
   box-shadow:
-    0 0 0 1px var(--float-ring, transparent),
+    0 0 0 1px var(--float-ring),
     0 14px 34px -12px var(--shadow),
     0 4px 10px -6px var(--shadow);
   animation: update-in 220ms var(--ease);
@@ -4187,8 +4154,7 @@ body.is-dragging-pane .pane__bar {
   gap: 6px;
   padding: 9px 10px 8px;
   border-radius: var(--radius-lg);
-  background: var(--raised);
-  background: light-dark(var(--bg), var(--raised));
+  background: var(--card);
   box-shadow: inset 0 0 0 1px var(--line), 0 1px 0 var(--sep);
   cursor: pointer;
   outline: none;
@@ -5258,7 +5224,7 @@ body.is-dragging-pane .board-dock__grip {
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
 }
 
 /* components/TaskDialog.tsx: a floating panel in the chrome's colour, its
@@ -5782,11 +5748,11 @@ select.task__input {
 .target__badge--muted {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line-strong);
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .target__badge--alert {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -5794,7 +5760,7 @@ select.task__input {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5856,7 +5822,7 @@ select.task__input {
 
 .reports .reports__hint {
   margin-top: 4px;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .manual {
@@ -5934,7 +5900,7 @@ select.task__input {
   font-weight: 400;
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.4;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* Aligned form, the way the system lays out a dialog: labels right-aligned
@@ -6144,7 +6110,7 @@ select.task__input {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .preview__cell.is-shell .preview__name {
@@ -6277,12 +6243,12 @@ select.task__input {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .root__tag {
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .root.is-main .root__tag {
@@ -6320,7 +6286,7 @@ select.task__input {
   padding: 0 9px;
   border-radius: 999px;
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   white-space: nowrap;
 }
@@ -6328,7 +6294,7 @@ select.task__input {
 .keymap__state.is-conflict {
   color: var(--danger);
   box-shadow: none;
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
   font-weight: 500;
 }
 
@@ -6354,7 +6320,7 @@ select.task__input {
   margin: 0;
   padding: 24px 0;
   text-align: center;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* Wrapping, so a conflict note takes the whole width under the row it warns
@@ -6415,7 +6381,7 @@ select.task__input {
 
 .key-row__none {
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .key-row__btn {
@@ -6530,7 +6496,7 @@ select.task__input {
 
 .key-bind__x:hover {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
 }
 
 .key-bind__x:focus-visible {
@@ -6611,7 +6577,7 @@ select.task__input {
 
 .key-rec__hint {
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 /* Half-typed sequence, floating just above the status bar: a pill, like
@@ -6632,7 +6598,7 @@ select.task__input {
   box-shadow: 0 10px 28px -12px var(--shadow), 0 2px 6px var(--shadow);
   font-size: calc(12px * var(--ui-scale));
   white-space: nowrap;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   z-index: 30;
 }
 
@@ -6670,7 +6636,7 @@ select.task__input {
   backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--line-strong);
   box-shadow:
-    0 0 0 1px var(--float-ring, transparent),
+    0 0 0 1px var(--float-ring),
     0 14px 34px -12px var(--shadow),
     0 4px 10px -6px var(--shadow);
   z-index: 31;
@@ -6807,7 +6773,7 @@ select.task__input {
 
 .vm__state {
   font-size: calc(11.5px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -6819,7 +6785,7 @@ select.task__input {
   margin: 0;
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.5;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   /* Twenty-five language codes wrap; without this they push the card wide. */
   overflow-wrap: anywhere;
 }
@@ -6949,7 +6915,7 @@ select.task__input {
 }
 
 .wt .target__badge--alert {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -7005,7 +6971,7 @@ select.task__input {
 }
 
 .wt__actions .btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -7231,8 +7197,7 @@ select.task__input {
   margin: 10px 0 6px;
   padding: 12px;
   border-radius: var(--radius-lg);
-  background: var(--raised);
-  background: light-dark(var(--bg), var(--raised));
+  background: var(--card);
   box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 0 var(--sep);
 }
 
@@ -7590,7 +7555,7 @@ select.task__input {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   box-shadow:
-    0 0 0 1px var(--float-ring, transparent),
+    0 0 0 1px var(--float-ring),
     0 18px 40px -12px var(--shadow),
     0 6px 14px -8px var(--shadow);
   scrollbar-width: thin;
@@ -7620,7 +7585,7 @@ select.task__input {
   padding: 4px 8px 3px;
   font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .cmd-item {
@@ -7682,7 +7647,7 @@ select.task__input {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7692,7 +7657,7 @@ select.task__input {
   flex: none;
   margin-left: auto;
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
 }
 
 .cmd-item:hover .cmd-item__cmd,
@@ -7721,7 +7686,7 @@ select.task__input {
   padding: 0 5px;
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
-  color: var(--text-hint);
+  color: var(--fg-secondary);
   white-space: nowrap;
   transition: opacity var(--dur);
 }
