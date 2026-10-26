@@ -90,19 +90,22 @@ select {
 
 /* ---------- Sidebar ---------- */
 
+/* The navigator (components/Sidebar.tsx): a source list in the manner of
+   Xcode's. Rows are 24px at 100 %, every length follows the interface size,
+   and colour is left to the agents' states. */
 .sidebar {
+  --nav-row: calc(24px * var(--ui-scale));
+  --nav-disc: calc(14px * var(--ui-scale));
+  --nav-glyph: calc(14px * var(--ui-scale));
+  --nav-gap: calc(6px * var(--ui-scale));
+  --nav-indent: calc(14px * var(--ui-scale));
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  background: var(--bg-sunken);
-  border-right: 1px solid var(--border);
-}
-
-.sidebar__brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 14px 16px 12px;
+  background: var(--chrome);
+  border-right: 1px solid var(--sep);
+  font-size: calc(12px * var(--ui-scale));
 }
 
 /* The mark takes its colors from the theme like the rest of the chrome: the
@@ -117,337 +120,707 @@ select {
   fill: var(--accent);
 }
 
-.sidebar__title {
-  font-weight: 650;
-  letter-spacing: 0.02em;
+.nav-icon {
+  display: block;
+  flex: none;
+  width: calc(var(--nav-icon) * var(--ui-scale));
+  height: calc(var(--nav-icon) * var(--ui-scale));
 }
 
-.sidebar__section {
+/* Level with the toolbar beside it, so the window reads as one band. */
+.nav-top {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px 6px 16px;
-  font-size: calc(10.5px * var(--ui-scale));
+  gap: calc(7px * var(--ui-scale));
+  height: calc(52px * var(--ui-scale));
+  padding: 0 calc(10px * var(--ui-scale)) 0 calc(16px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.nav-top__name {
+  font-size: calc(12.5px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  letter-spacing: -0.005em;
+}
+
+.nav-top__version {
+  font-family: var(--mono);
+  font-size: calc(10px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
   color: var(--fg-subtle);
 }
 
-.sidebar__list {
+.nav-top__hide {
+  margin-left: auto;
+}
+
+/* A borderless icon button, the navigator's only kind. */
+.nav-tb {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  height: calc(26px * var(--ui-scale));
+  min-width: calc(28px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+
+.nav-tb:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.nav-tb:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -1px;
+}
+
+.nav-section {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: calc(26px * var(--ui-scale));
+  margin: calc(2px * var(--ui-scale)) calc(8px * var(--ui-scale)) 0;
+  padding: 0 calc(2px * var(--ui-scale)) 0 calc(8px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.nav-section .nav-tb {
+  height: calc(22px * var(--ui-scale));
+  min-width: calc(22px * var(--ui-scale));
+  padding: 0;
+}
+
+/* Out of the way until the navigator is under the pointer; the context menu
+   offers it too. */
+.nav-section__add {
+  opacity: 0;
+}
+
+.sidebar:hover .nav-section__add,
+.nav-section__add:focus-visible {
+  opacity: 1;
+}
+
+.nav-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px 8px;
+  padding: calc(2px * var(--ui-scale)) calc(8px * var(--ui-scale)) calc(6px * var(--ui-scale));
   /* A column, so the drop zone under the last row can take the space left. */
   display: flex;
   flex-direction: column;
   /* Rows are dragged; a press that wanders would otherwise select names. */
   user-select: none;
+  cursor: default;
 }
 
-.sidebar__list > * {
+.nav-list > * {
   flex-shrink: 0;
 }
 
-.sidebar__empty {
-  margin: 18px 10px;
-  color: var(--fg-subtle);
-  font-size: calc(12px * var(--ui-scale));
+/* Level with the section heading above it. */
+.nav-empty {
+  margin: calc(12px * var(--ui-scale)) calc(8px * var(--ui-scale));
+  color: var(--fg-muted);
   line-height: 1.6;
   /* Translations carry their own line breaks. */
   white-space: pre-line;
 }
 
-.sidebar__footer {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-  border-top: 1px solid var(--border);
+.nav-empty p {
+  margin: 0 0 calc(4px * var(--ui-scale));
+  overflow-wrap: anywhere;
 }
 
-.ws {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  margin-bottom: 2px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+.nav-link {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--accent-hi);
   cursor: pointer;
-  transition: background var(--dur), border-color var(--dur);
 }
 
-.ws:hover {
+.nav-link:hover {
+  text-decoration: underline;
+}
+
+.nav-link:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* Rows. A workspace's name, path and activity line share one hit area, and
+   everything under it — path, agents — starts where the name starts. */
+
+.nav-ws {
+  --nav-x: calc(4px * var(--ui-scale) + var(--nav-level, 0) * var(--nav-indent));
+  --nav-name-x: calc(var(--nav-x) + var(--nav-disc) + var(--nav-glyph) + 2 * var(--nav-gap));
+  position: relative;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.nav-ws__head,
+.nav-folder__head {
+  display: grid;
+  grid-template-columns: var(--nav-disc) var(--nav-glyph) minmax(0, 1fr) auto;
+  grid-template-rows: var(--nav-row);
+  align-items: center;
+  column-gap: var(--nav-gap);
+  border-radius: var(--radius);
+  transition: background var(--dur) var(--ease);
+}
+
+.nav-ws__head {
+  padding: 0 calc(6px * var(--ui-scale)) calc(4px * var(--ui-scale)) var(--nav-x);
+  margin-bottom: 1px;
+}
+
+.nav-ws__head:hover,
+.nav-folder__head:hover {
   background: var(--surface-hover);
 }
 
-.ws--active {
-  background: var(--accent-soft);
-  border-color: var(--accent-ring);
+/* The workspace on screen: one quiet card around it and its agents, its name
+   a step bolder. The pane in front inside it takes the stronger fill. */
+.nav-ws--active {
+  background: color-mix(in srgb, var(--surface-hover) 55%, transparent);
 }
 
-.ws__meta {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 1px;
+.nav-ws:focus-visible > .nav-ws__head,
+.nav-folder:focus-visible > .nav-folder__head {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
-.ws__name {
-  font-weight: 550;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ws__path {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
-}
-
-.ws__badge {
-  padding: 1px 6px;
-  border-radius: 0;
-  background: var(--surface-active);
-  color: var(--fg-muted);
-  font-size: calc(10px * var(--ui-scale));
-  font-variant-numeric: tabular-nums;
-}
-
-/* The workspace's agents, from the panes' own states (lib/agentState). */
-.sidebar__activity {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.sidebar__activity-chip {
-  min-width: 15px;
-  padding: 1px 4px;
-  text-align: center;
-  font-size: calc(10px * var(--ui-scale));
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--bg);
-}
-
-.sidebar__activity-chip--waiting {
-  background: var(--warning);
-}
-
-.sidebar__activity-chip--yours {
-  background: var(--success);
-}
-
-.sidebar__activity-dot {
-  width: 7px;
-  height: 7px;
-  background: var(--accent);
-  animation: pulse 1.1s ease-in-out infinite;
-}
-
-/* One line for the account behind every pane: the plan's usage windows. */
-.plan {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  padding: 0 2px 4px;
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
-  cursor: default;
-}
-
-.plan__label {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: calc(9.5px * var(--ui-scale));
-  font-weight: 650;
-}
-
-.plan__window strong {
-  color: var(--fg-muted);
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.plan__window--warn strong {
-  color: var(--warning);
-}
-
-.plan__window--hot strong {
-  color: var(--danger);
-}
-
-/* Row controls stay out of the way until the row is under the pointer, so a
-   list of workspaces reads as names rather than as a wall of icons. */
-.ws__action {
+.nav-disc {
   display: grid;
   place-items: center;
-  border: 0;
-  background: transparent;
+  height: var(--nav-disc);
   color: var(--fg-subtle);
-  cursor: pointer;
-  padding: 2px;
-  font-size: calc(15px * var(--ui-scale));
-  line-height: 1;
-  opacity: 0;
-  transition: opacity var(--dur), color var(--dur);
+  transition: transform var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-.ws:hover .ws__action,
-.ws__action:focus-visible {
-  opacity: 1;
+.nav-disc--open {
+  transform: rotate(90deg);
 }
 
-.ws__action:hover {
+.nav-disc.nav-ctl:hover {
   color: var(--fg);
 }
 
-.ws__remove:hover {
-  color: var(--danger);
+.nav-ws__icon,
+.nav-folder__icon {
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
 }
 
-.ws__input {
+.nav-ws__title {
+  display: flex;
+  align-items: center;
+  gap: calc(5px * var(--ui-scale));
+  min-width: 0;
+}
+
+.nav-ws__name,
+.nav-folder__name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.nav-ws--active > .nav-ws__head .nav-ws__name {
+  font-weight: 600;
+}
+
+/* The count, and the "…" that takes its place under the pointer: one cell,
+   so nothing moves when it shows. */
+.nav-end {
+  display: grid;
+  justify-items: end;
+  align-items: center;
+}
+
+.nav-end > * {
+  grid-area: 1 / 1;
+}
+
+.nav-badge {
+  min-width: calc(18px * var(--ui-scale));
+  padding: 0 calc(5px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: calc(16px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.nav-more {
+  display: grid;
+  place-items: center;
+  width: calc(20px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.nav-more:hover {
+  background: var(--surface-active);
+  color: var(--fg);
+}
+
+.nav-ws__head:hover .nav-more,
+.nav-folder__head:hover .nav-more,
+.nav-ws:focus-visible > .nav-ws__head .nav-more,
+.nav-folder:focus-visible > .nav-folder__head .nav-more {
+  opacity: 1;
+}
+
+.nav-ws__head:hover .nav-badge,
+.nav-folder__head:hover .nav-badge,
+.nav-ws:focus-visible > .nav-ws__head .nav-badge,
+.nav-folder:focus-visible > .nav-folder__head .nav-badge {
+  visibility: hidden;
+}
+
+.nav-ws__path,
+.nav-ws__activity {
+  grid-column: 3 / -1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Long paths lose their start, not the project folder that ends them. */
+.nav-ws__path {
+  margin-top: calc(-3px * var(--ui-scale));
+  direction: rtl;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--fg-subtle);
+}
+
+.nav-ws__path bdi {
+  direction: ltr;
+}
+
+.nav-ws__activity {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+  line-height: 1.45;
+}
+
+.nav-ws__activity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A state written out takes the colour of its glyph. */
+.nav-state--working {
+  color: var(--state-working);
+}
+
+.nav-state--waiting {
+  color: var(--state-waiting);
+}
+
+.nav-state--yours {
+  color: var(--state-yours);
+}
+
+.nav-state--idle {
+  color: var(--fg-muted);
+}
+
+.nav-ws__agents {
+  padding-bottom: calc(4px * var(--ui-scale));
+}
+
+.nav-agent {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: var(--nav-row);
+  margin-bottom: 1px;
+  padding: 0 calc(6px * var(--ui-scale)) 0 var(--nav-name-x);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  outline: none;
+  transition: background var(--dur) var(--ease);
+}
+
+.nav-agent:hover {
+  background: var(--surface-hover);
+}
+
+.nav-agent--selected,
+.nav-agent--selected:hover {
+  background: var(--surface-active);
+}
+
+.nav-agent:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+
+/* As wide as the longest of the names panes are given (lib/paneNames), so the
+   kinds of agent line up in a column. */
+.nav-agent__name {
+  flex: none;
+  width: calc(36px * var(--ui-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.nav-agent__kind {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.nav-agent__state {
+  flex: none;
+  padding-left: calc(6px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.nav-rename {
+  grid-column: 3 / -1;
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--accent-ring);
+  height: calc(20px * var(--ui-scale));
+  padding: 0 calc(5px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-xs);
   background: var(--bg);
-  border-radius: 0;
-  padding: 3px 6px;
+  box-shadow: inset 0 0 0 1px var(--accent-ring), 0 0 0 3px var(--accent-soft);
   outline: none;
   user-select: text;
 }
 
-/* ---------- Sidebar folders ---------- */
+/* The plan's usage, then the filter: the navigator's footer. */
 
-.folder-icon {
-  display: block;
+.nav-plan {
   flex: none;
-}
-
-.sidebar__add-folder {
   display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  background: transparent;
-  color: var(--fg-subtle);
-  cursor: pointer;
-  transition: color var(--dur), background var(--dur);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: calc(8px * var(--ui-scale));
+  padding: calc(9px * var(--ui-scale)) calc(16px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  border-top: 1px solid var(--line);
+  cursor: default;
 }
 
-.sidebar__add-folder:hover {
-  color: var(--fg);
-  background: var(--surface-hover);
-}
-
-.folder__head {
+.nav-plan__head {
+  grid-column: 1 / -1;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 9px 5px 5px;
-  margin-bottom: 2px;
-  border: 1px solid transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: background var(--dur), border-color var(--dur), color var(--dur);
-}
-
-.folder__head:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
-}
-
-.folder__head:hover .ws__action {
-  opacity: 1;
-}
-
-.folder__chevron {
-  flex: none;
-  width: 10px;
-  font-size: calc(10px * var(--ui-scale));
-  text-align: center;
-  color: var(--fg-subtle);
-  transition: transform var(--dur);
-}
-
-.folder__chevron--open {
-  transform: rotate(90deg);
-}
-
-.folder__name {
-  flex: 1;
-  min-width: 0;
-  font-size: calc(12px * var(--ui-scale));
-  font-weight: 600;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(8px * var(--ui-scale));
+  margin-bottom: calc(5px * var(--ui-scale));
   white-space: nowrap;
+}
+
+.nav-plan__label {
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.nav-plan__reset {
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+
+/* One row per window, its three columns shared with the others so the bars
+   start and end together whatever the labels. */
+.nav-meter {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: calc(24px * var(--ui-scale)) minmax(0, 1fr) calc(34px * var(--ui-scale));
+  grid-template-columns: subgrid;
+  align-items: center;
+  height: calc(16px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.nav-meter__label {
+  white-space: nowrap;
+}
+
+.nav-meter__track {
+  height: calc(4px * var(--ui-scale));
+  border-radius: 2px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.nav-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--fg-muted);
+  transition: width var(--dur) var(--ease);
+}
+
+.nav-meter__value {
+  min-width: calc(30px * var(--ui-scale));
+  text-align: right;
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-meter--warn .nav-meter__fill {
+  background: var(--warning);
+}
+
+.nav-meter--warn .nav-meter__value {
+  color: var(--warning);
+}
+
+.nav-meter--hot .nav-meter__fill {
+  background: var(--danger);
+}
+
+.nav-meter--hot .nav-meter__value {
+  color: var(--danger);
+}
+
+/* As tall as the status bar beside it, so their top edges line up. */
+.nav-filter {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+  height: calc(36px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border-top: 1px solid var(--sep);
+}
+
+.nav-filter .nav-tb {
+  height: calc(24px * var(--ui-scale));
+  min-width: calc(26px * var(--ui-scale));
+  padding: 0 calc(4px * var(--ui-scale));
+}
+
+.nav-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0 calc(3px * var(--ui-scale)) 0 calc(8px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-muted);
+  cursor: text;
+  transition: box-shadow var(--dur) var(--ease);
+}
+
+/* Narrowed: the list is not everything, and the field says so. */
+.nav-field--active {
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+.nav-field--active > .nav-icon--search {
+  color: var(--accent-hi);
+}
+
+.nav-field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent-ring), 0 0 0 3px var(--accent-soft);
+}
+
+.nav-field__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+}
+
+.nav-field__input::placeholder {
+  color: var(--fg-muted);
+}
+
+.nav-field__scope {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(20px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.nav-field__scope:hover {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.nav-field__scope[aria-pressed="true"] {
+  color: var(--state-waiting);
+  background: color-mix(in srgb, var(--state-waiting) 16%, transparent);
+}
+
+.nav-field__scope:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-disc,
+  .nav-meter__fill {
+    transition: none;
+  }
+}
+
+/* ---------- Sidebar folders ---------- */
+
+.nav-folder {
+  position: relative;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.nav-folder__head {
+  position: relative;
+  padding: 0 calc(6px * var(--ui-scale)) 0 calc(4px * var(--ui-scale));
+  margin-bottom: 1px;
+  color: var(--fg-muted);
+}
+
+.nav-folder__head:hover {
+  color: var(--fg);
 }
 
 /* Folded away, the folder still says it holds the workspace on screen. */
-.folder__head--current {
+.nav-folder__head--current {
+  background: var(--surface-hover);
   color: var(--fg);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.folder__body {
-  margin: 0 0 4px 10px;
-  padding-left: 6px;
-  border-left: 1px solid var(--border);
+.nav-folder__head--current .nav-folder__name {
+  font-weight: 600;
 }
 
-.folder__empty {
-  margin: 0 0 4px;
-  padding: 6px 9px;
-  border: 1px dashed var(--border);
+.nav-folder__body {
+  padding-bottom: calc(2px * var(--ui-scale));
+}
+
+.nav-folder__empty {
+  display: flex;
+  align-items: center;
+  height: calc(22px * var(--ui-scale));
+  margin: 0 0 calc(4px * var(--ui-scale))
+    calc(4px * var(--ui-scale) + var(--nav-indent) + var(--nav-disc) + var(--nav-glyph) + 2 * var(--nav-gap));
+  padding: 0 calc(8px * var(--ui-scale));
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
   font-size: calc(11px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
 }
 
-/* Drag and drop: the dragged row fades, the landing spot is marked. */
+/* Drag and drop: the dragged row fades, the landing spot is marked with an
+   insertion line at the name, the way a source list does it. */
 
-.ws--dragging,
-.folder--dragging {
+.nav-ws--dragging,
+.nav-folder--dragging {
   opacity: 0.45;
 }
 
-.ws--drop-before,
-.folder__head--drop-before {
-  box-shadow: inset 0 2px 0 var(--accent);
+.nav-ws--drop-before::before,
+.nav-ws--drop-after::after,
+.nav-folder__head--drop-before::before,
+.nav-folder__head--drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: var(--nav-name-x, calc(44px * var(--ui-scale)));
+  right: calc(4px * var(--ui-scale));
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
-.ws--drop-after,
-.folder__head--drop-after {
-  box-shadow: inset 0 -2px 0 var(--accent);
+.nav-ws--drop-before::before,
+.nav-folder__head--drop-before::before {
+  top: -1px;
 }
 
-.folder__head--into {
+.nav-ws--drop-after::after,
+.nav-folder__head--drop-after::after {
+  bottom: -1px;
+}
+
+.nav-folder__head--into {
   background: var(--accent-soft);
-  border-color: var(--accent-ring);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
   color: var(--fg);
 }
 
-.sidebar__root {
-  flex: 1 0 28px;
+/* Its label sits at the top, right under the last row, where the drag is. */
+.nav-root {
+  flex: 1 0 calc(28px * var(--ui-scale));
   display: grid;
-  place-items: center;
-  margin-bottom: 4px;
+  place-items: start center;
+  padding-top: calc(6px * var(--ui-scale));
+  margin-top: calc(4px * var(--ui-scale));
   border: 1px dashed transparent;
+  border-radius: var(--radius);
   font-size: calc(11px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
 }
 
-.sidebar__root--drop {
+.nav-root--drop {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
   color: var(--fg);
@@ -460,49 +833,74 @@ body.is-sorting * {
 
 /* ---------- Context menu ---------- */
 
+/* components/NavigatorMenu.tsx. The pointer moves the focus, so `:focus` is
+   the one highlight, whether it came from the mouse or the arrow keys. */
 .ctx-menu {
   position: fixed;
   z-index: 45;
-  min-width: 200px;
-  max-width: 280px;
+  min-width: calc(200px * var(--ui-scale));
+  max-width: calc(280px * var(--ui-scale));
   max-height: 60vh;
   overflow-y: auto;
   display: grid;
-  gap: 1px;
-  padding: 4px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 18px 40px -18px var(--shadow);
-  animation: fade-in 100ms ease;
+  padding: calc(5px * var(--ui-scale));
+  background: var(--chrome-bar);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px -6px var(--shadow), 0 2px 6px var(--shadow);
+  outline: none;
+  user-select: none;
+  animation: fade-in 100ms var(--ease);
 }
 
 .ctx-menu__head {
-  padding: 3px 7px 4px;
-  font-size: calc(9.5px * var(--ui-scale));
+  padding: calc(5px * var(--ui-scale)) calc(8px * var(--ui-scale)) calc(3px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
 }
 
 .ctx-menu__item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 7px;
+  gap: calc(8px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
   text-align: left;
-  cursor: pointer;
+  cursor: default;
+  outline: none;
 }
 
-.ctx-menu__item:hover:not(:disabled) {
-  background: var(--surface-hover);
+.ctx-menu__item:focus {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 .ctx-menu__item:disabled {
   color: var(--fg-subtle);
-  cursor: default;
+}
+
+.ctx-menu__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(14px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.ctx-menu__item--danger,
+.ctx-menu__item--danger .ctx-menu__icon {
+  color: var(--danger);
+}
+
+.ctx-menu__item:focus .ctx-menu__icon,
+.ctx-menu__item:disabled .ctx-menu__icon {
+  color: inherit;
 }
 
 .ctx-menu__label {
@@ -514,14 +912,21 @@ body.is-sorting * {
 }
 
 .ctx-menu__check {
-  color: var(--accent);
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
 }
 
-.ctx-menu__add {
-  margin-top: 3px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-muted);
+.ctx-menu__sep {
+  height: 1px;
+  margin: calc(4px * var(--ui-scale)) calc(8px * var(--ui-scale));
+  background: var(--line-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-menu {
+    animation: none;
+  }
 }
 
 /* ---------- Buttons ---------- */
@@ -790,10 +1195,12 @@ body.is-sorting * {
   margin-top: 8px;
 }
 
-/* The sidebar's mark on a workspace shown in a window of its own. */
+/* The navigator's mark on a workspace shown in a window of its own. */
 .ws__window {
-  color: var(--accent);
-  font-size: calc(11px * var(--ui-scale));
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--fg-muted);
 }
 
 /* A workspace in a window of its own: no sidebar, the workspace takes it all. */

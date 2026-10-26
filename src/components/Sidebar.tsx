@@ -1,12 +1,22 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useStore } from "../store";
 import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
-import { FolderIcon, FolderMenu } from "./FolderMenu";
-import { Icon } from "./Icon";
-import { usePlanLimits, useWorkspaceActivity } from "../lib/agentState";
-import type { Workspace, WorkspaceFolder } from "../types";
+import { NavigatorIcon } from "./NavigatorIcons";
+import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
+import { NavigatorActivityLine, NavigatorAgentRow, NavigatorPaneWatch } from "./NavigatorAgents";
+import { NavigatorPlan } from "./NavigatorPlan";
+import {
+  buildNavTree,
+  rowKey,
+  type NavFolder,
+  type NavRow,
+  type NavWorkspace,
+} from "./NavigatorModel";
+import { getPaneActivity } from "../lib/agentState";
+import { useShortcutTitle } from "../lib/useShortcuts";
 
 interface Props {
   onOpenSettings: () => void;
@@ -33,8 +43,23 @@ type DropTarget =
   | { kind: "into"; folderId: string }
   | { kind: "root" };
 
+/** The context menu on screen: whose, where, and whether a key opened it. */
+interface MenuState {
+  kind: "workspace" | "folder";
+  id: string;
+  x: number;
+  y: number;
+  fromKeyboard: boolean;
+}
+
 /** Pointer travel before a press becomes a drag, so a click stays a click. */
 const DRAG_THRESHOLD = 5;
+
+/**
+ * A context menu this soon after a press was opened by the pointer; later
+ * than that, by the menu key or Shift+F10 on the focused row.
+ */
+const POINTER_MENU_MS = 800;
 
 /** The click a drag's release still fires would open or fold whatever it ended on. */
 function swallowNextClick() {
@@ -43,7 +68,19 @@ function swallowNextClick() {
   window.setTimeout(() => window.removeEventListener("click", swallow, true), 0);
 }
 
-export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
+const wantsYou = (paneId: string) => {
+  const activity = getPaneActivity(paneId)?.activity;
+  return activity === "waiting" || activity === "yours";
+};
+
+/**
+ * The navigator: the workspaces, their folders and, under each one opened,
+ * its agents and what they are doing — a source list in the manner of
+ * Xcode's. It is a tree to assistive technology and to the keyboard: one tab
+ * stop, arrows to move, Right and Left to open and fold, Enter to go, F2 to
+ * rename, the menu key for the rest.
+ */
+export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFocusPane }: Props) {
   const {
     state,
     activeWorkspace,
@@ -55,46 +92,118 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     removeFolder,
     moveFolder,
     moveWorkspace,
+    updateSettings,
   } = useStore();
   /** Id of the workspace or folder being renamed — ids never collide. */
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** Workspace whose worktrees are on screen; it may be deleted under us. */
   const [worktreesFor, setWorktreesFor] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(
-    null,
-  );
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const [drag, setDrag] = useState<{ item: DragItem; target: DropTarget | null } | null>(
     null,
   );
-  const listRef = useRef<HTMLElement>(null);
+  /**
+   * Workspaces opened by hand, by id. The active one is open whatever this
+   * says. A view, like the zoom: nothing here is saved.
+   */
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState("");
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  /** Bumped when a pane changes state while the list depends on it. */
+  const [activityTick, setActivityTick] = useState(0);
+  /** The row the keyboard is on, which is the tree's one tab stop. */
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [version, setVersion] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  /** When the pointer last went down in the tree, to tell its menus from the keyboard's. */
+  const lastPress = useRef(0);
+  /** Set once a rename is settled, so the blur its own Enter or Escape causes adds nothing. */
+  const renameSettled = useRef(false);
+  /** A row to give the focus back to once the next render has drawn it. */
+  const pendingFocus = useRef<string | null>(null);
   const t = useT();
+  const withKeys = useShortcutTitle();
+  const uid = useId();
 
   // A drag is committed from listeners installed when it started; they must
   // place it against the list as it is on release, not as it was then.
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  useEffect(() => {
+    // Dev builds and older permission sets may not answer; the number just stays out.
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(""));
+  }, []);
+
+  const activeId = activeWorkspace?.id ?? null;
+  const tree = useMemo(
+    () =>
+      buildNavTree({
+        workspaces: state.workspaces,
+        folders: state.folders,
+        activeId,
+        opened,
+        query,
+        attentionOnly,
+        wantsYou,
+      }),
+    // `activityTick` stands for the panes' states, which `wantsYou` reads
+    // outside React.
+    [state.workspaces, state.folders, activeId, opened, query, attentionOnly, activityTick],
+  );
+  const bumpActivity = useCallback(() => setActivityTick((n) => n + 1), []);
+
+  const rowsByKey = useMemo(() => new Map(tree.rows.map((row) => [row.key, row])), [tree]);
+  const activeKey = activeId ? rowKey("ws", activeId) : null;
+  const tabKey =
+    cursor && rowsByKey.has(cursor)
+      ? cursor
+      : activeKey && rowsByKey.has(activeKey)
+        ? activeKey
+        : (tree.rows[0]?.key ?? null);
+
   const worktreesWs = state.workspaces.find((ws) => ws.id === worktreesFor) ?? null;
-  const menuWs = state.workspaces.find((ws) => ws.id === menu?.workspaceId) ?? null;
-  const filed = new Set(state.folders.map((folder) => folder.id));
-  const loose = state.workspaces.filter((ws) => !ws.folderId || !filed.has(ws.folderId));
+  const filtered = tree.filtering;
+
+  function focusRow(key: string | null | undefined) {
+    if (!key) return;
+    setCursor(key);
+    treeRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus();
+  }
+
+  // After the menu: the row it was about may have been redrawn elsewhere (moved
+  // into a folder) or be gone (deleted), so it is looked up again by key, and
+  // the tree's tab stop stands in for one that no longer exists.
+  useEffect(() => {
+    const key = pendingFocus.current;
+    if (!key) return;
+    pendingFocus.current = null;
+    focusRow(rowsByKey.has(key) ? key : tabKey);
+  });
 
   function startRename(id: string, name: string) {
+    renameSettled.current = false;
     setRenaming(id);
     setDraft(name);
   }
 
-  function commitRename() {
+  /** `refocus` when a key ended it: the row gets the focus back, as before the rename. */
+  function finishRename(save: boolean, refocus: boolean) {
+    if (renameSettled.current || !renaming) return;
+    renameSettled.current = true;
+    const isFolder = state.folders.some((folder) => folder.id === renaming);
     const name = draft.trim();
-    if (renaming && name) {
-      if (state.folders.some((folder) => folder.id === renaming)) {
-        updateFolder(renaming, { name });
-      } else {
-        updateWorkspace(renaming, { name });
-      }
+    if (save && name) {
+      if (isFolder) updateFolder(renaming, { name });
+      else updateWorkspace(renaming, { name });
     }
     setRenaming(null);
+    if (refocus) focusRow(rowKey(isFolder ? "folder" : "ws", renaming));
   }
 
   /** A new folder opens straight into its name, which is the first thing it needs. */
@@ -105,7 +214,38 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     return id;
   }
 
+  function toggleWorkspace(row: NavRow | NavWorkspace) {
+    const id = "workspace" in row ? row.workspace.id : row.id;
+    if (!row.foldable) return;
+    setOpened((prev) => ({ ...prev, [id]: !row.expanded }));
+  }
+
+  function toggleFolder(folderId: string) {
+    // Under a filter a folder is held open: folding it would hide the matches.
+    if (filtered) return;
+    const folder = state.folders.find((entry) => entry.id === folderId);
+    if (folder) updateFolder(folderId, { collapsed: !folder.collapsed });
+  }
+
+  function clearFilter() {
+    setQuery("");
+    setAttentionOnly(false);
+  }
+
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  /** At the pointer for a right-click; under the row for the menu key, which has no pointer. */
+  function openMenu(kind: MenuState["kind"], id: string, anchor: Element, event: React.MouseEvent) {
+    const fromKeyboard = Date.now() - lastPress.current > POINTER_MENU_MS;
+    const box = anchor.getBoundingClientRect();
+    setMenu({
+      kind,
+      id,
+      x: fromKeyboard ? box.left + 24 : event.clientX,
+      y: fromKeyboard ? box.bottom + 2 : event.clientY,
+      fromKeyboard,
+    });
+  }
 
   /**
    * What sits under the pointer for `item`. A gap between two rows belongs to
@@ -170,8 +310,8 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
    */
   function beginDrag(item: DragItem, event: React.PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
-    // The row's buttons and its rename field keep the pointer for themselves.
-    if ((event.target as Element).closest("button, input")) return;
+    // The row's own controls and its rename field keep the pointer for themselves.
+    if ((event.target as Element).closest(".nav-ctl, input")) return;
 
     const row = event.currentTarget;
     const { pointerId, clientX: startX, clientY: startY } = event;
@@ -217,23 +357,128 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     window.addEventListener("blur", lostFocus);
   }
 
+  function activateRow(row: NavRow) {
+    if (row.kind === "folder") return toggleFolder(row.id);
+    if (row.kind === "ws") return setActiveWorkspace(row.id);
+    const workspaceId = row.parent ? rowsByKey.get(row.parent)?.id : null;
+    if (workspaceId) onFocusPane(workspaceId, row.id);
+  }
+
+  function onTreeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("input") || event.altKey || event.ctrlKey || event.metaKey) return;
+    const key = target.closest<HTMLElement>('[role="treeitem"]')?.dataset.key;
+    const at = tree.rows.findIndex((row) => row.key === key);
+    if (at < 0) return;
+    const row = tree.rows[at];
+
+    switch (event.key) {
+      case "ArrowDown":
+        focusRow(tree.rows[at + 1]?.key);
+        break;
+      case "ArrowUp":
+        focusRow(tree.rows[at - 1]?.key);
+        break;
+      case "Home":
+        focusRow(tree.rows[0]?.key);
+        break;
+      case "End":
+        focusRow(tree.rows[tree.rows.length - 1]?.key);
+        break;
+      case "ArrowRight":
+        if (row.kind === "pane") break;
+        if (!row.expanded) {
+          if (row.kind === "folder") toggleFolder(row.id);
+          else toggleWorkspace(row);
+        } else if (tree.rows[at + 1]?.parent === row.key) {
+          focusRow(tree.rows[at + 1].key);
+        }
+        break;
+      case "ArrowLeft":
+        if (row.expanded && row.foldable) {
+          if (row.kind === "folder") toggleFolder(row.id);
+          else toggleWorkspace(row);
+        } else {
+          focusRow(row.parent);
+        }
+        break;
+      case "Enter":
+      case " ":
+        activateRow(row);
+        break;
+      case "F2": {
+        if (row.kind === "pane") return;
+        const entity =
+          row.kind === "folder"
+            ? state.folders.find((folder) => folder.id === row.id)
+            : state.workspaces.find((ws) => ws.id === row.id);
+        if (entity) startRename(entity.id, entity.name);
+        break;
+      }
+      default:
+        return;
+    }
+    event.preventDefault();
+  }
+
+  /**
+   * One handler for the whole tree, so the menu key on a focused row works
+   * like a right-click on it. An agent row has no menu of its own; the
+   * webview's (reload, inspect) has no business in the list either.
+   */
+  function onTreeContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("input")) return;
+    event.preventDefault();
+    const item = target.closest<HTMLElement>('[role="treeitem"]');
+    const row = item?.dataset.key ? rowsByKey.get(item.dataset.key) : undefined;
+    if (!item || !row || row.kind === "pane") return;
+    const head = item.querySelector(".nav-ws__head, .nav-folder__head") ?? item;
+    openMenu(row.kind === "folder" ? "folder" : "workspace", row.id, head, event);
+  }
+
   function renameField(hint: string, selectAll: boolean) {
     return (
       <input
-        className="ws__input"
+        className="nav-rename"
         autoFocus
         title={hint}
+        aria-label={hint}
         value={draft}
+        spellCheck={false}
         onChange={(e) => setDraft(e.target.value)}
         // A folder's name is a placeholder until typed over.
         onFocus={selectAll ? (e) => e.target.select() : undefined}
-        onBlur={commitRename}
+        onBlur={() => finishRename(true, false)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commitRename();
-          if (e.key === "Escape") setRenaming(null);
+          if (e.key === "Enter") finishRename(true, true);
+          if (e.key === "Escape") {
+            // The field, not whatever else listens for Escape (the zoom).
+            e.stopPropagation();
+            finishRename(false, true);
+          }
         }}
         onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
       />
+    );
+  }
+
+  /** The "…" of a row: the menu a right-click opens, for those who would not think to. */
+  function moreButton(kind: MenuState["kind"], id: string) {
+    return (
+      <span
+        className="nav-more nav-ctl"
+        title={t("sidebar.more")}
+        aria-hidden="true"
+        onClick={(e) => {
+          e.stopPropagation();
+          const box = e.currentTarget.getBoundingClientRect();
+          setMenu({ kind, id, x: box.left, y: box.bottom + 4, fromKeyboard: false });
+        }}
+      >
+        <NavigatorIcon name="more" size={14} />
+      </span>
     );
   }
 
@@ -244,159 +489,198 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     return `${base}--drop-${target.after ? "after" : "before"}`;
   }
 
-  function renderWorkspace(ws: Workspace) {
-    const active = ws.id === activeWorkspace?.id;
+  function renderWorkspace(entry: NavWorkspace, level: number) {
+    const ws = entry.workspace;
+    const key = rowKey("ws", ws.id);
+    const active = ws.id === activeId;
     const dragged = drag?.item.kind === "workspace" && drag.item.id === ws.id;
+    const id = `${uid}-${ws.id}`;
+    const focusedPane = focusByWorkspace[ws.id];
+
     return (
       <div
         key={ws.id}
         className={[
-          "ws",
-          active && "ws--active",
-          dragged && "ws--dragging",
-          slotClass("workspace", ws.id, "ws"),
+          "nav-ws",
+          active && "nav-ws--active",
+          dragged && "nav-ws--dragging",
+          slotClass("workspace", ws.id, "nav-ws"),
         ]
           .filter(Boolean)
           .join(" ")}
+        style={{ "--nav-level": level - 1 } as React.CSSProperties}
+        role="treeitem"
+        aria-level={level}
+        aria-expanded={entry.expanded}
+        aria-current={active ? "true" : undefined}
+        aria-labelledby={`${id}-name`}
+        aria-describedby={`${id}-window ${id}-path ${id}-activity`}
+        tabIndex={tabKey === key ? 0 : -1}
+        data-key={key}
         data-drop="workspace"
         data-id={ws.id}
-        onClick={() => setActiveWorkspace(ws.id)}
-        onPointerDown={(e) => beginDrag({ kind: "workspace", id: ws.id }, e)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setMenu({ workspaceId: ws.id, x: e.clientX, y: e.clientY });
-        }}
-        onDoubleClick={(e) => {
-          // The row's buttons carry their own meaning; only the label
-          // itself opens the rename field.
-          if ((e.target as Element).closest("button")) return;
-          startRename(ws.id, ws.name);
-        }}
       >
-        {renaming === ws.id ? (
-          renameField(t("sidebar.renameHint"), false)
-        ) : (
-          <>
-            <div className="ws__meta">
-              <span className="ws__name">{ws.name}</span>
-              <span className="ws__path" title={ws.cwd}>
-                {ws.cwd}
+        <div
+          className="nav-ws__head"
+          onClick={() => setActiveWorkspace(ws.id)}
+          onPointerDown={(e) => beginDrag({ kind: "workspace", id: ws.id }, e)}
+          onDoubleClick={(e) => {
+            // The chevron and the "…" carry their own meaning; the rest of
+            // the row opens the rename field.
+            if ((e.target as Element).closest(".nav-ctl")) return;
+            startRename(ws.id, ws.name);
+          }}
+        >
+          <span
+            className={[
+              "nav-disc",
+              entry.expanded && "nav-disc--open",
+              entry.foldable && "nav-ctl",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            title={
+              entry.foldable ? t(entry.expanded ? "sidebar.collapse" : "sidebar.expand") : undefined
+            }
+            aria-hidden="true"
+            onClick={(e) => {
+              // Folding is not choosing: the workspace on screen stays.
+              e.stopPropagation();
+              toggleWorkspace(entry);
+            }}
+          >
+            <NavigatorIcon name="chevron" size={12} />
+          </span>
+          <span className="nav-ws__icon">
+            <NavigatorIcon name="workspace" size={14} />
+          </span>
+          {renaming === ws.id ? (
+            renameField(t("sidebar.renameHint"), false)
+          ) : (
+            <>
+              <span className="nav-ws__title">
+                <span className="nav-ws__name" id={`${id}-name`}>
+                  {ws.name}
+                </span>
+                {ws.detached && (
+                  <span
+                    className="ws__window"
+                    id={`${id}-window`}
+                    role="img"
+                    title={t("window.inOwnWindow")}
+                    aria-label={t("window.inOwnWindow")}
+                  >
+                    <NavigatorIcon name="window" size={12} />
+                  </span>
+                )}
               </span>
-            </div>
-            <WorkspaceActivityBadge workspaceId={ws.id} />
-            {ws.detached && (
-              <span className="ws__window" title={t("window.inOwnWindow")} aria-label={t("window.inOwnWindow")}>
-                ⧉
+              <span className="nav-end">
+                <span
+                  className="nav-badge"
+                  title={t("sidebar.paneCount", { n: ws.panes.length })}
+                  aria-hidden="true"
+                >
+                  {ws.panes.length}
+                </span>
+                {moreButton("workspace", ws.id)}
               </span>
-            )}
-            <span className="ws__badge">{ws.panes.length}</span>
-            {/* Double-click renames too, but nothing on the row says so. */}
-            <button
-              className="ws__action"
-              title={t("sidebar.rename")}
-              aria-label={t("sidebar.rename")}
-              onClick={(e) => {
-                e.stopPropagation();
-                startRename(ws.id, ws.name);
-              }}
-            >
-              <Icon name="pencil" size={12} />
-            </button>
-            <button
-              className="ws__action"
-              title={t("worktrees.action")}
-              aria-label={t("worktrees.action")}
-              onClick={(e) => {
-                e.stopPropagation();
-                setWorktreesFor(ws.id);
-              }}
-            >
-              <Icon name="branch" size={12} />
-            </button>
-            <button
-              className="ws__action ws__remove"
-              title={t("sidebar.remove")}
-              aria-label={t("sidebar.remove")}
-              onClick={(e) => {
-                e.stopPropagation();
-                removeWorkspace(ws.id);
-              }}
-            >
-              <Icon name="close" size={12} />
-            </button>
-          </>
+            </>
+          )}
+          <span className="nav-ws__path" id={`${id}-path`} title={ws.cwd}>
+            <bdi>{ws.cwd}</bdi>
+          </span>
+          <NavigatorActivityLine workspaceId={ws.id} id={`${id}-activity`} />
+        </div>
+
+        {entry.expanded && entry.panes.length > 0 && (
+          <div className="nav-ws__agents" role="group">
+            {entry.panes.map((pane) => {
+              const paneKey = rowKey("pane", pane.id);
+              return (
+                <NavigatorAgentRow
+                  key={pane.id}
+                  pane={pane}
+                  rowKey={paneKey}
+                  level={level + 1}
+                  selected={active && focusedPane === pane.id}
+                  tabbable={tabKey === paneKey}
+                  onActivate={() => onFocusPane(ws.id, pane.id)}
+                />
+              );
+            })}
+          </div>
         )}
       </div>
     );
   }
 
-  function renderFolder(folder: WorkspaceFolder) {
-    const items = state.workspaces.filter((ws) => ws.folderId === folder.id);
+  function renderFolder(entry: NavFolder) {
+    const folder = entry.folder;
+    const key = rowKey("folder", folder.id);
     const dragged = drag?.item.kind === "folder" && drag.item.id === folder.id;
     const into = drag?.target?.kind === "into" && drag.target.folderId === folder.id;
     // Folded away, the workspace on screen would otherwise be nowhere to see.
     const holdsActive =
-      folder.collapsed && items.some((ws) => ws.id === activeWorkspace?.id);
+      !entry.expanded &&
+      state.workspaces.some((ws) => ws.folderId === folder.id && ws.id === activeId);
+    const nameId = `${uid}-${folder.id}-name`;
 
     return (
-      <div key={folder.id} className={`folder ${dragged ? "folder--dragging" : ""}`}>
+      <div
+        key={folder.id}
+        className={`nav-folder ${dragged ? "nav-folder--dragging" : ""}`}
+        role="treeitem"
+        aria-level={1}
+        aria-expanded={entry.expanded}
+        aria-labelledby={nameId}
+        tabIndex={tabKey === key ? 0 : -1}
+        data-key={key}
+      >
         <div
           className={[
-            "folder__head",
-            into && "folder__head--into",
-            holdsActive && "folder__head--current",
-            slotClass("folder", folder.id, "folder__head"),
+            "nav-folder__head",
+            into && "nav-folder__head--into",
+            holdsActive && "nav-folder__head--current",
+            slotClass("folder", folder.id, "nav-folder__head"),
           ]
             .filter(Boolean)
             .join(" ")}
           data-drop="folder"
           data-id={folder.id}
-          onClick={() => updateFolder(folder.id, { collapsed: !folder.collapsed })}
+          onClick={() => toggleFolder(folder.id)}
           onPointerDown={(e) => beginDrag({ kind: "folder", id: folder.id }, e)}
         >
           <span
-            className={`folder__chevron ${folder.collapsed ? "" : "folder__chevron--open"}`}
+            className={`nav-disc ${entry.expanded ? "nav-disc--open" : ""}`}
+            aria-hidden="true"
           >
-            ▸
+            <NavigatorIcon name="chevron" size={12} />
           </span>
-          <FolderIcon />
+          <span className="nav-folder__icon">
+            <NavigatorIcon name="folder" size={14} />
+          </span>
           {renaming === folder.id ? (
             renameField(t("sidebar.renameHint"), true)
           ) : (
             <>
-              <span className="folder__name">{folder.name}</span>
-              <span className="ws__badge">{items.length}</span>
-              <button
-                className="ws__action"
-                title={t("sidebar.renameFolder")}
-                aria-label={t("sidebar.renameFolder")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startRename(folder.id, folder.name);
-                }}
-              >
-                <Icon name="pencil" size={12} />
-              </button>
-              <button
-                className="ws__action ws__remove"
-                title={t("sidebar.removeFolder")}
-                aria-label={t("sidebar.removeFolder")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeFolder(folder.id);
-                }}
-              >
-                <Icon name="close" size={12} />
-              </button>
+              <span className="nav-folder__name" id={nameId}>
+                {folder.name}
+              </span>
+              <span className="nav-end">
+                <span className="nav-badge" aria-hidden="true">
+                  {entry.size}
+                </span>
+                {moreButton("folder", folder.id)}
+              </span>
             </>
           )}
         </div>
 
-        {!folder.collapsed && (
-          <div className="folder__body">
-            {items.map(renderWorkspace)}
-            {items.length === 0 && (
-              <p className="folder__empty" data-drop="folder-body" data-id={folder.id}>
+        {entry.expanded && (
+          <div className="nav-folder__body" role="group">
+            {entry.workspaces.map((ws) => renderWorkspace(ws, 2))}
+            {entry.size === 0 && (
+              <p className="nav-folder__empty" data-drop="folder-body" data-id={folder.id}>
                 {t("sidebar.folderEmpty")}
               </p>
             )}
@@ -406,51 +690,247 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
     );
   }
 
+  function menuEntries(current: MenuState): NavigatorMenuEntry[] {
+    if (current.kind === "folder") {
+      const folder = state.folders.find((entry) => entry.id === current.id);
+      if (!folder) return [];
+      return [
+        {
+          kind: "item",
+          label: t("sidebar.menuRename"),
+          icon: "pencil",
+          takesFocus: true,
+          onSelect: () => startRename(folder.id, folder.name),
+        },
+        { kind: "separator" },
+        {
+          kind: "item",
+          label: t("sidebar.menuRemoveFolder"),
+          title: t("sidebar.removeFolder"),
+          icon: "trash",
+          danger: true,
+          onSelect: () => removeFolder(folder.id),
+        },
+      ];
+    }
+
+    const ws = state.workspaces.find((entry) => entry.id === current.id);
+    if (!ws) return [];
+    const filedIn =
+      ws.folderId && state.folders.some((folder) => folder.id === ws.folderId)
+        ? ws.folderId
+        : null;
+    return [
+      {
+        kind: "item",
+        label: t("sidebar.menuRename"),
+        icon: "pencil",
+        takesFocus: true,
+        onSelect: () => startRename(ws.id, ws.name),
+      },
+      {
+        kind: "item",
+        label: t("worktrees.action"),
+        icon: "branch",
+        takesFocus: true,
+        onSelect: () => setWorktreesFor(ws.id),
+      },
+      { kind: "separator" },
+      // Dragging does the same, but a menu is the one way to find out
+      // folders exist.
+      { kind: "heading", label: t("sidebar.moveTo") },
+      ...state.folders.map(
+        (folder): NavigatorMenuEntry => ({
+          kind: "item",
+          label: folder.name,
+          icon: "folder",
+          checked: folder.id === filedIn,
+          disabled: folder.id === filedIn,
+          onSelect: () => moveWorkspace(ws.id, folder.id, null),
+        }),
+      ),
+      ...(filedIn
+        ? [
+            {
+              kind: "item",
+              label: t("sidebar.noFolder"),
+              onSelect: () => moveWorkspace(ws.id, null, null),
+            } satisfies NavigatorMenuEntry,
+          ]
+        : []),
+      {
+        kind: "item",
+        label: t("sidebar.newFolder"),
+        icon: "folderPlus",
+        // Straight into the new folder's name.
+        takesFocus: true,
+        onSelect: () => moveWorkspace(ws.id, createFolder(), null),
+      },
+      { kind: "separator" },
+      {
+        kind: "item",
+        label: t("sidebar.remove"),
+        icon: "trash",
+        danger: true,
+        onSelect: () => removeWorkspace(ws.id),
+      },
+    ];
+  }
+
+  const menuEntriesNow = menu ? menuEntries(menu) : [];
+  const menuLabel = menu
+    ? ((menu.kind === "folder" ? state.folders : state.workspaces).find(
+        (entry) => entry.id === menu.id,
+      )?.name ?? "")
+    : "";
+  const filterActive = query.trim() !== "" || attentionOnly;
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar__brand">
-        <Logo size={17} />
-        <span className="sidebar__title">Hangar.AI</span>
+    <aside className="sidebar" aria-label={t("sidebar.label")}>
+      <div className="nav-top">
+        <Logo size={15} />
+        <span className="nav-top__name">Hangar.AI</span>
+        {version && (
+          <span className="nav-top__version" title={t("sidebar.version", { version })}>
+            {version}
+          </span>
+        )}
+        <button
+          className="nav-tb nav-top__hide"
+          title={withKeys(t("sidebar.hide"), "view.navigator")}
+          aria-label={t("sidebar.hide")}
+          onClick={() => updateSettings({ navigatorOpen: false })}
+        >
+          <NavigatorIcon name="sidebar" />
+        </button>
       </div>
 
-      <div className="sidebar__section">
-        <span>{t("sidebar.workspaces")}</span>
+      <div className="nav-section">
+        <span id={`${uid}-section`}>{t("sidebar.workspaces")}</span>
         <button
-          className="sidebar__add-folder"
+          className="nav-tb nav-section__add"
           title={t("sidebar.newFolder")}
           aria-label={t("sidebar.newFolder")}
           onClick={createFolder}
         >
-          <FolderIcon plus />
+          <NavigatorIcon name="folderPlus" size={14} />
         </button>
       </div>
 
-      <nav className="sidebar__list" ref={listRef}>
-        {state.folders.map(renderFolder)}
-        {loose.map(renderWorkspace)}
+      <div className="nav-list" ref={listRef}>
+        <div
+          className="nav-tree"
+          role="tree"
+          aria-labelledby={`${uid}-section`}
+          ref={treeRef}
+          onKeyDown={onTreeKeyDown}
+          onContextMenu={onTreeContextMenu}
+          onPointerDown={() => (lastPress.current = Date.now())}
+          onFocus={(e) => {
+            const key = (e.target as HTMLElement).dataset.key;
+            if (key && (e.target as HTMLElement).getAttribute("role") === "treeitem") {
+              setCursor(key);
+            }
+          }}
+        >
+          {tree.folders.map(renderFolder)}
+          {tree.loose.map((entry) => renderWorkspace(entry, 1))}
+        </div>
 
-        {state.workspaces.length === 0 && (
-          <p className="sidebar__empty">{t("sidebar.empty")}</p>
+        {state.workspaces.length === 0 && <p className="nav-empty">{t("sidebar.empty")}</p>}
+
+        {filtered && state.workspaces.length > 0 && tree.rows.length === 0 && (
+          <div className="nav-empty nav-empty--filter" role="status">
+            <p>
+              {query.trim()
+                ? t("sidebar.noMatch", { query: query.trim() })
+                : t("sidebar.noneWaiting")}
+            </p>
+            <button
+              className="nav-link"
+              onClick={() => {
+                clearFilter();
+                filterRef.current?.focus();
+              }}
+            >
+              {t("sidebar.clearFilter")}
+            </button>
+          </div>
         )}
 
         {/* The space under the list: dropping there takes a workspace out of
             its folder, which no row can offer once every one is filed. */}
         <div
-          className={`sidebar__root ${drag?.target?.kind === "root" ? "sidebar__root--drop" : ""}`}
+          className={`nav-root ${drag?.target?.kind === "root" ? "nav-root--drop" : ""}`}
           data-drop="root"
         >
           {drag?.item.kind === "workspace" && state.folders.length > 0 && t("sidebar.noFolder")}
         </div>
-      </nav>
+      </div>
 
-      <div className="sidebar__footer">
-        <PlanLimits />
-        <button className="btn btn--primary btn--block" onClick={onNewWorkspace}>
-          {t("sidebar.new")}
+      <NavigatorPlan />
+
+      <div className="nav-filter">
+        <button
+          className="nav-tb"
+          title={withKeys(t("cmd.workspace.new"), "workspace.new")}
+          aria-label={t("cmd.workspace.new")}
+          onClick={onNewWorkspace}
+        >
+          <NavigatorIcon name="plus" />
         </button>
-        <button className="btn btn--ghost btn--block" onClick={onOpenSettings}>
-          <Icon name="settings" size={13} />
-          {t("sidebar.settings")}
+        <div
+          className={`nav-field ${filterActive ? "nav-field--active" : ""}`}
+          // The field is wider than its input: a press anywhere on it types.
+          onPointerDown={(e) => {
+            if (!(e.target as Element).closest("button, input")) {
+              e.preventDefault();
+              filterRef.current?.focus();
+            }
+          }}
+        >
+          <NavigatorIcon name="search" size={14} />
+          <input
+            ref={filterRef}
+            className="nav-field__input"
+            value={query}
+            placeholder={t("sidebar.filter")}
+            aria-label={t("sidebar.filterLabel")}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                focusRow(tabKey);
+              }
+              if (e.key !== "Escape") return;
+              // First the text, then the toggle; an empty field gives the
+              // focus back to the list.
+              e.preventDefault();
+              e.stopPropagation();
+              if (query) setQuery("");
+              else if (attentionOnly) setAttentionOnly(false);
+              else focusRow(tabKey);
+            }}
+          />
+          <button
+            className="nav-field__scope"
+            aria-pressed={attentionOnly}
+            title={t("sidebar.attention")}
+            aria-label={t("sidebar.attention")}
+            onClick={() => setAttentionOnly((on) => !on)}
+          >
+            <NavigatorIcon name="attention" size={14} />
+          </button>
+        </div>
+        <button
+          className="nav-tb"
+          title={withKeys(t("sidebar.settings"), "view.settings")}
+          aria-label={t("sidebar.settings")}
+          onClick={onOpenSettings}
+        >
+          <NavigatorIcon name="gear" />
         </button>
       </div>
 
@@ -462,95 +942,29 @@ export function Sidebar({ onOpenSettings, onNewWorkspace }: Props) {
         />
       )}
 
-      {menu && menuWs && (
-        <FolderMenu
+      {menu && menuEntriesNow.length > 0 && (
+        <NavigatorMenu
+          // A new opening is a new menu, with its own opener to go back to.
+          key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`}
           x={menu.x}
           y={menu.y}
-          folders={state.folders}
-          current={menuWs.folderId}
+          label={menuLabel}
+          entries={menuEntriesNow}
+          fromKeyboard={menu.fromKeyboard}
           onClose={closeMenu}
-          onMove={(folderId) => {
-            moveWorkspace(menuWs.id, folderId, null);
-            setMenu(null);
-          }}
-          onMoveToNew={() => {
-            moveWorkspace(menuWs.id, createFolder(), null);
-            setMenu(null);
+          onRestoreFocus={() => {
+            pendingFocus.current = rowKey(menu.kind === "folder" ? "folder" : "ws", menu.id);
           }}
         />
       )}
+
+      {/* Only this view depends on every pane's state at once. */}
+      {attentionOnly &&
+        state.workspaces.flatMap((ws) =>
+          ws.panes.map((pane) => (
+            <NavigatorPaneWatch key={pane.id} paneId={pane.id} onChange={bumpActivity} />
+          )),
+        )}
     </aside>
-  );
-}
-
-/**
- * What a workspace's agents are up to, readable from any other workspace:
- * their terminals keep running out of sight. The states that want you come
- * first and carry a count; work in progress is a dot.
- */
-function WorkspaceActivityBadge({ workspaceId }: { workspaceId: string }) {
-  const { working, waiting, yours } = useWorkspaceActivity(workspaceId);
-  const t = useT();
-  if (!working && !waiting && !yours) return null;
-  const parts = [
-    waiting && t("sidebar.activityWaiting", { n: waiting }),
-    yours && t("sidebar.activityYours", { n: yours }),
-    working && t("sidebar.activityWorking", { n: working }),
-  ].filter(Boolean);
-  const label = parts.join(" · ");
-  return (
-    <span className="sidebar__activity" title={label} role="status" aria-label={label}>
-      {waiting > 0 && (
-        <span className="sidebar__activity-chip sidebar__activity-chip--waiting">
-          {waiting}
-        </span>
-      )}
-      {yours > 0 && (
-        <span className="sidebar__activity-chip sidebar__activity-chip--yours">{yours}</span>
-      )}
-      {working > 0 && <span className="sidebar__activity-dot" aria-hidden="true" />}
-    </span>
-  );
-}
-
-/**
- * The plan's rate-limit windows, as the last Claude Code session to report
- * saw them — one account behind every pane, so one line for all of them.
- * Nothing shows until a pane with the hangar-bridge mod has reported.
- */
-function PlanLimits() {
-  const plan = usePlanLimits();
-  const t = useT();
-  if (!plan) return null;
-  const label = (kind: string) =>
-    kind === "five_hour"
-      ? t("sidebar.planFiveHour")
-      : kind === "seven_day"
-        ? t("sidebar.planWeek")
-        : kind.replace(/_/g, " ");
-  const resets = plan.limits
-    .filter((limit) => limit.resetsAt)
-    .map((limit) =>
-      t("sidebar.planResets", {
-        window: label(limit.kind),
-        time: new Date(limit.resetsAt as string).toLocaleString(),
-      }),
-    );
-  const title = [t("sidebar.planHint"), ...resets].join("\n");
-  return (
-    <div className="plan" title={title}>
-      <span className="plan__label">{t("sidebar.plan")}</span>
-      {plan.limits.map((limit) => {
-        const pct = Math.round(limit.percentUsed);
-        return (
-          <span
-            key={limit.kind}
-            className={`plan__window ${pct >= 90 ? "plan__window--hot" : pct >= 70 ? "plan__window--warn" : ""}`}
-          >
-            {label(limit.kind)} <strong>{pct}%</strong>
-          </span>
-        );
-      })}
-    </div>
   );
 }
