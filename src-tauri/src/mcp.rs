@@ -458,7 +458,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "model_show",
-            "description": "Show the user a 3D model in Hangar's preview panel, beside the terminals. Call it whenever you create, export, change or find a model the user should look at, instead of handing them a file path. It reads glTF (.glb, or .gltf with its .bin and textures beside it), .obj with its .mtl, .stl, .ply, .fbx and .usdz, up to 256 MB, from your workspace's folders and its git worktrees. Showing a model that is already open brings it forward and reloads it; an open model also reloads by itself when its file changes on disk, so re-exporting is enough to refresh it. The answer says what the viewer found: format, triangles, vertices, meshes, materials, animation clip names, and the bounding box size and centre in the file's units. Check those against what you meant to build: a centimetre/metre mix-up shows as a size a hundred times off. A very large model can answer status 'loading' before it is done. To see the model yourself, call model_snapshot.",
+            "description": "Show the user a 3D model in Hangar's preview panel, beside the terminals. Each workspace has its own preview, and the model opens in yours: when the user is looking at another workspace, it waits in yours without covering theirs, and the answer says so ('visible': false, with a note) — tell them where to look if they should. Call it whenever you create, export, change or find a model the user should look at, instead of handing them a file path. It reads glTF (.glb, or .gltf with its .bin and textures beside it), .obj with its .mtl, .stl, .ply, .fbx and .usdz, up to 256 MB, from your workspace's folders and its git worktrees. Showing a model that is already open brings it forward and reloads it; an open model also reloads by itself when its file changes on disk, so re-exporting is enough to refresh it. The answer says what the viewer found: format, triangles, vertices, meshes, materials, animation clip names, and the bounding box size and centre in the file's units. Check those against what you meant to build: a centimetre/metre mix-up shows as a size a hundred times off. A very large model can answer status 'loading' before it is done. To see the model yourself, call model_snapshot.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -470,7 +470,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "model_snapshot",
-            "description": "Render an open 3D model to a PNG and look at it: the image comes back in the result, followed by the model's stats as text. Use it to check your own work before telling the user it is done — shape, proportions, orientation, materials, missing or black textures — and again after each change. The camera frames the model's bounding box from a fixed angle: front, back, left, right, top, bottom, or iso, a three-quarter view from above. The user's own view in the panel is left as it was. The model must be open already: call model_show first. A bigger image costs more of your context, and the default 1024×768 is enough for most checks.",
+            "description": "Render an open 3D model to a PNG and look at it: the image comes back in the result, followed by the model's stats as text. Use it to check your own work before telling the user it is done — shape, proportions, orientation, materials, missing or black textures — and again after each change. The camera frames the model's bounding box from a fixed angle: front, back, left, right, top, bottom, or iso, a three-quarter view from above. The user's own view in the panel is left as it was. The model must be open in your workspace's preview already: call model_show first. It renders whether or not your workspace is on screen. A bigger image costs more of your context, and the default 1024×768 is enough for most checks.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -487,11 +487,11 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "model_close",
-            "description": "Close a model in Hangar's 3D preview. Without a path it closes every model open for your workspace, and leaves the ones other workspaces have open; the panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
+            "description": "Close a model in your workspace's 3D preview. Without a path it closes every model open there; other workspaces' previews are left as they are. The panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "The model to close, as you gave it to model_show. Omit it to close every model open for your workspace." }
+                    "path": { "type": "string", "description": "The model to close, as you gave it to model_show. Omit it to close every model open in your workspace's preview." }
                 }
             }
         }

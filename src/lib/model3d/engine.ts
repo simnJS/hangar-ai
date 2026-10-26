@@ -462,7 +462,9 @@ export class ModelViewer {
       view: null,
       wire: null,
       normals: null,
-      lastShown: previous?.lastShown ?? 0,
+      // A first load counts as a use: loaded for a snapshot, or for a
+      // workspace that is not on screen, it must not be the first to go.
+      lastShown: previous?.lastShown ?? performance.now(),
     };
     if (loaded.clips.length) {
       entry.mixer = new AnimationMixer(loaded.root);
@@ -514,7 +516,11 @@ export class ModelViewer {
     }
   }
 
-  /** Drops the least recently shown models past the few kept for quick tab switches. */
+  /**
+   * Drops the least recently shown (or first loaded) models past the few kept
+   * for quick tab switches — whichever workspaces they belong to: the window
+   * has the one viewer for them all.
+   */
   private evict() {
     const others = [...this.entries.values()]
       .filter((entry) => entry.id !== this.activeId)

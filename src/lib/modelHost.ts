@@ -2,44 +2,55 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { modelAllowRoots } from "./modelFiles";
 import {
   activateModel,
-  closeAllModels,
-  closeModel,
-  getModels,
+  adoptModelScope,
+  closeModels,
   hasSnapshotter,
+  modelScope,
+  modelView,
   reloadModel,
   requestSnapshot,
   setModelPanel,
   showModel,
+  takeModelScope,
   whenSettled,
+  type ModelScope,
   type OpenModel,
   type SnapshotOptions,
 } from "./modelStore";
 
 /**
- * The 3D preview of a window, as the MCP control handlers reach it.
+ * A workspace's 3D preview, as the MCP control handlers reach it.
  *
- * Every window keeps its own models (lib/modelStore), but only the main one
- * carries out the agents' requests (lib/control). A workspace shown in a
- * window of its own has its preview drawn there, so a request about it is
- * forwarded to that window and answered from its store — the same way
- * lib/windows lends the main window a detached pane's terminal.
+ * Every window keeps the previews of the workspaces it draws (lib/modelStore),
+ * but only the main one carries out the agents' requests (lib/control). A
+ * workspace shown in a window of its own has its preview drawn there, so a
+ * request about it is forwarded to that window and answered from its store —
+ * the same way lib/windows lends the main window a detached pane's terminal.
+ *
+ * A host is bound to one workspace: it lists, shows, renders and closes that
+ * workspace's models and no other's, whichever workspace is on screen.
  *
  * Everything is asynchronous, even here, so the local preview and a remote
  * one are interchangeable behind `ModelHost`.
  */
 
-export type ModelToShow = Parameters<typeof showModel>[0];
+/** The host decides the workspace. */
+export type ModelToShow = Omit<Parameters<typeof showModel>[0], "workspaceId">;
 
 export interface ModelList {
   models: OpenModel[];
   activeId: string | null;
+  /** The workspace is the one its window has on screen. */
+  onScreen: boolean;
+  /** And its preview panel is on screen with it: the model in front can be seen. */
+  shown: boolean;
 }
 
 export interface ModelHost {
   list: () => Promise<ModelList>;
   /** Opens the model, or reloads it when it is open already; returns its id. */
   show: (model: ModelToShow) => Promise<string>;
-  /** Puts the model in front and the panel on screen. */
+  /** Puts the model in front, and the workspace's panel open. */
   reveal: (id: string) => Promise<void>;
   reload: (id: string, modifiedMs: number) => Promise<void>;
   /** The model once it has loaded or failed, or null after `ms`. */
@@ -49,43 +60,49 @@ export interface ModelHost {
   close: (ids: string[]) => Promise<void>;
 }
 
-/** How long a panel that was just revealed gets to mount and register its
-    snapshotter: the viewer loads three.js on demand the first time. */
+/** How long a viewer that is mounting gets to register its snapshotter: it
+    loads three.js on demand the first time. */
 const MOUNT_WAIT_MS = 4000;
 const MOUNT_POLL_MS = 150;
 
 const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-/** The preview of the window this code runs in. */
-export const localModelHost: ModelHost = {
-  list: async () => {
-    const { models, activeId } = getModels();
-    return { models, activeId };
-  },
-  show: async (model) => showModel(model),
-  reveal: async (id) => {
-    activateModel(id);
-    setModelPanel({ open: true });
-  },
-  reload: async (id, modifiedMs) => reloadModel(id, modifiedMs),
-  whenSettled: (id, ms) => whenSettled(id, ms),
-  snapshot: async (id, options) => {
-    // A panel the user had hidden is mounting again: give it the time to
-    // register its renderer instead of failing a request it can carry out.
-    for (let waited = 0; !hasSnapshotter() && waited < MOUNT_WAIT_MS; waited += MOUNT_POLL_MS) {
-      await pause(MOUNT_POLL_MS);
-    }
-    return requestSnapshot(id, options);
-  },
-  close: async (ids) => {
-    const open = getModels().models;
-    if (ids.length >= open.length && open.every((model) => ids.includes(model.id))) {
-      closeAllModels();
-      return;
-    }
-    for (const id of ids) closeModel(id);
-  },
-};
+const NOT_HERE = "That model is not open in this workspace.";
+
+/** A workspace's preview, in the window this code runs in. */
+export function localModelHost(workspaceId: string): ModelHost {
+  const owns = (id: string) => modelScope(workspaceId).models.some((model) => model.id === id);
+  return {
+    list: async () => {
+      const { models, activeId } = modelScope(workspaceId);
+      const view = modelView();
+      const onScreen = view.workspaceId === workspaceId;
+      return { models, activeId, onScreen, shown: onScreen && view.panelShown };
+    },
+    show: async (model) => showModel({ ...model, workspaceId }),
+    reveal: async (id) => {
+      if (!owns(id)) throw new Error(NOT_HERE);
+      activateModel(id);
+      setModelPanel(workspaceId, { open: true });
+    },
+    reload: async (id, modifiedMs) => {
+      if (owns(id)) reloadModel(id, modifiedMs);
+    },
+    whenSettled: async (id, ms) => (owns(id) ? whenSettled(id, ms) : null),
+    snapshot: async (id, options) => {
+      // Never another workspace's model, whatever id it is asked for.
+      if (!owns(id)) throw new Error(NOT_HERE);
+      // The window's viewer may be mounting — for its first model, or after
+      // the window changed what it shows: give it the time to register its
+      // renderer instead of failing a request it can carry out.
+      for (let waited = 0; !hasSnapshotter() && waited < MOUNT_WAIT_MS; waited += MOUNT_POLL_MS) {
+        await pause(MOUNT_POLL_MS);
+      }
+      return requestSnapshot(id, options);
+    },
+    close: async (ids) => closeModels(ids.filter(owns)),
+  };
+}
 
 /* ── another window's preview ─────────────────────────────────── */
 
@@ -150,8 +167,8 @@ function askWindow(workspaceId: string, method: Method, args: unknown[], ms: num
 }
 
 /**
- * The preview of the window that shows `workspaceId`, or null when no window
- * answers for it — not open yet, or gone.
+ * The preview of `workspaceId` in the window that shows it, or null when no
+ * window answers for it — not open yet, or gone.
  */
 export async function remoteModelHost(workspaceId: string): Promise<ModelHost | null> {
   try {
@@ -184,21 +201,50 @@ const METHODS = new Set<Method>([
   "close",
 ]);
 
-/**
- * Workspace window: answers the main window's requests about the models of
- * the workspace it shows. Returns the unsubscribe.
- */
-export function serveModelHost(workspaceId: string): () => void {
+/* ── a workspace moving between windows ───────────────────────── */
+
+/** A workspace's preview, sent to the window that draws it from now on. */
+interface Handover {
+  /** "main", or the workspace whose own window takes it. */
+  to: string;
+  workspaceId: string;
+  scope: ModelScope;
+}
+
+const MAIN = "main";
+
+function listenFor<T>(name: string, handler: (payload: T) => void, ready?: () => void): () => void {
   let off: (() => void) | null = null;
   let stopped = false;
-  listen<Ask>("model:ask", (event) => {
-    const { reqId, method, args } = event.payload;
+  listen<T>(name, (event) => handler(event.payload))
+    .then((stop) => {
+      if (stopped) return stop();
+      off = stop;
+      ready?.();
+    })
+    .catch(() => undefined);
+  return () => {
+    stopped = true;
+    off?.();
+  };
+}
+
+const handOver = (handover: Handover) => emit("model:handover", handover).catch(() => undefined);
+
+/**
+ * Workspace window: answers the main window's requests about the preview of
+ * the workspace it shows, and asks for the models the main window had open
+ * for it before it moved here. Returns the unsubscribe.
+ */
+export function serveModelHost(workspaceId: string): () => void {
+  const host = localModelHost(workspaceId);
+  const stopAsks = listenFor<Ask>("model:ask", ({ reqId, method, args, ...ask }) => {
     // Not ours: the window of another workspace answers, or nobody does.
-    if (event.payload.workspaceId !== workspaceId || !METHODS.has(method)) return;
+    if (ask.workspaceId !== workspaceId || !METHODS.has(method)) return;
     const run =
       method === "probe"
         ? Promise.resolve(true)
-        : (localModelHost[method] as (...values: unknown[]) => Promise<unknown>)(...args);
+        : (host[method] as (...values: unknown[]) => Promise<unknown>)(...args);
     run
       .then((value) => emit("model:answer", { reqId, ok: true, value } satisfies Answer))
       .catch((err) =>
@@ -209,16 +255,44 @@ export function serveModelHost(workspaceId: string): () => void {
         } satisfies Answer),
       )
       .catch(() => undefined);
-  })
-    .then((stop) => {
-      if (stopped) stop();
-      else off = stop;
-    })
-    .catch(() => undefined);
+  });
+  // Asked once listening, or the answer could come back before.
+  const stopHandovers = listenFor<Handover>(
+    "model:handover",
+    (handover) => {
+      if (handover.to === workspaceId) adoptModelScope(workspaceId, handover.scope);
+    },
+    () => void emit("model:claim", { workspaceId }).catch(() => undefined),
+  );
   return () => {
-    stopped = true;
-    off?.();
+    stopAsks();
+    stopHandovers();
   };
+}
+
+/**
+ * Main window: gives a workspace's preview to the window it moved to, when
+ * that window asks for it, and takes it back when the workspace returns —
+ * the models follow the workspace rather than staying where nobody sees them.
+ */
+export function serveModelHandovers(): () => void {
+  const stopClaims = listenFor<{ workspaceId: string }>("model:claim", ({ workspaceId }) => {
+    const scope = takeModelScope(workspaceId);
+    if (scope) void handOver({ to: workspaceId, workspaceId, scope });
+  });
+  const stopReturns = listenFor<Handover>("model:handover", (handover) => {
+    if (handover.to === MAIN) adoptModelScope(handover.workspaceId, handover.scope);
+  });
+  return () => {
+    stopClaims();
+    stopReturns();
+  };
+}
+
+/** Workspace window, its workspace going back to the main window: its models go too. */
+export function handBackModels(workspaceId: string) {
+  const scope = takeModelScope(workspaceId);
+  if (scope) void handOver({ to: MAIN, workspaceId, scope });
 }
 
 /* ── the folders models are served from ───────────────────────── */

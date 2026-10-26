@@ -14,7 +14,8 @@
   background: var(--chrome);
 }
 
-/* Mounted for as long as a model is open, shown or not. */
+/* Mounted for as long as any workspace of the window has a model open,
+   shown or not. */
 .model-panel[hidden] {
   display: none;
 }

@@ -93,6 +93,11 @@ It reads glTF and GLB, OBJ with its MTL, STL, PLY, FBX and USDZ, up to 256 MB, a
 the workspace's folders and its git worktrees. A model reloads by itself when its file
 changes, so an agent re-exporting it is enough to refresh what you see.
 
+Each workspace has its own preview. A model an agent shows opens in that agent's
+workspace: if you are looking at another one, nothing covers it, and the model is waiting
+when you get there. The agent is told whether you can see it, and its snapshots render
+either way.
+
 ## The Claude Code bridge
 
 Claude Code panes load a small [mod](https://code.claude.com/docs/en/plugins/mods/overview),
