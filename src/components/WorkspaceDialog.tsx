@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Backdrop } from "./Backdrop";
+import { Backdrop, ModalHead } from "./Backdrop";
+import { Glyph } from "./settings/icons";
 import { useT } from "../i18n";
 import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
 import { allPaneNames, pickPaneNames } from "../lib/paneNames";
@@ -24,14 +25,6 @@ const workspaceFileName = (path: string) =>
 
 /** Grid shape per layout, mirrored from the CSS so the preview matches reality. */
 const PREVIEW_COLUMNS: Record<LayoutSize, number> = { 1: 1, 2: 2, 4: 2, 8: 4 };
-
-const AGENT_SHORT: Record<AgentId, string> = {
-  shell: "PS",
-  claude: "CC",
-  codex: "CX",
-  gemini: "GM",
-  opencode: "OC",
-};
 
 interface Props {
   availableAgents: string[];
@@ -179,231 +172,269 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
   }
 
   const columns = PREVIEW_COLUMNS[layout];
+  const agentLabel = (id: AgentId) => AGENTS.find((a) => a.id === id)?.label ?? id;
 
   return (
     <Backdrop onClose={onClose}>
-      <div className="modal modal--wide">
-        <header className="modal__head">
-          <h2>{t("create.title")}</h2>
-          <button className="icon-btn" onClick={onClose}>
-            ×
-          </button>
-        </header>
+      <div
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ws-dialog-title"
+      >
+        <ModalHead id="ws-dialog-title" title={t("create.title")} onClose={onClose} />
 
-        <div className="modal__body modal__body--form">
-          <section className="form-row">
-            <label className="form-label" htmlFor="ws-folder">
+        {/* A form, so Return creates the workspace the way a dialog's default
+            button answers it; submit() still refuses without a folder. */}
+        <form
+          className="modal__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <div className="modal__body form-grid" data-modal-body>
+            <label className="form-grid__label" htmlFor="ws-folder">
               {t("create.folder")}
             </label>
-            <div className="picker">
-              <input
-                id="ws-folder"
-                className="picker__path"
-                value={cwd}
-                placeholder={t("create.folderEmpty")}
-                onChange={(e) => setCwd(e.target.value)}
-              />
-              <button className="btn" onClick={browse}>
-                {t("create.browse")}
-              </button>
-              <button
-                className="btn"
-                onClick={browseWorkspaceFile}
-                title={t("create.fileDialog")}
-              >
-                {t("create.openFile")}
-              </button>
+            <div className="form-grid__field">
+              <div className="picker">
+                <input
+                  id="ws-folder"
+                  className="picker__path"
+                  value={cwd}
+                  placeholder={t("create.folderEmpty")}
+                  spellCheck={false}
+                  onChange={(e) => setCwd(e.target.value)}
+                />
+                <button type="button" className="btn" onClick={browse}>
+                  {t("create.browse")}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={browseWorkspaceFile}
+                  title={t("create.fileDialog")}
+                >
+                  {t("create.openFile")}
+                </button>
+              </div>
+
+              {suggestion && (
+                <div className="notice">
+                  <span className="notice__text">
+                    {t("create.fileFound", { name: basename(suggestion) })}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--tiny"
+                    onClick={() => loadWorkspaceFile(suggestion)}
+                  >
+                    {t("create.fileUse")}
+                  </button>
+                  <button
+                    type="button"
+                    className="notice__close"
+                    aria-label={t("modal.close")}
+                    title={t("modal.close")}
+                    onClick={() => setSuggestion(null)}
+                  >
+                    <Glyph name="close" />
+                  </button>
+                </div>
+              )}
+
+              {fileError && (
+                <p className="notice notice--error">
+                  <span className="notice__text">
+                    {t("create.fileFailed", { name: basename(fileError) })}
+                  </span>
+                </p>
+              )}
+
+              {roots.length > 0 && (
+                <>
+                  <div className="roots">
+                    {roots.map((root) => {
+                      const isMain = root.path === cwd;
+                      return (
+                        <button
+                          type="button"
+                          key={root.path}
+                          className={`root ${isMain ? "is-main" : ""} ${
+                            root.exists ? "" : "is-missing"
+                          }`}
+                          aria-pressed={isMain}
+                          onClick={() => setCwd(root.path)}
+                          disabled={!root.exists}
+                          title={root.path}
+                        >
+                          <span className="root__name">{root.name}</span>
+                          <span className="root__path">{root.path}</span>
+                          <span className="root__tag">
+                            {!root.exists
+                              ? t("create.rootMissing")
+                              : isMain
+                                ? t("create.rootMain")
+                                : t("create.rootExtra")}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="form-hint">{t("create.rootsHint")}</span>
+                </>
+              )}
             </div>
 
-            {suggestion && (
-              <div className="notice">
-                <span className="notice__text">
-                  {t("create.fileFound", { name: basename(suggestion) })}
-                </span>
-                <button
-                  className="btn btn--tiny"
-                  onClick={() => loadWorkspaceFile(suggestion)}
-                >
-                  {t("create.fileUse")}
-                </button>
-                <button className="icon-btn" onClick={() => setSuggestion(null)}>
-                  ×
-                </button>
-              </div>
-            )}
-
-            {fileError && (
-              <p className="notice notice--error">
-                <span className="notice__text">
-                  {t("create.fileFailed", { name: basename(fileError) })}
-                </span>
-              </p>
-            )}
-
-            {roots.length > 0 && (
-              <div className="roots">
-                <span className="form-hint">{t("create.rootsHint")}</span>
-                {roots.map((root) => {
-                  const isMain = root.path === cwd;
-                  return (
-                    <button
-                      key={root.path}
-                      className={`root ${isMain ? "is-main" : ""} ${
-                        root.exists ? "" : "is-missing"
-                      }`}
-                      onClick={() => setCwd(root.path)}
-                      disabled={!root.exists}
-                      title={root.path}
-                    >
-                      <span className="root__name">{root.name}</span>
-                      <span className="root__path">{root.path}</span>
-                      <span className="root__tag">
-                        {!root.exists
-                          ? t("create.rootMissing")
-                          : isMain
-                            ? t("create.rootMain")
-                            : t("create.rootExtra")}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="form-row">
-            <label className="form-label" htmlFor="ws-name">
+            <label className="form-grid__label" htmlFor="ws-name">
               {t("create.name")}
             </label>
-            <input
-              id="ws-name"
-              className="text-input"
-              value={name}
-              placeholder={cwd ? basename(cwd) : t("create.namePlaceholder")}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </section>
+            <div className="form-grid__field">
+              <input
+                id="ws-name"
+                className="text-input"
+                value={name}
+                placeholder={cwd ? basename(cwd) : t("create.namePlaceholder")}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
 
-          <section className="form-row">
-            <label className="form-label" htmlFor="ws-shell">
+            <label className="form-grid__label" htmlFor="ws-shell">
               {t("pane.shell")}
+            </label>
+            <div className="form-grid__field form-grid__field--inline">
+              <span className="set-select">
+                <select
+                  id="ws-shell"
+                  className="set-select__field"
+                  value={shellId ?? ""}
+                  onChange={(e) => setShellId(e.target.value || null)}
+                >
+                  <option value="">
+                    {t("create.shellDefault", {
+                      name: shells[0]?.label ?? t("create.shellNone"),
+                    })}
+                  </option>
+                  {shells.map((shell) => (
+                    <option key={shell.id} value={shell.id}>
+                      {shell.label}
+                    </option>
+                  ))}
+                </select>
+              </span>
               <span className="form-hint">
                 {t("create.shellDetected", { n: shells.length })}
               </span>
-            </label>
-            <select
-              id="ws-shell"
-              className="text-input"
-              value={shellId ?? ""}
-              onChange={(e) => setShellId(e.target.value || null)}
-            >
-              <option value="">
-                {t("create.shellDefault", {
-                  name: shells[0]?.label ?? t("create.shellNone"),
-                })}
-              </option>
-              {shells.map((shell) => (
-                <option key={shell.id} value={shell.id}>
-                  {shell.label}
-                </option>
-              ))}
-            </select>
-          </section>
-
-          <section className="form-row">
-            <span className="form-label">{t("create.terminals")}</span>
-            <div className="layouts layouts--lg">
-              {LAYOUTS.map((size) => (
-                <button
-                  key={size}
-                  className={`layouts__btn ${layout === size ? "is-active" : ""}`}
-                  onClick={() => changeLayout(size)}
-                >
-                  {size}
-                </button>
-              ))}
             </div>
-          </section>
 
-          <section className="form-row">
-            <span className="form-label">
+            <span className="form-grid__label" id="ws-terminals">
+              {t("create.terminals")}
+            </span>
+            <div className="form-grid__field">
+              <div className="seg seg--numbers" role="group" aria-labelledby="ws-terminals">
+                {LAYOUTS.map((size) => (
+                  <button
+                    type="button"
+                    key={size}
+                    className={`seg__btn ${layout === size ? "is-active" : ""}`}
+                    aria-pressed={layout === size}
+                    onClick={() => changeLayout(size)}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <span className="form-grid__label" id="ws-agents">
               {t("create.agents")}
-              <span className="form-hint">
+            </span>
+            <div className="form-grid__field">
+              <div className="agent-counters" role="group" aria-labelledby="ws-agents">
+                {AGENTS.filter((a) => a.id !== "shell").map((agent) => {
+                  const missing = !availableAgents.includes(agent.id);
+                  return (
+                    <div key={agent.id} className={`counter ${missing ? "is-missing" : ""}`}>
+                      <span className="counter__name">
+                        {agent.label}
+                        {missing && (
+                          <em className="counter__missing">{t("create.notInstalled")}</em>
+                        )}
+                      </span>
+                      <span className="stepper">
+                        <button
+                          type="button"
+                          className="stepper__btn"
+                          aria-label={t("create.less", { agent: agent.label })}
+                          title={t("create.less", { agent: agent.label })}
+                          onClick={() => removeAgent(agent.id)}
+                          disabled={counts[agent.id] === 0}
+                        >
+                          <Glyph name="minus" />
+                        </button>
+                        <span className="stepper__value">{counts[agent.id]}</span>
+                        <button
+                          type="button"
+                          className="stepper__btn"
+                          aria-label={t("create.more", { agent: agent.label })}
+                          title={t("create.more", { agent: agent.label })}
+                          onClick={() => addAgent(agent.id)}
+                          disabled={freeSlots === 0}
+                        >
+                          <Glyph name="plus" />
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <span className="form-hint" aria-live="polite">
                 {freeSlots > 0
                   ? t("create.freeSlots", { n: freeSlots })
                   : t("create.allAssigned")}
               </span>
-            </span>
-
-            <div className="agent-counters">
-              {AGENTS.filter((a) => a.id !== "shell").map((agent) => {
-                const missing = !availableAgents.includes(agent.id);
-                return (
-                  <div key={agent.id} className={`counter ${missing ? "is-missing" : ""}`}>
-                    <span className="counter__name">
-                      {agent.label}
-                      {missing && (
-                        <em className="counter__missing">{t("create.notInstalled")}</em>
-                      )}
-                    </span>
-                    <div className="counter__controls">
-                      <button
-                        className="counter__btn"
-                        onClick={() => removeAgent(agent.id)}
-                        disabled={counts[agent.id] === 0}
-                      >
-                        −
-                      </button>
-                      <span className="counter__value">{counts[agent.id]}</span>
-                      <button
-                        className="counter__btn"
-                        onClick={() => addAgent(agent.id)}
-                        disabled={freeSlots === 0}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
-          </section>
 
-          <section className="form-row">
-            <span className="form-label">
+            <span className="form-grid__label">
               {t("create.layout")}
-              <span className="form-hint">{t("create.layoutHint")}</span>
             </span>
-            <div
-              className="preview"
-              style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
-            >
-              {/* Pane names are unique across workspaces: these are the next
-                  free ones, the same the store will hand out. */}
-              {assignments.map((agent, index) => (
-                <button
-                  key={index}
-                  className={`preview__cell preview__cell--${agent}`}
-                  onClick={() => cycleCell(index)}
-                  title={AGENTS.find((a) => a.id === agent)?.label}
-                >
-                  <span className="preview__tag">{AGENT_SHORT[agent]}</span>
-                  {/* The names the panes will actually be created with. */}
-                  <span className="preview__num">{names[index] ?? index + 1}</span>
-                </button>
-              ))}
+            <div className="form-grid__field">
+              <div
+                className="preview"
+                style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
+              >
+                {/* Pane names are unique across workspaces: these are the next
+                    free ones, the same the store will hand out. */}
+                {assignments.map((agent, index) => (
+                  <button
+                    type="button"
+                    key={index}
+                    className={`preview__cell ${agent === "shell" ? "is-shell" : ""}`}
+                    onClick={() => cycleCell(index)}
+                    title={agentLabel(agent)}
+                  >
+                    <span className="preview__head">
+                      {/* The names the panes will actually be created with. */}
+                      <span className="preview__name">{names[index] ?? index + 1}</span>
+                      <span className="preview__agent">{agentLabel(agent)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <span className="form-hint">{t("create.layoutHint")}</span>
             </div>
-          </section>
-        </div>
+          </div>
 
-        <footer className="modal__foot modal__foot--actions">
-          <button className="btn btn--ghost" onClick={onClose}>
-            {t("create.cancel")}
-          </button>
-          <button className="btn btn--primary" onClick={submit} disabled={!cwd}>
-            {t("create.submit")}
-          </button>
-        </footer>
+          <footer className="modal__foot">
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              {t("create.cancel")}
+            </button>
+            <button type="submit" className="btn btn--primary" disabled={!cwd}>
+              {t("create.submit")}
+            </button>
+          </footer>
+        </form>
       </div>
     </Backdrop>
   );

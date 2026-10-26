@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Backdrop } from "./Backdrop";
+import { Backdrop, ModalHead } from "./Backdrop";
 import { useT } from "../i18n";
 import type { CommandScope, SavedCommandDraft } from "../store";
 import type { SavedCommand } from "../types";
@@ -46,19 +46,18 @@ export function CommandDialog({ editing, onSubmit, onClose }: Props) {
 
   return (
     <Backdrop onClose={onClose}>
-      <div className="modal">
-        <header className="modal__head">
-          <h2>{t(editing ? "commands.titleEdit" : "commands.title")}</h2>
-          <button className="icon-btn" onClick={onClose}>
-            ×
-          </button>
-        </header>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cmd-title">
+        <ModalHead
+          id="cmd-title"
+          title={t(editing ? "commands.titleEdit" : "commands.title")}
+          onClose={onClose}
+        />
 
-        <div className="modal__body modal__body--form">
-          <section className="form-row">
-            <label className="form-label" htmlFor="cmd-command">
-              {t("commands.command")}
-            </label>
+        <div className="modal__body form-grid" data-modal-body>
+          <label className="form-grid__label" htmlFor="cmd-command">
+            {t("commands.command")}
+          </label>
+          <div className="form-grid__field">
             <input
               id="cmd-command"
               className="text-input text-input--mono"
@@ -69,13 +68,12 @@ export function CommandDialog({ editing, onSubmit, onClose }: Props) {
               onChange={(e) => setCommand(e.target.value)}
               onKeyDown={onKeyDown}
             />
-          </section>
+          </div>
 
-          <section className="form-row">
-            <label className="form-label" htmlFor="cmd-label">
-              {t("commands.label")}
-              <span className="form-hint">{t("commands.labelHint")}</span>
-            </label>
+          <label className="form-grid__label" htmlFor="cmd-label">
+            {t("commands.label")}
+          </label>
+          <div className="form-grid__field">
             <input
               id="cmd-label"
               className="text-input"
@@ -84,50 +82,52 @@ export function CommandDialog({ editing, onSubmit, onClose }: Props) {
               onChange={(e) => setLabel(e.target.value)}
               onKeyDown={onKeyDown}
             />
-          </section>
+            <span className="form-hint">{t("commands.labelHint")}</span>
+          </div>
 
-          <section className="form-row form-row--toggle">
-            <span className="form-label">
-              {t("commands.autoRun")}
-              <span className="form-hint">{t("commands.autoRunHint")}</span>
-            </span>
+          <label className="form-grid__label" htmlFor="cmd-autorun">
+            {t("commands.autoRun")}
+          </label>
+          <div className="form-grid__field form-grid__field--inline">
             <span className="switch">
               <input
+                id="cmd-autorun"
                 type="checkbox"
+                role="switch"
                 checked={autoRun}
-                aria-label={t("commands.autoRun")}
                 onChange={(e) => setAutoRun(e.target.checked)}
               />
               <span className="switch__track" aria-hidden="true">
                 <span className="switch__knob" />
               </span>
             </span>
-          </section>
+            <span className="form-hint">{t("commands.autoRunHint")}</span>
+          </div>
 
-          <section className="form-row form-row--toggle">
-            <span className="form-label">
-              {t("commands.broadcast")}
-              <span className="form-hint">{t("commands.broadcastHint")}</span>
-            </span>
+          <label className="form-grid__label" htmlFor="cmd-broadcast">
+            {t("commands.broadcast")}
+          </label>
+          <div className="form-grid__field form-grid__field--inline">
             <span className="switch">
               <input
+                id="cmd-broadcast"
                 type="checkbox"
+                role="switch"
                 checked={broadcast}
-                aria-label={t("commands.broadcast")}
                 onChange={(e) => setBroadcast(e.target.checked)}
               />
               <span className="switch__track" aria-hidden="true">
                 <span className="switch__knob" />
               </span>
             </span>
-          </section>
+            <span className="form-hint">{t("commands.broadcastHint")}</span>
+          </div>
 
-          <section className="form-row">
-            <span className="form-label">
-              {t("commands.scope")}
-              <span className="form-hint">{t("commands.scopeHint")}</span>
-            </span>
-            <div className="seg">
+          <span className="form-grid__label" id="cmd-scope">
+            {t("commands.scope")}
+          </span>
+          <div className="form-grid__field">
+            <div className="seg" role="group" aria-labelledby="cmd-scope">
               <button
                 type="button"
                 className={`seg__btn ${scope === "workspace" ? "is-active" : ""}`}
@@ -145,14 +145,20 @@ export function CommandDialog({ editing, onSubmit, onClose }: Props) {
                 {t("commands.scopeGlobal")}
               </button>
             </div>
-          </section>
+            <span className="form-hint">{t("commands.scopeHint")}</span>
+          </div>
         </div>
 
-        <footer className="modal__foot modal__foot--actions">
-          <button className="btn btn--ghost" onClick={onClose}>
+        <footer className="modal__foot">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
             {t("create.cancel")}
           </button>
-          <button className="btn btn--primary" onClick={submit} disabled={!trimmed}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={submit}
+            disabled={!trimmed}
+          >
             {t("commands.save")}
           </button>
         </footer>

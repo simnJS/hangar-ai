@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
+import { arrowStep, stepIndex } from "../lib/menuNav";
 import type { WorkspaceFolder } from "../types";
+import { Glyph } from "./settings/icons";
 
 /** Kept between the menu and the window edges. */
 const MARGIN = 8;
@@ -38,7 +40,30 @@ interface Props {
 export function FolderMenu({ x, y, folders, current, onMove, onMoveToNew, onClose }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  // Read before the menu takes focus, to hand it back when it closes.
+  const [opener] = useState(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
   const t = useT();
+
+  /** The entries the keyboard can land on: the current folder is disabled. */
+  const items = () =>
+    [...(menuRef.current?.querySelectorAll<HTMLButtonElement>(".ctx-menu__item") ?? [])].filter(
+      (item) => !item.disabled,
+    );
+
+  // The first entry takes focus, so the arrows work straight away; when the
+  // menu goes, focus returns to where it was unless something else took it.
+  useEffect(() => {
+    const menu = menuRef.current;
+    items()[0]?.focus({ preventScroll: true });
+    return () => {
+      if (menu?.isConnected) return;
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [opener]);
 
   // Opens at the pointer, pulled back inside the window when a click near the
   // bottom would leave it hanging off the edge.
@@ -54,7 +79,17 @@ export function FolderMenu({ x, y, folders, current, onMove, onMoveToNew, onClos
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      const step = arrowStep(event.key);
+      if (!step || !menuRef.current?.contains(document.activeElement)) return;
+      const list = items();
+      const next = stepIndex(list.indexOf(document.activeElement as HTMLButtonElement), list.length, step, true);
+      if (next === null) return;
+      event.preventDefault();
+      list[next].focus();
     }
     function onPointer(event: PointerEvent) {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
@@ -99,7 +134,11 @@ export function FolderMenu({ x, y, folders, current, onMove, onMoveToNew, onClos
           >
             <FolderIcon />
             <span className="ctx-menu__label">{folder.name}</span>
-            {here && <span className="ctx-menu__check">✓</span>}
+            {here && (
+              <span className="ctx-menu__check">
+                <Glyph name="check" />
+              </span>
+            )}
           </button>
         );
       })}

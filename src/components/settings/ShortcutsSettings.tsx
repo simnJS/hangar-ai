@@ -31,6 +31,7 @@ import {
   type ShortcutSection,
 } from "../../lib/shortcuts";
 import { suspendShortcuts } from "../../lib/useShortcuts";
+import { Glyph } from "./icons";
 
 /**
  * The keyboard shortcut editor.
@@ -197,18 +198,20 @@ function Recorder({
         type="button"
         className="key-row__btn"
         title={t("keymap.confirm")}
+        aria-label={t("keymap.confirm")}
         disabled={!chords.length}
         onClick={() => onDone(chords)}
       >
-        ✓
+        <Glyph name="check" />
       </button>
       <button
         type="button"
         className="key-row__btn"
         title={t("keymap.cancel")}
+        aria-label={t("keymap.cancel")}
         onClick={onCancel}
       >
-        ✕
+        <Glyph name="close" />
       </button>
     </span>
   );
@@ -270,11 +273,12 @@ function CommandRow({
               type="button"
               className="key-bind__x"
               title={t("keymap.remove", { keys: formatBinding(binding) })}
+              aria-label={t("keymap.remove", { keys: formatBinding(binding) })}
               onClick={() =>
                 onChange(withoutBinding(overrides, keymap, command.id, binding))
               }
             >
-              ×
+              <Glyph name="close" />
             </button>
           </span>
         ))}
@@ -295,20 +299,22 @@ function CommandRow({
           <>
             <button
               type="button"
-              className="key-row__btn"
+              className="key-row__btn key-row__btn--quiet"
               title={t("keymap.add")}
+              aria-label={t("keymap.add")}
               onClick={() => onRecord(command.id)}
             >
-              +
+              <Glyph name="plus" />
             </button>
             <button
               type="button"
-              className="key-row__btn"
+              className="key-row__btn key-row__btn--quiet"
               title={t("keymap.reset")}
+              aria-label={t("keymap.reset")}
               disabled={!custom}
               onClick={() => onChange(resetCommand(overrides, command.id))}
             >
-              ↺
+              <Glyph name="reset" />
             </button>
           </>
         )}
@@ -377,9 +383,7 @@ export function ShortcutsSettings() {
     <div className="keymap">
       <div className="keymap__bar">
         <div className="keymap__search">
-          <span className="keymap__search-icon" aria-hidden="true">
-            ⌕
-          </span>
+          <Glyph name="search" className="keymap__search-icon" />
           <input
             value={query}
             placeholder={t("keymap.search")}
@@ -392,11 +396,12 @@ export function ShortcutsSettings() {
           {query && (
             <button
               type="button"
-              className="icon-btn"
+              className="settings__search-clear"
               title={t("keymap.clear")}
+              aria-label={t("keymap.clear")}
               onClick={() => setQuery("")}
             >
-              ×
+              <Glyph name="close" />
             </button>
           )}
         </div>
