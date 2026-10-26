@@ -3709,10 +3709,9 @@ body.is-dragging-pane .pane__bar {
   opacity: 0.8;
 }
 
-/* Text on the accent: white wherever the accent is dark enough to carry it,
-   as the system does, and near-black on the pale accents (Gruvbox, Nord…)
-   where white would wash out. Engines without relative colours fall back on
-   the theme's own --accent-fg. */
+/* Text on the accent: the theme's --accent-fg, like every other accent
+   highlight in the app (palette, menus, primary buttons), which keeps 4.5:1
+   on any accent. */
 .session:focus-visible,
 .cmd-item:hover,
 .cmd-item:focus-within,
@@ -3720,17 +3719,6 @@ body.is-dragging-pane .pane__bar {
 .cmd-menu__add:focus-visible,
 .check:checked::after {
   color: var(--accent-fg);
-}
-
-@supports (color: oklch(from red l c h)) {
-  .session:focus-visible,
-  .cmd-item:hover,
-  .cmd-item:focus-within,
-  .cmd-menu__add:hover,
-  .cmd-menu__add:focus-visible,
-  .check:checked::after {
-    color: oklch(from var(--accent) clamp(0, (0.68 - l) * 1000, 1) 0 0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5487,7 +5475,7 @@ body.is-dragging-pane .board-dock__grip {
 .chord-hint {
   position: fixed;
   left: 50%;
-  bottom: calc(36px * var(--ui-scale) + 12px);
+  bottom: calc(36px * var(--ui-scale) + 14px);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -5646,9 +5634,7 @@ body.is-dragging-pane .board-dock__grip {
     transition: none;
   }
   /* The colour already tells the state; the blinking only adds urgency. */
-  .pane__attn,
-  .pane__state-dot,
-  .sidebar__activity-dot {
+  .pane__attn {
     animation: none !important;
   }
 }
