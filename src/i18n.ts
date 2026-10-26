@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useStore } from "./store";
+import { typeset } from "./lib/typography";
 
 /**
  * Minimal typed i18n. `en` is the reference: `fr` is declared as
@@ -8,6 +9,12 @@ import { useStore } from "./store";
  *
  * Plural keys come in `_one` / `_other` pairs and are selected through
  * `Intl.PluralRules`, which applies each language's own rules.
+ *
+ * Both dictionaries are written with plain spaces. The no-break ones — in
+ * French before ? ! ; : » and %, and after «, and in both languages between a
+ * number and its unit — are set once, when the dictionaries load
+ * (lib/typography), so no string has to spell them out and none can forget
+ * one; i18n.test.ts holds every French string to it.
  */
 
 export type Locale = "en" | "fr";
@@ -575,10 +582,10 @@ const en = {
   "board.missingTask": "a deleted task",
   "board.focusAgent": "Show {name}'s pane",
   "board.doingSince": "In progress since {date}",
-  "board.elapsedNow": "<\u00a01\u00a0min",
-  "board.elapsedMinutes": "{m}\u00a0min",
-  "board.elapsedHours": "{h}\u00a0h\u00a0{m}",
-  "board.elapsedDays": "{d}\u00a0d\u00a0{h}\u00a0h",
+  "board.elapsedNow": "< 1 min",
+  "board.elapsedMinutes": "{m} min",
+  "board.elapsedHours": "{h} h {m}",
+  "board.elapsedDays": "{d} d {h} h",
   "board.comments_one": "{n} comment",
   "board.comments_other": "{n} comments",
   "board.shown_one": "{shown} of {n} task",
@@ -748,7 +755,7 @@ const en = {
   "inspector.shell": "Shell",
   "inspector.folder": "Folder",
   "inspector.justNow": "just now",
-  "inspector.minutesAgo": "{n}\u00a0min ago",
+  "inspector.minutesAgo": "{n} min ago",
   "inspector.todayAt": "today {time}",
   "inspector.yesterdayAt": "yesterday {time}",
   "inspector.dateAt": "{date}, {time}",
@@ -962,7 +969,7 @@ const fr: Record<Key, string> = {
   "sidebar.filter": "Filtrer",
   "sidebar.filterLabel": "Filtrer les workspaces et les agents",
   "sidebar.attention": "Seulement ceux qui t'attendent",
-  "sidebar.noMatch": "Rien ne correspond à « {query} ».",
+  "sidebar.noMatch": "Rien ne correspond à « {query} ».",
   "sidebar.noneWaiting": "Aucun agent ne t'attend.",
   "sidebar.clearFilter": "Effacer le filtre",
   "sidebar.planResetAt": "remise à zéro {time}",
@@ -1479,10 +1486,10 @@ const fr: Record<Key, string> = {
   "board.missingTask": "une tâche supprimée",
   "board.focusAgent": "Afficher le pane de {name}",
   "board.doingSince": "En cours depuis le {date}",
-  "board.elapsedNow": "<\u00a01\u00a0min",
-  "board.elapsedMinutes": "{m}\u00a0min",
-  "board.elapsedHours": "{h}\u00a0h\u00a0{m}",
-  "board.elapsedDays": "{d}\u00a0j\u00a0{h}\u00a0h",
+  "board.elapsedNow": "< 1 min",
+  "board.elapsedMinutes": "{m} min",
+  "board.elapsedHours": "{h} h {m}",
+  "board.elapsedDays": "{d} j {h} h",
   "board.comments_one": "{n} commentaire",
   "board.comments_other": "{n} commentaires",
   "board.shown_one": "{shown} sur {n} tâche",
@@ -1653,15 +1660,15 @@ const fr: Record<Key, string> = {
   "inspector.shell": "Shell",
   "inspector.folder": "Dossier",
   "inspector.justNow": "à l'instant",
-  "inspector.minutesAgo": "il y a {n}\u00a0min",
+  "inspector.minutesAgo": "il y a {n} min",
   "inspector.todayAt": "aujourd'hui {time}",
   "inspector.yesterdayAt": "hier {time}",
   "inspector.dateAt": "{date} à {time}",
-  "inspector.contextUsed": "{pct}\u00a0% avant compactage",
+  "inspector.contextUsed": "{pct} % avant compactage",
   "inspector.contextTokens": "{used} sur {window} tokens",
   "inspector.contextHint": "Compactage automatique à l'approche de la limite.",
-  "inspector.contextHintSoon": "Compactage imminent\u00a0: l'agent va bientôt résumer la conversation.",
-  "inspector.contextRing": "Contexte utilisé à {pct}\u00a0%",
+  "inspector.contextHintSoon": "Compactage imminent : l'agent va bientôt résumer la conversation.",
+  "inspector.contextRing": "Contexte utilisé à {pct} %",
   "inspector.contextEmpty": "Rien de mesuré pour l'instant.",
   "inspector.cost": "Coût de la session",
   "inspector.costOver": "en {duration}",
@@ -1671,8 +1678,8 @@ const fr: Record<Key, string> = {
   "inspector.planWeek": "7 j",
   "inspector.planWindowFiveHour": "Fenêtre de 5 h",
   "inspector.planWindowWeek": "Fenêtre de 7 jours",
-  "inspector.planHint": "{window}\u00a0: {pct}\u00a0% utilisés",
-  "inspector.planHintResets": "{window}\u00a0: {pct}\u00a0% utilisés, remise à zéro {time}",
+  "inspector.planHint": "{window} : {pct} % utilisés",
+  "inspector.planHintResets": "{window} : {pct} % utilisés, remise à zéro {time}",
   "inspector.planUnknown": "Connu dès la première réponse.",
   "inspector.taskOpen": "Ouvrir",
   "inspector.taskOpenHint": "Afficher le tableau",
@@ -1694,7 +1701,7 @@ const fr: Record<Key, string> = {
   "inspector.filesClean": "Rien n'a changé dans ce dossier.",
   "inspector.filesTotals": "{add} lignes ajoutées, {del} supprimées",
   "inspector.fileRow": "{path} · {status} · ouvrir le diff",
-  "inspector.fileGone": "Plus rien en attente\u00a0: commité ou remis en l'état depuis",
+  "inspector.fileGone": "Plus rien en attente : commité ou remis en l'état depuis",
   "inspector.fileBinary": "binaire",
   "inspector.status.M": "modifié",
   "inspector.status.A": "ajouté",
@@ -1823,7 +1830,16 @@ const fr: Record<Key, string> = {
   "update.retry": "Réessayer",
 };
 
-const DICTIONARIES: Record<Locale, Record<Key, string>> = { en, fr };
+const typesetAll = (dict: Record<Key, string>, locale: Locale) =>
+  Object.fromEntries(
+    Object.entries(dict).map(([key, text]) => [key, typeset(text, locale)]),
+  ) as Record<Key, string>;
+
+/** The dictionaries as they are shown: typeset once, not on every lookup. */
+export const DICTIONARIES: Record<Locale, Record<Key, string>> = {
+  en: typesetAll(en, "en"),
+  fr: typesetAll(fr, "fr"),
+};
 
 /** `topbar.presetHint_one` also exposes `topbar.presetHint` as a callable key. */
 type PluralBase<K> = K extends `${infer Base}_one` ? Base : never;
@@ -1845,7 +1861,7 @@ export function translate(
 ): string {
   const dict = DICTIONARIES[locale];
   const direct = key as Key;
-  let template: string = dict[direct] ?? en[direct] ?? key;
+  let template: string = dict[direct] ?? DICTIONARIES.en[direct] ?? key;
 
   // Plural keys are addressed by their base name; pick the right variant.
   if (params && typeof params.n === "number") {
