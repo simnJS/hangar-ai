@@ -1477,7 +1477,7 @@ const fr: Record<Key, string> = {
   "settings.resetHint": "Tous les réglages de cette page reviennent à leur valeur initiale",
   "settings.resetConfirm": "Confirmer",
 
-  "sessions.title": "Sessions {agent}",
+  "sessions.title": "Sessions de {agent}",
   "sessions.new": "Nouvelle session",
   "sessions.newHint": "démarre l'agent sans reprise",
   "sessions.loading": "Lecture des transcriptions…",
