@@ -219,6 +219,11 @@ export function registerSnapshotter(fn: Snapshotter | null) {
   snapshotter = fn;
 }
 
+/** Whether a viewer is mounted in this window to render snapshots. */
+export function hasSnapshotter(): boolean {
+  return snapshotter !== null;
+}
+
 export function requestSnapshot(id: string, options: SnapshotOptions): Promise<string> {
   if (!snapshotter) return Promise.reject(new Error("the 3D preview is not mounted"));
   return snapshotter(id, options);
