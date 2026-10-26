@@ -100,4 +100,12 @@ libc = "0.2"
 # already locked.
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7.3"
+# The process table, to find what a pane's shell started — see procs.rs.
+# Already compiled for tokio, mio and a dozen others at this version, so it
+# only adds the three API sets named here.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+] }
 

@@ -1817,6 +1817,7 @@ dependencies = [
  "ureq",
  "uuid 1.24.0",
  "whisper-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

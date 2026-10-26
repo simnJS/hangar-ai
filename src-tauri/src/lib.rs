@@ -12,6 +12,7 @@ mod memory;
 mod model;
 mod notify;
 mod path_env;
+mod procs;
 mod pty;
 mod server;
 mod sessions;
@@ -78,6 +79,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_alive,
+            pty::pty_has_children,
             bridge::bridge_enqueue,
             bridge::bridge_cancel,
             bridge::bridge_queue,

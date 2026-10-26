@@ -362,8 +362,20 @@ pub fn pty_resize(
         .map_err(|e| e.to_string())
 }
 
+/// `tree` also ends every process below the shell, which is what a pane put
+/// to sleep wants: the memory is the point. On Windows the shell's own end
+/// does not reach them — a process there outlives its parent — and an agent's
+/// helpers (its MCP servers, a build it started) are not always tied to the
+/// pane's console either. A pane closed by hand keeps the gentler kill, which
+/// leaves alone what the user deliberately started out of it, an editor or a
+/// browser.
 #[tauri::command]
-pub fn pty_kill(app: AppHandle, manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+pub fn pty_kill(
+    app: AppHandle,
+    manager: State<'_, PtyManager>,
+    id: String,
+    tree: Option<bool>,
+) -> Result<(), String> {
     crate::bridge::forget(&id);
     // Taken out under the lock, reaped outside it: `wait` blocks until the
     // shell is really gone, and a shell that takes its time — one still
@@ -400,7 +412,14 @@ pub fn pty_kill(app: AppHandle, manager: State<'_, PtyManager>, id: String) -> R
             id,
         };
 
+        // Listed before the shell goes, while the tree still hangs off it.
+        let below = tree
+            .filter(|&tree| tree)
+            .and_then(|_| Some((session.child.process_id()?, crate::procs::table()?)))
+            .map(|(pid, table)| crate::procs::descendants(&table, pid, crate::procs::started))
+            .unwrap_or_default();
         let _ = session.child.kill();
+        crate::procs::terminate(&below);
         reap_process_group(&session);
         let _ = session.child.wait();
         // Closing the master is what ends the reader thread, so it happens
@@ -451,6 +470,44 @@ pub fn pty_history(manager: State<'_, PtyManager>, id: String) -> Result<PtyHist
 #[tauri::command]
 pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {
     manager.lock().sessions.contains_key(&id)
+}
+
+/// The panes among `ids` whose shell still runs a process of its own — a dev
+/// server, a watcher, a build — which closing the pane would end. A pane that
+/// is not running has nothing to lose and is left out.
+///
+/// Off the main thread: reading the process table is a few milliseconds on
+/// Windows and a `ps` on unix, and a command that is not `async` would spend
+/// them where the window repaints.
+#[tauri::command]
+pub async fn pty_has_children(
+    manager: State<'_, PtyManager>,
+    ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let shells: Vec<(String, u32)> = {
+        let registry = manager.lock();
+        ids.into_iter()
+            .filter_map(|id| {
+                let pid = registry.sessions.get(&id)?.child.process_id()?;
+                Some((id, pid))
+            })
+            .collect()
+    };
+    if shells.is_empty() {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        // Unreadable is not empty: answering "nothing runs" without having
+        // looked would let a dev server be closed.
+        let table = crate::procs::table().ok_or("the process table could not be read")?;
+        Ok(shells
+            .into_iter()
+            .filter(|(_, pid)| crate::procs::has_descendants(&table, *pid))
+            .map(|(id, _)| id)
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Kills every live pane. Used on window close so no shell is left behind.
