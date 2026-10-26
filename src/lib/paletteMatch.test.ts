@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandSynonyms,
   filterPalette,
   fold,
   highlight,
@@ -138,5 +139,45 @@ describe("filterPalette", () => {
       "Workspaces",
     ]);
     expect(filterPalette(entries, "zzz")).toEqual([]);
+  });
+});
+
+describe("synonyms", () => {
+  // A command as the palette lists it in French: its label, then its hidden
+  // keywords — the English label, the synonyms, the group.
+  const settings = {
+    group: "Affichage",
+    label: "Ouvrir ou fermer les réglages",
+    keywords: ["Open or close the settings", ...commandSynonyms("view.settings"), "Affichage"],
+  };
+  const font = { group: "Affichage", label: "Options de la police" };
+
+  it("finds a command by a word neither of its labels uses", () => {
+    expect(filterPalette([settings], "parametres")[0]?.entries[0].entry).toBe(settings);
+    expect(filterPalette([settings], "préférences")[0]?.entries[0].entry).toBe(settings);
+  });
+
+  it("finds a command by its label in the other language", () => {
+    expect(filterPalette([settings], "settings")[0]?.entries[0].entry).toBe(settings);
+  });
+
+  it("still ranks a label match above a synonym", () => {
+    const [group] = filterPalette([settings, font], "options");
+    expect(group.entries.map(({ entry }) => entry.label)).toEqual([
+      "Options de la police",
+      "Ouvrir ou fermer les réglages",
+    ]);
+    expect(group.entries[1].match.score).toBe(SCORE_KEYWORD);
+  });
+
+  it("has none for a command nobody calls anything else", () => {
+    expect(commandSynonyms("pane.next")).toEqual([]);
+  });
+});
+
+describe("no-break spaces", () => {
+  it("match the plain spaces that are typed", () => {
+    expect(matchText("Remise à zéro à 20\u00a0h\u00a001", "20 h 01")?.score).toBe(SCORE_WORD);
+    expect(marked("Aller à «\u202fBen\u202f»", "a « ben")).toEqual(["à «\u202fBen"]);
   });
 });

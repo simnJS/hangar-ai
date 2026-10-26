@@ -5,6 +5,7 @@ import {
   gaugeLevel,
   newlyQueued,
   paneGlyphState,
+  sessionIdLabel,
   shellShortName,
   shortSessionId,
 } from "./PaneStatus";
@@ -40,6 +41,8 @@ describe("PaneStatus", () => {
   it("shortens session ids", () => {
     expect(shortSessionId("01J8Z4-pty-bridge")).toBe("01J8Z4");
     expect(shortSessionId("abc")).toBe("abc");
+    expect(sessionIdLabel("01J8Z4-pty-bridge")).toBe("01J8Z4…");
+    expect(sessionIdLabel("abc")).toBe("abc");
   });
 
   it("keeps the first line that says something", () => {

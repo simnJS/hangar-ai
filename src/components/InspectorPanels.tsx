@@ -8,7 +8,7 @@ import { formatTokens, type ContextGauge } from "../lib/context";
 import { bridgeCancel, type QueuedPrompt } from "../lib/ipc";
 import type { RateLimit } from "../lib/bridge";
 import type { Task } from "../lib/board";
-import type { PaneEvent } from "../lib/paneInsight";
+import { paneEventText, type PaneEvent } from "../lib/paneInsight";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import {
   clockTime,
@@ -16,6 +16,7 @@ import {
   formatPercent,
   formatSince,
   planUsage,
+  resetWhen,
   spacedUnit,
   usageTone,
 } from "../lib/inspectorFormat";
@@ -205,19 +206,14 @@ function PlanMeter({
   const locale = useLocale();
   if (!limit) return null;
   const pct = limit.percentUsed;
-  const resets = limit.resetsAt ? new Date(limit.resetsAt) : null;
-  const hint =
-    resets && !Number.isNaN(resets.getTime())
-      ? t("inspector.planHintResets", {
-          window: name,
-          pct,
-          time: resets.toLocaleString(locale, {
-            weekday: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        })
-      : t("inspector.planHint", { window: name, pct });
+  const resets = limit.resetsAt ? new Date(limit.resetsAt).getTime() : NaN;
+  const hint = !Number.isNaN(resets)
+    ? t("inspector.planHintResets", {
+        window: name,
+        pct,
+        reset: resetWhen(resets, Date.now(), t, locale),
+      })
+    : t("inspector.planHint", { window: name, pct });
   return (
     <div className={`insp-meter insp-meter--${usageTone(pct)}`} title={hint}>
       <span>{label}</span>
@@ -486,7 +482,7 @@ export const ActivitySection = memo(function ActivitySection({
                 {clockTime(event.at, locale)}
               </time>
               <i className={`insp-event__dot insp-event__dot--${event.kind}`} aria-hidden="true" />
-              <span className="insp-event__text">{event.text}</span>
+              <span className="insp-event__text">{paneEventText(event, t)}</span>
             </li>
           ))}
         </ol>

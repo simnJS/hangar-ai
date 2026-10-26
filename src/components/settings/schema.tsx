@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LOCALES, type Translator } from "../../i18n";
+import { LOCALES, systemLocale, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
@@ -288,6 +288,12 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     return keys ? `${hint} · ${keys}` : hint;
   };
 
+  // A slider's value reads as the interface's language writes numbers:
+  // "3,0 s" and "1,30" in French.
+  const locale = settings.locale ?? systemLocale();
+  const num = (value: number, digits = 0) =>
+    value.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
   const shellChoices: Choice[] = shells.map((shell) => ({
     value: shell.id,
     label: shell.label,
@@ -521,7 +527,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               min: 1,
               max: 2,
               step: 0.05,
-              display: settings.lineHeight.toFixed(2),
+              display: num(settings.lineHeight, 2),
               onChange: (value) => set("lineHeight", value),
             },
             {
@@ -581,11 +587,12 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               kind: "slider",
               label: t("settings.scrollback"),
               hint: t("settings.scrollbackLines", { n: settings.scrollback }),
+              keywords: "scrollback historique history lignes lines buffer",
               value: settings.scrollback,
               min: 1000,
               max: 50000,
               step: 1000,
-              display: settings.scrollback.toLocaleString(),
+              display: num(settings.scrollback),
               onChange: (value) => set("scrollback", value),
             },
           ],
@@ -666,7 +673,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               min: 1000,
               max: 15000,
               step: 500,
-              display: `${(settings.notifyIdleMs / 1000).toFixed(1)} s`,
+              display: `${num(settings.notifyIdleMs / 1000, 1)} s`,
               onChange: (value) => set("notifyIdleMs", value),
             },
             {

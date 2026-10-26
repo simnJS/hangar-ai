@@ -3618,18 +3618,19 @@ body.is-dragging-pane .pane__bar {
   color: var(--fg-secondary);
 }
 
-/* The new-session row explains itself in a sentence, not in metadata. */
-.session__meta.session__meta--text {
-  font-family: inherit;
+/* When a session was last written reads as words, in the interface's font;
+   only its id is metadata, in the monospace of ids. */
+.session__meta {
   font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-secondary);
+  white-space: nowrap;
 }
 
-.session__meta {
+.session__id {
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--fg-secondary);
-  white-space: nowrap;
 }
 
 /* The keyboard's row is the menu highlight, like the palette's. */
@@ -7690,6 +7691,15 @@ select.task__input {
 .cmd-menu__add .icon {
   width: calc(12px * var(--ui-scale));
   height: calc(12px * var(--ui-scale));
+}
+
+/* What the menu is for, while nothing is saved in it. */
+.cmd-menu__empty {
+  margin: 0;
+  padding: 5px 8px 7px;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
 }
 
 /* Set apart from the commands above it, when there are any. */

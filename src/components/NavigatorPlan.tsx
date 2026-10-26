@@ -1,5 +1,6 @@
 import { useT, useLocale } from "../i18n";
 import { usePlanLimits } from "../lib/agentState";
+import { resetWhen } from "../lib/inspectorFormat";
 
 /** Past these, a window is close enough to its limit to say so in colour. */
 const WARN_AT = 70;
@@ -23,40 +24,32 @@ export function NavigatorPlan() {
         ? t("sidebar.planWeek")
         : kind.replace(/_/g, " ");
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 });
-  const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
-  const dayAndTime = new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const now = Date.now();
 
   const resets = plan.limits
     .filter((limit) => limit.resetsAt)
     .map((limit) =>
       t("sidebar.planResets", {
         window: label(limit.kind),
-        time: new Date(limit.resetsAt as string).toLocaleString(locale),
+        reset: resetWhen(new Date(limit.resetsAt as string).getTime(), now, t, locale),
       }),
     );
   const title = [t("sidebar.planHint"), ...resets].join("\n");
 
   // The heading names the next window to reset: the one that frees up first,
   // which is what a pane about to hit its limit is waiting for.
-  const now = Date.now();
   const next = plan.limits
-    .map((limit) => (limit.resetsAt ? new Date(limit.resetsAt) : null))
-    .filter((date): date is Date => date !== null && date.getTime() > now)
-    .sort((a, b) => a.getTime() - b.getTime())[0];
-  const nextLabel = next
-    ? (next.toDateString() === new Date(now).toDateString() ? time : dayAndTime).format(next)
-    : null;
+    .map((limit) => (limit.resetsAt ? new Date(limit.resetsAt).getTime() : NaN))
+    .filter((at) => at > now)
+    .sort((a, b) => a - b)[0];
+  const nextLabel = next !== undefined ? resetWhen(next, now, t, locale) : null;
 
   return (
     <div className="nav-plan" title={title}>
       <div className="nav-plan__head">
         <span className="nav-plan__label">{t("sidebar.plan")}</span>
         {nextLabel && (
-          <span className="nav-plan__reset">{t("sidebar.planResetAt", { time: nextLabel })}</span>
+          <span className="nav-plan__reset">{nextLabel}</span>
         )}
       </div>
       {plan.limits.map((limit) => {

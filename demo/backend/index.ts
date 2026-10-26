@@ -165,7 +165,7 @@ export async function route(command: string, args: Record<string, any>): Promise
           id: "parakeet-tdt-0.6b-v3",
           label: "Parakeet TDT 0.6b v3",
           approxBytes: 660_000_000,
-          languages: "25 languages",
+          languages: "25",
           license: "CC-BY-4.0",
           installed: false,
         },

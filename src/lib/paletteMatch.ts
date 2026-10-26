@@ -1,3 +1,5 @@
+import type { CommandId } from "./shortcuts";
+
 /**
  * How the command palette matches what is typed against what it offers.
  *
@@ -7,6 +9,45 @@
  * one merely containing it. Several words find a label holding all of them,
  * in any order. Pure, so the palette's ranking can be tested without a DOM.
  */
+
+/**
+ * The other words people reach for when they look for a command, in both
+ * languages at once: someone who thinks "paramètres" or "preferences" is
+ * looking for "Réglages". The palette also indexes each command's label in
+ * the other language, so these only cover what neither label says. Like the
+ * agent and group keywords, they rank below every label match.
+ */
+export const COMMAND_SYNONYMS: Partial<Record<CommandId, readonly string[]>> = {
+  "view.settings": ["paramètres", "préférences", "options", "configuration", "preferences", "config"],
+  "view.shortcuts": ["clavier", "touches", "keyboard", "keybindings", "hotkeys"],
+  "view.terminals": ["grille", "grid"],
+  "view.board": ["kanban", "tâches", "tasks", "todo"],
+  "view.boardDock": ["kanban", "tâches", "tasks", "dock"],
+  "view.memory": ["notes", "souvenirs", "knowledge"],
+  "view.mcp": ["serveur", "server", "connecter", "connect", "intégration", "integration"],
+  "view.broadcast": ["diffusion", "envoyer à tous", "send to all", "everyone"],
+  "view.navigator": ["barre latérale", "sidebar", "arborescence", "tree"],
+  "view.inspector": ["détails", "details", "infos", "info"],
+  "pane.split": ["nouveau terminal", "new terminal", "ajouter", "add", "ouvrir", "open"],
+  "pane.splitRight": ["vertical", "côte à côte", "side by side"],
+  "pane.splitDown": ["horizontal"],
+  "pane.close": ["supprimer", "remove", "kill", "quitter", "quit"],
+  "pane.restart": ["redémarrer", "relaunch", "reload"],
+  "pane.restartAll": ["redémarrer", "relaunch", "reload"],
+  "pane.resetAll": ["conversation", "vider", "effacer", "clear", "remise à zéro"],
+  "pane.tidy": ["ranger", "aligner", "grille", "disposition", "arrange", "grid", "layout"],
+  "pane.sessions": ["reprendre", "historique", "conversation", "resume", "history", "transcript"],
+  "pane.zoom": ["agrandir", "maximiser", "plein écran", "maximize", "focus"],
+  "workspace.new": ["projet", "dossier", "créer", "ajouter", "project", "folder", "create", "add"],
+  "terminal.clear": ["cls", "vider", "nettoyer", "reset"],
+  "terminal.find": ["chercher", "trouver", "find", "grep"],
+  "app.zoomIn": ["taille", "plus grand", "size", "larger"],
+  "app.zoomOut": ["taille", "plus petit", "size", "smaller"],
+  "app.fullscreen": ["plein écran", "maximiser", "maximize"],
+};
+
+/** The synonyms of a command, or none. */
+export const commandSynonyms = (id: CommandId): readonly string[] => COMMAND_SYNONYMS[id] ?? [];
 
 /** `[start, end)` in the original, unfolded text: what to highlight. */
 export interface MatchRange {
@@ -35,10 +76,19 @@ export const SCORE_KEYWORD = 0.5;
 
 const COMBINING_MARKS = /\p{M}/gu;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+/** The no-break spaces French labels carry (lib/typography), one for one. */
+const NO_BREAK_SPACES = /[  ]/g;
 
-/** Accents and case folded away, the way both sides are compared. */
+/**
+ * Accents, case and no-break spaces folded away, the way both sides are
+ * compared: what is typed has plain spaces, "20 h 01" in a label does not.
+ */
 export function fold(text: string): string {
-  return text.normalize("NFD").replace(COMBINING_MARKS, "").toLowerCase();
+  return text
+    .normalize("NFD")
+    .replace(COMBINING_MARKS, "")
+    .replace(NO_BREAK_SPACES, " ")
+    .toLowerCase();
 }
 
 /**

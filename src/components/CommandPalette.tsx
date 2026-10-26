@@ -7,7 +7,14 @@ import {
 } from "react";
 import { Icon, type IconName } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
-import { useLocale, useT, type TranslateKey } from "../i18n";
+import {
+  LOCALES,
+  translate,
+  useLocale,
+  useT,
+  type TranslateKey,
+  type TranslateParams,
+} from "../i18n";
 import { useStore } from "../store";
 import {
   getPaneActivity,
@@ -15,7 +22,13 @@ import {
   type AgentActivity,
 } from "../lib/agentState";
 import { leafIds, normalizeTree } from "../lib/layout";
-import { filterPalette, highlight, type MatchRange, type PaletteEntry } from "../lib/paletteMatch";
+import {
+  commandSynonyms,
+  filterPalette,
+  highlight,
+  type MatchRange,
+  type PaletteEntry,
+} from "../lib/paletteMatch";
 import { mergeCommands } from "../lib/savedCommands";
 import {
   COMMANDS,
@@ -190,6 +203,15 @@ export function CommandPalette({
       ? t("pane.shell")
       : (AGENTS.find((agent) => agent.id === pane.agent)?.label ?? pane.agent);
   const keysOf = (id: CommandId) => shortcutLabel(keymap, id);
+  /**
+   * The same words in the languages not shown, as hidden keywords: someone
+   * who reads the app in French may still type "settings", and the other
+   * way round.
+   */
+  const elsewhere = (key: TranslateKey, params?: TranslateParams) =>
+    LOCALES.filter((entry) => entry.id !== locale).map((entry) =>
+      translate(entry.id, key, params),
+    );
 
   const active = workspaces.find((ws) => ws.id === activeWorkspaceId) ?? null;
 
@@ -221,7 +243,14 @@ export function CommandPalette({
         key: `pane:${pane.id}`,
         group,
         label: t("palette.goTo", { name: pane.name }),
-        keywords: [pane.name, agentLabel(pane), t(STATE_WORD[activity]), ws.name],
+        keywords: [
+          pane.name,
+          agentLabel(pane),
+          t(STATE_WORD[activity]),
+          ws.name,
+          ...elsewhere("palette.goTo", { name: pane.name }),
+          ...elsewhere(STATE_WORD[activity]),
+        ],
         icon: <StateGlyph state={activity} size={7} />,
         detail: paneDetail(ws, pane, activity),
         keys: at >= 0 && at < 9 ? keysOf(`pane.focus${at + 1}` as CommandId) : "",
@@ -276,7 +305,7 @@ export function CommandPalette({
             key: `ws:${ws.id}`,
             group,
             label: t("palette.open", { name: ws.name }),
-            keywords: [ws.cwd],
+            keywords: [ws.cwd, ...elsewhere("palette.open", { name: ws.name })],
             icon: <Icon name="folder" size={13} />,
             detail: kind ? (
               <span className={`palette__state palette__state--${kind}`}>{text}</span>
@@ -303,9 +332,13 @@ export function CommandPalette({
             ? t("palette.runSaved", { label: savedCommand.label.trim() || savedCommand.command })
             : t(command.labelKey, command.labelParams),
           keywords: [
-            ...(savedCommand ? [savedCommand.command] : []),
-            ...(ALIASES[command.id] ?? []).map((key) => t(key)),
+            ...(savedCommand
+              ? [savedCommand.command]
+              : elsewhere(command.labelKey, command.labelParams)),
+            ...(ALIASES[command.id] ?? []).flatMap((key) => [t(key), ...elsewhere(key)]),
+            ...commandSynonyms(command.id),
             group,
+            ...elsewhere(`keymap.section.${section}`),
           ],
           icon: <Icon name={ICONS[command.id] ?? SECTION_ICONS[section]} size={13} />,
           keys: keysOf(command.id),

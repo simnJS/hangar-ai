@@ -3,6 +3,7 @@ import { Backdrop, ModalHead } from "./Backdrop";
 import { Icon } from "./Icon";
 import { listSessions } from "../lib/ipc";
 import { arrowStep, stepIndex } from "../lib/menuNav";
+import { sessionIdLabel } from "./PaneStatus";
 import { useT, type Translator } from "../i18n";
 import { AGENTS, type AgentId, type AgentSession } from "../types";
 
@@ -63,10 +64,7 @@ export function SessionPicker({ agent, cwd, currentId, onPick, onClose }: Props)
   const agentLabel = AGENTS.find((entry) => entry.id === agent)?.label ?? agent;
 
   /** The current session wears a check, so the list says where you are now. */
-  const row = (id: string | null, label: ReactNode, meta: string) => {
-    // The new-session row explains itself in a sentence; the others carry
-    // metadata, set in the monospace of ids.
-    const sentence = id === null;
+  const row = (id: string | null, label: ReactNode, meta: ReactNode) => {
     const current = currentId === id;
     return (
       <button
@@ -80,7 +78,7 @@ export function SessionPicker({ agent, cwd, currentId, onPick, onClose }: Props)
           {current && <Icon name="check" size={13} />}
         </span>
         <span className="session__label">{label}</span>
-        <span className={`session__meta ${sentence ? "session__meta--text" : ""}`}>{meta}</span>
+        <span className="session__meta">{meta}</span>
       </button>
     );
   };
@@ -120,7 +118,15 @@ export function SessionPicker({ agent, cwd, currentId, onPick, onClose }: Props)
             row(
               session.id,
               session.label || <em>{t("sessions.untitled")}</em>,
-              `${relative(t, session.modified_ms)} · ${session.id.slice(0, 8)}`,
+              // When, in words; which, in the monospace of ids, shortened the
+              // way the pane header shortens it, the whole id on hover.
+              <>
+                {relative(t, session.modified_ms)}
+                {" · "}
+                <span className="session__id" title={session.id}>
+                  {sessionIdLabel(session.id)}
+                </span>
+              </>,
             ),
           )}
         </div>

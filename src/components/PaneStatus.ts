@@ -47,6 +47,12 @@ export function shortSessionId(id: string): string {
   return id.slice(0, 6);
 }
 
+/** The short id, with an ellipsis saying there is more of it. */
+export function sessionIdLabel(id: string): string {
+  const short = shortSessionId(id);
+  return short.length < id.length ? `${short}…` : id;
+}
+
 /** The first line with something on it, trimmed — an event is one line. */
 export function firstLine(text: string, max = 120): string {
   const line = text.split(/\r?\n/).find((entry) => entry.trim())?.trim() ?? "";

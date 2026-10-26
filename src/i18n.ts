@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useStore } from "./store";
+import { typeset } from "./lib/typography";
 
 /**
  * Minimal typed i18n. `en` is the reference: `fr` is declared as
@@ -8,6 +9,12 @@ import { useStore } from "./store";
  *
  * Plural keys come in `_one` / `_other` pairs and are selected through
  * `Intl.PluralRules`, which applies each language's own rules.
+ *
+ * Both dictionaries are written with plain spaces. The no-break ones — in
+ * French before ? ! ; : » and %, and after «, and in both languages between a
+ * number and its unit — are set once, when the dictionaries load
+ * (lib/typography), so no string has to spell them out and none can forget
+ * one; i18n.test.ts holds every French string to it.
  */
 
 export type Locale = "en" | "fr";
@@ -34,7 +41,7 @@ const en = {
   "sidebar.planFiveHour": "5 h",
   "sidebar.planWeek": "7 d",
   "sidebar.planHint": "Plan usage, as Claude Code last reported it",
-  "sidebar.planResets": "{window} resets {time}",
+  "sidebar.planResets": "{window}: {reset}",
   "sidebar.rename": "Rename workspace (or double-click it)",
   "sidebar.renameHint": "Enter to confirm, Escape to cancel",
   "sidebar.remove": "Delete workspace",
@@ -63,7 +70,10 @@ const en = {
   "sidebar.noMatch": "Nothing matches “{query}”.",
   "sidebar.noneWaiting": "No agent is waiting for you.",
   "sidebar.clearFilter": "Clear the filter",
-  "sidebar.planResetAt": "resets {time}",
+  "sidebar.planResetToday": "resets at {time}",
+  "sidebar.planResetTomorrow": "resets tomorrow at {time}",
+  "sidebar.planResetDay": "resets {day} at {time}",
+  "sidebar.planResetDate": "resets {date} at {time}",
 
   "view.terminals": "Terminals",
   "view.board": "Board",
@@ -76,19 +86,19 @@ const en = {
   "topbar.restartAllHint": "Restart every pane",
   "topbar.resetAll": "Reset agents",
   "topbar.resetAllHint":
-    "Start every agent of this workspace on a new conversation. Shells are left alone, and the old conversations stay resumable from each pane's session picker.",
+    "Start every agent of this workspace on a new session. Shells are left alone; the old sessions can still be resumed from each pane's session picker.",
   "topbar.resetAllNone": "No agent pane to reset in this workspace",
   "topbar.resetAllConfirm_one": "Reset {n} agent",
   "topbar.resetAllConfirm_other": "Reset {n} agents",
-  "topbar.addPane": "Terminal",
+  "topbar.addPane": "Pane",
   "topbar.addPaneHint": "Split the focused pane",
   "topbar.presetHint_one": "Even layout, {n} pane",
   "topbar.presetHint_other": "Even layout, {n} panes",
   // toolbar.*, status.*, palette.* — toolbar, status bar and command palette.
   "toolbar.showNavigator": "Show the navigator",
   "toolbar.tidyHint": "Tidy — lay every pane out as an even grid again; nothing restarts",
-  "toolbar.newTerminal": "New terminal",
-  "toolbar.newTerminalHint": "New terminal — splits the focused pane",
+  "toolbar.newTerminal": "New pane",
+  "toolbar.newTerminalHint": "New pane — splits the focused pane",
   "toolbar.more": "More actions",
   "toolbar.menu": "Workspace actions",
   "toolbar.inspector": "Inspector",
@@ -96,15 +106,17 @@ const en = {
   "toolbar.resetTitle_one": "Reset {n} agent?",
   "toolbar.resetTitle_other": "Reset {n} agents?",
   "toolbar.resetBody":
-    "Each one starts on a new conversation. Shells are left alone, and the old conversations stay resumable from each pane's session picker.",
+    "Each one starts on a new session. Shells are left alone; the old sessions can still be resumed from each pane's session picker.",
   "toolbar.detach": "Open in a window",
   "toolbar.palette": "Command palette",
   "toolbar.activity.label": "Focused pane activity",
   "toolbar.activity.on": "on “{title}”",
   "toolbar.activity.task": "“{title}”",
+  "toolbar.activity.conflict": "a file {name} is editing",
   "toolbar.activity.lastAnswer": "last answer “{answer}”",
-  "toolbar.activity.context": "{pct}% context",
-  "toolbar.activity.contextHint": "{pct}% of the context used, counting toward automatic compaction",
+  "toolbar.activity.context": "{pct}%",
+  "toolbar.activity.contextHint":
+    "{pct}% of the context used; the agent compacts on its own as it nears the limit",
   "toolbar.activity.goTo": "{summary} — go to {name}",
   "toolbar.activity.quiet": "No agent at work",
   "status.broadcast": "Instruction for every pane",
@@ -133,7 +145,7 @@ const en = {
 
   "placeholder.title": "No workspace open",
   "placeholder.body":
-    "Create a workspace from the sidebar: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
+    "Create a workspace from the navigator: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
 
   "broadcast.placeholder": "Send the same instruction to all {n} panes…",
   "broadcast.send": "Broadcast",
@@ -182,23 +194,23 @@ const en = {
   "pane.state.yoursShort": "Your turn",
   "pane.actions": "Actions of pane {name}",
   "pane.more": "More: restart, split, session…",
-  "pane.menu": "More for pane {name}",
+  "pane.menu": "More actions for pane {name}",
   "pane.zoomIn": "Fill the grid with this pane",
   "pane.menuZoom": "Zoom onto this pane",
   "pane.menuDiff": "Show changes",
   "pane.restartNow": "Restart",
   "pane.event.resumed": "Session {id} resumed",
   "pane.event.newSession": "New session",
-  "pane.event.turnStart": "Turn started",
-  "pane.event.turnEnd": "Turn finished",
+  "pane.event.turnStart": "Prompt received",
+  "pane.event.turnEnd": "Finished",
   "pane.event.aborted": "Interrupted",
-  "pane.event.failed": "Turn ended on an error",
+  "pane.event.failed": "Stopped on an error",
   "pane.event.permission": "Waiting for your permission: {tool}",
   "pane.event.permissionAny": "Waiting for your permission",
   "pane.event.conflict": "Asks before editing a file {name} is editing",
   "pane.event.edit": "Edited {file}",
   "pane.event.queued": "Queued: {text}",
-  "pane.event.dropped": "Not taken from the queue: {text}",
+  "pane.event.dropped": "Dropped from the queue: {text}",
   "pane.event.end": "Claude Code exited",
   "pane.event.exit": "The shell exited",
 
@@ -224,6 +236,7 @@ const en = {
 
   "commands.menu": "Saved commands",
   "commands.add": "New command…",
+  "commands.empty": "Keep the commands you type often here: one click sends them to this pane.",
   "commands.edit": "Edit",
   "commands.remove": "Delete",
   "commands.runHint": "Send to this pane: {command}",
@@ -254,10 +267,10 @@ const en = {
 
   "settings.notifications": "Notifications",
   "settings.notifyOnIdle": "When a pane finishes",
-  "settings.notifyOnIdleHint": "desktop notification once an agent hands control back",
+  "settings.notifyOnIdleHint": "Desktop notification once an agent hands control back",
   "settings.notifyIdle": "Silence before finished",
   "settings.notifyAway": "Only in the background",
-  "settings.notifyAwayHint": "with the window in front, the pane badge is enough",
+  "settings.notifyAwayHint": "With the window in front, the pane badge is enough",
 
   // Shown on Discord, to people who are not looking at this app: worded for
   // them, not for the person setting it up.
@@ -277,21 +290,21 @@ const en = {
   "settings.discordHint":
     "Publishes the workspace you have open to your Discord status, through the Discord app running on this machine. Nothing else leaves the computer, and nothing at all until you turn it on.",
   "settings.discordEnable": "Publish to Discord",
-  "settings.discordEnableHint": "needs the Discord desktop app open on this machine",
+  "settings.discordEnableHint": "Needs the Discord desktop app open on this machine",
   "settings.discordWorkspace": "Name the workspace",
-  "settings.discordWorkspaceHint": "off keeps the card generic — no project name",
+  "settings.discordWorkspaceHint": "Off keeps the card generic, with no project name",
   "settings.discordAgents": "Name the agents",
-  "settings.discordAgentsHint": "off only says how many are running",
+  "settings.discordAgentsHint": "Off only says how many are running",
   "settings.discordApp": "Application",
   "settings.discordAppId": "Application ID",
-  "settings.discordAppIdHint": "empty uses the one Hangar.AI ships with",
+  "settings.discordAppIdHint": "Leave empty to use the one Hangar.AI ships with",
   "settings.discordAppIdPlaceholder": "Bundled application",
   "discord.cardHead": "Playing a game",
   "discord.elapsed": "{time} elapsed",
   "discord.statusOff": "Off",
   "discord.statusConnected": "Connected to Discord",
   "discord.statusWaiting": "Waiting for Discord…",
-  "discord.statusWaitingHint": "retrying every 15 s — the presence appears on its own",
+  "discord.statusWaitingHint": "Retrying every 15 s; the presence appears on its own",
 
   "voice.recording": "Listening — release to transcribe, Escape to cancel",
   "voice.transcribing": "Transcribing…",
@@ -303,9 +316,9 @@ const en = {
   "settings.voiceHint":
     "Hold the shortcut, speak, release. What you said is typed into the focused pane, and the microphone is only ever open while the key is down. Nothing is sent anywhere while the engine is local.",
   "settings.voiceEnable": "Enable dictation",
-  "settings.voiceEnableHint": "binds the shortcut and asks for the microphone",
+  "settings.voiceEnableHint": "Binds the shortcut and asks for the microphone",
   "settings.voiceEngine": "Engine",
-  "settings.voiceEngineHint": "where speech is turned into text",
+  "settings.voiceEngineHint": "Where speech is turned into text",
   "settings.voiceEngineLocal": "On this machine",
   "settings.voiceEngineCloud": "Groq",
   "settings.voiceModel": "Local model",
@@ -316,10 +329,10 @@ const en = {
   "settings.voiceInstalled": "Installed",
   "settings.voiceMissing": "Not downloaded yet — dictation falls back to nothing without it",
   "settings.voiceCloudModel": "Groq model",
-  "settings.voiceCloudModelHint": "billed by the hour of audio, to the second",
+  "settings.voiceCloudModelHint": "Billed by the hour of audio, to the second",
   "settings.voiceKey": "Groq API key",
   "settings.voiceKeyHint":
-    "also used by the cleanup pass. Kept in the system keychain, and never shown again once saved",
+    "Also used by the cleanup pass. Kept in the system keychain, and never shown again once saved",
   "settings.voiceKeyPlaceholder": "gsk_…",
   "settings.voiceKeySaved": "Key saved",
   "settings.voiceKeyNone": "No key",
@@ -336,19 +349,19 @@ const en = {
   "settings.voiceKeyLegacyDrop": "Delete it from state.json",
   "settings.voiceLanguage": "Language",
   "settings.voiceLanguageHint":
-    "naming it stops the model switching language mid-sentence; empty lets it decide",
+    "Naming it stops the model switching language mid-sentence; empty lets it decide",
   "settings.voiceLanguageAuto": "Detect",
   "settings.voiceSubmit": "Send on finish",
   "settings.voiceSubmitHint":
-    "off types the text and leaves it for you to read before pressing Enter",
+    "Off types the text and leaves it for you to read before pressing Enter",
   "settings.voiceCleanupSection": "Cleanup",
   "settings.voiceCleanup": "Tidy the transcript",
   "settings.voiceCleanupHintRow":
-    "a small model removes hesitations and spells code the way you type it — needs a Groq key",
+    "A small model removes hesitations and spells code the way you type it — needs a Groq key",
   "settings.voiceCleanupModel": "Cleanup model",
-  "settings.voiceCleanupModelHint": "empty uses {model}",
+  "settings.voiceCleanupModelHint": "Leave empty to use {model}",
   "settings.voiceVocabulary": "Project vocabulary",
-  "settings.voiceVocabularyHint": "names and spellings the cleanup should keep — one per line",
+  "settings.voiceVocabularyHint": "Names and spellings the cleanup should keep — one per line",
   "settings.voiceVocabularyPlaceholder": "Hangar.AI, pnpm, Tauri, simnJS",
   "settings.voiceShortcut": "Shortcut",
   "settings.voiceUnload": "Free the model's memory",
@@ -373,14 +386,14 @@ const en = {
   "settings.interface": "Interface",
   "settings.uiScale": "Interface size",
   "settings.uiScaleHint":
-    "Text of the sidebar, board, menus and settings. The terminals keep their own size, under Terminal › Typography.",
+    "Text of the navigator, board, menus and settings. The terminals keep their own size, under Terminal › Typography.",
   "settings.showNavigator": "Show the navigator",
   "settings.showNavigatorHint": "Workspaces and their agents, on the left",
   "settings.showInspector": "Show the inspector",
   "settings.showInspectorHint": "What the focused agent is doing, on the right",
   "settings.theme": "Theme",
-  "settings.themeHint": "Terminal palette — the whole window follows it.",
-  "settings.themePerWorkspace": "specific to this workspace",
+  "settings.themeHint": "Terminal palette — the whole window follows it",
+  "settings.themePerWorkspace": "Specific to this workspace",
   "settings.themePerWorkspaceHint": "{name} keeps its own theme",
   "settings.themeDark": "Dark",
   "settings.themeLight": "Light",
@@ -389,15 +402,16 @@ const en = {
   "settings.localeAuto": "System",
   "settings.shell": "Shell",
   "settings.shellDefault": "Default",
-  "settings.shellDetected": "{n} detected",
+  "settings.shellDetected_one": "{n} detected",
+  "settings.shellDetected_other": "{n} detected",
   "settings.shellAuto": "Auto ({name})",
   "settings.shellWorkspace": "This workspace",
-  "settings.shellWorkspaceHint": "overrides the default",
+  "settings.shellWorkspaceHint": "Overrides the default shell",
   "settings.shellFollow": "Follow the default",
   "settings.preview": "Preview",
   "settings.typography": "Typography",
   "settings.font": "Font",
-  "settings.fontHint": "monospace stacks — the first one installed wins",
+  "settings.fontHint": "Monospace stacks — the first one installed wins",
   "settings.fontCustom": "Custom",
   "settings.size": "Size",
   "settings.lineHeight": "Line height",
@@ -414,12 +428,12 @@ const en = {
   "settings.scrollbackLines": "{n} lines",
   "settings.sessions": "Sessions",
   "settings.autoResume": "Auto resume",
-  "settings.autoResumeHint": "relaunch agents on their last session",
+  "settings.autoResumeHint": "Relaunches agents on their last session",
   "settings.claudeBridge": "Claude Code bridge",
   "settings.claudeBridgeHint":
-    "load Hangar's mod into Claude Code, for exact states, plan usage and prompts held until free; applies to panes started from now on",
+    "Loads Hangar's mod into Claude Code, for exact states, plan usage and prompts held until free; applies to panes started from now on",
   "settings.launchDelay": "Launch delay",
-  "settings.launchDelayHint": "leaves the shell time to load its profile",
+  "settings.launchDelayHint": "Leaves the shell time to load its profile",
   "settings.agentCommands": "Launch commands",
   "settings.agentCommandsHint":
     "What a pane types to start each agent. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default.",
@@ -435,7 +449,7 @@ const en = {
   "keymap.remove": "Remove {keys}",
   "keymap.reset": "Restore the default",
   "keymap.resetAll": "Restore all defaults",
-  "keymap.resetAllHint": "every command goes back to the keys it ships with",
+  "keymap.resetAllHint": "Every command goes back to the keys it ships with",
   "keymap.resetAllConfirm": "Restore",
   "keymap.recording": "Press the keys…",
   "keymap.recordingHint": "Enter confirms · Escape cancels",
@@ -465,7 +479,7 @@ const en = {
   "cmd.pane.close": "Close the focused pane",
   "cmd.pane.restart": "Restart the focused pane",
   "cmd.pane.restartAll": "Restart every pane",
-  "cmd.pane.resetAll": "Start every agent on a new conversation",
+  "cmd.pane.resetAll": "Start every agent on a new session",
   "cmd.pane.tidy": "Tidy the panes into an even grid",
   "cmd.pane.sessions": "Pick the session to resume",
   "cmd.pane.zoom": "Fill the grid with the focused pane, or go back",
@@ -512,7 +526,7 @@ const en = {
   "settings.version": "Version",
   "settings.maintenance": "Maintenance",
   "settings.reset": "Restore defaults",
-  "settings.resetHint": "every setting on this page goes back to its initial value",
+  "settings.resetHint": "Every setting on this page goes back to its initial value",
   "settings.resetConfirm": "Confirm",
 
   "sessions.title": "{agent} sessions",
@@ -538,7 +552,7 @@ const en = {
   "create.fileFound": "{name} sits in this folder",
   "create.fileUse": "Open it",
   "create.fileFailed": "{name} could not be read",
-  "create.rootsHint": "terminals open in the main folder; the others go to Claude Code",
+  "create.rootsHint": "panes open in the main folder; the other folders go to Claude Code",
   "create.rootMain": "main",
   "create.rootExtra": "extra",
   "create.rootMissing": "missing",
@@ -548,7 +562,7 @@ const en = {
   "create.shellDetected_other": "{n} detected on this machine",
   "create.shellDefault": "Default ({name})",
   "create.shellNone": "none",
-  "create.terminals": "Number of terminals",
+  "create.terminals": "Number of panes",
   "create.agents": "Agent split",
   "create.freeSlots_one": "{n} pane left as a plain shell",
   "create.freeSlots_other": "{n} panes left as plain shells",
@@ -575,10 +589,10 @@ const en = {
   "board.missingTask": "a deleted task",
   "board.focusAgent": "Show {name}'s pane",
   "board.doingSince": "In progress since {date}",
-  "board.elapsedNow": "<\u00a01\u00a0min",
-  "board.elapsedMinutes": "{m}\u00a0min",
-  "board.elapsedHours": "{h}\u00a0h\u00a0{m}",
-  "board.elapsedDays": "{d}\u00a0d\u00a0{h}\u00a0h",
+  "board.elapsedNow": "< 1 min",
+  "board.elapsedMinutes": "{m} min",
+  "board.elapsedHours": "{h} h {m}",
+  "board.elapsedDays": "{d} d {h} h",
   "board.comments_one": "{n} comment",
   "board.comments_other": "{n} comments",
   "board.shown_one": "{shown} of {n} task",
@@ -616,7 +630,7 @@ const en = {
   "board.dockHint": "Keep the board beside the terminals",
   "board.dockExpand": "Open the full board",
   "board.dockHide": "Hide the board panel",
-  "board.dockResize": "Drag to resize the board panel, double-click to reset",
+  "board.dockResize": "Resize the board panel · double-click for the default width",
 
   "diff.title": "Changes",
   "diff.loading": "Reading the changes…",
@@ -662,7 +676,8 @@ const en = {
   "window.reattachHint": "Bring this workspace back into the main window. Its agents keep running.",
   "window.show": "Show its window",
   "window.elsewhereTitle": "{name} is open in its own window",
-  "window.elsewhereBody": "Its terminals run there. Closing that window brings the workspace back here, agents still running.",
+  "window.elsewhereBody":
+    "Its panes run there. Closing that window brings the workspace back here, agents still running.",
   "window.openFailed": "Could not open the window: {error}",
   "window.inOwnWindow": "Open in a window of its own",
   "window.bringBack": "Bring it back here",
@@ -741,19 +756,19 @@ const en = {
   "inspector.section.files": "Changed files",
   "inspector.section.activity": "Recent activity",
   "inspector.resume": "Resumes",
-  "inspector.resumeNew": "New conversation",
+  "inspector.resumeNew": "New session",
   "inspector.resumeChange": "Change…",
-  "inspector.resumeChangeHint": "Pick the conversation this pane resumes",
-  "inspector.since": "Since",
+  "inspector.resumeChangeHint": "Pick the session this pane resumes",
+  "inspector.since": "Started",
   "inspector.model": "Model",
   "inspector.shell": "Shell",
   "inspector.folder": "Folder",
   "inspector.justNow": "just now",
-  "inspector.minutesAgo": "{n}\u00a0min ago",
-  "inspector.todayAt": "today {time}",
-  "inspector.yesterdayAt": "yesterday {time}",
-  "inspector.dateAt": "{date}, {time}",
-  "inspector.contextUsed": "{pct}% toward compaction",
+  "inspector.minutesAgo": "{n} min ago",
+  "inspector.todayAt": "today at {time}",
+  "inspector.yesterdayAt": "yesterday at {time}",
+  "inspector.dateAt": "{date} at {time}",
+  "inspector.contextUsed": "{pct}% of context used",
   "inspector.contextTokens": "{used} of {window} tokens",
   "inspector.contextHint": "The agent compacts on its own as it nears the limit.",
   "inspector.contextHintSoon": "Compaction is close: the agent will soon summarise the conversation.",
@@ -768,7 +783,7 @@ const en = {
   "inspector.planWindowFiveHour": "5-hour window",
   "inspector.planWindowWeek": "7-day window",
   "inspector.planHint": "{window}: {pct}% used",
-  "inspector.planHintResets": "{window}: {pct}% used, resets {time}",
+  "inspector.planHintResets": "{window}: {pct}% used, {reset}",
   "inspector.planUnknown": "Reported with the first answer.",
   "inspector.taskOpen": "Open",
   "inspector.taskOpenHint": "Show the board",
@@ -799,7 +814,7 @@ const en = {
   "inspector.status.C": "copied",
   "inspector.status.U": "in conflict",
   "inspector.activityEmpty":
-    "Nothing yet. Turns, permissions and edits show up here once Claude Code loads the hangar-bridge mod.",
+    "Nothing yet. Prompts, permissions and edits show up here once Claude Code loads the hangar-bridge mod.",
   "inspector.activityQuiet": "Nothing yet.",
   "inspector.activityOther":
     "{agent} does not report what it does. Only Claude Code does, through the hangar-bridge mod.",
@@ -844,18 +859,18 @@ const en = {
   "worktrees.ageWeek": "{n}w",
   "worktrees.openWorkspace": "Open as workspace",
   "worktrees.openWorkspaceHint":
-    "opens it in a workspace of its own, or activates the one already on it",
+    "Opens it in a workspace of its own, or activates the one already on it",
   "worktrees.openPane": "Open in a pane",
-  "worktrees.openPaneHint": "adds a terminal on this worktree to the current workspace",
-  "worktrees.openPaneCurrent": "this workspace already opens here",
+  "worktrees.openPaneHint": "Adds a pane on this worktree to the active workspace",
+  "worktrees.openPaneCurrent": "This workspace already opens here",
   "worktrees.paneFull": "This workspace cannot take another pane.",
   "worktrees.lock": "Lock",
-  "worktrees.lockHint": "keeps prune and remove away from this worktree",
+  "worktrees.lockHint": "Keeps prune and remove away from this worktree",
   "worktrees.unlock": "Unlock",
-  "worktrees.unlockHint": "lets prune and remove reach this worktree again",
+  "worktrees.unlockHint": "Lets prune and remove reach this worktree again",
   "worktrees.remove": "Remove",
   "worktrees.removeConfirm": "Confirm?",
-  "worktrees.removeHint": "detaches the worktree and deletes its folder",
+  "worktrees.removeHint": "Detaches the worktree and deletes its folder",
   "worktrees.inUse":
     "Open in the workspace “{name}” — close it there before removing.",
   "worktrees.force": "Force",
@@ -891,7 +906,7 @@ const en = {
     "That folder already existed — the worktree went to {path}.",
   "worktrees.copy": "Copy the untracked files (.env…)",
   "worktrees.copyHint":
-    "a fresh checkout has none of the files git ignores: .env, *.local, .vscode/…",
+    "A fresh checkout has none of the files git ignores: .env, *.local, .vscode/…",
   "worktrees.copied_one": "{n} file copied.",
   "worktrees.copied_other": "{n} files copied.",
   "worktrees.copyFailed_one": "{n} could not be copied.",
@@ -904,7 +919,7 @@ const en = {
   "worktrees.fetchHint": "git fetch --all --prune",
   "worktrees.fetching": "Fetching…",
   "worktrees.prune": "Prune",
-  "worktrees.pruneHint": "forgets the worktrees whose folder is gone",
+  "worktrees.pruneHint": "Forgets the worktrees whose folder is gone",
   "worktrees.refresh": "↻ Refresh",
   "worktrees.close": "Close",
 
@@ -920,6 +935,45 @@ const en = {
 
 type Key = keyof typeof en;
 
+/**
+ * French glossary: one word per thing, everywhere. New strings keep to it.
+ *
+ * - pane: « panneau », never « pane » nor « terminal ». One tile of the
+ *   grid, running an agent or a shell: « Nouveau panneau », « Nombre de
+ *   panneaux », « le panneau de Ben ». The focused one is the « panneau
+ *   actif ».
+ * - « terminal », « terminaux »: only what is inside a pane (its text, font,
+ *   search, history) and the « Terminaux » view that shows the grid.
+ * - The side panels are named after what they hold, never « panneau »: the
+ *   « navigateur » on the left (not « barre latérale »), the « inspecteur »
+ *   on the right, and the « tableau latéral », the board docked beside the
+ *   grid. Their group of commands is « Affichage ».
+ * - workspace: « workspace » (masculine), never « espace de travail ».
+ * - board: « tableau », columns « À faire », « En cours », « Revue »,
+ *   « Terminé ». A task's tag is a « label »; a memory entry's, an
+ *   « étiquette ».
+ * - agent: the program a pane runs (Claude Code, Codex…). A first name
+ *   (Ava, Ben) names the pane, not the agent.
+ * - session: a resumable agent conversation, with an id: « Nouvelle
+ *   session », « Sessions de Claude Code », « sélecteur de sessions ». Not
+ *   « conversation » in a label.
+ * - prompt: « prompt » (masculine). The shell's own prompt is « l'invite ».
+ * - « Relancer » restarts the same session, « Réinitialiser » starts a new
+ *   one, « Rétablir » restores defaults; a plan window has a « remise à
+ *   zéro ».
+ * - changes: « modifications » in sentences; « diff » only names the
+ *   line-by-line view.
+ * - settings: « Réglages », never « Paramètres ». Focused: « actif ».
+ *
+ * Voice: the user is « tu ». Buttons, menu items and commands are
+ * infinitives (« Relancer le panneau »). Settings hints and tooltips are
+ * sentences starting with a capital, with no final period unless there are
+ * two; a hint set inline after a field's label (form-hint) stays lowercase.
+ * Times in prose read « à 20 h 01 ».
+ *
+ * Typography is t()'s job (lib/typography): write plain spaces before
+ * ? ! ; : » %, after «, and between a number and its unit.
+ */
 const fr: Record<Key, string> = {
   "app.loading": "Chargement…",
 
@@ -937,7 +991,7 @@ const fr: Record<Key, string> = {
   "sidebar.planFiveHour": "5 h",
   "sidebar.planWeek": "7 j",
   "sidebar.planHint": "Consommation du forfait, d'après le dernier relevé de Claude Code",
-  "sidebar.planResets": "{window} : remise à zéro {time}",
+  "sidebar.planResets": "{window} : {reset}",
   "sidebar.rename": "Renommer le workspace (ou double-clic dessus)",
   "sidebar.renameHint": "Entrée pour valider, Échap pour annuler",
   "sidebar.remove": "Supprimer le workspace",
@@ -963,10 +1017,13 @@ const fr: Record<Key, string> = {
   "sidebar.filter": "Filtrer",
   "sidebar.filterLabel": "Filtrer les workspaces et les agents",
   "sidebar.attention": "Seulement ceux qui t'attendent",
-  "sidebar.noMatch": "Rien ne correspond à « {query} ».",
+  "sidebar.noMatch": "Rien ne correspond à « {query} ».",
   "sidebar.noneWaiting": "Aucun agent ne t'attend.",
   "sidebar.clearFilter": "Effacer le filtre",
-  "sidebar.planResetAt": "remise à zéro {time}",
+  "sidebar.planResetToday": "remise à zéro à {time}",
+  "sidebar.planResetTomorrow": "remise à zéro demain à {time}",
+  "sidebar.planResetDay": "remise à zéro {day} à {time}",
+  "sidebar.planResetDate": "remise à zéro le {date} à {time}",
 
   "view.terminals": "Terminaux",
   "view.board": "Tableau",
@@ -979,19 +1036,19 @@ const fr: Record<Key, string> = {
   "topbar.restartAllHint": "Relancer tous les panneaux",
   "topbar.resetAll": "Réinitialiser les agents",
   "topbar.resetAllHint":
-    "Relancer chaque agent de ce workspace sur une nouvelle conversation. Les shells ne bougent pas, et les anciennes conversations restent reprenables depuis le sélecteur de sessions de chaque panneau.",
+    "Relancer chaque agent de ce workspace sur une nouvelle session. Les shells ne bougent pas ; les anciennes sessions restent reprenables depuis le sélecteur de sessions de chaque panneau.",
   "topbar.resetAllNone": "Aucun agent à réinitialiser dans ce workspace",
   "topbar.resetAllConfirm_one": "Réinitialiser {n} agent",
   "topbar.resetAllConfirm_other": "Réinitialiser {n} agents",
-  "topbar.addPane": "Terminal",
+  "topbar.addPane": "Panneau",
   "topbar.addPaneHint": "Diviser le panneau actif",
   "topbar.presetHint_one": "Disposition régulière, {n} panneau",
   "topbar.presetHint_other": "Disposition régulière, {n} panneaux",
   // toolbar.*, status.*, palette.* — barre d'outils, barre d'état, palette.
   "toolbar.showNavigator": "Afficher le navigateur",
   "toolbar.tidyHint": "Réorganiser — remettre tous les panneaux en grille régulière, sans rien relancer",
-  "toolbar.newTerminal": "Nouveau terminal",
-  "toolbar.newTerminalHint": "Nouveau terminal — divise le panneau actif",
+  "toolbar.newTerminal": "Nouveau panneau",
+  "toolbar.newTerminalHint": "Nouveau panneau — divise le panneau actif",
   "toolbar.more": "Plus d'actions",
   "toolbar.menu": "Actions du workspace",
   "toolbar.inspector": "Inspecteur",
@@ -999,15 +1056,17 @@ const fr: Record<Key, string> = {
   "toolbar.resetTitle_one": "Réinitialiser {n} agent ?",
   "toolbar.resetTitle_other": "Réinitialiser {n} agents ?",
   "toolbar.resetBody":
-    "Chacun repart sur une nouvelle conversation. Les shells ne bougent pas, et les anciennes conversations restent reprenables depuis le sélecteur de sessions de chaque panneau.",
+    "Chacun repart sur une nouvelle session. Les shells ne bougent pas ; les anciennes sessions restent reprenables depuis le sélecteur de sessions de chaque panneau.",
   "toolbar.detach": "Ouvrir dans une fenêtre",
   "toolbar.palette": "Palette de commandes",
   "toolbar.activity.label": "Activité du panneau actif",
   "toolbar.activity.on": "sur « {title} »",
   "toolbar.activity.task": "« {title} »",
+  "toolbar.activity.conflict": "un fichier que {name} modifie",
   "toolbar.activity.lastAnswer": "dernière réponse « {answer} »",
-  "toolbar.activity.context": "{pct} % contexte",
-  "toolbar.activity.contextHint": "{pct} % du contexte consommé, en route vers le compactage automatique",
+  "toolbar.activity.context": "{pct} %",
+  "toolbar.activity.contextHint":
+    "{pct} % du contexte utilisé ; l'agent compacte automatiquement à l'approche de la limite",
   "toolbar.activity.goTo": "{summary} — aller à {name}",
   "toolbar.activity.quiet": "Aucun agent au travail",
   "status.broadcast": "Instruction pour tous les panneaux",
@@ -1036,7 +1095,7 @@ const fr: Record<Key, string> = {
 
   "placeholder.title": "Aucun workspace ouvert",
   "placeholder.body":
-    "Crée un workspace depuis la barre latérale : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
+    "Crée un workspace depuis le navigateur : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
 
   "broadcast.placeholder": "Envoyer la même instruction aux {n} panneaux…",
   "broadcast.send": "Diffuser",
@@ -1047,7 +1106,7 @@ const fr: Record<Key, string> = {
     "Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneaux ont un Claude Code capable de la garder ; les autres la reçoivent tout de suite.",
 
   "pane.agent": "Agent lancé dans ce panneau",
-  "pane.missing": " (absent)",
+  "pane.missing": " (non installé)",
   "pane.shell": "Shell",
   "pane.inherited": "{name} (hérité)",
   "pane.shellTitle": "Shell : {program}",
@@ -1085,23 +1144,23 @@ const fr: Record<Key, string> = {
   "pane.state.yoursShort": "À toi",
   "pane.actions": "Actions du panneau {name}",
   "pane.more": "Plus : relancer, diviser, session…",
-  "pane.menu": "Plus pour le panneau {name}",
+  "pane.menu": "Plus d'actions pour le panneau {name}",
   "pane.zoomIn": "Afficher ce panneau sur toute la grille",
   "pane.menuZoom": "Zoomer sur ce panneau",
   "pane.menuDiff": "Voir les modifications",
   "pane.restartNow": "Relancer",
   "pane.event.resumed": "Session {id} reprise",
   "pane.event.newSession": "Nouvelle session",
-  "pane.event.turnStart": "Tour lancé",
-  "pane.event.turnEnd": "Tour terminé",
+  "pane.event.turnStart": "Prompt reçu",
+  "pane.event.turnEnd": "Terminé",
   "pane.event.aborted": "Interrompu",
-  "pane.event.failed": "Tour terminé sur une erreur",
+  "pane.event.failed": "S'est arrêté sur une erreur",
   "pane.event.permission": "Attend ta permission : {tool}",
   "pane.event.permissionAny": "Attend ta permission",
   "pane.event.conflict": "Demande avant de modifier un fichier que {name} modifie",
-  "pane.event.edit": "Modifié {file}",
+  "pane.event.edit": "A modifié {file}",
   "pane.event.queued": "Mis en file : {text}",
-  "pane.event.dropped": "Pas repris de la file : {text}",
+  "pane.event.dropped": "Écarté de la file : {text}",
   "pane.event.end": "Claude Code s'est arrêté",
   "pane.event.exit": "Le shell s'est arrêté",
 
@@ -1127,6 +1186,8 @@ const fr: Record<Key, string> = {
 
   "commands.menu": "Commandes enregistrées",
   "commands.add": "Nouvelle commande…",
+  "commands.empty":
+    "Garde ici les commandes que tu tapes souvent : un clic les envoie dans ce panneau.",
   "commands.edit": "Modifier",
   "commands.remove": "Supprimer",
   "commands.runHint": "Envoyer dans ce panneau : {command}",
@@ -1157,13 +1218,13 @@ const fr: Record<Key, string> = {
 
   "settings.notifications": "Notifications",
   "settings.notifyOnIdle": "Quand un panneau a terminé",
-  "settings.notifyOnIdleHint": "notification système dès qu'un agent rend la main",
+  "settings.notifyOnIdleHint": "Notification système dès qu'un agent rend la main",
   "settings.notifyIdle": "Silence avant « terminé »",
   "settings.notifyAway": "Seulement en arrière-plan",
-  "settings.notifyAwayHint": "fenêtre au premier plan, la pastille du panneau suffit",
+  "settings.notifyAwayHint": "Quand la fenêtre est au premier plan, la pastille du panneau suffit",
 
   "discord.working": "Pilote ses agents de code",
-  "discord.noWorkspace": "Aucun espace ouvert",
+  "discord.noWorkspace": "Aucun workspace ouvert",
   "discord.idle": "Au repos",
   "discord.panes_one": "{n} panneau",
   "discord.panes_other": "{n} panneaux",
@@ -1176,16 +1237,16 @@ const fr: Record<Key, string> = {
   "settings.catDiscord": "Discord",
   "settings.discord": "Rich Presence",
   "settings.discordHint":
-    "Publie l'espace de travail ouvert sur ton statut Discord, via l'application Discord installée sur cette machine. Rien d'autre ne quitte l'ordinateur, et rien du tout tant que ce n'est pas activé.",
+    "Publie le workspace ouvert sur ton statut Discord, via l'application Discord installée sur cette machine. Rien d'autre ne quitte l'ordinateur, et rien du tout tant que ce n'est pas activé.",
   "settings.discordEnable": "Publier sur Discord",
-  "settings.discordEnableHint": "nécessite l'application Discord ouverte sur cette machine",
-  "settings.discordWorkspace": "Nommer l'espace de travail",
-  "settings.discordWorkspaceHint": "désactivé, la carte reste générique — aucun nom de projet",
+  "settings.discordEnableHint": "Nécessite l'application Discord ouverte sur cette machine",
+  "settings.discordWorkspace": "Nommer le workspace",
+  "settings.discordWorkspaceHint": "Désactivé, la carte reste générique, sans nom de projet",
   "settings.discordAgents": "Nommer les agents",
-  "settings.discordAgentsHint": "désactivé, seul leur nombre est indiqué",
+  "settings.discordAgentsHint": "Désactivé, seul leur nombre est indiqué",
   "settings.discordApp": "Application",
   "settings.discordAppId": "Identifiant d'application",
-  "settings.discordAppIdHint": "vide, celle fournie avec Hangar.AI est utilisée",
+  "settings.discordAppIdHint": "Laisse vide pour utiliser celle fournie avec Hangar.AI",
   "settings.discordAppIdPlaceholder": "Application fournie",
   "discord.cardHead": "Joue à",
   "discord.elapsed": "{time} écoulées",
@@ -1193,21 +1254,21 @@ const fr: Record<Key, string> = {
   "discord.statusConnected": "Connecté à Discord",
   "discord.statusWaiting": "En attente de Discord…",
   "discord.statusWaitingHint":
-    "nouvelle tentative toutes les 15 s — la présence apparaîtra d'elle-même",
+    "Nouvelle tentative toutes les 15 s ; la présence apparaîtra d'elle-même",
 
   "voice.recording": "À l'écoute — relâche pour transcrire, Échap pour annuler",
   "voice.transcribing": "Transcription…",
   "voice.failed": "Dictée échouée : {error}",
-  "voice.noPane": "Ouvre un terminal pour y dicter",
+  "voice.noPane": "Ouvre un panneau pour y dicter",
 
   "settings.catVoice": "Voix",
   "settings.voice": "Dictée",
   "settings.voiceHint":
-    "Maintiens le raccourci, parle, relâche. Ce que tu dis est tapé dans le terminal actif, et le micro n'est ouvert que tant que la touche est enfoncée. Tant que le moteur est local, rien ne quitte la machine.",
+    "Maintiens le raccourci, parle, relâche. Ce que tu dis est tapé dans le panneau actif, et le micro n'est ouvert que tant que la touche est enfoncée. Tant que le moteur est local, rien ne quitte la machine.",
   "settings.voiceEnable": "Activer la dictée",
-  "settings.voiceEnableHint": "attribue le raccourci et demande l'accès au micro",
+  "settings.voiceEnableHint": "Attribue le raccourci et demande l'accès au micro",
   "settings.voiceEngine": "Moteur",
-  "settings.voiceEngineHint": "où la parole devient du texte",
+  "settings.voiceEngineHint": "Là où la parole devient du texte",
   "settings.voiceEngineLocal": "Sur cette machine",
   "settings.voiceEngineCloud": "Groq",
   "settings.voiceModel": "Modèle local",
@@ -1219,10 +1280,10 @@ const fr: Record<Key, string> = {
   "settings.voiceInstalled": "Installé",
   "settings.voiceMissing": "Pas encore téléchargé — sans lui la dictée locale ne peut rien faire",
   "settings.voiceCloudModel": "Modèle Groq",
-  "settings.voiceCloudModelHint": "facturé à l'heure d'audio, à la seconde près",
+  "settings.voiceCloudModelHint": "Facturé à l'heure d'audio, à la seconde près",
   "settings.voiceKey": "Clé d'API Groq",
   "settings.voiceKeyHint":
-    "sert aussi à la relecture. Rangée dans le trousseau du système, et plus jamais affichée une fois enregistrée",
+    "Sert aussi à la relecture. Rangée dans le trousseau du système, et plus jamais affichée une fois enregistrée",
   "settings.voiceKeyPlaceholder": "gsk_…",
   "settings.voiceKeySaved": "Clé enregistrée",
   "settings.voiceKeyNone": "Aucune clé",
@@ -1239,20 +1300,20 @@ const fr: Record<Key, string> = {
   "settings.voiceKeyLegacyDrop": "La supprimer de state.json",
   "settings.voiceLanguage": "Langue",
   "settings.voiceLanguageHint":
-    "la nommer empêche le modèle de changer de langue en cours de phrase ; vide, il décide",
+    "La nommer empêche le modèle de changer de langue en cours de phrase ; vide, il décide",
   "settings.voiceLanguageAuto": "Détecter",
   "settings.voiceSubmit": "Envoyer à la fin",
   "settings.voiceSubmitHint":
-    "désactivé, le texte est tapé et te laisse le relire avant d'appuyer sur Entrée",
+    "Désactivé, le texte est tapé et te laisse le relire avant d'appuyer sur Entrée",
   "settings.voiceCleanupSection": "Relecture",
   "settings.voiceCleanup": "Nettoyer la transcription",
   "settings.voiceCleanupHintRow":
-    "un petit modèle retire les hésitations et écrit le code comme tu le tapes — nécessite une clé Groq",
+    "Un petit modèle retire les hésitations et écrit le code comme tu le tapes — nécessite une clé Groq",
   "settings.voiceCleanupModel": "Modèle de relecture",
-  "settings.voiceCleanupModelHint": "vide, {model} est utilisé",
+  "settings.voiceCleanupModelHint": "Laisse vide pour utiliser {model}",
   "settings.voiceVocabulary": "Vocabulaire du projet",
   "settings.voiceVocabularyHint":
-    "les noms et orthographes que la relecture doit respecter — un par ligne",
+    "Les noms et orthographes que la relecture doit respecter — un par ligne",
   "settings.voiceVocabularyPlaceholder": "Hangar.AI, pnpm, Tauri, simnJS",
   "settings.voiceShortcut": "Raccourci",
   "settings.voiceUnload": "Libérer la mémoire du modèle",
@@ -1277,14 +1338,14 @@ const fr: Record<Key, string> = {
   "settings.interface": "Interface",
   "settings.uiScale": "Taille de l'interface",
   "settings.uiScaleHint":
-    "Texte de la barre latérale, du tableau, des menus et des réglages. Les terminaux gardent leur propre taille, dans Terminal › Typographie.",
+    "Texte du navigateur, du tableau, des menus et des réglages. Les terminaux gardent leur propre taille, dans Terminal › Typographie.",
   "settings.showNavigator": "Afficher le navigateur",
   "settings.showNavigatorHint": "Les workspaces et leurs agents, à gauche",
   "settings.showInspector": "Afficher l'inspecteur",
   "settings.showInspectorHint": "Ce que fait l'agent actif, à droite",
   "settings.theme": "Thème",
-  "settings.themeHint": "Palette des terminaux — toute la fenêtre la suit.",
-  "settings.themePerWorkspace": "spécifique à ce workspace",
+  "settings.themeHint": "Palette des terminaux — toute la fenêtre la suit",
+  "settings.themePerWorkspace": "Propre à ce workspace",
   "settings.themePerWorkspaceHint": "{name} garde son propre thème",
   "settings.themeDark": "Sombres",
   "settings.themeLight": "Clairs",
@@ -1293,15 +1354,16 @@ const fr: Record<Key, string> = {
   "settings.localeAuto": "Système",
   "settings.shell": "Shell",
   "settings.shellDefault": "Par défaut",
-  "settings.shellDetected": "{n} détecté(s)",
+  "settings.shellDetected_one": "{n} détecté",
+  "settings.shellDetected_other": "{n} détectés",
   "settings.shellAuto": "Auto ({name})",
   "settings.shellWorkspace": "Ce workspace",
-  "settings.shellWorkspaceHint": "prioritaire sur le défaut",
+  "settings.shellWorkspaceHint": "Prioritaire sur le shell par défaut",
   "settings.shellFollow": "Suivre le défaut",
   "settings.preview": "Aperçu",
   "settings.typography": "Typographie",
   "settings.font": "Police",
-  "settings.fontHint": "piles monospace — la première installée l'emporte",
+  "settings.fontHint": "Piles monospace — la première installée l'emporte",
   "settings.fontCustom": "Personnalisée",
   "settings.size": "Taille",
   "settings.lineHeight": "Interligne",
@@ -1314,16 +1376,16 @@ const fr: Record<Key, string> = {
   "settings.cursorUnderline": "Souligné",
   "settings.blink": "Clignotement",
   "settings.history": "Historique",
-  "settings.scrollback": "Scrollback",
+  "settings.scrollback": "Taille de l'historique",
   "settings.scrollbackLines": "{n} lignes",
   "settings.sessions": "Sessions",
-  "settings.autoResume": "Reprise auto",
-  "settings.autoResumeHint": "relance les agents sur leur dernière session",
+  "settings.autoResume": "Reprise automatique",
+  "settings.autoResumeHint": "Relance les agents sur leur dernière session",
   "settings.claudeBridge": "Pont Claude Code",
   "settings.claudeBridgeHint":
-    "charge le mod de Hangar dans Claude Code, pour des états exacts, la consommation du forfait et les prompts gardés jusqu'à ce qu'il soit libre ; vaut pour les panneaux lancés ensuite",
+    "Charge le mod de Hangar dans Claude Code, pour des états exacts, la consommation du forfait et les prompts gardés jusqu'à ce qu'il soit libre ; vaut pour les panneaux lancés ensuite",
   "settings.launchDelay": "Délai de lancement",
-  "settings.launchDelayHint": "laisse au shell le temps de charger son profil",
+  "settings.launchDelayHint": "Laisse au shell le temps de charger son profil",
   "settings.agentCommands": "Commandes de lancement",
   "settings.agentCommandsHint":
     "Ce qu'un panneau tape pour démarrer chaque agent. C'est envoyé à un shell interactif : un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.",
@@ -1339,7 +1401,7 @@ const fr: Record<Key, string> = {
   "keymap.remove": "Retirer {keys}",
   "keymap.reset": "Rétablir le raccourci par défaut",
   "keymap.resetAll": "Tout rétablir",
-  "keymap.resetAllHint": "chaque commande retrouve les touches d'origine",
+  "keymap.resetAllHint": "Chaque commande retrouve ses touches d'origine",
   "keymap.resetAllConfirm": "Rétablir",
   "keymap.recording": "Appuie sur les touches…",
   "keymap.recordingHint": "Entrée valide · Échap annule",
@@ -1357,7 +1419,7 @@ const fr: Record<Key, string> = {
   "keymap.section.panes": "Panneaux",
   "keymap.section.navigation": "Déplacements",
   "keymap.section.workspaces": "Workspaces",
-  "keymap.section.view": "Vues & panneaux",
+  "keymap.section.view": "Affichage",
   "keymap.section.terminal": "Terminal",
   "keymap.section.commands": "Commandes enregistrées",
   "keymap.section.voice": "Voix",
@@ -1369,7 +1431,7 @@ const fr: Record<Key, string> = {
   "cmd.pane.close": "Fermer le panneau actif",
   "cmd.pane.restart": "Relancer le panneau actif",
   "cmd.pane.restartAll": "Relancer tous les panneaux",
-  "cmd.pane.resetAll": "Relancer chaque agent sur une nouvelle conversation",
+  "cmd.pane.resetAll": "Relancer chaque agent sur une nouvelle session",
   "cmd.pane.tidy": "Réorganiser les panneaux en grille régulière",
   "cmd.pane.sessions": "Choisir la session à reprendre",
   "cmd.pane.zoom": "Afficher le panneau actif sur toute la grille, ou revenir",
@@ -1392,7 +1454,7 @@ const fr: Record<Key, string> = {
   "cmd.view.shortcuts": "Ouvrir les raccourcis clavier",
   "cmd.view.terminals": "Afficher les terminaux",
   "cmd.view.board": "Afficher le tableau",
-  "cmd.view.boardDock": "Afficher ou masquer le tableau à côté des terminaux",
+  "cmd.view.boardDock": "Afficher ou masquer le tableau latéral",
   "cmd.view.memory": "Afficher la mémoire",
   "cmd.view.mcp": "Ouvrir la connexion MCP",
   "cmd.view.broadcast": "Aller au champ de diffusion",
@@ -1411,15 +1473,15 @@ const fr: Record<Key, string> = {
   "cmd.app.zoomOut": "Réduire le texte",
   "cmd.app.zoomReset": "Taille de texte par défaut",
   "cmd.app.fullscreen": "Plein écran",
-  "cmd.voice.dictate": "Dicter dans le terminal actif",
+  "cmd.voice.dictate": "Dicter dans le panneau actif",
 
   "settings.version": "Version",
   "settings.maintenance": "Maintenance",
   "settings.reset": "Rétablir les valeurs par défaut",
-  "settings.resetHint": "tous les réglages de cette page reviennent à leur valeur initiale",
+  "settings.resetHint": "Tous les réglages de cette page reviennent à leur valeur initiale",
   "settings.resetConfirm": "Confirmer",
 
-  "sessions.title": "Sessions {agent}",
+  "sessions.title": "Sessions de {agent}",
   "sessions.new": "Nouvelle session",
   "sessions.newHint": "démarre l'agent sans reprise",
   "sessions.loading": "Lecture des transcriptions…",
@@ -1443,17 +1505,17 @@ const fr: Record<Key, string> = {
   "create.fileUse": "L'ouvrir",
   "create.fileFailed": "{name} n'a pas pu être lu",
   "create.rootsHint":
-    "les terminaux s'ouvrent dans le dossier principal ; les autres vont à Claude Code",
+    "les panneaux s'ouvrent dans le dossier principal ; les autres dossiers vont à Claude Code",
   "create.rootMain": "principal",
   "create.rootExtra": "en plus",
   "create.rootMissing": "introuvable",
   "create.name": "Nom",
   "create.namePlaceholder": "Mon projet",
-  "create.shellDetected_one": "{n} détecté sur ce PC",
-  "create.shellDetected_other": "{n} détectés sur ce PC",
+  "create.shellDetected_one": "{n} détecté sur cette machine",
+  "create.shellDetected_other": "{n} détectés sur cette machine",
   "create.shellDefault": "Par défaut ({name})",
   "create.shellNone": "aucun",
-  "create.terminals": "Nombre de terminaux",
+  "create.terminals": "Nombre de panneaux",
   "create.agents": "Répartition des agents",
   "create.freeSlots_one": "{n} panneau en shell simple",
   "create.freeSlots_other": "{n} panneaux en shell simple",
@@ -1478,12 +1540,12 @@ const fr: Record<Key, string> = {
   "board.dependsOn": "Dépend d'autres tâches, toutes terminées",
   "board.blockedBy": "Bloquée par {tasks}",
   "board.missingTask": "une tâche supprimée",
-  "board.focusAgent": "Afficher le pane de {name}",
+  "board.focusAgent": "Afficher le panneau de {name}",
   "board.doingSince": "En cours depuis le {date}",
-  "board.elapsedNow": "<\u00a01\u00a0min",
-  "board.elapsedMinutes": "{m}\u00a0min",
-  "board.elapsedHours": "{h}\u00a0h\u00a0{m}",
-  "board.elapsedDays": "{d}\u00a0j\u00a0{h}\u00a0h",
+  "board.elapsedNow": "< 1 min",
+  "board.elapsedMinutes": "{m} min",
+  "board.elapsedHours": "{h} h {m}",
+  "board.elapsedDays": "{d} j {h} h",
   "board.comments_one": "{n} commentaire",
   "board.comments_other": "{n} commentaires",
   "board.shown_one": "{shown} sur {n} tâche",
@@ -1514,14 +1576,14 @@ const fr: Record<Key, string> = {
   "board.loading": "Lecture du tableau…",
   "board.emptyTitle": "Aucune tâche sur ce tableau",
   "board.emptyBody":
-    "Ajoute la première toi-même, ou connecte tes agents : via MCP, ils créent des tâches, les prennent et rendent compte ici, et chaque pane voit le même tableau.",
+    "Ajoute la première toi-même, ou connecte tes agents : via MCP, ils créent des tâches, les prennent et rendent compte ici, et chaque panneau voit le même tableau.",
   "board.emptyAdd": "Ajouter une tâche",
   "board.emptyMcp": "Connecter les agents…",
-  "board.dock": "Panneau tableau",
+  "board.dock": "Tableau latéral",
   "board.dockHint": "Garder le tableau à côté des terminaux",
   "board.dockExpand": "Ouvrir le tableau en entier",
-  "board.dockHide": "Masquer le panneau du tableau",
-  "board.dockResize": "Glisser pour redimensionner le panneau, double-clic pour revenir à la largeur par défaut",
+  "board.dockHide": "Masquer le tableau latéral",
+  "board.dockResize": "Redimensionner le tableau latéral · double-clic pour la largeur par défaut",
 
   "diff.title": "Modifications",
   "diff.loading": "Lecture des modifications…",
@@ -1567,14 +1629,15 @@ const fr: Record<Key, string> = {
   "window.reattachHint": "Ramener ce workspace dans la fenêtre principale. Ses agents continuent de tourner.",
   "window.show": "Afficher sa fenêtre",
   "window.elsewhereTitle": "{name} est ouvert dans sa propre fenêtre",
-  "window.elsewhereBody": "Ses terminaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.",
+  "window.elsewhereBody":
+    "Ses panneaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.",
   "window.openFailed": "Impossible d'ouvrir la fenêtre : {error}",
   "window.inOwnWindow": "Ouvert dans sa propre fenêtre",
   "window.bringBack": "Le ramener ici",
-  "settings.agentControlSection": "Agents et panes",
-  "settings.agentPaneControl": "Laisser les agents gérer les panes",
+  "settings.agentControlSection": "Agents et panneaux",
+  "settings.agentPaneControl": "Laisser les agents gérer les panneaux",
   "settings.agentPaneControlHint":
-    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panes de tes workspaces et y écrire — pour lancer d'autres agents, par exemple. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
+    "Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panneaux de tes workspaces et y écrire — pour lancer d'autres agents, par exemple. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.",
 
   "task.title": "Tâche",
   "task.name": "Titre",
@@ -1582,7 +1645,7 @@ const fr: Record<Key, string> = {
   "task.descriptionHint": "visible par les agents",
   "task.column": "Colonne",
   "task.priority": "Priorité",
-  "task.assignee": "Assigné à",
+  "task.assignee": "Assignée à",
   "task.release": "Libérer",
   "task.free": "libre — un agent peut la prendre",
   "task.dependencies": "Dépend de",
@@ -1638,7 +1701,8 @@ const fr: Record<Key, string> = {
   "inspector.close": "Masquer l'inspecteur",
   "inspector.resize": "Redimensionner l'inspecteur · double-clic pour la largeur par défaut",
   "inspector.noPane": "Aucun panneau actif",
-  "inspector.noPaneBody": "Clique sur un panneau pour voir ici sa session, son contexte et ses changements.",
+  "inspector.noPaneBody":
+    "Clique sur un panneau pour voir ici sa session, son contexte et ses modifications.",
   "inspector.section.session": "Session",
   "inspector.section.terminal": "Terminal",
   "inspector.section.context": "Contexte et coût",
@@ -1647,23 +1711,23 @@ const fr: Record<Key, string> = {
   "inspector.section.files": "Fichiers modifiés",
   "inspector.section.activity": "Activité récente",
   "inspector.resume": "Reprise",
-  "inspector.resumeNew": "Nouvelle conversation",
+  "inspector.resumeNew": "Nouvelle session",
   "inspector.resumeChange": "Changer…",
-  "inspector.resumeChangeHint": "Choisir la conversation que reprend ce panneau",
-  "inspector.since": "Depuis",
+  "inspector.resumeChangeHint": "Choisir la session que reprend ce panneau",
+  "inspector.since": "Démarrée",
   "inspector.model": "Modèle",
   "inspector.shell": "Shell",
   "inspector.folder": "Dossier",
   "inspector.justNow": "à l'instant",
-  "inspector.minutesAgo": "il y a {n}\u00a0min",
-  "inspector.todayAt": "aujourd'hui {time}",
-  "inspector.yesterdayAt": "hier {time}",
-  "inspector.dateAt": "{date} à {time}",
-  "inspector.contextUsed": "{pct}\u00a0% avant compactage",
+  "inspector.minutesAgo": "il y a {n} min",
+  "inspector.todayAt": "aujourd'hui à {time}",
+  "inspector.yesterdayAt": "hier à {time}",
+  "inspector.dateAt": "le {date} à {time}",
+  "inspector.contextUsed": "{pct} % du contexte utilisé",
   "inspector.contextTokens": "{used} sur {window} tokens",
   "inspector.contextHint": "Compactage automatique à l'approche de la limite.",
-  "inspector.contextHintSoon": "Compactage imminent\u00a0: l'agent va bientôt résumer la conversation.",
-  "inspector.contextRing": "Contexte utilisé à {pct}\u00a0%",
+  "inspector.contextHintSoon": "Compactage imminent : l'agent va bientôt résumer la conversation.",
+  "inspector.contextRing": "Contexte utilisé à {pct} %",
   "inspector.contextEmpty": "Rien de mesuré pour l'instant.",
   "inspector.cost": "Coût de la session",
   "inspector.costOver": "en {duration}",
@@ -1673,8 +1737,8 @@ const fr: Record<Key, string> = {
   "inspector.planWeek": "7 j",
   "inspector.planWindowFiveHour": "Fenêtre de 5 h",
   "inspector.planWindowWeek": "Fenêtre de 7 jours",
-  "inspector.planHint": "{window}\u00a0: {pct}\u00a0% utilisés",
-  "inspector.planHintResets": "{window}\u00a0: {pct}\u00a0% utilisés, remise à zéro {time}",
+  "inspector.planHint": "{window} : {pct} % utilisés",
+  "inspector.planHintResets": "{window} : {pct} % utilisés, {reset}",
   "inspector.planUnknown": "Connu dès la première réponse.",
   "inspector.taskOpen": "Ouvrir",
   "inspector.taskOpenHint": "Afficher le tableau",
@@ -1696,7 +1760,7 @@ const fr: Record<Key, string> = {
   "inspector.filesClean": "Rien n'a changé dans ce dossier.",
   "inspector.filesTotals": "{add} lignes ajoutées, {del} supprimées",
   "inspector.fileRow": "{path} · {status} · ouvrir le diff",
-  "inspector.fileGone": "Plus rien en attente\u00a0: commité ou remis en l'état depuis",
+  "inspector.fileGone": "Plus rien en attente : commité ou remis en l'état depuis",
   "inspector.fileBinary": "binaire",
   "inspector.status.M": "modifié",
   "inspector.status.A": "ajouté",
@@ -1705,7 +1769,7 @@ const fr: Record<Key, string> = {
   "inspector.status.C": "copié",
   "inspector.status.U": "en conflit",
   "inspector.activityEmpty":
-    "Rien pour l'instant. Tours, permissions et modifications s'affichent ici dès que Claude Code charge le mod hangar-bridge.",
+    "Rien pour l'instant. Prompts, permissions et modifications s'affichent ici dès que Claude Code charge le mod hangar-bridge.",
   "inspector.activityQuiet": "Rien pour l'instant.",
   "inspector.activityOther":
     "{agent} ne raconte pas ce qu'il fait. Seul Claude Code le fait, via le mod hangar-bridge.",
@@ -1750,19 +1814,18 @@ const fr: Record<Key, string> = {
   "worktrees.ageDay": "{n}j",
   "worktrees.ageWeek": "{n}sem",
   "worktrees.openWorkspace": "Ouvrir en workspace",
-  "worktrees.openWorkspaceHint":
-    "l'ouvre dans un workspace à lui, ou active celui qui y est déjà",
+  "worktrees.openWorkspaceHint": "L'ouvre dans un workspace à lui, ou active celui qui y est déjà",
   "worktrees.openPane": "Ouvrir dans un panneau",
-  "worktrees.openPaneHint": "ajoute un terminal sur ce worktree au workspace courant",
-  "worktrees.openPaneCurrent": "ce workspace s'ouvre déjà ici",
+  "worktrees.openPaneHint": "Ajoute au workspace actif un panneau ouvert sur ce worktree",
+  "worktrees.openPaneCurrent": "Ce workspace s'ouvre déjà ici",
   "worktrees.paneFull": "Ce workspace ne peut pas accueillir un panneau de plus.",
   "worktrees.lock": "Verrouiller",
-  "worktrees.lockHint": "met ce worktree hors de portée de prune et de remove",
+  "worktrees.lockHint": "Met ce worktree hors de portée de prune et de remove",
   "worktrees.unlock": "Déverrouiller",
-  "worktrees.unlockHint": "rend ce worktree à nouveau nettoyable et supprimable",
+  "worktrees.unlockHint": "Rend ce worktree à nouveau nettoyable et supprimable",
   "worktrees.remove": "Supprimer",
   "worktrees.removeConfirm": "Confirmer ?",
-  "worktrees.removeHint": "détache le worktree et supprime son dossier",
+  "worktrees.removeHint": "Détache le worktree et supprime son dossier",
   "worktrees.inUse":
     "Ouvert dans le workspace « {name} » — ferme-le là-bas avant de supprimer.",
   "worktrees.force": "Forcer",
@@ -1777,7 +1840,7 @@ const fr: Record<Key, string> = {
   "worktrees.branch": "Branche",
   "worktrees.branchPlaceholder": "feature/…",
   "worktrees.groupLocal": "Locales",
-  "worktrees.groupRemote": "Remotes",
+  "worktrees.groupRemote": "Distantes",
   "worktrees.baseLabel": "Basée sur",
   "worktrees.base": "Branche courante ({branch})",
   "worktrees.sanitized": "Sera créée sous « {name} »",
@@ -1798,7 +1861,7 @@ const fr: Record<Key, string> = {
     "Ce dossier existait déjà — le worktree a été créé dans {path}.",
   "worktrees.copy": "Copier les fichiers non suivis (.env…)",
   "worktrees.copyHint":
-    "un checkout neuf n'a aucun des fichiers que git ignore : .env, *.local, .vscode/…",
+    "Un checkout neuf n'a aucun des fichiers que git ignore : .env, *.local, .vscode/…",
   "worktrees.copied_one": "{n} fichier copié.",
   "worktrees.copied_other": "{n} fichiers copiés.",
   "worktrees.copyFailed_one": "{n} n'a pas pu être copié.",
@@ -1811,7 +1874,7 @@ const fr: Record<Key, string> = {
   "worktrees.fetchHint": "git fetch --all --prune",
   "worktrees.fetching": "Fetch en cours…",
   "worktrees.prune": "Nettoyer",
-  "worktrees.pruneHint": "oublie les worktrees dont le dossier a disparu",
+  "worktrees.pruneHint": "Oublie les worktrees dont le dossier a disparu",
   "worktrees.refresh": "↻ Rafraîchir",
   "worktrees.close": "Fermer",
 
@@ -1825,7 +1888,16 @@ const fr: Record<Key, string> = {
   "update.retry": "Réessayer",
 };
 
-const DICTIONARIES: Record<Locale, Record<Key, string>> = { en, fr };
+const typesetAll = (dict: Record<Key, string>, locale: Locale) =>
+  Object.fromEntries(
+    Object.entries(dict).map(([key, text]) => [key, typeset(text, locale)]),
+  ) as Record<Key, string>;
+
+/** The dictionaries as they are shown: typeset once, not on every lookup. */
+export const DICTIONARIES: Record<Locale, Record<Key, string>> = {
+  en: typesetAll(en, "en"),
+  fr: typesetAll(fr, "fr"),
+};
 
 /** `topbar.presetHint_one` also exposes `topbar.presetHint` as a callable key. */
 type PluralBase<K> = K extends `${infer Base}_one` ? Base : never;
@@ -1847,7 +1919,7 @@ export function translate(
 ): string {
   const dict = DICTIONARIES[locale];
   const direct = key as Key;
-  let template: string = dict[direct] ?? en[direct] ?? key;
+  let template: string = dict[direct] ?? DICTIONARIES.en[direct] ?? key;
 
   // Plural keys are addressed by their base name; pick the right variant.
   if (params && typeof params.n === "number") {
@@ -1859,9 +1931,27 @@ export function translate(
   }
 
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(params[name]) : match,
-  );
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+    if (!(name in params)) return match;
+    const value = params[name];
+    return typeof value === "number" ? formatNumber(value, locale) : String(value);
+  });
+}
+
+const numberFormats = new Map<Locale, Intl.NumberFormat>();
+
+/**
+ * A number in a sentence, grouped the way the language groups it: "10 000
+ * lignes" in French, "10,000 lines" in English. Strings pass through as they
+ * are, so a caller that already formatted one keeps its own format.
+ */
+function formatNumber(value: number, locale: Locale): string {
+  let format = numberFormats.get(locale);
+  if (!format) {
+    format = new Intl.NumberFormat(locale);
+    numberFormats.set(locale, format);
+  }
+  return format.format(value);
 }
 
 export type Translator = (key: TranslateKey, params?: TranslateParams) => string;
