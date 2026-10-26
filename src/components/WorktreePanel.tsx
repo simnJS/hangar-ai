@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Backdrop } from "./Backdrop";
 import { DiffView } from "./DiffView";
+import { Icon } from "./Icon";
 import { useT, type Translator } from "../i18n";
 import {
   gitBranchDelete,
@@ -650,11 +651,17 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
 
   return (
     <Backdrop onClose={onClose}>
-      <div className="modal modal--wide">
-        <header className="modal__head">
+      <div className="modal modal--wide modal--worktrees">
+        <header className="modal__head wt__head">
           <h2>{t("worktrees.title")}</h2>
-          <button className="icon-btn" onClick={onClose}>
-            ×
+          <button
+            type="button"
+            className="diff__close"
+            onClick={onClose}
+            title={t("worktrees.close")}
+            aria-label={t("worktrees.close")}
+          >
+            <Icon name="close" size={14} />
           </button>
         </header>
 

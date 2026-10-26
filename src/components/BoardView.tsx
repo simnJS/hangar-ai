@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   BOARD_COLUMNS,
@@ -10,7 +10,16 @@ import {
   type BoardColumn,
   type Task,
 } from "../lib/board";
-import { useLocale, useT, type Translator } from "../i18n";
+import { findAgentPane } from "../lib/agentPane";
+import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
+import { useLocale, useT } from "../i18n";
+import { useStore } from "../store";
+import { AGENTS } from "../types";
+import { Icon } from "./Icon";
+import { BoardIcon } from "./BoardIcons";
+import { BoardFilter, type FilterOption } from "./BoardFilter";
+import { BoardAssignee, type AssigneePane } from "./BoardAssignee";
+import { BoardPriority } from "./BoardPriority";
 import { TaskDialog } from "./TaskDialog";
 
 interface Props {
@@ -34,17 +43,11 @@ interface Props {
 const ANY = "";
 const NOBODY = "\u0000";
 
-/** How long a card has been in `doing`, at a glance rather than to the second. */
-function elapsed(ms: number, t: Translator): string {
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return t("board.elapsedNow");
-  if (minutes < 60) return t("board.elapsedMinutes", { m: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return t("board.elapsedHours", { h: hours, m: String(minutes % 60).padStart(2, "0") });
-  }
-  return t("board.elapsedDays", { d: Math.floor(hours / 24), h: hours % 24 });
-}
+/**
+ * Beside the terminals, the work under way matters most: what is in progress
+ * and what waits for a review come first, the rest folds away below.
+ */
+const DOCK_ORDER: BoardColumn[] = ["doing", "review", "todo", "done"];
 
 /** Ticks once a minute, and only while something on the board has a clock. */
 function useMinuteClock(running: boolean): number {
@@ -70,16 +73,28 @@ export function BoardView({
   onExpand,
 }: Props) {
   const dock = variant === "dock";
-  const [tasks, setTasks] = useState<Task[]>([]);
+  /** null until the first read answers, so a slow read is never shown as an
+      empty board. */
+  const [tasks, setTasks] = useState<Task[] | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [dragOver, setDragOver] = useState<BoardColumn | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState(ANY);
   const [assigneeFilter, setAssigneeFilter] = useState(ANY);
-  // Finished work is the least useful thing to keep in view next to the agents.
-  const [folded, setFolded] = useState<BoardColumn[]>(() => (dock ? ["done"] : []));
+  // Finished work, and work nobody started, are the least useful things to
+  // keep in view next to the agents.
+  const [folded, setFolded] = useState<BoardColumn[]>(() => (dock ? ["todo", "done"] : []));
+  /** Dock only: the filter row is one click away rather than always there. */
+  const [showFilters, setShowFilters] = useState(false);
+  /** Asked for a first task from the empty board: show the columns anyway. */
+  const [composing, setComposing] = useState(false);
+  /** The column whose add field takes the focus once it is on screen. */
+  const [focusAdd, setFocusAdd] = useState<BoardColumn | null>(null);
+  const addRefs = useRef<Partial<Record<BoardColumn, HTMLInputElement | null>>>({});
   const t = useT();
   const locale = useLocale();
+  const { state } = useStore();
 
   const refresh = useCallback(() => {
     boardLoad(cwd)
@@ -103,6 +118,14 @@ export function BoardView({
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!focusAdd) return;
+    const field = addRefs.current[focusAdd];
+    field?.focus();
+    field?.scrollIntoView({ block: "nearest" });
+    setFocusAdd(null);
+  }, [focusAdd]);
+
   async function addTask(column: BoardColumn) {
     const title = (draft[column] ?? "").trim();
     if (!title) return;
@@ -116,277 +139,457 @@ export function BoardView({
     refresh();
   }
 
-  const byId = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  /** Puts the cursor in a column's add field, unfolding it if need be. */
+  function startAdding(column: BoardColumn) {
+    setComposing(true);
+    setFolded((current) => current.filter((c) => c !== column));
+    setFocusAdd(column);
+  }
 
-  // A filter whose value left the board stays listed, so the select never
+  const all = useMemo(() => tasks ?? [], [tasks]);
+  const byId = useMemo(() => new Map(all.map((task) => [task.id, task])), [all]);
+
+  // The pane each assignee leads to, worked out once per board rather than
+  // once per card: the same few agents hold most of the tasks.
+  const paneFor = useMemo(() => {
+    const cache = new Map<string, AssigneePane | null>();
+    return (assignee: string): AssigneePane | null => {
+      if (cache.has(assignee)) return cache.get(assignee) ?? null;
+      const target = findAgentPane(assignee, state.workspaces, state.activeWorkspaceId);
+      const pane = target
+        ? state.workspaces
+            .find((ws) => ws.id === target.workspaceId)
+            ?.panes.find((p) => p.id === target.paneId)
+        : undefined;
+      const found = pane
+        ? {
+            id: pane.id,
+            name: pane.name,
+            agent: AGENTS.find((a) => a.id === pane.agent)?.label ?? pane.agent,
+          }
+        : null;
+      cache.set(assignee, found);
+      return found;
+    };
+  }, [state.workspaces, state.activeWorkspaceId]);
+
+  // A filter whose value left the board stays listed, so the filter never
   // shows a value it has no option for.
   const labels = useMemo(
-    () => sortedUnique([...tasks.flatMap((task) => task.labels), labelFilter].filter(Boolean)),
-    [tasks, labelFilter],
+    () => sortedUnique([...all.flatMap((task) => task.labels), labelFilter].filter(Boolean)),
+    [all, labelFilter],
   );
   const assignees = useMemo(
     () =>
       sortedUnique(
-        [...tasks.map((task) => task.assignee ?? ""), assigneeFilter].filter(
+        [...all.map((task) => task.assignee ?? ""), assigneeFilter].filter(
           (name) => name && name !== NOBODY,
         ),
       ),
-    [tasks, assigneeFilter],
+    [all, assigneeFilter],
   );
+
+  const labelOptions: FilterOption[] = [
+    { value: ANY, label: t("board.allLabels"), short: t("board.filterAll") },
+    ...labels.map((label) => ({ value: label, label })),
+  ];
+  const assigneeOptions: FilterOption[] = [
+    { value: ANY, label: t("board.allAssignees"), short: t("board.filterAll") },
+    { value: NOBODY, label: t("board.unassigned") },
+    ...assignees.map((name) => {
+      const pane = paneFor(name);
+      return { value: name, label: name, hint: pane && pane.name !== name ? pane.name : undefined };
+    }),
+  ];
 
   const filtering = labelFilter !== ANY || assigneeFilter !== ANY;
   const shown = useMemo(
     () =>
-      tasks.filter(
+      all.filter(
         (task) =>
           (labelFilter === ANY || task.labels.includes(labelFilter)) &&
           (assigneeFilter === ANY ||
             (assigneeFilter === NOBODY ? !task.assignee : task.assignee === assigneeFilter)),
       ),
-    [tasks, labelFilter, assigneeFilter],
+    [all, labelFilter, assigneeFilter],
   );
 
-  const now = useMinuteClock(tasks.some((task) => task.column === "doing" && task.doing_since));
+  const now = useMinuteClock(all.some((task) => task.column === "doing" && task.doing_since));
 
-  const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
+  const openTask = all.find((task) => task.id === openTaskId) ?? null;
+  const loaded = tasks !== null;
+  const empty = loaded && all.length === 0 && !composing;
+
+  function clearFilters() {
+    setLabelFilter(ANY);
+    setAssigneeFilter(ANY);
+  }
 
   function renderCard(task: Task) {
-    const blockers = task.column === "done" ? [] : blockersOf(task, byId);
+    const done = task.column === "done";
+    const blockers = done ? [] : blockersOf(task, byId);
     const blockerNames = blockers.map((dep) =>
-      typeof dep === "string" ? t("board.missingTask") : dep.title,
+      typeof dep === "string" ? t("board.missingTask") : `#${shortTaskId(dep.id)} · ${dep.title}`,
     );
     const focusAgent = task.assignee ? (findAgent?.(task.assignee) ?? null) : null;
     const since = task.column === "doing" ? task.doing_since : null;
+    const dependsDone = task.depends_on.length > 0 && blockers.length === 0;
 
     return (
       <article
         key={task.id}
-        className={`card ${task.assignee ? "card--claimed" : ""} ${blockers.length ? "card--blocked" : ""}`}
+        className={`card ${done ? "card--done" : ""} ${blockers.length ? "card--blocked" : ""} ${
+          dragging === task.id ? "card--dragging" : ""
+        }`}
         draggable
-        onDragStart={(e) => e.dataTransfer.setData("text/plain", task.id)}
+        tabIndex={0}
+        aria-label={t("board.openTask", { title: task.title })}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", task.id);
+          e.dataTransfer.effectAllowed = "move";
+          setDragging(task.id);
+        }}
+        onDragEnd={() => setDragging(null)}
         onClick={() => setOpenTaskId(task.id)}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpenTaskId(task.id);
+          }
+        }}
       >
+        <div className="card__top">
+          <span className="card__id" title={task.id}>
+            #{shortTaskId(task.id)}
+          </span>
+          <BoardPriority priority={task.priority} />
+        </div>
+
         <p className="card__title">{task.title}</p>
+
+        {task.labels.length > 0 && (
+          <div className="card__labels">
+            {task.labels.map((label) => (
+              <span key={label} className="chip">
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
 
         {blockers.length > 0 && (
           <p className="card__blocked" title={blockerNames.join("\n")}>
-            {t("board.blockedBy", { tasks: blockerNames.join(", ") })}
+            <BoardIcon name="lock" size={11} />
+            <span>{t("board.blockedBy", { tasks: blockerNames.join(", ") })}</span>
           </p>
         )}
 
-        <div className="card__meta">
-          {task.priority > 1 && <span className="chip chip--priority">P{task.priority}</span>}
-          {task.assignee &&
-            (focusAgent ? (
-              <button
-                type="button"
-                className="chip chip--assignee chip--link"
-                title={t("board.focusAgent", { name: task.assignee })}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  focusAgent();
-                }}
+        <footer className="card__foot">
+          {task.assignee ? (
+            <BoardAssignee
+              assignee={task.assignee}
+              pane={paneFor(task.assignee)}
+              done={done}
+              onFocus={focusAgent}
+            />
+          ) : (
+            <span className="card__nobody">{t("board.nobody")}</span>
+          )}
+          <span className="card__meta">
+            {since ? (
+              <span
+                className="card__stat"
+                title={t("board.doingSince", { date: new Date(since).toLocaleString(locale) })}
               >
-                {task.assignee}
-              </button>
-            ) : (
-              <span className="chip chip--assignee" title={t("board.assignee")}>
-                {task.assignee}
+                <BoardIcon name="clock" size={11} />
+                {elapsedLabel(now - since, t)}
               </span>
-            ))}
-          {since ? (
-            <span
-              className="chip"
-              title={t("board.doingSince", { date: new Date(since).toLocaleString(locale) })}
-            >
-              ⏱ {elapsed(Math.max(0, now - since), t)}
-            </span>
-          ) : null}
-          {task.depends_on.length > 0 && blockers.length === 0 && (
-            <span className="chip" title={t("board.dependsOn")}>
-              ⛓ {task.depends_on.length} ✓
-            </span>
-          )}
-          {task.comments.length > 0 && (
-            <span className="chip" title={t("board.comments", { n: task.comments.length })}>
-              💬 {task.comments.length}
-            </span>
-          )}
-          {task.labels.map((label) => (
-            <span key={label} className="chip">
-              {label}
-            </span>
-          ))}
-        </div>
+            ) : null}
+            {dependsDone && (
+              <span className="card__stat" title={t("board.dependsOn")}>
+                <BoardIcon name="link" size={11} />
+                {task.depends_on.length}
+              </span>
+            )}
+            {task.comments.length > 0 && (
+              <span
+                className="card__stat"
+                title={t("board.comments", { n: task.comments.length })}
+              >
+                <BoardIcon name="bubble" size={11} />
+                {task.comments.length}
+              </span>
+            )}
+          </span>
+        </footer>
       </article>
     );
   }
 
+  function renderColumn(column: BoardColumn) {
+    const items = shown
+      .filter((task) => task.column === column)
+      .sort((a, b) => b.priority - a.priority || a.order - b.order);
+    const isFolded = dock && folded.includes(column);
+    const name = t(columnKey(column));
+
+    return (
+      <section
+        key={column}
+        className={`column column--${column} ${dragOver === column ? "column--over" : ""} ${
+          isFolded ? "column--folded" : ""
+        } ${items.length === 0 ? "column--empty" : ""}`}
+        aria-label={name}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(column);
+        }}
+        onDragLeave={() => setDragOver((c) => (c === column ? null : c))}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(null);
+          const id = e.dataTransfer.getData("text/plain");
+          if (id) moveTask(id, column);
+        }}
+      >
+        <header className="column__head">
+          {dock ? (
+            <button
+              type="button"
+              className="column__toggle"
+              aria-expanded={!isFolded}
+              onClick={() =>
+                setFolded((current) =>
+                  current.includes(column)
+                    ? current.filter((c) => c !== column)
+                    : [...current, column],
+                )
+              }
+            >
+              <span className="column__caret" aria-hidden>
+                <BoardIcon name="chevron" size={10} />
+              </span>
+              <span className="column__mark" aria-hidden />
+              <span className="column__name">{name}</span>
+              <span className="column__count">{items.length}</span>
+            </button>
+          ) : (
+            <>
+              <span className="column__mark" aria-hidden />
+              <h3 className="column__name">{name}</h3>
+              <span className="column__count">{items.length}</span>
+            </>
+          )}
+          <button
+            type="button"
+            className="column__plus"
+            title={t("board.addTo", { column: name })}
+            aria-label={t("board.addTo", { column: name })}
+            onClick={() => startAdding(column)}
+          >
+            <Icon name="plus" size={12} />
+          </button>
+        </header>
+
+        {!isFolded && (
+          <div className="column__list">
+            {items.map(renderCard)}
+
+            <input
+              ref={(field) => {
+                addRefs.current[column] = field;
+              }}
+              className="column__add"
+              placeholder={t("board.add")}
+              aria-label={t("board.addTo", { column: name })}
+              value={draft[column] ?? ""}
+              onChange={(e) => setDraft((prev) => ({ ...prev, [column]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addTask(column);
+                else if (e.key === "Escape" && draft[column]) {
+                  e.stopPropagation();
+                  setDraft((prev) => ({ ...prev, [column]: "" }));
+                }
+              }}
+              onBlur={() => addTask(column)}
+            />
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  const filters = (
+    <>
+      <BoardFilter
+        name={t("board.filterName.label")}
+        title={t("board.filterLabel")}
+        value={labelFilter}
+        options={labelOptions}
+        active={labelFilter !== ANY}
+        onChange={setLabelFilter}
+      />
+      <BoardFilter
+        name={t("board.filterName.agent")}
+        title={t("board.filterAssignee")}
+        value={assigneeFilter}
+        options={assigneeOptions}
+        active={assigneeFilter !== ANY}
+        onChange={setAssigneeFilter}
+      />
+      {filtering && (
+        <button
+          type="button"
+          className="board__clear"
+          onClick={clearFilters}
+          title={t("board.clearFilters")}
+        >
+          <Icon name="close" size={10} />
+          {t("board.clearFiltersShort")}
+        </button>
+      )}
+    </>
+  );
+
+  const count = filtering
+    ? t("board.shown", { shown: shown.length, n: all.length })
+    : t("board.tasks", { n: all.length });
+  const active = shown.filter((task) => task.column === "doing" || task.column === "review");
+
   return (
     <div className={`board ${dock ? "board--dock" : ""}`}>
-      <div className="board__bar">
-        <span className="board__count">
-          {filtering
-            ? t("board.shown", { shown: shown.length, n: tasks.length })
-            : t("board.tasks", { n: tasks.length })}
-        </span>
-        {dock ? (
-          <span className="pane__spacer" />
-        ) : (
-          <span className="board__hint">{t("board.hint")}</span>
-        )}
-
-        <div className="board__filters" role="group" aria-label={t("board.filters")}>
-          <select
-            className={`board__filter ${labelFilter !== ANY ? "is-active" : ""}`}
-            value={labelFilter}
-            onChange={(e) => setLabelFilter(e.target.value)}
-            aria-label={t("board.filterLabel")}
-          >
-            <option value={ANY}>{t("board.allLabels")}</option>
-            {labels.map((label) => (
-              <option key={label} value={label}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            className={`board__filter ${assigneeFilter !== ANY ? "is-active" : ""}`}
-            value={assigneeFilter}
-            onChange={(e) => setAssigneeFilter(e.target.value)}
-            aria-label={t("board.filterAssignee")}
-          >
-            <option value={ANY}>{t("board.allAssignees")}</option>
-            <option value={NOBODY}>{t("board.unassigned")}</option>
-            {assignees.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          {filtering && (
+      {dock ? (
+        <>
+          <div className="board__bar">
+            <h2 className="board__title">{t("board.title")}</h2>
+            {loaded && (
+              <span className="board__sub">
+                {filtering ? count : t("board.dockActive", { n: active.length })}
+              </span>
+            )}
+            <span className="board__spacer" />
             <button
               type="button"
-              className="btn btn--ghost"
-              onClick={() => {
-                setLabelFilter(ANY);
-                setAssigneeFilter(ANY);
-              }}
+              className={`board__tool ${filtering ? "is-active" : ""}`}
+              aria-pressed={showFilters}
+              title={t("board.filters")}
+              aria-label={t("board.filters")}
+              onClick={() => setShowFilters((on) => !on)}
             >
-              {t("board.clearFilters")}
+              <BoardIcon name="filter" size={13} />
             </button>
-          )}
-        </div>
-
-        {dock ? (
-          <div className="board__dock-actions">
             <button
               type="button"
-              className="icon-btn"
+              className="board__tool"
               onClick={onExpand}
               title={t("board.dockExpand")}
               aria-label={t("board.dockExpand")}
             >
-              ⤢
+              <BoardIcon name="expand" size={12} />
             </button>
             <button
               type="button"
-              className="icon-btn"
+              className="board__tool"
               onClick={onClose}
               title={t("board.dockHide")}
               aria-label={t("board.dockHide")}
             >
-              ×
+              <Icon name="close" size={13} />
             </button>
           </div>
-        ) : (
-          <button className="btn btn--ghost" onClick={onOpenMcp}>
-            {t("board.mcp")}
+          {showFilters && (
+            <div className="board__filterbar" role="group" aria-label={t("board.filters")}>
+              {filters}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="board__bar">
+          <h2 className="board__count">{loaded ? count : t("board.title")}</h2>
+          {/* Nothing to filter before the first read, or on an empty board. */}
+          {(filtering || all.length > 0) && (
+            <div className="board__filters" role="group" aria-label={t("board.filters")}>
+              {filters}
+            </div>
+          )}
+          <button
+            type="button"
+            className="board__mcp"
+            onClick={onOpenMcp}
+            title={t("board.mcp")}
+          >
+            <BoardIcon name="plug" size={12} />
+            <span className="board__mcp-text">{t("board.hint")}</span>
           </button>
-        )}
-      </div>
+          <button type="button" className="btn board__add" onClick={() => startAdding("todo")}>
+            <Icon name="plus" size={12} />
+            {t("board.addTask")}
+          </button>
+        </div>
+      )}
 
-      <div className="board__columns">
-        {BOARD_COLUMNS.map((column) => {
-          const items = shown
-            .filter((task) => task.column === column)
-            .sort((a, b) => b.priority - a.priority || a.order - b.order);
-          const isFolded = dock && folded.includes(column);
-
-          return (
-            <section
-              key={column}
-              className={`column ${dragOver === column ? "column--over" : ""} ${isFolded ? "column--folded" : ""}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(column);
-              }}
-              onDragLeave={() => setDragOver((c) => (c === column ? null : c))}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(null);
-                const id = e.dataTransfer.getData("text/plain");
-                if (id) moveTask(id, column);
-              }}
-            >
-              {dock ? (
-                <button
-                  type="button"
-                  className="column__head column__head--toggle"
-                  aria-expanded={!isFolded}
-                  onClick={() =>
-                    setFolded((current) =>
-                      current.includes(column)
-                        ? current.filter((c) => c !== column)
-                        : [...current, column],
-                    )
-                  }
-                >
-                  <span className="column__name">
-                    <span className="column__caret" aria-hidden>
-                      {isFolded ? "▸" : "▾"}
-                    </span>
-                    {t(columnKey(column))}
-                  </span>
-                  <span className="column__count">{items.length}</span>
-                </button>
-              ) : (
-                <header className="column__head">
-                  <span className="column__name">{t(columnKey(column))}</span>
-                  <span className="column__count">{items.length}</span>
-                </header>
-              )}
-
-              {!isFolded && (
-                <div className="column__list">
-                  {items.map(renderCard)}
-
-                  <input
-                    className="column__add"
-                    placeholder={t("board.add")}
-                    value={draft[column] ?? ""}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, [column]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addTask(column);
-                    }}
-                    onBlur={() => addTask(column)}
-                  />
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {!loaded ? (
+        <BoardSkeleton dock={dock} label={t("board.loading")} />
+      ) : empty ? (
+        <div className="board__empty">
+          <span className="board__empty-icon" aria-hidden>
+            <BoardIcon name="board" size={dock ? 18 : 22} />
+          </span>
+          <h3>{t("board.emptyTitle")}</h3>
+          <p>{t("board.emptyBody")}</p>
+          <div className="board__empty-actions">
+            <button type="button" className="btn btn--primary" onClick={() => startAdding("todo")}>
+              <Icon name="plus" size={12} />
+              {t("board.emptyAdd")}
+            </button>
+            <button type="button" className="btn" onClick={onOpenMcp}>
+              <BoardIcon name="plug" size={12} />
+              {t("board.emptyMcp")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="board__columns">
+          {(dock ? DOCK_ORDER : BOARD_COLUMNS).map(renderColumn)}
+        </div>
+      )}
 
       {openTask && (
         <TaskDialog
           cwd={cwd}
           task={openTask}
-          allTasks={tasks}
+          allTasks={all}
           onClose={() => setOpenTaskId(null)}
           onChanged={refresh}
+          assigneePane={openTask.assignee ? paneFor(openTask.assignee) : null}
+          onFocusAgent={openTask.assignee ? (findAgent?.(openTask.assignee) ?? null) : null}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The columns' outline while the first read is out. It fades in only after a
+ * beat, so the usual instant read never flashes it.
+ */
+function BoardSkeleton({ dock, label }: { dock: boolean; label: string }) {
+  const shape = dock ? [2, 1] : [3, 2, 1, 2];
+  return (
+    <div className="board__columns board__skeleton" role="status" aria-label={label}>
+      {shape.map((cards, column) => (
+        <div key={column} className="column">
+          <div className="column__head">
+            <span className="skeleton skeleton--label" />
+          </div>
+          <div className="column__list">
+            {Array.from({ length: cards }, (_, card) => (
+              <div key={card} className="skeleton skeleton--card" />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

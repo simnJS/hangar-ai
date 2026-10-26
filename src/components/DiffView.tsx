@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Backdrop } from "./Backdrop";
+import { Icon } from "./Icon";
 import { useT } from "../i18n";
 import {
   gitChanges,
@@ -219,13 +220,19 @@ export function DiffView({ cwd, label, onClose }: Props) {
   return (
     <Backdrop onClose={onClose}>
       <div className="modal modal--diff" role="dialog" aria-label={t("diff.title")}>
-        <header className="modal__head">
+        <header className="modal__head diff__head">
           <h2>
             {t("diff.title")}
             {label && <span className="diff__label">{label}</span>}
           </h2>
-          <button className="icon-btn" onClick={onClose} aria-label={t("diff.close")}>
-            ×
+          <button
+            type="button"
+            className="diff__close"
+            onClick={onClose}
+            title={t("diff.close")}
+            aria-label={t("diff.close")}
+          >
+            <Icon name="close" size={14} />
           </button>
         </header>
 

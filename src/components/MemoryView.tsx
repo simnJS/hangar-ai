@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   MEMORY_CHANGED_EVENT,
@@ -8,7 +8,10 @@ import {
   memoryUpdate,
   type MemoryEntry,
 } from "../lib/memory";
+import { compactPath, shortDay, signerName, wasUpdated } from "../lib/memoryFormat";
 import { useLocale, useT } from "../i18n";
+import { BoardIcon } from "./BoardIcons";
+import { Icon } from "./Icon";
 
 interface Props {
   /** Active workspace: the origin stamped on what is written from here. */
@@ -22,12 +25,6 @@ interface Draft {
 }
 
 const EMPTY_DRAFT: Draft = { title: "", content: "", tags: "" };
-
-/** Last segment of a path — how a project is recognised at a glance. */
-function shortWorkspace(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
 
 /** Free text in, tag list out; duplicates and blanks dropped. */
 function parseTags(raw: string): string[] {
@@ -52,7 +49,8 @@ function matches(entry: MemoryEntry, terms: string[]): boolean {
 }
 
 export function MemoryView({ cwd }: Props) {
-  const [entries, setEntries] = useState<MemoryEntry[]>([]);
+  /** null until the first read answers: a slow read is not an empty memory. */
+  const [entries, setEntries] = useState<MemoryEntry[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
@@ -63,6 +61,7 @@ export function MemoryView({ cwd }: Props) {
   const [edit, setEdit] = useState<Draft>(EMPTY_DRAFT);
   /** Delete asks twice, like the destructive actions in the settings do. */
   const [armedId, setArmedId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const t = useT();
   const locale = useLocale();
 
@@ -101,12 +100,11 @@ export function MemoryView({ cwd }: Props) {
     [query],
   );
 
+  const all = useMemo(() => entries ?? [], [entries]);
   const visible = useMemo(
     () =>
-      entries
-        .filter((entry) => matches(entry, terms))
-        .sort((a, b) => b.updated_at - a.updated_at),
-    [entries, terms],
+      all.filter((entry) => matches(entry, terms)).sort((a, b) => b.updated_at - a.updated_at),
+    [all, terms],
   );
 
   /** Every write funnels through here, so a rejected limit is always shown. */
@@ -171,67 +169,107 @@ export function MemoryView({ cwd }: Props) {
       current.includes(id) ? current.filter((it) => it !== id) : [...current, id],
     );
 
+  function startComposing() {
+    setComposing(true);
+    setError(null);
+  }
+
+  /** "Written by Ava", "Updated Oct 21", in the row's right column. */
+  function origin(entry: MemoryEntry) {
+    const signer = signerName(entry.agent);
+    const updated = wasUpdated(entry.created_at, entry.updated_at);
+    const at = updated ? entry.updated_at : entry.created_at;
+    const day = shortDay(at, Date.now(), locale);
+    const dated =
+      day === "today"
+        ? t(updated ? "memory.updatedToday" : "memory.createdToday")
+        : t(updated ? "memory.updatedAt" : "memory.createdAt", { date: day });
+    return { signer, dated, at, updated };
+  }
+
+  const loaded = entries !== null;
+
   return (
     <div className="memory">
       <div className="memory__bar">
-        <span className="memory__count">
-          {terms.length
-            ? t("memory.results", { n: visible.length })
-            : t("memory.entries", { n: entries.length })}
+        <h2 className="memory__count">
+          {!loaded
+            ? t("memory.title")
+            : terms.length
+              ? t("memory.results", { n: visible.length })
+              : t("memory.entries", { n: all.length })}
+        </h2>
+
+        <label className="memory__search">
+          <BoardIcon name="search" size={12} />
+          <input
+            ref={searchRef}
+            type="search"
+            placeholder={t("memory.search")}
+            aria-label={t("memory.search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape empties the field first, the way a search field does.
+              if (e.key === "Escape" && query) {
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
+          />
+        </label>
+
+        <span className="memory__hint" title={t("memory.hint")}>
+          <BoardIcon name="plug" size={12} />
+          <span className="memory__hint-text">{t("memory.hint")}</span>
         </span>
 
-        <input
-          className="memory__search"
-          type="search"
-          placeholder={t("memory.search")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-
-        <span className="memory__hint">{t("memory.hint")}</span>
-
         <button
-          className="btn btn--ghost"
-          onClick={() => {
-            setComposing((on) => !on);
-            setError(null);
-          }}
+          type="button"
+          className="btn memory__new"
+          aria-expanded={composing}
+          onClick={() => (composing ? setComposing(false) : startComposing())}
         >
+          <Icon name="plus" size={12} />
           {t("memory.new")}
         </button>
       </div>
 
       {error && (
         <p className="memory__error" role="alert">
-          {error}
+          <Icon name="alert" size={12} />
+          <span>{error}</span>
         </p>
       )}
 
       <div className="memory__list">
         {composing && (
-          <section className="memory__composer">
+          <section className="memory__composer" aria-label={t("memory.new")}>
             <input
-              className="text-input"
+              className="memory__input memory__input--title"
               autoFocus
               placeholder={t("memory.titlePlaceholder")}
+              aria-label={t("memory.titlePlaceholder")}
               value={draft.title}
               onChange={(e) => setDraft({ ...draft, title: e.target.value })}
             />
             <textarea
-              className="text-input text-area"
+              className="memory__input memory__input--area"
               rows={5}
               placeholder={t("memory.contentPlaceholder")}
+              aria-label={t("memory.contentPlaceholder")}
               value={draft.content}
               onChange={(e) => setDraft({ ...draft, content: e.target.value })}
             />
             <input
-              className="text-input"
+              className="memory__input memory__input--tags"
               placeholder={t("memory.tagsPlaceholder")}
+              aria-label={t("memory.tagsPlaceholder")}
               value={draft.tags}
               onChange={(e) => setDraft({ ...draft, tags: e.target.value })}
             />
             <div className="memory__composer-foot">
-              <span className="form-hint">{t("memory.upsertHint")}</span>
+              <span className="memory__note">{t("memory.upsertHint")}</span>
               <button
                 className="btn btn--ghost"
                 onClick={() => {
@@ -253,136 +291,192 @@ export function MemoryView({ cwd }: Props) {
           </section>
         )}
 
-        {/* Never under an error: a memory that could not be read is not one
-            that has nothing in it, and saying "empty" would invite rewriting
-            facts that are still on disk. */}
-        {entries.length === 0 && !error && (
-          <div className="memory__empty">
-            <h3>{t("memory.empty")}</h3>
-            <p>{t("memory.emptyBody")}</p>
+        {!loaded && (
+          <div className="memory__skeleton" role="status" aria-label={t("memory.loading")}>
+            {[0, 1, 2, 3].map((row) => (
+              <div key={row} className="mem mem--ghost">
+                <div className="mem__main">
+                  <span className="skeleton skeleton--title" />
+                  <span className="skeleton skeleton--line" />
+                  <span className="skeleton skeleton--line skeleton--short" />
+                </div>
+                <div className="mem__by">
+                  <span className="skeleton skeleton--meta" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {entries.length > 0 && visible.length === 0 && (
-          <p className="memory__none">{t("memory.noResults", { q: query.trim() })}</p>
+        {/* Never under an error: a memory that could not be read is not one
+            that has nothing in it, and saying "empty" would invite rewriting
+            facts that are still on disk. */}
+        {loaded && all.length === 0 && !error && !composing && (
+          <div className="memory__empty">
+            <span className="memory__empty-icon" aria-hidden>
+              <BoardIcon name="bookmark" size={20} />
+            </span>
+            <h3>{t("memory.empty")}</h3>
+            <p>{t("memory.emptyBody")}</p>
+            <button type="button" className="btn btn--primary" onClick={startComposing}>
+              <Icon name="plus" size={12} />
+              {t("memory.emptyAction")}
+            </button>
+          </div>
+        )}
+
+        {all.length > 0 && visible.length === 0 && (
+          <div className="memory__none">
+            <p>{t("memory.noResults", { q: query.trim() })}</p>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                setQuery("");
+                searchRef.current?.focus();
+              }}
+            >
+              {t("memory.clearSearch")}
+            </button>
+          </div>
         )}
 
         {visible.map((entry) => {
           const open = openIds.includes(entry.id);
           const editing = editingId === entry.id;
-          const workspace = entry.workspace ? shortWorkspace(entry.workspace) : "";
+          const { signer, dated, at, updated } = origin(entry);
 
           return (
-            <article key={entry.id} className={`mem ${open ? "mem--open" : ""}`}>
-              <header className="mem__head">
-                <button
-                  className="mem__toggle"
-                  onClick={() => toggle(entry.id)}
-                  aria-expanded={open}
-                  title={open ? t("memory.collapse") : t("memory.expand")}
-                >
-                  <span className="mem__caret" aria-hidden="true">
-                    {open ? "▾" : "▸"}
-                  </span>
-                  <span className="mem__title">{entry.title}</span>
-                </button>
-                <span
-                  className="mem__time"
-                  title={t("memory.updatedAt", { date: when(entry.updated_at) })}
-                >
-                  {when(entry.updated_at)}
-                </span>
-              </header>
+            <article
+              key={entry.id}
+              className={`mem ${open ? "mem--open" : ""} ${editing ? "mem--editing" : ""}`}
+            >
+              <div className="mem__main">
+                {editing ? (
+                  <div className="mem__editor">
+                    <input
+                      className="memory__input memory__input--title"
+                      aria-label={t("memory.titlePlaceholder")}
+                      value={edit.title}
+                      onChange={(e) => setEdit({ ...edit, title: e.target.value })}
+                    />
+                    <textarea
+                      className="memory__input memory__input--area"
+                      rows={8}
+                      aria-label={t("memory.contentPlaceholder")}
+                      value={edit.content}
+                      onChange={(e) => setEdit({ ...edit, content: e.target.value })}
+                    />
+                    <input
+                      className="memory__input memory__input--tags"
+                      placeholder={t("memory.tagsPlaceholder")}
+                      aria-label={t("memory.tagsPlaceholder")}
+                      value={edit.tags}
+                      onChange={(e) => setEdit({ ...edit, tags: e.target.value })}
+                    />
+                    <div className="mem__actions">
+                      <span className="memory__note">{t("memory.tagsHint")}</span>
+                      <button className="btn btn--ghost" onClick={() => setEditingId(null)}>
+                        {t("create.cancel")}
+                      </button>
+                      <button
+                        className="btn btn--primary"
+                        onClick={() => saveEdit(entry)}
+                        disabled={!edit.title.trim() || !edit.content.trim()}
+                      >
+                        {t("memory.save")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="mem__head">
+                      <button
+                        type="button"
+                        className="mem__toggle"
+                        onClick={() => toggle(entry.id)}
+                        aria-expanded={open}
+                        title={open ? t("memory.collapse") : t("memory.expand")}
+                      >
+                        <span className="mem__caret" aria-hidden>
+                          <BoardIcon name="chevron" size={10} />
+                        </span>
+                        <span className="mem__title">{entry.title}</span>
+                      </button>
+                    </h3>
 
-              <div className="mem__meta">
-                {entry.tags.map((tag) => (
-                  <span key={tag} className="chip">
-                    {tag}
-                  </span>
-                ))}
-                {entry.agent && (
-                  <span
-                    className="chip chip--assignee"
-                    title={t("memory.byAgent", { agent: entry.agent })}
-                  >
-                    {entry.agent}
-                  </span>
-                )}
-                {workspace && (
-                  <span
-                    className="chip"
-                    title={t("memory.fromWorkspace", { path: entry.workspace })}
-                  >
-                    {workspace}
-                  </span>
+                    <p className={`mem__content ${open ? "" : "mem__content--clamp"}`}>
+                      {entry.content}
+                    </p>
+
+                    {entry.tags.length > 0 && (
+                      <div className="mem__tags">
+                        {entry.tags.map((tag) => (
+                          <span key={tag} className="chip">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {open && (
+                      <div className="mem__actions">
+                        <span className="memory__note">
+                          {t("memory.createdAt", { date: when(entry.created_at) })}
+                        </span>
+                        <button className="btn btn--ghost" onClick={() => startEdit(entry)}>
+                          <Icon name="pencil" size={11} />
+                          {t("memory.edit")}
+                        </button>
+                        {armedId === entry.id ? (
+                          <>
+                            <button className="btn btn--ghost" onClick={() => setArmedId(null)}>
+                              {t("create.cancel")}
+                            </button>
+                            <button className="btn btn--danger" onClick={() => remove(entry)}>
+                              {t("memory.deleteConfirm")}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn btn--ghost mem__delete"
+                            onClick={() => setArmedId(entry.id)}
+                          >
+                            <BoardIcon name="trash" size={11} />
+                            {t("memory.delete")}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
-              {editing ? (
-                <div className="mem__editor">
-                  <input
-                    className="text-input"
-                    value={edit.title}
-                    onChange={(e) => setEdit({ ...edit, title: e.target.value })}
-                  />
-                  <textarea
-                    className="text-input text-area"
-                    rows={8}
-                    value={edit.content}
-                    onChange={(e) => setEdit({ ...edit, content: e.target.value })}
-                  />
-                  <input
-                    className="text-input"
-                    placeholder={t("memory.tagsPlaceholder")}
-                    value={edit.tags}
-                    onChange={(e) => setEdit({ ...edit, tags: e.target.value })}
-                  />
-                  <div className="mem__actions">
-                    <span className="form-hint">{t("memory.tagsHint")}</span>
-                    <button className="btn btn--ghost" onClick={() => setEditingId(null)}>
-                      {t("create.cancel")}
-                    </button>
-                    <button
-                      className="btn btn--primary"
-                      onClick={() => saveEdit(entry)}
-                      disabled={!edit.title.trim() || !edit.content.trim()}
-                    >
-                      {t("memory.save")}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <p className={`mem__content ${open ? "" : "mem__content--clamp"}`}>
-                    {entry.content}
-                  </p>
-
-                  {open && (
-                    <div className="mem__actions">
-                      <span className="mem__created">
-                        {t("memory.createdAt", { date: when(entry.created_at) })}
-                      </span>
-                      <button className="btn btn--ghost" onClick={() => startEdit(entry)}>
-                        {t("memory.edit")}
-                      </button>
-                      {armedId === entry.id ? (
-                        <>
-                          <button className="btn btn--ghost" onClick={() => setArmedId(null)}>
-                            {t("create.cancel")}
-                          </button>
-                          <button className="btn btn--danger" onClick={() => remove(entry)}>
-                            {t("memory.deleteConfirm")}
-                          </button>
-                        </>
-                      ) : (
-                        <button className="btn btn--danger" onClick={() => setArmedId(entry.id)}>
-                          {t("memory.delete")}
-                        </button>
-                      )}
-                    </div>
+              <div className="mem__by">
+                <span className="mem__signer" title={t("memory.byAgent", { agent: entry.agent })}>
+                  {signer === null ? (
+                    t("memory.byYou")
+                  ) : (
+                    <>
+                      {t("memory.writtenBy")} <b>{signer}</b>
+                    </>
                   )}
-                </>
-              )}
+                </span>
+                <span
+                  className="mem__date"
+                  title={t(updated ? "memory.updatedAt" : "memory.createdAt", { date: when(at) })}
+                >
+                  {dated}
+                </span>
+                {entry.workspace && (
+                  <span
+                    className="mem__path"
+                    title={t("memory.fromWorkspace", { path: entry.workspace })}
+                  >
+                    {compactPath(entry.workspace)}
+                  </span>
+                )}
+              </div>
             </article>
           );
         })}
