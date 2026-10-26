@@ -56,6 +56,7 @@ import { mergeCommands, runSavedCommand } from "./lib/savedCommands";
 import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal, openFinder } from "./lib/terminalRegistry";
+import { placeSidePanels } from "./lib/sidePanels";
 import type { CommandId } from "./lib/shortcuts";
 import {
   useKeymap,
@@ -77,6 +78,22 @@ import {
 /** Same bounds as the font size slider in the settings. */
 const FONT_MIN = 9;
 const FONT_MAX = 24;
+
+/**
+ * The width of an element, kept current. Set while the commit that mounted it
+ * is still being laid out, so the first paint already knows it.
+ */
+function useWidth(): [(element: HTMLElement | null) => (() => void) | undefined, number | null] {
+  const [width, setWidth] = useState<number | null>(null);
+  const ref = useCallback((element: HTMLElement | null) => {
+    if (!element) return;
+    setWidth(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width];
+}
 
 export default function App() {
   const {
@@ -101,6 +118,14 @@ export default function App() {
   const [showMcp, setShowMcp] = useState(false);
   const [view, setView] = useState<View>("terminals");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * The side panel open as a drawer over the terminals, for want of room
+   * beside them. Never saved, and never the saved "open" setting either: a
+   * window that narrows starts with its drawers closed, whatever was docked.
+   */
+  const [drawer, setDrawer] = useState<"inspector" | "dock" | null>(null);
+  /** The row the terminals share with the side panels. */
+  const [bodyRef, bodyWidth] = useWidth();
 
   /**
    * The workspace this window draws. A workspace window draws the one it was
@@ -144,10 +169,11 @@ export default function App() {
 
   // Every interface font size in styles.css is multiplied by this; the
   // terminals are sized by `fontSize` alone.
+  const uiScale =
+    Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100)) / 100;
   useEffect(() => {
-    const percent = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100));
-    document.documentElement.style.setProperty("--ui-scale", String(percent / 100));
-  }, [state.settings.uiScale]);
+    document.documentElement.style.setProperty("--ui-scale", String(uiScale));
+  }, [uiScale]);
 
   // The interface's monospace — session ids, paths, counts — is the
   // terminals' own font, so the chrome and the panes read as one thing.
@@ -345,23 +371,55 @@ export default function App() {
     [state.workspaces, state.activeWorkspaceId],
   );
 
-  /** The board panel only ever sits beside the terminals. */
-  const dockShown = view === "terminals" && state.settings.boardDockOpen;
+  /**
+   * Beside the terminals or over them (lib/sidePanels). Until the row has been
+   * measured — within the commit that mounts it — everything counts as fitting.
+   */
+  const sides = placeSidePanels({
+    room: bodyWidth ?? Number.POSITIVE_INFINITY,
+    scale: uiScale,
+    inspector: { open: state.settings.inspectorOpen, width: state.settings.inspectorWidth },
+    // The board panel only ever sits beside the terminals.
+    dock:
+      view === "terminals"
+        ? { open: state.settings.boardDockOpen, width: state.settings.boardDockWidth }
+        : null,
+  });
+  const inspectorDrawer = !sides.inspector.fits;
+  const dockDrawer = !sides.dock.fits;
+
+  // A drawer the window has grown wide enough to dock, or a board drawer whose
+  // terminals left the screen, is over: narrowing again must not bring it back.
+  useEffect(() => {
+    if (drawer === "inspector" && !inspectorDrawer) setDrawer(null);
+    if (drawer === "dock" && (!dockDrawer || view !== "terminals")) setDrawer(null);
+  }, [drawer, inspectorDrawer, dockDrawer, view]);
+
+  const dockShown =
+    view === "terminals" && (dockDrawer ? drawer === "dock" : state.settings.boardDockOpen);
+  /** Without room, the button opens the drawer and leaves the setting alone. */
   const toggleDock = () => {
-    if (view === "terminals") {
-      updateSettings({ boardDockOpen: !state.settings.boardDockOpen });
+    if (view !== "terminals") {
+      setView("terminals");
+      updateSettings({ boardDockOpen: true });
+      if (dockDrawer) setDrawer("dock");
       return;
     }
-    setView("terminals");
-    updateSettings({ boardDockOpen: true });
+    if (dockDrawer) setDrawer((open) => (open === "dock" ? null : "dock"));
+    else updateSettings({ boardDockOpen: !state.settings.boardDockOpen });
   };
+  const closeDock = () =>
+    dockDrawer ? setDrawer(null) : updateSettings({ boardDockOpen: false });
 
   const toggleNavigator = () =>
     updateSettings({ navigatorOpen: !state.settings.navigatorOpen });
-  const toggleInspector = () =>
-    updateSettings({ inspectorOpen: !state.settings.inspectorOpen });
-  /** The inspector is about a pane, so it needs a workspace to show one of. */
-  const inspectorShown = state.settings.inspectorOpen;
+  const toggleInspector = () => {
+    if (inspectorDrawer) setDrawer((open) => (open === "inspector" ? null : "inspector"));
+    else updateSettings({ inspectorOpen: !state.settings.inspectorOpen });
+  };
+  const closeInspector = () =>
+    inspectorDrawer ? setDrawer(null) : updateSettings({ inspectorOpen: false });
+  const inspectorShown = inspectorDrawer ? drawer === "inspector" : state.settings.inspectorOpen;
   /** The main window's alone, and only when there is room asked for it. */
   const navigatorShown = isMainWindow && state.settings.navigatorOpen;
 
@@ -896,7 +954,7 @@ export default function App() {
               hasNavigator={isMainWindow}
               navigatorOpen={state.settings.navigatorOpen}
               onToggleNavigator={toggleNavigator}
-              inspectorOpen={state.settings.inspectorOpen}
+              inspectorOpen={inspectorShown}
               onToggleInspector={toggleInspector}
               onOpenPalette={() => setPaletteOpen(true)}
             />
@@ -904,7 +962,7 @@ export default function App() {
             {/* Always rendered, whatever the view: the grids below must keep
                 the same parent for good, and the board panel sits beside
                 them in this row. */}
-            <div className="main__body">
+            <div className="main__body" ref={bodyRef}>
               <div className="workarea">
                 {/* One grid per workspace ever opened, all but one hidden. They
                     are never unmounted: that would kill every PTY and lose the
@@ -944,8 +1002,13 @@ export default function App() {
                     onOpenMcp={() => setShowMcp(true)}
                     findAgent={findAgent}
                     width={state.settings.boardDockWidth}
+                    drawnWidth={sides.dock.width}
+                    maxWidth={sides.dock.max}
+                    scale={uiScale}
+                    drawer={dockDrawer}
+                    paneId={focusedPaneId}
                     onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
-                    onClose={() => updateSettings({ boardDockOpen: false })}
+                    onClose={closeDock}
                     onExpand={() => setView("board")}
                   />
                 )}
@@ -960,6 +1023,8 @@ export default function App() {
                   paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
                   shells={shells}
                   width={state.settings.inspectorWidth}
+                  maxWidth={sides.inspector.max}
+                  drawer={inspectorDrawer}
                   onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
                   collapsed={state.settings.inspectorCollapsed}
                   onToggleSection={(id) => {
@@ -972,7 +1037,7 @@ export default function App() {
                         : [...folded, id],
                     });
                   }}
-                  onClose={() => updateSettings({ inspectorOpen: false })}
+                  onClose={closeInspector}
                   onOpenBoard={() => setView("board")}
                   onOpenSessions={setPickerPaneId}
                 />

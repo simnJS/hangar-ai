@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { Icon } from "./Icon";
 import { FilesSection } from "./InspectorFiles";
 import {
@@ -18,7 +18,9 @@ import { usePaneInsight } from "../lib/paneInsight";
 import { taskForPane, useBoardTasks } from "../lib/paneTask";
 import { resolveShell } from "../lib/shells";
 import type { CommandId } from "../lib/shortcuts";
+import { clampInspector, INSPECTOR_MAX, INSPECTOR_MIN } from "../lib/sidePanels";
 import { getTerminal } from "../lib/terminalRegistry";
+import { useDrawer } from "../lib/useDrawer";
 import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
 import { AGENTS, DEFAULT_SETTINGS, type Pane, type ShellInfo, type Workspace } from "../types";
 
@@ -39,7 +41,15 @@ export interface InspectorProps {
   paneIndex: number | null;
   /** The shells the machine reported, to name a shell pane's. */
   shells?: ShellInfo[];
+  /** In interface points, as saved. */
   width: number;
+  /** The widest the room allows right now, in points (lib/sidePanels). */
+  maxWidth: number;
+  /**
+   * No room beside the terminals: drawn over them, opened on demand and gone
+   * again as soon as the user is done with it (lib/useDrawer).
+   */
+  drawer: boolean;
   onResize: (width: number) => void;
   /** Section ids folded away (Settings.inspectorCollapsed). */
   collapsed: string[];
@@ -51,21 +61,10 @@ export interface InspectorProps {
 
 /**
  * Widths are in interface points: the column is drawn at `width × ui-scale`,
- * so a larger interface size keeps the same amount of text per line.
+ * so a larger interface size keeps the same amount of text per line. Whether
+ * it docks or opens as a drawer is App's call, from lib/sidePanels.
  */
-const MIN_WIDTH = 240;
-const MAX_WIDTH = 440;
 const KEY_STEP = 16;
-/**
- * What the work area keeps beside a docked inspector. With less room than
- * that, the inspector stops taking any and slides over the terminals as a
- * drawer instead — about a 1180px window with the navigator open.
- */
-const TERMINALS_MIN = 640;
-/** The strip of work area a drawer, however wide, always leaves uncovered. */
-const DRAWER_MARGIN = 48;
-
-const clampWidth = (width: number) => Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)));
 
 /** A function that keeps its identity across renders but always calls the latest. */
 function useLatest<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void {
@@ -80,48 +79,12 @@ function readScale(): number {
 }
 
 export function Inspector(props: InspectorProps) {
-  const { pane, width, onResize, onClose } = props;
+  const { pane, width, maxWidth, drawer, onResize, onClose } = props;
   const t = useT();
   const slotRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const [drawer, setDrawer] = useState(false);
-  const shown = clampWidth(width);
-
-  // Docked or drawer, from the room the work area has left — measured, since
-  // it depends on the window, the navigator and the interface size at once.
-  // The panel's own width is the same in both modes, so the switch can never
-  // feed back into the measurement.
-  useLayoutEffect(() => {
-    const slot = slotRef.current;
-    const panel = panelRef.current;
-    const area = slot?.parentElement;
-    if (!slot || !panel || !area) return;
-    let first = true;
-    const measure = () => {
-      const room = area.getBoundingClientRect().width;
-      const own = panel.getBoundingClientRect().width;
-      const next = room - own < TERMINALS_MIN;
-      setDrawer(next);
-      // Opened as a drawer, it takes the keyboard: Escape then closes it
-      // and hands the keys back to the pane.
-      if (first && next) panel.focus({ preventScroll: true });
-      first = false;
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(area);
-    observer.observe(panel);
-    return () => observer.disconnect();
-  }, []);
-
-  /** The widest the column may get, in points, with the room there is now. */
-  const maxFor = useCallback(
-    (scale: number) => {
-      const room = slotRef.current?.parentElement?.getBoundingClientRect().width ?? Infinity;
-      return Math.max(MIN_WIDTH, (room - (drawer ? DRAWER_MARGIN : TERMINALS_MIN)) / scale);
-    },
-    [drawer],
-  );
+  /** A drawer in a window narrower than the saved width still leaves a margin. */
+  const shown = Math.min(clampInspector(width), maxWidth);
 
   function beginResize(event: React.PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -133,7 +96,7 @@ export function Inspector(props: InspectorProps) {
     const grip = event.currentTarget;
     const pointerId = event.pointerId;
     const scale = readScale();
-    const max = Math.min(MAX_WIDTH, maxFor(scale));
+    const max = Math.min(INSPECTOR_MAX, maxWidth);
     const startX = event.clientX;
     const startWidth = panel.getBoundingClientRect().width;
     let latest = shown;
@@ -146,7 +109,7 @@ export function Inspector(props: InspectorProps) {
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;
       const points = (startWidth + (startX - ev.clientX)) / scale;
-      latest = Math.round(Math.max(MIN_WIDTH, Math.min(max, points)));
+      latest = Math.round(Math.max(INSPECTOR_MIN, Math.min(max, points)));
       slot.style.setProperty("--inspector-w", `${latest}px`);
     };
 
@@ -170,11 +133,20 @@ export function Inspector(props: InspectorProps) {
   }
 
   function resizeBy(delta: number) {
-    const max = Math.min(MAX_WIDTH, maxFor(readScale()));
-    onResize(Math.round(Math.max(MIN_WIDTH, Math.min(max, shown + delta))));
+    const max = Math.min(INSPECTOR_MAX, maxWidth);
+    onResize(Math.round(Math.max(INSPECTOR_MIN, Math.min(max, shown + delta))));
   }
 
+  const closeDrawer = useDrawer({
+    panelRef,
+    active: drawer,
+    onClose: () => onClose(),
+    paneId: pane?.id ?? null,
+  });
+
   const close = useLatest(() => {
+    // A drawer gives the keyboard back to whatever had it when it opened.
+    if (drawer) return closeDrawer("button");
     onClose();
     // The keyboard goes back where it was working: the focused pane.
     getTerminal(pane?.id ?? null)?.focus();
@@ -191,12 +163,6 @@ export function Inspector(props: InspectorProps) {
         className="inspector__panel"
         aria-label={t("inspector.label")}
         tabIndex={-1}
-        onKeyDown={(event) => {
-          if (!drawer || event.key !== "Escape" || event.defaultPrevented) return;
-          event.preventDefault();
-          event.stopPropagation();
-          close();
-        }}
       >
         <div
           className="inspector__grip"
@@ -204,8 +170,8 @@ export function Inspector(props: InspectorProps) {
           aria-orientation="vertical"
           aria-label={t("inspector.resize")}
           aria-valuenow={shown}
-          aria-valuemin={MIN_WIDTH}
-          aria-valuemax={MAX_WIDTH}
+          aria-valuemin={INSPECTOR_MIN}
+          aria-valuemax={Math.max(INSPECTOR_MIN, Math.min(INSPECTOR_MAX, maxWidth))}
           title={t("inspector.resize")}
           tabIndex={0}
           onPointerDown={beginResize}

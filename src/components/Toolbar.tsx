@@ -304,6 +304,8 @@ export function Toolbar({
           className="tbtn tbtn--toggle"
           onClick={onToggleDock}
           aria-pressed={dockShown}
+          // Opens and closes a drawer itself: a press on it is not "elsewhere".
+          data-drawer-toggle=""
           title={withKeys(t("board.dockHint"), "view.boardDock")}
           aria-label={t("board.dock")}
         >
@@ -314,6 +316,7 @@ export function Toolbar({
           className="tbtn tbtn--toggle"
           onClick={onToggleInspector}
           aria-pressed={inspectorOpen}
+          data-drawer-toggle=""
           title={withKeys(t("cmd.view.inspector"), "view.inspector")}
           aria-label={t("toolbar.inspector")}
         >

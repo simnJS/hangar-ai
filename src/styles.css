@@ -4585,7 +4585,9 @@ button.card__who:focus-visible {
 
 /* Holds the grids, the full-width views and the panel, in one row. */
 .workarea {
+  position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
 }
@@ -4595,17 +4597,51 @@ button.card__who:focus-visible {
 }
 
 /* Keeps its width: the terminals are the ones that give way, down to what
-   the max-width leaves them. */
+   lib/sidePanels leaves them. The width is set inline, from there. */
 .board-dock {
   position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
-  min-width: 300px;
-  max-width: calc(100% - 320px);
+  max-width: 100%;
   min-height: 0;
   border-left: 1px solid var(--sep);
   background: var(--chrome);
+}
+
+/* Focused only as a drawer, to take the keyboard; a region, not a control. */
+.board-dock:focus {
+  outline: none;
+}
+
+/* No room beside the terminals: a drawer over their right edge, opened on
+   demand (lib/useDrawer). Out of the row's flow, so the terminals keep their
+   size whether it is open or not, and nothing under them remounts. */
+.board-dock--drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  border-left: 0;
+  box-shadow:
+    inset 1px 0 0 var(--line-strong),
+    -1px 0 0 var(--sep),
+    -18px 0 44px var(--shadow);
+  animation: board-dock-in var(--dur) var(--ease);
+}
+
+@keyframes board-dock-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(16px * var(--ui-scale)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-dock--drawer {
+    animation: none;
+  }
 }
 
 /* A wide grip over a hairline: easy to catch, drawn only while it is used. */
