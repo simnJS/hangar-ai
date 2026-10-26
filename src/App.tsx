@@ -56,6 +56,8 @@ import { mergeCommands, runSavedCommand } from "./lib/savedCommands";
 import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal, openFinder } from "./lib/terminalRegistry";
+import { placeSidePanels } from "./lib/sidePanels";
+import { focusRegion, nextRegion, regionOf, type Region } from "./lib/regions";
 import type { CommandId } from "./lib/shortcuts";
 import {
   useKeymap,
@@ -77,6 +79,22 @@ import {
 /** Same bounds as the font size slider in the settings. */
 const FONT_MIN = 9;
 const FONT_MAX = 24;
+
+/**
+ * The width of an element, kept current. Set while the commit that mounted it
+ * is still being laid out, so the first paint already knows it.
+ */
+function useWidth(): [(element: HTMLElement | null) => (() => void) | undefined, number | null] {
+  const [width, setWidth] = useState<number | null>(null);
+  const ref = useCallback((element: HTMLElement | null) => {
+    if (!element) return;
+    setWidth(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width];
+}
 
 export default function App() {
   const {
@@ -101,6 +119,14 @@ export default function App() {
   const [showMcp, setShowMcp] = useState(false);
   const [view, setView] = useState<View>("terminals");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * The side panel open as a drawer over the terminals, for want of room
+   * beside them. Never saved, and never the saved "open" setting either: a
+   * window that narrows starts with its drawers closed, whatever was docked.
+   */
+  const [drawer, setDrawer] = useState<"inspector" | "dock" | null>(null);
+  /** The row the terminals share with the side panels. */
+  const [bodyRef, bodyWidth] = useWidth();
 
   /**
    * The workspace this window draws. A workspace window draws the one it was
@@ -144,10 +170,11 @@ export default function App() {
 
   // Every interface font size in styles.css is multiplied by this; the
   // terminals are sized by `fontSize` alone.
+  const uiScale =
+    Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100)) / 100;
   useEffect(() => {
-    const percent = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100));
-    document.documentElement.style.setProperty("--ui-scale", String(percent / 100));
-  }, [state.settings.uiScale]);
+    document.documentElement.style.setProperty("--ui-scale", String(uiScale));
+  }, [uiScale]);
 
   // The interface's monospace — session ids, paths, counts — is the
   // terminals' own font, so the chrome and the panes read as one thing.
@@ -345,25 +372,114 @@ export default function App() {
     [state.workspaces, state.activeWorkspaceId],
   );
 
-  /** The board panel only ever sits beside the terminals. */
-  const dockShown = view === "terminals" && state.settings.boardDockOpen;
+  /**
+   * Beside the terminals or over them (lib/sidePanels). Until the row has been
+   * measured — within the commit that mounts it — everything counts as fitting.
+   */
+  const sides = placeSidePanels({
+    room: bodyWidth ?? Number.POSITIVE_INFINITY,
+    scale: uiScale,
+    inspector: { open: state.settings.inspectorOpen, width: state.settings.inspectorWidth },
+    // The board panel only ever sits beside the terminals.
+    dock:
+      view === "terminals"
+        ? { open: state.settings.boardDockOpen, width: state.settings.boardDockWidth }
+        : null,
+  });
+  const inspectorDrawer = !sides.inspector.fits;
+  const dockDrawer = !sides.dock.fits;
+
+  // A drawer the window has grown wide enough to dock, or a board drawer whose
+  // terminals left the screen, is over: narrowing again must not bring it back.
+  useEffect(() => {
+    if (drawer === "inspector" && !inspectorDrawer) setDrawer(null);
+    if (drawer === "dock" && (!dockDrawer || view !== "terminals")) setDrawer(null);
+  }, [drawer, inspectorDrawer, dockDrawer, view]);
+
+  const dockShown =
+    view === "terminals" && (dockDrawer ? drawer === "dock" : state.settings.boardDockOpen);
+  /** Without room, the button opens the drawer and leaves the setting alone. */
   const toggleDock = () => {
-    if (view === "terminals") {
-      updateSettings({ boardDockOpen: !state.settings.boardDockOpen });
+    if (view !== "terminals") {
+      setView("terminals");
+      updateSettings({ boardDockOpen: true });
+      if (dockDrawer) setDrawer("dock");
       return;
     }
-    setView("terminals");
-    updateSettings({ boardDockOpen: true });
+    if (dockDrawer) setDrawer((open) => (open === "dock" ? null : "dock"));
+    else updateSettings({ boardDockOpen: !state.settings.boardDockOpen });
   };
+  const closeDock = () =>
+    dockDrawer ? setDrawer(null) : updateSettings({ boardDockOpen: false });
 
   const toggleNavigator = () =>
     updateSettings({ navigatorOpen: !state.settings.navigatorOpen });
-  const toggleInspector = () =>
-    updateSettings({ inspectorOpen: !state.settings.inspectorOpen });
-  /** The inspector is about a pane, so it needs a workspace to show one of. */
-  const inspectorShown = state.settings.inspectorOpen;
+  const toggleInspector = () => {
+    if (inspectorDrawer) setDrawer((open) => (open === "inspector" ? null : "inspector"));
+    else updateSettings({ inspectorOpen: !state.settings.inspectorOpen });
+  };
+  const closeInspector = () =>
+    inspectorDrawer ? setDrawer(null) : updateSettings({ inspectorOpen: false });
+  const inspectorShown = inspectorDrawer ? drawer === "inspector" : state.settings.inspectorOpen;
   /** The main window's alone, and only when there is room asked for it. */
   const navigatorShown = isMainWindow && state.settings.navigatorOpen;
+
+  // ---------------------------------------------------------------------------
+  // The keyboard's way around the window (lib/regions): a terminal keeps Tab
+  // for the shell, so F6 and the "focus" commands are how it gets out of a
+  // pane and into the panels around it.
+  // ---------------------------------------------------------------------------
+
+  /** A region to put the keyboard in once the render that shows it is done. */
+  const pendingRegion = useRef<Region | null>(null);
+  useEffect(() => {
+    const region = pendingRegion.current;
+    if (!region) return;
+    pendingRegion.current = null;
+    focusRegion(region);
+  });
+
+  /** In the terminals view, the panes' region is the focused pane's terminal. */
+  const enterRegion = (region: Region): boolean => {
+    const term = view === "terminals" && region === "main" ? getTerminal(focusedPaneId) : null;
+    if (!term) return focusRegion(region);
+    term.focus();
+    return true;
+  };
+
+  const cycleRegion = (step: 1 | -1) => {
+    const at = document.activeElement;
+    // A dialog keeps the keyboard until it is closed.
+    if (at?.closest('[aria-modal="true"], .modal-backdrop')) return;
+    const shown: Region[] = [];
+    if (navigatorShown) shown.push("navigator");
+    if (activeWorkspace) shown.push("toolbar", "main", "status");
+    if (activeWorkspace && dockShown) shown.push("dock");
+    if (activeWorkspace && inspectorShown) shown.push("inspector");
+    // A region with nothing to focus — the status bar over the board, which
+    // has no field — is stepped over.
+    let current = regionOf(at);
+    for (let tries = 0; tries < shown.length; tries++) {
+      const next = nextRegion(shown, current, step);
+      if (!next || enterRegion(next)) return;
+      current = next;
+    }
+  };
+
+  /** Shown first when it is hidden: asking for its keys is asking to see it. */
+  const focusNavigator = () => {
+    if (state.settings.navigatorOpen) return void focusRegion("navigator");
+    pendingRegion.current = "navigator";
+    updateSettings({ navigatorOpen: true });
+  };
+
+  const focusInspector = () => {
+    // A drawer takes the keyboard by itself as it opens.
+    if (inspectorDrawer && drawer !== "inspector") return setDrawer("inspector");
+    if (inspectorShown) return void focusRegion("inspector");
+    pendingRegion.current = "inspector";
+    updateSettings({ inspectorOpen: true });
+  };
 
   /** `dir` is only passed by the shortcuts that name a side; otherwise the
       longer side of the pane decides. */
@@ -623,7 +739,7 @@ export default function App() {
     setConfirmReset(false);
   };
 
-  /** The confirm button had the keyboard; hand it back to the terminal. */
+  /** The confirmation had the keyboard; hand it back to the terminal. */
   const cancelReset = () => {
     setConfirmReset(false);
     if (focusedPaneId) getTerminal(focusedPaneId)?.focus();
@@ -666,6 +782,8 @@ export default function App() {
       // The same key closes it again, as in any editor.
       "view.palette": () => setPaletteOpen((open) => !open),
       "view.inspector": toggleInspector,
+      "view.nextRegion": () => cycleRegion(1),
+      "view.prevRegion": () => cycleRegion(-1),
       "app.zoomIn": () => zoom(state.settings.fontSize + 1),
       "app.zoomOut": () => zoom(state.settings.fontSize - 1),
       "app.zoomReset": () => zoom(DEFAULT_SETTINGS.fontSize),
@@ -684,7 +802,10 @@ export default function App() {
 
     // A workspace window shows one workspace and no settings: those keys are
     // the main window's.
-    if (isMainWindow) map["view.navigator"] = toggleNavigator;
+    if (isMainWindow) {
+      map["view.navigator"] = toggleNavigator;
+      map["view.focusNavigator"] = focusNavigator;
+    }
     if (windowWorkspaceId) {
       delete map["view.settings"];
       delete map["view.shortcuts"];
@@ -709,6 +830,7 @@ export default function App() {
     if (!activeWorkspace) return map;
     const wsId = activeWorkspace.id;
 
+    map["view.focusInspector"] = focusInspector;
     map["view.terminals"] = () => setView("terminals");
     map["view.board"] = () => setView("board");
     map["view.boardDock"] = toggleDock;
@@ -896,7 +1018,7 @@ export default function App() {
               hasNavigator={isMainWindow}
               navigatorOpen={state.settings.navigatorOpen}
               onToggleNavigator={toggleNavigator}
-              inspectorOpen={state.settings.inspectorOpen}
+              inspectorOpen={inspectorShown}
               onToggleInspector={toggleInspector}
               onOpenPalette={() => setPaletteOpen(true)}
             />
@@ -904,79 +1026,86 @@ export default function App() {
             {/* Always rendered, whatever the view: the grids below must keep
                 the same parent for good, and the board panel sits beside
                 them in this row. */}
-            <div className="main__body">
-            <div className="workarea">
-              {/* One grid per workspace ever opened, all but one hidden. They
-                  are never unmounted: that would kill every PTY and lose the
-                  running agents — on a workspace switch as much as on the
-                  switch to the board. */}
-              {openWorkspaces.map((ws) => (
-                <WorkspaceTerminals
-                  key={ws.id}
-                  workspace={ws}
-                  hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
-                  settings={state.settings}
-                  availableAgents={availableAgents}
+            <div className="main__body" ref={bodyRef}>
+              <div className="workarea">
+                {/* One grid per workspace ever opened, all but one hidden. They
+                    are never unmounted: that would kill every PTY and lose the
+                    running agents — on a workspace switch as much as on the
+                    switch to the board. */}
+                {openWorkspaces.map((ws) => (
+                  <WorkspaceTerminals
+                    key={ws.id}
+                    workspace={ws}
+                    hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
+                    settings={state.settings}
+                    availableAgents={availableAgents}
+                    shells={shells}
+                    focusedPaneId={focusByWorkspace[ws.id] ?? null}
+                    zoomed={Boolean(zoomByWorkspace[ws.id])}
+                    onZoomChange={(on) => setZoom(ws.id, on)}
+                    onFocusPane={(paneId) => focusPane(ws.id, paneId)}
+                    onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
+                    onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                    onOpenSessions={setPickerPaneId}
+                  />
+                ))}
+
+                {view === "board" && (
+                  <BoardView
+                    cwd={activeWorkspace.cwd}
+                    onOpenMcp={() => setShowMcp(true)}
+                    findAgent={findAgent}
+                  />
+                )}
+
+                {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+                {dockShown && (
+                  <BoardDock
+                    cwd={activeWorkspace.cwd}
+                    onOpenMcp={() => setShowMcp(true)}
+                    findAgent={findAgent}
+                    width={state.settings.boardDockWidth}
+                    drawnWidth={sides.dock.width}
+                    maxWidth={sides.dock.max}
+                    scale={uiScale}
+                    drawer={dockDrawer}
+                    paneId={focusedPaneId}
+                    onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
+                    onClose={closeDock}
+                    onExpand={() => setView("board")}
+                  />
+                )}
+              </div>
+
+              {inspectorShown && (
+                <Inspector
+                  workspace={activeWorkspace}
+                  workspaces={state.workspaces}
+                  activeWorkspaceId={activeWorkspace.id}
+                  pane={panes.find((p) => p.id === focusedPaneId) ?? null}
+                  paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
                   shells={shells}
-                  focusedPaneId={focusByWorkspace[ws.id] ?? null}
-                  zoomed={Boolean(zoomByWorkspace[ws.id])}
-                  onZoomChange={(on) => setZoom(ws.id, on)}
-                  onFocusPane={(paneId) => focusPane(ws.id, paneId)}
-                  onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
-                  onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                  width={state.settings.inspectorWidth}
+                  maxWidth={sides.inspector.max}
+                  drawer={inspectorDrawer}
+                  onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
+                  collapsed={state.settings.inspectorCollapsed}
+                  onToggleSection={(id) => {
+                    // Read from the store as it stands, not this render: two
+                    // folds before a re-render would otherwise lose one.
+                    const folded = snapshot().settings.inspectorCollapsed;
+                    updateSettings({
+                      inspectorCollapsed: folded.includes(id)
+                        ? folded.filter((entry) => entry !== id)
+                        : [...folded, id],
+                    });
+                  }}
+                  onClose={closeInspector}
+                  onOpenBoard={() => setView("board")}
                   onOpenSessions={setPickerPaneId}
                 />
-              ))}
-
-              {view === "board" && (
-                <BoardView
-                  cwd={activeWorkspace.cwd}
-                  onOpenMcp={() => setShowMcp(true)}
-                  findAgent={findAgent}
-                />
               )}
-
-              {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
-
-              {dockShown && (
-                <BoardDock
-                  cwd={activeWorkspace.cwd}
-                  onOpenMcp={() => setShowMcp(true)}
-                  findAgent={findAgent}
-                  width={state.settings.boardDockWidth}
-                  onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
-                  onClose={() => updateSettings({ boardDockOpen: false })}
-                  onExpand={() => setView("board")}
-                />
-              )}
-            </div>
-
-            {inspectorShown && (
-              <Inspector
-                workspace={activeWorkspace}
-                workspaces={state.workspaces}
-                activeWorkspaceId={activeWorkspace.id}
-                pane={panes.find((p) => p.id === focusedPaneId) ?? null}
-                paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
-                shells={shells}
-                width={state.settings.inspectorWidth}
-                onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
-                collapsed={state.settings.inspectorCollapsed}
-                onToggleSection={(id) => {
-                  // Read from the store as it stands, not this render: two
-                  // folds before a re-render would otherwise lose one.
-                  const folded = snapshot().settings.inspectorCollapsed;
-                  updateSettings({
-                    inspectorCollapsed: folded.includes(id)
-                      ? folded.filter((entry) => entry !== id)
-                      : [...folded, id],
-                  });
-                }}
-                onClose={() => updateSettings({ inspectorOpen: false })}
-                onOpenBoard={() => setView("board")}
-                onOpenSessions={setPickerPaneId}
-              />
-            )}
             </div>
 
             <StatusBar

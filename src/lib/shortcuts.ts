@@ -83,6 +83,10 @@ export type CommandId =
   | "view.palette"
   | "view.navigator"
   | "view.inspector"
+  | "view.focusNavigator"
+  | "view.focusInspector"
+  | "view.nextRegion"
+  | "view.prevRegion"
   | "terminal.clear"
   | "terminal.copy"
   | "terminal.paste"
@@ -356,6 +360,35 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "view",
     labelKey: "cmd.view.inspector",
     defaults: ["Mod+Alt+I"],
+  },
+  {
+    id: "view.focusNavigator",
+    section: "view",
+    labelKey: "cmd.view.focusNavigator",
+    // The panel's own chord, shifted: the same panel, with the keyboard in
+    // it. AltGr+Shift+N types nothing on AZERTY either, so it stays a chord.
+    defaults: ["Mod+Alt+Shift+N"],
+  },
+  {
+    id: "view.focusInspector",
+    section: "view",
+    labelKey: "cmd.view.focusInspector",
+    defaults: ["Mod+Alt+Shift+I"],
+  },
+  {
+    // F6, as in browsers and editors. A terminal keeps Tab for the shell, so
+    // this is the keyboard's way out of a pane and into the panels around it;
+    // a function key types nothing, so it works from a field just as well.
+    id: "view.nextRegion",
+    section: "view",
+    labelKey: "cmd.view.nextRegion",
+    defaults: ["F6"],
+  },
+  {
+    id: "view.prevRegion",
+    section: "view",
+    labelKey: "cmd.view.prevRegion",
+    defaults: ["Shift+F6"],
   },
   {
     id: "view.terminals",

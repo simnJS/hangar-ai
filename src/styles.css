@@ -1433,6 +1433,24 @@ body.is-sorting * {
   transition-delay: 0ms;
 }
 
+/* Focused from the keyboard: the line, drawn twice as thick, is the ring. */
+.splitter:focus {
+  outline: none;
+}
+
+.splitter:focus-visible::before {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
+.splitter--col:focus-visible::before {
+  width: 2px;
+}
+
+.splitter--row:focus-visible::before {
+  height: 2px;
+}
+
 .splitter::after {
   content: "";
   position: absolute;
@@ -1942,10 +1960,15 @@ body.is-dragging-pane .pane__bar {
 
 /*
  * Narrowing panes drop details in a fixed order — the shell, the session's
- * id, the state word, the gauge's figure, the diff button — so nothing ever
- * wraps or overlaps, down to eight panes beside both side panels in the
- * smallest window. The focused pane, whose actions take a fifth of its header,
- * goes through the same steps sooner than the others.
+ * id, the state word's long form, the gauge's figure, the diff button — so
+ * nothing ever wraps or overlaps, down to eight panes beside both side panels
+ * in the smallest window.
+ *
+ * Every pane drops them at the same widths: the ones that leave room for the
+ * actions the focused pane shows at the end of its header, a fifth of it. So
+ * moving the focus only brings the actions in, and nothing before them comes
+ * or goes. Below 29em, where both no longer fit, the actions take the state
+ * word's place, right where it stood.
  *
  * Widths are in the header's em, so they follow the interface size, and they
  * measure its content box: the pane's width less 16px of padding.
@@ -1954,8 +1977,31 @@ body.is-dragging-pane .pane__bar {
   display: none;
 }
 
-/* The word's short form, while the full one stays for the screen reader. */
-@container pane-bar (max-width: 33.5em) {
+@container pane-bar (max-width: 47em) {
+  .pane__pick--shell {
+    display: none;
+  }
+
+  /* The longest word, the one asking for an answer, is the first to go. Its
+     short form shows; the full one stays for the screen reader. */
+  .pane__state--waiting .pane__state-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .pane__state--waiting .pane__state-short {
+    display: inline;
+  }
+}
+
+@container pane-bar (max-width: 42em) {
+  .pane__session-id {
+    display: none;
+  }
+
   .pane__state-long {
     position: absolute;
     width: 1px;
@@ -1969,55 +2015,8 @@ body.is-dragging-pane .pane__bar {
   }
 }
 
-@container pane-bar (max-width: 42em) {
-  .pane__pick--shell {
-    display: none;
-  }
-
-  .pane--focused .pane__session-id {
-    display: none;
-  }
-
-  .pane--focused .pane__state-long {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-
-  .pane--focused .pane__state-short {
-    display: inline;
-  }
-}
-
-@container pane-bar (max-width: 47em) {
-  .pane--focused .pane__pick--shell {
-    display: none;
-  }
-
-  /* The longest word, the one asking for an answer, is the first to go. */
-  .pane--focused .pane__state--waiting .pane__state-long {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-
-  .pane--focused .pane__state--waiting .pane__state-short {
-    display: inline;
-  }
-}
-
-@container pane-bar (max-width: 38.5em) {
-  .pane__session-id {
-    display: none;
-  }
-}
-
 @container pane-bar (max-width: 37em) {
-  .pane--focused .pane__ctxpct {
+  .pane__ctxpct {
     display: none;
   }
 }
@@ -2053,17 +2052,16 @@ body.is-dragging-pane .pane__bar {
 
 @container pane-bar (max-width: 27.5em) {
   .pane__action--cmd,
-  .pane--focused .pane__session {
+  .pane__session {
     display: none;
   }
 }
 
-/* The focused pane keeps its agent in view over its gauge — which the
-   inspector shows in full — and over the zoom, which the menu takes. */
+/* The agent stays in view over the gauge — which the inspector shows in
+   full — and over the zoom, which the menu takes. */
 @container pane-bar (max-width: 25em) {
-  .pane__ctxpct,
-  .pane--focused .pane__meta,
-  .pane--focused .pane__action--zoom {
+  .pane__meta,
+  .pane__action--zoom {
     display: none;
   }
 }
@@ -4580,7 +4578,9 @@ button.card__who:focus-visible {
 
 /* Holds the grids, the full-width views and the panel, in one row. */
 .workarea {
+  position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
 }
@@ -4590,17 +4590,56 @@ button.card__who:focus-visible {
 }
 
 /* Keeps its width: the terminals are the ones that give way, down to what
-   the max-width leaves them. */
+   lib/sidePanels leaves them. The width is set inline, from there. */
 .board-dock {
   position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
-  min-width: 300px;
-  max-width: calc(100% - 320px);
+  max-width: 100%;
   min-height: 0;
   border-left: 1px solid var(--sep);
   background: var(--chrome);
+}
+
+/* Focused as a region — by F6, or as a drawer — like the inspector. */
+.board-dock:focus {
+  outline: none;
+}
+
+.board-dock:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+
+/* No room beside the terminals: a drawer over their right edge, opened on
+   demand (lib/useDrawer). Out of the row's flow, so the terminals keep their
+   size whether it is open or not, and nothing under them remounts. */
+.board-dock--drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  border-left: 0;
+  box-shadow:
+    inset 1px 0 0 var(--line-strong),
+    -1px 0 0 var(--sep),
+    -18px 0 44px var(--shadow);
+  animation: board-dock-in var(--dur) var(--ease);
+}
+
+@keyframes board-dock-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(16px * var(--ui-scale)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-dock--drawer {
+    animation: none;
+  }
 }
 
 /* A wide grip over a hairline: easy to catch, drawn only while it is used. */

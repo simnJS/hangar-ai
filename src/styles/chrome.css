@@ -392,6 +392,15 @@
   }
 }
 
+/* What follows the state word — the task, the question, the last answer —
+   only says something with room for a few words of it. Narrower, the word
+   stands alone rather than trailing off as "Travaille su…". */
+@container activity (width < 30em) {
+  .activity__state ~ .activity__detail {
+    display: none;
+  }
+}
+
 @container activity (width < 10em) {
   .activity__message {
     display: none;
@@ -521,6 +530,37 @@
   display: flex;
   justify-content: flex-end;
   gap: calc(6px * var(--ui-scale));
+}
+
+/* A preset asking first: the panes it would stop mid-work, one per line. */
+.tmenu__panes {
+  display: grid;
+  gap: calc(2px * var(--ui-scale));
+  margin: calc(-4px * var(--ui-scale)) 0 calc(12px * var(--ui-scale));
+  padding: calc(6px * var(--ui-scale)) calc(8px * var(--ui-scale));
+  border-radius: var(--radius-sm);
+  background: var(--line);
+  list-style: none;
+}
+
+.tmenu__pane {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  min-width: 0;
+  height: calc(20px * var(--ui-scale));
+}
+
+.tmenu__pane-name {
+  flex: none;
+  font-weight: 600;
+}
+
+.tmenu__pane-state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-secondary);
 }
 
 /* ---- Status bar ---- */
@@ -728,9 +768,10 @@
   font-size: calc(10px * var(--ui-scale));
 }
 
-/* A narrow window at a large interface size: the field keeps its room, the
-   hint and the extras go first. */
-@container status (width < 46em) {
+/* A narrow window, or a large interface size: the field keeps its room, the
+   hint and the extras go first — before the placeholder runs under the hint
+   (a 900px window with the navigator open). */
+@container status (width < 58em) {
   .status__kbd,
   .status__item--panes {
     display: none;

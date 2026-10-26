@@ -33,6 +33,9 @@ export interface Handle {
   rect: Rect;
   /** Area owned by the split, used to turn a pointer position into a ratio. */
   bounds: Rect;
+  /** The panes on either side — left or above, right or below — in reading order. */
+  before: string[];
+  after: string[];
 }
 
 export interface GridLayout {
@@ -234,6 +237,26 @@ export function normalizeTree(panes: Pane[], tree?: SplitNode | null): SplitNode
   return presetTree([...kept, ...ids.filter((id) => !seen.has(id))]);
 }
 
+/**
+ * The panes in the order they are read on screen. It is the order a preset
+ * keeps them in: the panes you see first stay, and a smaller preset closes the
+ * ones read last — not whichever were spawned last, which after a few moves
+ * has nothing to do with what is on screen.
+ */
+export function readingOrder(panes: Pane[], tree?: SplitNode | null): Pane[] {
+  const byId = new Map(panes.map((pane) => [pane.id, pane]));
+  return leafIds(normalizeTree(panes, tree))
+    .map((id) => byId.get(id))
+    .filter((pane): pane is Pane => Boolean(pane));
+}
+
+/** The number of panes a preset asking for `count` ends up with. */
+export const presetSize = (count: number) => Math.min(MAX_PANES, Math.max(1, Math.round(count)));
+
+/** The panes a preset of `count` closes, in reading order. */
+export const closedByPreset = (panes: Pane[], tree: SplitNode | null | undefined, count: number) =>
+  readingOrder(panes, tree).slice(presetSize(count));
+
 /** Turns the tree into flat rectangles plus the boundaries between them. */
 export function computeLayout(tree: SplitNode): GridLayout {
   const rects: Record<string, Rect> = {};
@@ -262,6 +285,8 @@ export function computeLayout(tree: SplitNode): GridLayout {
         dir: "row",
         rect: { left: rect.left + width, top: rect.top, width: 0, height: rect.height },
         bounds: rect,
+        before: leafIds(node.a),
+        after: leafIds(node.b),
       });
     } else {
       const height = rect.height * ratio;
@@ -276,6 +301,8 @@ export function computeLayout(tree: SplitNode): GridLayout {
         dir: "col",
         rect: { left: rect.left, top: rect.top + height, width: rect.width, height: 0 },
         bounds: rect,
+        before: leafIds(node.a),
+        after: leafIds(node.b),
       });
     }
   };

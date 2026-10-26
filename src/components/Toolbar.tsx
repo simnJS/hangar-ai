@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "./Icon";
+import { StateGlyph } from "./StateGlyph";
 import { ToolbarActivity } from "./ToolbarActivity";
 import { ToolbarMenu, type MenuCloseReason } from "./ToolbarMenu";
 import { useT } from "../i18n";
-import { MAX_PANES } from "../lib/layout";
+import { getPaneActivity, type AgentActivity } from "../lib/agentState";
+import { closedByPreset, MAX_PANES } from "../lib/layout";
 import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
 import type { LayoutSize, Pane, Workspace } from "../types";
 
@@ -107,6 +109,47 @@ export function Toolbar({
   const actionsRef = useRef<HTMLDivElement>(null);
   const confirmId = useId();
 
+  /**
+   * A smaller preset closes the panes read last. When one of them still has
+   * an agent at work, waiting on you or with an answer you have not read, the
+   * segmented control — which looks like a harmless view switch — asks first,
+   * from the button that was pressed.
+   */
+  const [presetAsk, setPresetAsk] = useState<{
+    size: LayoutSize;
+    closing: Pane[];
+    busy: { pane: Pane; activity: AgentActivity }[];
+  } | null>(null);
+  const presetRef = useRef<HTMLButtonElement | null>(null);
+
+  const choosePreset = (size: LayoutSize, button: HTMLButtonElement) => {
+    const closing = closedByPreset(panes, workspace.tree, size);
+    const busy = closing.flatMap((pane) => {
+      const activity = getPaneActivity(pane.id)?.activity ?? "idle";
+      return activity === "idle" ? [] : [{ pane, activity }];
+    });
+    if (!busy.length) return onPreset(size);
+    presetRef.current = button;
+    setPresetAsk({ size, closing, busy });
+  };
+
+  const closePresetAsk = (reason: MenuCloseReason) => {
+    setPresetAsk(null);
+    if (reason === "escape" || reason === "tab") presetRef.current?.focus();
+  };
+
+  // A question about this workspace's panes, in this view, and nowhere else —
+  // and one at a time: a reset armed from its shortcut takes over.
+  useEffect(() => {
+    setPresetAsk(null);
+  }, [workspace.id, view, confirmReset]);
+
+  /** "Ben", "Ben and Cleo", "Ben, Cleo and Dan". */
+  const nameList = (names: string[]) =>
+    names.length < 2
+      ? names.join("")
+      : t("toolbar.presetNames", { names: names.slice(0, -1).join(", "), last: names[names.length - 1] });
+
   // The reset went through, or was called off elsewhere (a view change): the
   // menu it was showing in has nothing left to say.
   const wasConfirming = useRef(confirmReset);
@@ -116,15 +159,15 @@ export function Toolbar({
   }, [confirmReset]);
 
   /**
-   * Escape gives the keyboard back to the button that opened the menu. A reset
-   * armed from a shortcut or the palette had no button: calling it off hands
-   * the keyboard back to the terminal, which is what App's cancel does.
+   * Escape and Tab give the keyboard back to the button that opened the menu.
+   * A reset armed from a shortcut or the palette had no button: calling it off
+   * hands the keyboard back to the terminal, which is what App's cancel does.
    */
   const closeMenu = (reason: MenuCloseReason) => {
     const fromButton = menuOpen;
     if (confirmReset) onCancelReset();
     setMenuOpen(false);
-    if (reason === "escape" && fromButton) moreRef.current?.focus();
+    if ((reason === "escape" || reason === "tab") && fromButton) moreRef.current?.focus();
   };
 
   /** A menu entry runs once the menu is gone, so it never fights it for focus. */
@@ -230,7 +273,7 @@ export function Toolbar({
                   type="button"
                   className="segmented__btn"
                   aria-pressed={panes.length === size}
-                  onClick={() => onPreset(size)}
+                  onClick={(event) => choosePreset(size, event.currentTarget)}
                   title={t("topbar.presetHint", { n: size })}
                   aria-label={t("topbar.presetHint", { n: size })}
                 >
@@ -304,6 +347,8 @@ export function Toolbar({
           className="tbtn tbtn--toggle"
           onClick={onToggleDock}
           aria-pressed={dockShown}
+          // Opens and closes a drawer itself: a press on it is not "elsewhere".
+          data-drawer-toggle=""
           title={withKeys(t("board.dockHint"), "view.boardDock")}
           aria-label={t("board.dock")}
         >
@@ -314,12 +359,63 @@ export function Toolbar({
           className="tbtn tbtn--toggle"
           onClick={onToggleInspector}
           aria-pressed={inspectorOpen}
+          data-drawer-toggle=""
           title={withKeys(t("cmd.view.inspector"), "view.inspector")}
           aria-label={t("toolbar.inspector")}
         >
           <Icon name="sidebarRight" size={16} />
         </button>
       </div>
+
+      {presetAsk && (
+        <ToolbarMenu
+          anchorRef={presetRef}
+          role="alertdialog"
+          labelledBy={`${confirmId}-preset-title`}
+          describedBy={`${confirmId}-preset-body`}
+          onClose={closePresetAsk}
+        >
+          <p className="tmenu__title" id={`${confirmId}-preset-title`}>
+            {t("toolbar.presetTitle", { names: nameList(presetAsk.closing.map((pane) => pane.name)) })}
+          </p>
+          <p className="tmenu__body" id={`${confirmId}-preset-body`}>
+            {t("toolbar.presetBody", { n: presetAsk.closing.length })}
+          </p>
+          {/* Who is still busy, in the state language of the rest of the app. */}
+          <ul className="tmenu__panes" aria-label={t("toolbar.presetBusy")}>
+            {presetAsk.busy.map(({ pane, activity }) => (
+              <li key={pane.id} className="tmenu__pane">
+                <StateGlyph state={activity} size={7} />
+                <span className="tmenu__pane-name">{pane.name}</span>
+                <span className="tmenu__pane-state">{t(`pane.state.${activity}`)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="tmenu__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => closePresetAsk("escape")}
+              // As for the reset: the answer that loses nothing has the keyboard.
+              autoFocus
+            >
+              {t("create.cancel")}
+            </button>
+            <button
+              type="button"
+              className="btn btn--danger"
+              onClick={() => {
+                const { size } = presetAsk;
+                setPresetAsk(null);
+                presetRef.current?.focus();
+                onPreset(size);
+              }}
+            >
+              {t("toolbar.presetConfirm", { n: presetAsk.closing.length })}
+            </button>
+          </div>
+        </ToolbarMenu>
+      )}
 
       {menuShown &&
         (confirmReset ? (
@@ -337,17 +433,18 @@ export function Toolbar({
               {t("toolbar.resetBody")}
             </p>
             <div className="tmenu__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => closeMenu("escape")}>
-                {t("create.cancel")}
-              </button>
               <button
                 type="button"
-                className="btn btn--danger"
-                onClick={onReset}
-                // Armed from the keyboard as often as from a click, so the
-                // answer is one Enter away either way.
+                className="btn btn--ghost"
+                onClick={() => closeMenu("escape")}
+                // The safe answer has the keyboard: every conversation of the
+                // workspace is one deliberate Tab and Enter away, never two
+                // Enters from the "…" button.
                 autoFocus
               >
+                {t("create.cancel")}
+              </button>
+              <button type="button" className="btn btn--danger" onClick={onReset}>
                 {t("topbar.resetAllConfirm", { n: agentPaneCount })}
               </button>
             </div>
@@ -393,21 +490,8 @@ export function Toolbar({
                 <div className="tmenu__sep" role="separator" />
               </>
             )}
-            <button
-              type="button"
-              role="menuitem"
-              className="tmenu__item tmenu__item--danger"
-              onClick={onArmReset}
-              disabled={!agentPaneCount}
-              title={agentPaneCount ? t("topbar.resetAllHint") : t("topbar.resetAllNone")}
-            >
-              <Icon name="reset" size={14} />
-              <span className="tmenu__label">{t("toolbar.resetAll")}</span>
-              {resetKeys && <kbd className="tmenu__keys">{resetKeys}</kbd>}
-            </button>
             {(canDetach || inOwnWindow) && (
               <>
-                <div className="tmenu__sep" role="separator" />
                 {canDetach && (
                   <button
                     type="button"
@@ -432,9 +516,9 @@ export function Toolbar({
                     <span className="tmenu__label">{t("window.reattach")}</span>
                   </button>
                 )}
+                <div className="tmenu__sep" role="separator" />
               </>
             )}
-            <div className="tmenu__sep" role="separator" />
             <button
               type="button"
               role="menuitem"
@@ -444,6 +528,21 @@ export function Toolbar({
               <Icon name="search" size={14} />
               <span className="tmenu__label">{t("toolbar.palette")}</span>
               {paletteKeys && <kbd className="tmenu__keys">{paletteKeys}</kbd>}
+            </button>
+            {/* Last, on its own, where the menu's first focus and a stray
+                Enter never land: it throws away every conversation. */}
+            <div className="tmenu__sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="tmenu__item tmenu__item--danger"
+              onClick={onArmReset}
+              disabled={!agentPaneCount}
+              title={agentPaneCount ? t("topbar.resetAllHint") : t("topbar.resetAllNone")}
+            >
+              <Icon name="reset" size={14} />
+              <span className="tmenu__label">{t("toolbar.resetAll")}</span>
+              {resetKeys && <kbd className="tmenu__keys">{resetKeys}</kbd>}
             </button>
           </ToolbarMenu>
         ))}

@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Pane, SplitNode } from "../types";
 import {
+  closedByPreset,
   computeLayout,
   insertLeaf,
   leafIds,
   moveLeaf,
   neighborOf,
   normalizeTree,
+  presetSize,
   presetTree,
   ratioAt,
+  readingOrder,
   removeLeaf,
   renameLeaf,
   swapLeaves,
@@ -152,6 +155,12 @@ describe("ratios", () => {
     expect(root.dir).toBe("row");
     expect(root.rect).toEqual({ left: 0.5, top: 0, width: 0, height: 1 });
   });
+
+  it("names the panes on either side of each handle, for its label", () => {
+    const { handles } = computeLayout(tree);
+    const byKey = Object.fromEntries(handles.map((h) => [h.key, [h.before, h.after]]));
+    expect(byKey).toEqual({ root: [["a"], ["b", "c"]], b: [["b"], ["c"]] });
+  });
 });
 
 describe("moving panes", () => {
@@ -255,5 +264,31 @@ describe("drop zones", () => {
     expect(zoneRect(rect, "right")).toEqual({ left: 0.5, top: 0, width: 0.5, height: 1 });
     expect(zoneRect(rect, "bottom")).toEqual({ left: 0, top: 0.5, width: 1, height: 0.5 });
     expect(zoneRect(rect, "center")).toBe(rect);
+  });
+});
+
+describe("presets", () => {
+  // Created a, b, c, d; then d was dragged to the front.
+  const four = panes("a", "b", "c", "d");
+  const moved = split("row", split("col", leaf("d"), leaf("a")), split("col", leaf("b"), leaf("c")));
+
+  it("reads the panes in their order on screen, not their order of creation", () => {
+    expect(readingOrder(four, moved).map((pane) => pane.id)).toEqual(["d", "a", "b", "c"]);
+  });
+
+  it("closes the panes read last, which are the ones it names before doing it", () => {
+    expect(closedByPreset(four, moved, 2).map((pane) => pane.id)).toEqual(["b", "c"]);
+    expect(closedByPreset(four, moved, 1).map((pane) => pane.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("closes nothing when it keeps or grows the grid", () => {
+    expect(closedByPreset(four, moved, 4)).toEqual([]);
+    expect(closedByPreset(four, moved, 8)).toEqual([]);
+  });
+
+  it("keeps at least one pane and at most the grid's maximum", () => {
+    expect(presetSize(0)).toBe(1);
+    expect(presetSize(99)).toBe(16);
+    expect(closedByPreset(four, null, 0).map((pane) => pane.id)).toEqual(["b", "c", "d"]);
   });
 });

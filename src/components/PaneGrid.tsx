@@ -51,6 +51,9 @@ export const usePaneDrag = () => useContext(DragContext);
 
 const percent = (value: number) => `${value * 100}%`;
 
+/** How far an arrow key moves a boundary, in pixels; Shift goes five times as far. */
+const KEY_STEP_PX = 24;
+
 function slotStyle(rect: Rect): CSSProperties {
   return {
     left: percent(rect.left),
@@ -219,6 +222,35 @@ export function PaneGrid({
     window.addEventListener("blur", lostFocus);
   }
 
+  /**
+   * The keyboard's resize, for a boundary that has the focus: the arrows along
+   * it move it, Home and End take it as far as the panes allow, Enter evens it
+   * out like a double-click.
+   */
+  function resizeByKey(handle: Handle, event: React.KeyboardEvent) {
+    const host = hostRef.current;
+    if (!host) return;
+    const horizontal = handle.dir === "row";
+    const box = host.getBoundingClientRect();
+    const span = Math.max(
+      horizontal ? handle.bounds.width * box.width : handle.bounds.height * box.height,
+      1,
+    );
+    // The same floor as a drag: no pane gets narrower than MIN_PANE_PX.
+    const min = Math.min(0.45, MIN_PANE_PX / span);
+    const current = ratioAt(treeRef.current, handle.path);
+    const step = (event.shiftKey ? KEY_STEP_PX * 5 : KEY_STEP_PX) / span;
+    let next: number;
+    if (event.key === (horizontal ? "ArrowLeft" : "ArrowUp")) next = current - step;
+    else if (event.key === (horizontal ? "ArrowRight" : "ArrowDown")) next = current + step;
+    else if (event.key === "Home") next = min;
+    else if (event.key === "End") next = 1 - min;
+    else if (event.key === "Enter") next = 0.5;
+    else return;
+    event.preventDefault();
+    onTreeChange(withRatio(treeRef.current, handle.path, Math.min(1 - min, Math.max(min, next))));
+  }
+
   const hitTest = useCallback((x: number, y: number, moving: string): DragTarget | null => {
     const el = document
       .elementFromPoint(x, y)
@@ -378,18 +410,34 @@ export function PaneGrid({
           <PaneZoomBar zoomedId={zoomed} order={order} names={names} onZoom={onZoom} />
         )}
 
-        {!zoomed && layout.handles.map((handle) => (
-          <div
-            key={handle.key}
-            data-handle={handle.key}
-            className={`splitter splitter--${handle.dir === "row" ? "col" : "row"}`}
-            style={handleStyle(handle)}
-            onPointerDown={(event) => startResize(handle, event)}
-            onDoubleClick={() => onTreeChange(withRatio(tree, handle.path, 0.5))}
-            role="separator"
-            aria-orientation={handle.dir === "row" ? "vertical" : "horizontal"}
-          />
-        ))}
+        {/* Focusable, and named after the panes on either side: the
+            terminals keep Tab and the arrows for themselves, so a boundary
+            is the keyboard's one way to resize them. */}
+        {!zoomed && layout.handles.map((handle) => {
+          const side = (ids: string[]) => ids.map((id) => names.get(id) ?? "").join(", ");
+          const ratio = Math.min(0.95, Math.max(0.05, ratioAt(tree, handle.path)));
+          return (
+            <div
+              key={handle.key}
+              data-handle={handle.key}
+              className={`splitter splitter--${handle.dir === "row" ? "col" : "row"}`}
+              style={handleStyle(handle)}
+              onPointerDown={(event) => startResize(handle, event)}
+              onDoubleClick={() => onTreeChange(withRatio(tree, handle.path, 0.5))}
+              onKeyDown={(event) => resizeByKey(handle, event)}
+              role="separator"
+              tabIndex={0}
+              aria-orientation={handle.dir === "row" ? "vertical" : "horizontal"}
+              aria-label={t(handle.dir === "row" ? "grid.resizeColumns" : "grid.resizeRows", {
+                before: side(handle.before),
+                after: side(handle.after),
+              })}
+              aria-valuenow={Math.round(ratio * 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          );
+        })}
 
         {hint && (
           <div

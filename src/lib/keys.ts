@@ -315,6 +315,9 @@ export function isBareChord(chord: Chord): boolean {
   return !chord.ctrl && !chord.alt && !chord.meta;
 }
 
+/** F1 to F24: keys that never type a character, with a modifier or without. */
+export const isFunctionKey = (key: string) => /^F([1-9]|1\d|2[0-4])$/.test(key);
+
 /** Letters the platform modifier reserves for editing a text field. */
 const EDITING_KEYS = new Set(["A", "C", "V", "X", "Z", "Y"]);
 

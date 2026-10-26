@@ -32,14 +32,18 @@ const GIT_REFRESH_MS = 20_000;
  * The repository the workspace folder is in, or null when it is in none — or
  * when there is no git to ask, as in the browser demo, where the call fails.
  * Read again when the window comes back to the front: a branch changed in
- * another program is the likeliest thing to have moved meanwhile.
+ * another program is the likeliest thing to have moved meanwhile. A hidden
+ * window — minimised, say — asks nothing at all: one git process every 20
+ * seconds for a bar nobody can see is not nothing.
  */
 function useRepo(cwd: string): RepoInfo | null {
   const [repo, setRepo] = useState<RepoInfo | null>(null);
   useEffect(() => {
     let alive = true;
+    let lastRead = 0;
     setRepo(null);
     const read = () => {
+      lastRead = Date.now();
       gitRepoInfo(cwd)
         .then((info) => {
           if (!alive) return;
@@ -57,13 +61,27 @@ function useRepo(cwd: string): RepoInfo | null {
         })
         .catch(() => alive && setRepo(null));
     };
-    read();
-    const timer = window.setInterval(read, GIT_REFRESH_MS);
-    window.addEventListener("focus", read);
+    let timer = 0;
+    const poll = () => {
+      window.clearInterval(timer);
+      timer = 0;
+      if (document.hidden) return;
+      read();
+      timer = window.setInterval(read, GIT_REFRESH_MS);
+    };
+    poll();
+    // Shown again: read at once, then on the usual beat. Coming back from
+    // the taskbar is both shown and focused, and is worth one read, not two.
+    const onFocus = () => {
+      if (Date.now() - lastRead > 1000) read();
+    };
+    document.addEventListener("visibilitychange", poll);
+    window.addEventListener("focus", onFocus);
     return () => {
       alive = false;
       window.clearInterval(timer);
-      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", poll);
+      window.removeEventListener("focus", onFocus);
     };
   }, [cwd]);
   return repo;

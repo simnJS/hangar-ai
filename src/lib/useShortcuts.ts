@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   chordFromEvent,
   isBareChord,
+  isFunctionKey,
   isTextEditingChord,
   serializeChords,
   type Chord,
@@ -128,8 +129,16 @@ export function useShortcuts(options: {
 
       // A shortcut without Ctrl/Alt/Meta is a character somewhere else; typing
       // it into a field is not asking for the command. Mid-sequence the same
-      // key is unambiguous, so the guard only applies to a first chord.
-      if (!armed && isBareChord(chord) && isTypingTarget(event.target)) return;
+      // key is unambiguous, so the guard only applies to a first chord. A
+      // function key types nothing anywhere, so F6 still leaves a field.
+      if (
+        !armed &&
+        isBareChord(chord) &&
+        !isFunctionKey(chord.key) &&
+        isTypingTarget(event.target)
+      ) {
+        return;
+      }
 
       // Copy, paste and select-all belong to the field the caret is in. On a
       // Mac they are also the terminal's own bindings, which is why this is not

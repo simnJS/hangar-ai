@@ -12,6 +12,7 @@ import {
   type Task,
 } from "../lib/board";
 import { findAgentPane } from "../lib/agentPane";
+import { focusablesIn } from "../lib/focusable";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import { useLocale, useT } from "../i18n";
 import { useStore } from "../store";
@@ -92,6 +93,7 @@ export function BoardView({
   /** The column whose add field takes the focus once it is on screen. */
   const [focusAdd, setFocusAdd] = useState<BoardColumn | null>(null);
   const addRefs = useRef<Partial<Record<BoardColumn, HTMLInputElement | null>>>({});
+  const rootRef = useRef<HTMLDivElement>(null);
   const t = useT();
   const locale = useLocale();
   const { state } = useStore();
@@ -217,6 +219,33 @@ export function BoardView({
   const now = useMinuteClock(all.some((task) => task.column === "doing" && task.doing_since));
 
   const openTask = all.find((task) => task.id === openTaskId) ?? null;
+
+  /**
+   * The task whose dialog is open, kept until the dialog is gone. Its card is
+   * what the dialog gives the keyboard back to — but an agent moving the task
+   * to another column redraws the card as a new element, and a deleted task
+   * has none: the dialog's own restore then lands on <body>. The card is
+   * found again by id instead, or its column when the task is gone or folded.
+   */
+  const lastOpen = useRef<{ id: string; column: BoardColumn } | null>(null);
+  useEffect(() => {
+    if (openTask) {
+      lastOpen.current = { id: openTask.id, column: openTask.column };
+      return;
+    }
+    const last = lastOpen.current;
+    lastOpen.current = null;
+    if (!last) return;
+    const frame = requestAnimationFrame(() => {
+      const at = document.activeElement;
+      if (at && at !== document.body) return;
+      const root = rootRef.current;
+      const card = root?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(last.id)}"]`);
+      const column = root?.querySelector<HTMLElement>(`.column--${last.column}`);
+      (card ?? (column && focusablesIn(column)[0]))?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [openTask]);
   const loaded = tasks !== null;
   const empty = loaded && all.length === 0 && !composing;
 
@@ -238,6 +267,7 @@ export function BoardView({
     return (
       <article
         key={task.id}
+        data-task-id={task.id}
         className={`card ${done ? "card--done" : ""} ${blockers.length ? "card--blocked" : ""} ${
           dragging === task.id ? "card--dragging" : ""
         }`}
@@ -455,7 +485,7 @@ export function BoardView({
   const active = shown.filter((task) => task.column === "doing" || task.column === "review");
 
   return (
-    <div className={`board ${dock ? "board--dock" : ""}`}>
+    <div className={`board ${dock ? "board--dock" : ""}`} ref={rootRef}>
       {dock ? (
         <>
           <div className="board__bar">
