@@ -11,6 +11,37 @@ export interface TerminalTheme {
 
 export const THEMES: TerminalTheme[] = [
   {
+    // Hangar's own: near-monochrome graphite, so that colour only ever means
+    // something — an agent's state, a diff, the focus.
+    id: "graphite",
+    name: "Graphite",
+    appearance: "dark",
+    accent: "#3e8bff",
+    xterm: {
+      background: "#121316",
+      foreground: "#c8c9ce",
+      cursor: "#d8d9dd",
+      cursorAccent: "#121316",
+      selectionBackground: "#2a3954",
+      black: "#1b1c1f",
+      red: "#ff7b72",
+      green: "#5fd27f",
+      yellow: "#e7c06b",
+      blue: "#79b0ff",
+      magenta: "#c79bff",
+      cyan: "#6fd3df",
+      white: "#c8c9ce",
+      brightBlack: "#6b6c73",
+      brightRed: "#ff9a92",
+      brightGreen: "#7fe29b",
+      brightYellow: "#f2d38b",
+      brightBlue: "#9cc4ff",
+      brightMagenta: "#d8b6ff",
+      brightCyan: "#93e3ec",
+      brightWhite: "#ecedf0",
+    },
+  },
+  {
     id: "tokyo-night",
     name: "Tokyo Night",
     appearance: "dark",
@@ -991,7 +1022,28 @@ export function applyThemeToDocument(theme: TerminalTheme) {
   const isDark = theme.appearance === "dark";
   const lift = isDark ? "#ffffff" : "#000000";
 
+  /** A step from the terminal background toward the foreground side. */
+  const lifted = (amount: number) => mix(bg, lift, amount);
+
   const vars: Record<string, string> = {
+    // The chrome around the terminals, in a few steps away from their
+    // background: the navigator, inspector and status bar sit on `--chrome`,
+    // the toolbar a step above, pane headers just off the terminal itself.
+    "--chrome": lifted(0.04),
+    "--chrome-bar": lifted(0.06),
+    "--pane-head": lifted(0.025),
+    "--pane-head-focus": lifted(0.045),
+    "--raised": lifted(0.07),
+    // What sits between panes and columns: darker than anything around it.
+    "--sep": mix(bg, "#000000", isDark ? 0.5 : 0.14),
+    "--line": withAlpha(lift, isDark ? 0.07 : 0.08),
+    "--line-strong": withAlpha(lift, isDark ? 0.12 : 0.14),
+    "--accent-hi": isDark ? mix(theme.accent, "#ffffff", 0.22) : theme.accent,
+    // An agent's state, always in these four: colour, plus a shape in the UI.
+    "--state-working": theme.xterm.green ?? "#5fd27f",
+    "--state-waiting": theme.xterm.yellow ?? "#e7c06b",
+    "--state-yours": theme.accent,
+    "--state-idle": mix(fg, bg, 0.55),
     "--bg": bg,
     "--bg-sunken": mix(bg, isDark ? "#000000" : "#ffffff", 0.35),
     "--surface": mix(bg, lift, 0.04),

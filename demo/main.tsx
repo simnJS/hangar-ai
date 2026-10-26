@@ -1,7 +1,7 @@
 /**
  * Entry point for the browser demo.
  *
- * Identical to src/main.tsx: same App, same store, same stylesheet. The only
+ * Identical to src/main.tsx: same App, same store, same stylesheets. The only
  * difference is in vite.demo.config.ts, which points every `@tauri-apps/*`
  * import at demo/mock instead. Nothing under src/ knows this build exists.
  */
@@ -11,7 +11,7 @@ import App from "../src/App";
 import { StoreProvider, useStore } from "../src/store";
 import { THEMES } from "../src/themes";
 import { ptyWrite } from "../src/lib/ipc";
-import "../src/styles.css";
+import "../src/stylesheet";
 import "./demo.css";
 
 /** The pane the seeded workspace starts Claude Code in. See backend/state. */

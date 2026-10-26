@@ -66,6 +66,7 @@ const en = {
   "topbar.addPaneHint": "Split the focused pane",
   "topbar.presetHint_one": "Even layout, {n} pane",
   "topbar.presetHint_other": "Even layout, {n} panes",
+  // toolbar.*, status.*, palette.* — toolbar, status bar and command palette.
 
   "placeholder.title": "No workspace open",
   "placeholder.body":
@@ -399,6 +400,9 @@ const en = {
   "cmd.view.memory": "Show the memory",
   "cmd.view.mcp": "Open the MCP connection",
   "cmd.view.broadcast": "Focus the broadcast field",
+  "cmd.view.palette": "Open the command palette",
+  "cmd.view.navigator": "Show or hide the navigator",
+  "cmd.view.inspector": "Show or hide the inspector",
   "cmd.terminal.clear": "Clear the terminal",
   "cmd.terminal.copy": "Copy the selection",
   "cmd.terminal.paste": "Paste",
@@ -598,6 +602,7 @@ const en = {
   "memory.emptyBody":
     "Agents fill this in over MCP with the memory_* tools: what is worth keeping across sessions — decisions, pitfalls, the conventions of a project. Everything written here is shared by every workspace, and you can add an entry yourself.",
   "memory.noResults": "Nothing matches “{q}”.",
+  // inspector.* — the pane inspector (components/Inspector.tsx).
 
   "mcp.title": "Connect agents to the board",
   "mcp.intro":
@@ -764,6 +769,7 @@ const fr: Record<Key, string> = {
   "topbar.addPaneHint": "Diviser le panneau actif",
   "topbar.presetHint_one": "Disposition régulière, {n} panneau",
   "topbar.presetHint_other": "Disposition régulière, {n} panneaux",
+  // toolbar.*, status.*, palette.* — barre d'outils, barre d'état, palette.
 
   "placeholder.title": "Aucun workspace ouvert",
   "placeholder.body":
@@ -1098,6 +1104,9 @@ const fr: Record<Key, string> = {
   "cmd.view.memory": "Afficher la mémoire",
   "cmd.view.mcp": "Ouvrir la connexion MCP",
   "cmd.view.broadcast": "Aller au champ de diffusion",
+  "cmd.view.palette": "Ouvrir la palette de commandes",
+  "cmd.view.navigator": "Afficher ou masquer le navigateur",
+  "cmd.view.inspector": "Afficher ou masquer l'inspecteur",
   "cmd.terminal.clear": "Effacer le terminal",
   "cmd.terminal.copy": "Copier la sélection",
   "cmd.terminal.paste": "Coller",
@@ -1299,6 +1308,7 @@ const fr: Record<Key, string> = {
   "memory.emptyBody":
     "Les agents la remplissent via MCP avec les outils memory_* : ce qui mérite de survivre à une session — décisions, pièges, conventions d'un projet. Tout ce qui est écrit ici est partagé par tous les workspaces, et tu peux ajouter une entrée toi-même.",
   "memory.noResults": "Rien ne correspond à « {q} ».",
+  // inspector.* — l'inspecteur du pane (components/Inspector.tsx).
 
   "mcp.title": "Connecter les agents au tableau",
   "mcp.intro":

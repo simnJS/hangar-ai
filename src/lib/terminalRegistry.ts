@@ -23,6 +23,24 @@ export const getTerminal = (id: string | null): Terminal | null =>
   (id && terminals.get(id)) || null;
 
 /**
+ * What opens the diff view of a workspace's pane. The view is hosted by the
+ * workspace's terminals, and asked for from elsewhere — the inspector — the
+ * same way as the search bar below.
+ */
+const diffOpeners = new Map<string, (paneId: string) => void>();
+
+export function registerDiffOpener(workspaceId: string, open: (paneId: string) => void) {
+  diffOpeners.set(workspaceId, open);
+  return () => {
+    if (diffOpeners.get(workspaceId) === open) diffOpeners.delete(workspaceId);
+  };
+}
+
+export function openDiff(workspaceId: string, paneId: string) {
+  diffOpeners.get(workspaceId)?.(paneId);
+}
+
+/**
  * What opens each pane's search bar. The bar is state inside the pane, and the
  * shortcut that asks for it is dispatched from the app, the same way as above.
  */

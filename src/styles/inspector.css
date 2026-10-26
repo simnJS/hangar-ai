@@ -1,0 +1,10 @@
+/* ---------- Inspector ---------- */
+
+/* The column on the right of the work area (components/Inspector.tsx). */
+.inspector {
+  flex: none;
+  min-height: 0;
+  overflow: auto;
+  background: var(--chrome);
+  border-left: 1px solid var(--sep);
+}

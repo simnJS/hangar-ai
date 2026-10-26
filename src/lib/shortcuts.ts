@@ -80,6 +80,9 @@ export type CommandId =
   | "view.memory"
   | "view.mcp"
   | "view.broadcast"
+  | "view.palette"
+  | "view.navigator"
+  | "view.inspector"
   | "terminal.clear"
   | "terminal.copy"
   | "terminal.paste"
@@ -332,6 +335,27 @@ export const COMMANDS: ShortcutCommand[] = [
     // A two-step sequence, both because it reads well and because it is the
     // one place the feature documents itself.
     defaults: ["Mod+K Mod+S"],
+  },
+  {
+    id: "view.palette",
+    section: "view",
+    labelKey: "cmd.view.palette",
+    // Mod+K would be the obvious key, but it already opens the shortcuts
+    // sequence; Mod+Shift+P is the palette everywhere else a developer looks.
+    defaults: ["Mod+Shift+P"],
+  },
+  {
+    id: "view.navigator",
+    section: "view",
+    labelKey: "cmd.view.navigator",
+    // Mod+Alt letters type nothing on AZERTY's AltGr, N for navigator.
+    defaults: ["Mod+Alt+N"],
+  },
+  {
+    id: "view.inspector",
+    section: "view",
+    labelKey: "cmd.view.inspector",
+    defaults: ["Mod+Alt+I"],
   },
   {
     id: "view.terminals",

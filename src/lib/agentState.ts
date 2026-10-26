@@ -91,6 +91,11 @@ export function getPaneActivity(paneId: string): PaneActivity | undefined {
   return panes.get(paneId);
 }
 
+/** One pane's state, re-rendering only when that pane's entry changes. */
+export function usePaneActivity(paneId: string | null): PaneActivity | undefined {
+  return useSyncExternalStore(subscribe, () => (paneId ? panes.get(paneId) : undefined));
+}
+
 /**
  * Panes another pane is asking about: "you edited this file, may I?". Keyed
  * by the pane that edited it, valued with the name of the pane asking.

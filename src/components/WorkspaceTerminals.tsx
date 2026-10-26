@@ -7,7 +7,7 @@ import { dropText, watchFileDrops, type Point } from "../lib/fileDrop";
 import { leafIds, normalizeTree } from "../lib/layout";
 import { runSavedCommand } from "../lib/savedCommands";
 import { resolveShell } from "../lib/shells";
-import { getTerminal } from "../lib/terminalRegistry";
+import { getTerminal, registerDiffOpener } from "../lib/terminalRegistry";
 import { useStore, type CommandScope } from "../store";
 import { getTheme } from "../themes";
 import type {
@@ -95,6 +95,18 @@ export function WorkspaceTerminals({
   }, [hidden]);
 
   const panes = workspace.panes;
+
+  // The inspector asks for a pane's diff by id, from outside this tree.
+  const panesById = useRef(panes);
+  panesById.current = panes;
+  useEffect(
+    () =>
+      registerDiffOpener(workspace.id, (paneId) => {
+        const pane = panesById.current.find((p) => p.id === paneId);
+        if (pane) setDiffPane(pane);
+      }),
+    [workspace.id],
+  );
 
   const tree = useMemo(
     () => normalizeTree(panes, workspace.tree),

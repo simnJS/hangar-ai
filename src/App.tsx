@@ -12,6 +12,10 @@ import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { VoiceHud } from "./components/VoiceHud";
+import { Toolbar, type View } from "./components/Toolbar";
+import { StatusBar } from "./components/StatusBar";
+import { Inspector } from "./components/Inspector";
+import { CommandPalette } from "./components/CommandPalette";
 import {
   bridgeEnqueue,
   detectAgents,
@@ -38,10 +42,8 @@ import {
 import { emit } from "@tauri-apps/api/event";
 import { applyRemoteActivity, relayActivity, type PaneActivity } from "./lib/agentState";
 import { getPaneActivity, useBridgedCount } from "./lib/agentState";
-import { Icon } from "./components/Icon";
 import {
   leafIds,
-  MAX_PANES,
   neighborOf,
   normalizeTree,
   preferredDir,
@@ -58,7 +60,6 @@ import type { CommandId } from "./lib/shortcuts";
 import {
   useKeymap,
   useShortcuts,
-  useShortcutTitle,
   type ShortcutHandlers,
 } from "./lib/useShortcuts";
 import { useT } from "./i18n";
@@ -69,12 +70,9 @@ import {
   DEFAULT_SETTINGS,
   UI_SCALE_MAX,
   UI_SCALE_MIN,
-  type LayoutSize,
   type Pane,
   type ShellInfo,
 } from "./types";
-
-const LAYOUTS: LayoutSize[] = [1, 2, 4, 8];
 
 /** Same bounds as the font size slider in the settings. */
 const FONT_MIN = 9;
@@ -101,7 +99,8 @@ export default function App() {
   const [settingsCategory, setSettingsCategory] = useState("general");
   const [showCreate, setShowCreate] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
-  const [view, setView] = useState<"terminals" | "board" | "memory">("terminals");
+  const [view, setView] = useState<View>("terminals");
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   /**
    * The workspace this window draws. A workspace window draws the one it was
@@ -149,6 +148,12 @@ export default function App() {
     const percent = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, state.settings.uiScale || 100));
     document.documentElement.style.setProperty("--ui-scale", String(percent / 100));
   }, [state.settings.uiScale]);
+
+  // The interface's monospace — session ids, paths, counts — is the
+  // terminals' own font, so the chrome and the panes read as one thing.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--mono", state.settings.fontFamily);
+  }, [state.settings.fontFamily]);
 
   useEffect(() => {
     detectAgents()
@@ -350,6 +355,15 @@ export default function App() {
     setView("terminals");
     updateSettings({ boardDockOpen: true });
   };
+
+  const toggleNavigator = () =>
+    updateSettings({ navigatorOpen: !state.settings.navigatorOpen });
+  const toggleInspector = () =>
+    updateSettings({ inspectorOpen: !state.settings.inspectorOpen });
+  /** The inspector is about a pane, so it needs a workspace to show one of. */
+  const inspectorShown = state.settings.inspectorOpen;
+  /** The main window's alone, and only when there is room asked for it. */
+  const navigatorShown = isMainWindow && state.settings.navigatorOpen;
 
   /** `dir` is only passed by the shortcuts that name a side; otherwise the
       longer side of the pane decides. */
@@ -627,7 +641,6 @@ export default function App() {
   }, []);
 
   const keymap = useKeymap();
-  const withKeys = useShortcutTitle();
 
   /**
    * What every shortcut does, for the app as it stands right now.
@@ -650,6 +663,8 @@ export default function App() {
       "view.settings": () => (showSettings ? setShowSettings(false) : openSettings()),
       "view.shortcuts": () => openSettings("shortcuts"),
       "workspace.new": () => setShowCreate(true),
+      "view.palette": () => setPaletteOpen(true),
+      "view.inspector": toggleInspector,
       "app.zoomIn": () => zoom(state.settings.fontSize + 1),
       "app.zoomOut": () => zoom(state.settings.fontSize - 1),
       "app.zoomReset": () => zoom(DEFAULT_SETTINGS.fontSize),
@@ -668,6 +683,7 @@ export default function App() {
 
     // A workspace window shows one workspace and no settings: those keys are
     // the main window's.
+    if (isMainWindow) map["view.navigator"] = toggleNavigator;
     if (windowWorkspaceId) {
       delete map["view.settings"];
       delete map["view.shortcuts"];
@@ -789,7 +805,11 @@ export default function App() {
     return map;
   }
 
-  const pendingChords = useShortcuts({ keymap, handlers: buildHandlers() });
+  const handlers = buildHandlers();
+  const pendingChords = useShortcuts({ keymap, handlers });
+  /** What the palette offers: every command a key would run, but itself. */
+  const paletteHandlers = { ...handlers };
+  delete paletteHandlers["view.palette"];
 
   /**
    * `whenFree` hands the line to each pane's hangar-bridge mod, which submits
@@ -819,169 +839,65 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${windowWorkspaceId ? "app--window" : ""}`}>
+    <div
+      className={[
+        "app",
+        windowWorkspaceId ? "app--window" : "",
+        navigatorShown ? "" : "app--no-nav",
+      ].join(" ")}
+    >
       {/* One update banner and one sidebar, both the main window's. */}
       {isMainWindow && <UpdateBanner />}
-      {isMainWindow && (
+      {navigatorShown && (
         <Sidebar
           onOpenSettings={() => openSettings()}
           onNewWorkspace={() => setShowCreate(true)}
+          focusByWorkspace={focusByWorkspace}
+          onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
         />
       )}
 
       <main className="main">
         {activeWorkspace ? (
           <>
-            <header className="topbar">
-              <div className="topbar__id">
-                <h1 className="topbar__name">{activeWorkspace.name}</h1>
-                <span className="topbar__path" title={activeWorkspace.cwd}>
-                  {activeWorkspace.cwd}
-                </span>
-              </div>
-
-              <div className="layouts" role="group" aria-label={t("view.group")}>
-                <button
-                  className={`layouts__btn layouts__btn--wide ${view === "terminals" ? "is-active" : ""}`}
-                  onClick={() => setView("terminals")}
-                >
-                  {t("view.terminals")}
-                </button>
-                <button
-                  className={`layouts__btn layouts__btn--wide ${view === "board" ? "is-active" : ""}`}
-                  onClick={() => setView("board")}
-                >
-                  {t("view.board")}
-                </button>
-                <button
-                  className={`layouts__btn layouts__btn--wide ${view === "memory" ? "is-active" : ""}`}
-                  onClick={() => setView("memory")}
-                >
-                  {t("view.memory")}
-                </button>
-              </div>
-
-              <div className="layouts">
-                <button
-                  className={`layouts__btn layouts__btn--wide ${dockShown ? "is-active" : ""}`}
-                  onClick={toggleDock}
-                  aria-pressed={dockShown}
-                  title={withKeys(t("board.dockHint"), "view.boardDock")}
-                >
-                  ◧ {t("board.dock")}
-                </button>
-                {canDetach && (
-                  <button
-                    className="layouts__btn layouts__btn--wide"
-                    onClick={() => void detach(activeWorkspace.id)}
-                    title={t("window.detachHint")}
-                  >
-                    ⧉ {t("window.detach")}
-                  </button>
-                )}
-                {windowWorkspaceId && (
-                  <button
-                    className="layouts__btn layouts__btn--wide"
-                    onClick={() => reattach(activeWorkspace.id)}
-                    title={t("window.reattachHint")}
-                  >
-                    ⤓ {t("window.reattach")}
-                  </button>
-                )}
-              </div>
-
-              {view === "terminals" && (
-                <>
-                  <div className="layouts" role="group" aria-label={t("topbar.layout")}>
-                    {LAYOUTS.map((size) => (
-                      <button
-                        key={size}
-                        className={`layouts__btn ${panes.length === size ? "is-active" : ""}`}
-                        onClick={() =>
-                          // The focused pane is the model for whatever the
-                          // preset has to create.
-                          applyPreset(
-                            activeWorkspace.id,
-                            size,
-                            focusByWorkspace[activeWorkspace.id] ?? null,
-                          )
-                        }
-                        title={t("topbar.presetHint", { n: size })}
-                      >
-                        {size}
-                      </button>
-                    ))}
-                    {/* For the counts no preset matches, and for a grid that
-                        splits and moves have pulled out of shape. */}
-                    <button
-                      className="layouts__btn layouts__btn--wide"
-                      onClick={() => tidyLayout(activeWorkspace.id)}
-                      disabled={panes.length < 2}
-                      title={withKeys(t("topbar.tidyHint"), "pane.tidy")}
-                    >
-                      ⊞ {t("topbar.tidy")}
-                    </button>
-                  </div>
-
-                  <button
-                    className="btn btn--ghost"
-                    onClick={() => splitPane(activeWorkspace.id, null)}
-                    disabled={panes.length >= MAX_PANES}
-                    title={withKeys(t("topbar.addPaneHint"), "pane.split")}
-                  >
-                    <Icon name="plus" size={13} />
-                    {t("topbar.addPane")}
-                  </button>
-
-                  <button
-                    className="btn btn--ghost"
-                    onClick={() =>
-                      panes.forEach((p) => replacePane(activeWorkspace.id, p.id, {}))
-                    }
-                    title={withKeys(t("topbar.restartAllHint"), "pane.restartAll")}
-                  >
-                    <Icon name="restart" size={13} />
-                    {t("topbar.restartAll")}
-                  </button>
-
-                  {confirmReset ? (
-                    <>
-                      <button className="btn btn--ghost" onClick={cancelReset}>
-                        {t("create.cancel")}
-                      </button>
-                      <button
-                        className="btn btn--danger"
-                        onClick={resetAgents}
-                        onKeyDown={(event) => event.key === "Escape" && cancelReset()}
-                        // Armed from the keyboard as often as from a click, so
-                        // the answer is one Enter away either way.
-                        autoFocus
-                      >
-                        {t("topbar.resetAllConfirm", { n: agentPanes.length })}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btn btn--ghost"
-                      onClick={() => setConfirmReset(true)}
-                      disabled={!agentPanes.length}
-                      title={
-                        agentPanes.length
-                          ? withKeys(t("topbar.resetAllHint"), "pane.resetAll")
-                          : t("topbar.resetAllNone")
-                      }
-                    >
-                      <Icon name="reset" size={13} />
-                      {t("topbar.resetAll")}
-                    </button>
-                  )}
-                </>
-              )}
-            </header>
+            <Toolbar
+              workspace={activeWorkspace}
+              view={view}
+              onView={setView}
+              panes={panes}
+              focusedPaneId={focusedPaneId}
+              onFocusPane={(paneId) => focusPane(activeWorkspace.id, paneId)}
+              dockShown={dockShown}
+              onToggleDock={toggleDock}
+              canDetach={canDetach}
+              onDetach={() => void detach(activeWorkspace.id)}
+              inOwnWindow={Boolean(windowWorkspaceId)}
+              onReattach={() => reattach(activeWorkspace.id)}
+              // The focused pane is the model for whatever the preset has to
+              // create.
+              onPreset={(size) =>
+                applyPreset(activeWorkspace.id, size, focusByWorkspace[activeWorkspace.id] ?? null)
+              }
+              onTidy={() => tidyLayout(activeWorkspace.id)}
+              onSplit={() => splitPane(activeWorkspace.id, null)}
+              onRestartAll={() => panes.forEach((p) => replacePane(activeWorkspace.id, p.id, {}))}
+              agentPaneCount={agentPanes.length}
+              confirmReset={confirmReset}
+              onArmReset={() => setConfirmReset(true)}
+              onCancelReset={cancelReset}
+              onReset={resetAgents}
+              hasNavigator={isMainWindow}
+              navigatorOpen={state.settings.navigatorOpen}
+              onToggleNavigator={toggleNavigator}
+              inspectorOpen={state.settings.inspectorOpen}
+              onToggleInspector={toggleInspector}
+              onOpenPalette={() => setPaletteOpen(true)}
+            />
 
             {/* Always rendered, whatever the view: the grids below must keep
                 the same parent for good, and the board panel sits beside
                 them in this row. */}
+            <div className="main__body">
             <div className="workarea">
               {/* One grid per workspace ever opened, all but one hidden. They
                   are never unmounted: that would kill every PTY and lose the
@@ -1028,37 +944,41 @@ export default function App() {
               )}
             </div>
 
-            {view === "terminals" && (
-            <footer className="broadcast">
-              <span className="broadcast__icon">⇉</span>
-              <input
-                className="broadcast__input"
-                ref={broadcastRef}
-                placeholder={t("broadcast.placeholder", { n: panes.length })}
-                value={broadcast}
-                onChange={(e) => setBroadcast(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") sendBroadcast(e.altKey);
+            {inspectorShown && (
+              <Inspector
+                workspace={activeWorkspace}
+                workspaces={state.workspaces}
+                activeWorkspaceId={activeWorkspace.id}
+                pane={panes.find((p) => p.id === focusedPaneId) ?? null}
+                paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
+                width={state.settings.inspectorWidth}
+                onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
+                collapsed={state.settings.inspectorCollapsed}
+                onToggleSection={(id) => {
+                  const folded = state.settings.inspectorCollapsed;
+                  updateSettings({
+                    inspectorCollapsed: folded.includes(id)
+                      ? folded.filter((entry) => entry !== id)
+                      : [...folded, id],
+                  });
                 }}
+                onClose={() => updateSettings({ inspectorOpen: false })}
+                onOpenBoard={() => setView("board")}
+                onOpenSessions={setPickerPaneId}
               />
-              <button
-                className="btn btn--ghost"
-                onClick={() => sendBroadcast(true)}
-                disabled={!broadcast.trim()}
-                title={t("broadcast.whenFreeHint", { n: bridgedPanes })}
-              >
-                <Icon name="hourglass" size={12} />
-                {t("broadcast.whenFree")}
-              </button>
-              <button
-                className="btn btn--primary"
-                onClick={() => sendBroadcast()}
-                disabled={!broadcast.trim()}
-              >
-                {t("broadcast.send")}
-              </button>
-            </footer>
             )}
+            </div>
+
+            <StatusBar
+              workspace={activeWorkspace}
+              showBroadcast={view === "terminals"}
+              value={broadcast}
+              onChange={setBroadcast}
+              onSend={sendBroadcast}
+              inputRef={broadcastRef}
+              paneCount={panes.length}
+              bridgedCount={bridgedPanes}
+            />
           </>
         ) : elsewhere ? (
           <div className="placeholder">
@@ -1116,6 +1036,22 @@ export default function App() {
           </span>
           {t("keymap.pending")}
         </div>
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          handlers={paletteHandlers}
+          keymap={keymap}
+          workspaces={windowWorkspaceId ? openWorkspaces : sidebarOrder(state.workspaces, state.folders)}
+          activeWorkspaceId={activeWorkspace?.id ?? null}
+          focusedPaneId={focusedPaneId}
+          onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
+          onActivateWorkspace={(id) => {
+            setActiveWorkspace(id);
+            setView("terminals");
+          }}
+        />
       )}
 
       {showSettings && (

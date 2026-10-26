@@ -4,12 +4,22 @@
 :root {
   /* Set from Settings.uiScale; every interface font size is multiplied by it. */
   --ui-scale: 1;
-  --sidebar-w: calc(248px * var(--ui-scale));
-  /* Squared-off everywhere: no rounding, panes share hairline separators. */
-  --radius: 0;
-  --radius-sm: 0;
-  --ui-font: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --sidebar-w: calc(252px * var(--ui-scale));
+  /* Small, consistent radii: controls 4, cards 6–8, floating panels 10.
+     Panes themselves stay square and share 1px separators. */
+  --radius-xs: 4px;
+  --radius-sm: 5px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  /* Inter is bundled (@fontsource-variable/inter), so every platform reads
+     the same face; the system fonts are only there if it fails to load. */
+  --ui-font: "Inter Variable", -apple-system, "SF Pro Text", "Segoe UI Variable Text",
+    "Segoe UI", system-ui, sans-serif;
+  /* Overwritten with the terminals' font (Settings.fontFamily) by the app. */
+  --mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
   --dur: 140ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 * {
@@ -25,6 +35,8 @@ body,
 
 body {
   font-family: var(--ui-font);
+  font-optical-sizing: auto;
+  font-feature-settings: "cv11", "ss01";
   font-size: calc(13px * var(--ui-scale));
   color: var(--fg);
   background: var(--bg);
@@ -67,8 +79,13 @@ select {
 
 .app {
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100%;
+}
+
+/* The navigator folded away: the workspace takes the whole window. */
+.app--no-nav {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ---------- Sidebar ---------- */
@@ -514,10 +531,13 @@ body.is-sorting * {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  min-height: calc(26px * var(--ui-scale));
+  padding: 4px 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--fg);
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--dur), border-color var(--dur), opacity var(--dur);
@@ -528,6 +548,11 @@ body.is-sorting * {
   border-color: var(--border-strong);
 }
 
+.btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
 .btn:disabled {
   opacity: 0.45;
   cursor: default;
@@ -535,9 +560,10 @@ body.is-sorting * {
 
 .btn--primary {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: transparent;
   color: var(--accent-fg);
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -548,6 +574,12 @@ body.is-sorting * {
 
 .btn--ghost {
   background: transparent;
+  border-color: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
 }
 
 .btn--block {
@@ -562,7 +594,7 @@ body.is-sorting * {
   line-height: 1;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   transition: color var(--dur), background var(--dur);
 }
 
@@ -576,6 +608,14 @@ body.is-sorting * {
 .main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Under the toolbar: the work area, then the inspector beside it. */
+.main__body {
+  flex: 1;
+  display: flex;
   min-width: 0;
   min-height: 0;
 }

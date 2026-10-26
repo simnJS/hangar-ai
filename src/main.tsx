@@ -1,7 +1,7 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { StoreProvider } from "./store";
-import "./styles.css";
+import "./stylesheet";
 
 // No StrictMode: its double-invoked effects would spawn every pseudo-terminal
 // twice in development.

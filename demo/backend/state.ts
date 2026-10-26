@@ -43,10 +43,10 @@ export const SEED_STATE: AppState = {
       savedCommands: [],
       folderId: null,
       panes: [
-        pane("pane-1", "one", "claude", "01J8Z4-pty-bridge"),
-        pane("pane-2", "two", "codex", "01J8Z6-board-tests"),
-        pane("pane-3", "three", "gemini"),
-        pane("pane-4", "four", "shell"),
+        pane("pane-1", "Ava", "claude", "01J8Z4-pty-bridge"),
+        pane("pane-2", "Ben", "codex", "01J8Z6-board-tests"),
+        pane("pane-3", "Cleo", "gemini"),
+        pane("pane-4", "Dan", "shell"),
       ],
     },
     {
@@ -59,12 +59,12 @@ export const SEED_STATE: AppState = {
       tree: null,
       savedCommands: [],
       folderId: null,
-      panes: [pane("pane-5", "one", "claude"), pane("pane-6", "two", "shell")],
+      panes: [pane("pane-5", "Eve", "claude"), pane("pane-6", "Finn", "shell")],
     },
   ],
   settings: {
     ...DEFAULT_SETTINGS,
-    themeId: "tokyo-night",
+    themeId: "graphite",
     shellId: "pwsh",
     // The demo should be alive within a second of loading, so the pause that
     // waits for a real shell profile is cut down here.

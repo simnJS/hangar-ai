@@ -256,6 +256,14 @@ export interface Settings {
   boardDockOpen: boolean;
   /** Its width in px, as last dragged. */
   boardDockWidth: number;
+  /** The navigator on the left: the workspaces and the agents in each. */
+  navigatorOpen: boolean;
+  /** The inspector on the right: everything about the focused pane. */
+  inspectorOpen: boolean;
+  /** Its width in px, as last dragged. */
+  inspectorWidth: number;
+  /** Inspector sections folded away, by section id. */
+  inspectorCollapsed: string[];
   /**
    * Size of the interface text, in percent — sidebar, board, settings, pane
    * headers. The terminals keep `fontSize`: the two are read at different
@@ -301,7 +309,7 @@ export const AGENTS: { id: AgentId; label: string; resumable: boolean }[] = [
 ];
 
 export const DEFAULT_SETTINGS: Settings = {
-  themeId: "tokyo-night",
+  themeId: "graphite",
   locale: null,
   shellId: null,
   fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace',
@@ -336,6 +344,10 @@ export const DEFAULT_SETTINGS: Settings = {
   discordAppId: "",
   boardDockOpen: false,
   boardDockWidth: 420,
+  navigatorOpen: true,
+  inspectorOpen: true,
+  inspectorWidth: 296,
+  inspectorCollapsed: [],
   uiScale: 100,
   agentPaneControl: true,
 };

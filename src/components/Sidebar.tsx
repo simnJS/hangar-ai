@@ -11,6 +11,10 @@ import type { Workspace, WorkspaceFolder } from "../types";
 interface Props {
   onOpenSettings: () => void;
   onNewWorkspace: () => void;
+  /** The focused pane of each workspace, by workspace id. */
+  focusByWorkspace: Record<string, string>;
+  /** Brings a pane forward, switching workspace if it has to. */
+  onFocusPane: (workspaceId: string, paneId: string) => void;
 }
 
 interface DragItem {
