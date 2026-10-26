@@ -9,7 +9,7 @@ import { closedByPreset, MAX_PANES } from "../lib/layout";
 import { useShortcutLabel, useShortcutTitle } from "../lib/useShortcuts";
 import type { LayoutSize, Pane, Workspace } from "../types";
 
-export type View = "terminals" | "board" | "memory";
+export type View = "terminals" | "board" | "memory" | "stats";
 
 export const LAYOUTS: LayoutSize[] = [1, 2, 4, 8];
 
@@ -17,6 +17,7 @@ const VIEWS: { id: View; icon: IconName }[] = [
   { id: "terminals", icon: "terminal" },
   { id: "board", icon: "board" },
   { id: "memory", icon: "bookmark" },
+  { id: "stats", icon: "chart" },
 ];
 
 const LAYOUT_ICONS: Record<LayoutSize, IconName> = {

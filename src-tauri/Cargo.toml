@@ -23,7 +23,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `raw_value`: the stats leave the bulk of a transcript line unparsed.
+serde_json = { version = "1", features = ["raw_value"] }
 portable-pty = "0.9.0"
 tauri-plugin-dialog = "2.7.2"
 dirs = "6.0.0"
@@ -85,6 +86,16 @@ keyring = { version = "4.2", default-features = false, features = ["v1"] }
 percent-encoding = "2.3"
 dunce = "1.0"
 base64 = "0.22"
+
+# The usage statistics — see stats.rs. Codex compresses the rollouts it keeps
+# (`rollout-….jsonl.zst`), so reading its token counts means decoding zstd.
+# ruzstd is a decoder in pure Rust: no C library to build for the universal
+# macOS bundle or the AppImage, and decoding is all the stats ever do.
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
+# Days and hours of the week are the user's own, not UTC's: a turn at 1 a.m.
+# in Paris belongs to that night, not to the evening before. Already compiled
+# for tauri with its clock, so naming it adds no crate.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.

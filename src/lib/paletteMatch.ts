@@ -26,6 +26,7 @@ export const COMMAND_SYNONYMS: Partial<Record<CommandId, readonly string[]>> = {
   "view.modelPreview": ["modèle", "model", "maillage", "mesh", "glb", "gltf", "fbx", "obj", "viewer"],
   "view.closeModels": ["modèle", "model", "3d"],
   "view.memory": ["notes", "souvenirs", "knowledge"],
+  "view.stats": ["usage", "tokens", "coût", "cost", "dépenses", "spend", "temps", "time", "dashboard"],
   "view.mcp": ["serveur", "server", "connecter", "connect", "intégration", "integration"],
   "workspace.mcpServers": ["mémoire", "memory", "processus", "process", "ram", "strict"],
   "view.broadcast": ["diffusion", "envoyer à tous", "send to all", "everyone"],

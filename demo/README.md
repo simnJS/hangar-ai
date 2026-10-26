@@ -36,6 +36,7 @@ backend/memory.ts     the global memory, seeded, raising memory:changed
 backend/shell.ts      the pseudo-terminal: a shell, and an agent mode
 backend/replies.ts    what the agents answer
 backend/model.ts      the 3D preview's file stat, and its URL scheme over fetch()
+backend/stats.ts      four months of made-up usage statistics, seeded
 ```
 
 Because `src/` is untouched, a command that changes name in Rust breaks a panel

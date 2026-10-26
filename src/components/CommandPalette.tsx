@@ -138,6 +138,7 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.modelPreview": "cube",
   "view.closeModels": "close",
   "view.memory": "bookmark",
+  "view.stats": "chart",
   "view.mcp": "plug",
   "workspace.mcpServers": "plug",
   "view.broadcast": "broadcast",

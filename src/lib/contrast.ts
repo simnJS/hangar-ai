@@ -51,6 +51,22 @@ export const relativeLuminance = (hex: string): number => {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
 
+/**
+ * Lightness as the eye reads it, from 0 for black to 1 for white: OKLab's L.
+ * WCAG's luminance answers "can it be read"; this answers "do two steps of a
+ * ramp look apart", which luminance gets wrong in the darks.
+ */
+export const perceivedLightness = (hex: string): number => {
+  const [r, g, b] = toRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+};
+
 /** WCAG contrast ratio between two colours, from 1 to 21. */
 export const contrastRatio = (a: string, b: string): number => {
   const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);

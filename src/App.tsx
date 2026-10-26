@@ -10,6 +10,7 @@ import { BoardView } from "./components/BoardView";
 import { BoardDock } from "./components/BoardDock";
 import { ModelPanel } from "./components/ModelPanel";
 import { MemoryView } from "./components/MemoryView";
+import { StatsView } from "./components/StatsView";
 import { McpPanel } from "./components/McpPanel";
 import { McpServersPanel } from "./components/McpServersPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -961,6 +962,7 @@ export default function App() {
       map["view.closeModels"] = closeAllModels;
     }
     map["view.memory"] = () => setView("memory");
+    map["view.stats"] = () => setView("stats");
     map["view.mcp"] = () => setShowMcp(true);
     map["workspace.mcpServers"] = () => setMcpServersFor(wsId);
 
@@ -1195,6 +1197,10 @@ export default function App() {
                 )}
 
                 {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+                {/* Every project's statistics, not this workspace's: the
+                    page has a project filter of its own. */}
+                {view === "stats" && <StatsView workspaces={state.workspaces} />}
 
                 {/* Mounted while any model is open, shown or not: the loaded
                     models stay on the GPU, and agents' snapshots render
