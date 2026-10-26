@@ -7,3 +7,4 @@ import "./styles.css";
 import "./styles/chrome.css";
 import "./styles/inspector.css";
 import "./styles/palette.css";
+import "./styles/model.css";

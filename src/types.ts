@@ -256,6 +256,11 @@ export interface Settings {
   boardDockOpen: boolean;
   /** Its width in px, as last dragged. */
   boardDockWidth: number;
+  /**
+   * The 3D preview's width beside the terminals, as last dragged. Whether it
+   * shows is not a setting: it exists while an agent has a model open.
+   */
+  modelPanelWidth: number;
   /** The navigator on the left: the workspaces and the agents in each. */
   navigatorOpen: boolean;
   /** The inspector on the right: everything about the focused pane. */
@@ -344,6 +349,7 @@ export const DEFAULT_SETTINGS: Settings = {
   discordAppId: "",
   boardDockOpen: false,
   boardDockWidth: 420,
+  modelPanelWidth: 440,
   navigatorOpen: true,
   inspectorOpen: true,
   inspectorWidth: 296,

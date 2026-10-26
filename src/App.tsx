@@ -8,6 +8,7 @@ import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { WorkspaceTerminals } from "./components/WorkspaceTerminals";
 import { BoardView } from "./components/BoardView";
 import { BoardDock } from "./components/BoardDock";
+import { ModelPanel } from "./components/ModelPanel";
 import { MemoryView } from "./components/MemoryView";
 import { McpPanel } from "./components/McpPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -65,6 +66,7 @@ import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal, openFinder } from "./lib/terminalRegistry";
 import { placeSidePanels } from "./lib/sidePanels";
+import { closeAllModels, setModelPanel, useModels } from "./lib/modelStore";
 import { focusRegion, nextRegion, regionOf, type Region } from "./lib/regions";
 import type { CommandId } from "./lib/shortcuts";
 import {
@@ -132,7 +134,7 @@ export default function App() {
    * beside them. Never saved, and never the saved "open" setting either: a
    * window that narrows starts with its drawers closed, whatever was docked.
    */
-  const [drawer, setDrawer] = useState<"inspector" | "dock" | null>(null);
+  const [drawer, setDrawer] = useState<"inspector" | "dock" | "model" | null>(null);
   /** The row the terminals share with the side panels. */
   const [bodyRef, bodyWidth] = useWidth();
 
@@ -380,6 +382,12 @@ export default function App() {
     [state.workspaces, state.activeWorkspaceId],
   );
 
+  /** The models agents opened in this window, and the 3D preview's state. */
+  const models = useModels();
+  const modelsOpen = models.models.length > 0;
+  /** Over the whole work area: only ever in the terminals view. */
+  const modelExpanded = modelsOpen && models.expanded && view === "terminals";
+
   /**
    * Beside the terminals or over them (lib/sidePanels). Until the row has been
    * measured — within the commit that mounts it — everything counts as fitting.
@@ -393,16 +401,24 @@ export default function App() {
       view === "terminals"
         ? { open: state.settings.boardDockOpen, width: state.settings.boardDockWidth }
         : null,
+    // Beside the terminals too, while a model is open; expanded, it covers
+    // the work area instead of taking room in it.
+    model:
+      view === "terminals" && modelsOpen && !modelExpanded
+        ? { open: models.panelOpen, width: state.settings.modelPanelWidth }
+        : null,
   });
   const inspectorDrawer = !sides.inspector.fits;
   const dockDrawer = !sides.dock.fits;
+  const modelDrawer = !sides.model.fits;
 
   // A drawer the window has grown wide enough to dock, or a board drawer whose
   // terminals left the screen, is over: narrowing again must not bring it back.
   useEffect(() => {
     if (drawer === "inspector" && !inspectorDrawer) setDrawer(null);
     if (drawer === "dock" && (!dockDrawer || view !== "terminals")) setDrawer(null);
-  }, [drawer, inspectorDrawer, dockDrawer, view]);
+    if (drawer === "model" && (!modelDrawer || view !== "terminals" || !modelsOpen)) setDrawer(null);
+  }, [drawer, inspectorDrawer, dockDrawer, modelDrawer, modelsOpen, view]);
 
   const dockShown =
     view === "terminals" && (dockDrawer ? drawer === "dock" : state.settings.boardDockOpen);
@@ -419,6 +435,45 @@ export default function App() {
   };
   const closeDock = () =>
     dockDrawer ? setDrawer(null) : updateSettings({ boardDockOpen: false });
+
+  /**
+   * The 3D preview: docked when there is room and it is open, a drawer the
+   * user opens otherwise — an agent showing a model never throws a drawer
+   * over the terminals someone is typing in; the toolbar button says there
+   * is something to see instead.
+   */
+  const modelShown =
+    view === "terminals" &&
+    modelsOpen &&
+    (modelExpanded || (modelDrawer ? drawer === "model" : models.panelOpen));
+  const toggleModels = () => {
+    if (view !== "terminals") {
+      setView("terminals");
+      setModelPanel({ open: true });
+      if (modelDrawer) setDrawer("model");
+      return;
+    }
+    if (modelExpanded) return setModelPanel({ open: false });
+    if (modelDrawer) setDrawer((open) => (open === "model" ? null : "model"));
+    else setModelPanel({ open: !models.panelOpen });
+  };
+  const closeModelPanel = () => {
+    if (modelExpanded || !modelDrawer) setModelPanel({ open: false });
+    else setDrawer(null);
+  };
+  const toggleModelExpand = () => setModelPanel({ open: true, expanded: !models.expanded });
+
+  /** Something an agent opened or changed is waiting behind the toolbar button. */
+  const modelsKey = models.models.map((model) => `${model.id}:${model.revision}`).join(" ");
+  const [modelsUnseen, setModelsUnseen] = useState(false);
+  useEffect(() => {
+    setModelsUnseen(Boolean(modelsKey) && !modelShown);
+    // Only a change in what is open counts, not the panel being hidden.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsKey]);
+  useEffect(() => {
+    if (modelShown) setModelsUnseen(false);
+  }, [modelShown]);
 
   const toggleNavigator = () =>
     updateSettings({ navigatorOpen: !state.settings.navigatorOpen });
@@ -462,6 +517,7 @@ export default function App() {
     const shown: Region[] = [];
     if (navigatorShown) shown.push("navigator");
     if (activeWorkspace) shown.push("toolbar", "main", "status");
+    if (activeWorkspace && modelShown) shown.push("model");
     if (activeWorkspace && dockShown) shown.push("dock");
     if (activeWorkspace && inspectorShown) shown.push("inspector");
     // A region with nothing to focus — the status bar over the board, which
@@ -845,6 +901,12 @@ export default function App() {
     map["view.terminals"] = () => setView("terminals");
     map["view.board"] = () => setView("board");
     map["view.boardDock"] = toggleDock;
+    // Only while there is a model to show or close: otherwise the keys fall
+    // through, and the palette does not offer them.
+    if (modelsOpen) {
+      map["view.modelPreview"] = toggleModels;
+      map["view.closeModels"] = closeAllModels;
+    }
     map["view.memory"] = () => setView("memory");
     map["view.mcp"] = () => setShowMcp(true);
 
@@ -1009,6 +1071,10 @@ export default function App() {
               onFocusPane={(paneId) => focusPane(activeWorkspace.id, paneId)}
               dockShown={dockShown}
               onToggleDock={toggleDock}
+              modelsOpen={modelsOpen}
+              modelShown={modelShown}
+              modelsUnseen={modelsUnseen}
+              onToggleModels={toggleModels}
               canDetach={canDetach}
               onDetach={() => void detach(activeWorkspace.id)}
               inOwnWindow={Boolean(windowWorkspaceId)}
@@ -1070,6 +1136,25 @@ export default function App() {
                 )}
 
                 {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+                {/* Mounted while any model is open, shown or not: the loaded
+                    models stay on the GPU, and agents' snapshots render
+                    whatever the user is looking at. */}
+                {modelsOpen && (
+                  <ModelPanel
+                    shown={modelShown}
+                    drawer={modelDrawer}
+                    expanded={modelExpanded}
+                    width={state.settings.modelPanelWidth}
+                    drawnWidth={sides.model.width}
+                    maxWidth={sides.model.max}
+                    scale={uiScale}
+                    paneId={focusedPaneId}
+                    onResize={(modelPanelWidth) => updateSettings({ modelPanelWidth })}
+                    onClose={closeModelPanel}
+                    onToggleExpand={toggleModelExpand}
+                  />
+                )}
 
                 {dockShown && (
                   <BoardDock

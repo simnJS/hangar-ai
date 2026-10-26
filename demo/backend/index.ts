@@ -9,6 +9,7 @@ import * as shell from "./shell";
 import * as board from "./board";
 import * as control from "./control";
 import * as memory from "./memory";
+import * as model from "./model";
 import {
   AVAILABLE_AGENTS,
   HOME,
@@ -26,6 +27,9 @@ const MCP_TARGETS = [
   { id: "cursor", label: "Cursor", path: ".cursor/mcp.json", detected: false, configured: false, project_scoped: true },
   { id: "vscode", label: "VS Code", path: ".vscode/mcp.json", detected: true, configured: false, project_scoped: true },
 ];
+
+// The 3D preview loads models from Rust's URL scheme; here, from the bundle.
+model.installModelScheme();
 
 /** Flipped by mcp_install so the panel reflects what you just did. */
 const configured = new Set(MCP_TARGETS.filter((t) => t.configured).map((t) => t.id));
@@ -194,6 +198,16 @@ export async function route(command: string, args: Record<string, any>): Promise
       return undefined;
     case "voice_key_clear":
       voiceKeySaved = false;
+      return undefined;
+
+    /* ── 3D preview ── */
+    case "model_allow_roots":
+      model.allowRoots(args.roots ?? []);
+      return undefined;
+    case "model_stat":
+      return model.stat(String(args.path ?? ""));
+    case "model_save_png":
+      model.savePng(String(args.path ?? ""), String(args.data ?? ""));
       return undefined;
 
     default:

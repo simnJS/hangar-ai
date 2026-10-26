@@ -251,6 +251,52 @@ const PATHS = {
   bolt: <path d="M9.2 1.8 3.8 9h4l-1 5.2L12.2 7h-4z" />,
   // Plus, slash, minus: what changed, the way SF Symbols draws a diff.
   diff: <path d="M4.8 2.8v5M2.3 5.3h5M9 11.5h4.7M12.4 3.2 3.6 12.8" />,
+
+  // The 3D preview: the panel itself, then its viewport tools.
+  cube: (
+    <>
+      <path d="M8 1.9 13.6 5v6.1L8 14.1l-5.6-3V5z" />
+      <path d="M2.4 5 8 8.1 13.6 5M8 8.1v6" />
+    </>
+  ),
+  // Framing corners round the centre: "recentre".
+  frame: (
+    <>
+      <path d="M2.4 5.6V3.9a1.5 1.5 0 0 1 1.5-1.5h1.7M10.4 2.4h1.7a1.5 1.5 0 0 1 1.5 1.5v1.7M13.6 10.4v1.7a1.5 1.5 0 0 1-1.5 1.5h-1.7M5.6 13.6H3.9a1.5 1.5 0 0 1-1.5-1.5v-1.7" />
+      <circle cx="8" cy="8" r="1.9" />
+    </>
+  ),
+  wireframe: <path d="M8 2.4 13.6 12.9H2.4zM5.2 7.65h5.6M8 12.9 5.2 7.65M8 12.9l2.8-5.25" />,
+  grid: (
+    <>
+      <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.6" />
+      <path d="M6.1 2.25v11.5M9.9 2.25v11.5M2.25 6.1h11.5M2.25 9.9h11.5" />
+    </>
+  ),
+  axes: <path d="M4 12V2.8M4 12h9.2M4 12l5.6-4.2M2.6 4.2 4 2.8l1.4 1.4M11.8 10.6l1.4 1.4-1.4 1.4" />,
+  // Short strokes standing off a curved surface.
+  normals: (
+    <path d="M2.2 13.2c3.3-2.4 8.3-2.4 11.6 0M4.6 11.6 3.7 7.4M8 11V5.6M11.4 11.6l.9-4.2M2.6 8.6l1.1-1.2 1.3.9M6.8 6.8 8 5.6l1.2 1.2M11 8.3l1.3-.9 1.1 1.2" />
+  ),
+  camera: (
+    <>
+      <path d="M2.1 5.6a1.5 1.5 0 0 1 1.5-1.5h1.5l1.1-1.6h3.6l1.1 1.6h1.5a1.5 1.5 0 0 1 1.5 1.5v5.9a1.5 1.5 0 0 1-1.5 1.5H3.6a1.5 1.5 0 0 1-1.5-1.5z" />
+      <circle cx="8" cy="8.5" r="2.3" />
+    </>
+  ),
+  play: <path d="M5.2 3.4v9.2l7.3-4.6z" fill="currentColor" />,
+  pause: (
+    <>
+      <rect x="4.3" y="3.5" width="2.4" height="9" rx=".6" fill="currentColor" stroke="none" />
+      <rect x="9.3" y="3.5" width="2.4" height="9" rx=".6" fill="currentColor" stroke="none" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6" />
+      <path d="M10.6 5.4V3.9a1.5 1.5 0 0 0-1.5-1.5H3.9a1.5 1.5 0 0 0-1.5 1.5v5.2a1.5 1.5 0 0 0 1.5 1.5h1.5" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;

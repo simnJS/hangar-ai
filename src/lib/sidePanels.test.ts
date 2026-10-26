@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DOCK_MIN,
+  MODEL_MIN,
   DRAWER_MARGIN,
   INSPECTOR_MAX,
   INSPECTOR_MIN,
@@ -140,5 +141,69 @@ describe("placeSidePanels", () => {
     );
     // Open but without room, it is a drawer, which takes nothing either.
     expect(open.dock.width).toBe(closed.dock.width);
+  });
+});
+
+describe("placeSidePanels with the 3D preview", () => {
+  const withModel = (patch: Partial<SidePanelsInput> = {}) =>
+    input({ model: { open: true, width: 440 }, ...patch });
+
+  it("places nothing differently while no model is open", () => {
+    const room = 1600 - NAV;
+    const dock = { open: true, width: 420 };
+    const before = placeSidePanels(input({ room, dock }));
+    const after = placeSidePanels(input({ room, dock, model: null }));
+    expect(after.inspector).toEqual(before.inspector);
+    expect(after.dock).toEqual(before.dock);
+  });
+
+  it("docks the preview at its width when the terminals keep their room", () => {
+    const { model, inspector } = placeSidePanels(withModel({ room: 1920 - NAV }));
+    expect(model.fits).toBe(true);
+    expect(model.width).toBe(440);
+    expect(inspector.fits).toBe(true);
+  });
+
+  it("makes the inspector a drawer before it squeezes the preview", () => {
+    const { model, inspector } = placeSidePanels(withModel({ room: 1280 - NAV }));
+    expect(inspector.fits).toBe(false);
+    expect(model.fits).toBe(true);
+    expect(model.width).toBe(Math.min(440, 1280 - NAV - TERMINALS_MIN));
+  });
+
+  it("keeps the preview beside the terminals and makes the dock the drawer when only one fits", () => {
+    const { model, dock } = placeSidePanels(
+      withModel({
+        room: TERMINALS_MIN + MODEL_MIN + 100,
+        inspector: { open: false, width: 296 },
+        dock: { open: true, width: 420 },
+      }),
+    );
+    expect(model.fits).toBe(true);
+    expect(dock.fits).toBe(false);
+  });
+
+  it("leaves the dock its minimum beside the preview while there is room for both", () => {
+    const room = TERMINALS_MIN + MODEL_MIN + DOCK_MIN + 60;
+    const { model, dock } = placeSidePanels(
+      withModel({ room, inspector: { open: false, width: 296 }, dock: { open: true, width: 420 } }),
+    );
+    expect(model.fits).toBe(true);
+    expect(dock.fits).toBe(true);
+    expect(model.width + dock.width).toBe(room - TERMINALS_MIN);
+    expect(dock.width).toBe(DOCK_MIN);
+  });
+
+  it("becomes a drawer in half of a 1920 screen, the same width as docked", () => {
+    const { model } = placeSidePanels(withModel({ room: 960 - NAV }));
+    expect(model.fits).toBe(false);
+    expect(model.width).toBe(440);
+  });
+
+  it("never lets a drag take the terminals' room", () => {
+    const { model } = placeSidePanels(
+      withModel({ room: TERMINALS_MIN + 500, inspector: { open: false, width: 296 } }),
+    );
+    expect(model.max).toBe(500);
   });
 });
