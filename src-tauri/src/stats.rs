@@ -375,24 +375,33 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
     let (found, sources) = discover(roots);
 
     // What needs reading, decided under the lock; the reading happens
-    // outside it, so a cached-only answer is never held up by a scan.
-    let (todo, reused, mut kept) = {
+    // outside it, so a cached-only answer is never held up by a scan. The
+    // files that did not change stay where they are, uncopied.
+    let (todo, reused, gone) = {
         let mut cache = cache().lock().unwrap_or_else(|e| e.into_inner());
         ensure_loaded(&mut cache, disk);
         let mut todo: Vec<(Found, Option<Entry>)> = Vec::new();
-        let mut kept: HashMap<String, Entry> = HashMap::new();
         let mut reused = 0;
         for file in found.iter() {
             let key = file.path.to_string_lossy().into_owned();
             match cache.files.get(&key) {
                 Some(entry) if entry.modified == file.modified && entry.size == file.size => {
-                    kept.insert(key, entry.clone());
                     reused += 1;
                 }
                 previous => todo.push((file.clone(), previous.cloned())),
             }
         }
-        (todo, reused, kept)
+        let on_disk: std::collections::HashSet<String> = found
+            .iter()
+            .map(|file| file.path.to_string_lossy().into_owned())
+            .collect();
+        let gone: Vec<String> = cache
+            .files
+            .keys()
+            .filter(|key| !on_disk.contains(*key))
+            .cloned()
+            .collect();
+        (todo, reused, gone)
     };
 
     let bytes: u64 = todo
@@ -427,23 +436,24 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
         }
     });
 
-    let mut failed = 0;
     let parsed = todo.len();
-    for (key, entry) in results.into_inner().unwrap_or_else(|e| e.into_inner()) {
-        match entry {
-            Ok(entry) => {
-                kept.insert(key, entry);
-            }
-            Err(_) => failed += 1,
-        }
-    }
-
-    // Files gone from disk leave the cache with this swap.
+    let mut failed = 0;
     let changed = {
         let mut cache = cache().lock().unwrap_or_else(|e| e.into_inner());
-        let changed = parsed > 0 || cache.files.len() != kept.len();
-        cache.files = kept;
-        changed
+        for (key, entry) in results.into_inner().unwrap_or_else(|e| e.into_inner()) {
+            match entry {
+                Ok(entry) => {
+                    cache.files.insert(key, entry);
+                }
+                // Locked by another process for a moment, say: what the last
+                // read found stays until a read works.
+                Err(_) => failed += 1,
+            }
+        }
+        for key in &gone {
+            cache.files.remove(key);
+        }
+        parsed > failed || !gone.is_empty()
     };
     if changed {
         if let Some(path) = disk {
