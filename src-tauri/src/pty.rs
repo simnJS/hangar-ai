@@ -170,6 +170,26 @@ const INHERITED_SESSION_MARKERS: &[&str] = &[
     "CLAUDE_PID",
 ];
 
+/// Arguments a shell gets on top of the ones recorded for it.
+///
+/// PowerShell greets every new pane with its version and, once the profile
+/// takes more than half a second, with how long it took: two lines of noise in
+/// a pane an agent is about to take over. `-NoLogo` drops both and changes
+/// nothing else. It is added here rather than when shells are detected, so
+/// panes whose shell was recorded before get it too.
+fn extra_shell_args(program: &str, args: &[String]) -> Vec<&'static str> {
+    let stem = std::path::Path::new(program)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let is_powershell = stem == "pwsh" || stem == "powershell";
+    if is_powershell && !args.iter().any(|a| a.eq_ignore_ascii_case("-nologo")) {
+        vec!["-NoLogo"]
+    } else {
+        Vec::new()
+    }
+}
+
 // The arguments are the command's IPC fields, named as the frontend sends them.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -230,6 +250,9 @@ pub fn pty_spawn(
         .ok_or("no usable shell found on this system")?;
 
     let mut cmd = CommandBuilder::new(&shell.program);
+    for arg in extra_shell_args(&shell.program, &shell.args) {
+        cmd.arg(arg);
+    }
     for arg in &shell.args {
         cmd.arg(arg);
     }
@@ -522,6 +545,27 @@ pub fn kill_all(manager: &PtyManager) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn powershell_starts_without_its_banner() {
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            extra_shell_args(r"C:\Program Files\PowerShell\7\pwsh.exe", &none),
+            ["-NoLogo"]
+        );
+        assert_eq!(
+            extra_shell_args(
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe",
+                &none
+            ),
+            ["-NoLogo"]
+        );
+        assert_eq!(extra_shell_args("/usr/local/bin/pwsh", &none), ["-NoLogo"]);
+        // Asked for already, in whatever case: not twice.
+        assert!(extra_shell_args("pwsh", &["-nologo".to_string()]).is_empty());
+        assert!(extra_shell_args(r"C:\Windows\System32\cmd.exe", &none).is_empty());
+        assert!(extra_shell_args("/bin/bash", &none).is_empty());
+    }
 
     #[test]
     fn history_keeps_a_bounded_tail_cut_at_a_line() {
