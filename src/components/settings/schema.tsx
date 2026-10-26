@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { LOCALES, systemLocale, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
+import { HIBERNATE_DELAYS } from "../../lib/hibernate";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
 import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
@@ -356,6 +357,37 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               step: 100,
               display: `${settings.launchDelayMs} ms`,
               onChange: (value) => set("launchDelayMs", value),
+            },
+          ],
+        },
+        {
+          id: "memory",
+          title: t("settings.memory"),
+          items: [
+            {
+              id: "hibernateIdle",
+              kind: "toggle",
+              label: t("settings.hibernate"),
+              hint: t("settings.hibernateHint"),
+              keywords: "sleep veille hibernate hibernation memory mémoire ram idle inactif kill arrêter",
+              value: settings.hibernateIdle,
+              onChange: (value) => set("hibernateIdle", value),
+            },
+            {
+              id: "hibernateAfter",
+              kind: "select",
+              label: t("settings.hibernateDelay"),
+              hint: t("settings.hibernateDelayHint"),
+              keywords: "sleep veille delay délai minutes",
+              // A value edited into state.json by hand still shows, rather
+              // than the list silently claiming another one.
+              value: String(settings.hibernateAfterMin),
+              choices: [
+                ...new Set([...HIBERNATE_DELAYS, settings.hibernateAfterMin]),
+              ]
+                .sort((a, b) => a - b)
+                .map((minutes) => ({ value: String(minutes), label: `${num(minutes)} min` })),
+              onChange: (value) => set("hibernateAfterMin", Number(value)),
             },
           ],
         },

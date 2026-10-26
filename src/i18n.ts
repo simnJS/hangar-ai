@@ -445,6 +445,12 @@ const en = {
     "Loads Hangar's mod into Claude Code, for exact states, plan usage and prompts held until free; applies to panes started from now on",
   "settings.launchDelay": "Launch delay",
   "settings.launchDelayHint": "Leaves the shell time to load its profile",
+  "settings.memory": "Memory",
+  "settings.hibernate": "Put idle workspaces to sleep",
+  "settings.hibernateHint":
+    "Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume (Gemini, OpenCode), nor while a shell runs a command.",
+  "settings.hibernateDelay": "Put to sleep after",
+  "settings.hibernateDelayHint": "Without a keystroke, a click or an agent sending it anything",
   "settings.agentCommands": "Launch commands",
   "settings.agentCommandsHint":
     "What a pane types to start each agent. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default.",
@@ -1475,6 +1481,12 @@ const fr: Record<Key, string> = {
     "Charge le mod de Hangar dans Claude Code, pour des états exacts, la consommation du forfait et les prompts gardés jusqu'à ce qu'il soit libre ; vaut pour les panneaux lancés ensuite",
   "settings.launchDelay": "Délai de lancement",
   "settings.launchDelayHint": "Laisse au shell le temps de charger son profil",
+  "settings.memory": "Mémoire",
+  "settings.hibernate": "Mettre en veille les workspaces inactifs",
+  "settings.hibernateHint":
+    "Arrête les agents d'un workspace laissé de côté pour libérer la mémoire ; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session (Gemini, OpenCode), ni tant qu'un shell exécute une commande.",
+  "settings.hibernateDelay": "Mettre en veille après",
+  "settings.hibernateDelayHint": "Sans frappe, clic ni envoi d'un agent",
   "settings.agentCommands": "Commandes de lancement",
   "settings.agentCommandsHint":
     "Ce qu'un panneau tape pour démarrer chaque agent. C'est envoyé à un shell interactif : un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.",
