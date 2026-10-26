@@ -35,11 +35,26 @@ backend/board.ts      the task board, in memory, raising board:changed
 backend/memory.ts     the global memory, seeded, raising memory:changed
 backend/shell.ts      the pseudo-terminal: a shell, and an agent mode
 backend/replies.ts    what the agents answer
+backend/model.ts      the 3D preview's file stat, and its URL scheme over fetch()
 ```
 
 Because `src/` is untouched, a command that changes name in Rust breaks a panel
 here rather than a type check. That is the trade for having the demo *be* the
 app instead of a drawing of it.
+
+## The 3D model
+
+`models/sample.glb` is the one model on the demo's pretend disk, at
+`C:\dev\hangar-ai\demo\models\sample.glb` in the hangar-ai workspace: a drone
+hangar and a quadcopter flying a loop around it. It is generated from three.js
+primitives by `node scripts/demo-model.mjs` — no third-party asset — so it can
+be changed and rebuilt at will. `backend/model.ts` answers `model_stat` for it
+and serves it wherever the app fetches the `hangar-model` scheme.
+
+The demo build inlines the 3D preview's engine into the page, three.js
+included, which the desktop app keeps in a chunk of its own: the page has no
+sub-resources to load it from. The Draco and Basis decoders stay out; the
+sample needs neither.
 
 ## The terminals
 

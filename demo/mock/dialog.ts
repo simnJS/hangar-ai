@@ -17,8 +17,9 @@ export async function open(options: { multiple?: boolean; directory?: boolean } 
   return options.multiple ? [picked] : picked;
 }
 
-export async function save() {
-  return "C:\\dev\\hangar-ai\\workspace.code-workspace";
+/** Takes whatever name the app proposed, in the workspace's folder. */
+export async function save(options: { defaultPath?: string } = {}) {
+  return `C:\\dev\\hangar-ai\\${options.defaultPath ?? "workspace.code-workspace"}`;
 }
 
 export async function message() {

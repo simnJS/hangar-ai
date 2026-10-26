@@ -33,8 +33,15 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("./site/demo", import.meta.url)),
     emptyOutDir: true,
     // One request for the app, one for its stylesheet: the demo loads inside
-    // an iframe that is already below the fold.
-    chunkSizeWarningLimit: 1200,
+    // an iframe that is already below the fold. The 3D preview's engine
+    // (three.js) included, which the desktop app keeps in a chunk of its own:
+    // scripts/demo-singlefile.mjs folds everything into one page, where a
+    // second chunk would have no URL to load from.
+    chunkSizeWarningLimit: 2600,
+    modulePreload: false,
+    rollupOptions: {
+      output: { inlineDynamicImports: true },
+    },
   },
   server: {
     port: 4300,

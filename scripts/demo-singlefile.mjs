@@ -27,7 +27,18 @@ if (!fs.existsSync(assetDir)) {
 
 const assets = fs.readdirSync(assetDir);
 const cssFile = assets.find((f) => f.endsWith(".css"));
-const jsFile = assets.find((f) => f.endsWith(".js"));
+// The entry is the script vite's own page loads: the assets also hold
+// JavaScript that is never a module of the app — the 3D preview's Draco and
+// Basis decoders, which three.js fetches by URL.
+const builtPage = fs.readFileSync(path.join(outDir, "index.html"), "utf8");
+const jsFile = /<script[^>]+src="[^"]*assets\/([^"]+\.js)"/.exec(builtPage)?.[1];
+
+/**
+ * Assets the demo bundle names but never fetches: the decoders only load for a
+ * Draco or KTX2 model, and the demo's one model is neither. They stay out of
+ * the page rather than adding a megabyte to it.
+ */
+const UNUSED = /^(draco_|basis_transcoder)/;
 
 if (!jsFile) {
   console.error("no bundle in site/demo/assets");
@@ -44,6 +55,9 @@ const MEDIA = {
   ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  // The 3D preview's sample model, which fetch() reads from a data URI as
+  // well as from a file.
+  ".glb": "model/gltf-binary",
 };
 
 const dataUri = (file) => {
@@ -64,10 +78,12 @@ for (const file of assets) {
 
 // Vite emits imported assets as `new URL("file.png", import.meta.url)`. Inlined
 // the module resolves that against the document, which is not where the file
-// is, so the whole expression is replaced by the data URI.
+// is, so the expression becomes a URL of the data URI — still a URL, since
+// what follows it is usually `.href`.
 js = js.replace(/new URL\("([^"]+)",\s*import\.meta\.url\)/g, (whole, file) => {
   if (!fs.existsSync(path.join(assetDir, file))) return whole;
-  return JSON.stringify(dataUri(file) ?? whole);
+  const uri = dataUri(file);
+  return uri ? `new URL(${JSON.stringify(uri)})` : whole;
 });
 
 const page = `<!doctype html>
@@ -93,7 +109,12 @@ ${js}</script>
 fs.writeFileSync(path.join(outDir, "index.html"), page);
 fs.rmSync(assetDir, { recursive: true, force: true });
 
-const left = page.match(/["'(]\.{0,2}\/?assets\/[A-Za-z0-9._-]+/g);
-if (left) console.warn("still referencing:", [...new Set(left)].join(", "));
+const left = (page.match(/["'(]\.{0,2}\/?assets\/[A-Za-z0-9._-]+/g) ?? []).filter(
+  (ref) => !UNUSED.test(ref.replace(/^.*assets\//, "")),
+);
+const named = [...new Set(page.match(/new URL\("([^"]+)",\s*import\.meta\.url\)/g) ?? [])].filter(
+  (ref) => !UNUSED.test(/"([^"]+)"/.exec(ref)[1]),
+);
+if (left.length || named.length) console.warn("still referencing:", [...new Set([...left, ...named])].join(", "));
 
 console.log(`site/demo/index.html, ${(page.length / 1024).toFixed(0)} kB, no sub-resources`);
