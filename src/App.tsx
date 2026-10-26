@@ -905,78 +905,78 @@ export default function App() {
                 the same parent for good, and the board panel sits beside
                 them in this row. */}
             <div className="main__body">
-            <div className="workarea">
-              {/* One grid per workspace ever opened, all but one hidden. They
-                  are never unmounted: that would kill every PTY and lose the
-                  running agents — on a workspace switch as much as on the
-                  switch to the board. */}
-              {openWorkspaces.map((ws) => (
-                <WorkspaceTerminals
-                  key={ws.id}
-                  workspace={ws}
-                  hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
-                  settings={state.settings}
-                  availableAgents={availableAgents}
+              <div className="workarea">
+                {/* One grid per workspace ever opened, all but one hidden. They
+                    are never unmounted: that would kill every PTY and lose the
+                    running agents — on a workspace switch as much as on the
+                    switch to the board. */}
+                {openWorkspaces.map((ws) => (
+                  <WorkspaceTerminals
+                    key={ws.id}
+                    workspace={ws}
+                    hidden={ws.id !== activeWorkspace.id || view !== "terminals"}
+                    settings={state.settings}
+                    availableAgents={availableAgents}
+                    shells={shells}
+                    focusedPaneId={focusByWorkspace[ws.id] ?? null}
+                    zoomed={Boolean(zoomByWorkspace[ws.id])}
+                    onZoomChange={(on) => setZoom(ws.id, on)}
+                    onFocusPane={(paneId) => focusPane(ws.id, paneId)}
+                    onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
+                    onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                    onOpenSessions={setPickerPaneId}
+                  />
+                ))}
+
+                {view === "board" && (
+                  <BoardView
+                    cwd={activeWorkspace.cwd}
+                    onOpenMcp={() => setShowMcp(true)}
+                    findAgent={findAgent}
+                  />
+                )}
+
+                {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
+
+                {dockShown && (
+                  <BoardDock
+                    cwd={activeWorkspace.cwd}
+                    onOpenMcp={() => setShowMcp(true)}
+                    findAgent={findAgent}
+                    width={state.settings.boardDockWidth}
+                    onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
+                    onClose={() => updateSettings({ boardDockOpen: false })}
+                    onExpand={() => setView("board")}
+                  />
+                )}
+              </div>
+
+              {inspectorShown && (
+                <Inspector
+                  workspace={activeWorkspace}
+                  workspaces={state.workspaces}
+                  activeWorkspaceId={activeWorkspace.id}
+                  pane={panes.find((p) => p.id === focusedPaneId) ?? null}
+                  paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
                   shells={shells}
-                  focusedPaneId={focusByWorkspace[ws.id] ?? null}
-                  zoomed={Boolean(zoomByWorkspace[ws.id])}
-                  onZoomChange={(on) => setZoom(ws.id, on)}
-                  onFocusPane={(paneId) => focusPane(ws.id, paneId)}
-                  onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
-                  onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
+                  width={state.settings.inspectorWidth}
+                  onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
+                  collapsed={state.settings.inspectorCollapsed}
+                  onToggleSection={(id) => {
+                    // Read from the store as it stands, not this render: two
+                    // folds before a re-render would otherwise lose one.
+                    const folded = snapshot().settings.inspectorCollapsed;
+                    updateSettings({
+                      inspectorCollapsed: folded.includes(id)
+                        ? folded.filter((entry) => entry !== id)
+                        : [...folded, id],
+                    });
+                  }}
+                  onClose={() => updateSettings({ inspectorOpen: false })}
+                  onOpenBoard={() => setView("board")}
                   onOpenSessions={setPickerPaneId}
                 />
-              ))}
-
-              {view === "board" && (
-                <BoardView
-                  cwd={activeWorkspace.cwd}
-                  onOpenMcp={() => setShowMcp(true)}
-                  findAgent={findAgent}
-                />
               )}
-
-              {view === "memory" && <MemoryView cwd={activeWorkspace.cwd} />}
-
-              {dockShown && (
-                <BoardDock
-                  cwd={activeWorkspace.cwd}
-                  onOpenMcp={() => setShowMcp(true)}
-                  findAgent={findAgent}
-                  width={state.settings.boardDockWidth}
-                  onResize={(boardDockWidth) => updateSettings({ boardDockWidth })}
-                  onClose={() => updateSettings({ boardDockOpen: false })}
-                  onExpand={() => setView("board")}
-                />
-              )}
-            </div>
-
-            {inspectorShown && (
-              <Inspector
-                workspace={activeWorkspace}
-                workspaces={state.workspaces}
-                activeWorkspaceId={activeWorkspace.id}
-                pane={panes.find((p) => p.id === focusedPaneId) ?? null}
-                paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
-                shells={shells}
-                width={state.settings.inspectorWidth}
-                onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
-                collapsed={state.settings.inspectorCollapsed}
-                onToggleSection={(id) => {
-                  // Read from the store as it stands, not this render: two
-                  // folds before a re-render would otherwise lose one.
-                  const folded = snapshot().settings.inspectorCollapsed;
-                  updateSettings({
-                    inspectorCollapsed: folded.includes(id)
-                      ? folded.filter((entry) => entry !== id)
-                      : [...folded, id],
-                  });
-                }}
-                onClose={() => updateSettings({ inspectorOpen: false })}
-                onOpenBoard={() => setView("board")}
-                onOpenSessions={setPickerPaneId}
-              />
-            )}
             </div>
 
             <StatusBar
