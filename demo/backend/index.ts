@@ -10,6 +10,7 @@ import * as board from "./board";
 import * as control from "./control";
 import * as memory from "./memory";
 import * as model from "./model";
+import * as stats from "./stats";
 import {
   AVAILABLE_AGENTS,
   HOME,
@@ -157,6 +158,14 @@ export async function route(command: string, args: Record<string, any>): Promise
       return memory.update(args.id, args.patch);
     case "memory_delete":
       return memory.remove(args.id);
+
+    /* ── usage statistics ──
+       Four months of made-up work (backend/stats). The full answer takes a
+       moment, as reading transcripts does, so the page shows its refresh. */
+    case "usage_stats":
+      return args.cachedOnly
+        ? stats.usageStats(args)
+        : new Promise((resolve) => setTimeout(() => resolve(stats.usageStats(args)), 700));
 
     /* ── Discord ── */
     case "discord_presence_set":
