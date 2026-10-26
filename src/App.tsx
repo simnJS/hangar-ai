@@ -26,6 +26,14 @@ import {
   ptyWrite,
 } from "./lib/ipc";
 import { usePaneControl } from "./lib/control";
+import { gitWorktreeList } from "./lib/git";
+import { modelStat } from "./lib/modelFiles";
+import {
+  grantModelRoots,
+  localModelHost,
+  remoteModelHost,
+  serveModelHost,
+} from "./lib/modelHost";
 import {
   canDetach,
   closeWorkspaceWindow,
@@ -546,14 +554,15 @@ export default function App() {
           // Said on screen: panes appearing and vanishing on their own would
           // otherwise look like a bug.
           announce: (event) =>
-            setNotice(
-              t(`control.${event.kind}`, {
-                by: event.by ?? t("control.someone"),
-                pane: event.pane,
-                workspace: event.workspace,
-              }),
-            ),
+            setNotice(t(`control.${event.kind}`, { ...event, by: event.by ?? t("control.someone") })),
           sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+          modelAllowRoots: (workspaceId, roots) =>
+            grantModelRoots(workspaceId, roots, snapshot().workspaces.map((ws) => ws.id)),
+          modelStat,
+          worktrees: gitWorktreeList,
+          // A detached workspace's preview is drawn by its own window.
+          modelHost: async (workspaceId) =>
+            workspaceId ? remoteModelHost(workspaceId) : localModelHost,
         }
       : null,
   );
@@ -651,11 +660,13 @@ export default function App() {
       emit("agent:activity", { from: WINDOW_LABEL, paneId, value }).catch(() => undefined);
     });
     // The main window carries out the agents' requests; this one lends it the
-    // terminals it draws.
+    // terminals it draws, and the 3D preview of its workspace.
     const stopServing = serveTerminals(getTerminal);
+    const stopModels = windowWorkspaceId ? serveModelHost(windowWorkspaceId) : null;
     return () => {
       relayActivity(null);
       stopServing();
+      stopModels?.();
     };
   }, []);
 
