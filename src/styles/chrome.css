@@ -393,6 +393,15 @@
   }
 }
 
+/* What follows the state word — the task, the question, the last answer —
+   only says something with room for a few words of it. Narrower, the word
+   stands alone rather than trailing off as "Travaille su…". */
+@container activity (width < 30em) {
+  .activity__state ~ .activity__detail {
+    display: none;
+  }
+}
+
 @container activity (width < 10em) {
   .activity__message {
     display: none;
@@ -760,9 +769,10 @@
   font-size: calc(10px * var(--ui-scale));
 }
 
-/* A narrow window at a large interface size: the field keeps its room, the
-   hint and the extras go first. */
-@container status (width < 46em) {
+/* A narrow window, or a large interface size: the field keeps its room, the
+   hint and the extras go first — before the placeholder runs under the hint
+   (a 900px window with the navigator open). */
+@container status (width < 58em) {
   .status__kbd,
   .status__item--panes {
     display: none;
