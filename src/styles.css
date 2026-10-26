@@ -980,25 +980,22 @@ body.is-sorting * {
   border-color: transparent;
 }
 
-.btn--block {
-  width: 100%;
+/* Destructive: the danger colour in the text and the outline, and a tint
+   of it under the pointer. */
+.btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
-.icon-btn {
-  border: 0;
-  background: transparent;
-  color: var(--fg-subtle);
-  font-size: calc(19px * var(--ui-scale));
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: color var(--dur), background var(--dur);
+.btn--danger:hover:not(:disabled) {
+  background: var(--danger-soft);
 }
 
-.icon-btn:hover {
-  color: var(--fg);
-  background: var(--surface-hover);
+/* For a row of actions inside a list item. */
+.btn--tiny {
+  min-height: calc(22px * var(--ui-scale));
+  padding: 0 9px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 /* ---------- Icons ---------- */
@@ -1110,40 +1107,6 @@ body.is-sorting * {
   display: flex;
   min-width: 0;
   min-height: 0;
-}
-
-/* The toolbar itself is in styles/chrome.css. These segmented buttons stay
-   for the workspace dialog, which picks its first layout with them. */
-.layouts {
-  display: flex;
-  padding: 2px;
-  gap: 2px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.layouts__btn {
-  min-width: 30px;
-  padding: 4px 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background var(--dur), color var(--dur);
-}
-
-.layouts__btn:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
-}
-
-.layouts__btn.is-active {
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 600;
 }
 
 .placeholder {
@@ -3491,8 +3454,7 @@ body.is-dragging-pane .pane__bar {
   border-bottom: 1px solid var(--line);
 }
 
-.modal__close,
-.modal__head .icon-btn {
+.modal__close {
   flex: none;
   display: grid;
   place-items: center;
@@ -3507,14 +3469,12 @@ body.is-dragging-pane .pane__bar {
   transition: background var(--dur), color var(--dur);
 }
 
-.modal__close:hover,
-.modal__head .icon-btn:hover {
+.modal__close:hover {
   background: var(--surface-hover);
   color: var(--fg);
 }
 
-.modal__close:focus-visible,
-.modal__head .icon-btn:focus-visible {
+.modal__close:focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 1px;
 }
@@ -5218,15 +5178,6 @@ body.is-dragging-pane .board-dock__grip {
 
 /* ---------- Task dialog ---------- */
 
-.btn--danger {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-}
-
-.btn--danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-}
-
 /* components/TaskDialog.tsx: a floating panel in the chrome's colour, its
    fields one step darker, every edit saved as it is made. */
 .modal--task {
@@ -5856,11 +5807,6 @@ select.task__input {
   user-select: all;
 }
 
-.layouts__btn--wide {
-  min-width: 74px;
-  padding: 4px 10px;
-}
-
 /* ---------- Workspace creation dialog ---------- */
 
 .modal--wide {
@@ -6174,12 +6120,6 @@ select.task__input {
 .notice__close:focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 0;
-}
-
-.btn--tiny {
-  min-height: calc(22px * var(--ui-scale));
-  padding: 0 9px;
-  font-size: calc(11.5px * var(--ui-scale));
 }
 
 /* The roots of a .code-workspace, one per line; the main one is selected. */
@@ -6949,9 +6889,7 @@ select.task__input {
 .wt__actions .btn--tiny,
 .wt__blocked .btn--tiny,
 .wt__orphan .btn--tiny {
-  min-height: calc(22px * var(--ui-scale));
   padding: 0 8px;
-  font-size: calc(11.5px * var(--ui-scale));
 }
 
 .wt__actions .btn--tiny {
