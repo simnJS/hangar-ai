@@ -11,6 +11,7 @@ import App from "../src/App";
 import { StoreProvider, useStore } from "../src/store";
 import { THEMES } from "../src/themes";
 import { ptyWrite } from "../src/lib/ipc";
+import { playOpeningScene } from "./backend/scene";
 import "../src/stylesheet";
 import "./demo.css";
 
@@ -64,9 +65,27 @@ function PageBridge() {
   return null;
 }
 
+/**
+ * Starts what the agents off screen are busy with (backend/scene) once the
+ * app has its state, a moment after the workspace on screen has started its
+ * own panes.
+ */
+function OpeningScene() {
+  const { hydrated } = useStore();
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = window.setTimeout(playOpeningScene, 800);
+    return () => window.clearTimeout(timer);
+  }, [hydrated]);
+
+  return null;
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <StoreProvider>
     <PageBridge />
+    <OpeningScene />
     <App />
   </StoreProvider>,
 );

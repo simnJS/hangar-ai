@@ -1,6 +1,7 @@
 /**
- * The world the demo starts in: two workspaces, the shells and agents a
- * machine would have reported, and the board the agents work.
+ * The world the demo starts in: a few workspaces, some filed in folders, the
+ * shells and agents a machine would have reported, and the board the agents
+ * work.
  *
  * Everything lives in memory. Reloading the page resets the demo, which is
  * what a visitor expects from one.
@@ -28,39 +29,65 @@ const pane = (
 ) => ({ id, name, agent, sessionId, cwd: null, shellId: null, title: null });
 
 /** `tree: null` lets lib/layout build the preset arrangement for the count. */
+const workspace = (
+  id: string,
+  name: string,
+  cwd: string,
+  folderId: string | null,
+  panes: ReturnType<typeof pane>[],
+) => ({
+  id,
+  name,
+  cwd,
+  extraRoots: [],
+  themeId: null,
+  shellId: "pwsh",
+  tree: null,
+  savedCommands: [],
+  folderId,
+  panes,
+});
+
+/**
+ * A machine that has been in use for a while: projects filed in folders, a
+ * name too long for the navigator, and agents busy in workspaces off screen
+ * (backend/scene says what they are doing when the demo opens).
+ */
 export const SEED_STATE: AppState = {
   activeWorkspaceId: "ws-hangar",
-  folders: [],
+  folders: [
+    { id: "f-clients", name: "Clients", collapsed: false },
+    { id: "f-oss", name: "Open source", collapsed: false },
+    { id: "f-archive", name: "Archive", collapsed: true },
+  ],
   workspaces: [
-    {
-      id: "ws-hangar",
-      name: "hangar-ai",
-      cwd: "C:\\dev\\hangar-ai",
-      extraRoots: [],
-      themeId: null,
-      shellId: "pwsh",
-      tree: null,
-      savedCommands: [],
-      folderId: null,
-      panes: [
-        pane("pane-1", "Ava", "claude", "01J8Z4-pty-bridge"),
-        pane("pane-2", "Ben", "codex", "01J8Z6-board-tests"),
-        pane("pane-3", "Cleo", "gemini"),
-        pane("pane-4", "Dan", "shell"),
-      ],
-    },
-    {
-      id: "ws-store",
-      name: "storefront",
-      cwd: "C:\\dev\\storefront",
-      extraRoots: [],
-      themeId: null,
-      shellId: "pwsh",
-      tree: null,
-      savedCommands: [],
-      folderId: null,
-      panes: [pane("pane-5", "Eve", "claude"), pane("pane-6", "Finn", "shell")],
-    },
+    workspace("ws-hangar", "hangar-ai", "C:\\dev\\hangar-ai", null, [
+      pane("pane-1", "Ava", "claude", "01J8Z4-pty-bridge"),
+      pane("pane-2", "Ben", "codex", "01J8Z6-board-tests"),
+      pane("pane-3", "Cleo", "gemini"),
+      pane("pane-4", "Dan", "shell"),
+    ]),
+    workspace("ws-site", "marketing-site-redesign", "C:\\dev\\marketing-site-redesign", null, [
+      pane("pane-7", "Leo", "claude"),
+    ]),
+    workspace("ws-store", "storefront", "C:\\dev\\storefront", "f-clients", [
+      pane("pane-5", "Eve", "claude"),
+      pane("pane-6", "Finn", "shell"),
+    ]),
+    workspace("ws-billing", "billing-api", "C:\\dev\\billing-api", "f-clients", [
+      pane("pane-8", "Max", "claude"),
+      pane("pane-9", "Mia", "codex"),
+    ]),
+    workspace("ws-docs", "docs", "C:\\dev\\docs", "f-oss", [
+      pane("pane-10", "Ivy", "claude"),
+      pane("pane-11", "Theo", "shell"),
+    ]),
+    workspace("ws-themes", "terminal-themes", "C:\\dev\\terminal-themes", "f-oss", [
+      pane("pane-12", "Nora", "gemini"),
+    ]),
+    workspace("ws-legacy", "legacy-dashboard", "C:\\dev\\legacy-dashboard", "f-archive", [
+      pane("pane-13", "Sam", "claude"),
+    ]),
   ],
   settings: {
     ...DEFAULT_SETTINGS,
