@@ -3,9 +3,9 @@ import { LOCALES, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
-import { mix, THEMES, type TerminalTheme } from "../../themes";
+import { THEMES, themeVars, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
-import type { GlyphName } from "./icons";
+import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import { VoiceCard, VoiceKeyCard } from "./VoiceCard";
 import { voiceUnload } from "../../lib/ipc";
@@ -104,7 +104,7 @@ export interface SettingSection {
 export interface SettingCategory {
   id: string;
   label: string;
-  icon: GlyphName;
+  icon: IconName;
   sections: SettingSection[];
 }
 
@@ -138,12 +138,13 @@ const FONT_STACKS = [
  * said which colours a palette holds, not what working in it looks like.
  */
 function ThemePreview({ theme }: { theme: TerminalTheme }) {
-  const bg = theme.xterm.background ?? "#1a1b26";
-  const fg = theme.xterm.foreground ?? "#c0caf5";
-  // The same step applyThemeToDocument takes for the chrome, so the preview's
-  // navigator sits on the shade the real one will.
-  const chrome = mix(bg, theme.appearance === "dark" ? "#ffffff" : "#000000", 0.04);
-  const dim = mix(fg, bg, 0.5);
+  // The tokens the real window would take, so the preview's navigator sits
+  // on the shade the real one will.
+  const vars = themeVars(theme);
+  const bg = vars["--bg"];
+  const fg = vars["--fg"];
+  const chrome = vars["--chrome"];
+  const dim = vars["--fg-subtle"];
   const lines: [string | undefined, number][] = [
     [theme.xterm.blue, 44],
     [dim, 70],
@@ -296,7 +297,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "general",
       label: t("settings.catGeneral"),
-      icon: "general",
+      icon: "sliders",
       sections: [
         {
           id: "language",
@@ -595,7 +596,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shell",
       label: t("settings.catShell"),
-      icon: "shell",
+      icon: "prompt",
       sections: [
         {
           id: "shell",
@@ -643,7 +644,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "notifications",
       label: t("settings.catNotifications"),
-      icon: "notifications",
+      icon: "bell",
       sections: [
         {
           id: "notifications",
@@ -684,7 +685,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "voice",
       label: t("settings.catVoice"),
-      icon: "voice",
+      icon: "mic",
       sections: [
         {
           id: "voice",
@@ -849,7 +850,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "discord",
       label: t("settings.catDiscord"),
-      icon: "discord",
+      icon: "gamepad",
       sections: [
         {
           id: "discordPreview",
@@ -934,7 +935,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shortcuts",
       label: t("settings.catShortcuts"),
-      icon: "shortcuts",
+      icon: "keyboard",
       sections: [
         {
           id: "keymap",
@@ -962,7 +963,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "about",
       label: t("settings.catAbout"),
-      icon: "about",
+      icon: "info",
       sections: [
         {
           id: "about",

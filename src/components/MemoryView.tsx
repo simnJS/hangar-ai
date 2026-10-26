@@ -10,7 +10,6 @@ import {
 } from "../lib/memory";
 import { compactPath, shortDay, signerName, wasUpdated } from "../lib/memoryFormat";
 import { useLocale, useT } from "../i18n";
-import { BoardIcon } from "./BoardIcons";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -196,7 +195,7 @@ export function MemoryView({ cwd }: Props) {
         </h2>
 
         <label className="memory__search">
-          <BoardIcon name="search" size={12} />
+          <Icon name="search" size={12} />
           <input
             ref={searchRef}
             type="search"
@@ -215,7 +214,7 @@ export function MemoryView({ cwd }: Props) {
         </label>
 
         <span className="memory__hint" title={t("memory.hint")}>
-          <BoardIcon name="plug" size={12} />
+          <Icon name="plug" size={12} />
           <span className="memory__hint-text">{t("memory.hint")}</span>
         </span>
 
@@ -309,7 +308,7 @@ export function MemoryView({ cwd }: Props) {
         {loaded && all.length === 0 && !error && !composing && (
           <div className="memory__empty">
             <span className="memory__empty-icon" aria-hidden>
-              <BoardIcon name="bookmark" size={20} />
+              <Icon name="bookmark" size={20} />
             </span>
             <h3>{t("memory.empty")}</h3>
             <p>{t("memory.emptyBody")}</p>
@@ -394,7 +393,7 @@ export function MemoryView({ cwd }: Props) {
                         title={open ? t("memory.collapse") : t("memory.expand")}
                       >
                         <span className="mem__caret" aria-hidden>
-                          <BoardIcon name="chevron" size={10} />
+                          <Icon name="chevronRight" size={10} />
                         </span>
                         <span className="mem__title">{entry.title}</span>
                       </button>
@@ -434,10 +433,10 @@ export function MemoryView({ cwd }: Props) {
                           </>
                         ) : (
                           <button
-                            className="btn btn--ghost mem__delete"
+                            className="btn btn--ghost btn--delete"
                             onClick={() => setArmedId(entry.id)}
                           >
-                            <BoardIcon name="trash" size={11} />
+                            <Icon name="trash" size={11} />
                             {t("memory.delete")}
                           </button>
                         )}

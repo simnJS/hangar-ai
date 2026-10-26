@@ -5,21 +5,9 @@
    scale, and the toolbar's narrow layouts are container queries written in
    em: its font size carries the scale, so they move with it. */
 
-/* Secondary text. --fg-muted reads at about 4:1 on the chrome of a dark theme
-   and under 3.5:1 on a light one, short of the 4.5:1 text needs; this keeps
-   the same hierarchy and clears it on every surface here, the translucent
-   wells included. Icons stay on --fg-muted, which is enough for a shape.
-   "Your turn" is written in the accent, which on a light theme is too pale
-   for small text on these greys; pulled toward --fg it clears 4.5:1 both
-   ways. The palette (styles/palette.css) and the chord hint use both. */
-.toolbar,
-.tmenu,
-.status,
-.palette,
-.chord-hint {
-  --chrome-muted: color-mix(in srgb, var(--fg) 76%, var(--bg));
-  --chrome-yours: color-mix(in srgb, var(--accent-hi) 78%, var(--fg));
-}
+/* Secondary text is --fg-secondary, which clears 4.5:1 on every surface
+   here; icons stay on --fg-muted, which is enough for a shape. "Your turn"
+   is --state-yours-text, the accent leaned toward --fg until it reads. */
 
 /* ---- Toolbar ---- */
 
@@ -87,7 +75,7 @@
   font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .toolbar__actions {
@@ -173,7 +161,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   font-weight: 500;
   cursor: pointer;
   transition: background var(--dur), color var(--dur), box-shadow var(--dur);
@@ -185,12 +173,7 @@
 
 .segmented__btn[aria-checked="true"],
 .segmented__btn[aria-pressed="true"] {
-  /* Older engines without light-dark() keep the dark rendering. */
-  background: color-mix(in srgb, var(--fg) 17%, var(--chrome-bar));
-  background: light-dark(
-    var(--bg-sunken),
-    color-mix(in srgb, var(--fg) 17%, var(--chrome-bar))
-  );
+  background: var(--seg-thumb);
   color: var(--fg);
   box-shadow: 0 1px 2px var(--shadow), inset 0 0 0 1px var(--line);
 }
@@ -255,7 +238,7 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .activity__state {
@@ -271,11 +254,11 @@
 }
 
 .activity__state--yours {
-  color: var(--chrome-yours);
+  color: var(--state-yours-text);
 }
 
 .activity__state--idle {
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .activity__detail--strong {
@@ -287,7 +270,7 @@
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-numeric: tabular-nums;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .activity__badges {
@@ -330,7 +313,7 @@
 }
 
 .activity__badge--yours {
-  color: var(--chrome-yours);
+  color: var(--state-yours-text);
 }
 
 /* The context used, as a hairline along the bottom of the capsule. */
@@ -479,7 +462,7 @@
   padding-left: calc(18px * var(--ui-scale));
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .tmenu__item:not(:disabled):hover,
@@ -532,7 +515,7 @@
   margin: 0 0 calc(12px * var(--ui-scale));
   line-height: 1.45;
   white-space: normal;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .tmenu__actions {
@@ -612,7 +595,7 @@
 }
 
 .status__input::placeholder {
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 /* The key that lands here; pointless once you are here. */
@@ -620,7 +603,7 @@
   flex: none;
   font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   transition: opacity var(--dur);
 }
 
@@ -639,7 +622,7 @@
   border-radius: var(--radius);
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line-strong);
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   font-weight: 500;
   cursor: pointer;
   transition: background var(--dur), color var(--dur);
@@ -678,12 +661,12 @@
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-ligatures: none;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .status__summary {
   flex: none;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .status__summary::before {
@@ -701,7 +684,7 @@
 }
 
 .status__summary--yours {
-  color: var(--chrome-yours);
+  color: var(--state-yours-text);
 }
 
 .status__items {
@@ -724,7 +707,7 @@
   font-size: calc(10.5px * var(--ui-scale));
   font-variant-ligatures: none;
   font-variant-numeric: tabular-nums;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .status__item .icon {

@@ -2,8 +2,9 @@ import type { TranslateKey, Translator } from "../i18n";
 
 /**
  * How the board writes a task's numbers in words: its priority, its id, how
- * long it has been in progress. Pure, so the cards, the dock and the task
- * dialog all say the same thing, and so it can be tested without a DOM.
+ * long it has been in progress. Pure, so the cards, the dock, the task dialog
+ * and the inspector all say the same thing, and so it can be tested without
+ * a DOM.
  */
 
 export type PriorityLevel = 1 | 2 | 3;
@@ -42,7 +43,10 @@ export function shortTaskId(id: string): string {
   return (compact || id).slice(0, 4);
 }
 
-/** How long a card has been in `doing`, at a glance rather than to the second. */
+/**
+ * How long something has been going on — a card in `doing`, the session a
+ * cost adds up over — at a glance rather than to the second.
+ */
 export function elapsedLabel(ms: number, t: Translator): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);
   if (minutes < 1) return t("board.elapsedNow");

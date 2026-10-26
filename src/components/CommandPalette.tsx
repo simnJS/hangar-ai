@@ -98,23 +98,23 @@ const OWNS_FOCUS = new Set<CommandId>([
 ]);
 
 const ICONS: Partial<Record<CommandId, IconName>> = {
-  "pane.split": "split",
-  "pane.splitRight": "split",
-  "pane.splitDown": "split",
+  "pane.split": "splitRight",
+  "pane.splitRight": "splitRight",
+  "pane.splitDown": "splitDown",
   "pane.close": "close",
   "pane.restart": "restart",
   "pane.restartAll": "restart",
   "pane.resetAll": "reset",
   "pane.tidy": "tidy",
-  "pane.sessions": "history",
+  "pane.sessions": "clock",
   "pane.zoom": "expand",
   "workspace.new": "folderPlus",
-  "view.settings": "settings",
-  "view.shortcuts": "settings",
+  "view.settings": "gear",
+  "view.shortcuts": "keyboard",
   "view.terminals": "terminal",
   "view.board": "board",
   "view.boardDock": "boardPanel",
-  "view.memory": "memory",
+  "view.memory": "bookmark",
   "view.mcp": "plug",
   "view.broadcast": "broadcast",
   "view.navigator": "sidebarLeft",
@@ -124,12 +124,12 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
 };
 
 const SECTION_ICONS: Record<ShortcutSection, IconName> = {
-  panes: "split",
+  panes: "splitRight",
   navigation: "arrowRight",
   workspaces: "folder",
   view: "window",
   terminal: "terminal",
-  commands: "zap",
+  commands: "bolt",
   voice: "mic",
   app: "window",
 };

@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
-import { NavigatorIcon } from "./NavigatorIcons";
+import { Icon } from "./Icon";
 import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
 import { NavigatorActivityLine, NavigatorAgentRow, NavigatorPaneWatch } from "./NavigatorAgents";
 import { NavigatorPlan } from "./NavigatorPlan";
@@ -477,7 +477,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
           setMenu({ kind, id, x: box.left, y: box.bottom + 4, fromKeyboard: false });
         }}
       >
-        <NavigatorIcon name="more" size={14} />
+        <Icon name="more" size={14} />
       </span>
     );
   }
@@ -549,10 +549,10 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
               toggleWorkspace(entry);
             }}
           >
-            <NavigatorIcon name="chevron" size={12} />
+            <Icon name="chevronRight" size={12} />
           </span>
           <span className="nav-ws__icon">
-            <NavigatorIcon name="workspace" size={14} />
+            <Icon name="workspace" size={14} />
           </span>
           {renaming === ws.id ? (
             renameField(t("sidebar.renameHint"), false)
@@ -570,7 +570,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
                     title={t("window.inOwnWindow")}
                     aria-label={t("window.inOwnWindow")}
                   >
-                    <NavigatorIcon name="window" size={12} />
+                    <Icon name="window" size={12} />
                   </span>
                 )}
               </span>
@@ -654,10 +654,10 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
             className={`nav-disc ${entry.expanded ? "nav-disc--open" : ""}`}
             aria-hidden="true"
           >
-            <NavigatorIcon name="chevron" size={12} />
+            <Icon name="chevronRight" size={12} />
           </span>
           <span className="nav-folder__icon">
-            <NavigatorIcon name="folder" size={14} />
+            <Icon name="folder" size={14} />
           </span>
           {renaming === folder.id ? (
             renameField(t("sidebar.renameHint"), true)
@@ -801,7 +801,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
           aria-label={t("sidebar.hide")}
           onClick={() => updateSettings({ navigatorOpen: false })}
         >
-          <NavigatorIcon name="sidebar" />
+          <Icon name="sidebarLeft" size={16} />
         </button>
       </div>
 
@@ -813,7 +813,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
           aria-label={t("sidebar.newFolder")}
           onClick={createFolder}
         >
-          <NavigatorIcon name="folderPlus" size={14} />
+          <Icon name="folderPlus" size={14} />
         </button>
       </div>
 
@@ -877,7 +877,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
           aria-label={t("cmd.workspace.new")}
           onClick={onNewWorkspace}
         >
-          <NavigatorIcon name="plus" />
+          <Icon name="plus" size={16} />
         </button>
         <div
           className={`nav-field ${filterActive ? "nav-field--active" : ""}`}
@@ -889,7 +889,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
             }
           }}
         >
-          <NavigatorIcon name="search" size={14} />
+          <Icon name="search" size={14} />
           <input
             ref={filterRef}
             className="nav-field__input"
@@ -921,7 +921,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
             aria-label={t("sidebar.attention")}
             onClick={() => setAttentionOnly((on) => !on)}
           >
-            <NavigatorIcon name="attention" size={14} />
+            <Icon name="alert" size={14} />
           </button>
         </div>
         <button
@@ -930,7 +930,7 @@ export function Sidebar({ onOpenSettings, onNewWorkspace, focusByWorkspace, onFo
           aria-label={t("sidebar.settings")}
           onClick={onOpenSettings}
         >
-          <NavigatorIcon name="gear" />
+          <Icon name="gear" size={16} />
         </button>
       </div>
 

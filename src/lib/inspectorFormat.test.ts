@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCost,
-  formatElapsed,
   formatPercent,
   formatSince,
   planUsage,
   prettyModel,
-  priorityBars,
-  shortTaskId,
   spacedUnit,
   usageTone,
 } from "./inspectorFormat";
@@ -45,20 +42,6 @@ describe("prettyModel", () => {
   });
 });
 
-describe("board task", () => {
-  it("maps the 0–9 priority onto three bars", () => {
-    expect(priorityBars(0)).toBe(1);
-    expect(priorityBars(1)).toBe(2);
-    expect(priorityBars(2)).toBe(3);
-    expect(priorityBars(9)).toBe(3);
-  });
-
-  it("shortens a UUID but not an id that is already short", () => {
-    expect(shortTaskId("e6f34373-d46e-483d-ad2f-d399520ee40c")).toBe("e6f343");
-    expect(shortTaskId("14")).toBe("14");
-  });
-});
-
 describe("numbers", () => {
   it("writes a cost the way the locale does", () => {
     expect(formatCost(1.84, "fr")).toMatch(/^1,84\s\$$/);
@@ -91,13 +74,6 @@ describe("numbers", () => {
 });
 
 describe("time", () => {
-  it("words a duration", () => {
-    expect(formatElapsed(30_000, t)).toBe("inspector.elapsedNow");
-    expect(formatElapsed(25 * 60_000, t)).toBe("inspector.elapsedMinutes(25)");
-    expect(formatElapsed(72 * 60_000, t)).toBe("inspector.elapsedHours(1,12)");
-    expect(formatElapsed(26 * 3_600_000, t)).toBe("inspector.elapsedDays(1,2)");
-  });
-
   it("words a start time relative to now", () => {
     const now = new Date(2026, 9, 26, 15, 0).getTime();
     expect(formatSince(now - 20_000, now, t, "en")).toBe("inspector.justNow");

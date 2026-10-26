@@ -2,8 +2,7 @@
 
 /* components/CommandPalette.tsx. A floating panel over a light scrim: the
    window stays readable behind it, so it is clear nothing has moved yet.
-   Secondary text uses --chrome-muted, defined with the toolbar's in
-   styles/chrome.css. */
+   Secondary text is --fg-secondary, as in the toolbar. */
 
 .palette {
   position: fixed;
@@ -78,7 +77,7 @@
 }
 
 .palette__input::placeholder {
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .palette__esc {
@@ -90,7 +89,7 @@
   box-shadow: inset 0 0 0 1px var(--line-strong);
   font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   cursor: pointer;
 }
 
@@ -116,7 +115,7 @@
   padding: calc(9px * var(--ui-scale)) calc(10px * var(--ui-scale)) calc(4px * var(--ui-scale));
   font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .palette__option {
@@ -166,7 +165,7 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .palette__state--working {
@@ -178,7 +177,7 @@
 }
 
 .palette__state--yours {
-  color: var(--chrome-yours);
+  color: var(--state-yours-text);
 }
 
 .palette__keys {
@@ -188,7 +187,7 @@
   font-family: var(--mono);
   font-size: calc(11px * var(--ui-scale));
   font-variant-numeric: tabular-nums;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 /* The selected row: one solid accent bar, everything on it in the accent's
@@ -227,7 +226,7 @@
   margin: 0;
   padding: calc(26px * var(--ui-scale)) calc(16px * var(--ui-scale));
   text-align: center;
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
 }
 
 .palette__foot {
@@ -239,7 +238,7 @@
   padding: 0 calc(16px * var(--ui-scale));
   border-top: 1px solid var(--line-strong);
   font-size: calc(11px * var(--ui-scale));
-  color: var(--chrome-muted);
+  color: var(--fg-secondary);
   white-space: nowrap;
 }
 

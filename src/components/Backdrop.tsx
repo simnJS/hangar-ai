@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useT } from "../i18n";
-import { Glyph } from "./settings/icons";
+import { Icon } from "./Icon";
 
 /** What Tab can land on. Disabled controls and `tabindex="-1"` are left out. */
 const FOCUSABLE = [
@@ -170,7 +170,7 @@ export function ModalHead({
         aria-label={t("modal.close")}
         title={t("keymap.withKeys", { label: t("modal.close"), keys: "Esc" })}
       >
-        <Glyph name="close" />
+        <Icon name="close" />
       </button>
     </header>
   );

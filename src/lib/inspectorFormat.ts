@@ -44,21 +44,6 @@ export function prettyModel(model: string | null): string | null {
 }
 
 /**
- * Three bars for a priority that runs 0–9: 0 is low, 1 the board's default,
- * anything above it high — the board itself only flags priorities above 1.
- */
-export function priorityBars(priority: number): 1 | 2 | 3 {
-  if (priority <= 0) return 1;
-  if (priority === 1) return 2;
-  return 3;
-}
-
-/** Board ids are UUIDs; six characters tell them apart on one board. */
-export function shortTaskId(id: string): string {
-  return id.length > 8 ? id.slice(0, 6) : id;
-}
-
-/**
  * "14:32", on a 24-hour clock whatever the locale: the activity column is
  * five characters wide, and "04:59 PM" would wrap in it.
  */
@@ -97,18 +82,6 @@ export function formatPercent(pct: number, locale: string): string {
  */
 export function spacedUnit(formatted: string, locale: string): string {
   return locale === "fr" ? formatted.replace(/(\d)([kM])$/, "$1\u202f$2") : formatted;
-}
-
-/** "1 h 12", "25 min": how long something has been going on. */
-export function formatElapsed(ms: number, t: Translator): string {
-  const minutes = Math.floor(Math.max(0, ms) / 60_000);
-  if (minutes < 1) return t("inspector.elapsedNow");
-  if (minutes < 60) return t("inspector.elapsedMinutes", { m: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return t("inspector.elapsedHours", { h: hours, m: String(minutes % 60).padStart(2, "0") });
-  }
-  return t("inspector.elapsedDays", { d: Math.floor(hours / 24), h: hours % 24 });
 }
 
 const startOfDay = (at: number) => {

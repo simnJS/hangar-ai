@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Backdrop, ModalHead } from "./Backdrop";
-import { Glyph } from "./settings/icons";
+import { Icon } from "./Icon";
 import { listSessions } from "../lib/ipc";
 import { arrowStep, stepIndex } from "../lib/menuNav";
 import { useT, type Translator } from "../i18n";
@@ -77,7 +77,7 @@ export function SessionPicker({ agent, cwd, currentId, onPick, onClose }: Props)
         onClick={() => onPick(id)}
       >
         <span className="session__check" aria-hidden="true">
-          {current && <Glyph name="check" />}
+          {current && <Icon name="check" size={13} />}
         </span>
         <span className="session__label">{label}</span>
         <span className={`session__meta ${sentence ? "session__meta--text" : ""}`}>{meta}</span>

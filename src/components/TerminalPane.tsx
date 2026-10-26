@@ -48,7 +48,7 @@ import { usePaneDrag } from "./PaneGrid";
 import { CommandMenu } from "./CommandMenu";
 import { TerminalSearch } from "./TerminalSearch";
 import { StateGlyph } from "./StateGlyph";
-import { PaneIcon } from "./PaneIcon";
+import { Icon } from "./Icon";
 import { PaneGauge } from "./PaneGauge";
 import { PaneMenu, type PaneMenuItem } from "./PaneMenu";
 import {
@@ -1100,7 +1100,7 @@ export function TerminalPane({
     menuItems.push({
       id: "restart",
       label: t("pane.restart"),
-      icon: "resume",
+      icon: "restart",
       keys: shortcut("pane.restart"),
       onSelect: pick(onRestart),
     });
@@ -1134,7 +1134,7 @@ export function TerminalPane({
       menuItems.push({
         id: "zoom",
         label: t(zoomed ? "zoom.restore" : "pane.menuZoom"),
-        icon: zoomed ? "unzoom" : "zoom",
+        icon: zoomed ? "collapse" : "expand",
         keys: shortcut("pane.zoom"),
         separated: true,
         onSelect: pick(onToggleZoom),
@@ -1224,7 +1224,7 @@ export function TerminalPane({
           <span className="pane__pick-text pane__pick-text--short" aria-hidden="true">
             {agentLabel.split(" ")[0]}
           </span>
-          <PaneIcon name="updown" size={10} />
+          <Icon name="updown" size={10} />
           <select
             className="pane__select"
             value={pane.agent}
@@ -1281,7 +1281,7 @@ export function TerminalPane({
                   : t("pane.noSession")
               }
             >
-              <PaneIcon name="resume" size={10} />
+              <Icon name="restart" size={10} />
               <span className="pane__session-id">
                 {pane.sessionId ? `${shortSessionId(pane.sessionId)}…` : t("pane.newSession")}
               </span>
@@ -1313,7 +1313,7 @@ export function TerminalPane({
             title={t("pane.queue", { n: queue.length })}
             aria-label={t("pane.queue", { n: queue.length })}
           >
-            <PaneIcon name="tray" size={11} />
+            <Icon name="tray" size={11} />
             {queue.length}
           </button>
         )}
@@ -1324,7 +1324,7 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.conflict", { name: conflictFrom })}
           >
-            <PaneIcon name="warn" size={13} />
+            <Icon name="alert" size={13} />
           </span>
         )}
         {agentMissing && (
@@ -1334,7 +1334,7 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.notOnPath", { agent: pane.agent })}
           >
-            <PaneIcon name="warn" size={13} />
+            <Icon name="alert" size={13} />
           </span>
         )}
         {/* An agent pane says the same through its state; a shell keeps the
@@ -1346,7 +1346,7 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.attention")}
           >
-            <PaneIcon name="bell" size={13} />
+            <Icon name="bell" size={13} />
           </span>
         )}
         {/* A shell that died says how to bring it back, in so many words. */}
@@ -1356,7 +1356,7 @@ export function TerminalPane({
             onClick={onRestart}
             title={withKeys(t("pane.restart"), "pane.restart")}
           >
-            <PaneIcon name="resume" size={11} />
+            <Icon name="restart" size={11} />
             {t("pane.restartNow")}
           </button>
         )}
@@ -1379,7 +1379,7 @@ export function TerminalPane({
             aria-haspopup="menu"
             aria-expanded={commandsOpen === "button"}
           >
-            <PaneIcon name="bolt" />
+            <Icon name="bolt" />
           </button>
           {onShowDiff && (
             <button
@@ -1389,7 +1389,7 @@ export function TerminalPane({
               title={t("diff.open")}
               aria-label={t("diff.open")}
             >
-              <PaneIcon name="diff" />
+              <Icon name="diff" />
             </button>
           )}
           {onToggleZoom && (
@@ -1401,7 +1401,7 @@ export function TerminalPane({
               aria-label={t(zoomed ? "zoom.restore" : "pane.zoomIn")}
               aria-pressed={zoomed}
             >
-              <PaneIcon name={zoomed ? "unzoom" : "zoom"} />
+              <Icon name={zoomed ? "collapse" : "expand"} />
             </button>
           )}
           <button
@@ -1414,7 +1414,7 @@ export function TerminalPane({
             aria-expanded={Boolean(more)}
             aria-controls={more ? menuId : undefined}
           >
-            <PaneIcon name="more" />
+            <Icon name="more" />
           </button>
           <button
             className="pane__action pane__action--close"
@@ -1423,7 +1423,7 @@ export function TerminalPane({
             title={canClose ? withKeys(t("pane.close"), "pane.close") : t("pane.closeLast")}
             aria-label={t("pane.close")}
           >
-            <PaneIcon name="close" />
+            <Icon name="close" />
           </button>
         </span>
       </header>

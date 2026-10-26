@@ -17,7 +17,6 @@ import { useLocale, useT } from "../i18n";
 import { useStore } from "../store";
 import { AGENTS } from "../types";
 import { Icon } from "./Icon";
-import { BoardIcon } from "./BoardIcons";
 import { BoardFilter, type FilterOption } from "./BoardFilter";
 import { BoardAssignee, type AssigneePane } from "./BoardAssignee";
 import { BoardPriority } from "./BoardPriority";
@@ -281,7 +280,7 @@ export function BoardView({
 
         {blockers.length > 0 && (
           <p className="card__blocked" title={blockerNames.join("\n")}>
-            <BoardIcon name="lock" size={11} />
+            <Icon name="lock" size={11} />
             <span>{t("board.blockedBy", { tasks: blockerNames.join(", ") })}</span>
           </p>
         )}
@@ -303,19 +302,19 @@ export function BoardView({
                 className="card__stat"
                 title={t("board.doingSince", { date: new Date(since).toLocaleString(locale) })}
               >
-                <BoardIcon name="clock" size={11} />
+                <Icon name="clock" size={11} />
                 {elapsedLabel(now - since, t)}
               </span>
             ) : null}
             {dependsDone && (
               <span className="card__stat" title={t("board.dependsOn")}>
-                <BoardIcon name="link" size={11} />
+                <Icon name="link" size={11} />
                 {task.depends_on.length}
               </span>
             )}
             {task.comments.length > 0 && (
               <span className="card__stat" title={t("board.comments", { n: task.comments.length })}>
-                <BoardIcon name="bubble" size={11} />
+                <Icon name="bubble" size={11} />
                 {task.comments.length}
               </span>
             )}
@@ -366,7 +365,7 @@ export function BoardView({
               }
             >
               <span className="column__caret" aria-hidden>
-                <BoardIcon name="chevron" size={10} />
+                <Icon name="chevronRight" size={10} />
               </span>
               <span className="column__mark" aria-hidden />
               <span className="column__name">{name}</span>
@@ -475,7 +474,7 @@ export function BoardView({
               aria-label={t("board.filters")}
               onClick={() => setShowFilters((on) => !on)}
             >
-              <BoardIcon name="filter" size={13} />
+              <Icon name="filter" size={13} />
             </button>
             <button
               type="button"
@@ -484,7 +483,7 @@ export function BoardView({
               title={t("board.dockExpand")}
               aria-label={t("board.dockExpand")}
             >
-              <BoardIcon name="expand" size={12} />
+              <Icon name="expand" size={12} />
             </button>
             <button
               type="button"
@@ -512,7 +511,7 @@ export function BoardView({
             </div>
           )}
           <button type="button" className="board__mcp" onClick={onOpenMcp} title={t("board.mcp")}>
-            <BoardIcon name="plug" size={12} />
+            <Icon name="plug" size={12} />
             <span className="board__mcp-text">{t("board.hint")}</span>
           </button>
           <button type="button" className="btn board__add" onClick={() => startAdding("todo")}>
@@ -527,7 +526,7 @@ export function BoardView({
       ) : empty ? (
         <div className="board__empty">
           <span className="board__empty-icon" aria-hidden>
-            <BoardIcon name="board" size={dock ? 18 : 22} />
+            <Icon name="board" size={dock ? 18 : 22} />
           </span>
           <h3>{t("board.emptyTitle")}</h3>
           <p>{t("board.emptyBody")}</p>
@@ -537,7 +536,7 @@ export function BoardView({
               {t("board.emptyAdd")}
             </button>
             <button type="button" className="btn" onClick={onOpenMcp}>
-              <BoardIcon name="plug" size={12} />
+              <Icon name="plug" size={12} />
               {t("board.emptyMcp")}
             </button>
           </div>

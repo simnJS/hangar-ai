@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useT } from "../i18n";
-import { Glyph } from "./settings/icons";
+import { Icon } from "./Icon";
 
 type Stage = "idle" | "available" | "downloading" | "ready" | "failed";
 
@@ -65,7 +65,7 @@ export function UpdateBanner() {
   // panes when it appears, and it stays out of the way of the status bar.
   return (
     <div className={`update update--${stage}`} role="status">
-      <Glyph
+      <Icon
         name={stage === "failed" ? "alert" : stage === "ready" ? "check" : "download"}
         className="update__icon"
       />
