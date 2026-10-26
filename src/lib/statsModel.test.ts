@@ -229,8 +229,11 @@ describe("formats", () => {
 
   it("writes dollars with cents only where they matter", () => {
     expect(formatUsd(0.84, "en")).toBe("$0.84");
+    expect(formatUsd(59.44, "en")).toBe("$59");
     expect(formatUsd(1284.4, "en")).toBe("$1,284");
     expect(formatUsd(312_000, "en")).toBe("$312K");
+    expect(formatUsd(59.44, "en", true)).toBe("$59.44");
+    expect(formatUsd(312_000, "en", true)).toBe("$312,000.00");
   });
 
   it("writes durations in minutes, hours and minutes, or hours", () => {

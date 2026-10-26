@@ -518,19 +518,20 @@ export const formatInteger = (value: number, locale: string) =>
   format(locale, { maximumFractionDigits: 0 }).format(value);
 
 /**
- * Dollars: cents under a hundred, whole dollars up to a hundred thousand,
- * then compact — "0,84 $", "1 284 $", "312 k$".
+ * Dollars at a glance: cents under ten, whole dollars up to a hundred
+ * thousand, then compact — "0,84 $", "59 $", "1 284 $", "312 k$". `exact`
+ * keeps the cents, for a table or a readout where the figure is the point.
  */
-export function formatUsd(value: number, locale: string): string {
+export function formatUsd(value: number, locale: string, exact = false): string {
   const base: Intl.NumberFormatOptions = {
     style: "currency",
     currency: "USD",
     currencyDisplay: "narrowSymbol",
   };
-  if (value >= 100_000) {
+  if (!exact && value >= 100_000) {
     return format(locale, { ...base, notation: "compact", maximumSignificantDigits: 3 }).format(value);
   }
-  const cents = value < 100;
+  const cents = exact || value < 10;
   return format(locale, {
     ...base,
     minimumFractionDigits: cents ? 2 : 0,

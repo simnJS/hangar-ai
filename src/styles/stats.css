@@ -38,15 +38,19 @@
 
 /* ---- The bar ---- */
 
+/* Its controls take a second row when the page is narrow, rather than
+   being cut off at the edge. */
 .stats__bar {
   container: statsbar / inline-size;
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: calc(10px * var(--ui-scale));
+  gap: calc(8px * var(--ui-scale)) calc(10px * var(--ui-scale));
   min-width: 0;
   min-height: calc(44px * var(--ui-scale));
-  padding: 0 calc(12px * var(--ui-scale)) 0 calc(16px * var(--ui-scale));
+  padding: calc(8px * var(--ui-scale)) calc(12px * var(--ui-scale)) calc(8px * var(--ui-scale))
+    calc(16px * var(--ui-scale));
   background: var(--pane-head);
   box-shadow: inset 0 -1px 0 var(--sep);
   white-space: nowrap;
@@ -547,7 +551,8 @@
 
 .viz-columns {
   position: relative;
-  min-height: calc(214px * var(--ui-scale));
+  /* The plot is drawn in pixels, whatever the interface size. */
+  min-height: 214px;
   border-radius: var(--radius);
   outline: none;
 }

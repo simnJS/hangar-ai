@@ -51,7 +51,7 @@ export const kindColor = (kind: Kind) => `var(--viz-${KINDS.indexOf(kind) + 1})`
 
 /** A value of the measure, in full: a table cell, a readout. */
 export function formatMeasure(value: number, measure: Measure, locale: string): string {
-  return measure === "cost" ? formatUsd(value, locale) : formatInteger(value, locale);
+  return measure === "cost" ? formatUsd(value, locale, true) : formatInteger(value, locale);
 }
 
 /** The width of an element, kept current. */
