@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NavigatorIcon, type NavigatorIconName } from "./NavigatorIcons";
+import { Icon, type IconName } from "./Icon";
 
 /** Kept between the menu and the window edges. */
 const MARGIN = 8;
@@ -8,7 +8,7 @@ export type NavigatorMenuEntry =
   | {
       kind: "item";
       label: string;
-      icon?: NavigatorIconName;
+      icon?: IconName;
       onSelect: () => void;
       /** Destroys something: drawn in the danger colour. */
       danger?: boolean;
@@ -178,12 +178,12 @@ export function NavigatorMenu({
             }}
           >
             <span className="ctx-menu__icon">
-              {entry.icon && <NavigatorIcon name={entry.icon} size={14} />}
+              {entry.icon && <Icon name={entry.icon} size={14} />}
             </span>
             <span className="ctx-menu__label">{entry.label}</span>
             {entry.checked && (
               <span className="ctx-menu__check">
-                <NavigatorIcon name="check" size={13} />
+                <Icon name="check" size={13} />
               </span>
             )}
           </button>

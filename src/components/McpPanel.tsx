@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Backdrop, ModalHead } from "./Backdrop";
-import { Glyph } from "./settings/icons";
+import { Icon } from "./Icon";
 import { useT } from "../i18n";
 import {
   agentInstructionsStatus,
@@ -166,7 +166,7 @@ export function McpPanel({ cwd, onClose }: Props) {
             <div className="reports" role="status">
               {reports.map((report) => (
                 <p key={report.id} className={report.ok ? "report--ok" : "report--fail"}>
-                  <Glyph name={report.ok ? "check" : "alert"} className="report__icon" />
+                  <Icon name={report.ok ? "check" : "alert"} className="report__icon" />
                   <span className="report__id">{report.id}</span>
                   <span className="report__message">{report.message}</span>
                 </p>

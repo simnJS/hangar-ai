@@ -12,7 +12,7 @@ import { arrowStep, stepIndex } from "../../lib/menuNav";
 import { shortcutsSuspended } from "../../lib/useShortcuts";
 import { DEFAULT_SETTINGS, type Settings, type ShellInfo } from "../../types";
 import { Backdrop } from "../Backdrop";
-import { Glyph } from "./icons";
+import { Icon } from "../Icon";
 import {
   buildCategories,
   type SettingCategory,
@@ -333,7 +333,7 @@ export function SettingsPage({
       >
         <aside className="settings__side">
           <div className="settings__search">
-            <Glyph name="search" className="settings__search-icon" />
+            <Icon name="search" className="settings__search-icon" />
             <input
               autoFocus
               value={query}
@@ -350,7 +350,7 @@ export function SettingsPage({
                 aria-label={t("settings.searchClear")}
                 onClick={() => setQuery("")}
               >
-                <Glyph name="close" />
+                <Icon name="close" size={10} />
               </button>
             )}
           </div>
@@ -372,7 +372,7 @@ export function SettingsPage({
                   aria-current={current ? "page" : undefined}
                   onClick={() => setCategoryId(category.id)}
                 >
-                  <Glyph name={category.icon} className="settings__cat-icon" />
+                  <Icon name={category.icon} size={15} className="settings__cat-icon" />
                   <span className="settings__cat-label">{category.label}</span>
                   {needle && (
                     <span className="settings__cat-count">{countItems(category)}</span>
@@ -393,7 +393,7 @@ export function SettingsPage({
               aria-label={t("settings.close")}
               title={t("keymap.withKeys", { label: t("settings.close"), keys: "Esc" })}
             >
-              <Glyph name="close" />
+              <Icon name="close" />
             </button>
           </header>
 

@@ -14,7 +14,7 @@ export const LAYOUTS: LayoutSize[] = [1, 2, 4, 8];
 const VIEWS: { id: View; icon: IconName }[] = [
   { id: "terminals", icon: "terminal" },
   { id: "board", icon: "board" },
-  { id: "memory", icon: "memory" },
+  { id: "memory", icon: "bookmark" },
 ];
 
 const LAYOUT_ICONS: Record<LayoutSize, IconName> = {

@@ -31,7 +31,7 @@ import {
   type ShortcutSection,
 } from "../../lib/shortcuts";
 import { suspendShortcuts } from "../../lib/useShortcuts";
-import { Glyph } from "./icons";
+import { Icon } from "../Icon";
 
 /**
  * The keyboard shortcut editor.
@@ -202,7 +202,7 @@ function Recorder({
         disabled={!chords.length}
         onClick={() => onDone(chords)}
       >
-        <Glyph name="check" />
+        <Icon name="check" size={13} />
       </button>
       <button
         type="button"
@@ -211,7 +211,7 @@ function Recorder({
         aria-label={t("keymap.cancel")}
         onClick={onCancel}
       >
-        <Glyph name="close" />
+        <Icon name="close" size={13} />
       </button>
     </span>
   );
@@ -278,7 +278,7 @@ function CommandRow({
                 onChange(withoutBinding(overrides, keymap, command.id, binding))
               }
             >
-              <Glyph name="close" />
+              <Icon name="close" size={10} />
             </button>
           </span>
         ))}
@@ -304,7 +304,7 @@ function CommandRow({
               aria-label={t("keymap.add")}
               onClick={() => onRecord(command.id)}
             >
-              <Glyph name="plus" />
+              <Icon name="plus" size={13} />
             </button>
             <button
               type="button"
@@ -314,7 +314,7 @@ function CommandRow({
               disabled={!custom}
               onClick={() => onChange(resetCommand(overrides, command.id))}
             >
-              <Glyph name="reset" />
+              <Icon name="reset" size={13} />
             </button>
           </>
         )}
@@ -383,7 +383,7 @@ export function ShortcutsSettings() {
     <div className="keymap">
       <div className="keymap__bar">
         <div className="keymap__search">
-          <Glyph name="search" className="keymap__search-icon" />
+          <Icon name="search" className="keymap__search-icon" />
           <input
             value={query}
             placeholder={t("keymap.search")}
@@ -401,7 +401,7 @@ export function ShortcutsSettings() {
               aria-label={t("keymap.clear")}
               onClick={() => setQuery("")}
             >
-              <Glyph name="close" />
+              <Icon name="close" size={10} />
             </button>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop, ModalHead } from "./Backdrop";
-import { Glyph } from "./settings/icons";
+import { Icon } from "./Icon";
 import { useT } from "../i18n";
 import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
 import { allPaneNames, pickPaneNames } from "../lib/paneNames";
@@ -239,7 +239,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                     title={t("modal.close")}
                     onClick={() => setSuggestion(null)}
                   >
-                    <Glyph name="close" />
+                    <Icon name="close" size={12} />
                   </button>
                 </div>
               )}
@@ -371,7 +371,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                           onClick={() => removeAgent(agent.id)}
                           disabled={counts[agent.id] === 0}
                         >
-                          <Glyph name="minus" />
+                          <Icon name="minus" size={12} />
                         </button>
                         <span className="stepper__value">{counts[agent.id]}</span>
                         <button
@@ -382,7 +382,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                           onClick={() => addAgent(agent.id)}
                           disabled={freeSlots === 0}
                         >
-                          <Glyph name="plus" />
+                          <Icon name="plus" size={12} />
                         </button>
                       </span>
                     </div>

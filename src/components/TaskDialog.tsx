@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Backdrop } from "./Backdrop";
 import { Icon } from "./Icon";
-import { BoardIcon } from "./BoardIcons";
 import { BoardPriority } from "./BoardPriority";
 import { BoardAssignee, type AssigneePane } from "./BoardAssignee";
 import {
@@ -233,9 +232,9 @@ export function TaskDialog({
                     <li key={dep.id} className={done ? "task__dep task__dep--done" : "task__dep"}>
                       <span className="task__dep-mark" aria-hidden>
                         {done ? (
-                          <BoardIcon name="check" size={11} />
+                          <Icon name="check" size={11} />
                         ) : (
-                          <BoardIcon name="lock" size={11} />
+                          <Icon name="lock" size={11} />
                         )}
                       </span>
                       <span className="task__dep-id">#{shortTaskId(dep.id)}</span>

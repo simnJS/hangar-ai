@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
+import { Icon } from "./Icon";
 import { formatBinding } from "../lib/keys";
 import { useT } from "../i18n";
 import { mix, type TerminalTheme } from "../themes";
@@ -64,31 +65,6 @@ function decorationsFor(theme: TerminalTheme): Decorations {
     activeMatchColorOverviewRuler: theme.accent,
   };
 }
-
-const Chevron = ({ up }: { up: boolean }) => (
-  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-    <path
-      d={up ? "M3 7.5 6 4.5l3 3" : "M3 4.5 6 7.5l3-3"}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-const Cross = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-    <path
-      d="M3.5 3.5l5 5m0-5-5 5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-    />
-  </svg>
-);
 
 export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
   const t = useT();
@@ -237,7 +213,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         title={t("search.up", { keys: formatBinding("Enter") })}
         aria-label={t("search.up", { keys: formatBinding("Enter") })}
       >
-        <Chevron up />
+        <Icon name="chevronUp" size={12} />
       </button>
       <button
         className="term-search__btn"
@@ -250,7 +226,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         title={t("search.down", { keys: formatBinding("Shift+Enter") })}
         aria-label={t("search.down", { keys: formatBinding("Shift+Enter") })}
       >
-        <Chevron up={false} />
+        <Icon name="chevronDown" size={12} />
       </button>
       <button
         className="term-search__btn"
@@ -258,7 +234,7 @@ export function TerminalSearch({ term, theme, request, seed, onClose }: Props) {
         title={t("search.close", { keys: formatBinding("Escape") })}
         aria-label={t("search.close", { keys: formatBinding("Escape") })}
       >
-        <Cross />
+        <Icon name="close" size={12} />
       </button>
     </div>
   );

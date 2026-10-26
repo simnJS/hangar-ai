@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { BoardIcon } from "./BoardIcons";
+import { Icon } from "./Icon";
 
 export interface FilterOption {
   value: string;
@@ -146,7 +146,7 @@ export function BoardFilter({ name, title, value, options, active, onChange }: P
       >
         <span className="board-filter__name">{name}</span>
         <span className="board-filter__value">{current?.short ?? current?.label}</span>
-        <BoardIcon name="updown" size={10} />
+        <Icon name="updown" size={10} />
       </button>
 
       {open && (
@@ -174,7 +174,7 @@ export function BoardFilter({ name, title, value, options, active, onChange }: P
                 onClick={() => pick(index)}
               >
                 <span className="board-filter__check" aria-hidden>
-                  {selected && <BoardIcon name="check" size={11} />}
+                  {selected && <Icon name="check" size={11} />}
                 </span>
                 <span className="board-filter__label">{option.label}</span>
                 {option.hint && <span className="board-filter__hint">{option.hint}</span>}

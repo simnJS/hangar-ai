@@ -204,12 +204,6 @@ body.is-dragging-pane .inspector__grip {
   height: calc(11px * var(--ui-scale));
 }
 
-.inspector-glyph {
-  flex: none;
-  width: auto;
-  height: calc(1em * 0.9);
-}
-
 /* A path that loses its beginning first: right-to-left box, left-to-right
    text (the marks around it keep the separators in place). */
 .insp-tail {
@@ -402,14 +396,12 @@ body.is-dragging-pane .inspector__grip {
   color: var(--fg);
 }
 
-.insp-section__toggle .inspector-glyph {
-  width: calc(10px * var(--ui-scale));
-  height: calc(10px * var(--ui-scale));
+.insp-section__toggle .icon {
   color: var(--fg-subtle);
   transition: transform var(--dur) var(--ease);
 }
 
-.insp-section--folded .insp-section__toggle .inspector-glyph {
+.insp-section--folded .insp-section__toggle .icon {
   transform: rotate(-90deg);
 }
 
@@ -1062,7 +1054,7 @@ body.is-dragging-pane .inspector__grip {
   }
 
   .inspector__grip::before,
-  .insp-section__toggle .inspector-glyph,
+  .insp-section__toggle .icon,
   .insp-ring__value {
     transition: none;
   }

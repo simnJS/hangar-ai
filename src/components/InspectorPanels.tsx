@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { Icon } from "./Icon";
-import { InspectorGlyph, InspectorSection } from "./InspectorSection";
+import { InspectorSection } from "./InspectorSection";
 import { StateGlyph } from "./StateGlyph";
 import { useLocale, useT } from "../i18n";
 import { formatTokens, type ContextGauge } from "../lib/context";
@@ -356,7 +356,7 @@ export const TaskSection = memo(function TaskSection({
       onClick={onOpenBoard}
     >
       {t("inspector.taskOpen")}
-      <InspectorGlyph name="external" size={10} />
+      <Icon name="arrowUpRight" size={10} />
     </button>
   );
 
@@ -408,7 +408,7 @@ export const TaskSection = memo(function TaskSection({
                 className="insp-task__comments"
                 title={t("inspector.taskComments", { n: task.comments.length })}
               >
-                <InspectorGlyph name="comment" size={11} />
+                <Icon name="bubble" size={11} />
                 {task.comments.length}
               </span>
             )}

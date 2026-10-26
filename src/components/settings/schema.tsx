@@ -5,7 +5,7 @@ import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
 import { mix, THEMES, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
-import type { GlyphName } from "./icons";
+import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import { VoiceCard, VoiceKeyCard } from "./VoiceCard";
 import { voiceUnload } from "../../lib/ipc";
@@ -104,7 +104,7 @@ export interface SettingSection {
 export interface SettingCategory {
   id: string;
   label: string;
-  icon: GlyphName;
+  icon: IconName;
   sections: SettingSection[];
 }
 
@@ -296,7 +296,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "general",
       label: t("settings.catGeneral"),
-      icon: "general",
+      icon: "sliders",
       sections: [
         {
           id: "language",
@@ -595,7 +595,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shell",
       label: t("settings.catShell"),
-      icon: "shell",
+      icon: "prompt",
       sections: [
         {
           id: "shell",
@@ -643,7 +643,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "notifications",
       label: t("settings.catNotifications"),
-      icon: "notifications",
+      icon: "bell",
       sections: [
         {
           id: "notifications",
@@ -684,7 +684,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "voice",
       label: t("settings.catVoice"),
-      icon: "voice",
+      icon: "mic",
       sections: [
         {
           id: "voice",
@@ -849,7 +849,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "discord",
       label: t("settings.catDiscord"),
-      icon: "discord",
+      icon: "gamepad",
       sections: [
         {
           id: "discordPreview",
@@ -934,7 +934,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "shortcuts",
       label: t("settings.catShortcuts"),
-      icon: "shortcuts",
+      icon: "keyboard",
       sections: [
         {
           id: "keymap",
@@ -962,7 +962,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
     {
       id: "about",
       label: t("settings.catAbout"),
-      icon: "about",
+      icon: "info",
       sections: [
         {
           id: "about",

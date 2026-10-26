@@ -1,45 +1,5 @@
 import { useId, type ReactNode } from "react";
-
-/**
- * The few glyphs the inspector needs that the app's icon set has no use for
- * elsewhere, drawn the same way (24-unit grid, one stroke, currentColor) so
- * they sit beside components/Icon without a seam. Decoration only: the
- * control around each one carries the label.
- */
-export function InspectorGlyph({
-  name,
-  size = 12,
-}: {
-  name: "chevron" | "external" | "comment";
-  size?: number;
-}) {
-  return (
-    <svg
-      className="inspector-glyph"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {name === "chevron" ? (
-        <path d="m6 9 6 6 6-6" />
-      ) : name === "external" ? (
-        <>
-          <path d="M7 17 17 7" />
-          <path d="M8 7h9v9" />
-        </>
-      ) : (
-        <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
-      )}
-    </svg>
-  );
-}
+import { Icon } from "./Icon";
 
 /**
  * One foldable block of the inspector. The title row is a real button that
@@ -77,7 +37,7 @@ export function InspectorSection({
           aria-controls={collapsed ? undefined : bodyId}
           onClick={() => onToggle(id)}
         >
-          <InspectorGlyph name="chevron" size={10} />
+          <Icon name="chevronDown" size={10} />
           <span className="insp-section__title">{title}</span>
           {meta != null && meta !== false && <span className="insp-section__meta">{meta}</span>}
         </button>

@@ -120,13 +120,6 @@ select {
   fill: var(--accent);
 }
 
-.nav-icon {
-  display: block;
-  flex: none;
-  width: calc(var(--nav-icon) * var(--ui-scale));
-  height: calc(var(--nav-icon) * var(--ui-scale));
-}
-
 /* Level with the toolbar beside it, so the window reads as one band. */
 .nav-top {
   flex: none;
@@ -661,7 +654,7 @@ select {
   box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
-.nav-field--active > .nav-icon--search {
+.nav-field--active > .icon {
   color: var(--accent-hi);
 }
 
@@ -1006,6 +999,21 @@ body.is-sorting * {
 .icon-btn:hover {
   color: var(--fg);
   background: var(--surface-hover);
+}
+
+/* ---------- Icons ---------- */
+
+/*
+ * components/Icon. A block, so it sits on the centre line of the flex row
+ * that holds it whatever the font, and sized against the interface scale
+ * like the text beside it. `--icon` is the side the caller asked for; a
+ * context that needs another size sets the width and height itself.
+ */
+.icon {
+  display: block;
+  flex: none;
+  width: calc(var(--icon, 14px) * var(--ui-scale));
+  height: calc(var(--icon, 14px) * var(--ui-scale));
 }
 
 /* ---------- Agent state glyphs ---------- */
@@ -1575,13 +1583,6 @@ body.is-dragging-pane .pane__bar {
   outline-offset: -2px;
 }
 
-.pane-icon {
-  display: block;
-  flex: none;
-  width: calc(var(--pane-icon, 14px) * var(--ui-scale));
-  height: calc(var(--pane-icon, 14px) * var(--ui-scale));
-}
-
 .pane__glyph {
   flex: none;
   display: grid;
@@ -1637,7 +1638,7 @@ body.is-dragging-pane .pane__bar {
   display: none;
 }
 
-.pane__pick .pane-icon {
+.pane__pick .icon {
   color: var(--fg-subtle);
 }
 
@@ -1706,7 +1707,7 @@ body.is-dragging-pane .pane__bar {
   background: var(--line-strong);
 }
 
-.pane__session .pane-icon {
+.pane__session .icon {
   color: var(--fg-subtle);
 }
 
@@ -1718,12 +1719,6 @@ body.is-dragging-pane .pane__bar {
 
 .pane__spacer {
   flex: 1;
-}
-
-/* The app's SVG icons sit on the text baseline's centre, whatever the font. */
-.icon {
-  display: block;
-  flex: none;
 }
 
 /*
@@ -1816,7 +1811,7 @@ body.is-dragging-pane .pane__bar {
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
-.pane__queue .pane-icon {
+.pane__queue .icon {
   color: var(--fg-muted);
 }
 
@@ -1825,7 +1820,7 @@ body.is-dragging-pane .pane__bar {
   background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 
-.pane__queue:hover .pane-icon {
+.pane__queue:hover .icon {
   color: inherit;
 }
 
@@ -2096,8 +2091,8 @@ body.is-dragging-pane .pane__bar {
 /* A 4x2 grid in a small window: who, what, and where each pane stands. */
 @container pane-bar (max-width: 15.5em) {
   .pane__meta,
-  .pane__pick--agent .pane-icon,
-  .pane__queue .pane-icon {
+  .pane__pick--agent .icon,
+  .pane__queue .icon {
     display: none;
   }
 
@@ -2170,7 +2165,7 @@ body.is-dragging-pane .pane__bar {
   outline: none;
 }
 
-.pane-menu__item .pane-icon {
+.pane-menu__item .icon {
   color: var(--fg-muted);
 }
 
@@ -2180,8 +2175,8 @@ body.is-dragging-pane .pane__bar {
   color: var(--accent-fg);
 }
 
-.pane-menu__item:hover .pane-icon,
-.pane-menu__item:focus-visible .pane-icon {
+.pane-menu__item:hover .icon,
+.pane-menu__item:focus-visible .icon {
   color: inherit;
 }
 
@@ -2500,10 +2495,8 @@ body.is-dragging-pane .pane__bar {
   outline-offset: 1px;
 }
 
-.settings__search-clear .glyph-icon {
-  width: calc(10px * var(--ui-scale));
-  height: calc(10px * var(--ui-scale));
-  stroke-width: 2.5;
+.settings__search-clear .icon {
+  stroke-width: 1.65;
 }
 
 .settings__nav {
@@ -2548,8 +2541,6 @@ body.is-dragging-pane .pane__bar {
 }
 
 .settings__cat-icon {
-  width: calc(15px * var(--ui-scale));
-  height: calc(15px * var(--ui-scale));
   color: var(--fg-muted);
 }
 
@@ -2916,9 +2907,9 @@ body.is-dragging-pane .pane__bar {
   height: calc(10px * var(--ui-scale));
   transform: translateY(-50%);
   background: var(--fg-muted);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E")
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.2 8 3.2l3 3M5 9.8l3 3 3-3'/%3E%3C/svg%3E")
     center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E")
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.2 8 3.2l3 3M5 9.8l3 3 3-3'/%3E%3C/svg%3E")
     center / contain no-repeat;
   pointer-events: none;
 }
@@ -3388,13 +3379,6 @@ body.is-dragging-pane .pane__bar {
    with a light blur, and a chrome panel whose title bar and footer are set
    off by hairlines, actions at the bottom right. */
 
-/* The glyphs of components/settings/icons, sized with the interface. */
-.glyph-icon {
-  flex: none;
-  width: calc(14px * var(--ui-scale));
-  height: calc(14px * var(--ui-scale));
-}
-
 /* What floats over the window — dialogs, menus, capsules — gets a dark outer
    edge under its light hairline on a dark theme, the double edge that keeps
    a panel from melting into what is behind it. On a light theme the shadow
@@ -3658,10 +3642,8 @@ body.is-dragging-pane .pane__bar {
   color: var(--accent-hi);
 }
 
-.session__check .glyph-icon {
-  width: calc(13px * var(--ui-scale));
-  height: calc(13px * var(--ui-scale));
-  stroke-width: 2.25;
+.session__check .icon {
+  stroke-width: 1.5;
 }
 
 .session.is-active .session__label {
@@ -6101,11 +6083,6 @@ select.task__input {
   outline-offset: -2px;
 }
 
-.stepper__btn .glyph-icon {
-  width: calc(12px * var(--ui-scale));
-  height: calc(12px * var(--ui-scale));
-}
-
 .stepper__value {
   min-width: calc(20px * var(--ui-scale));
   text-align: center;
@@ -6231,11 +6208,6 @@ select.task__input {
 .notice__close:focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 0;
-}
-
-.notice__close .glyph-icon {
-  width: calc(12px * var(--ui-scale));
-  height: calc(12px * var(--ui-scale));
 }
 
 .btn--tiny {
@@ -6460,11 +6432,6 @@ select.task__input {
   transition: color var(--dur), background var(--dur), opacity var(--dur);
 }
 
-.key-row__btn .glyph-icon {
-  width: calc(13px * var(--ui-scale));
-  height: calc(13px * var(--ui-scale));
-}
-
 .key-row__btn:hover:not(:disabled) {
   color: var(--fg);
   background: var(--surface-hover);
@@ -6552,10 +6519,8 @@ select.task__input {
   transition: opacity var(--dur), color var(--dur), background var(--dur);
 }
 
-.key-bind__x .glyph-icon {
-  width: calc(10px * var(--ui-scale));
-  height: calc(10px * var(--ui-scale));
-  stroke-width: 2.4;
+.key-bind__x .icon {
+  stroke-width: 1.6;
 }
 
 .key-row:hover .key-bind__x,
@@ -6736,9 +6701,9 @@ select.task__input {
   width: calc(14px * var(--ui-scale));
   height: calc(14px * var(--ui-scale));
   background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E")
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7.1 2.9a1 1 0 0 1 1.8 0l5.3 9.4a1 1 0 0 1-.9 1.5H2.7a1 1 0 0 1-.9-1.5zM8 6.4v3'/%3E%3Ccircle cx='8' cy='11.5' r='.35' fill='black'/%3E%3C/svg%3E")
     center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E")
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7.1 2.9a1 1 0 0 1 1.8 0l5.3 9.4a1 1 0 0 1-.9 1.5H2.7a1 1 0 0 1-.9-1.5zM8 6.4v3'/%3E%3Ccircle cx='8' cy='11.5' r='.35' fill='black'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
 

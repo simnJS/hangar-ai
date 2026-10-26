@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { PaneIcon, type PaneIconName } from "./PaneIcon";
+import { Icon, type IconName } from "./Icon";
 
 /**
  * The "…" menu of a pane header: what a pane can do that is not worth a
@@ -17,7 +17,7 @@ const MARGIN = 8;
 export interface PaneMenuItem {
   id: string;
   label: string;
-  icon: PaneIconName;
+  icon: IconName;
   /** The bound shortcut, already formatted; empty when nothing is bound. */
   keys?: string;
   /** Draws a hairline above the entry, to set a group apart. */
@@ -142,7 +142,7 @@ export function PaneMenu({ id, label, anchorRef, items, onClose }: Props) {
             // The pointer and the arrows move one highlight, not two.
             onMouseEnter={(event) => event.currentTarget.focus()}
           >
-            <PaneIcon name={item.icon} size={14} />
+            <Icon name={item.icon} size={14} />
             <span className="pane-menu__label">{item.label}</span>
             {item.keys && <kbd className="pane-menu__keys">{item.keys}</kbd>}
           </button>
