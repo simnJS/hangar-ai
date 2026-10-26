@@ -1792,6 +1792,7 @@ name = "hangar-ai"
 version = "0.12.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "cpal",
  "dirs",
  "discord-rich-presence",

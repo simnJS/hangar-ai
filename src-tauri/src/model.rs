@@ -352,6 +352,44 @@ pub async fn model_stat(path: String) -> Result<ModelFile, String> {
     .await
 }
 
+/// What a capture must be before it is written: a `.png` path (the one the
+/// user picked in the save dialog) and bytes that really are a PNG. The
+/// command is reachable from the page, so it must not become a way to write
+/// anything anywhere.
+fn png_capture(path: &str, data: &str) -> Result<(PathBuf, Vec<u8>), String> {
+    use base64::Engine;
+    let target = PathBuf::from(path.trim());
+    if !target
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+    {
+        return Err(format!("{} is not a .png file", target.display()));
+    }
+    let base64 = data.trim();
+    let base64 = base64
+        .strip_prefix("data:image/png;base64,")
+        .unwrap_or(base64);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .map_err(|err| format!("the capture is not valid base64: {err}"))?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("the capture is not a PNG image".into());
+    }
+    Ok((target, bytes))
+}
+
+/// Writes a capture of the 3D preview to the file the user chose in the
+/// save dialog.
+#[tauri::command]
+pub async fn model_save_png(path: String, data: String) -> Result<(), String> {
+    let (target, bytes) = png_capture(&path, &data)?;
+    crate::git::off_thread(move || {
+        std::fs::write(&target, bytes)
+            .map_err(|err| format!("could not write {}: {err}", target.display()))
+    })
+    .await
+}
+
 /// The file a `hangar-model` URL names.
 ///
 /// The URL's path is the file's absolute path, one encoded segment per
@@ -651,6 +689,22 @@ pub fn serve<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_capture_must_be_a_png_named_png() {
+        use base64::Engine;
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
+        assert!(super::png_capture("C:/out/shot.PNG", &png).is_ok());
+        assert!(super::png_capture("C:/out/shot.exe", &png).is_err());
+        let text = base64::engine::general_purpose::STANDARD.encode(b"not an image");
+        assert!(super::png_capture("C:/out/shot.png", &text).is_err());
+        assert!(super::png_capture("C:/out/shot.png", "%%%").is_err());
+        let url = format!("data:image/png;base64,{png}");
+        assert_eq!(
+            super::png_capture("shot.png", &url).unwrap().1,
+            b"\x89PNG\r\n\x1a\nrest"
+        );
+    }
+
     use super::*;
     use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 

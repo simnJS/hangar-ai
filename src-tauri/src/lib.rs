@@ -122,6 +122,7 @@ pub fn run() {
             memory::memory_delete,
             model::model_allow_roots,
             model::model_stat,
+            model::model_save_png,
             install::mcp_targets,
             install::mcp_install,
             install::mcp_manual_commands,
