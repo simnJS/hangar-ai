@@ -1064,7 +1064,8 @@ export function applyThemeToDocument(theme: TerminalTheme) {
     "--accent-fg": isDark ? mix(theme.accent, "#000000", 0.82) : "#ffffff",
     "--danger": theme.xterm.red ?? "#f7768e",
     "--success": theme.xterm.green ?? "#9ece6a",
-    "--warning": theme.xterm.yellow ?? "#e0af68",
+    // Same amber as --state-waiting on light themes, for the same reason.
+    "--warning": isDark ? (theme.xterm.yellow ?? "#e0af68") : "#b45309",
     "--shadow": isDark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.12)",
   };
 
