@@ -106,16 +106,18 @@ export function useDrawer({
   }, [active, panelRef]);
 
   // Gone with the focus inside it: the keyboard goes back where it was, or to
-  // the pane — not to <body>, where no key does anything. Only a real close
-  // counts: a drawer the window grew wide enough to dock keeps the focus.
+  // the pane — not to <body>, where no key does anything. That holds docked
+  // too, for a panel closed by its shortcut or squeezed into a closed drawer
+  // by a narrowing window. Only a real close counts: a drawer the window grew
+  // wide enough to dock keeps the focus.
   useEffect(() => {
     const panel = panelRef.current;
-    if (!active || !panel) return;
+    if (!panel) return;
     return () => {
       if (panel.isConnected || leftBy.current === "outside") return;
       const now = document.activeElement;
       if (now && now !== document.body) return;
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      if (active && opener?.isConnected) opener.focus({ preventScroll: true });
       else getTerminal(paneRef.current)?.focus();
     };
   }, [active, opener, panelRef]);

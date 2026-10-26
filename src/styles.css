@@ -4609,9 +4609,14 @@ button.card__who:focus-visible {
   background: var(--chrome);
 }
 
-/* Focused only as a drawer, to take the keyboard; a region, not a control. */
+/* Focused as a region — by F6, or as a drawer — like the inspector. */
 .board-dock:focus {
   outline: none;
+}
+
+.board-dock:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
 /* No room beside the terminals: a drawer over their right edge, opened on

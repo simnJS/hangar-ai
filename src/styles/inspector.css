@@ -30,9 +30,16 @@
   line-height: 1.4;
 }
 
-/* Focused only to receive Escape as a drawer; it is a region, not a control. */
+/* Focused as a region — by F6, or as a drawer — rather than as a control: a
+   ring inside its edge says where the keys went, and only when a key sent
+   them there. */
 .inspector__panel:focus {
   outline: none;
+}
+
+.inspector__panel:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
 .inspector__scroll {

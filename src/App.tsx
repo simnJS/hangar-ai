@@ -57,6 +57,7 @@ import { useVoice } from "./lib/voice";
 import { formatChord } from "./lib/keys";
 import { getTerminal, openFinder } from "./lib/terminalRegistry";
 import { placeSidePanels } from "./lib/sidePanels";
+import { focusRegion, nextRegion, regionOf, type Region } from "./lib/regions";
 import type { CommandId } from "./lib/shortcuts";
 import {
   useKeymap,
@@ -423,6 +424,63 @@ export default function App() {
   /** The main window's alone, and only when there is room asked for it. */
   const navigatorShown = isMainWindow && state.settings.navigatorOpen;
 
+  // ---------------------------------------------------------------------------
+  // The keyboard's way around the window (lib/regions): a terminal keeps Tab
+  // for the shell, so F6 and the "focus" commands are how it gets out of a
+  // pane and into the panels around it.
+  // ---------------------------------------------------------------------------
+
+  /** A region to put the keyboard in once the render that shows it is done. */
+  const pendingRegion = useRef<Region | null>(null);
+  useEffect(() => {
+    const region = pendingRegion.current;
+    if (!region) return;
+    pendingRegion.current = null;
+    focusRegion(region);
+  });
+
+  /** In the terminals view, the panes' region is the focused pane's terminal. */
+  const enterRegion = (region: Region): boolean => {
+    const term = view === "terminals" && region === "main" ? getTerminal(focusedPaneId) : null;
+    if (!term) return focusRegion(region);
+    term.focus();
+    return true;
+  };
+
+  const cycleRegion = (step: 1 | -1) => {
+    const at = document.activeElement;
+    // A dialog keeps the keyboard until it is closed.
+    if (at?.closest('[aria-modal="true"], .modal-backdrop')) return;
+    const shown: Region[] = [];
+    if (navigatorShown) shown.push("navigator");
+    if (activeWorkspace) shown.push("toolbar", "main", "status");
+    if (activeWorkspace && dockShown) shown.push("dock");
+    if (activeWorkspace && inspectorShown) shown.push("inspector");
+    // A region with nothing to focus — the status bar over the board, which
+    // has no field — is stepped over.
+    let current = regionOf(at);
+    for (let tries = 0; tries < shown.length; tries++) {
+      const next = nextRegion(shown, current, step);
+      if (!next || enterRegion(next)) return;
+      current = next;
+    }
+  };
+
+  /** Shown first when it is hidden: asking for its keys is asking to see it. */
+  const focusNavigator = () => {
+    if (state.settings.navigatorOpen) return void focusRegion("navigator");
+    pendingRegion.current = "navigator";
+    updateSettings({ navigatorOpen: true });
+  };
+
+  const focusInspector = () => {
+    // A drawer takes the keyboard by itself as it opens.
+    if (inspectorDrawer && drawer !== "inspector") return setDrawer("inspector");
+    if (inspectorShown) return void focusRegion("inspector");
+    pendingRegion.current = "inspector";
+    updateSettings({ inspectorOpen: true });
+  };
+
   /** `dir` is only passed by the shortcuts that name a side; otherwise the
       longer side of the pane decides. */
   const splitPane = useCallback(
@@ -724,6 +782,8 @@ export default function App() {
       // The same key closes it again, as in any editor.
       "view.palette": () => setPaletteOpen((open) => !open),
       "view.inspector": toggleInspector,
+      "view.nextRegion": () => cycleRegion(1),
+      "view.prevRegion": () => cycleRegion(-1),
       "app.zoomIn": () => zoom(state.settings.fontSize + 1),
       "app.zoomOut": () => zoom(state.settings.fontSize - 1),
       "app.zoomReset": () => zoom(DEFAULT_SETTINGS.fontSize),
@@ -742,7 +802,10 @@ export default function App() {
 
     // A workspace window shows one workspace and no settings: those keys are
     // the main window's.
-    if (isMainWindow) map["view.navigator"] = toggleNavigator;
+    if (isMainWindow) {
+      map["view.navigator"] = toggleNavigator;
+      map["view.focusNavigator"] = focusNavigator;
+    }
     if (windowWorkspaceId) {
       delete map["view.settings"];
       delete map["view.shortcuts"];
@@ -767,6 +830,7 @@ export default function App() {
     if (!activeWorkspace) return map;
     const wsId = activeWorkspace.id;
 
+    map["view.focusInspector"] = focusInspector;
     map["view.terminals"] = () => setView("terminals");
     map["view.board"] = () => setView("board");
     map["view.boardDock"] = toggleDock;

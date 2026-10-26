@@ -4,6 +4,7 @@ import {
   chordFromEvent,
   formatBinding,
   isBareChord,
+  isFunctionKey,
   isMac,
   isTextEditingChord,
   keyFromEvent,
@@ -196,6 +197,15 @@ describe("chord classes", () => {
   it("calls a chord bare when nothing keeps it out of typing", () => {
     expect(isBareChord(chord("A", { shift: true }))).toBe(true);
     expect(isBareChord(chord("A", { alt: true }))).toBe(false);
+  });
+
+  it("knows the function keys, which type nothing in a field", () => {
+    expect(isFunctionKey("F6")).toBe(true);
+    expect(isFunctionKey("F12")).toBe(true);
+    expect(isFunctionKey("F24")).toBe(true);
+    expect(isFunctionKey("F25")).toBe(false);
+    expect(isFunctionKey("F")).toBe(false);
+    expect(isFunctionKey("Home")).toBe(false);
   });
 
   it("recognises the editing chords a text field owns", () => {
