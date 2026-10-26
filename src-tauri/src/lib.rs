@@ -9,6 +9,7 @@ mod install;
 mod instructions;
 mod mcp;
 mod memory;
+mod model;
 mod notify;
 mod path_env;
 mod pty;
@@ -39,6 +40,9 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .manage(discord::DiscordPresence::default())
         .manage(voice::VoiceManager::default())
+        // The 3D preview's models and textures, read from the folders the
+        // window allowed and nowhere else.
+        .register_asynchronous_uri_scheme_protocol(model::SCHEME, model::serve)
         .setup(|app| {
             // Warmed here rather than on the first detection call: asking the
             // login shell for its PATH takes a moment, and doing it now means
@@ -116,6 +120,8 @@ pub fn run() {
             memory::memory_create,
             memory::memory_update,
             memory::memory_delete,
+            model::model_allow_roots,
+            model::model_stat,
             install::mcp_targets,
             install::mcp_install,
             install::mcp_manual_commands,
