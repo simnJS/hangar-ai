@@ -663,7 +663,8 @@ export default function App() {
       "view.settings": () => (showSettings ? setShowSettings(false) : openSettings()),
       "view.shortcuts": () => openSettings("shortcuts"),
       "workspace.new": () => setShowCreate(true),
-      "view.palette": () => setPaletteOpen(true),
+      // The same key closes it again, as in any editor.
+      "view.palette": () => setPaletteOpen((open) => !open),
       "view.inspector": toggleInspector,
       "app.zoomIn": () => zoom(state.settings.fontSize + 1),
       "app.zoomOut": () => zoom(state.settings.fontSize - 1),
@@ -806,7 +807,13 @@ export default function App() {
   }
 
   const handlers = buildHandlers();
-  const pendingChords = useShortcuts({ keymap, handlers });
+  // While the palette is open the keyboard is its own: a shortcut acting on
+  // the window behind it would change what the list is about mid-search. Only
+  // its own key stays, to close it.
+  const pendingChords = useShortcuts({
+    keymap,
+    handlers: paletteOpen ? { "view.palette": () => setPaletteOpen(false) } : handlers,
+  });
   /** What the palette offers: every command a key would run, but itself. */
   const paletteHandlers = { ...handlers };
   delete paletteHandlers["view.palette"];

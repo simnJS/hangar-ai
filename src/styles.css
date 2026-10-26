@@ -133,7 +133,7 @@ select {
   display: flex;
   align-items: center;
   gap: calc(7px * var(--ui-scale));
-  height: calc(52px * var(--ui-scale));
+  height: calc(44px * var(--ui-scale));
   padding: 0 calc(10px * var(--ui-scale)) 0 calc(16px * var(--ui-scale));
   white-space: nowrap;
 }
