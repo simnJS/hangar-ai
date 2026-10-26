@@ -6,13 +6,19 @@
  * page around it says so too. Keep it that way.
  *
  * Some replies really do move the board, so switching to the Board view after
- * watching a pane work shows what the pane just did.
+ * watching a pane work shows what the pane just did. One really calls a Hangar
+ * tool: "show the model" opens the sample model in the 3D preview.
  */
 import * as board from "./board";
+import * as control from "./control";
+import { appState } from "./state";
 
 export interface Ctx {
   cwd: string;
   agent: string;
+  /** The pane's id, which is also its PTY's. */
+  pane: string;
+  name: string | null;
 }
 
 /**
@@ -164,6 +170,87 @@ function boardWork(): Step[] {
   ];
 }
 
+/** The procedural sample shipped with the demo, relative to the demo
+    workspace, which plays the Hangar repository itself. */
+const SAMPLE_MODEL = "demo/models/sample.glb";
+
+/**
+ * Opens the sample in the 3D preview through model_show, the way an agent
+ * would: the app carries the call out (lib/control), shows the model, says
+ * who opened it, and the transcript prints what the viewer found.
+ */
+function showModel(french: boolean): Step[] {
+  let answer: control.ControlAnswer | null = null;
+
+  const found = () => {
+    if (!answer) return french ? "ouverture en cours…" : "opening…";
+    if (!answer.ok) return null;
+    const value = answer.value as {
+      title?: string;
+      status?: string;
+      info?: { triangles: number; materials: number; animations: string[] } | null;
+    };
+    const title = value.title ?? "sample.glb";
+    if (!value.info) return french ? `${title} ouvert, encore en chargement` : `${title} opened, still loading`;
+    const n = (count: number) => count.toLocaleString(french ? "fr-FR" : "en-US");
+    const { triangles, materials, animations } = value.info;
+    return french
+      ? `${title} · ${n(triangles)} triangles · ${n(materials)} matériaux · ${n(animations.length)} animation(s)`
+      : `${title} · ${n(triangles)} triangles · ${n(materials)} materials · ${n(animations.length)} animation(s)`;
+  };
+
+  return [
+    {
+      after: 500,
+      text: say(french ? "Je te l'ouvre dans l'aperçu 3D de Hangar." : "Opening it in Hangar's 3D preview."),
+    },
+    {
+      after: 600,
+      text: nl(`${C.magenta}⏺${C.reset} hangar - model_show (MCP)(path: "${SAMPLE_MODEL}")`),
+      fx: (ctx) => {
+        // The name the pane has now, as the app would read it from the
+        // environment of a real agent.
+        const paneName =
+          appState.workspaces.flatMap((ws) => ws.panes).find((pane) => pane.id === ctx.pane)?.name ??
+          ctx.name;
+        control
+          .ask("model_show", {
+            path: SAMPLE_MODEL,
+            caller: { paneId: ctx.pane, paneName, cwd: ctx.cwd },
+          })
+          .then((result) => {
+            answer = result;
+          });
+      },
+    },
+    {
+      // The viewer loads three.js on demand the first time: give it a moment.
+      after: 2400,
+      text: () => {
+        const line = found();
+        return line === null
+          ? nl(`  ${C.dim}⎿  ${C.reset}${C.red}${answer?.error ?? "failed"}${C.reset}`)
+          : nl(`  ${C.dim}⎿  ${line}${C.reset}`);
+      },
+    },
+    {
+      after: 500,
+      text: () =>
+        answer && !answer.ok
+          ? nl(
+              french
+                ? `\r\n  L'aperçu n'a pas pu s'ouvrir. Le reste de la démo marche quand même.`
+                : `\r\n  The preview did not open. The rest of the demo still works.`,
+            )
+          : nl(
+              french
+                ? `\r\n  Le voilà, dans l'aperçu 3D à côté des terminaux. Fais-le tourner à la\r\n  souris, molette pour zoomer.`
+                : `\r\n  There it is, in the 3D preview beside the terminals. Drag to turn it,\r\n  scroll to zoom.`,
+            ),
+    },
+  ];
+}
+
 function build(): Step[] {
   return [
     { after: 500, text: tool("Bash(pnpm tauri build)", "started") },
@@ -194,6 +281,7 @@ function capabilities(agent: string): Step[] {
     { after: 300, text: nl(`    ${C.cyan}take the next task${C.reset}    claims from the board`) },
     { after: 200, text: nl(`    ${C.cyan}write the tests${C.reset}       runs a suite, closes its task`) },
     { after: 200, text: nl(`    ${C.cyan}check the fr table${C.reset}    files a new task`) },
+    { after: 200, text: nl(`    ${C.cyan}show the model${C.reset}        opens it in the 3D preview`) },
     { after: 200, text: nl(`    ${C.cyan}/exit${C.reset}                 back to the shell`) },
   ];
 }
@@ -223,6 +311,26 @@ export function replyFor(agent: string, prompt: string): Step[] {
   // last word of the line.
   const p = ` ${prompt.toLowerCase()} `;
 
+  // Ahead of the rest: "montre-moi le modèle" would otherwise read as a
+  // French greeting or a translation job.
+  const french = has(p, ["montre", "modèle", "modele", "aperçu", "apercu"]);
+  if (
+    has(p, [
+      "montre le mod",
+      "montre-moi le mod",
+      "montre moi le mod",
+      "modèle 3d",
+      "modele 3d",
+      "aperçu 3d",
+      "apercu 3d",
+      "show the model",
+      "show me the model",
+      "3d model",
+      "3d preview",
+      "model_show",
+    ])
+  )
+    return showModel(french);
   if (has(p, [" hello", " hi ", " hey", " salut", " bonjour", "who are you", "what can you", "help me", "qui es"]))
     return capabilities(agent);
   if (has(p, ["board", "next task", "take the next", "claim", "todo", "tâche", "tache"]))

@@ -17,6 +17,8 @@ type Mode = "shell" | "claude" | "codex" | "gemini" | "opencode";
 
 interface Session {
   id: string;
+  /** The pane's name when it was spawned; the app's state has the current one. */
+  name: string | null;
   cwd: string;
   shell: ShellInfo | null;
   cols: number;
@@ -94,7 +96,7 @@ function drain(s: Session) {
   out(s, next.text + "\r\n");
   const steps = agentCommand(s, next.text);
   if (steps !== "handled" && steps.length) {
-    run(s, steps, { cwd: s.cwd, agent: s.mode });
+    run(s, steps, { cwd: s.cwd, agent: s.mode, pane: s.id, name: s.name });
   }
 }
 
@@ -372,6 +374,7 @@ function agentCommand(s: Session, line: string): Step[] | "handled" {
 
 export function spawn(args: {
   id: string;
+  name?: string;
   cwd: string;
   shell?: ShellInfo | null;
   cols: number;
@@ -379,6 +382,7 @@ export function spawn(args: {
 }): void {
   const s: Session = {
     id: args.id,
+    name: args.name ?? null,
     cwd: args.cwd,
     shell: args.shell ?? null,
     cols: args.cols,
@@ -443,7 +447,12 @@ export function write(id: string, data: string): void {
       }
       out(s, "\r\n");
 
-      const ctx: Ctx = { cwd: s.cwd, agent: s.mode === "shell" ? "shell" : s.mode };
+      const ctx: Ctx = {
+        cwd: s.cwd,
+        agent: s.mode === "shell" ? "shell" : s.mode,
+        pane: s.id,
+        name: s.name,
+      };
       const steps = s.mode === "shell" ? shellCommand(s, line) : agentCommand(s, line);
       if (steps === "handled") continue;
       if (!steps.length) {
