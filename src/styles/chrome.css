@@ -1,4 +1,776 @@
 /* ---------- Toolbar and status bar ---------- */
 
 /* The bar over the workspace (components/Toolbar.tsx) and the one along its
-   bottom (components/StatusBar.tsx). */
+   bottom (components/StatusBar.tsx). Both are sized in px times the interface
+   scale, and the toolbar's narrow layouts are container queries written in
+   em: its font size carries the scale, so they move with it. */
+
+/* Secondary text. --fg-muted reads at about 4:1 on the chrome of a dark theme
+   and under 3.5:1 on a light one, short of the 4.5:1 text needs; this keeps
+   the same hierarchy and clears it on every surface here, the translucent
+   wells included. Icons stay on --fg-muted, which is enough for a shape.
+   "Your turn" is written in the accent, which on a light theme is too pale
+   for small text on these greys; pulled toward --fg it clears 4.5:1 both
+   ways. The palette (styles/palette.css) and the chord hint use both. */
+.toolbar,
+.tmenu,
+.status,
+.palette,
+.chord-hint {
+  --chrome-muted: color-mix(in srgb, var(--fg) 76%, var(--bg));
+  --chrome-yours: color-mix(in srgb, var(--accent-hi) 78%, var(--fg));
+}
+
+/* ---- Toolbar ---- */
+
+.toolbar {
+  container: toolbar / inline-size;
+  flex: none;
+  display: grid;
+  /* The activity viewer stays centred while the sides fit at their natural
+     width, and is the one that gives way when they no longer do. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, calc(520px * var(--ui-scale))) minmax(
+      max-content,
+      1fr
+    );
+  align-items: center;
+  column-gap: calc(12px * var(--ui-scale));
+  height: calc(44px * var(--ui-scale));
+  min-width: 0;
+  padding: 0 calc(8px * var(--ui-scale)) 0 calc(12px * var(--ui-scale));
+  background: var(--chrome-bar);
+  border-bottom: 1px solid var(--sep);
+  font-size: calc(12px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.toolbar__lead,
+.toolbar__trail {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.toolbar__lead {
+  gap: calc(8px * var(--ui-scale));
+}
+
+.toolbar__trail {
+  justify-content: flex-end;
+  gap: calc(2px * var(--ui-scale));
+}
+
+.toolbar__title {
+  display: grid;
+  min-width: 0;
+  max-width: calc(200px * var(--ui-scale));
+  margin-right: calc(6px * var(--ui-scale));
+  line-height: 1.25;
+}
+
+.toolbar__name {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+/* Cut from the start: the end of a path is the part that names the project. */
+.toolbar__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--chrome-muted);
+}
+
+.toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--ui-scale));
+}
+
+.toolbar__sep {
+  flex: none;
+  width: 1px;
+  height: calc(18px * var(--ui-scale));
+  margin: 0 calc(5px * var(--ui-scale));
+  background: var(--line-strong);
+}
+
+/* Icon buttons. A pressed toggle reads in the accent; nothing else does. */
+.tbtn {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: calc(28px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.tbtn .icon,
+.segmented__btn .icon {
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+}
+
+.tbtn:hover:not(:disabled),
+.tbtn.is-open {
+  background: var(--line);
+  color: var(--fg);
+}
+
+.tbtn[aria-pressed="true"] {
+  color: var(--accent-hi);
+}
+
+.tbtn:disabled {
+  color: var(--fg-subtle);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tbtn:focus-visible,
+.segmented__btn:focus-visible,
+.activity__badge:focus-visible,
+.status__btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* Segmented controls: the views on the left, the layout presets on the right.
+   The chosen segment is raised — lighter than the track on a dark theme,
+   white on a light one, the way a native control does it. */
+.segmented {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(2px * var(--ui-scale));
+  padding: calc(2px * var(--ui-scale));
+  border-radius: calc(7px * var(--ui-scale));
+  background: var(--line);
+}
+
+.segmented__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0 calc(11px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--chrome-muted);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur), box-shadow var(--dur);
+}
+
+.segmented__btn:hover {
+  color: var(--fg);
+}
+
+.segmented__btn[aria-checked="true"],
+.segmented__btn[aria-pressed="true"] {
+  /* Older engines without light-dark() keep the dark rendering. */
+  background: color-mix(in srgb, var(--fg) 17%, var(--chrome-bar));
+  background: light-dark(
+    var(--bg-sunken),
+    color-mix(in srgb, var(--fg) 17%, var(--chrome-bar))
+  );
+  color: var(--fg);
+  box-shadow: 0 1px 2px var(--shadow), inset 0 0 0 1px var(--line);
+}
+
+.segmented--icons .segmented__btn {
+  width: calc(28px * var(--ui-scale));
+  padding: 0;
+}
+
+/* Tidy is about the same grid as the presets, but an action, not a choice:
+   beside them, not inside the track. */
+.segmented--icons + .toolbar__actions {
+  margin-left: calc(4px * var(--ui-scale));
+}
+
+/* The view icons only come out when the labels no longer fit. */
+.segmented__icon {
+  display: none;
+}
+
+/* ---- Activity viewer ---- */
+
+.activity {
+  container: activity / inline-size;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  min-width: 0;
+  height: calc(30px * var(--ui-scale));
+  padding: 0 calc(5px * var(--ui-scale)) 0 calc(12px * var(--ui-scale));
+  overflow: hidden;
+  border-radius: calc(7px * var(--ui-scale));
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.activity__line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+}
+
+.activity__who {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(7px * var(--ui-scale));
+  max-width: 45%;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.activity__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity__message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--chrome-muted);
+}
+
+.activity__state {
+  font-weight: 500;
+}
+
+.activity__state--working {
+  color: var(--state-working);
+}
+
+.activity__state--waiting {
+  color: var(--state-waiting);
+}
+
+.activity__state--yours {
+  color: var(--chrome-yours);
+}
+
+.activity__state--idle {
+  color: var(--chrome-muted);
+}
+
+.activity__detail--strong {
+  color: var(--fg);
+}
+
+.activity__context {
+  flex: none;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-muted);
+}
+
+.activity__badges {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--ui-scale));
+  padding-left: calc(5px * var(--ui-scale));
+  border-left: 1px solid var(--line-strong);
+}
+
+.activity__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.activity__badge .icon {
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+}
+
+.activity__badge:hover {
+  background: var(--line);
+}
+
+.activity__badge--waiting {
+  color: var(--state-waiting);
+}
+
+.activity__badge--yours {
+  color: var(--chrome-yours);
+}
+
+/* The context used, as a hairline along the bottom of the capsule. */
+.activity__progress {
+  position: absolute;
+  left: calc(8px * var(--ui-scale));
+  right: calc(8px * var(--ui-scale));
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+}
+
+.activity__progress::after {
+  content: "";
+  display: block;
+  width: calc(var(--activity-progress, 0) * 100%);
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+/* Narrower toolbars, in em of its own font so the steps follow the
+   interface scale: first the title goes, then the capsule's extras, then the
+   view labels give way to their icons — what the focused agent is doing is
+   worth more room than words the tooltips also say. */
+@container toolbar (width < 80em) {
+  .toolbar__title {
+    display: none;
+  }
+}
+
+@container toolbar (width < 71em) {
+  .activity__context,
+  .activity__badges {
+    display: none;
+  }
+}
+
+@container toolbar (width < 64em) {
+  .segmented--views .segmented__btn {
+    width: calc(30px * var(--ui-scale));
+    padding: 0;
+  }
+
+  .segmented--views .segmented__icon {
+    display: inline-grid;
+  }
+
+  .segmented--views .segmented__icon .icon {
+    width: calc(15px * var(--ui-scale));
+    height: calc(15px * var(--ui-scale));
+  }
+
+  /* Still the radio's name for a screen reader, just not drawn. */
+  .segmented--views .segmented__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .toolbar__sep {
+    margin: 0 calc(3px * var(--ui-scale));
+  }
+}
+
+/* The last steps, for the narrowest window at the largest interface size:
+   the terminal actions fold into the "…" menu (Toolbar.tsx lists them there
+   when they are hidden), and a capsule with no room for a sentence keeps the
+   glyph and the name rather than half a word. */
+@container toolbar (width < 46em) {
+  .toolbar__actions {
+    display: none;
+  }
+}
+
+@container activity (width < 10em) {
+  .activity__message {
+    display: none;
+  }
+
+  .activity__who {
+    max-width: none;
+  }
+}
+
+/* ---- Toolbar menus ---- */
+
+.tmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: calc(232px * var(--ui-scale));
+  padding: calc(5px * var(--ui-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-bar);
+  box-shadow: 0 18px 40px -10px var(--shadow), 0 4px 12px var(--shadow);
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+  animation: tmenu-in var(--dur) var(--ease);
+}
+
+@keyframes tmenu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.tmenu__item {
+  display: flex;
+  align-items: center;
+  gap: calc(9px * var(--ui-scale));
+  width: 100%;
+  height: calc(26px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+  outline: none;
+}
+
+.tmenu__item .icon {
+  flex: none;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.tmenu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tmenu__keys {
+  flex: none;
+  padding-left: calc(18px * var(--ui-scale));
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--chrome-muted);
+}
+
+.tmenu__item:not(:disabled):hover,
+.tmenu__item:not(:disabled):focus-visible {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.tmenu__item:not(:disabled):hover .icon,
+.tmenu__item:not(:disabled):focus-visible .icon,
+.tmenu__item:not(:disabled):hover .tmenu__keys,
+.tmenu__item:not(:disabled):focus-visible .tmenu__keys {
+  color: inherit;
+}
+
+.tmenu__item--danger,
+.tmenu__item--danger .icon {
+  color: var(--danger);
+}
+
+.tmenu__item--danger:not(:disabled):hover,
+.tmenu__item--danger:not(:disabled):focus-visible {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.tmenu__item:disabled {
+  opacity: 0.45;
+}
+
+.tmenu__sep {
+  height: 1px;
+  margin: calc(5px * var(--ui-scale)) calc(6px * var(--ui-scale));
+  background: var(--line-strong);
+}
+
+/* The reset, asking first: a question in place of the items. */
+.tmenu--confirm {
+  width: calc(300px * var(--ui-scale));
+  padding: calc(12px * var(--ui-scale)) calc(12px * var(--ui-scale)) calc(10px * var(--ui-scale));
+}
+
+.tmenu__title {
+  margin: 0 0 calc(4px * var(--ui-scale));
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.tmenu__body {
+  margin: 0 0 calc(12px * var(--ui-scale));
+  line-height: 1.45;
+  white-space: normal;
+  color: var(--chrome-muted);
+}
+
+.tmenu__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(6px * var(--ui-scale));
+}
+
+/* ---- Status bar ---- */
+
+/* As tall as the navigator's bottom bar, so their top edges meet in one line
+   across the window. */
+.status {
+  container: status / inline-size;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--ui-scale));
+  height: calc(36px * var(--ui-scale));
+  min-width: 0;
+  padding: 0 calc(8px * var(--ui-scale)) 0 calc(10px * var(--ui-scale));
+  background: var(--chrome);
+  border-top: 1px solid var(--sep);
+  font-size: calc(12px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.status__broadcast,
+.status__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+}
+
+.status__lead {
+  flex: none;
+  display: inline-grid;
+  margin-right: calc(2px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.status__lead .icon {
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+}
+
+.status__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: text;
+  transition: box-shadow var(--dur);
+}
+
+.status__field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent-ring), 0 0 0 3px var(--accent-soft);
+}
+
+.status__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+}
+
+.status__input::placeholder {
+  color: var(--chrome-muted);
+}
+
+/* The key that lands here; pointless once you are here. */
+.status__kbd {
+  flex: none;
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--chrome-muted);
+  transition: opacity var(--dur);
+}
+
+.status__field:focus-within .status__kbd {
+  opacity: 0;
+}
+
+.status__btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0 calc(9px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--chrome-muted);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.status__btn:hover:not(:disabled) {
+  background: var(--line);
+  color: var(--fg);
+}
+
+.status__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.status__btn .icon,
+.status__send .icon {
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+}
+
+.status__send {
+  flex: none;
+  min-height: 0;
+  height: calc(24px * var(--ui-scale));
+  padding: 0 calc(11px * var(--ui-scale));
+}
+
+/* Other views: where the workspace is, and how its agents are doing. */
+.status__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  color: var(--chrome-muted);
+}
+
+.status__summary {
+  flex: none;
+  color: var(--chrome-muted);
+}
+
+.status__summary::before {
+  content: "·";
+  margin-right: calc(8px * var(--ui-scale));
+  color: var(--fg-subtle);
+}
+
+.status__summary--working {
+  color: var(--state-working);
+}
+
+.status__summary--waiting {
+  color: var(--state-waiting);
+}
+
+.status__summary--yours {
+  color: var(--chrome-yours);
+}
+
+.status__items {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--ui-scale));
+  min-width: 0;
+  padding-left: calc(6px * var(--ui-scale));
+  border-left: 1px solid var(--line);
+}
+
+.status__item {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  padding: 0 calc(7px * var(--ui-scale));
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-muted);
+}
+
+.status__item .icon {
+  flex: none;
+  width: calc(13px * var(--ui-scale));
+  height: calc(13px * var(--ui-scale));
+}
+
+.status__text {
+  max-width: calc(180px * var(--ui-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status__tag {
+  padding: 0 calc(4px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: calc(10px * var(--ui-scale));
+}
+
+/* A narrow window at a large interface size: the field keeps its room, the
+   hint and the extras go first. */
+@container status (width < 46em) {
+  .status__kbd,
+  .status__item--panes {
+    display: none;
+  }
+}
+
+@container status (width < 40em) {
+  .status__btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tmenu {
+    animation: none;
+  }
+
+  .activity__progress::after {
+    transition: none;
+  }
+}

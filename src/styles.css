@@ -1104,36 +1104,8 @@ body.is-sorting * {
   min-height: 0;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-sunken);
-}
-
-.topbar__id {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.topbar__name {
-  margin: 0;
-  font-size: calc(14px * var(--ui-scale));
-  font-weight: 650;
-}
-
-.topbar__path {
-  font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* The toolbar itself is in styles/chrome.css. These segmented buttons stay
+   for the workspace dialog, which picks its first layout with them. */
 .layouts {
   display: flex;
   padding: 2px;
@@ -2409,39 +2381,7 @@ body.is-dragging-pane .pane__bar {
 
 /* ---------- Broadcast bar ---------- */
 
-.broadcast {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-sunken);
-}
-
-.broadcast__icon {
-  color: var(--accent);
-  font-size: calc(15px * var(--ui-scale));
-}
-
-.broadcast__input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  outline: none;
-  transition: border-color var(--dur), box-shadow var(--dur);
-}
-
-.broadcast__input:focus {
-  border-color: var(--accent-ring);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.broadcast__input::placeholder {
-  color: var(--fg-subtle);
-}
+/* The broadcast field lives in the status bar now: styles/chrome.css. */
 
 /* ---------- Settings page ---------- */
 
@@ -4608,27 +4548,33 @@ body.is-dragging-pane .board-dock__grip {
   color: var(--fg-subtle);
 }
 
-/* Half-typed sequence, floating above the broadcast bar. */
+/* Half-typed sequence, floating just above the status bar: a pill, like
+   the dictation one, because it is about the keyboard and not the window. */
 .chord-hint {
   position: fixed;
   left: 50%;
-  bottom: 58px;
+  bottom: calc(36px * var(--ui-scale) + 12px);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  font-size: calc(11.5px * var(--ui-scale));
-  color: var(--fg-muted);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 10px 26px -18px var(--shadow);
+  gap: calc(8px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
+  padding: 0 calc(12px * var(--ui-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-bar);
+  box-shadow: 0 10px 28px -12px var(--shadow), 0 2px 6px var(--shadow);
+  font-size: calc(12px * var(--ui-scale));
+  white-space: nowrap;
+  color: var(--chrome-muted);
   z-index: 30;
 }
 
 .chord-hint__keys {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-hi);
 }
 
 /* Dictation ------------------------------------------------------------- */
