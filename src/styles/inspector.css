@@ -1,10 +1,1069 @@
 /* ---------- Inspector ---------- */
 
-/* The column on the right of the work area (components/Inspector.tsx). */
+/* The column on the right of the work area (components/Inspector.tsx).
+   `--inspector-w` is in interface points; everything is drawn at
+   `× --ui-scale`, the column's width included, so a larger interface size
+   keeps the same text per line instead of wrapping it. */
 .inspector {
+  --insp-pad: calc(14px * var(--ui-scale));
+  position: relative;
   flex: none;
+  display: flex;
+  width: calc(var(--inspector-w, 296px) * var(--ui-scale));
   min-height: 0;
-  overflow: auto;
+}
+
+.inspector__panel {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   background: var(--chrome);
-  border-left: 1px solid var(--sep);
+  box-shadow: inset 1px 0 0 var(--sep);
+  color: var(--fg);
+  /* What a narrow column gives up is decided by its own width, not the
+     window's: the user sets that width. */
+  container: insp / inline-size;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.4;
+}
+
+/* Focused only to receive Escape as a drawer; it is a region, not a control. */
+.inspector__panel:focus {
+  outline: none;
+}
+
+.inspector__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Too little room beside the terminals: the column takes none, and slides
+   over the right of the work area instead. The slot stays where it was in
+   the tree, so nothing inside remounts when the mode changes. */
+.inspector--drawer {
+  width: 0;
+  z-index: 25;
+}
+
+.inspector--drawer .inspector__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: calc(var(--inspector-w, 296px) * var(--ui-scale));
+  box-shadow:
+    inset 1px 0 0 var(--line-strong),
+    -1px 0 0 var(--sep),
+    -18px 0 44px var(--shadow);
+  animation: insp-drawer-in var(--dur) var(--ease);
+}
+
+@keyframes insp-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(16px * var(--ui-scale)));
+  }
+}
+
+/* The resize handle: a wide hit area over the left edge, drawn as a single
+   accent hairline only while it is pointed at, dragged or focused. */
+.inspector__grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.inspector__grip::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.inspector__grip:hover::before,
+.inspector__grip.is-active::before {
+  opacity: 1;
+}
+
+.inspector__grip:focus-visible {
+  outline: none;
+}
+
+.inspector__grip:focus-visible::before {
+  width: 2px;
+  opacity: 1;
+}
+
+body.is-dragging-pane .inspector__grip {
+  pointer-events: none;
+}
+
+/* Shared bits */
+
+.insp-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.insp-mono {
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.insp-add {
+  color: var(--success);
+}
+
+.insp-del {
+  color: var(--danger);
+}
+
+/* A side of a diff that did not move: there for the rhythm, not to be read. */
+.insp-add.is-zero,
+.insp-del.is-zero {
+  color: var(--fg-subtle);
+}
+
+.insp-empty {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.5;
+}
+
+.insp-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: calc(20px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.insp-icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.insp-icon-btn:focus-visible,
+.insp-link:focus-visible,
+.insp-section__toggle:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* A text action: accent text, nothing around it until it is pointed at. */
+.insp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--accent-hi);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.insp-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.insp-link .icon {
+  width: calc(11px * var(--ui-scale));
+  height: calc(11px * var(--ui-scale));
+}
+
+.inspector-glyph {
+  flex: none;
+  width: auto;
+  height: calc(1em * 0.9);
+}
+
+/* A path that loses its beginning first: right-to-left box, left-to-right
+   text (the marks around it keep the separators in place). */
+.insp-tail {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Header */
+
+.insp-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: calc(30px * var(--ui-scale)) minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: calc(10px * var(--ui-scale));
+  row-gap: 1px;
+  align-items: center;
+  min-height: calc(56px * var(--ui-scale));
+  padding: calc(10px * var(--ui-scale)) calc(10px * var(--ui-scale)) calc(10px * var(--ui-scale))
+    var(--insp-pad);
+  border-bottom: 1px solid var(--line);
+}
+
+.insp-head__avatar {
+  grid-row: 1 / 3;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  border-radius: calc(7px * var(--ui-scale));
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+}
+
+/* The state, pinned to the monogram's corner on a ring of the column's own
+   colour, so it reads as a badge on any theme. */
+.insp-head__badge {
+  position: absolute;
+  right: calc(-4px * var(--ui-scale));
+  bottom: calc(-4px * var(--ui-scale));
+  display: grid;
+  place-items: center;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+  border-radius: 50%;
+  background: var(--chrome);
+}
+
+.insp-head__title {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  gap: calc(8px * var(--ui-scale));
+  min-width: 0;
+  margin: 0;
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.insp-head__name {
+  flex: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-head__state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.insp-state--working {
+  color: var(--state-working);
+}
+
+.insp-state--waiting {
+  color: var(--state-waiting);
+}
+
+.insp-state--yours {
+  color: var(--accent-hi);
+}
+
+.insp-state--idle {
+  color: var(--fg-subtle);
+}
+
+.insp-head__tools {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+}
+
+.insp-head__kbd {
+  padding: 1px calc(5px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.insp-head__sub {
+  grid-column: 2 / 4;
+  grid-row: 2;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.insp-head__version {
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sections */
+
+.insp-section {
+  padding: calc(9px * var(--ui-scale)) var(--insp-pad) calc(12px * var(--ui-scale));
+  border-bottom: 1px solid var(--line);
+}
+
+.insp-section:last-child {
+  border-bottom: 0;
+}
+
+.insp-section--folded {
+  padding-bottom: calc(9px * var(--ui-scale));
+}
+
+.insp-section__head {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
+  margin-bottom: calc(8px * var(--ui-scale));
+}
+
+.insp-section--folded .insp-section__head {
+  margin-bottom: 0;
+}
+
+.insp-section__toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  min-width: 0;
+  height: 100%;
+  margin-left: calc(-3px * var(--ui-scale));
+  padding: 0 0 0 calc(3px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.insp-section__toggle:hover {
+  color: var(--fg);
+}
+
+.insp-section__toggle .inspector-glyph {
+  width: calc(10px * var(--ui-scale));
+  height: calc(10px * var(--ui-scale));
+  color: var(--fg-subtle);
+  transition: transform var(--dur) var(--ease);
+}
+
+.insp-section--folded .insp-section__toggle .inspector-glyph {
+  transform: rotate(-90deg);
+}
+
+.insp-section__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-section__meta {
+  margin-left: auto;
+  padding-left: calc(6px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.insp-section__action {
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin-right: -2px;
+}
+
+/* Key / value grids */
+
+.insp-kv {
+  display: grid;
+  grid-template-columns: calc(54px * var(--ui-scale)) minmax(0, 1fr);
+  gap: calc(5px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  align-items: baseline;
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.insp-kv dt {
+  color: var(--fg-subtle);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.insp-kv dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-kv__split {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8px * var(--ui-scale));
+  min-width: 0;
+}
+
+.insp-kv__clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-kv__split .insp-link {
+  margin-left: auto;
+}
+
+.insp-kv__faint {
+  color: var(--fg-subtle);
+}
+
+/* Context and cost */
+
+.insp-ctx {
+  display: grid;
+  grid-template-columns: calc(64px * var(--ui-scale)) minmax(0, 1fr);
+  gap: calc(14px * var(--ui-scale));
+  align-items: center;
+}
+
+.insp-ring {
+  position: relative;
+  width: calc(64px * var(--ui-scale));
+  height: calc(64px * var(--ui-scale));
+}
+
+.insp-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.insp-ring circle {
+  fill: none;
+  stroke-width: 5;
+}
+
+.insp-ring__track {
+  stroke: var(--line-strong);
+}
+
+.insp-ring__value {
+  stroke: var(--fg-muted);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.4s var(--ease), stroke var(--dur) var(--ease);
+}
+
+.insp-ring--warn .insp-ring__value {
+  stroke: var(--warning);
+}
+
+.insp-ring--danger .insp-ring__value {
+  stroke: var(--danger);
+}
+
+.insp-ring__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.insp-ring__label small {
+  margin-left: 1px;
+  color: var(--fg-subtle);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 500;
+}
+
+.insp-ctx__info {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--ui-scale));
+  min-width: 0;
+}
+
+.insp-ctx__info b {
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+}
+
+.insp-ctx__info span {
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.insp-ctx__info .insp-ctx__hint {
+  color: var(--fg-subtle);
+  line-height: 1.4;
+}
+
+/* Side by side while both fit, stacked in a narrow column. */
+.insp-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(118px * var(--ui-scale)), 1fr));
+  gap: calc(8px * var(--ui-scale));
+  margin-top: calc(10px * var(--ui-scale));
+}
+
+.insp-empty + .insp-stats {
+  margin-top: calc(8px * var(--ui-scale));
+}
+
+.insp-stat {
+  min-width: 0;
+  padding: calc(7px * var(--ui-scale)) calc(9px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.insp-stat__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+}
+
+.insp-stat__value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.insp-stat__value small {
+  margin-left: calc(4px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.insp-stat__value--none {
+  color: var(--fg-subtle);
+  font-weight: 500;
+  cursor: help;
+}
+
+.insp-meter {
+  display: grid;
+  grid-template-columns: calc(20px * var(--ui-scale)) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(15px * var(--ui-scale));
+  margin-top: 2px;
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.insp-meter__bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.insp-meter__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--fg-muted);
+}
+
+.insp-meter--warn .insp-meter__bar i {
+  background: var(--warning);
+}
+
+.insp-meter--danger .insp-meter__bar i {
+  background: var(--danger);
+}
+
+.insp-meter__value {
+  min-width: calc(30px * var(--ui-scale));
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Board task */
+
+.insp-task {
+  padding: calc(9px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+  transition: box-shadow var(--dur) var(--ease);
+}
+
+.insp-task:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.insp-task__top {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  color: var(--fg-subtle);
+}
+
+/* Three rising bars, lit up to the priority. */
+.insp-prio {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: calc(9px * var(--ui-scale));
+}
+
+.insp-prio i {
+  width: 2.5px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+
+.insp-prio i:nth-child(1) {
+  height: 44%;
+}
+
+.insp-prio i:nth-child(2) {
+  height: 72%;
+}
+
+.insp-prio i:nth-child(3) {
+  height: 100%;
+}
+
+.insp-prio[data-level="1"] i:nth-child(-n + 1),
+.insp-prio[data-level="2"] i:nth-child(-n + 2),
+.insp-prio[data-level="3"] i:nth-child(-n + 3) {
+  background: var(--fg-muted);
+}
+
+.insp-task__title {
+  display: -webkit-box;
+  margin: calc(3px * var(--ui-scale)) 0 calc(6px * var(--ui-scale));
+  overflow: hidden;
+  color: var(--fg);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.003em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.insp-task__foot {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--ui-scale));
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: calc(11px * var(--ui-scale));
+  white-space: nowrap;
+}
+
+.insp-task__state {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.insp-task__comments {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Prompt queue */
+
+.insp-queue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(4px * var(--ui-scale));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insp-queue__item {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  min-height: calc(26px * var(--ui-scale));
+  padding: 2px 3px 2px calc(8px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: calc(11.5px * var(--ui-scale));
+}
+
+.insp-queue__n {
+  flex: none;
+  min-width: 1ch;
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.insp-queue__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Changed files */
+
+.insp-subhead {
+  margin: 0 0 calc(3px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+}
+
+.insp-files {
+  margin: 0 calc(-6px * var(--ui-scale));
+  padding: 0;
+  list-style: none;
+}
+
+.insp-file {
+  display: grid;
+  grid-template-columns: calc(12px * var(--ui-scale)) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  font-size: calc(11.5px * var(--ui-scale));
+  cursor: pointer;
+}
+
+.insp-file:hover {
+  background: var(--surface-hover);
+}
+
+.insp-file__status {
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 600;
+  text-align: center;
+}
+
+.insp-file__status--A {
+  color: var(--success);
+}
+
+.insp-file__status--D {
+  color: var(--danger);
+}
+
+.insp-file__status--U {
+  color: var(--warning);
+}
+
+/* The directory gives way first, from its start, so the file name always
+   shows; only a name longer than the whole row is cut, at its end. */
+.insp-file__path {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-ligatures: none;
+  white-space: nowrap;
+}
+
+.insp-file__dir {
+  flex: 0 100000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  color: var(--fg-subtle);
+}
+
+.insp-file__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.insp-file--settled .insp-file__name {
+  color: var(--fg-muted);
+}
+
+.insp-file__counts {
+  display: flex;
+  gap: calc(4px * var(--ui-scale));
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.insp-file__counts--faint {
+  grid-column: 3 / 5;
+  color: var(--fg-subtle);
+  font-weight: 400;
+}
+
+.insp-diffbar {
+  display: flex;
+  gap: 1px;
+  width: calc(29px * var(--ui-scale));
+  height: calc(6px * var(--ui-scale));
+}
+
+.insp-diffbar__seg {
+  flex: 1;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+
+.insp-diffbar__seg--add {
+  background: var(--success);
+}
+
+.insp-diffbar__seg--del {
+  background: var(--danger);
+}
+
+.insp-more {
+  margin: calc(4px * var(--ui-scale)) 0 0;
+  padding-left: calc(20px * var(--ui-scale));
+  color: var(--fg-subtle);
+  font-size: calc(11px * var(--ui-scale));
+}
+
+/* Recent activity */
+
+.insp-activity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(2px * var(--ui-scale));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insp-event {
+  display: grid;
+  grid-template-columns: calc(34px * var(--ui-scale)) calc(6px * var(--ui-scale)) minmax(0, 1fr);
+  gap: calc(8px * var(--ui-scale));
+  align-items: baseline;
+  padding: 1px 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.45;
+}
+
+.insp-event time {
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* On the first line, whatever the text wraps to. */
+.insp-event__dot {
+  align-self: start;
+  justify-self: center;
+  margin-top: calc((1.45em - 5px) / 2);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+}
+
+.insp-event__dot--turn-start {
+  background: var(--state-working);
+}
+
+.insp-event__dot--permission {
+  background: var(--state-waiting);
+}
+
+.insp-event__dot--turn-end {
+  background: var(--state-yours);
+}
+
+.insp-event__dot--dropped {
+  background: var(--danger);
+}
+
+.insp-event__dot--exit {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--state-idle);
+}
+
+.insp-event__text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* No pane in focus */
+
+.insp-none {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(6px * var(--ui-scale));
+  /* Sits a little above the middle, where the eye expects it. */
+  padding: calc(24px * var(--ui-scale)) calc(24px * var(--ui-scale)) 18%;
+  text-align: center;
+}
+
+.insp-none__close {
+  position: absolute;
+  top: calc(10px * var(--ui-scale));
+  right: calc(10px * var(--ui-scale));
+}
+
+/* The header's monogram with no one in it. */
+.insp-none__mark {
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  margin-bottom: calc(4px * var(--ui-scale));
+  border: 1px dashed var(--line-strong);
+  border-radius: calc(7px * var(--ui-scale));
+}
+
+.insp-none__title {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.insp-none__body {
+  max-width: 28ch;
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.5;
+}
+
+/* A narrow column keeps the essentials: the agent's version and the label
+   of the diff action go first (the button keeps its name for assistive
+   technology). */
+@container insp (max-width: 280px) {
+  .insp-head__version,
+  .insp-link__label--optional {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector--drawer .inspector__panel {
+    animation: none;
+  }
+
+  .inspector__grip::before,
+  .insp-section__toggle .inspector-glyph,
+  .insp-ring__value {
+    transition: none;
+  }
 }

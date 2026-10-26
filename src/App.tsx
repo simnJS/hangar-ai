@@ -951,6 +951,7 @@ export default function App() {
                 activeWorkspaceId={activeWorkspace.id}
                 pane={panes.find((p) => p.id === focusedPaneId) ?? null}
                 paneIndex={focusedPaneId ? order.indexOf(focusedPaneId) + 1 || null : null}
+                shells={shells}
                 width={state.settings.inspectorWidth}
                 onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
                 collapsed={state.settings.inspectorCollapsed}
