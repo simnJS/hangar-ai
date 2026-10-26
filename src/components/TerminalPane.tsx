@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -29,12 +29,15 @@ import {
   useConflict,
   type AgentActivity,
 } from "../lib/agentState";
-import { Icon } from "./Icon";
+import { computeContextGauge, type ContextGauge } from "../lib/context";
 import {
-  computeContextGauge,
-  formatTokens,
-  type ContextGauge,
-} from "../lib/context";
+  clearPaneInsight,
+  getPaneInsight,
+  recordEditedFile,
+  recordPaneEvent,
+  updatePaneInsight,
+  type PaneEventKind,
+} from "../lib/paneInsight";
 import { subscribePty } from "../lib/ptyBus";
 import { registerFinder, registerTerminal } from "../lib/terminalRegistry";
 import { attachWebgl, WEBGL_PARK_MS } from "../lib/webgl";
@@ -44,6 +47,19 @@ import { notify } from "../lib/notify";
 import { usePaneDrag } from "./PaneGrid";
 import { CommandMenu } from "./CommandMenu";
 import { TerminalSearch } from "./TerminalSearch";
+import { StateGlyph } from "./StateGlyph";
+import { PaneIcon } from "./PaneIcon";
+import { PaneGauge } from "./PaneGauge";
+import { PaneMenu, type PaneMenuItem } from "./PaneMenu";
+import {
+  fileBaseName,
+  firstLine,
+  newlyQueued,
+  paneGlyphState,
+  shellShortName,
+  shortSessionId,
+  type PaneStatus,
+} from "./PaneStatus";
 import {
   claim,
   isResumable,
@@ -65,7 +81,7 @@ import {
   type ShellInfo,
 } from "../types";
 
-type Status = "starting" | "running" | "exited";
+type Status = PaneStatus;
 
 interface Props {
   pane: Pane;
@@ -101,11 +117,16 @@ interface Props {
   /** `null` when the conversation the pane held has nothing left to resume. */
   onSessionCaptured: (sessionId: string | null) => void;
   onRestart: () => void;
-  onSplit: () => void;
+  /** Without a direction, the pane's longer side decides. */
+  onSplit: (dir?: "row" | "col") => void;
   onClose: () => void;
   onOpenSessions: () => void;
   /** Opens what changed in the pane's folder; no button without it. */
   onShowDiff?: () => void;
+  /** This pane is the one drawn over the whole grid. */
+  zoomed: boolean;
+  /** Zooms onto this pane, or back out; absent while it is the only one. */
+  onToggleZoom?: () => void;
   /** Writes the command out — to this pane, or to all of them if it says so. */
   onRunCommand: (command: SavedCommand) => void;
   onEditCommand: (command: SavedCommand, scope: CommandScope) => void;
@@ -139,6 +160,8 @@ export function TerminalPane({
   onClose,
   onOpenSessions,
   onShowDiff,
+  zoomed,
+  onToggleZoom,
   onRunCommand,
   onEditCommand,
   onRemoveCommand,
@@ -148,13 +171,29 @@ export function TerminalPane({
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const commandsRef = useRef<HTMLButtonElement>(null);
+  const diffRef = useRef<HTMLButtonElement>(null);
+  const zoomRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
   const [status, setStatus] = useState<Status>("starting");
   /** The pane handed control back while you were looking somewhere else. */
   const [attention, setAttention] = useState(false);
   /** Where the agent stands in its context window, from its transcript. */
   const [context, setContext] = useState<ContextGauge | null>(null);
-  /** Open per pane, not per workspace: two panes can have their own menu. */
-  const [commandsOpen, setCommandsOpen] = useState(false);
+  /**
+   * Open per pane, not per workspace: two panes can have their own menu. It
+   * hangs off the ⚡ button, or off "…" when a narrow header folded ⚡ into it.
+   */
+  const [commandsOpen, setCommandsOpen] = useState<"button" | "more" | null>(null);
+  /**
+   * The "…" menu, while open, and which header buttons a narrow pane had
+   * folded away when it opened — those join the menu instead.
+   */
+  const [more, setMore] = useState<{
+    commands: boolean;
+    diff: boolean;
+    zoom: boolean;
+  } | null>(null);
   /** Where the agent stands — see lib/agentState. */
   const [activity, setActivity] = useState<AgentActivity>("idle");
   /**
@@ -420,11 +459,24 @@ export function TerminalPane({
     });
 
     /**
+     * A line in the pane's history, for the inspector. An agent that saves a
+     * file five times running gets one line for it, not five.
+     */
+    function record(kind: PaneEventKind, text: string) {
+      if (disposed) return;
+      const last = getPaneInsight(pane.id).events[0];
+      if (kind === "edit" && last?.kind === "edit" && last.text === text) return;
+      recordPaneEvent(pane.id, kind, text);
+    }
+
+    /**
      * What the hangar-bridge mod reports from inside this pane's Claude Code.
      * The first report of any kind is proof the mod loaded, and from then on
      * the guesses above stand down.
      */
     let bridgeModel: string | null = null;
+    /** The conversation the pane's history last said it was in. */
+    let reportedSession: string | null = null;
     /** The pane whose file this one is asking about, while it asks. */
     let conflictWith: string | null = null;
     function captureSession(sessionId: string) {
@@ -434,21 +486,57 @@ export function TerminalPane({
       claim(sessionId);
       onSessionCaptured(sessionId);
     }
+    function sessionLine(sessionId: string, resumed: boolean) {
+      return resumed
+        ? tRef.current("pane.event.resumed", { id: shortSessionId(sessionId) })
+        : tRef.current("pane.event.newSession");
+    }
     function onBridgeEvent(event: BridgeEvent) {
       if (disposed) return;
       if (event.kind !== "end") setBridged(true);
       switch (event.kind) {
-        case "hello":
+        case "hello": {
+          // Read before the capture below makes it this session's id.
+          const resumed = event.sessionId === sessionIdRef.current;
           bridgeModel = event.model;
+          reportedSession = event.sessionId;
+          updatePaneInsight(pane.id, {
+            model: event.model || null,
+            agentVersion: event.version || null,
+            sessionSince: Date.now(),
+            turnStartedAt: null,
+          });
+          record("session", sessionLine(event.sessionId, resumed));
           captureSession(event.sessionId);
           break;
+        }
         case "session":
+          // /clear, /resume and a branch move the pane to another
+          // conversation; the first start repeats what the hello said.
+          if (reportedSession !== null && event.sessionId !== reportedSession) {
+            reportedSession = event.sessionId;
+            updatePaneInsight(pane.id, { sessionSince: Date.now() });
+            record("session", sessionLine(event.sessionId, event.source === "resume"));
+          }
           captureSession(event.sessionId);
           break;
         case "turn":
           if (event.phase === "start") {
             setActivity("working");
+            updatePaneInsight(pane.id, { turnStartedAt: Date.now() });
+            record("turn-start", tRef.current("pane.event.turnStart"));
           } else {
+            const answer = firstLine(event.answer);
+            updatePaneInsight(pane.id, { turnStartedAt: null, lastAnswer: answer || null });
+            record(
+              "turn-end",
+              event.reason === "aborted"
+                ? tRef.current("pane.event.aborted")
+                : answer ||
+                    tRef.current(
+                      event.reason === "answer" ? "pane.event.turnEnd" : "pane.event.failed",
+                    ),
+            );
             handBack(
               event.answer ||
                 tRef.current(event.reason === "aborted" ? "notify.aborted" : "notify.settled"),
@@ -468,6 +556,14 @@ export function TerminalPane({
           }
           if (event.waiting) {
             setActivity("waiting");
+            record(
+              "permission",
+              event.conflict
+                ? tRef.current("pane.event.conflict", { name: event.conflict })
+                : event.tool
+                  ? tRef.current("pane.event.permission", { tool: event.tool })
+                  : tRef.current("pane.event.permissionAny"),
+            );
             announce(
               event.conflict
                 ? tRef.current("notify.conflict", { name: event.conflict })
@@ -492,9 +588,16 @@ export function TerminalPane({
                 },
           );
           setPlanLimits(event.rateLimits);
+          // The gauge itself is published from the one the header shows.
+          updatePaneInsight(pane.id, { costUsd: event.costUsd });
           break;
         }
+        case "edit":
+          recordEditedFile(pane.id, event.file);
+          record("edit", tRef.current("pane.event.edit", { file: fileBaseName(event.file) }));
+          break;
         case "dropped":
+          record("dropped", tRef.current("pane.event.dropped", { text: firstLine(event.text) }));
           announce(tRef.current("notify.dropped", { text: event.text }));
           break;
         case "end":
@@ -506,6 +609,9 @@ export function TerminalPane({
           setBridged(false);
           setBridgeContext(null);
           setActivity("idle");
+          reportedSession = null;
+          updatePaneInsight(pane.id, { turnStartedAt: null });
+          record("exit", tRef.current("pane.event.end"));
           break;
       }
     }
@@ -551,6 +657,8 @@ export function TerminalPane({
             }
             setBridged(false);
             setActivity("idle");
+            updatePaneInsight(pane.id, { turnStartedAt: null });
+            record("exit", tRef.current("pane.event.exit"));
           },
         );
         // The cleanup may have run during that await, in which case it saw
@@ -662,6 +770,12 @@ export function TerminalPane({
           if (command) {
             if (resumeId) claim(resumeId);
             await ptyWrite(pane.id, `${command}\r`).catch(() => undefined);
+            // A Claude Code with the mod says so itself in its hello, with
+            // the id it really landed on; the other agents only have this.
+            if (pane.agent !== "claude" || !settingsRef.current.claudeBridge) {
+              updatePaneInsight(pane.id, { sessionSince: Date.now() });
+              record("session", sessionLine(resumeId ?? "", resumeId !== null));
+            }
           }
         } else if (pane.agent === "shell") {
           return;
@@ -835,11 +949,57 @@ export function TerminalPane({
 
   const gauge = (bridged && bridgeContext) || context;
 
-  // The menu is placed from the button's position on screen, and a hidden
-  // workspace has none — leaving it open would put it back somewhere else
-  // entirely on the way back.
+  /*
+   * The pane's insight (lib/paneInsight), for the inspector, the toolbar and
+   * the palette. The bridge's events write theirs as they arrive; what the
+   * pane only knows as state is published when that state changes. Each write
+   * that changes nothing is dropped by the store, so none of this re-renders
+   * a reader for nothing.
+   */
+
+  // The gauge the header shows, whichever source it came from.
   useEffect(() => {
-    if (!visible) setCommandsOpen(false);
+    updatePaneInsight(pane.id, { context: gauge });
+  }, [pane.id, gauge]);
+
+  // Without the mod, the transcript is the one place that names the model.
+  useEffect(() => {
+    if (!bridged && context?.model) updatePaneInsight(pane.id, { model: context.model });
+  }, [pane.id, bridged, context]);
+
+  // The queue as the mod holds it, and a line for each prompt that joins it.
+  const queueRef = useRef(queue);
+  useEffect(() => {
+    const added = newlyQueued(queueRef.current, queue);
+    queueRef.current = queue;
+    updatePaneInsight(pane.id, { queue });
+    for (const entry of added) {
+      recordPaneEvent(
+        pane.id,
+        "queued",
+        tRef.current("pane.event.queued", { text: firstLine(entry.text) }),
+      );
+    }
+  }, [pane.id, queue]);
+
+  // Forgotten with the pane — a restart is a new id, with a history of its
+  // own — except when the pane moves to another window, for the same reason
+  // as its activity above.
+  useEffect(
+    () => () => {
+      if (!isHandingOver(pane.id)) clearPaneInsight(pane.id);
+    },
+    [pane.id],
+  );
+
+  // The menus are placed from their button's position on screen, and a
+  // hidden workspace has none — leaving one open would put it back somewhere
+  // else entirely on the way back.
+  useEffect(() => {
+    if (!visible) {
+      setCommandsOpen(null);
+      setMore(null);
+    }
   }, [visible]);
 
   // Drawn on the GPU while on screen. A pane that leaves the screen keeps its
@@ -897,7 +1057,7 @@ export function TerminalPane({
    * that opened the menu gave it, and which swallows everything typed at it.
    */
   function closeCommands() {
-    setCommandsOpen(false);
+    setCommandsOpen(null);
     termRef.current?.focus();
   }
 
@@ -905,6 +1065,123 @@ export function TerminalPane({
     onRunCommand(command);
     closeCommands();
   }
+
+  /** Same as the commands: typing is what comes after a menu, whatever it did. */
+  function closeMore() {
+    setMore(null);
+    termRef.current?.focus();
+  }
+
+  function toggleMore() {
+    if (more) {
+      closeMore();
+      return;
+    }
+    setCommandsOpen(null);
+    // A narrow header folds some of its buttons away; which ones is read off
+    // the screen rather than off the breakpoints, which live in the CSS.
+    const folded = (button: HTMLElement | null) =>
+      Boolean(button) && button!.getClientRects().length === 0;
+    setMore({
+      commands: folded(commandsRef.current),
+      diff: folded(diffRef.current),
+      zoom: folded(zoomRef.current),
+    });
+  }
+
+  /** Runs an entry once the menu is gone, so whatever it opens gets the keyboard. */
+  const pick = (action: () => void) => () => {
+    closeMore();
+    action();
+  };
+
+  const menuItems: PaneMenuItem[] = [];
+  if (more) {
+    menuItems.push({
+      id: "restart",
+      label: t("pane.restart"),
+      icon: "resume",
+      keys: shortcut("pane.restart"),
+      onSelect: pick(onRestart),
+    });
+    if (agentMeta?.resumable) {
+      menuItems.push({
+        id: "sessions",
+        label: t("cmd.pane.sessions"),
+        icon: "clock",
+        keys: shortcut("pane.sessions"),
+        onSelect: pick(onOpenSessions),
+      });
+    }
+    menuItems.push(
+      {
+        id: "split-right",
+        label: t("cmd.pane.splitRight"),
+        icon: "splitRight",
+        keys: shortcut("pane.splitRight"),
+        separated: true,
+        onSelect: pick(() => onSplit("row")),
+      },
+      {
+        id: "split-down",
+        label: t("cmd.pane.splitDown"),
+        icon: "splitDown",
+        keys: shortcut("pane.splitDown"),
+        onSelect: pick(() => onSplit("col")),
+      },
+    );
+    if (more.zoom && onToggleZoom) {
+      menuItems.push({
+        id: "zoom",
+        label: t(zoomed ? "zoom.restore" : "pane.menuZoom"),
+        icon: zoomed ? "unzoom" : "zoom",
+        keys: shortcut("pane.zoom"),
+        separated: true,
+        onSelect: pick(onToggleZoom),
+      });
+    }
+    if (more.commands) {
+      menuItems.push({
+        id: "commands",
+        label: t("commands.menu"),
+        icon: "bolt",
+        separated: !more.zoom,
+        onSelect: pick(() => setCommandsOpen("more")),
+      });
+    }
+    if (more.diff && onShowDiff) {
+      menuItems.push({
+        id: "diff",
+        label: t("pane.menuDiff"),
+        icon: "diff",
+        separated: !more.zoom && !more.commands,
+        onSelect: pick(onShowDiff),
+      });
+    }
+  }
+
+  // What the header says about the pane: the shell's life until it runs,
+  // then the agent's state — or nothing more than a resting ring for a plain
+  // shell, whose builds and test runs are not an agent at work.
+  const glyph = paneGlyphState(status, reportsActivity ? activity : null);
+  const stateLabel = t(
+    `pane.state.${status !== "running" ? status : reportsActivity ? activity : "running"}` as const,
+  );
+  const stateSource =
+    status === "running" && reportsActivity
+      ? t(bridged ? "pane.state.reported" : "pane.state.guessed")
+      : "";
+  const stateTitle = stateSource ? `${stateLabel} · ${stateSource}` : stateLabel;
+  const stateShort =
+    glyph === "waiting"
+      ? t("pane.state.waitingShort")
+      : glyph === "yours"
+        ? t("pane.state.yoursShort")
+        : stateLabel;
+  const showState = status !== "running" || reportsActivity;
+
+  const shellName = shellShortName(shell) ?? t("pane.shell");
+  const agentLabel = agentMeta?.label ?? pane.agent;
 
   return (
     <section
@@ -917,6 +1194,10 @@ export function TerminalPane({
         onPointerDown={(event) => drag.begin(pane.id, event)}
         title={t("pane.move")}
       >
+        <span className="pane__glyph" title={stateTitle}>
+          <StateGlyph state={glyph} />
+        </span>
+
         {/*
           Only the first nine panes get the shortcut hint: there are nine
           "focus pane N" commands, and the user is free to unbind any of them.
@@ -924,7 +1205,7 @@ export function TerminalPane({
           that does not exist.
         */}
         <span
-          className="pane__index"
+          className="pane__name"
           title={
             jumpKeys
               ? t("pane.jump", { keys: jumpKeys })
@@ -934,75 +1215,96 @@ export function TerminalPane({
           {pane.name}
         </span>
 
-        <select
-          className="pane__agent"
-          value={pane.agent}
-          onChange={(e) => onAgentChange(e.target.value as AgentId)}
-          title={t("pane.agent")}
-        >
-          {AGENTS.map((agent) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.label}
-              {agent.id !== "shell" && !availableAgents.includes(agent.id)
-                ? t("pane.missing")
-                : ""}
-            </option>
-          ))}
-        </select>
-
-        <select
-          className="pane__agent pane__agent--shell"
-          value={pane.shellId ?? ""}
-          onChange={(e) => onShellChange(e.target.value || null)}
-          title={
-            shell ? t("pane.shellTitle", { program: shell.program }) : t("pane.shell")
-          }
-        >
-          <option value="">
-            {t("pane.inherited", { name: shell ? shell.label : t("pane.shell") })}
-          </option>
-          {shells.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-
-        {agentMeta?.resumable && (
-          <button
-            className={`pane__session ${pane.sessionId ? "is-set" : ""}`}
-            onClick={onOpenSessions}
-            title={
-              pane.sessionId
-                ? t("pane.resuming", { id: pane.sessionId })
-                : t("pane.noSession")
-            }
-          >
-            <Icon name="history" size={12} />
-            {pane.sessionId ? pane.sessionId.slice(0, 8) : t("pane.newSession")}
-          </button>
-        )}
-
-        {gauge && (
-          <span
-            className={`pane__ctx ${
-              gauge.pct >= 90 ? "pane__ctx--hot" : gauge.pct >= 70 ? "pane__ctx--warn" : ""
-            }`}
-            title={t("pane.context", {
-              used: formatTokens(gauge.usedTokens),
-              window: formatTokens(gauge.window),
-              pct: gauge.pct,
-              model: gauge.model ?? pane.agent,
-            })}
-          >
-            <span className="pane__ctxbar">
-              <span className="pane__ctxfill" style={{ width: `${gauge.pct}%` }} />
-            </span>
-            <span className="pane__ctxpct">{gauge.pct}%</span>
+        {/* The native select stays, laid transparently over its label: the
+            keyboard, the screen reader and the platform's own list all keep
+            working, while the header shows just the agent's name. */}
+        <span className="pane__pick pane__pick--agent">
+          <span className="pane__pick-text pane__pick-text--long">{agentLabel}</span>
+          {/* "Claude", "Gemini": the first word is the name, for a narrow pane. */}
+          <span className="pane__pick-text pane__pick-text--short" aria-hidden="true">
+            {agentLabel.split(" ")[0]}
           </span>
-        )}
+          <PaneIcon name="updown" size={10} />
+          <select
+            className="pane__select"
+            value={pane.agent}
+            onChange={(e) => onAgentChange(e.target.value as AgentId)}
+            title={t("pane.agent")}
+            aria-label={t("pane.agent")}
+          >
+            {AGENTS.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.label}
+                {agent.id !== "shell" && !availableAgents.includes(agent.id)
+                  ? t("pane.missing")
+                  : ""}
+              </option>
+            ))}
+          </select>
+        </span>
+
+        <span className="pane__meta">
+          <span className="pane__pick pane__pick--shell">
+            <span className="pane__pick-text">{shellName}</span>
+            <select
+              className="pane__select"
+              value={pane.shellId ?? ""}
+              onChange={(e) => onShellChange(e.target.value || null)}
+              title={
+                shell ? t("pane.shellTitle", { program: shell.program }) : t("pane.shell")
+              }
+              aria-label={t("pane.shell")}
+            >
+              <option value="">
+                {t("pane.inherited", { name: shell ? shell.label : t("pane.shell") })}
+              </option>
+              {shells.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </span>
+
+          {agentMeta?.resumable && (
+            <button
+              className={`pane__session ${pane.sessionId ? "is-set" : ""}`}
+              onClick={onOpenSessions}
+              title={
+                pane.sessionId
+                  ? t("pane.resuming", { id: pane.sessionId })
+                  : t("pane.noSession")
+              }
+              aria-label={
+                pane.sessionId
+                  ? t("pane.resuming", { id: pane.sessionId })
+                  : t("pane.noSession")
+              }
+            >
+              <PaneIcon name="resume" size={10} />
+              <span className="pane__session-id">
+                {pane.sessionId ? `${shortSessionId(pane.sessionId)}…` : t("pane.newSession")}
+              </span>
+            </button>
+          )}
+
+          {gauge && <PaneGauge gauge={gauge} fallbackModel={pane.agent} />}
+        </span>
 
         <span className="pane__spacer" />
+
+        {showState && (
+          <span
+            className={`pane__state pane__state--${glyph}`}
+            title={stateTitle}
+            role="status"
+          >
+            <span className="pane__state-long">{stateLabel}</span>
+            <span className="pane__state-short" aria-hidden="true">
+              {stateShort}
+            </span>
+          </span>
+        )}
 
         {queue.length > 0 && (
           <button
@@ -1011,7 +1313,7 @@ export function TerminalPane({
             title={t("pane.queue", { n: queue.length })}
             aria-label={t("pane.queue", { n: queue.length })}
           >
-            <Icon name="hourglass" size={12} />
+            <PaneIcon name="tray" size={11} />
             {queue.length}
           </button>
         )}
@@ -1022,7 +1324,7 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.conflict", { name: conflictFrom })}
           >
-            <Icon name="alert" size={13} />
+            <PaneIcon name="warn" size={13} />
           </span>
         )}
         {agentMissing && (
@@ -1032,11 +1334,11 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.notOnPath", { agent: pane.agent })}
           >
-            <Icon name="alert" size={13} />
+            <PaneIcon name="warn" size={13} />
           </span>
         )}
         {/* An agent pane says the same through its state; a shell keeps the
-            badge for the build that finished while you were away. */}
+            bell for the build that finished while you were away. */}
         {attention && !reportsActivity && (
           <span
             className="pane__attn"
@@ -1044,62 +1346,86 @@ export function TerminalPane({
             role="img"
             aria-label={t("pane.attention")}
           >
-            <Icon name="bell" size={13} />
+            <PaneIcon name="bell" size={13} />
           </span>
         )}
-        <PaneState
-          status={status}
-          activity={reportsActivity ? activity : null}
-          bridged={bridged}
-        />
-        {/* A button among the other pane actions, which the header's drag
-            already steps aside for — it ignores a press that lands on one. */}
-        <button
-          ref={commandsRef}
-          className={`pane__action ${commandsOpen ? "is-open" : ""}`}
-          onClick={() => (commandsOpen ? closeCommands() : setCommandsOpen(true))}
-          title={t("commands.menu")}
-          aria-label={t("commands.menu")}
-          aria-haspopup="menu"
-          aria-expanded={commandsOpen}
-        >
-          <Icon name="zap" />
-        </button>
-        {onShowDiff && (
+        {/* A shell that died says how to bring it back, in so many words. */}
+        {status === "exited" && (
           <button
-            className="pane__action"
-            onClick={onShowDiff}
-            title={t("diff.open")}
-            aria-label={t("diff.open")}
+            className="pane__revive"
+            onClick={onRestart}
+            title={withKeys(t("pane.restart"), "pane.restart")}
           >
-            <Icon name="diff" />
+            <PaneIcon name="resume" size={11} />
+            {t("pane.restartNow")}
           </button>
         )}
-        <button
-          className="pane__action"
-          onClick={onRestart}
-          title={withKeys(t("pane.restart"), "pane.restart")}
-          aria-label={t("pane.restart")}
+
+        {/* Buttons, which the header's drag steps aside for — it ignores a
+            press that lands on one. Always there on the focused pane; on the
+            others they show on hover or keyboard focus, over the status, so
+            a header at rest says only where its pane stands. */}
+        <span
+          className="pane__actions"
+          role="group"
+          aria-label={t("pane.actions", { name: pane.name })}
         >
-          <Icon name="restart" />
-        </button>
-        <button
-          className="pane__action"
-          onClick={onSplit}
-          title={withKeys(t("pane.split"), "pane.split")}
-          aria-label={t("pane.split")}
-        >
-          <Icon name="split" />
-        </button>
-        <button
-          className="pane__action pane__action--close"
-          onClick={onClose}
-          disabled={!canClose}
-          title={canClose ? withKeys(t("pane.close"), "pane.close") : t("pane.closeLast")}
-          aria-label={t("pane.close")}
-        >
-          <Icon name="close" />
-        </button>
+          <button
+            ref={commandsRef}
+            className={`pane__action pane__action--cmd ${commandsOpen === "button" ? "is-open" : ""}`}
+            onClick={() => (commandsOpen ? closeCommands() : setCommandsOpen("button"))}
+            title={t("commands.menu")}
+            aria-label={t("commands.menu")}
+            aria-haspopup="menu"
+            aria-expanded={commandsOpen === "button"}
+          >
+            <PaneIcon name="bolt" />
+          </button>
+          {onShowDiff && (
+            <button
+              ref={diffRef}
+              className="pane__action pane__action--diff"
+              onClick={onShowDiff}
+              title={t("diff.open")}
+              aria-label={t("diff.open")}
+            >
+              <PaneIcon name="diff" />
+            </button>
+          )}
+          {onToggleZoom && (
+            <button
+              ref={zoomRef}
+              className="pane__action pane__action--zoom"
+              onClick={onToggleZoom}
+              title={withKeys(t(zoomed ? "zoom.restore" : "pane.zoomIn"), "pane.zoom")}
+              aria-label={t(zoomed ? "zoom.restore" : "pane.zoomIn")}
+              aria-pressed={zoomed}
+            >
+              <PaneIcon name={zoomed ? "unzoom" : "zoom"} />
+            </button>
+          )}
+          <button
+            ref={moreRef}
+            className={`pane__action pane__action--more ${more || commandsOpen === "more" ? "is-open" : ""}`}
+            onClick={toggleMore}
+            title={t("pane.more")}
+            aria-label={t("pane.more")}
+            aria-haspopup="menu"
+            aria-expanded={Boolean(more)}
+            aria-controls={more ? menuId : undefined}
+          >
+            <PaneIcon name="more" />
+          </button>
+          <button
+            className="pane__action pane__action--close"
+            onClick={onClose}
+            disabled={!canClose}
+            title={canClose ? withKeys(t("pane.close"), "pane.close") : t("pane.closeLast")}
+            aria-label={t("pane.close")}
+          >
+            <PaneIcon name="close" />
+          </button>
+        </span>
       </header>
 
       {/* The search bar floats over the terminal from beside its host rather
@@ -1121,65 +1447,36 @@ export function TerminalPane({
         )}
       </div>
 
-      {/* Outside the header on purpose: nested in it, a press anywhere in the
+      {/* Outside the header on purpose: nested in it, a press anywhere in a
           menu that is not on a control would reach the bar's drag handler. */}
       {commandsOpen && (
         <CommandMenu
-          anchorRef={commandsRef}
+          anchorRef={commandsOpen === "more" ? moreRef : commandsRef}
           workspaceCommands={workspaceCommands}
           globalCommands={globalCommands}
           onRun={runCommand}
           onEdit={(command, scope) => {
-            setCommandsOpen(false);
+            setCommandsOpen(null);
             onEditCommand(command, scope);
           }}
           onRemove={onRemoveCommand}
           onAdd={() => {
-            setCommandsOpen(false);
+            setCommandsOpen(null);
             onAddCommand();
           }}
           onClose={closeCommands}
         />
       )}
-    </section>
-  );
-}
 
-/**
- * The dot at the end of a pane's header. Until the shell runs it says that
- * much; after, for an agent, where the agent stands — with a word for the one
- * state that needs you to act, since a colour alone is easy to miss in a grid
- * of eight.
- */
-function PaneState({
-  status,
-  activity,
-  bridged,
-}: {
-  status: Status;
-  /** null for a plain shell, which has no agent to report on. */
-  activity: AgentActivity | null;
-  bridged: boolean;
-}) {
-  const t = useT();
-  const state = status !== "running" ? status : (activity ?? "running");
-  const label = t(`pane.state.${state}` as const);
-  const source =
-    status === "running" && activity
-      ? t(bridged ? "pane.state.reported" : "pane.state.guessed")
-      : "";
-  const title = source ? `${label} · ${source}` : label;
-  return (
-    <span
-      className={`pane__state pane__state--${state}`}
-      title={title}
-      role="status"
-      aria-label={title}
-    >
-      <span className="pane__state-dot" aria-hidden="true" />
-      {state === "waiting" && (
-        <span className="pane__state-word">{t("pane.state.waitingShort")}</span>
+      {more && (
+        <PaneMenu
+          id={menuId}
+          label={t("pane.menu", { name: pane.name })}
+          anchorRef={moreRef}
+          items={menuItems}
+          onClose={closeMore}
+        />
       )}
-    </span>
+    </section>
   );
 }

@@ -915,7 +915,7 @@ export default function App() {
                   zoomed={Boolean(zoomByWorkspace[ws.id])}
                   onZoomChange={(on) => setZoom(ws.id, on)}
                   onFocusPane={(paneId) => focusPane(ws.id, paneId)}
-                  onSplitPane={(paneId) => splitPane(ws.id, paneId)}
+                  onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
                   onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
                   onOpenSessions={setPickerPaneId}
                 />

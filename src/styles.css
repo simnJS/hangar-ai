@@ -1219,13 +1219,25 @@ body.is-sorting * {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--border);
+  background: var(--sep);
 }
 
 .grid__slot {
   position: absolute;
   display: flex;
   overflow: hidden;
+}
+
+/* The 1px separators between panes. A pane that does not touch the grid's
+   left or top edge gives its first column or row to one, inside its own slot:
+   drawn over the slots instead, a separator would cover the focus ring of the
+   pane beside it. */
+.grid__slot.is-inner-x {
+  border-left: 1px solid var(--sep);
+}
+
+.grid__slot.is-inner-y {
+  border-top: 1px solid var(--sep);
 }
 
 .grid__slot > * {
@@ -1245,7 +1257,7 @@ body.is-sorting * {
    unmounted, which keeps their PTYs alive and — since the fit addon ignores a
    host it cannot measure — at the size they had. */
 .grid--zoomed {
-  --zoombar-h: 28px;
+  --zoombar-h: calc(28px * var(--ui-scale));
 }
 
 .grid__slot.is-behind {
@@ -1266,52 +1278,73 @@ body.is-sorting * {
   height: var(--zoombar-h);
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 6px;
-  background: var(--bg-sunken);
-  border-bottom: 1px solid var(--accent);
-  overflow-x: auto;
-  scrollbar-width: none;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  background: var(--pane-head);
+  box-shadow: inset 0 -1px 0 var(--sep);
+  container: zoombar / inline-size;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--fg-muted);
+  white-space: nowrap;
 }
 
 .zoombar__tag {
   flex: none;
-  height: 17px;
-  padding: 0 7px;
-  margin-right: 6px;
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--accent-fg);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  color: var(--accent-hi);
+  font-family: var(--mono);
   font-size: calc(10px * var(--ui-scale));
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: help;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-.zoombar__tab {
+.zoombar__name {
   flex: none;
-  border: 0;
-  background: transparent;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.zoombar__others {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zoombar__dot {
+  margin-right: 8px;
   color: var(--fg-subtle);
-  font-size: calc(11px * var(--ui-scale));
-  font-weight: 550;
-  padding: 3px 9px;
-  white-space: nowrap;
+}
+
+/* The panes out of sight, each with its state, one click from the grid. */
+.zoombar__panes {
+  display: flex;
+  gap: 1px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.zoombar__pane {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: calc(20px * var(--ui-scale));
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-weight: 500;
   cursor: pointer;
-  transition: color var(--dur), background var(--dur);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
-.zoombar__tab:hover {
+.zoombar__pane:hover {
   color: var(--fg);
-  background: var(--surface-hover);
-}
-
-.zoombar__tab.is-active {
-  color: var(--fg);
-  background: var(--surface-active);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--line-strong);
 }
 
 .zoombar__spacer {
@@ -1320,19 +1353,32 @@ body.is-sorting * {
 
 .zoombar__restore {
   flex: none;
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: calc(11px * var(--ui-scale));
-  padding: 2px 9px;
-  white-space: nowrap;
+  height: calc(22px * var(--ui-scale));
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg);
+  font-weight: 500;
   cursor: pointer;
-  transition: color var(--dur), border-color var(--dur);
+  transition: background var(--dur) var(--ease);
 }
 
 .zoombar__restore:hover {
-  color: var(--fg);
-  border-color: var(--accent);
+  background: var(--line-strong);
+}
+
+.zoombar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* A narrow grid keeps the facts and the way out; the sentence goes first. */
+@container zoombar (max-width: 55em) {
+  .zoombar__others {
+    display: none;
+  }
 }
 
 /* ---------- File drop ---------- */
@@ -1346,50 +1392,85 @@ body.is-sorting * {
   display: grid;
   place-items: center;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .grid__filedrop-label {
-  padding: 6px 12px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--accent);
+  padding: 5px 11px;
+  border-radius: var(--radius);
+  background: var(--chrome-bar);
+  box-shadow: 0 0 0 1px var(--line-strong), 0 10px 28px -10px var(--shadow);
   color: var(--fg);
   font-size: calc(12px * var(--ui-scale));
   font-weight: 550;
 }
 
+/*
+ * The resize handles. Invisible at rest — the separator under them is the
+ * slot's own border — and an accent hairline exactly over it while hovered or
+ * dragged. The element is wider than the line, and its ::after wider still,
+ * so the grab area stays generous without moving any track.
+ */
 .splitter {
   position: absolute;
   z-index: 3;
-  background: var(--border);
-  transition: background var(--dur);
   touch-action: none;
 }
 
 /* A row split is separated by a vertical bar, hence the col-resize cursor. */
 .splitter--col {
-  width: 5px;
-  margin-left: -2.5px;
+  width: 9px;
+  margin-left: -4px;
   cursor: col-resize;
 }
 
 .splitter--row {
-  height: 5px;
-  margin-top: -2.5px;
+  height: 9px;
+  margin-top: -4px;
   cursor: row-resize;
 }
 
-.splitter:hover,
-.splitter:active {
+/* Lands on the same pixels as the separator: the first column or row of the
+   pane after the split. */
+.splitter::before {
+  content: "";
+  position: absolute;
   background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
 }
 
-/* Widens the grab area well past the visible 5px without moving any track. */
+.splitter--col::before {
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+}
+
+.splitter--row::before {
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+}
+
+/* A short delay on the way in, so a pointer crossing the grid does not
+   flash every line it passes over. */
+.splitter:hover::before {
+  opacity: 1;
+  transition-delay: 80ms;
+}
+
+.splitter.is-active::before {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
 .splitter::after {
   content: "";
   position: absolute;
-  inset: -3px;
+  inset: -2px;
 }
 
 /* While a pane is being dragged the separators must not swallow the pointer,
@@ -1413,26 +1494,36 @@ body.is-resizing {
   position: absolute;
   z-index: 4;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  box-shadow: inset 0 0 0 2px var(--accent);
-  transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  transition:
+    left 90ms var(--ease),
+    top 90ms var(--ease),
+    width 90ms var(--ease),
+    height 90ms var(--ease);
 }
 
+/* The pane on the move, by name, just off the pointer. */
 .drag-ghost {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 60;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
+  margin: 10px 0 0 12px;
+  padding: 3px 9px;
+  visibility: hidden;
   pointer-events: none;
-  border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.75;
+  border-radius: var(--radius);
+  background: var(--chrome-bar);
+  box-shadow: 0 0 0 1px var(--accent), 0 10px 24px -10px var(--shadow);
+  color: var(--fg);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1440,31 +1531,61 @@ body.is-resizing {
   border: 0;
   overflow: hidden;
   background: var(--bg);
-  transition: box-shadow var(--dur);
 }
 
-/* Inset ring: marks the active pane without adding width that would push the
-   grid tracks around. */
-.pane--focused {
-  box-shadow: inset 0 0 0 1px var(--accent);
+/* The focus ring, over everything the pane draws — header and terminal both
+   paint over an inset shadow of the pane itself — and inset, so it adds no
+   width that would push the grid tracks around. */
+.pane::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--dur) var(--ease);
+}
+
+.pane--focused::after {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 66%, transparent);
 }
 
 /* A pane that finished while you were elsewhere keeps its outline until you
-   actually read it, so the desktop notification is never the only trace. */
-.pane--attn {
-  box-shadow: inset 0 0 0 1px var(--warning);
+   actually read it, so the desktop notification is never the only trace.
+   Amber, like everything that waits on you: in the accent it would pass for
+   the focused pane. */
+.pane--attn::after {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 80%, transparent);
 }
 
-/* Doubles as the drag handle for the whole pane. */
+/*
+ * The header: one line of status, and the drag handle for the whole pane. It
+ * is also the container its details answer to, dropping them one by one as
+ * the pane narrows (see the @container rules below). `em` here is the
+ * header's own font size, so those widths follow the interface size.
+ */
 .pane__bar {
+  --head-bg: var(--pane-head);
+  position: relative;
+  flex: none;
+  container: pane-bar / inline-size;
+  height: calc(30px * var(--ui-scale));
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px 4px 8px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  padding: 0 6px 0 10px;
+  background: var(--head-bg);
+  box-shadow: inset 0 -1px 0 var(--line);
+  font-size: calc(12px * var(--ui-scale));
+  white-space: nowrap;
   cursor: grab;
   touch-action: none;
+  user-select: none;
+  transition: background var(--dur) var(--ease);
+}
+
+.pane--focused .pane__bar {
+  --head-bg: var(--pane-head-focus);
 }
 
 body.is-dragging-pane .pane__bar {
@@ -1477,81 +1598,150 @@ body.is-dragging-pane .pane__bar {
   cursor: pointer;
 }
 
-/* Holds a short first name, not a digit: it grows with the word. */
-.pane__index {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
+.pane__bar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pane-icon {
+  display: block;
+  flex: none;
+  width: calc(var(--pane-icon, 14px) * var(--ui-scale));
+  height: calc(var(--pane-icon, 14px) * var(--ui-scale));
+}
+
+.pane__glyph {
+  flex: none;
   display: grid;
   place-items: center;
-  border-radius: 0;
-  background: var(--surface-active);
+  width: calc(10px * var(--ui-scale));
+}
+
+.pane__name {
+  flex: none;
   color: var(--fg-muted);
-  font-size: calc(10px * var(--ui-scale));
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  transition: color var(--dur) var(--ease);
 }
 
-.pane--focused .pane__index {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-.pane__agent {
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: calc(11.5px * var(--ui-scale));
-  font-weight: 550;
-  padding: 2px 4px;
-  border-radius: 0;
-  cursor: pointer;
-  outline: none;
-  max-width: 130px;
-}
-
-.pane__agent:hover {
-  background: var(--surface-hover);
+.pane--focused .pane__name {
   color: var(--fg);
 }
 
-.pane__agent option {
-  background: var(--bg-sunken);
-  color: var(--fg);
-}
-
-/* Secondary to the agent picker: narrower, and recedes until hovered. */
-.pane__agent--shell {
-  max-width: 96px;
-  color: var(--fg-subtle);
-  font-weight: 500;
-}
-
-.pane__session {
+/* A picker that reads as text: its label and a chevron, with the native
+   select stretched invisibly over both to take the click and the keyboard. */
+.pane__pick {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  border: 1px solid var(--border);
-  background: transparent;
+  height: calc(20px * var(--ui-scale));
+  padding: 0 4px 0 5px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.pane__pick:hover {
+  color: var(--fg);
+  background: var(--line-strong);
+}
+
+.pane__pick:has(.pane__select:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pane__pick-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane__pick-text--short {
+  display: none;
+}
+
+.pane__pick .pane-icon {
   color: var(--fg-subtle);
+}
+
+.pane__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  appearance: none;
+  font: inherit;
+}
+
+.pane__select option {
+  background: var(--chrome);
+  color: var(--fg);
+}
+
+/* The one thing in the header that gives way when nothing else can: the
+   agent's name ellipsizes rather than anything overlapping. */
+.pane__pick--agent {
+  margin-left: -1px;
+  flex: 0 1 auto;
+}
+
+/* Metadata: the shell, the session, the context — mono, a step down. */
+.pane__meta {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  font-family: ui-monospace, Consolas, monospace;
-  padding: 1px 6px;
-  border-radius: 0;
-  cursor: pointer;
-  transition: color var(--dur), border-color var(--dur), background var(--dur);
+  font-variant-ligatures: none;
+  color: var(--fg-muted);
+}
+
+.pane__pick--shell {
+  flex: none;
+  padding: 0 4px;
+  color: var(--fg-muted);
+}
+
+.pane__session {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: calc(18px * var(--ui-scale));
+  padding: 0 6px 0 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  color: var(--fg-muted);
+  font: inherit;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .pane__session:hover {
   color: var(--fg);
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
+  background: var(--line-strong);
 }
 
-.pane__session.is-set {
-  color: var(--accent);
-  border-color: var(--accent-ring);
+.pane__session .pane-icon {
+  color: var(--fg-subtle);
+}
+
+/* Nothing stored: an outline only, the way to pick one. */
+.pane__session:not(.is-set) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .pane__spacer {
@@ -1564,78 +1754,75 @@ body.is-dragging-pane .pane__bar {
   flex: none;
 }
 
-.pane__warn {
-  display: grid;
-  place-items: center;
-  color: var(--warning);
-}
-
-.pane__attn {
-  display: grid;
-  place-items: center;
-  color: var(--warning);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
 /*
- * Where the pane stands: the shell's life until it runs, then the agent's
- * state. Only `waiting` adds a word — it is the one that needs an answer.
+ * Context gauge: how full the agent's window is, read from the mod or the
+ * transcript. A ring and a percentage, the numbers behind them in the tooltip.
  */
-.pane__state {
+.pane__ctx {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  color: var(--fg-muted);
 }
 
-.pane__state-dot {
-  width: 7px;
-  height: 7px;
-  background: var(--fg-subtle);
+.pane__ring {
+  flex: none;
+  width: calc(12px * var(--ui-scale));
+  height: calc(12px * var(--ui-scale));
+  transform: rotate(-90deg);
 }
 
-.pane__state--starting .pane__state-dot {
-  background: var(--warning);
-  animation: pulse 1.1s ease-in-out infinite;
+.pane__ring circle {
+  fill: none;
+  stroke-width: 2.2;
 }
 
-.pane__state--running .pane__state-dot {
-  background: var(--success);
+.pane__ring-track {
+  stroke: var(--line-strong);
 }
 
-.pane__state--exited .pane__state-dot {
-  background: var(--danger);
+.pane__ring-value {
+  stroke: var(--fg-muted);
+  stroke-linecap: round;
+  transition: stroke-dasharray 400ms var(--ease);
 }
 
-.pane__state--idle .pane__state-dot {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--fg-subtle);
+.pane__ctx--warn {
+  color: var(--warning);
 }
 
-.pane__state--working .pane__state-dot {
-  background: var(--accent);
-  animation: pulse 1.1s ease-in-out infinite;
+.pane__ctx--hot {
+  color: var(--danger);
 }
 
-.pane__state--yours .pane__state-dot {
-  background: var(--success);
+.pane__ctx--warn .pane__ring-value,
+.pane__ctx--hot .pane__ring-value {
+  stroke: currentColor;
+}
+
+.pane__ctxpct {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The state, in so many words and in its own colour. */
+.pane__state {
+  flex: none;
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.pane__state--working {
+  color: var(--state-working);
 }
 
 .pane__state--waiting {
-  padding: 1px 5px 1px 4px;
-  background: var(--warning);
-  color: var(--bg);
+  color: var(--state-waiting);
 }
 
-.pane__state--waiting .pane__state-dot {
-  background: var(--bg);
-  animation: pulse 0.9s ease-in-out infinite;
-}
-
-.pane__state-word {
-  font-size: calc(10px * var(--ui-scale));
-  font-weight: 700;
-  white-space: nowrap;
+.pane__state--yours {
+  color: var(--accent-hi);
 }
 
 /* Prompts held for the agent; a click drops them. */
@@ -1644,62 +1831,65 @@ body.is-dragging-pane .pane__bar {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  border: 1px solid var(--accent-ring);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: calc(10px * var(--ui-scale));
-  font-weight: 650;
+  height: calc(18px * var(--ui-scale));
+  padding: 0 6px 0 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding: 1px 5px;
-  border-radius: 0;
-  transition: color var(--dur), background var(--dur), border-color var(--dur);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.pane__queue .pane-icon {
+  color: var(--fg-muted);
 }
 
 .pane__queue:hover {
-  color: var(--bg);
-  background: var(--danger);
-  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 
-/*
- * Context gauge: how full the agent's window is, read from its transcript.
- * Sized to survive an 8-pane layout — a short bar and a percentage, the
- * numbers behind them in the tooltip.
- */
-.pane__ctx {
+.pane__queue:hover .pane-icon {
+  color: inherit;
+}
+
+.pane__warn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--warning);
+}
+
+.pane__attn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--warning);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* A shell that exited, and the one thing to do about it. */
+.pane__revive {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: calc(20px * var(--ui-scale));
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--line-strong);
+  color: var(--fg);
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 500;
 }
 
-.pane__ctxbar {
-  width: 36px;
-  height: 4px;
+.pane__revive:hover {
   background: var(--surface-active);
-  overflow: hidden;
-}
-
-.pane__ctxfill {
-  display: block;
-  height: 100%;
-  background: var(--success);
-  transition: width var(--dur) ease;
-}
-
-.pane__ctx--warn .pane__ctxfill {
-  background: var(--warning);
-}
-
-.pane__ctx--hot .pane__ctxfill {
-  background: var(--danger);
-}
-
-.pane__ctxpct {
-  font-size: calc(10px * var(--ui-scale));
-  color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 @keyframes pulse {
@@ -1708,45 +1898,372 @@ body.is-dragging-pane .pane__bar {
   }
 }
 
-.pane__action {
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--fg-subtle);
-  cursor: pointer;
-  font-size: calc(13px * var(--ui-scale));
-  padding: 3px 4px;
-  border-radius: 0;
-  transition: color var(--dur), background var(--dur);
+/*
+ * The pane's actions. Always in the header of the focused pane. On the
+ * others they are hidden, so a header at rest is pure status, and show on
+ * hover or keyboard focus laid over its right end — over the status rather
+ * than beside it, so nothing moves when they appear.
+ */
+.pane__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 1px;
+  padding-left: 4px;
+  box-shadow: inset 1px 0 0 var(--line);
 }
 
-.pane__action:focus-visible,
-.pane__queue:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
+.pane:not(.pane--focused) .pane__actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 1px;
+  margin: 0;
+  padding: 0 6px 0 4px;
+  background: var(--head-bg);
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+/* Fades the status out under the overlay instead of cutting it. */
+.pane:not(.pane--focused) .pane__actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 16px;
+  background: linear-gradient(to right, transparent, var(--head-bg));
+}
+
+.pane:not(.pane--focused) .pane__bar:hover .pane__actions,
+.pane:not(.pane--focused) .pane__bar:focus-within .pane__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pane__action {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(22px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .pane__action:hover {
   color: var(--fg);
-  background: var(--surface-hover);
+  background: var(--line-strong);
+}
+
+.pane__action.is-open,
+.pane__action[aria-pressed="true"] {
+  color: var(--fg);
+  background: var(--line-strong);
 }
 
 .pane__action:disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   cursor: default;
   background: transparent;
 }
 
 .pane__action--close:hover:enabled {
-  color: var(--bg);
-  background: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/*
+ * Narrowing panes drop details in a fixed order — the shell, the session's
+ * id, the state word, the gauge's figure, the diff button — so nothing ever
+ * wraps or overlaps, down to eight panes beside both side panels in the
+ * smallest window. The focused pane, whose actions take a fifth of its header,
+ * goes through the same steps sooner than the others.
+ *
+ * Widths are in the header's em, so they follow the interface size, and they
+ * measure its content box: the pane's width less 16px of padding.
+ */
+.pane__state-short {
+  display: none;
+}
+
+/* The word's short form, while the full one stays for the screen reader. */
+@container pane-bar (max-width: 33.5em) {
+  .pane__state-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .pane__state-short {
+    display: inline;
+  }
+}
+
+@container pane-bar (max-width: 42em) {
+  .pane__pick--shell {
+    display: none;
+  }
+
+  .pane--focused .pane__session-id {
+    display: none;
+  }
+
+  .pane--focused .pane__state-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .pane--focused .pane__state-short {
+    display: inline;
+  }
+}
+
+@container pane-bar (max-width: 47em) {
+  .pane--focused .pane__pick--shell {
+    display: none;
+  }
+
+  /* The longest word, the one asking for an answer, is the first to go. */
+  .pane--focused .pane__state--waiting .pane__state-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .pane--focused .pane__state--waiting .pane__state-short {
+    display: inline;
+  }
+}
+
+@container pane-bar (max-width: 38.5em) {
+  .pane__session-id {
+    display: none;
+  }
+}
+
+@container pane-bar (max-width: 37em) {
+  .pane--focused .pane__ctxpct {
+    display: none;
+  }
+}
+
+/* From here on, what the header folds away the "…" menu takes in. */
+@container pane-bar (max-width: 34em) {
+  .pane__action--diff {
+    display: none;
+  }
+}
+
+/* Where the actions show, they take the word's place; at rest it stays. */
+@container pane-bar (max-width: 29em) {
+  .pane--focused .pane__state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@container pane-bar (max-width: 28.5em) {
+  .pane__bar:hover .pane__state,
+  .pane__bar:focus-within .pane__state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@container pane-bar (max-width: 27.5em) {
+  .pane__action--cmd,
+  .pane--focused .pane__session {
+    display: none;
+  }
+}
+
+/* The focused pane keeps its agent in view over its gauge — which the
+   inspector shows in full — and over the zoom, which the menu takes. */
+@container pane-bar (max-width: 25em) {
+  .pane__ctxpct,
+  .pane--focused .pane__meta,
+  .pane--focused .pane__action--zoom {
+    display: none;
+  }
+}
+
+/* "Claude", "Gemini": the first word of the agent is its name. */
+@container pane-bar (max-width: 21em) {
+  .pane__pick-text--long,
+  .pane__session {
+    display: none;
+  }
+
+  .pane__pick-text--short {
+    display: inline;
+  }
+}
+
+/* A 4x2 grid in a small window: who, what, and where each pane stands. */
+@container pane-bar (max-width: 15.5em) {
+  .pane__meta,
+  .pane__pick--agent .pane-icon,
+  .pane__queue .pane-icon {
+    display: none;
+  }
+
+  .pane__queue {
+    padding: 0 6px;
+  }
+
+  .pane__action {
+    width: calc(20px * var(--ui-scale));
+  }
+}
+
+/* Eight panes beside both side panels in the smallest window: the glyph and
+   the name, and on the focused pane the menu and the way out. */
+@container pane-bar (max-width: 12em) {
+  .pane__pick--agent,
+  .pane__queue {
+    display: none;
+  }
+
+  .pane__state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+/* The menu a pane's "…" opens: Pro menus are a raised sheet of 26px rows. */
+.pane-menu {
+  position: fixed;
+  z-index: 45;
+  min-width: calc(232px * var(--ui-scale));
+  max-width: calc(320px * var(--ui-scale));
+  padding: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-bar);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    0 14px 36px -10px var(--shadow),
+    0 2px 8px -2px var(--shadow);
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+  animation: pane-menu-in var(--dur) var(--ease);
+}
+
+.pane-menu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line-strong);
+}
+
+.pane-menu__item {
+  width: 100%;
+  height: calc(26px * var(--ui-scale));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  outline: none;
+}
+
+.pane-menu__item .pane-icon {
+  color: var(--fg-muted);
+}
+
+.pane-menu__item:hover,
+.pane-menu__item:focus-visible {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.pane-menu__item:hover .pane-icon,
+.pane-menu__item:focus-visible .pane-icon {
+  color: inherit;
+}
+
+.pane-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-menu__keys {
+  flex: none;
+  margin-left: 18px;
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--fg-muted);
+}
+
+.pane-menu__item:hover .pane-menu__keys,
+.pane-menu__item:focus-visible .pane-menu__keys {
+  color: inherit;
+  opacity: 0.75;
+}
+
+@keyframes pane-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* The terminal and what floats over it. Isolated, so xterm's own layers stay
+   under the focus ring. */
+.pane__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
 }
 
 .pane__term {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  transition: opacity var(--dur) var(--ease);
+}
+
+/* The panes you are not typing into step back a little. Their cursor is
+   already hollow: xterm draws it that way without the keyboard. */
+.pane:not(.pane--focused) .pane__term {
+  opacity: 0.85;
 }
 
 .pane__term .xterm {
@@ -1757,13 +2274,20 @@ body.is-dragging-pane .pane__bar {
   background: transparent !important;
 }
 
-/* The terminal and what floats over it. */
-.pane__body {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+@media (prefers-reduced-motion: reduce) {
+  .pane::after,
+  .pane__bar,
+  .pane__term,
+  .pane__actions,
+  .splitter::before,
+  .drop-hint {
+    transition: none;
+  }
+
+  .pane-menu,
+  .pane__attn {
+    animation: none;
+  }
 }
 
 /* ---------- Terminal search ---------- */
@@ -1772,7 +2296,7 @@ body.is-dragging-pane .pane__bar {
    pane: an 8-pane layout leaves little room. */
 .term-search {
   position: absolute;
-  top: 6px;
+  top: 8px;
   right: 14px;
   z-index: 5;
   max-width: calc(100% - 28px);
@@ -1780,30 +2304,39 @@ body.is-dragging-pane .pane__bar {
   align-items: center;
   gap: 1px;
   padding: 3px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 10px 26px -18px var(--shadow);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-bar);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    0 12px 30px -12px var(--shadow);
+  font-size: calc(12px * var(--ui-scale));
 }
 
 .term-search__input {
   flex: 0 1 180px;
   min-width: 48px;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 0;
+  height: calc(22px * var(--ui-scale));
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
   background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--fg);
   font-size: calc(12px * var(--ui-scale));
   outline: none;
+  transition: box-shadow var(--dur) var(--ease);
+}
+
+.term-search__input::placeholder {
+  color: var(--fg-subtle);
 }
 
 .term-search__input:focus {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-ring), 0 0 0 2px var(--accent-soft);
 }
 
 .term-search__input[aria-invalid="true"] {
-  border-color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 .term-search__count {
@@ -1811,8 +2344,9 @@ body.is-dragging-pane .pane__bar {
   min-width: 44px;
   padding: 0 6px;
   text-align: center;
+  font-family: var(--mono);
   font-size: calc(10.5px * var(--ui-scale));
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1826,33 +2360,38 @@ body.is-dragging-pane .pane__bar {
   flex: none;
   display: grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
+  min-width: calc(22px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
   padding: 0 4px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
   cursor: pointer;
-  transition: color var(--dur), background var(--dur);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .term-search__opt {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: calc(11px * var(--ui-scale));
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 600;
 }
 
 .term-search__opt:hover,
 .term-search__btn:hover:enabled {
   color: var(--fg);
-  background: var(--surface-hover);
+  background: var(--line-strong);
 }
 
 .term-search__opt.is-on {
-  color: var(--accent);
-  background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px var(--accent-ring);
+  color: var(--accent-hi);
+  background: var(--accent-soft);
+}
+
+.term-search__opt:focus-visible,
+.term-search__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .term-search__btn:disabled {
@@ -1865,7 +2404,7 @@ body.is-dragging-pane .pane__bar {
   width: 1px;
   height: 14px;
   margin: 0 3px;
-  background: var(--border-strong);
+  background: var(--line-strong);
 }
 
 /* ---------- Broadcast bar ---------- */

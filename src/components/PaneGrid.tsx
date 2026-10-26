@@ -21,9 +21,9 @@ import {
   type Rect,
   type Zone,
 } from "../lib/layout";
-import { useShortcutTitle } from "../lib/useShortcuts";
 import { useT } from "../i18n";
 import type { Pane, SplitNode } from "../types";
+import { PaneZoomBar } from "./PaneZoomBar";
 
 /**
  * Renders the split tree as flat, absolutely positioned slots.
@@ -134,7 +134,6 @@ export function PaneGrid({
   const [dragId, setDragId] = useState<string | null>(null);
   const [target, setTarget] = useState<DragTarget | null>(null);
   const t = useT();
-  const withKeys = useShortcutTitle();
 
   const layout = useMemo(() => computeLayout(tree), [tree]);
   /** Reading order, which is the order the zoom bar lists the panes in. */
@@ -165,6 +164,8 @@ export function PaneGrid({
     const grip = event.currentTarget;
     const pointerId = event.pointerId;
     grip.setPointerCapture(pointerId);
+    // Keeps the hairline lit for the whole gesture, wherever the pointer goes.
+    grip.classList.add("is-active");
 
     const box = host.getBoundingClientRect();
     const horizontal = handle.dir === "row";
@@ -204,6 +205,7 @@ export function PaneGrid({
       window.removeEventListener("pointercancel", end);
       window.removeEventListener("blur", lostFocus);
       if (grip.hasPointerCapture(pointerId)) grip.releasePointerCapture(pointerId);
+      grip.classList.remove("is-active");
       document.body.classList.remove("is-resizing");
       onTreeChange(withRatio(treeRef.current, handle.path, latest));
     }
@@ -258,8 +260,13 @@ export function PaneGrid({
           document.body.classList.add("is-dragging-pane");
         }
 
+        // Hidden until placed: it mounts on the move that arms the drag, one
+        // render before it can be told where the pointer is.
         const ghost = ghostRef.current;
-        if (ghost) ghost.style.transform = `translate(${ev.clientX}px, ${ev.clientY}px)`;
+        if (ghost) {
+          ghost.style.transform = `translate(${ev.clientX}px, ${ev.clientY}px)`;
+          ghost.style.visibility = "visible";
+        }
 
         const next = hitTest(ev.clientX, ev.clientY, paneId);
         if (next?.paneId !== last?.paneId || next?.zone !== last?.zone) {
@@ -341,10 +348,16 @@ export function PaneGrid({
           const rect = layout.rects[pane.id];
           if (!rect) return null;
           const behind = zoomed !== null && zoomed !== pane.id;
+          // The 1px separators: a pane off the grid's left or top edge gives
+          // its first column or row to one. A resize never moves a pane off
+          // or onto an edge, so painting rectangles alone keeps these right.
+          const inner = zoomed
+            ? ""
+            : `${rect.left > 1e-6 ? "is-inner-x" : ""} ${rect.top > 1e-6 ? "is-inner-y" : ""}`;
           return (
             <div
               key={pane.id}
-              className={`grid__slot ${dragId === pane.id ? "is-dragging" : ""} ${behind ? "is-behind" : ""}`}
+              className={`grid__slot ${inner} ${dragId === pane.id ? "is-dragging" : ""} ${behind ? "is-behind" : ""}`}
               data-slot={pane.id}
               style={zoomed === pane.id ? ZOOMED_SLOT : slotStyle(rect)}
               onDoubleClick={(event) => toggleZoom(pane.id, event)}
@@ -361,39 +374,8 @@ export function PaneGrid({
           );
         })}
 
-        {/* Without it a zoomed grid looks like a workspace that lost its other
-            panes. Mouse presses are kept off the buttons' focus: the keyboard
-            stays with the terminal, which is where it is wanted next. */}
         {zoomed && onZoom && (
-          <div
-            className="zoombar"
-            role="toolbar"
-            aria-label={t("zoom.bar")}
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <span className="zoombar__tag" title={t("zoom.others", { n: order.length - 1 })}>
-              {t("zoom.tag")}
-            </span>
-            {order.map((id) => (
-              <button
-                key={id}
-                className={`zoombar__tab ${id === zoomed ? "is-active" : ""}`}
-                aria-pressed={id === zoomed}
-                onClick={() => onZoom(id)}
-                title={t("zoom.show", { name: names.get(id) ?? "" })}
-              >
-                {names.get(id)}
-              </button>
-            ))}
-            <span className="zoombar__spacer" />
-            <button
-              className="zoombar__restore"
-              onClick={() => onZoom(null)}
-              title={withKeys(t("zoom.restore"), "pane.zoom")}
-            >
-              {t("zoom.restore")}
-            </button>
-          </div>
+          <PaneZoomBar zoomedId={zoomed} order={order} names={names} onZoom={onZoom} />
         )}
 
         {!zoomed && layout.handles.map((handle) => (
@@ -417,7 +399,12 @@ export function PaneGrid({
           />
         )}
 
-        {dragId && <div className="drag-ghost" ref={ghostRef} aria-hidden />}
+        {/* Follows the pointer, carrying the name of the pane on the move. */}
+        {dragId && (
+          <div className="drag-ghost" ref={ghostRef} aria-hidden>
+            {names.get(dragId)}
+          </div>
+        )}
       </div>
     </DragContext.Provider>
   );
