@@ -1,5 +1,4 @@
 import { useMemo, type CSSProperties, type ReactNode } from "react";
-import { Icon } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 import { useT } from "../i18n";
 import { useStore } from "../store";
@@ -159,10 +158,14 @@ export function ToolbarActivity({
     );
   };
 
-  const badges = [
-    badge("waiting", counts.waiting, waitingNext, <StateGlyph state="waiting" size={7} />),
-    badge("yours", counts.yours, yoursNext, <Icon name="check" size={12} />),
-  ].filter(Boolean);
+  // Each counter wears its state's glyph, as everywhere else that state shows.
+  const waitingBadge = badge(
+    "waiting",
+    counts.waiting,
+    waitingNext,
+    <StateGlyph state="waiting" size={7} />,
+  );
+  const yoursBadge = badge("yours", counts.yours, yoursNext, <StateGlyph state="yours" size={7} />);
 
   return (
     <div className="activity" role="group" aria-label={t("toolbar.activity.label")}>
@@ -189,7 +192,12 @@ export function ToolbarActivity({
         </span>
       )}
 
-      {badges.length > 0 && <span className="activity__badges">{badges}</span>}
+      {(waitingBadge || yoursBadge) && (
+        <span className="activity__badges">
+          {waitingBadge}
+          {yoursBadge}
+        </span>
+      )}
 
       {pct !== null && (
         <span

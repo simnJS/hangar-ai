@@ -24,16 +24,18 @@ interface Props {
  * Who holds a task, with the live state of their pane in front of the name:
  * a card in progress whose agent is waiting for an answer reads as such
  * without leaving the board. An assignee no pane answers to is drawn idle.
+ * A finished card has no glyph at all: the glyph only ever means what the
+ * agent is doing now, and the work on that card is over.
  */
 export function BoardAssignee({ assignee, pane, done, onFocus }: Props) {
   const t = useT();
   const activity = usePaneActivity(pane?.id ?? null);
-  const state: GlyphState = done || !activity ? "idle" : activity.activity;
+  const state: GlyphState = activity?.activity ?? "idle";
   const name = pane?.name ?? assignee;
 
   const body = (
     <>
-      <StateGlyph state={state} size={7} label={t(`pane.state.${state}`)} />
+      {!done && <StateGlyph state={state} size={7} label={t(`pane.state.${state}`)} />}
       <span className="card__who-name">{name}</span>
       {pane && <span className="card__who-agent">· {pane.agent}</span>}
     </>
