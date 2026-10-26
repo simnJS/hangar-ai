@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { Translator } from "../../i18n";
+import { useLocale, type Translator } from "../../i18n";
 import {
   voiceKeyClear,
   voiceKeySet,
@@ -19,12 +19,20 @@ import type { VoiceDownload, VoiceModel } from "../../lib/voice";
  * things a label and a control can answer.
  */
 
-function formatBytes(bytes: number): string {
+/** "629 MB" in English, "629 Mo" in French, and "1,5 Go" past a gigabyte. */
+function formatBytes(bytes: number, locale: string): string {
   const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+  const [value, unit] = mb >= 1024 ? [mb / 1024, "gigabyte"] : [Math.round(mb), "megabyte"];
+  return new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "short",
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 export function VoiceCard({ t, selected }: { t: Translator; selected: string }) {
+  const locale = useLocale();
   const [models, setModels] = useState<VoiceModel[]>([]);
   const [progress, setProgress] = useState<VoiceDownload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +90,7 @@ export function VoiceCard({ t, selected }: { t: Translator; selected: string }) 
       <div className="vm__head">
         <strong className="vm__name">{model.label}</strong>
         <span className={`vm__state ${model.installed ? "is-ready" : ""}`}>
-          {model.installed ? t("settings.voiceInstalled") : formatBytes(model.approxBytes)}
+          {model.installed ? t("settings.voiceInstalled") : formatBytes(model.approxBytes, locale)}
         </span>
       </div>
 
@@ -111,7 +119,7 @@ export function VoiceCard({ t, selected }: { t: Translator; selected: string }) 
           <button type="button" className="btn btn--primary" onClick={start}>
             {model.installed
               ? t("settings.voiceDownloadAgain")
-              : t("settings.voiceDownload", { size: formatBytes(model.approxBytes) })}
+              : t("settings.voiceDownload", { size: formatBytes(model.approxBytes, locale) })}
           </button>
           {!model.installed && <span className="vm__note">{t("settings.voiceMissing")}</span>}
         </div>

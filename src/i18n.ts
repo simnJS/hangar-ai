@@ -1929,9 +1929,27 @@ export function translate(
   }
 
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(params[name]) : match,
-  );
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+    if (!(name in params)) return match;
+    const value = params[name];
+    return typeof value === "number" ? formatNumber(value, locale) : String(value);
+  });
+}
+
+const numberFormats = new Map<Locale, Intl.NumberFormat>();
+
+/**
+ * A number in a sentence, grouped the way the language groups it: "10 000
+ * lignes" in French, "10,000 lines" in English. Strings pass through as they
+ * are, so a caller that already formatted one keeps its own format.
+ */
+function formatNumber(value: number, locale: Locale): string {
+  let format = numberFormats.get(locale);
+  if (!format) {
+    format = new Intl.NumberFormat(locale);
+    numberFormats.set(locale, format);
+  }
+  return format.format(value);
 }
 
 export type Translator = (key: TranslateKey, params?: TranslateParams) => string;

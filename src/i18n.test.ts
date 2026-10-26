@@ -44,6 +44,11 @@ describe("French typography", () => {
     expect(french).not.toMatch(/[  ]|\\u00a0|\\u202f/);
   });
 
+  it("groups the digits of a number the French way", () => {
+    expect(translate("fr", "settings.scrollbackLines", { n: 10000 })).toBe(`10${NNBSP}000 lignes`);
+    expect(translate("en", "settings.scrollbackLines", { n: 10000 })).toBe("10,000 lines");
+  });
+
   it("never touches what fills a placeholder", () => {
     expect(translate("fr", "palette.empty", { query: "fix : tests ?" })).toBe(
       `Rien ne correspond à «${NNBSP}fix : tests ?${NNBSP}».`,
