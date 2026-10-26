@@ -1447,6 +1447,24 @@ body.is-sorting * {
   transition-delay: 0ms;
 }
 
+/* Focused from the keyboard: the line, drawn twice as thick, is the ring. */
+.splitter:focus {
+  outline: none;
+}
+
+.splitter:focus-visible::before {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
+.splitter--col:focus-visible::before {
+  width: 2px;
+}
+
+.splitter--row:focus-visible::before {
+  height: 2px;
+}
+
 .splitter::after {
   content: "";
   position: absolute;

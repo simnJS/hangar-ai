@@ -33,6 +33,9 @@ export interface Handle {
   rect: Rect;
   /** Area owned by the split, used to turn a pointer position into a ratio. */
   bounds: Rect;
+  /** The panes on either side — left or above, right or below — in reading order. */
+  before: string[];
+  after: string[];
 }
 
 export interface GridLayout {
@@ -282,6 +285,8 @@ export function computeLayout(tree: SplitNode): GridLayout {
         dir: "row",
         rect: { left: rect.left + width, top: rect.top, width: 0, height: rect.height },
         bounds: rect,
+        before: leafIds(node.a),
+        after: leafIds(node.b),
       });
     } else {
       const height = rect.height * ratio;
@@ -296,6 +301,8 @@ export function computeLayout(tree: SplitNode): GridLayout {
         dir: "col",
         rect: { left: rect.left, top: rect.top + height, width: rect.width, height: 0 },
         bounds: rect,
+        before: leafIds(node.a),
+        after: leafIds(node.b),
       });
     }
   };

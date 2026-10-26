@@ -155,6 +155,12 @@ describe("ratios", () => {
     expect(root.dir).toBe("row");
     expect(root.rect).toEqual({ left: 0.5, top: 0, width: 0, height: 1 });
   });
+
+  it("names the panes on either side of each handle, for its label", () => {
+    const { handles } = computeLayout(tree);
+    const byKey = Object.fromEntries(handles.map((h) => [h.key, [h.before, h.after]]));
+    expect(byKey).toEqual({ root: [["a"], ["b", "c"]], b: [["b"], ["c"]] });
+  });
 });
 
 describe("moving panes", () => {

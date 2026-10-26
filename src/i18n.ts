@@ -219,6 +219,9 @@ const en = {
   "drop.paste_one": "Drop to paste its path",
   "drop.paste_other": "Drop to paste the {n} paths",
 
+  "grid.resizeColumns": "Resize {before} ↔ {after}",
+  "grid.resizeRows": "Resize {before} ↕ {after}",
+
   "search.label": "Search the terminal",
   "search.placeholder": "Search",
   "search.up": "Match above ({keys})",
@@ -1131,6 +1134,9 @@ const fr: Record<Key, string> = {
 
   "drop.paste_one": "Dépose pour coller son chemin",
   "drop.paste_other": "Dépose pour coller les {n} chemins",
+
+  "grid.resizeColumns": "Redimensionner {before} ↔ {after}",
+  "grid.resizeRows": "Redimensionner {before} ↕ {after}",
 
   "search.label": "Rechercher dans le terminal",
   "search.placeholder": "Rechercher",
