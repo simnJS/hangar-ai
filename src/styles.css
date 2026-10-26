@@ -6715,10 +6715,20 @@ select.task__input {
     center / contain no-repeat;
 }
 
-/* A workspace put to sleep (lib/hibernate): news, not a warning. The moon
-   is the navigator's mark for it. */
-.voice-pill--asleep {
+/* A workspace put to sleep (lib/hibernate), or an agent opening a pane or a
+   model (lib/control): news, not a warning. The moon is the navigator's mark
+   for sleep; an agent's doing gets an information sign. */
+.voice-pill--asleep,
+.voice-pill--agent {
   color: var(--fg);
+}
+
+.voice-pill--agent::before {
+  background: var(--fg-muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 7.4v3.6'/%3E%3Ccircle cx='8' cy='5.2' r='.35' fill='black'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 7.4v3.6'/%3E%3Ccircle cx='8' cy='5.2' r='.35' fill='black'/%3E%3C/svg%3E")
+    center / contain no-repeat;
 }
 
 .voice-pill--asleep::before {

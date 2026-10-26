@@ -188,13 +188,14 @@ export default function App() {
   const [broadcast, setBroadcast] = useState("");
   const [openedIds, setOpenedIds] = useState<string[]>([]);
   /**
-   * Transient line at the bottom of the window — dictation errors, for now.
-   * A workspace going to sleep is news rather than a problem, and comes
-   * without the warning sign.
+   * Transient line at the bottom of the window. A plain string is a problem
+   * (dictation, a window that would not open) and comes with the warning
+   * sign; a workspace going to sleep or an agent acting on the layout is
+   * news, and comes with its own quieter mark.
    */
-  const [notice, setNotice] = useState<string | { text: string; kind: "asleep" } | null>(
-    null,
-  );
+  const [notice, setNotice] = useState<
+    string | { text: string; kind: "asleep" | "agent" } | null
+  >(null);
   const broadcastRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
@@ -689,7 +690,10 @@ export default function App() {
           // Said on screen: panes appearing and vanishing on their own would
           // otherwise look like a bug.
           announce: (event) =>
-            setNotice(t(`control.${event.kind}`, { ...event, by: event.by ?? t("control.someone") })),
+            setNotice({
+              kind: "agent",
+              text: t(`control.${event.kind}`, { ...event, by: event.by ?? t("control.someone") }),
+            }),
           sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
           modelAllowRoots: (workspaceId, roots) =>
             grantModelRoots(workspaceId, roots, snapshot().workspaces.map((ws) => ws.id)),
