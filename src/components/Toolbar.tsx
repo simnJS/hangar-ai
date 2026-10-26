@@ -138,10 +138,11 @@ export function Toolbar({
     if (reason === "escape" || reason === "tab") presetRef.current?.focus();
   };
 
-  // A question about this workspace's panes, in this view, and nowhere else.
+  // A question about this workspace's panes, in this view, and nowhere else —
+  // and one at a time: a reset armed from its shortcut takes over.
   useEffect(() => {
     setPresetAsk(null);
-  }, [workspace.id, view]);
+  }, [workspace.id, view, confirmReset]);
 
   /** "Ben", "Ben and Cleo", "Ben, Cleo and Dan". */
   const nameList = (names: string[]) =>
