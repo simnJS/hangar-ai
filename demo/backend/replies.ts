@@ -242,7 +242,15 @@ function showModel(french: boolean): Step[] {
                 ? `\r\n  L'aperçu n'a pas pu s'ouvrir. Le reste de la démo marche quand même.`
                 : `\r\n  The preview did not open. The rest of the demo still works.`,
             )
-          : nl(
+          : answer && /not the workspace on screen/.test((answer.value as { note?: string }).note ?? "")
+            ? nl(
+                // The user moved to another workspace meanwhile: the model
+                // waits in this one's preview, as the answer says.
+                french
+                  ? `\r\n  Il t'attend dans l'aperçu 3D de ce workspace : tu es sur un autre en ce\r\n  moment, je ne l'ai pas ouvert par-dessus.`
+                  : `\r\n  It is waiting in this workspace's 3D preview: you are on another one right\r\n  now, so I did not open it over that.`,
+              )
+            : nl(
               french
                 ? `\r\n  Le voilà, dans l'aperçu 3D à côté des terminaux. Fais-le tourner à la\r\n  souris, molette pour zoomer.`
                 : `\r\n  There it is, in the 3D preview beside the terminals. Drag to turn it,\r\n  scroll to zoom.`,
