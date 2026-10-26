@@ -93,10 +93,15 @@ const SECTION_ORDER: ShortcutSection[] = [
  * Commands the palette leaves out. The digit families are listed by name
  * instead — "Go to Ben" says more than "Focus pane 2" — and dictation is
  * push-to-talk: run from a list, the next key released would end a recording
- * nobody is speaking into.
+ * nobody is speaking into. Cycling regions is relative to where the keyboard
+ * is, and from the palette that is always the palette itself.
  */
 const hidden = (id: CommandId) =>
-  /^pane\.focus\d$/.test(id) || /^workspace\.go\d$/.test(id) || id === "voice.dictate";
+  /^pane\.focus\d$/.test(id) ||
+  /^workspace\.go\d$/.test(id) ||
+  id === "voice.dictate" ||
+  id === "view.nextRegion" ||
+  id === "view.prevRegion";
 
 /** Commands that leave the focus on what they opened. */
 const OWNS_FOCUS = new Set<CommandId>([
@@ -108,6 +113,8 @@ const OWNS_FOCUS = new Set<CommandId>([
   "pane.sessions",
   "pane.resetAll",
   "terminal.find",
+  "view.focusNavigator",
+  "view.focusInspector",
 ]);
 
 const ICONS: Partial<Record<CommandId, IconName>> = {
@@ -132,6 +139,8 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.broadcast": "broadcast",
   "view.navigator": "sidebarLeft",
   "view.inspector": "sidebarRight",
+  "view.focusNavigator": "sidebarLeft",
+  "view.focusInspector": "sidebarRight",
   "terminal.find": "search",
   "app.fullscreen": "expand",
 };
