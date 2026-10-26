@@ -13,6 +13,6 @@ body,
 }
 
 /* A visitor cannot install anything from a web page. */
-.update-banner {
+.update {
   display: none !important;
 }
