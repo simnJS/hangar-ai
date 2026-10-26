@@ -581,6 +581,7 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               kind: "slider",
               label: t("settings.scrollback"),
               hint: t("settings.scrollbackLines", { n: settings.scrollback }),
+              keywords: "scrollback historique history lignes lines buffer",
               value: settings.scrollback,
               min: 1000,
               max: 50000,
