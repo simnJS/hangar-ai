@@ -78,6 +78,13 @@ num_cpus = "1.17"
 # needs no libdbus on the build machine.
 keyring = { version = "4.2", default-features = false, features = ["v1"] }
 
+# The `hangar-model` scheme the 3D preview loads from — see model.rs. One
+# decodes the file path a URL carries; the other turns the `\\?\C:\…` Windows
+# canonicalizes to back into the `C:\…` the window keys its models by. Both
+# were already compiled for tauri, so neither adds a crate to the build.
+percent-encoding = "2.3"
+dunce = "1.0"
+
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.
 [target.'cfg(unix)'.dependencies]
