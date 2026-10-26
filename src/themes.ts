@@ -1041,7 +1041,9 @@ export function applyThemeToDocument(theme: TerminalTheme) {
     "--accent-hi": isDark ? mix(theme.accent, "#ffffff", 0.22) : theme.accent,
     // An agent's state, always in these four: colour, plus a shape in the UI.
     "--state-working": theme.xterm.green ?? "#5fd27f",
-    "--state-waiting": theme.xterm.yellow ?? "#e7c06b",
+    // A light theme's "yellow" is often a dark brown that reads as body text,
+    // so light themes get an amber chosen for 4.5:1 on white instead.
+    "--state-waiting": isDark ? (theme.xterm.yellow ?? "#e7c06b") : "#b45309",
     "--state-yours": theme.accent,
     "--state-idle": mix(fg, bg, 0.55),
     "--bg": bg,
@@ -1052,8 +1054,10 @@ export function applyThemeToDocument(theme: TerminalTheme) {
     "--border": mix(bg, lift, 0.11),
     "--border-strong": mix(bg, lift, 0.2),
     "--fg": fg,
-    "--fg-muted": mix(fg, bg, 0.4),
-    "--fg-subtle": mix(fg, bg, 0.62),
+    // Measured on --chrome, the darkest surface text sits on: muted clears
+    // 4.5:1 and subtle stays legible for metadata on every bundled theme.
+    "--fg-muted": mix(fg, bg, 0.33),
+    "--fg-subtle": mix(fg, bg, 0.5),
     "--accent": theme.accent,
     "--accent-soft": withAlpha(theme.accent, 0.14),
     "--accent-ring": withAlpha(theme.accent, 0.45),

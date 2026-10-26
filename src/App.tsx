@@ -956,7 +956,9 @@ export default function App() {
                 onResize={(inspectorWidth) => updateSettings({ inspectorWidth })}
                 collapsed={state.settings.inspectorCollapsed}
                 onToggleSection={(id) => {
-                  const folded = state.settings.inspectorCollapsed;
+                  // Read from the store as it stands, not this render: two
+                  // folds before a re-render would otherwise lose one.
+                  const folded = snapshot().settings.inspectorCollapsed;
                   updateSettings({
                     inspectorCollapsed: folded.includes(id)
                       ? folded.filter((entry) => entry !== id)
