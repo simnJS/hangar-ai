@@ -97,6 +97,11 @@ question), message it directly with `SendMessage` to that name; `/list-agents` s
 is reachable. The board stays the record: write the same thing there if it matters beyond
 this moment.
 
+### Showing a 3D model
+
+To show the user a 3D model, open it with `model_show` rather than giving them a path, and
+check your own work with `model_snapshot`, which returns a picture of it.
+
 ## Global memory
 
 You also have a **persistent global memory**, reached through the MCP tools prefixed
@@ -323,6 +328,16 @@ mod tests {
         }
         // Task progress belongs to the board, not to the memory.
         assert!(block.contains("board_comment_task"));
+    }
+
+    /// Same reason as the memory tools: an agent that has never read about
+    /// `model_show` hands the user a file path instead.
+    #[test]
+    fn the_generated_block_names_the_model_tools() {
+        let block = playbook();
+
+        assert!(block.contains("model_show"));
+        assert!(block.contains("model_snapshot"));
     }
 
     #[test]

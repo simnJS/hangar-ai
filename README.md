@@ -43,6 +43,8 @@ The app updates itself from there, so this is a one-time download.
 - **Shared task board** — a kanban board per workspace that the agents themselves read and
   write, over MCP. Cards show who holds them and what blocks them, and the board can sit
   in a panel beside the terminals.
+- **3D preview** — an agent shows you the model it is working on in a panel beside the
+  terminals rather than naming a file, and can render it to an image to check its own work.
 - **Agent state at a glance** — each pane says whether its agent is working, waiting for
   your answer, or done and waiting for you; the sidebar counts the same for every
   workspace, so a turn that ends in a workspace you left does not go unnoticed.
@@ -76,6 +78,20 @@ Every workspace gets a board, and agents work it over MCP:
 
 Claims are atomic: every change goes through a single lock, so two agents racing for the
 same task cannot both win it.
+
+## The 3D preview
+
+Agents that build game assets show them over MCP too:
+
+| Tool | What it does |
+|---|---|
+| `model_show` | Open a model in the panel and report its triangles, materials, animations and size |
+| `model_snapshot` | Render it to a PNG the agent can look at, from a fixed angle |
+| `model_close` | Close one model, or every model the agent's workspace has open |
+
+It reads glTF and GLB, OBJ with its MTL, STL, PLY, FBX and USDZ, up to 256 MB, and only from
+the workspace's folders and its git worktrees. A model reloads by itself when its file
+changes, so an agent re-exporting it is enough to refresh what you see.
 
 ## The Claude Code bridge
 
