@@ -33,6 +33,7 @@ function input(patch: Partial<HibernateInput> = {}): HibernateInput {
     mounted: true,
     onScreen: false,
     detached: false,
+    delivering: false,
     lastInteraction: LONG_AGO,
     ...patch,
     panes,
@@ -111,6 +112,42 @@ describe("hibernationVerdict", () => {
       input({ rest: { a: rest({ queued: 2 }), b: rest(), c: rest() } }),
     );
     expect(verdict).toEqual({ kind: "awake", reason: "queued", paneId: "a" });
+  });
+
+  describe("orchestration", () => {
+    const orchestrator: Pane = { ...pane("o", "claude"), role: "orchestrator" };
+    const worker: Pane = { ...pane("w", "claude"), role: "worker", taskId: "t1" };
+
+    it("never puts a workspace to sleep while one of its workers is there", () => {
+      const panes = [orchestrator, worker, pane("c", "codex")];
+      expect(hibernationVerdict(input({ panes }))).toEqual({
+        kind: "awake",
+        reason: "worker",
+        paneId: "w",
+      });
+    });
+
+    it("holds the workers above everything else a workspace left alone could pass", () => {
+      // Busy, never seen, without a session: the worker still answers first.
+      const panes = [{ ...worker, sessionId: null }, pane("c", "codex")];
+      expect(reason(hibernationVerdict(input({ panes, rest: {} })))).toBe("worker");
+    });
+
+    it("never puts a workspace to sleep while one of its deliveries runs", () => {
+      expect(reason(hibernationVerdict(input({ delivering: true })))).toBe("delivering");
+      const panes = [orchestrator, pane("c", "codex")];
+      expect(reason(hibernationVerdict(input({ panes, delivering: true })))).toBe("delivering");
+    });
+
+    it("lets an orchestrator with no worker and nothing landing sleep like any agent", () => {
+      const panes = [orchestrator, pane("c", "codex")];
+      expect(hibernationVerdict(input({ panes }))).toEqual({ kind: "sleep", agents: 2 });
+    });
+
+    it("still leaves the workspace on screen to the screen", () => {
+      const panes = [orchestrator, worker];
+      expect(reason(hibernationVerdict(input({ panes, onScreen: true })))).toBe("onScreen");
+    });
   });
 
   it("keeps awake while a pane has not been seen at all", () => {
