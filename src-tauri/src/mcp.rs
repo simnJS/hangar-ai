@@ -179,11 +179,6 @@ fn tool_definitions() -> Value {
         "type": "string",
         "description": "Pane name, as pane_list shows it (an id works too). Names are unique across workspaces, so a pane is found wherever it is."
     });
-    let owns_arg = json!({
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Paths and globs the task's worker may change, relative to the repository root: 'src/lib/board.ts', 'src/components/' (a folder covers everything under it), 'src/**/*.test.ts'. Two tasks in doing never share a file: a claim that would is refused."
-    });
     json!([
         {
             "name": "board_list_tasks",
@@ -231,8 +226,7 @@ fn tool_definitions() -> Value {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "Task ids that must be done first."
-                    },
-                    "owns": owns_arg
+                    }
                 },
                 "required": ["title"]
             }
@@ -249,13 +243,7 @@ fn tool_definitions() -> Value {
                     "column": { "type": "string", "enum": ["todo", "doing", "review", "done"] },
                     "priority": { "type": "integer" },
                     "assignee": { "type": "string" },
-                    "release": { "type": "boolean", "description": "Unassign the task so someone else can take it." },
-                    "labels": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Replaces the task's labels: pass the whole list, the ones to keep included."
-                    },
-                    "owns": owns_arg
+                    "release": { "type": "boolean", "description": "Unassign the task so someone else can take it." }
                 },
                 "required": ["id"]
             }
