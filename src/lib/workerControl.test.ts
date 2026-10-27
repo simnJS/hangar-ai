@@ -358,7 +358,7 @@ describe("worker_spawn", () => {
     expect([first.ports.base, second.ports.base]).toEqual([PORT_POOL_START + 20, PORT_POOL_START + 40]);
     expect(allocatePortBase(app.deps.snapshot().workspaces)).toBe(PORT_POOL_START + 60);
     // A block another pane overlaps is skipped too, aligned or not.
-    expect(allocatePortBase([workspace("x", "x", "x", [pane("a", "a", "shell", { portBase: 41005 })])])).toBe(
+    expect(allocatePortBase([workspace("x", "x", "x", [pane("a", "a", "shell", { portBase: PORT_POOL_START + 5 })])])).toBe(
       PORT_POOL_START + 40,
     );
   });
@@ -701,7 +701,7 @@ describe("names", () => {
       branch: "hangar/t-t",
       target: "main",
       worktree: "/w",
-      portBase: 41000,
+      portBase: PORT_POOL_START,
       checkCommand: null,
       attempt: 1,
       maxAttempts: 2,
