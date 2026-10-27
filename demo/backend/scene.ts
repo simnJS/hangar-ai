@@ -18,6 +18,8 @@ const JOBS: { pane: string; text: string }[] = [
   { pane: "Max", text: "Migrate the invoice amounts to integer cents" },
   // Done in a few seconds, with nobody looking: your turn.
   { pane: "Leo", text: "Tighten the copy of the pricing page" },
+  // A worker of checkout-v2's orchestrator, on its task: at work.
+  { pane: "Jade", text: "Migrate the cart totals to one per currency" },
 ];
 
 /** Once the app has loaded its state; the control listener comes with it. */
