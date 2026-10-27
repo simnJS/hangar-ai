@@ -124,6 +124,10 @@ pub fn run() {
             git::git_copy_untracked,
             git::git_changes,
             git::git_file_diff,
+            delivery::delivery_preflight,
+            delivery::delivery_run,
+            delivery::delivery_cleanup,
+            delivery::delivery_running,
             memory::memory_load,
             memory::memory_create,
             memory::memory_update,
@@ -170,6 +174,8 @@ pub fn run() {
                 // panes running for the main window to take back.
                 WindowEvent::Destroyed if label == "main" => {
                     pty::kill_all(&app.state::<pty::PtyManager>());
+                    // A check or a review still running goes with the app.
+                    delivery::cancel_all();
                     // Stale endpoint files would make agents try to reach a dead port.
                     endpoint::clear();
                     // Discord drops the presence when the pipe dies anyway; this
