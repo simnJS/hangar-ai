@@ -8,6 +8,22 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.0.1] - 2026-10-27
+
+- **Put a workspace to sleep by hand.** Right-click a workspace in the navigator, or run
+  **Put to sleep** from the command palette. It is the same sleep Hangar applies on its
+  own, without the idle delay, and with the same guards: the entry is greyed out, with
+  the reason, while an agent works or waits for you, a shell runs a process, an agent
+  could not resume its session, or a worker or a delivery is running. The workspace on
+  screen hands over to the one you used last.
+- **A delivery waiting for you can be redone.** When a worker fixes its branch after its
+  delivery passed and waits to be merged, `delivery_submit` withdraws the waiting one and
+  runs the whole chain again. **Merge** never lands a version the worker changed since it
+  was tested, and the reason a merge was refused stays on screen.
+- **No personal path on the launch line.** Orchestrator and worker panes read their MCP
+  configuration from `HANGAR_MCP_CONFIG` instead of typing its full path, so a screen
+  share or a recording no longer shows your user folder.
+
 ## [1.0.0] - 2026-10-27
 
 The first stable release. It adds orchestrator mode on top of what the 0.12 to 0.15
@@ -202,6 +218,7 @@ statistics, workspace sleep and per-workspace MCP servers.
 - Automatic updates from signed GitHub releases.
 - An interface in English and French (0.1.1).
 
+[1.0.1]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.1
 [1.0.0]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.0
 [0.15]: https://github.com/simnJS/hangar-ai/releases/tag/v0.15.0
 [0.14]: https://github.com/simnJS/hangar-ai/releases/tag/v0.14.0

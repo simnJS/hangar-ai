@@ -1,6 +1,6 @@
 [package]
 name = "hangar-ai"
-version = "1.0.0"
+version = "1.0.1"
 description = "Terminal multiplexer for CLI coding agents, with a shared task board"
 authors = ["simnJS"]
 license = "MIT"
