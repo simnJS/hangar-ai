@@ -22,7 +22,7 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Jade and Kai, each in its own terminal, beside a board panel listing their tasks in progress and a delivery ready to land](.github/assets/hero.webp)
+![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Jade and Kai, each in its own terminal. Iris was asked to ship checkout v2: she wrote her plan to memory, created board tasks with the files each one owns, started workers, and, told by Hangar that a delivery had landed, started Jade on the task it unblocked. Jade is at work; Kai's delivery passed its check and review and waits to be merged.](.github/assets/hero.webp)
 
 <p align="center"><sub>Screenshots are taken from the browser demo, with made-up data.</sub></p>
 
@@ -163,7 +163,7 @@ Claude Code.
   project and per model. They are read from the transcripts Claude Code and Codex keep on
   disk. On a Claude or ChatGPT subscription, the cost figure is an equivalent, not a bill.
 
-![The board of a workspace: tasks to do, including one waiting for a decision and one blocked by another task, two tasks in progress held by workers, one in review ready to land, and one done](.github/assets/board.webp)
+![The board of a workspace: two tasks to do, one waiting for a decision and one blocked by another task, one in progress held by a worker, one in review ready to land, and one done](.github/assets/board.webp)
 
 ![The usage statistics view: tokens, API-equivalent cost, active time and sessions over 30 days, tokens per day, usage by project, and a heatmap of active hours across the week](.github/assets/stats.webp)
 

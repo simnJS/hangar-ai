@@ -119,20 +119,20 @@
         <source type="image/avif" srcset="img/hero-1280.avif 1280w, img/hero-1920.avif 1920w, img/hero-2560.avif 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
         <source type="image/webp" srcset="img/hero-1280.webp 1280w, img/hero-1920.webp 1920w, img/hero-2560.webp 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
         <img src="img/hero-1280.webp" width="1280" height="800" fetchpriority="high" decoding="async"
-          alt="Hangar.AI on the checkout-v2 workspace. The navigator on the left lists workspaces with their agents' states. In the middle, Iris, pinned as orchestrator, sits idle while two workers run: Jade, working on the task Cart: one total per currency, and Kai, on Keep the address after a failed payment. The toolbar shows Needs you with 3 items, and the inspector on the right shows Iris's session, context, cost and Claude plan usage.">
+          alt="Hangar.AI on the checkout-v2 workspace. The navigator on the left lists workspaces with their agents' states. On the left half, Iris, pinned as orchestrator: asked to ship checkout v2, she wrote her plan to memory, created five board tasks with the files each one owns, started two workers, then, told by Hangar that Lou's price helpers had landed, started Jade on the cart totals. On the right, Jade is working on one total per currency, and Kai's delivery of Keep the address after a failed payment passed its check and review and waits to be landed. The toolbar shows Needs you with 3 items, and the inspector shows Iris's session, context, cost and Claude plan usage.">
       </picture>
       <span class="mark" data-n="1" style="--x:0.56%;--y:7.8%;--w:16.4%;--h:35.8%" aria-hidden="true"></span>
-      <span class="mark" data-n="2" style="--x:17.78%;--y:5.22%;--w:4.86%;--h:2.67%" aria-hidden="true"></span>
-      <span class="mark" data-n="3" style="--x:48.89%;--y:5.22%;--w:16.39%;--h:2.67%" aria-hidden="true"></span>
-      <span class="mark" data-n="3" style="--x:17.78%;--y:50.9%;--w:22.2%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-n="2" style="--x:17.78%;--y:5.22%;--w:10%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-n="3" style="--x:53.82%;--y:5.22%;--w:7.64%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-n="3" style="--x:53.82%;--y:50.9%;--w:6.94%;--h:2.67%" aria-hidden="true"></span>
       <span class="mark mark--side" data-n="4" style="--x:68.06%;--y:0.67%;--w:7.99%;--h:3.56%" aria-hidden="true"></span>
       <span class="mark" data-n="5" style="--x:79.72%;--y:5.56%;--w:20%;--h:42.2%" aria-hidden="true"></span>
     </div>
     <figcaption class="legend">
       <ol class="legend__list">
         <li><b>Navigator.</b> Every workspace, and what its agents are doing right now.</li>
-        <li><b>Orchestrator.</b> Iris plans on the board and leaves the code to the workers.</li>
-        <li><b>Workers.</b> Jade and Kai, each on one task, each in a git worktree of their own.</li>
+        <li><b>Orchestrator.</b> Iris plans on the board, starts the workers and hears when their work lands.</li>
+        <li><b>Workers.</b> Jade and Kai, each on one task, each in a git worktree of its own.</li>
         <li><b>Needs you.</b> Questions and finished work waiting for your decision.</li>
         <li><b>Inspector.</b> The focused agent's session, context, cost and plan usage.</li>
       </ol>
@@ -198,7 +198,7 @@
               <source type="image/avif" srcset="img/board-892.avif 892w, img/board-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
               <source type="image/webp" srcset="img/board-892.webp 892w, img/board-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
               <img src="img/board-892.webp" width="892" height="356" loading="lazy" decoding="async"
-                alt="The checkout-v2 board in four columns. To do: pick the payment provider for EU cards, labelled needs-you, and a task blocked by task 31. In progress: two tasks held by Jade and Kai. Review: a coupon fix labelled ready-to-land. Done: price formatting helpers.">
+                alt="The checkout-v2 board in four columns. To do: pick the payment provider for EU cards, labelled needs-you, and apply a coupon once per retry, blocked by task 32. In progress: the cart totals, held by Jade. Review: keep the address after a failed payment, by Kai, labelled ready-to-land. Done: price formatting helpers, by Lou.">
             </picture>
           </div>
         </figure>
@@ -220,7 +220,7 @@
               <source type="image/avif" srcset="img/workers-892.avif 892w, img/workers-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
               <source type="image/webp" srcset="img/workers-892.webp 892w, img/workers-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
               <img src="img/workers-892.webp" width="892" height="504" loading="lazy" decoding="async"
-                alt="Iris, marked as orchestrator, is idle. Beside her, Jade, a worker on Cart: one total per currency, is working: it reads the schema, writes a migration and runs it. Below, Kai, a worker on Keep the address after a failed payment, was started in the folder checkout-v2-worktrees/keep-address with the Sonnet model.">
+                alt="Iris, the orchestrator, received the objective, wrote her plan to memory and created the board tasks, each with the files it owns. Beside her, Jade, a worker on the cart totals, reads the cart code, updates it, writes tests and runs them. Below, Kai, the worker on the address task, is done.">
             </picture>
           </div>
         </figure>
@@ -240,8 +240,8 @@
         <figure class="step__art">
           <div class="delivery" id="delivery" aria-label="The four stages of a delivery">
             <div class="delivery__head">
-              <span class="delivery__title">Delivery of #33</span>
-              <span class="delivery__task">Coupon applied twice when a payment is retried</span>
+              <span class="delivery__title">Delivery of #32</span>
+              <span class="delivery__task">Keep the address after a failed payment</span>
             </div>
             <ol class="delivery__list">
               <li class="dstep" data-state="done">
@@ -284,7 +284,7 @@
             <source type="image/avif" srcset="img/needs-440.avif 440w, img/needs-880.avif 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
             <source type="image/webp" srcset="img/needs-440.webp 440w, img/needs-880.webp 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
             <img src="img/needs-440.webp" width="440" height="368" loading="lazy" decoding="async"
-              alt="The Needs you panel with three items: Eve in storefront waits for an answer; a question from the orchestrator, Stripe or Adyen for EU cards; and a coupon fix ready to merge after pnpm test passed and the review approved, with a Merge button.">
+              alt="The Needs you panel with three items: Eve in storefront waits for an answer; a question from the orchestrator, Stripe or Adyen for EU cards; and Kai's fix keeping the address after a failed payment, ready to merge once pnpm test passed and the review approved, with a Merge button.">
           </picture>
         </figure>
       </div>
