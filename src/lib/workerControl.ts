@@ -29,7 +29,7 @@ import {
   READY_TO_LAND_LABEL,
   workersOf,
 } from "./orchestration";
-import { postOrchestratorEvent } from "./orchestratorEvents";
+import { orchestratorJournal, postOrchestratorEvent } from "./orchestratorEvents";
 import { allPaneNames, pickPaneName } from "./paneNames";
 import { COPY_PATTERNS, sanitizeBranchName, worktreeFolder } from "./worktrees";
 import type { Pane, Workspace } from "../types";
@@ -324,10 +324,17 @@ function modelArg(value: unknown): string | null {
   return wanted;
 }
 
-function nameArg(value: unknown, state: { workspaces: Workspace[] }): string {
+/**
+ * The workers its orchestrator still hears about: a new worker given one of
+ * their names would read, in the next events, as the one that left.
+ */
+const recentWorkers = (workspaceId: string) =>
+  orchestratorJournal(workspaceId).flatMap(({ event }) => ("worker" in event ? [event.worker] : []));
+
+function nameArg(value: unknown, state: { workspaces: Workspace[] }, workspaceId: string): string {
   const taken = [...allPaneNames(state.workspaces), ...starting.names];
   const wanted = text(value);
-  if (!wanted) return pickPaneName(taken);
+  if (!wanted) return pickPaneName([...taken, ...recentWorkers(workspaceId)]);
   if (/["`$\r\n]/.test(wanted) || wanted.length > 40) {
     throw new Error(
       `"${wanted}" cannot name a pane: keep it under 40 characters, without quotes, backticks or $. ` +
@@ -450,7 +457,7 @@ export async function spawnWorker(
     );
   }
   const model = modelArg(request.model) ?? settings.workerModel;
-  const name = nameArg(request.name, state);
+  const name = nameArg(request.name, state, ws.id);
   const portBase = allocatePortBase(state.workspaces, starting.ports);
   if (portBase === null) {
     throw new Error("Every block of worker ports is taken. Stop a worker you no longer need first.");

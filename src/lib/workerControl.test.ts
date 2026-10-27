@@ -23,9 +23,12 @@ import {
 } from "../types";
 
 const events = vi.hoisted(() => [] as { workspaceId: string; event: OrchestratorEvent }[]);
+/** What each workspace's orchestrator heard lately, as the engine keeps it. */
+const journal = vi.hoisted(() => new Map<string, { at: number; event: OrchestratorEvent; quiet: boolean }[]>());
 vi.mock("./orchestratorEvents", () => ({
   postOrchestratorEvent: (workspaceId: string, event: OrchestratorEvent) =>
     events.push({ workspaceId, event }),
+  orchestratorJournal: (workspaceId: string) => journal.get(workspaceId) ?? [],
 }));
 
 const REPO = "C:\\dev\\shop";
@@ -274,6 +277,7 @@ function world(
 
 beforeEach(() => {
   events.length = 0;
+  journal.clear();
 });
 
 describe("worker_spawn", () => {
@@ -531,6 +535,20 @@ describe("worker_spawn", () => {
 
     const stopped = await app.call("worker_stop", { worker: "Mia" });
     expect(stopped.worktree).toMatchObject({ path: "C:/dev/shop-worktrees/hangar-one-t1", removed: true });
+  });
+
+  it("does not hand a worker the name of one its orchestrator still hears about", async () => {
+    const app = world({ tasks: [task("t1", "One", { owns: ["a/**"] })] });
+    const landed: OrchestratorEvent = {
+      kind: "delivery",
+      taskId: "t0",
+      title: "Zero",
+      worker: "Mia",
+      outcome: "landed",
+      detail: "",
+    };
+    journal.set("w1", [{ at: 0, event: landed, quiet: false }]);
+    expect((await app.call("worker_spawn", { task: "t1" })).worker).not.toBe("Mia");
   });
 
   it("refuses a name another pane has anywhere in Hangar", async () => {
