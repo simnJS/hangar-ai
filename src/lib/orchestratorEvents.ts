@@ -120,7 +120,8 @@ const DELIVERY: Record<Extract<OrchestratorEvent, { kind: "delivery" }>["outcome
   conflict: "hit a merge conflict; Hangar sent the worker what to fix",
   checkFailed: "failed the check; Hangar sent the worker the output",
   changesRequested: "came back from review with changes requested; Hangar sent the worker the review",
-  dirty: "was refused: uncommitted changes",
+  // The worker's worktree or the person's checkout: the detail says which.
+  dirty: "was held back by uncommitted changes",
   error: "failed",
 };
 
