@@ -98,10 +98,11 @@
     <h1 class="hero__title" id="hero-title">A team of coding agents, in&nbsp;one&nbsp;window.</h1>
 
     <p class="hero__lede">
-      Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side in real terminals,
-      with a task board and a memory they share. Pin a Claude Code pane as orchestrator: it plans
-      the work and hands each task to a worker in its own git worktree, and Hangar merges each
-      delivery once it passes a review, and your tests if you set them.
+      Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side<span class="wide-only"> in real
+      terminals</span>, with a<span class="wide-only"> task</span> board and a memory they share. Pin a Claude Code
+      pane as orchestrator: it plans<span class="wide-only"> the work</span> and hands each task to a worker in its
+      own git worktree<span class="wide-only">, and Hangar
+      merges each delivery once it passes a review, and your tests if you set them</span>.
     </p>
 
     <div class="hero__cta">
@@ -116,6 +117,8 @@
   <figure class="shot shot--hero wrap-wide">
     <div class="shot__frame">
       <picture>
+        <source media="(max-width: 599px)" type="image/avif" data-crop="hero-m" srcset="img/hero-m-400.avif 400w, img/hero-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="248">
+        <source media="(max-width: 599px)" type="image/webp" data-crop="hero-m" srcset="img/hero-m-400.webp 400w, img/hero-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="248">
         <source type="image/avif" data-crop="hero" srcset="img/hero-1280.avif 1280w, img/hero-1920.avif 1920w, img/hero-2560.avif 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)" width="1280" height="800">
         <source type="image/webp" data-crop="hero" srcset="img/hero-1280.webp 1280w, img/hero-1920.webp 1920w, img/hero-2560.webp 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)" width="1280" height="800">
         <img data-crop="hero" src="img/hero-1280.webp" width="1280" height="800" fetchpriority="high" decoding="async"
@@ -131,7 +134,7 @@
     <figcaption class="legend">
       <ol class="legend__list">
         <li><b>Navigator.</b> Every workspace, and what its agents are doing right now.</li>
-        <li><b>Orchestrator.</b> Iris plans on the board, starts the workers and hears when their work lands.</li>
+        <li class="legend__lead"><b>Orchestrator.</b> Iris plans on the board, starts the workers and hears when their work lands.</li>
         <li><b>Workers.</b> Jade and Kai, each on one task, each in a git worktree of its own.</li>
         <li><b>Needs you.</b> Questions and finished work waiting for your decision.</li>
         <li><b>Inspector.</b> The focused agent's session, context, cost and plan usage.</li>
@@ -139,7 +142,7 @@
     </figcaption>
   </figure>
 
-  <div class="wrap">
+  <div class="wrap wide-only">
     <p class="works">
       Works with <b>Claude Code</b>, <b>Codex</b>, <b>Gemini CLI</b>, <b>OpenCode</b>
       and any shell, on Windows, macOS and Linux.
@@ -153,9 +156,9 @@
     <header class="head">
       <h2 class="head__title" id="orch-title">Pin an orchestrator. It runs the others.</h2>
       <p class="head__lede">
-        Orchestration turns one Claude Code pane into a lead that plans and delegates instead of
-        writing code. Hangar does the parts a prompt should not be trusted with: the worktrees,
-        the limits, the checks and the merge.
+        <span class="wide-only">Orchestration turns one Claude Code pane into a lead that plans and delegates
+        instead of writing code. </span>Hangar does the parts a prompt should not be trusted with: the
+        worktrees, the limits, the checks and the merge.
       </p>
     </header>
 
@@ -165,14 +168,17 @@
         <div class="step__copy">
           <h3>Give it an objective</h3>
           <p>
-            In a git repository, pin any Claude Code pane as the workspace's orchestrator and say
-            what you want. It reads the code, asks you the product questions it cannot settle
-            itself, all in one go, then writes a plan with validation criteria to the shared memory.
+            In a git repository, pin any Claude Code pane as <span class="wide-only">the workspace's
+            </span>orchestrator and say what you want. It <span class="wide-only">reads the code, </span>asks you
+            the product questions it cannot settle itself<span class="wide-only">, all in one go</span>, then writes a plan<span
+            class="wide-only"> with validation criteria</span> to the shared memory.
           </p>
         </div>
         <figure class="step__art">
           <div class="crop">
             <picture>
+              <source media="(max-width: 599px)" type="image/avif" data-crop="pin-m" srcset="img/pin-m-400.avif 400w, img/pin-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="176">
+              <source media="(max-width: 599px)" type="image/webp" data-crop="pin-m" srcset="img/pin-m-400.webp 400w, img/pin-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="176">
               <source type="image/avif" data-crop="pin" srcset="img/pin-448.avif 448w, img/pin-896.avif 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)" width="448" height="256">
               <source type="image/webp" data-crop="pin" srcset="img/pin-448.webp 448w, img/pin-896.webp 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)" width="448" height="256">
               <img data-crop="pin" src="img/pin-448.webp" width="448" height="256" loading="lazy" decoding="async"
@@ -187,14 +193,17 @@
         <div class="step__copy">
           <h3>It plans on the board</h3>
           <p>
-            The plan becomes tasks on the workspace board, each with a goal, acceptance criteria,
-            the command that proves it, and the files it owns. Hangar never runs two tasks at once
-            whose files overlap, and a task waits for the ones it depends on.
+            The plan becomes tasks on the<span class="wide-only"> workspace</span> board, each with <span
+            class="wide-only">a goal, acceptance criteria, the command that proves it, and </span>the files it
+            owns. Hangar never runs two tasks at once whose files overlap, and a task waits for the ones
+            it depends on.
           </p>
         </div>
         <figure class="step__art">
           <div class="crop">
             <picture>
+              <source media="(max-width: 599px)" type="image/avif" data-crop="board-m" srcset="img/board-m-400.avif 400w, img/board-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="261">
+              <source media="(max-width: 599px)" type="image/webp" data-crop="board-m" srcset="img/board-m-400.webp 400w, img/board-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="261">
               <source type="image/avif" data-crop="board" srcset="img/board-892.avif 892w, img/board-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="356">
               <source type="image/webp" data-crop="board" srcset="img/board-892.webp 892w, img/board-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="356">
               <img data-crop="board" src="img/board-892.webp" width="892" height="356" loading="lazy" decoding="async"
@@ -209,14 +218,17 @@
         <div class="step__copy">
           <h3>Workers take the tasks</h3>
           <p>
-            Each task goes to a worker: a new Claude Code pane, on Sonnet by default, on a branch
-            of its own in its own git worktree, with 20 ports set aside so their dev servers do not
-            fight over one. Three run at once by default, and Hangar refuses a fourth.
+            Each task goes to a worker: a new Claude Code pane<span class="wide-only">, on Sonnet by
+            default,</span> on a branch of its own in its own git worktree<span class="wide-only">, with 20
+            ports set aside so their dev servers do not fight over one</span>. Three run at once by
+            default, and Hangar refuses a fourth.
           </p>
         </div>
         <figure class="step__art">
           <div class="crop">
             <picture>
+              <source media="(max-width: 599px)" type="image/avif" data-crop="workers-m" srcset="img/workers-m-400.avif 400w, img/workers-m-748.avif 748w" sizes="calc(100vw - 32px)" width="400" height="439">
+              <source media="(max-width: 599px)" type="image/webp" data-crop="workers-m" srcset="img/workers-m-400.webp 400w, img/workers-m-748.webp 748w" sizes="calc(100vw - 32px)" width="400" height="439">
               <source type="image/avif" data-crop="workers" srcset="img/workers-892.avif 892w, img/workers-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="504">
               <source type="image/webp" data-crop="workers" srcset="img/workers-892.webp 892w, img/workers-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="504">
               <img data-crop="workers" src="img/workers-892.webp" width="892" height="504" loading="lazy" decoding="async"
@@ -231,11 +243,11 @@
         <div class="step__copy">
           <h3>Every delivery is checked before it lands</h3>
           <p>
-            A worker that is done hands in its branch. Hangar merges it in a scratch worktree, runs
-            your check command if you set one (<code>pnpm test</code>, <code>cargo test</code>…), and
-            has a reviewer agent with a fresh context read the diff. Only then does it move your
-            branch forward. A step that fails goes back to the worker with the reason, and one
-            delivery runs at a time per repository.
+            A worker that is done hands in its branch. <span class="wide-only">Hangar merges it in a scratch
+            worktree, runs your check command if you set one (<code>pnpm test</code>, <code>cargo
+            test</code>…), and has a reviewer agent with a fresh context read the diff. Only then does it
+            move your branch forward. </span>A step that fails goes back to the worker with the reason, and
+            one delivery runs at a time per repository.
           </p>
         </div>
         <figure class="step__art">
@@ -276,12 +288,14 @@
       <div class="pair__item">
         <h3>You stay in charge</h3>
         <p>
-          One box gathers what waits on you: an agent's question, a product decision the
-          orchestrator escalated, a delivery ready to merge. Deliveries merge by themselves by
+          One box gathers what waits on you<span class="wide-only">: an agent's question, a product decision
+          the orchestrator escalated, a delivery ready to merge</span>. Deliveries merge by themselves by
           default; turn that off and each one waits for your click.
         </p>
         <figure class="crop crop--needs">
           <picture>
+            <source media="(max-width: 599px)" type="image/avif" data-crop="needs-m" srcset="img/needs-m-400.avif 400w, img/needs-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="295">
+            <source media="(max-width: 599px)" type="image/webp" data-crop="needs-m" srcset="img/needs-m-400.webp 400w, img/needs-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="295">
             <source type="image/avif" data-crop="needs" srcset="img/needs-440.avif 440w, img/needs-880.avif 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)" width="440" height="368">
             <source type="image/webp" data-crop="needs" srcset="img/needs-440.webp 440w, img/needs-880.webp 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)" width="440" height="368">
             <img data-crop="needs" src="img/needs-440.webp" width="440" height="368" loading="lazy" decoding="async"
@@ -292,13 +306,15 @@
       <div class="pair__item">
         <h3>Limits a prompt cannot talk its way past</h3>
         <p>
-          Workers at once, attempts per task, overlapping files, permissions, the check command
-          and the branch work lands on are set per workspace and enforced by Hangar, not asked of
-          the model. The models are set there too: by default Opus plans, Sonnet works and Sonnet
-          reviews.
+          Workers at once, attempts per task<span class="wide-only">, overlapping files, permissions, the check
+          command</span> and the branch work lands on are set per workspace and enforced by Hangar, not asked of
+          the model.<span class="wide-only"> The models are set there too: by default Opus plans, Sonnet
+          works and Sonnet reviews.</span>
         </p>
         <figure class="crop crop--orch">
           <picture>
+            <source media="(max-width: 599px)" type="image/avif" data-crop="orch-m" srcset="img/orch-m-400.avif 400w, img/orch-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="101">
+            <source media="(max-width: 599px)" type="image/webp" data-crop="orch-m" srcset="img/orch-m-400.webp 400w, img/orch-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="101">
             <source type="image/avif" data-crop="orch" srcset="img/orch-600.avif 600w, img/orch-1200.avif 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="600" height="676">
             <source type="image/webp" data-crop="orch" srcset="img/orch-600.webp 600w, img/orch-1200.webp 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="600" height="676">
             <img data-crop="orch" src="img/orch-600.webp" width="600" height="676" loading="lazy" decoding="async"
@@ -308,26 +324,26 @@
       </div>
     </div>
 
-    <dl class="facts">
-      <div>
-        <dt>Hangar never pushes</dt>
-        <dd>Merges are local fast-forwards, and the orchestrator and its workers are told not to push. Pushing, pull requests and releases stay your call.</dd>
-      </div>
-      <div>
-        <dt>Woken by events, not a loop</dt>
-        <dd>
+    <div class="facts">
+      <details class="fold" open>
+        <summary>Hangar never pushes</summary>
+        <p>Merges are local fast-forwards, and the orchestrator and its workers are told not to push. Pushing, pull requests and releases stay your call.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Woken by events, not a loop</summary>
+        <p>
           The orchestrator ends its turn while workers run. Hangar wakes it when a task moves, a
           worker waits or stops, or a delivery lands or fails.
-        </dd>
-      </div>
-      <div>
-        <dt>Survives compaction</dt>
-        <dd>
+        </p>
+      </details>
+      <details class="fold" open>
+        <summary>Survives compaction</summary>
+        <p>
           After a restart or a compacted context, the orchestrator gets the board, its plan and the
           latest events back, and carries on from there.
-        </dd>
-      </div>
-    </dl>
+        </p>
+      </details>
+    </div>
   </div>
 </section>
 
@@ -383,7 +399,7 @@
   <div class="wrap">
     <header class="head">
       <h2 class="head__title" id="features-title">Everything else in 1.0</h2>
-      <p class="head__lede">
+      <p class="head__lede wide-only">
         Hangar.AI started as a way to tile agents in one window. Here is what it grew around them.
       </p>
     </header>
@@ -392,19 +408,19 @@
       <div class="show__copy">
         <h3>An interface built like an IDE</h3>
         <p>
-          A navigator lists every workspace and what its agents are doing. An inspector shows the
-          focused agent's session, context window, cost and plan usage. A command palette reaches
-          every pane, workspace and command from <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>,
-          or <span class="keys"><kbd><abbr title="Command">⌘</abbr></kbd><kbd><abbr title="Shift">⇧</abbr></kbd><kbd>P</kbd></span> on a Mac.
+          <span class="wide-only">A navigator lists every workspace and what its agents are doing. An inspector shows
+          the focused agent's session, context window, cost and plan usage. </span>A command palette reaches
+          every pane, workspace and command<span class="wide-only"> from <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>,
+          or <span class="keys"><kbd><abbr title="Command">⌘</abbr></kbd><kbd><abbr title="Shift">⇧</abbr></kbd><kbd>P</kbd></span> on a Mac</span>.
         </p>
         <p>
-          33 themes restyle the whole window, not only the terminals. Graphite is the default,
-          where colour only marks an agent's state, a diff or the focus.
+          33 themes restyle the whole window, not only the terminals.<span class="wide-only"> Graphite is the
+          default, where colour only marks an agent's state, a diff or the focus.</span>
           <span class="js-only">Try a few on this page:</span>
         </p>
         <div class="swatches" id="swatches" role="group" aria-label="Preview a theme on this page and in the demo"></div>
       </div>
-      <figure class="show__art">
+      <figure class="show__art wide-only">
         <div class="crop">
           <picture>
             <source type="image/avif" data-crop="palette" srcset="img/palette-640.avif 640w, img/palette-1280.avif 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)" width="640" height="520">
@@ -421,8 +437,8 @@
         <h3>See where the tokens go</h3>
         <p>
           Hangar reads the transcripts Claude Code and Codex keep on your machine and adds up
-          tokens, active time and an API-equivalent cost by project, agent and model, and maps
-          the hours of the week your agents were busy.
+          tokens, active time and an API-equivalent cost by project, agent and model<span
+          class="wide-only">, and maps the hours of the week your agents were busy</span>.
         </p>
         <p class="aside">
           The cost prices every token at the providers' public API rates. It measures the work
@@ -432,6 +448,8 @@
       <figure class="show__art">
         <div class="crop">
           <picture>
+            <source media="(max-width: 599px)" type="image/avif" data-crop="stats-m" srcset="img/stats-m-400.avif 400w, img/stats-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="187">
+            <source media="(max-width: 599px)" type="image/webp" data-crop="stats-m" srcset="img/stats-m-400.webp 400w, img/stats-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="187">
             <source type="image/avif" data-crop="stats" srcset="img/stats-892.avif 892w, img/stats-1784.avif 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)" width="892" height="508">
             <source type="image/webp" data-crop="stats" srcset="img/stats-892.webp 892w, img/stats-1784.webp 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)" width="892" height="508">
             <img data-crop="stats" src="img/stats-892.webp" width="892" height="508" loading="lazy" decoding="async"
@@ -446,13 +464,15 @@
         <h3>Agents can show you a 3D model</h3>
         <p>
           Over MCP, an agent opens a glTF, GLB, OBJ, STL, PLY, FBX or USDZ file in a panel beside
-          its terminal, then renders snapshots to check its own work. Each workspace has its own
-          preview, and a model reloads when its file changes.
+          its terminal, then renders snapshots to check its own work.<span class="wide-only"> Each workspace
+          has its own preview, and a model reloads when its file changes.</span>
         </p>
       </div>
       <figure class="show__art">
         <div class="crop">
           <picture>
+            <source media="(max-width: 599px)" type="image/avif" data-crop="model-m" srcset="img/model-m-400.avif 400w, img/model-m-800.avif 800w" sizes="calc(100vw - 32px)" width="400" height="233">
+            <source media="(max-width: 599px)" type="image/webp" data-crop="model-m" srcset="img/model-m-400.webp 400w, img/model-m-800.webp 800w" sizes="calc(100vw - 32px)" width="400" height="233">
             <source type="image/avif" data-crop="model" srcset="img/model-1188.avif 1188w, img/model-2376.avif 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)" width="1188" height="546">
             <source type="image/webp" data-crop="model" srcset="img/model-1188.webp 1188w, img/model-2376.webp 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)" width="1188" height="546">
             <img data-crop="model" src="img/model-1188.webp" width="1188" height="546" loading="lazy" decoding="async"
@@ -462,48 +482,48 @@
       </figure>
     </article>
 
-    <dl class="specs">
-      <div>
-        <dt>A board the agents share</dt>
-        <dd>A kanban board per workspace that agents read, claim and comment on over MCP. Claims are atomic: two agents never win the same task.</dd>
-      </div>
-      <div>
-        <dt>A memory across workspaces</dt>
-        <dd>Notes every agent can search and write, wherever it runs: conventions, decisions, the trap someone already fell into.</dd>
-      </div>
-      <div>
-        <dt>MCP servers per workspace</dt>
-        <dd>Pick which servers Claude Code loads in each workspace. Every session starts its own copy of each stdio server, so fewer means less memory.</dd>
-      </div>
-      <div>
-        <dt>Idle workspaces go to sleep</dt>
-        <dd>By default, a workspace you have not touched for 10 minutes, and are not looking at, stops its agents to free memory. They resume their sessions when you come back.</dd>
-      </div>
-      <div>
-        <dt>Git worktrees and diffs</dt>
-        <dd>Create and remove worktrees from the app, and read what an agent changed before it lands.</dd>
-      </div>
-      <div>
-        <dt>Sessions come back</dt>
-        <dd>Reopen the window and every Claude Code and Codex pane resumes the conversation it was in, with no session ids to keep track of.</dd>
-      </div>
-      <div>
-        <dt>Agent states at a glance</dt>
-        <dd>Every pane says whether its agent is working, waiting for your answer, or done. Claude Code reports it exactly, through a small bridge.</dd>
-      </div>
-      <div>
-        <dt>Dictation</dt>
-        <dd>Hold a key and speak into the focused pane. It runs on your machine with whisper.cpp, or on Groq if you prefer. Off until you turn it on.</dd>
-      </div>
-      <div>
-        <dt>Broadcast</dt>
-        <dd>Send one instruction to every pane at once. Claude Code panes can hold it until their agent is free.</dd>
-      </div>
-      <div>
-        <dt>Up to 16 panes per workspace, any shell</dt>
-        <dd>PowerShell, cmd, Git Bash, WSL and Nushell on Windows; zsh, bash, fish, Nushell and pwsh elsewhere.</dd>
-      </div>
-    </dl>
+    <div class="specs">
+      <details class="fold" open>
+        <summary>A board the agents share</summary>
+        <p>A kanban board per workspace that agents read, claim and comment on over MCP. Claims are atomic: two agents never win the same task.</p>
+      </details>
+      <details class="fold" open>
+        <summary>A memory across workspaces</summary>
+        <p>Notes every agent can search and write, wherever it runs: conventions, decisions, the trap someone already fell into.</p>
+      </details>
+      <details class="fold" open>
+        <summary>MCP servers per workspace</summary>
+        <p>Pick which servers Claude Code loads in each workspace. Every session starts its own copy of each stdio server, so fewer means less memory.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Idle workspaces go to sleep</summary>
+        <p>By default, a workspace you have not touched for 10 minutes, and are not looking at, stops its agents to free memory. They resume their sessions when you come back.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Git worktrees and diffs</summary>
+        <p>Create and remove worktrees from the app, and read what an agent changed before it lands.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Sessions come back</summary>
+        <p>Reopen the window and every Claude Code and Codex pane resumes the conversation it was in, with no session ids to keep track of.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Agent states at a glance</summary>
+        <p>Every pane says whether its agent is working, waiting for your answer, or done. Claude Code reports it exactly, through a small bridge.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Dictation</summary>
+        <p>Hold a key and speak into the focused pane. It runs on your machine with whisper.cpp, or on Groq if you prefer. Off until you turn it on.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Broadcast</summary>
+        <p>Send one instruction to every pane at once. Claude Code panes can hold it until their agent is free.</p>
+      </details>
+      <details class="fold" open>
+        <summary>Up to 16 panes per workspace, any shell</summary>
+        <p>PowerShell, cmd, Git Bash, WSL and Nushell on Windows; zsh, bash, fish, Nushell and pwsh elsewhere.</p>
+      </details>
+    </div>
   </div>
 </section>
 
@@ -521,7 +541,7 @@
     <div class="plats">
       <article class="plat" data-os="windows">
         <h3 class="plat__os">Windows</h3>
-        <p class="plat__what">64-bit installer. Installs for you alone, without administrator rights. Needs WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing.</p>
+        <p class="plat__what">64-bit installer. Installs for you alone, without administrator rights.<span class="wide-only"> Needs WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing.</span></p>
         <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_x64-setup.exe">Download the installer <span class="ext">.exe</span></a>
         <p class="plat__note">The installer is not code-signed yet, so SmartScreen warns on first run: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
@@ -535,7 +555,7 @@
 
       <article class="plat" data-os="linux">
         <h3 class="plat__os">Linux</h3>
-        <p class="plat__what">x86-64. The AppImage runs without installing on distributions from 2022 on (glibc 2.35); the packages suit apt and dnf, and bring WebKitGTK 4.1 with them.</p>
+        <p class="plat__what">x86-64. The AppImage runs without installing on distributions from 2022 on (glibc 2.35)<span class="wide-only">; the packages suit apt and dnf, and bring WebKitGTK 4.1 with them</span>.</p>
         <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_amd64.AppImage">Download the AppImage</a>
         <p class="plat__note plat__alts">
           Or a package:
@@ -553,8 +573,8 @@
       </p>
       <p>
         <a href="https://github.com/simnJS/hangar-ai/releases/latest">Every file of the latest release</a>
-        is on GitHub. To build it yourself you need Node 22, pnpm 10, Rust, cmake and LLVM:
-        see <a href="https://github.com/simnJS/hangar-ai#build-from-source">Build from source</a>.
+        is on GitHub.<span class="wide-only"> To build it yourself you need Node 22, pnpm 10, Rust, cmake and
+        LLVM: see <a href="https://github.com/simnJS/hangar-ai#build-from-source">Build from source</a>.</span>
       </p>
     </div>
   </div>

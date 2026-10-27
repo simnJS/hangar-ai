@@ -4,7 +4,8 @@
     "rect: [x, y, width, height] in the capture's CSS pixels (scale: capture pixels per CSS pixel),",
     "or { \"ref\": \"path/in/the/rects/index\" } with optional pad and x/y/w/h overrides.",
     "widths: the files written, img/<name>-<width>.avif and .webp; the page's srcset follows them.",
-    "fade: CSS pixels over which an edge the crop cuts through fades to that edge's own colour."
+    "fade: CSS pixels over which an edge the crop cuts through fades to that edge's own colour.",
+    "Names ending in -m are the phone crops: one panel, drawn near its real size on a phone."
   ],
   "scale": 2,
   "rects": "rects.json",
@@ -36,6 +37,20 @@
     "orch": { "src": "orch.png", "rect": [420, 24, 600, 676], "widths": [600, 1200] },
     "palette": { "src": "palette.png", "rect": [400, 126, 640, 520], "widths": [640, 1280] },
     "stats": { "src": "stats.png", "rect": [252, 44, 892, 508], "widths": [892, 1784] },
-    "model": { "src": "model.png", "rect": [252, 44, 1188, 546], "widths": [1188, 2376] }
+    "model": { "src": "model.png", "rect": [252, 44, 1188, 546], "widths": [1188, 2376] },
+
+    "hero-m": {
+      "src": "checkout.png",
+      "rect": { "ref": "checkout/.pane/0", "w": 410, "h": 254 },
+      "fade": { "right": 44 },
+      "widths": [400, 800]
+    },
+    "pin-m": { "src": "pinmenu.png", "rect": [252, 44, 446, 196], "widths": [400, 800] },
+    "board-m": { "src": "board.png", "rect": [252, 86, 444, 290], "widths": [400, 800] },
+    "workers-m": { "src": "checkout.png", "rect": { "ref": "checkout/.pane/1" }, "widths": [400, 748] },
+    "needs-m": { "src": "needs.png", "rect": [652, 38, 440, 324], "widths": [400, 800] },
+    "orch-m": { "src": "orch.png", "rect": [486, 236, 476, 120], "widths": [400, 800] },
+    "stats-m": { "src": "stats.png", "rect": [254, 50, 444, 208], "widths": [400, 800] },
+    "model-m": { "src": "model.png", "rect": [1001, 326, 439, 256], "widths": [400, 800] }
   }
 }

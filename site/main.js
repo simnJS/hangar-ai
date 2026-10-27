@@ -10,6 +10,7 @@
      4. the section bar, which marks where you are
      5. the download for the system you are on
      6. the delivery, which plays its four stages once
+     7. the short lists, folded to their titles on a phone
    ═══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -269,5 +270,31 @@
       })();
     }, { threshold: 0.6 });
     watch.observe(box);
+  })();
+
+  /* ── 7. the short lists ────────────────────────────────────────
+     The facts under the orchestrator and the list under "Everything
+     else" are written open. On a phone they fold to their titles, a
+     tap away each; they open again when the screen grows. */
+
+  (function folds() {
+    var folds = document.querySelectorAll('details.fold');
+    if (!folds.length) return;
+    var roomy = window.matchMedia('(min-width: 600px)');
+    function set() {
+      Array.prototype.forEach.call(folds, function (d) { d.open = roomy.matches; });
+    }
+    set();
+    if (roomy.addEventListener) roomy.addEventListener('change', set);
+    else if (roomy.addListener) roomy.addListener(set);
+
+    // Folding moved what a link to a section points at: go back to it.
+    if (!roomy.matches && window.location.hash) {
+      var target = document.getElementById(window.location.hash.slice(1));
+      if (target) {
+        try { target.scrollIntoView({ block: 'start', behavior: 'instant' }); }
+        catch (e) { target.scrollIntoView(true); }
+      }
+    }
   })();
 })();

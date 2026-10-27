@@ -46,6 +46,12 @@ orchestration defaults (3 workers, 2 attempts, merge by itself, Opus plans,
 Sonnet works and reviews), `src-tauri/src/delivery.rs` for the delivery
 stages, `src/lib/orchestratorBrief.ts` for what the orchestrator is told.
 
+On a phone (below 600 px) the page keeps every point and drops detail: the
+words wrapped in `.wide-only` are left out there, so read them with the rest
+when the copy changes. The facts under the orchestrator and the list under
+"Everything else" are `<details class="fold">`, written open; `main.js` folds
+them to their titles on a phone.
+
 The delivery card in step 4 is HTML, not a capture. It is written in its final
 state; `main.js` resets it and plays the four stages once when it scrolls into
 view, unless the visitor asked for reduced motion. It is the only thing on the
@@ -131,7 +137,12 @@ folder that holds them. To swap them, put the new ones in a folder, set each
 image's `src` and `rect` (or `rects` and the refs) and `scale`, and run the
 script. Nothing in the page is edited by hand.
 
-Everything below the hero is `loading="lazy"`.
+Below 600 px each `<picture>` switches, through a `media` source, to the `-m`
+crop of the same image: one panel, two board columns, the Needs you popover,
+the pane menu, drawn close to the size the app draws them so their text reads
+on a phone. There the hero's outlines give way to the one line of its legend
+that matches its crop, and the palette capture is left out. Everything below
+the hero is `loading="lazy"`.
 
 The README's images (`../.github/assets`) come from the same session, with the
 inspector closed, and `../.github/social-preview.png` (1280 × 640) is rendered
