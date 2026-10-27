@@ -103,6 +103,8 @@ export interface ControlDeps {
   /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
   workers?: WorkerDeps;
   // orchestration: delivery deps
+  /** Merges, checks, reviews and lands workers' deliveries (lib/deliveryControl). */
+  delivery?: import("./deliveryControl").DeliveryDeps;
 }
 
 export const DISABLED =

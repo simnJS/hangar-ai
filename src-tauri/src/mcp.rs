@@ -538,6 +538,24 @@ fn tool_definitions() -> Value {
         },
         // orchestration: delivery (delivery_* tools)
         {
+            "name": "delivery_submit",
+            "description": "Hand in your task's work, once it is done and committed: only for a worker pane started on a board task. Hangar merges your branch onto the workspace's branch as it is now, in a separate worktree, runs the workspace's check command there when it has one, and has a reviewer that did not write it read the change against your task. If all passes it lands on the branch by itself (or waits for the person, when automatic landing is off), your task is done and your pane closes. Otherwise you get a message from Hangar saying exactly what failed — a conflict, a failing check, the reviewer's blocking items — and what to do; fix it on your branch, commit, and call this again. It refuses straight away when your worktree has uncommitted changes or your branch has nothing new. Call it once, then end your turn and wait for that message; do not change your branch meanwhile.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "summary": { "type": "string", "description": "What you did, in a few lines, for the reviewer and the task's comments: what changed, and the commands you ran with their result." }
+                }
+            }
+        },
+        {
+            "name": "delivery_status",
+            "description": "Where deliveries stand: from a worker pane, its own; otherwise every worker's in your workspace. Each says its stage while running (queued, merging, checking, reviewing, landing) or its last outcome. Outcomes arrive as messages by themselves: there is no need to poll this.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
             "name": "model_close",
             "description": "Close a model in your workspace's 3D preview. Without a path it closes every model open there; other workspaces' previews are left as they are. The panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
             "inputSchema": {

@@ -30,6 +30,7 @@ import {
 } from "./lib/ipc";
 import { usePaneControl } from "./lib/control";
 import { useOrchestrator } from "./lib/orchestratorBrief";
+import { deliveryDeps } from "./lib/deliveryControl";
 import {
   carryResume,
   isAsleep,
@@ -708,6 +709,7 @@ export default function App() {
           // orchestration: workers deps
           workers: liveWorkerDeps(updatePane),
           // orchestration: delivery deps
+          delivery: deliveryDeps(() => shells),
         }
       : null,
   );

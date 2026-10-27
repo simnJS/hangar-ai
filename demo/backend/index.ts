@@ -121,6 +121,30 @@ export async function route(command: string, args: Record<string, any>): Promise
     case "board_comment":
       return board.comment(args.cwd, args.id, args.author, args.text);
 
+    /* ── deliveries ──
+       The browser has no git: a delivery waiting for the person lands as it
+       was tested, its worker goes, and the board says so. */
+    case "delivery_preflight":
+      return { repo: args.workspace, queue: args.workspace, branch: "hangar/demo", target: "main", ahead: 1 };
+    case "delivery_run":
+      return {
+        outcome: "landed",
+        detail: "hangar/demo landed on main (d3m0f00).",
+        files: [],
+        inCheckout: false,
+        changed: [],
+        outsideOwns: [],
+        check: null,
+        review: null,
+        merge: "d3m0f00d",
+        base: null,
+        landedIn: args.delivery?.workspace ?? null,
+      };
+    case "delivery_cleanup":
+      return { worktreeRemoved: true, branchDeleted: true, kept: [] };
+    case "delivery_running":
+      return [];
+
     /* ── MCP registration ── */
     case "mcp_targets":
       return MCP_TARGETS.map((t) => ({ ...t, configured: configured.has(t.id) }));

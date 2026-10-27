@@ -39,6 +39,8 @@ pub const OPERATIONS: &[&str] = &[
     "worker_list",
     "worker_stop",
     // orchestration: delivery (lib/deliveryControl.ts)
+    "delivery_submit",
+    "delivery_status",
 ];
 
 /// Long enough for a window that is busy repainting eight streaming panes;
