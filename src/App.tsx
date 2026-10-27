@@ -29,6 +29,7 @@ import {
   ptyWrite,
 } from "./lib/ipc";
 import { usePaneControl } from "./lib/control";
+import { useOrchestrator } from "./lib/orchestratorBrief";
 import {
   carryResume,
   isAsleep,
@@ -710,6 +711,9 @@ export default function App() {
         }
       : null,
   );
+
+  // Orchestrators: the events that wake them, the briefing their sessions ask for.
+  useOrchestrator(hydrated ? snapshot : null);
 
   // ---------------------------------------------------------------------------
   // Workspaces in windows of their own (lib/windows). Moving one never
