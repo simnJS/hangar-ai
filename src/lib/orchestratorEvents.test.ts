@@ -355,6 +355,16 @@ describe("settling a batch", () => {
     expect(settle(batch, batch, now).map((e) => ("worker" in e ? e.worker : null))).toEqual(["w1", "w3"]);
   });
 
+  it("drops the exit of a worker whose task left doing, as a landing closes its pane", () => {
+    const batch = [
+      entry({ kind: "workerExited", worker: "w1", taskId: "a" }),
+      entry({ kind: "workerExited", worker: "w2", taskId: "b" }),
+      entry({ kind: "workerExited", worker: "w3", taskId: null }),
+    ];
+    const now = live({}, { a: "done", b: "doing" });
+    expect(settle(batch, batch, now).map((e) => ("worker" in e ? e.worker : null))).toEqual(["w2", "w3"]);
+  });
+
   it("removes repeats, keeps a worker's last two comments, and puts deliveries first", () => {
     const comment = (text: string): OrchestratorEvent => ({
       kind: "taskCommented",

@@ -209,9 +209,14 @@ export function settle(batch: JournalEntry[], journal: JournalEntry[], live: Liv
         const now = live.activity(event.worker);
         return now !== "working" && now !== "waiting" && (!event.taskId || live.column(event.taskId) === "doing");
       }
-      case "workerExited":
+      case "workerExited": {
         // Stopped on purpose: worker_stop says so itself.
-        return !near(entry, "workerStopped", (e) => workerOf(e) === event.worker);
+        if (near(entry, "workerStopped", (e) => workerOf(e) === event.worker)) return false;
+        // Closed because its delivery landed, or off a task no longer in
+        // doing: nothing is left hanging on it.
+        const column = event.taskId ? live.column(event.taskId) : undefined;
+        return column === undefined || column === "doing";
+      }
       case "taskMoved": {
         const same = (e: OrchestratorEvent) => taskOf(e) === event.taskId;
         if (event.to === "doing" && near(entry, "workerStarted", same)) return false;
