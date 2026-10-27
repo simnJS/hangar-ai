@@ -1198,6 +1198,11 @@ const en = {
   "update.restart": "Restart",
   "update.failed": "Update failed",
   "update.retry": "Retry",
+  // orchestration: bridge
+  // orchestration: workers
+  // orchestration: delivery
+  // orchestration: orchestrator
+  // orchestration: ui
 } as const;
 
 type Key = keyof typeof en;
@@ -2420,6 +2425,11 @@ const fr: Record<Key, string> = {
   "update.restart": "Redémarrer",
   "update.failed": "Échec de la mise à jour",
   "update.retry": "Réessayer",
+  // orchestration: bridge
+  // orchestration: workers
+  // orchestration: delivery
+  // orchestration: orchestrator
+  // orchestration: ui
 };
 
 const typesetAll = (dict: Record<Key, string>, locale: Locale) =>

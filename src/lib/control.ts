@@ -9,6 +9,8 @@ import type { ModelHost } from "./modelHost";
 import type { OpenModel, SnapshotAngle } from "./modelStore";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
+import { workerControl } from "./workerControl";
+import { deliveryControl } from "./deliveryControl";
 
 /**
  * Agents driving the panes through the MCP server (see src-tauri/src/control.rs).
@@ -93,6 +95,8 @@ export interface ControlDeps {
    * detached workspace is shown in; null when that window does not answer.
    */
   modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
+  // orchestration: workers deps
+  // orchestration: delivery deps
 }
 
 export const DISABLED =
@@ -645,6 +649,10 @@ export async function runControl(
   // What an agent does to a workspace's panes counts as using it, like typing
   // into them would — reading them does not.
   if (op === "pane_send" || op === "pane_create" || op === "pane_restart") deps.touch(ws.id);
+
+  // Orchestration has modules of its own: lib/workerControl, lib/deliveryControl.
+  if (op.startsWith("worker_")) return workerControl(op, ws, args, caller, deps);
+  if (op.startsWith("delivery_")) return deliveryControl(op, ws, args, caller, deps);
 
   switch (op) {
     case "pane_list": {

@@ -371,6 +371,19 @@ async fn bridge_next(
     Ok(Json(json!({ "message": message })))
 }
 
+/// What the pane's mod adds to its session: its part in an orchestration and
+/// the state it is handed again (orchestrator.rs). `null` for any other pane.
+async fn bridge_briefing(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(pane): Path<String>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    Ok(Json(
+        json!({ "briefing": crate::orchestrator::briefing(&pane) }),
+    ))
+}
+
 #[derive(Deserialize)]
 struct ConflictQuery {
     file: String,
@@ -465,6 +478,7 @@ pub async fn start(
         .route("/api/bridge/{pane}/event", post(bridge_event))
         .route("/api/bridge/{pane}/next", get(bridge_next))
         .route("/api/bridge/{pane}/conflict", get(bridge_conflict))
+        .route("/api/bridge/{pane}/briefing", get(bridge_briefing))
         .route("/api/control/{op}", post(control))
         .with_state(state);
 

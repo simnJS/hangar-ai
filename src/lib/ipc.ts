@@ -34,11 +34,17 @@ export const ptyHasChildren = (ids: string[]) => invoke<string[]>("pty_has_child
 export interface QueuedPrompt {
   id: string;
   text: string;
+  /** Absent when the person queued it; see `bridgeEnqueue`. */
+  from?: string;
 }
 
-/** Queued for the pane's hangar-bridge mod, which submits it once idle. */
-export const bridgeEnqueue = (paneId: string, text: string) =>
-  invoke<QueuedPrompt>("bridge_enqueue", { paneId, text });
+/**
+ * Queued for the pane's hangar-bridge mod, which submits it once idle.
+ * `from` names who sends it when it is not the person at the keyboard: an
+ * agent's pane name, or `hangar` (see `Queued.from` in bridge.rs).
+ */
+export const bridgeEnqueue = (paneId: string, text: string, from?: string) =>
+  invoke<QueuedPrompt>("bridge_enqueue", { paneId, text, from: from ?? null });
 
 /** One queued prompt by id, or the pane's whole queue without one. */
 export const bridgeCancel = (paneId: string, id?: string) =>

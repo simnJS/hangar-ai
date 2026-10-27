@@ -71,7 +71,21 @@ export interface Pane {
   /** Overrides the workspace shell. null follows the workspace. */
   shellId: string | null;
   title: string | null;
+  /**
+   * The pane's part in its workspace's orchestration (lib/orchestration).
+   * Absent on every other pane, and on every pane saved before it existed.
+   */
+  role?: PaneRole;
+  /** A worker's board task, by id. */
+  taskId?: string | null;
+  /** The model its agent starts with (`--model`); absent: the agent's own. */
+  model?: string | null;
+  /** First of the ports a worker may bind (HANGAR_PORT_BASE in its shell). */
+  portBase?: number | null;
 }
+
+/** An orchestrator coordinates; a worker does one board task in its worktree. */
+export type PaneRole = "orchestrator" | "worker";
 
 /**
  * A command kept around to be run again — `pnpm tauri dev`, `cargo check`, the
@@ -129,6 +143,31 @@ export interface Workspace {
    * reads as `inherit`, which is what every workspace saved before this did.
    */
   mcp?: WorkspaceMcp;
+  /**
+   * How its orchestrator works (lib/orchestration). Absent reads as the
+   * defaults there; a workspace without an orchestrator ignores it.
+   */
+  orchestration?: OrchestrationSettings;
+}
+
+export interface OrchestrationSettings {
+  /** Workers running at once; the orchestrator itself does not count. */
+  maxWorkers: number;
+  /** Workers started on one task before it goes back to the person. */
+  maxAttempts: number;
+  /**
+   * Whether a delivery that passed its check and its review lands on the
+   * branch by itself. Off, it waits for the person. Nothing is ever pushed.
+   */
+  autoMerge: boolean;
+  /** Run in a delivery's worktree before it lands; null: none. */
+  checkCommand: string | null;
+  /** `--model` of the orchestrator, of its workers, of its reviewers. */
+  orchestratorModel: string;
+  workerModel: string;
+  reviewerModel: string;
+  /** The branch deliveries land on; null: the workspace's current branch. */
+  branch: string | null;
 }
 
 /**

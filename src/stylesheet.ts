@@ -10,3 +10,4 @@ import "./styles/palette.css";
 import "./styles/model.css";
 import "./styles/mcp-scope.css";
 import "./styles/stats.css";
+import "./styles/orchestration.css";

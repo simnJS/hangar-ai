@@ -34,6 +34,8 @@ pub const OPERATIONS: &[&str] = &[
     "model_show",
     "model_snapshot",
     "model_close",
+    // orchestration: workers (lib/workerControl.ts)
+    // orchestration: delivery (lib/deliveryControl.ts)
 ];
 
 /// Long enough for a window that is busy repainting eight streaming panes;

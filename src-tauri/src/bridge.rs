@@ -167,6 +167,11 @@ fn now_ms() -> u64 {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    /// Who it comes from: absent for the person at the keyboard, an agent's
+    /// pane name for an agent, `hangar` for Hangar's own events. Only what the
+    /// person typed reaches the model as typed by them (orchestration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 #[derive(Default)]
@@ -175,10 +180,11 @@ struct Inbox {
 }
 
 impl Inbox {
-    fn push(&mut self, pane_id: &str, text: String) -> Queued {
+    fn push(&mut self, pane_id: &str, text: String, from: Option<String>) -> Queued {
         let queued = Queued {
             id: uuid::Uuid::new_v4().to_string(),
             text,
+            from,
         };
         self.by_pane
             .entry(pane_id.to_string())
@@ -247,13 +253,23 @@ fn queue_changed(app: &AppHandle, pane_id: &str, pending: Vec<Queued>) {
 }
 
 #[tauri::command]
-pub fn bridge_enqueue(app: AppHandle, pane_id: String, text: String) -> Queued {
+pub fn bridge_enqueue(
+    app: AppHandle,
+    pane_id: String,
+    text: String,
+    from: Option<String>,
+) -> Queued {
+    enqueue_from(&app, &pane_id, text, from)
+}
+
+/// Queues `text` for a pane; `from` as on `Queued`.
+pub fn enqueue_from(app: &AppHandle, pane_id: &str, text: String, from: Option<String>) -> Queued {
     let (queued, pending) = {
         let mut inbox = inbox();
-        let queued = inbox.push(&pane_id, text);
-        (queued, inbox.pending(&pane_id))
+        let queued = inbox.push(pane_id, text, from);
+        (queued, inbox.pending(pane_id))
     };
-    queue_changed(&app, &pane_id, pending);
+    queue_changed(app, pane_id, pending);
     queued
 }
 
@@ -378,8 +394,8 @@ mod tests {
     #[test]
     fn inbox_hands_out_in_order_and_forgets_empty_panes() {
         let mut inbox = Inbox::default();
-        let first = inbox.push("a", "one".into());
-        inbox.push("a", "two".into());
+        let first = inbox.push("a", "one".into(), None);
+        inbox.push("a", "two".into(), None);
         assert_eq!(inbox.pop("a"), Some(first));
         assert_eq!(inbox.pending("a").len(), 1);
         assert_eq!(inbox.pop("a").map(|q| q.text), Some("two".into()));
@@ -390,8 +406,8 @@ mod tests {
     #[test]
     fn inbox_cancels_one_or_all() {
         let mut inbox = Inbox::default();
-        let first = inbox.push("a", "one".into());
-        inbox.push("a", "two".into());
+        let first = inbox.push("a", "one".into(), None);
+        inbox.push("a", "two".into(), None);
         inbox.cancel("a", Some(&first.id));
         assert_eq!(inbox.pending("a").len(), 1);
         inbox.cancel("a", None);

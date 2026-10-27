@@ -485,6 +485,8 @@ fn tool_definitions() -> Value {
                 }
             }
         },
+        // orchestration: workers (worker_* tools)
+        // orchestration: delivery (delivery_* tools)
         {
             "name": "model_close",
             "description": "Close a model in your workspace's 3D preview. Without a path it closes every model open there; other workspaces' previews are left as they are. The panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",

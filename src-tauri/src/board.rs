@@ -56,6 +56,17 @@ pub struct Task {
     /// rather than a made-up one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doing_since: Option<u64>,
+    /// Paths and globs this task's worker may change, relative to the
+    /// workspace (orchestration). Two tasks in `doing` never share one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owns: Vec<String>,
+    /// How many workers were started on this task (orchestration).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub attempts: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Task {
@@ -197,6 +208,8 @@ pub struct NewTask {
     pub labels: Vec<String>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub owns: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -213,6 +226,7 @@ pub struct TaskPatch {
     pub labels: Option<Vec<String>>,
     pub depends_on: Option<Vec<String>>,
     pub order: Option<f64>,
+    pub owns: Option<Vec<String>>,
 }
 
 pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
@@ -235,6 +249,8 @@ pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
         depends_on: input.depends_on,
         created_at: stamp,
         updated_at: stamp,
+        owns: input.owns,
+        attempts: 0,
     };
     board.tasks.push(task.clone());
     Ok(task)
@@ -269,6 +285,9 @@ pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task,
     }
     if let Some(v) = patch.labels {
         task.labels = v;
+    }
+    if let Some(v) = patch.owns {
+        task.owns = v;
     }
     if let Some(v) = patch.depends_on {
         task.depends_on = v;
@@ -421,6 +440,7 @@ mod tests {
                 priority: None,
                 labels: vec![],
                 depends_on: vec![],
+                owns: vec![],
             },
         )
         .unwrap()

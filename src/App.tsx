@@ -702,6 +702,8 @@ export default function App() {
           // A detached workspace's preview is drawn by its own window.
           modelHost: async (workspaceId, detached) =>
             detached ? remoteModelHost(workspaceId) : localModelHost(workspaceId),
+          // orchestration: workers deps
+          // orchestration: delivery deps
         }
       : null,
   );
