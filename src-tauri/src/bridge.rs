@@ -427,7 +427,10 @@ mod tests {
         let event = inbox.push("a", "task done".into(), Some("hangar".into()));
         inbox.push("a", "from ava".into(), Some("Ava".into()));
         assert_eq!(inbox.pop("a", true), Some(event));
-        assert_eq!(inbox.pop("a", true).map(|q| q.text), Some("from ava".into()));
+        assert_eq!(
+            inbox.pop("a", true).map(|q| q.text),
+            Some("from ava".into())
+        );
         assert_eq!(inbox.pop("a", true), None);
         // The person's prompt kept its place, and is what is left.
         assert_eq!(inbox.pop("a", false).map(|q| q.text), Some("mine".into()));
