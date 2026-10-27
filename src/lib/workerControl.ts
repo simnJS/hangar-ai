@@ -271,15 +271,15 @@ export function workerBrief(facts: BriefFacts): string {
       : "- The project's own checks pass for what you changed: its tests, its build. A reviewer reads your diff when you deliver.",
     "",
     "## Report",
-    `Before you stop, whatever the reason, leave one short comment on task ${task.id} (board_comment_task): ` +
-      "what you did, and each command you ran to check it, with its result.",
+    `Before you stop, whatever the reason, leave one short comment on your task with ` +
+      `board_comment_task {id: "${task.id}", text}: what you did, and each command you ran to check it, with its result.`,
     "",
     "## When blocked",
     "If something is missing — a decision, an access, a file outside yours, a dependency that does not work — " +
       "say what it is in a comment on the task and stop. Never mock, stub or guess your way past it.",
     "",
     "## When done",
-    `Commit everything on ${branch}, leave the comment above, then call delivery_submit with a one-line summary. ` +
+    `Commit everything on ${branch}, leave the comment above, then call delivery_submit {summary} with a one-line summary. ` +
       "Hangar checks your branch, has it reviewed and lands it; if anything fails, a message tells you what to fix.",
   ];
   return lines.filter((line): line is string => line !== null).join("\n");

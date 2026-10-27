@@ -710,5 +710,8 @@ describe("names", () => {
     expect(brief).toContain("No files were assigned to this task");
     expect(brief).toContain("(No description beyond the title.)");
     expect(brief).not.toContain("attempt 1");
+    // Spelled out: a worker that guesses them calls with task_id and comment.
+    expect(brief).toContain('board_comment_task {id: "t", text}');
+    expect(brief).toContain("delivery_submit {summary}");
   });
 });

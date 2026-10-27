@@ -165,7 +165,7 @@ Hangar.AI started this Claude Code session to do one board task, ${task}, in a g
 ## When you are done
 1. Run the check from the brief, and the tests near your change, until they pass.
 2. Commit everything on your branch.
-3. board_comment_task on your task: what changed, the commands you ran and their results.
+3. board_comment_task {id: <your task's id>, text} on your task: what changed, the commands you ran and their results.
 4. Call delivery_submit {summary}. Hangar merges your branch in a scratch worktree, runs the check, has a reviewer read the diff, and lands it.
 5. If it comes back (uncommitted changes, a conflict, a failed check, changes requested), fix exactly that, commit, and call delivery_submit again. On a conflict, merge the target branch into yours, resolve, commit.`;
 }
