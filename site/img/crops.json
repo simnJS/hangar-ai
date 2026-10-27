@@ -1,14 +1,16 @@
 {
   "$comment": [
     "What scripts/site-crops.mjs cuts out of the captures, and how. Run it with --sources <folder>.",
-    "rect: [x, y, width, height] in the capture's CSS pixels (scale: capture pixels per CSS pixel),",
+    "The captures are real sessions of the app, 2560 x 1440 px: a 1280 x 720 window at scale 2.",
+    "rect: [x, y, width, height] in capture pixels (scale 1: one capture pixel per unit),",
     "or { \"ref\": \"path/in/the/rects/index\" } with optional pad and x/y/w/h overrides.",
+    "In a list of the index, a path step is a position or an entry's name: stills/en/hero/rects/workers/Zoe/box.",
     "widths: the files written, img/<name>-<width>.avif and .webp; the page's srcset follows them.",
-    "fade: CSS pixels over which an edge the crop cuts through fades to that edge's own colour.",
+    "fade: pixels over which an edge the crop cuts through fades to that edge's own colour.",
     "Names ending in -m are the phone crops: one panel, drawn near its real size on a phone."
   ],
-  "scale": 2,
-  "rects": "rects.json",
+  "scale": 1,
+  "rects": "../../index.json",
   "out": ".",
   "href": "img/",
   "page": "../index.html",
@@ -18,39 +20,64 @@
   },
   "images": {
     "hero": {
-      "src": "checkout.png",
-      "rect": [0, 0, 1440, 900],
+      "src": "alt/hero-r2-8.png",
+      "rect": [0, 0, 2560, 1440],
       "widths": [1280, 1920, 2560],
       "marks": [
-        [8, 70, 236, 322],
-        [256, 47, 144, 24],
-        [775, 47, 110, 24],
-        [775, 458, 100, 24],
-        [980, 6, 115, 32],
-        [1148, 50, 288, 380]
+        [12, 96, 480, 452],
+        [514, 94, 138, 48],
+        [1250, 94, 206, 48],
+        [514, 736, 648, 48],
+        { "ref": "alternates/en/alt/hero-r2-8/rects/needsYouButton", "pad": [6, 6, 6, 18] },
+        { "ref": "alternates/en/alt/hero-r2-8/rects/inspector", "pad": -8, "h": 770 }
       ]
     },
-    "pin": { "src": "pinmenu.png", "rect": [252, 44, 448, 256], "widths": [448, 896] },
-    "board": { "src": "board.png", "rect": [252, 44, 892, 356], "widths": [892, 1784] },
-    "workers": { "src": "checkout.png", "rect": [252, 44, 892, 504], "widths": [892, 1784] },
-    "needs": { "src": "needs.png", "rect": [652, 0, 440, 368], "widths": [440, 880] },
-    "orch": { "src": "orch.png", "rect": [420, 24, 600, 676], "widths": [600, 1200] },
-    "palette": { "src": "palette.png", "rect": [400, 126, 640, 520], "widths": [640, 1280] },
-    "stats": { "src": "stats.png", "rect": [252, 44, 892, 508], "widths": [892, 1784] },
-    "model": { "src": "model.png", "rect": [252, 44, 1188, 546], "widths": [1188, 2376] },
+    "pin": { "src": "pin.png", "rect": [1270, 88, 698, 396], "widths": [448, 698] },
+    "board": {
+      "src": "alt/board-inspector.png",
+      "rect": [504, 88, 1464, 812],
+      "fade": { "bottom": 64 },
+      "widths": [732, 1464]
+    },
+    "workers": { "src": "s-grid.png", "rect": { "ref": "stills/en/s-grid/rects/paneGrid", "w": 1720 }, "widths": [860, 1720] },
+    "needs": { "src": "alt/needs-3.png", "rect": [984, 8, 880, 728], "widths": [440, 880] },
+    "orch": {
+      "src": "orch.png",
+      "rect": { "ref": "stills/en/orch/rects/dialogs/0/box", "pad": 4 },
+      "widths": [604, 1208]
+    },
+    "palette": {
+      "src": "alt/palette-open.png",
+      "rect": { "ref": "alternates/en/alt/palette-open/rects/dialogs/0/box", "pad": 6 },
+      "widths": [646, 1292]
+    },
+    "stats": { "src": "stats.png", "rect": [504, 88, 1436, 688], "widths": [718, 1436] },
+    "model": { "src": "model.png", "rect": [504, 88, 2056, 912], "widths": [1180, 2056] },
 
     "hero-m": {
-      "src": "checkout.png",
-      "rect": { "ref": "checkout/.pane/0", "w": 410, "h": 254 },
-      "fade": { "right": 44 },
+      "src": "alt/hero-r2-8.png",
+      "rect": { "ref": "alternates/en/alt/hero-r2-8/rects/orchestrator/box", "h": 460 },
+      "widths": [400, 732]
+    },
+    "pin-m": { "src": "pin.png", "rect": [1270, 88, 698, 396], "widths": [400, 698] },
+    "board-m": {
+      "src": "alt/board-inspector.png",
+      "rect": [1235, 190, 733, 700],
+      "fade": { "bottom": 64 },
+      "widths": [400, 733]
+    },
+    "workers-m": {
+      "src": "s-grid.png",
+      "rect": { "ref": "stills/en/s-grid/rects/workers/Max/box", "h": 430 },
       "widths": [400, 800]
     },
-    "pin-m": { "src": "pinmenu.png", "rect": [252, 44, 446, 196], "widths": [400, 800] },
-    "board-m": { "src": "board.png", "rect": [252, 86, 444, 290], "widths": [400, 800] },
-    "workers-m": { "src": "checkout.png", "rect": { "ref": "checkout/.pane/1" }, "widths": [400, 748] },
-    "needs-m": { "src": "needs.png", "rect": [652, 38, 440, 324], "widths": [400, 800] },
-    "orch-m": { "src": "orch.png", "rect": [486, 236, 476, 120], "widths": [400, 800] },
-    "stats-m": { "src": "stats.png", "rect": [254, 50, 444, 208], "widths": [400, 800] },
-    "model-m": { "src": "model.png", "rect": [1001, 326, 439, 256], "widths": [400, 800] }
+    "needs-m": {
+      "src": "alt/needs-3.png",
+      "rect": { "ref": "alternates/en/alt/needs-3/rects/dialogs/0/box" },
+      "widths": [400, 800]
+    },
+    "orch-m": { "src": "orch.png", "rect": [820, 472, 940, 248], "widths": [400, 800] },
+    "stats-m": { "src": "stats.png", "rect": [526, 196, 704, 572], "widths": [400, 704] },
+    "model-m": { "src": "alt/model-wide.png", "rect": [1283, 88, 685, 860], "widths": [400, 685] }
   }
 }
