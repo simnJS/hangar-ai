@@ -22,7 +22,13 @@ import {
 } from "./git";
 import { ptyKill } from "./ipc";
 import { MAX_PANES } from "./layout";
-import { orchestrationOf, orchestratorOf, workersOf } from "./orchestration";
+import {
+  NEEDS_YOU_LABEL,
+  orchestrationOf,
+  orchestratorOf,
+  READY_TO_LAND_LABEL,
+  workersOf,
+} from "./orchestration";
 import { postOrchestratorEvent } from "./orchestratorEvents";
 import { allPaneNames, pickPaneName } from "./paneNames";
 import { COPY_PATTERNS, sanitizeBranchName, worktreeFolder } from "./worktrees";
@@ -602,8 +608,8 @@ async function removeWorktree(ws: Workspace, path: string, deps: ControlDeps): P
 function deliveryOf(task: Task | undefined): string | null {
   if (!task) return null;
   if (task.column === "done") return "landed";
-  if (task.labels.includes("ready-to-land")) return "ready";
-  if (task.labels.includes("needs-you")) return "needs-you";
+  if (task.labels.includes(READY_TO_LAND_LABEL)) return "ready";
+  if (task.labels.includes(NEEDS_YOU_LABEL)) return "needs-you";
   if (task.column === "review") return "review";
   return null;
 }

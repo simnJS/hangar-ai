@@ -59,6 +59,11 @@ export function orchestrationOf(ws: Pick<Workspace, "orchestration">): Orchestra
   };
 }
 
+/** The label of a board task only the person can move forward. */
+export const NEEDS_YOU_LABEL = "needs-you";
+/** The label of a delivery that passed its check and review, waiting to land. */
+export const READY_TO_LAND_LABEL = "ready-to-land";
+
 /** The workspace's orchestrator pane, if it has one. */
 export const orchestratorOf = (ws: Pick<Workspace, "panes">): Pane | null =>
   ws.panes.find((pane) => pane.role === "orchestrator") ?? null;

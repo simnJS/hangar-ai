@@ -3,7 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { boardComment, boardLoad, boardUpdate, type Task, type TaskPatch } from "./board";
 import { resolvePath, type Caller, type ControlDeps } from "./control";
 import { bridgeEnqueue } from "./ipc";
-import { orchestrationOf, workersOf } from "./orchestration";
+import { NEEDS_YOU_LABEL, orchestrationOf, READY_TO_LAND_LABEL, workersOf } from "./orchestration";
 import { postOrchestratorEvent, type OrchestratorEvent } from "./orchestratorEvents";
 import { resolveShell } from "./shells";
 import type { Pane, ShellInfo, Workspace } from "../types";
@@ -126,9 +126,8 @@ export interface DeliveryDeps {
 /** What the comments and the messages are signed with (bridge.rs `Queued.from`). */
 export const HANGAR = "hangar";
 /** A delivery that passed and waits for the person to land it. */
-export const READY_LABEL = "ready-to-land";
-/** A task only the person can move forward. */
-export const NEEDS_YOU_LABEL = "needs-you";
+export const READY_LABEL = READY_TO_LAND_LABEL;
+export { NEEDS_YOU_LABEL };
 /** Failed deliveries of one task before it goes to the person. */
 export const MAX_FAILED_DELIVERIES = 3;
 /** How the board's comments count the failed deliveries: they outlive the app. */

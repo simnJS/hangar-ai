@@ -52,21 +52,58 @@ function ensureListening() {
     });
 }
 
+/** Keeps the board in `cwd` loaded and current until the returned call. */
+function hold(cwd: string): () => void {
+  const entry = boards.get(cwd);
+  if (entry) entry.users += 1;
+  else boards.set(cwd, { tasks: null, users: 1 });
+  ensureListening();
+  refresh(cwd);
+  return () => {
+    const held = boards.get(cwd);
+    if (held && --held.users <= 0) boards.delete(cwd);
+  };
+}
+
 /** The tasks of the board in `cwd`, or null until they are read. */
 export function useBoardTasks(cwd: string | null): Task[] | null {
   useEffect(() => {
     if (!cwd) return;
-    const entry = boards.get(cwd);
-    if (entry) entry.users += 1;
-    else boards.set(cwd, { tasks: null, users: 1 });
-    ensureListening();
-    refresh(cwd);
-    return () => {
-      const held = boards.get(cwd);
-      if (held && --held.users <= 0) boards.delete(cwd);
-    };
+    return hold(cwd);
   }, [cwd]);
   return useSyncExternalStore(subscribe, () => (cwd ? (boards.get(cwd)?.tasks ?? null) : null));
+}
+
+const EMPTY_BOARDS: ReadonlyMap<string, Task[] | null> = new Map();
+const boardSets = new Map<string, Map<string, Task[] | null>>();
+
+/** The same map for as long as none of its boards changed, as a snapshot must be. */
+function boardsSnapshot(key: string, cwds: readonly string[]): ReadonlyMap<string, Task[] | null> {
+  if (!cwds.length) return EMPTY_BOARDS;
+  const cached = boardSets.get(key);
+  if (cached && cwds.every((cwd) => cached.get(cwd) === (boards.get(cwd)?.tasks ?? null))) {
+    return cached;
+  }
+  const value = new Map(cwds.map((cwd) => [cwd, boards.get(cwd)?.tasks ?? null]));
+  boardSets.set(key, value);
+  return value;
+}
+
+/**
+ * Several boards at once, by folder — however many there are, which a hook
+ * per board could not follow. Each is null until it is read.
+ */
+export function useBoardsOf(cwds: readonly string[]): ReadonlyMap<string, Task[] | null> {
+  const key = cwds.join("\n");
+  useEffect(() => {
+    if (!key) return;
+    const releases = key.split("\n").map(hold);
+    return () => {
+      releases.forEach((release) => release());
+      boardSets.delete(key);
+    };
+  }, [key]);
+  return useSyncExternalStore(subscribe, () => boardsSnapshot(key, key ? key.split("\n") : []));
 }
 
 /** Work in progress first, then work waiting for review; the freshest of each. */

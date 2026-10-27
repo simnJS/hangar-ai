@@ -11,6 +11,8 @@ import {
   touchWorkspace,
 } from "./hibernateStore";
 import { ptyHasChildren, ptyKill } from "./ipc";
+import { isDelivering } from "./deliveryRuns";
+import { deliveringIn } from "./deliveryControl";
 import { getPaneInsight } from "./paneInsight";
 import type { AppState, Workspace } from "../types";
 
@@ -134,6 +136,9 @@ async function decide(workspaceId: string, current: () => Options): Promise<Slep
       mounted: true,
       onScreen,
       detached: Boolean(workspace.detached),
+      // A worker's delivery_submit is tracked by lib/deliveryControl, a
+      // « Fusionner » by lib/deliveryRuns: either keeps the workspace up.
+      delivering: isDelivering(workspaceId) || deliveringIn(workspaceId),
       lastInteraction: lastTouch(workspaceId) ?? now,
       rest: Object.fromEntries(workspace.panes.map((pane) => [pane.id, restOf(pane.id, probed)])),
     });

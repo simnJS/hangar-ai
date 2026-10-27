@@ -57,6 +57,8 @@ export type CommandId =
   | "pane.tidy"
   | "pane.sessions"
   | "pane.zoom"
+  | "pane.pinOrchestrator"
+  | "pane.unpinOrchestrator"
   | "pane.next"
   | "pane.prev"
   | "pane.focusLeft"
@@ -72,6 +74,9 @@ export type CommandId =
   | "workspace.prev"
   | "workspace.new"
   | "workspace.mcpServers"
+  | "workspace.newOrchestrator"
+  | "workspace.orchestration"
+  | "workspace.stopWorkers"
   | `workspace.go${Digit}`
   | "view.settings"
   | "view.shortcuts"
@@ -83,6 +88,7 @@ export type CommandId =
   | "view.memory"
   | "view.stats"
   | "view.mcp"
+  | "view.needsYou"
   | "view.broadcast"
   | "view.palette"
   | "view.navigator"
@@ -241,6 +247,21 @@ export const COMMANDS: ShortcutCommand[] = [
     // macOS Edit menu, which takes it before the window ever sees it.
     defaults: forPlatform(["Mod+Shift+Z"], ["Meta+Alt+Z"]),
   },
+  {
+    // Orchestration's commands are unbound: they are found in the palette,
+    // the pane's menu and the navigator's, by those who use them, and cost
+    // nobody else a chord.
+    id: "pane.pinOrchestrator",
+    section: "panes",
+    labelKey: "cmd.pane.pinOrchestrator",
+    defaults: [],
+  },
+  {
+    id: "pane.unpinOrchestrator",
+    section: "panes",
+    labelKey: "cmd.pane.unpinOrchestrator",
+    defaults: [],
+  },
 
   {
     id: "pane.next",
@@ -334,6 +355,24 @@ export const COMMANDS: ShortcutCommand[] = [
     id: "workspace.mcpServers",
     section: "workspaces",
     labelKey: "cmd.workspace.mcpServers",
+    defaults: [],
+  },
+  {
+    id: "workspace.newOrchestrator",
+    section: "workspaces",
+    labelKey: "cmd.workspace.newOrchestrator",
+    defaults: [],
+  },
+  {
+    id: "workspace.orchestration",
+    section: "workspaces",
+    labelKey: "cmd.workspace.orchestration",
+    defaults: [],
+  },
+  {
+    id: "workspace.stopWorkers",
+    section: "workspaces",
+    labelKey: "cmd.workspace.stopWorkers",
     defaults: [],
   },
   ...workspaceDigits,
@@ -459,6 +498,12 @@ export const COMMANDS: ShortcutCommand[] = [
     section: "view",
     labelKey: "cmd.view.mcp",
     defaults: ["Mod+Alt+M"],
+  },
+  {
+    id: "view.needsYou",
+    section: "view",
+    labelKey: "cmd.view.needsYou",
+    defaults: [],
   },
   {
     id: "view.broadcast",

@@ -44,6 +44,11 @@ export interface HibernateInput {
   onScreen: boolean;
   /** It is shown in a window of its own. */
   detached: boolean;
+  /**
+   * One of its deliveries is being checked, reviewed or landed right now
+   * (lib/deliveryRuns): stopping it halfway would leave a merge half done.
+   */
+  delivering: boolean;
   /** When someone last typed into it, clicked it, or sent it anything. */
   lastInteraction: number;
   /** By pane id; a pane with no entry has not been seen and counts as busy. */
@@ -55,6 +60,8 @@ export type Blocker =
   | "notMounted"
   | "onScreen"
   | "detached"
+  | "worker"
+  | "delivering"
   | "recentInteraction"
   | "noAgents"
   | "unknownPane"
@@ -80,6 +87,10 @@ const waited = (since: number, now: number, delayMs: number) => now - since >= d
  * The rules, in the order that answers cheapest:
  *
  * 1. Mounted here, not the workspace on screen, not in a window of its own.
+ *    No worker of an orchestrator in it, and no delivery running: work
+ *    handed out goes on with nobody looking — that is the point of handing
+ *    it out — and a worker stopped mid-task, or a delivery mid-merge, is
+ *    work lost rather than memory saved.
  * 2. Nobody has touched it for the delay.
  * 3. At least one pane runs an agent: freeing agents is the point, and a
  *    workspace of shells holds little memory and all its value on screen.
@@ -97,6 +108,9 @@ export function hibernationVerdict(input: HibernateInput): Verdict {
   if (!input.mounted) return { kind: "awake", reason: "notMounted" };
   if (input.onScreen) return { kind: "awake", reason: "onScreen" };
   if (input.detached) return { kind: "awake", reason: "detached" };
+  const worker = panes.find((pane) => pane.role === "worker");
+  if (worker) return { kind: "awake", reason: "worker", paneId: worker.id };
+  if (input.delivering) return { kind: "awake", reason: "delivering" };
   if (!waited(input.lastInteraction, now, delayMs)) {
     return { kind: "awake", reason: "recentInteraction" };
   }

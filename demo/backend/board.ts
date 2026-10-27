@@ -38,6 +38,50 @@ function task(
 const boards = new Map<string, Task[]>();
 
 function seed(cwd: string): Task[] {
+  // The orchestrated workspace (backend/state): its orchestrator's plan, two
+  // tasks out with workers, a question for you, a delivery waiting for you.
+  if (cwd.endsWith("checkout-v2")) {
+    return [
+      task("30", "Pick the payment provider for EU cards", "todo", {
+        priority: 3,
+        labels: ["needs-you"],
+        description: "Decides how tasks 35 to 37 are built.",
+        comments: [
+          {
+            id: "c30",
+            author: "Iris",
+            text: "Stripe or Adyen for the EU cards? Stripe is already wired for the US; Adyen costs less above 50k a month. I hold the three tasks that depend on it until you say.",
+            created_at: now() - 6 * 60_000,
+          },
+        ],
+      }),
+      task("31", "Cart: one total per currency", "doing", {
+        priority: 2,
+        assignee: "Jade",
+        doing_since: now() - 18 * 60_000,
+      }),
+      task("32", "Keep the address after a failed payment", "doing", {
+        assignee: "Kai",
+        doing_since: now() - 9 * 60_000,
+      }),
+      task("33", "Coupon applied twice when a payment is retried", "review", {
+        priority: 2,
+        assignee: "Lou",
+        labels: ["ready-to-land"],
+        updated_at: now() - 3 * 60_000,
+        comments: [
+          {
+            id: "c33",
+            author: "hangar",
+            text: "Ready to land: pnpm test passed (142 tests), review approved with one note — retryKey could be named for what it holds.",
+            created_at: now() - 3 * 60_000,
+          },
+        ],
+      }),
+      task("34", "Order confirmation in the customer's language", "todo", { depends_on: ["31"] }),
+      task("29", "Price formatting helpers", "done", { assignee: "Jade" }),
+    ];
+  }
   if (cwd.endsWith("storefront")) {
     return [
       task("21", "Cart total ignores the currency", "todo", { priority: 2, labels: ["bug"] }),

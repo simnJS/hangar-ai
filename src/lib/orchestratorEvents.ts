@@ -1,7 +1,7 @@
 import type { AgentActivity, PaneActivity } from "./agentState";
 import type { BridgeEvent } from "./bridge";
 import type { Task } from "./board";
-import { orchestratorOf, workersOf } from "./orchestration";
+import { NEEDS_YOU_LABEL, orchestratorOf, workersOf } from "./orchestration";
 import type { AppState, Pane, Workspace } from "../types";
 
 /**
@@ -49,7 +49,7 @@ export type OrchestratorEvent =
 export type BoardTask = Task & { owns?: string[]; attempts?: number };
 
 /** The label of a task that waits for the person. */
-export const NEEDS_YOU = "needs-you";
+export const NEEDS_YOU = NEEDS_YOU_LABEL;
 
 /** Who signs the comments Hangar writes itself (delivery results, say). */
 const HANGAR_AUTHOR = /^hangar\b/i;
