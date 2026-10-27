@@ -78,7 +78,7 @@ import {
   sleep,
   watchForSession,
 } from "../lib/agents";
-import { mcpScopeWrite, quoteArg, shellFamily, workspaceMcp } from "../lib/mcpScope";
+import { mcpConfigArg, mcpScopeWrite, shellFamily, workspaceMcp } from "../lib/mcpScope";
 import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
@@ -513,40 +513,43 @@ export function TerminalPane({
     }
 
     /**
-     * The `--mcp-config` argument for this launch, when the workspace chose
-     * its servers (lib/mcpScope). The file is written again now, from Claude
-     * Code's configuration as it stands, so a server edited since the last
-     * launch comes as it is today.
+     * The `--mcp-config` file for this launch, when the workspace chose its
+     * servers (lib/mcpScope), and the argument naming it. The file is written
+     * again each time, from Claude Code's configuration as it stands, so a
+     * server edited since the last launch comes as it is today — and before
+     * the shell starts, which is handed its path in HANGAR_MCP_CONFIG: the
+     * typed command names that variable, never the path, which holds the
+     * user's name (`mcpConfigArg`).
      *
      * Whatever goes wrong — a WSL pane, a path the shell cannot be handed, a
      * failed write — the agent still starts, with its own servers, and the
-     * pane says so instead of leaving it to look like the choice applied.
+     * pane says so instead of leaving it to look like the choice applied. It
+     * says so in `notes`, written out once the shell is there to follow them.
      *
      * An orchestrator or a worker gets Hangar's server on top of its own even
      * then: the board, `worker_*` and `delivery_submit` are its work, and a
      * worker's worktree sits outside the folder whose `.mcp.json` would give
      * it the server.
      */
-    async function mcpLaunchConfig(): Promise<{ arg: string; strict: boolean } | undefined> {
+    async function mcpLaunchConfig(
+      notes: string[],
+    ): Promise<{ path: string; arg: string; strict: boolean } | undefined> {
       const scope = workspaceMcp({ mcp: mcpRef.current });
-      const warn = (text: string) => term.writeln(`\x1b[33m${text}\x1b[0m`);
       const family = shellFamily(shellRef.current);
       if (scope.mode === "inherit") {
         updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
         if (!pane.role || family === "wsl") return undefined;
         try {
           const file = await mcpScopeWrite({ workspaceId, workspaceCwd: cwd, cwd: paneCwd, enabled: [] });
-          const quoted = quoteArg(file.path, family);
-          return quoted ? { arg: quoted, strict: false } : undefined;
+          const arg = mcpConfigArg(file.path, family);
+          return arg ? { path: file.path, arg, strict: false } : undefined;
         } catch (err) {
-          if (!disposed) {
-            warn(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
-          }
+          notes.push(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
           return undefined;
         }
       }
       if (family === "wsl") {
-        warn(tRef.current("mcpScope.warnWsl"));
+        notes.push(tRef.current("mcpScope.warnWsl"));
         updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
         return undefined;
       }
@@ -557,18 +560,16 @@ export function TerminalPane({
           cwd: paneCwd,
           enabled: scope.enabled,
         });
-        const quoted = quoteArg(file.path, family);
-        if (!quoted) throw new Error(tRef.current("mcpScope.warnQuote"));
+        const arg = mcpConfigArg(file.path, family);
+        if (!arg) throw new Error(tRef.current("mcpScope.warnQuote"));
         if (file.missing.length) {
-          warn(tRef.current("mcpScope.warnMissing", { names: file.missing.join(", ") }));
+          notes.push(tRef.current("mcpScope.warnMissing", { names: file.missing.join(", ") }));
         }
         updatePaneInsight(pane.id, { mcp: { mode: "custom", servers: file.servers } });
-        return { arg: quoted, strict: true };
+        return { path: file.path, arg, strict: true };
       } catch (err) {
-        if (!disposed) {
-          warn(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
-          updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
-        }
+        notes.push(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
+        if (!disposed) updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
         return undefined;
       }
     }
@@ -798,6 +799,10 @@ export function TerminalPane({
         if (disposed) return;
 
         if (!adopted) {
+          // Before the shell, which is handed the file's path.
+          const mcpNotes: string[] = [];
+          const mcpConfig = pane.agent === "claude" ? await mcpLaunchConfig(mcpNotes) : undefined;
+          if (disposed) return;
           await ptySpawn({
             id: pane.id,
             cwd: paneCwd,
@@ -807,6 +812,7 @@ export function TerminalPane({
             name: pane.name,
             bridge: settingsRef.current.claudeBridge,
             portBase: pane.portBase ?? null,
+            mcpConfig: mcpConfig?.path ?? null,
           });
           // Same race as the subscription above: a cleanup that ran during the
           // spawn killed an id the backend did not know yet, so the shell it
@@ -846,8 +852,7 @@ export function TerminalPane({
             resumeId = null;
             onSessionCaptured(null);
           }
-          const mcpConfig = pane.agent === "claude" ? await mcpLaunchConfig() : undefined;
-          if (disposed) return;
+          for (const note of mcpNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,

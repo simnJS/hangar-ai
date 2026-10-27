@@ -63,9 +63,10 @@ export function launchCommand(
      */
     name?: string;
     /**
-     * The MCP config file this session loads instead of every other one,
-     * already quoted for the pane's shell (`quoteArg` in lib/mcpScope).
-     * Absent, Claude Code starts with its own servers, as it always did.
+     * The MCP config file this session loads instead of every other one, as
+     * the pane's shell is to read it: the variable holding its path, or the
+     * path quoted (`mcpConfigArg` in lib/mcpScope). Absent, Claude Code
+     * starts with its own servers, as it always did.
      */
     mcpConfig?: string;
     /**
