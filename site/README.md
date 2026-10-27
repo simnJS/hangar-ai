@@ -8,7 +8,7 @@ loaded from another origin.
 index.html            the page
 styles.css            every colour is a token; Graphite unless main.js swaps them
 main.js               themes, the demo frame, prompt chips, section bar, download per OS
-img/                  real captures of the app, AVIF + WebP, two or three widths each
+img/                  crops of captures of the app, AVIF + WebP, cut as img/crops.json says
 fonts/                Inter (latin, variable, with optical sizes) and its OFL licence
 og.png                the 1200×630 share image for X, Open Graph and the rest
 favicon.ico           16/32/48 px, for whatever still asks for /favicon.ico
@@ -45,6 +45,12 @@ words) and against the file the claim names: `src/lib/orchestration.ts` for the
 orchestration defaults (3 workers, 2 attempts, merge by itself, Opus plans,
 Sonnet works and reviews), `src-tauri/src/delivery.rs` for the delivery
 stages, `src/lib/orchestratorBrief.ts` for what the orchestrator is told.
+
+On a phone (below 600 px) the page keeps every point and drops detail: the
+words wrapped in `.wide-only` are left out there, so read them with the rest
+when the copy changes. The facts under the orchestrator and the list under
+"Everything else" are `<details class="fold">`, written open; `main.js` folds
+them to their titles on a phone.
 
 The delivery card in step 4 is HTML, not a capture. It is written in its final
 state; `main.js` resets it and plays the four stages once when it scrolls into
@@ -84,35 +90,75 @@ then map the `--*` names to the keys `TOKENS` lists in `main.js`.
 
 ## Captures
 
-Everything in `img/` is the demo build, captured with headless Edge through the
-DevTools protocol:
+Everything in `img/` is the real app, not the demo: Hangar.AI 1.0 on Windows,
+with real Claude Code agents (the orchestrator on Opus, workers and reviewer on
+Sonnet) orchestrating **checkout-v2**, a small sample repository, over one
+afternoon. The captures are lossless PNGs of the window's client area:
 
-- window 1440 × 900, `--force-device-scale-factor=2` (emulating the scale
-  instead makes xterm draw its text twice too large), English forced through
-  `navigator.language`;
-- Graphite, the demo's default;
-- the hero and most crops are the **checkout-v2** workspace, about 18 seconds
-  after the demo opens (`demo/backend/checkout.ts` tells its story): Iris, the
-  orchestrator, shows her whole turn, from the objective to the worker she
-  started after Lou's delivery landed; Jade is at work on the cart totals; Kai's
-  delivery waits to be merged; the board holds a question and a blocked task;
-- the notice the demo shows above itself on a page of its own is removed before
-  each capture, as the site's frame hides it;
-- the menu with "Pin as orchestrator" is Ava's pane in hangar-ai; the 3D
-  preview is Ava after the prompt `show the model`, with its pane zoomed.
+- window 1280 × 720 at scale 2, so each capture is 2560 × 1440 px;
+- Graphite, the interface in English, permissions in Auto mode;
+- a run of its own (another data folder, another identifier), so no other
+  project or path of the person taking them appears;
+- the hero is round 2: Iris, the orchestrator, reads Zoe's delivery on the
+  coupon task while Eli writes the order receipt; the board, Needs you and the
+  orchestration settings are the same minutes; the grid of four panes is round
+  4, with Ava, Max and Leo at work;
+- the pane menu, the palette filtered on "orchestrat" and the 3D preview are
+  Eve's pane in storefront; the statistics are filtered on checkout-v2, the only
+  project on screen.
 
-Crops are encoded with Pillow: AVIF at quality 62, WebP at 82, at 1× and 2×
-(the hero at 1280, 1920 and 2560 px). Each `<img>` carries its width and
-height, and everything below the hero is `loading="lazy"`.
+Before a capture goes public, check it frame by frame: no `C:\Users\…` or
+`%APPDATA%` path (a worker's launch line shows one for a second or two), no
+e-mail address, no other project, and no "bypass permissions" banner.
 
-The outlines numbered on the hero (`.mark`) are positioned in percent of that
-1440 × 900 capture, from the rectangles of `.pane__bar`, `.orch-badge`,
-`.needs-btn` and `.inspector`. Recapture at another size, or change the
-checkout-v2 layout in `demo/backend/state.ts`, and they need moving.
+`img/crops.json` says what is cut out of the captures, and
+`scripts/site-crops.mjs` cuts it:
 
-The README's images (`../.github/assets`) come from the same session, with the
-inspector closed, and `../.github/social-preview.png` (1280 × 640) is rendered
-the way `og.png` is.
+```bash
+node scripts/site-crops.mjs --sources <folder of captures>          # every image
+node scripts/site-crops.mjs --sources <folder> --only hero,board     # some of them
+```
+
+For each image, `crops.json` gives the capture it comes from, a rectangle in the
+capture (`[x, y, width, height]`, in units of `scale` capture pixels: 1 for
+these captures, so plain capture pixels), the widths to write, and optionally a
+fade over an edge the crop cuts through. The first width sets the `width` and
+`height` the page reserves, and an image is never drawn wider than that, so it
+must be at least the width the layout gives the image. Every width becomes
+`img/<name>-<width>.avif` (quality 62) and `.webp` (quality 82), encoded by
+Pillow through Python (`pip install pillow`), and widths an image no longer has
+are deleted. The script then writes into `index.html` the `srcset`, `src`,
+`width` and `height` of each `<source>` and `<img>` marked `data-crop="<name>"`,
+and places the hero's numbered outlines (`<span class="mark" data-of="hero">`,
+in the order of the hero's `marks`) in percent of its crop. It warns when a
+width asks for more pixels than the capture has there, or a rectangle runs off
+it.
+
+A rectangle can also point into the index of element rectangles that comes
+with the captures (`rects`, a path from the captures folder; here
+`../../index.json`, in capture pixels): `{ "ref":
+"stills/en/s-grid/rects/workers/Max/box" }`, where a step through a list is a
+position or an entry's `name`, with an optional `pad` and `x`, `y`, `w` or `h`
+to override, or `{ "union": [...] }` over several.
+
+The full-window captures are not kept in the repository; `--sources` names the
+folder that holds them. To swap them, put the new ones in a folder, set each
+image's `src` and `rect` (or `rects` and the refs) and `scale`, and run the
+script. Nothing in the page is edited by hand.
+
+Below 600 px each `<picture>` switches, through a `media` source, to the `-m`
+crop of the same image: the orchestrator's pane, two board columns, one
+worker, the Needs you popover, the pane menu, two statistics cards, the 3D
+preview, drawn close to the size the app draws them so their text reads on a
+phone. There the hero's outlines give way to the one line of its legend
+that matches its crop, and the palette capture is left out. Everything below
+the hero is `loading="lazy"`.
+
+The README's images (`../.github/assets`) are cut from the same captures, at
+full capture size: the hero without the navigator, so the panes read at the
+width of a README, then the Needs you popover, the orchestration settings, the
+board and the statistics cards. `../.github/social-preview.png` (1280 × 640) is
+rendered the way `og.png` is, with the hero capture.
 
 `og.png` is an HTML page rendered at 1200 × 630: the brand, the headline, one
 line on the orchestrator, and the hero capture bleeding off the bottom.

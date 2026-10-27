@@ -22,9 +22,9 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Jade and Kai, each in its own terminal. Iris was asked to ship checkout v2: she wrote her plan to memory, created board tasks with the files each one owns, started workers, and, told by Hangar that a delivery had landed, started Jade on the task it unblocked. Jade is at work; Kai's delivery passed its check and review and waits to be merged.](.github/assets/hero.webp)
+![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Zoe and Eli, each in its own terminal. Iris says Zoe reports the coupon task is done and that she is reading the branch's changes before its delivery reaches you. Zoe has finished and left her report on the task. Eli writes the order receipt in a git worktree of its own. On the right, the inspector shows Iris's session, context use, cost and the Claude plan's usage.](.github/assets/hero.webp)
 
-<p align="center"><sub>Screenshots are taken from the browser demo, with made-up data.</sub></p>
+<p align="center"><sub>Screenshots of a real session: Claude Code agents at work on checkout-v2, a sample repository.</sub></p>
 
 Hangar.AI is an open-source desktop app for Windows, macOS and Linux, built with Tauri 2
 and React. It runs the coding agents you already use, each in a real terminal, and gives
@@ -106,8 +106,8 @@ Claude Code.
 
 <table>
   <tr>
-    <td width="50%"><img src=".github/assets/needs-you.webp" alt="The Needs you list: one agent waiting for an answer, one question handed back by the orchestrator, and one delivery ready to merge, whose check and review passed"></td>
-    <td width="50%"><img src=".github/assets/orchestration-settings.webp" alt="A workspace's orchestration settings: workers at once, attempts per task, permissions, automatic merging, check command, target branch and models"></td>
+    <td width="50%"><img src=".github/assets/needs-you.webp" alt="The Needs you list: one question the orchestrator handed back to you, which provider takes EU cards, and two deliveries ready to merge, whose check and review passed"></td>
+    <td width="50%"><img src=".github/assets/orchestration-settings.webp" alt="A workspace's orchestration settings: workers at once, attempts per task, permissions, automatic merging, here turned off, and the check command"></td>
   </tr>
   <tr>
     <td align="center"><sub>Needs you: what waits for you, across workspaces</sub></td>
@@ -164,9 +164,9 @@ Claude Code.
   project, agent and model. They are read from the transcripts Claude Code and Codex keep on
   disk. On a Claude or ChatGPT subscription, the cost figure is an equivalent, not a bill.
 
-![The board of a workspace: two tasks to do, one waiting for a decision and one blocked by another task, one in progress held by a worker, one in review ready to land, and one done](.github/assets/board.webp)
+![The board of a workspace: one task to do, waiting for a decision and depending on two other tasks; two in review, each labelled ready-to-land, with the worker that did it; and four done](.github/assets/board.webp)
 
-![The usage statistics view: tokens, API-equivalent cost, active time and sessions over 30 days, tokens per day, usage by project, and a heatmap of active hours across the week](.github/assets/stats.webp)
+![The usage statistics view over 30 days, filtered on one project: tokens, API-equivalent cost, active time and sessions](.github/assets/stats.webp)
 
 ### Also
 
