@@ -116,17 +116,17 @@
   <figure class="shot shot--hero wrap-wide">
     <div class="shot__frame">
       <picture>
-        <source type="image/avif" srcset="img/hero-1280.avif 1280w, img/hero-1920.avif 1920w, img/hero-2560.avif 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
-        <source type="image/webp" srcset="img/hero-1280.webp 1280w, img/hero-1920.webp 1920w, img/hero-2560.webp 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
-        <img src="img/hero-1280.webp" width="1280" height="800" fetchpriority="high" decoding="async"
+        <source type="image/avif" data-crop="hero" srcset="img/hero-1280.avif 1280w, img/hero-1920.avif 1920w, img/hero-2560.avif 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)" width="1280" height="800">
+        <source type="image/webp" data-crop="hero" srcset="img/hero-1280.webp 1280w, img/hero-1920.webp 1920w, img/hero-2560.webp 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)" width="1280" height="800">
+        <img data-crop="hero" src="img/hero-1280.webp" width="1280" height="800" fetchpriority="high" decoding="async"
           alt="Hangar.AI on the checkout-v2 workspace. The navigator on the left lists workspaces with their agents' states. On the left half, Iris, pinned as orchestrator: asked to ship checkout v2, she wrote her plan to memory, created five board tasks with the files each one owns, started two workers, then, told by Hangar that Lou's price helpers had landed, started Jade on the cart totals. On the right, Jade is working on one total per currency, and Kai's delivery of Keep the address after a failed payment passed its check and review and waits to be landed. The toolbar shows Needs you with 3 items, and the inspector shows Iris's session, context, cost and Claude plan usage.">
       </picture>
-      <span class="mark" data-n="1" style="--x:0.56%;--y:7.8%;--w:16.4%;--h:35.8%" aria-hidden="true"></span>
-      <span class="mark" data-n="2" style="--x:17.78%;--y:5.22%;--w:10%;--h:2.67%" aria-hidden="true"></span>
-      <span class="mark" data-n="3" style="--x:53.82%;--y:5.22%;--w:7.64%;--h:2.67%" aria-hidden="true"></span>
-      <span class="mark" data-n="3" style="--x:53.82%;--y:50.9%;--w:6.94%;--h:2.67%" aria-hidden="true"></span>
-      <span class="mark mark--side" data-n="4" style="--x:68.06%;--y:0.67%;--w:7.99%;--h:3.56%" aria-hidden="true"></span>
-      <span class="mark" data-n="5" style="--x:79.72%;--y:5.56%;--w:20%;--h:42.2%" aria-hidden="true"></span>
+      <span class="mark" data-of="hero" data-n="1" style="--x:0.56%;--y:7.78%;--w:16.39%;--h:35.78%" aria-hidden="true"></span>
+      <span class="mark" data-of="hero" data-n="2" style="--x:17.78%;--y:5.22%;--w:10%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-of="hero" data-n="3" style="--x:53.82%;--y:5.22%;--w:7.64%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-of="hero" data-n="3" style="--x:53.82%;--y:50.89%;--w:6.94%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark mark--side" data-of="hero" data-n="4" style="--x:68.06%;--y:0.67%;--w:7.99%;--h:3.56%" aria-hidden="true"></span>
+      <span class="mark" data-of="hero" data-n="5" style="--x:79.72%;--y:5.56%;--w:20%;--h:42.22%" aria-hidden="true"></span>
     </div>
     <figcaption class="legend">
       <ol class="legend__list">
@@ -173,9 +173,9 @@
         <figure class="step__art">
           <div class="crop">
             <picture>
-              <source type="image/avif" srcset="img/pin-448.avif 448w, img/pin-896.avif 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)">
-              <source type="image/webp" srcset="img/pin-448.webp 448w, img/pin-896.webp 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)">
-              <img src="img/pin-448.webp" width="448" height="256" loading="lazy" decoding="async"
+              <source type="image/avif" data-crop="pin" srcset="img/pin-448.avif 448w, img/pin-896.avif 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)" width="448" height="256">
+              <source type="image/webp" data-crop="pin" srcset="img/pin-448.webp 448w, img/pin-896.webp 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)" width="448" height="256">
+              <img data-crop="pin" src="img/pin-448.webp" width="448" height="256" loading="lazy" decoding="async"
                 alt="The menu of a Claude Code pane named Ava, open on its last item: Pin as orchestrator.">
             </picture>
           </div>
@@ -195,9 +195,9 @@
         <figure class="step__art">
           <div class="crop">
             <picture>
-              <source type="image/avif" srcset="img/board-892.avif 892w, img/board-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
-              <source type="image/webp" srcset="img/board-892.webp 892w, img/board-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
-              <img src="img/board-892.webp" width="892" height="356" loading="lazy" decoding="async"
+              <source type="image/avif" data-crop="board" srcset="img/board-892.avif 892w, img/board-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="356">
+              <source type="image/webp" data-crop="board" srcset="img/board-892.webp 892w, img/board-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="356">
+              <img data-crop="board" src="img/board-892.webp" width="892" height="356" loading="lazy" decoding="async"
                 alt="The checkout-v2 board in four columns. To do: pick the payment provider for EU cards, labelled needs-you, and apply a coupon once per retry, blocked by task 32. In progress: the cart totals, held by Jade. Review: keep the address after a failed payment, by Kai, labelled ready-to-land. Done: price formatting helpers, by Lou.">
             </picture>
           </div>
@@ -217,9 +217,9 @@
         <figure class="step__art">
           <div class="crop">
             <picture>
-              <source type="image/avif" srcset="img/workers-892.avif 892w, img/workers-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
-              <source type="image/webp" srcset="img/workers-892.webp 892w, img/workers-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
-              <img src="img/workers-892.webp" width="892" height="504" loading="lazy" decoding="async"
+              <source type="image/avif" data-crop="workers" srcset="img/workers-892.avif 892w, img/workers-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="504">
+              <source type="image/webp" data-crop="workers" srcset="img/workers-892.webp 892w, img/workers-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)" width="892" height="504">
+              <img data-crop="workers" src="img/workers-892.webp" width="892" height="504" loading="lazy" decoding="async"
                 alt="Iris, the orchestrator, received the objective, wrote her plan to memory and created the board tasks, each with the files it owns. Beside her, Jade, a worker on the cart totals, reads the cart code, updates it, writes tests and runs them. Below, Kai, the worker on the address task, is done.">
             </picture>
           </div>
@@ -282,9 +282,9 @@
         </p>
         <figure class="crop crop--needs">
           <picture>
-            <source type="image/avif" srcset="img/needs-440.avif 440w, img/needs-880.avif 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
-            <source type="image/webp" srcset="img/needs-440.webp 440w, img/needs-880.webp 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
-            <img src="img/needs-440.webp" width="440" height="368" loading="lazy" decoding="async"
+            <source type="image/avif" data-crop="needs" srcset="img/needs-440.avif 440w, img/needs-880.avif 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)" width="440" height="368">
+            <source type="image/webp" data-crop="needs" srcset="img/needs-440.webp 440w, img/needs-880.webp 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)" width="440" height="368">
+            <img data-crop="needs" src="img/needs-440.webp" width="440" height="368" loading="lazy" decoding="async"
               alt="The Needs you panel with three items: Eve in storefront waits for an answer; a question from the orchestrator, Stripe or Adyen for EU cards; and Kai's fix keeping the address after a failed payment, ready to merge once pnpm test passed and the review approved, with a Merge button.">
           </picture>
         </figure>
@@ -299,9 +299,9 @@
         </p>
         <figure class="crop crop--orch">
           <picture>
-            <source type="image/avif" srcset="img/orch-600.avif 600w, img/orch-1200.avif 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)">
-            <source type="image/webp" srcset="img/orch-600.webp 600w, img/orch-1200.webp 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)">
-            <img src="img/orch-600.webp" width="600" height="676" loading="lazy" decoding="async"
+            <source type="image/avif" data-crop="orch" srcset="img/orch-600.avif 600w, img/orch-1200.avif 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="600" height="676">
+            <source type="image/webp" data-crop="orch" srcset="img/orch-600.webp 600w, img/orch-1200.webp 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="600" height="676">
+            <img data-crop="orch" src="img/orch-600.webp" width="600" height="676" loading="lazy" decoding="async"
               alt="The Orchestration settings of checkout-v2: Iris orchestrates with 2 workers running; workers at once 3; attempts per task 2; permissions as in Claude Code; merge by itself off; check command pnpm test; target branch, the workspace's current branch; then the models section.">
           </picture>
         </figure>
@@ -407,9 +407,9 @@
       <figure class="show__art">
         <div class="crop">
           <picture>
-            <source type="image/avif" srcset="img/palette-640.avif 640w, img/palette-1280.avif 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)">
-            <source type="image/webp" srcset="img/palette-640.webp 640w, img/palette-1280.webp 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)">
-            <img src="img/palette-640.webp" width="640" height="520" loading="lazy" decoding="async"
+            <source type="image/avif" data-crop="palette" srcset="img/palette-640.avif 640w, img/palette-1280.avif 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)" width="640" height="520">
+            <source type="image/webp" data-crop="palette" srcset="img/palette-640.webp 640w, img/palette-1280.webp 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)" width="640" height="520">
+            <img data-crop="palette" src="img/palette-640.webp" width="640" height="520" loading="lazy" decoding="async"
               alt="The command palette, suggesting to go to Eve, who waits for an answer in storefront, and to Leo, who finished in marketing-site-redesign, then listing panes and commands with their shortcuts.">
           </picture>
         </div>
@@ -432,9 +432,9 @@
       <figure class="show__art">
         <div class="crop">
           <picture>
-            <source type="image/avif" srcset="img/stats-892.avif 892w, img/stats-1784.avif 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)">
-            <source type="image/webp" srcset="img/stats-892.webp 892w, img/stats-1784.webp 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)">
-            <img src="img/stats-892.webp" width="892" height="508" loading="lazy" decoding="async"
+            <source type="image/avif" data-crop="stats" srcset="img/stats-892.avif 892w, img/stats-1784.avif 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)" width="892" height="508">
+            <source type="image/webp" data-crop="stats" srcset="img/stats-892.webp 892w, img/stats-1784.webp 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)" width="892" height="508">
+            <img data-crop="stats" src="img/stats-892.webp" width="892" height="508" loading="lazy" decoding="async"
               alt="The statistics view over 30 days, with demo data: tokens, API-equivalent cost, active time and sessions, each compared with the 30 days before, above a chart of tokens per day by kind.">
           </picture>
         </div>
@@ -453,9 +453,9 @@
       <figure class="show__art">
         <div class="crop">
           <picture>
-            <source type="image/avif" srcset="img/model-1188.avif 1188w, img/model-2376.avif 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)">
-            <source type="image/webp" srcset="img/model-1188.webp 1188w, img/model-2376.webp 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)">
-            <img src="img/model-1188.webp" width="1188" height="546" loading="lazy" decoding="async"
+            <source type="image/avif" data-crop="model" srcset="img/model-1188.avif 1188w, img/model-2376.avif 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)" width="1188" height="546">
+            <source type="image/webp" data-crop="model" srcset="img/model-1188.webp 1188w, img/model-2376.webp 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)" width="1188" height="546">
+            <img data-crop="model" src="img/model-1188.webp" width="1188" height="546" loading="lazy" decoding="async"
               alt="Ava, a Claude Code pane, was asked to show the model. It calls model_show over MCP, and the 3D preview beside its terminal opens sample.glb, opened by Ava: a drone hangar on a landing pad.">
           </picture>
         </div>

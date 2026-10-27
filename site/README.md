@@ -8,7 +8,7 @@ loaded from another origin.
 index.html            the page
 styles.css            every colour is a token; Graphite unless main.js swaps them
 main.js               themes, the demo frame, prompt chips, section bar, download per OS
-img/                  real captures of the app, AVIF + WebP, two or three widths each
+img/                  crops of captures of the app, AVIF + WebP, cut as img/crops.json says
 fonts/                Inter (latin, variable, with optical sizes) and its OFL licence
 og.png                the 1200×630 share image for X, Open Graph and the rest
 favicon.ico           16/32/48 px, for whatever still asks for /favicon.ico
@@ -101,14 +101,37 @@ DevTools protocol:
 - the menu with "Pin as orchestrator" is Ava's pane in hangar-ai; the 3D
   preview is Ava after the prompt `show the model`, with its pane zoomed.
 
-Crops are encoded with Pillow: AVIF at quality 62, WebP at 82, at 1× and 2×
-(the hero at 1280, 1920 and 2560 px). Each `<img>` carries its width and
-height, and everything below the hero is `loading="lazy"`.
+`img/crops.json` says what is cut out of the captures, and
+`scripts/site-crops.mjs` cuts it:
 
-The outlines numbered on the hero (`.mark`) are positioned in percent of that
-1440 × 900 capture, from the rectangles of `.pane__bar`, `.orch-badge`,
-`.needs-btn` and `.inspector`. Recapture at another size, or change the
-checkout-v2 layout in `demo/backend/state.ts`, and they need moving.
+```bash
+node scripts/site-crops.mjs --sources <folder of captures>          # every image
+node scripts/site-crops.mjs --sources <folder> --only hero,board     # some of them
+```
+
+For each image, `crops.json` gives the capture it comes from, a rectangle in
+that capture's CSS pixels (`[x, y, width, height]`; `scale` is how many capture
+pixels make one), the widths to write, and optionally a fade over an edge the
+crop cuts through. Every width becomes `img/<name>-<width>.avif` (quality 62)
+and `.webp` (quality 82), encoded by Pillow through Python (`pip install
+pillow`), and widths an image no longer has are deleted. The script then
+writes into `index.html` the `srcset`, `src`, `width` and `height` of each
+`<source>` and `<img>` marked `data-crop="<name>"`, and places the hero's
+numbered outlines (`<span class="mark" data-of="hero">`, in the order of the
+hero's `marks`) in percent of its crop. It warns when a width asks for more
+pixels than the capture has there, or a rectangle runs off it.
+
+A rectangle can also point into the index of element rectangles that comes
+with the captures (`rects`, read from the same folder): `{ "ref":
+"checkout/.pane/1" }`, with an optional `pad` and `x`, `y`, `w` or `h` to
+override, or `{ "union": [...] }` over several.
+
+The full-window captures are not kept in the repository; `--sources` names the
+folder that holds them. To swap them, put the new ones in a folder, set each
+image's `src` and `rect` (or `rects` and the refs) and `scale`, and run the
+script. Nothing in the page is edited by hand.
+
+Everything below the hero is `loading="lazy"`.
 
 The README's images (`../.github/assets`) come from the same session, with the
 inspector closed, and `../.github/social-preview.png` (1280 × 640) is rendered
