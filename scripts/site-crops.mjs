@@ -5,19 +5,20 @@
 //
 // (HANGAR_CAPTURES can name the folder instead of --sources.)
 //
-// For each image, crops.json names a capture, a rectangle in the capture's CSS pixels, the
-// widths to write and, optionally, a fade over an edge the crop cuts through. Every width is
-// written as AVIF and WebP, as img/<name>-<width>.<ext>. The page then gets, on each
-// <source> and <img> carrying data-crop="<name>", the srcset, the src and the width and height
-// those files have, and on each <span data-of="<name>"> the position of the next outline listed
-// under that image's "marks". Change the captures or the rectangles, run this again, and
+// For each image, crops.json names a capture, a rectangle in it (in units of "scale" capture
+// pixels), the widths to write and, optionally, a fade over an edge the crop cuts through.
+// Every width is written as AVIF and WebP, as img/<name>-<width>.<ext>. The page then gets, on
+// each <source> and <img> carrying data-crop="<name>", the srcset, the src and the width and
+// height those files have, and on each <span data-of="<name>"> the position of the next outline
+// listed under that image's "marks". Change the captures or the rectangles, run this again, and
 // nothing else needs editing by hand.
 //
-// A rectangle is [x, y, width, height], or a reference into the rectangle index that ships
-// with the captures (crops.json "rects"): { "ref": "path/to/rect" }, optionally with "pad"
-// (one number, or [top, right, bottom, left]) and with "x", "y", "w" or "h" to override one
-// side of what the index says. { "union": [ref, ...] } spans several. A rectangle in the index
-// can be {x, y, w, h}, {x, y, width, height}, {left, top, right, bottom} or [x, y, w, h].
+// A rectangle is [x, y, width, height], or a reference into the rectangle index that ships with
+// the captures (crops.json "rects"): { "ref": "path/to/rect" }, where a step through a list is
+// a position or an entry's "name", optionally with "pad" (one number, or [top, right, bottom,
+// left]) and with "x", "y", "w" or "h" to override one side of what the index says. { "union":
+// [ref, ...] } spans several. A rectangle in the index can be {x, y, w, h}, {x, y, width,
+// height}, {left, top, right, bottom} or [x, y, w, h].
 //
 // The pixels are Pillow's job (pip install pillow), run through Python so the repository
 // needs no image library of its own. --html-only skips them and only rewrites the page.
@@ -74,11 +75,23 @@ function asRect(value, where) {
   fail(`${where}: not a rectangle: ${JSON.stringify(value)}`);
 }
 
+// In a list, a key is a position or the "name" of an entry; a name may itself hold slashes
+// ("stills/en/hero/rects/workers/Zoe/box").
 function lookup(path, where) {
   let node = rectIndex();
-  for (const key of String(path).split("/")) {
-    if (node == null) break;
-    node = Array.isArray(node) && /^\d+$/.test(key) ? node[Number(key)] : node[key];
+  const keys = String(path).split("/");
+  for (let i = 0; i < keys.length && node != null; i++) {
+    if (!Array.isArray(node)) node = node[keys[i]];
+    else if (/^\d+$/.test(keys[i])) node = node[Number(keys[i])];
+    else {
+      let found = null;
+      for (let j = i; j < keys.length && !found; j++) {
+        const name = keys.slice(i, j + 1).join("/");
+        found = node.find((entry) => entry && entry.name === name);
+        if (found) i = j;
+      }
+      node = found;
+    }
   }
   if (node == null) fail(`${where}: "${path}" is not in ${config.rects}`);
   return asRect(node, `${where} (${path})`);
