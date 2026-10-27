@@ -230,7 +230,7 @@ fn tool_definitions() -> Value {
                     "owns": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Paths and globs, relative to the workspace, that the task's worker may change, tests included (e.g. ['src/export/**', 'src/App.tsx']). Two tasks in 'doing' never share one."
+                        "description": "Paths and globs, relative to the workspace, that the task's worker may change, tests included (e.g. ['src/export/', 'src/App.tsx']). A folder covers everything in it; a name with an extension is a file, so write a folder with a dot in its name with a trailing slash ('v1.2/'). Two tasks in 'doing' never share one."
                     }
                 },
                 "required": ["title"]

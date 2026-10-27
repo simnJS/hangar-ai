@@ -112,7 +112,7 @@ Hangar.AI pinned this Claude Code session as the orchestrator of workspace "${wo
   Acceptance: a checklist of observable criteria a reviewer can verify.
   Check: the command that proves it.
   Out of scope: what the worker must leave alone.
-- owns: every path or glob the worker may change, relative to the workspace root, tests included: ["src/export/**", "src/orders/OrdersPage.tsx"]. Tasks that may run at the same time never share a path. A file many tasks need (package.json, a lockfile, a central registry, translations) goes to one task, and the others depend on it.
+- owns: every path or glob the worker may change, relative to the workspace root, tests included: ["src/export/", "src/orders/OrdersPage.tsx"]. A folder covers everything in it. Tasks that may run at the same time never share a path. A file many tasks need (package.json, a lockfile, a central registry, translations) goes to one task, and the others depend on it.
 - depends_on: ids of the tasks whose result this one needs. priority: higher for tasks that unblock others.
 - One task is one focused worker session, a few hundred changed lines at most; split anything bigger.
 
