@@ -58,10 +58,6 @@ const DIFF_BYTES: usize = 200 * 1024;
 /// Times the whole delivery is tried again because the branch it lands on
 /// moved while it was being tested.
 const LANDING_TRIES: usize = 3;
-/// What a worktree made in the worktree panel gets copied from the main
-/// checkout (WorktreePanel.tsx): the files git ignores that a check is likely
-/// to need.
-const COPY_PATTERNS: [&str; 4] = [".env", ".env.*", "*.local", ".vscode/**"];
 
 const SCRATCH_PREFIX: &str = "hangar-delivery-";
 /// Where a delivery that passed but did not land keeps its tested merge: out
@@ -930,6 +926,38 @@ fn check_command(invocation: &Invocation, dir: &Path, port_base: Option<u32>) ->
     command
 }
 
+/// Copies the files a check is likely to need and a fresh checkout lacks,
+/// from the main checkout: the ones a worktree made in the worktree panel
+/// gets (WorktreePanel.tsx) — `.env`, `.env.*` and `*.local` at the root, and
+/// `.vscode`. Copies what is missing and replaces nothing: what the merge
+/// itself holds stays as it was tested.
+fn copy_local_files(from: &Path, to: &Path) {
+    fn missing(from: &Path, to: &Path) {
+        if to.exists() {
+            return;
+        }
+        if from.is_dir() {
+            let _ = std::fs::create_dir_all(to);
+            for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+                missing(&entry.path(), &to.join(entry.file_name()));
+            }
+        } else if from.is_file() {
+            let _ = std::fs::copy(from, to);
+        }
+    }
+    for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let local = kind.is_file()
+            && (name == ".env" || name.starts_with(".env.") || name.ends_with(".local"));
+        if local || (kind.is_dir() && name == ".vscode") {
+            missing(&entry.path(), &to.join(&name));
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Check {
@@ -1609,15 +1637,11 @@ fn attempt(
         .filter(|l| !l.is_empty())
     {
         stage.set("checking");
-        if let Some(main) = worktrees(worktree)
+        if let Some((main, _, _)) = worktrees(worktree)
             .ok()
             .and_then(|list| list.into_iter().find(|(_, _, bare)| !bare))
         {
-            let _ = tauri::async_runtime::block_on(crate::git::git_copy_untracked(
-                main.0,
-                dir.to_string_lossy().into_owned(),
-                COPY_PATTERNS.iter().map(|p| p.to_string()).collect(),
-            ));
+            copy_local_files(Path::new(&main), &dir);
         }
         let check = match run_check(request, &dir, line, limits.check) {
             Ok(check) => check,
@@ -2237,7 +2261,8 @@ mod tests {
             root,
             main,
             worker,
-            task: format!("task-{tag}-{}", &unique[..8]),
+            // Unique from its first characters, which name its scratch folder.
+            task: format!("{}-{tag}", &unique[..8]),
         }
     }
 
@@ -2405,6 +2430,39 @@ mod tests {
     }
 
     #[test]
+    fn the_check_gets_the_local_files_the_main_checkout_has_and_nothing_replaced() {
+        let repo = repo("local-files");
+        write(&repo.main, ".gitignore", ".env\n");
+        write(&repo.main, "app.local", "tracked\n");
+        commit(&repo.main, "Ignore .env, track app.local");
+        sh(&repo.worker, &["merge", "-q", "main"]);
+        write(&repo.worker, "b.txt", "bee\n");
+        commit(&repo.worker, "Add b");
+        // Ignored, so only the main checkout has it; and a tracked file the
+        // person is editing, which the check must see as committed.
+        write(&repo.main, ".env", "SECRET=42\n");
+        write(&repo.main, "app.local", "mine\n");
+        let mut request = request(&repo);
+        request.check_command = Some(if cfg!(windows) {
+            "type .env && type app.local".into()
+        } else {
+            "cat .env app.local".into()
+        });
+
+        let outcome = deliver_now(&request, &fake(Ok(approve())));
+
+        assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
+        let tail = outcome.check.unwrap().tail;
+        assert!(
+            tail.contains("SECRET=42") && tail.contains("tracked"),
+            "{tail}"
+        );
+        assert!(!tail.contains("mine"), "{tail}");
+        assert_eq!(read(&repo.main, "app.local"), "mine\n");
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
     fn a_target_that_moved_on_gets_a_merge_with_both_sides() {
         let repo = repo("merge");
         write(&repo.main, "c.txt", "sea\n");
@@ -2545,12 +2603,32 @@ mod tests {
 
         assert_eq!(finished.ended, Ended::TimedOut, "{finished:?}");
         assert!(finished.elapsed < Duration::from_secs(20));
-        let table = crate::procs::table().expect("process table");
-        assert!(
-            crate::procs::descendants(&table, finished.pid, |_| None).is_empty(),
-            "a child of {} is still running",
-            finished.pid
-        );
+        // Killing returns before the process is gone from the table, and the
+        // shell's id may have gone to a newer process since, whose children
+        // are its own: only children older than that one were the shell's.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let table = crate::procs::table().expect("process table");
+            let reused = crate::procs::started(finished.pid);
+            let left: Vec<u32> = table
+                .iter()
+                .filter(|proc| proc.ppid == finished.pid && proc.pid != proc.ppid)
+                .map(|proc| proc.pid)
+                .filter(|&child| match (reused, crate::procs::started(child)) {
+                    (Some(newer), Some(born)) => born < newer,
+                    _ => true,
+                })
+                .collect();
+            if left.is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "children of {} still running: {left:?}",
+                finished.pid
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     #[test]

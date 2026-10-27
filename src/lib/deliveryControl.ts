@@ -188,6 +188,13 @@ export function deliveryState(taskId: string): DeliveryState | null {
   return last ? { state: last.outcome, since: last.at, detail: last.detail } : null;
 }
 
+/**
+ * Whether a delivery of the workspace's is being tested or landed — minutes,
+ * during which its worker waits quietly and its workspace must not sleep.
+ */
+export const deliveringIn = (workspaceId: string) =>
+  [...inFlight.values()].some((entry) => entry.workspaceId === workspaceId);
+
 /** For the tests: forgets every delivery. */
 export function resetDeliveries() {
   inFlight.clear();
@@ -214,6 +221,48 @@ function headline(detail: string): string {
   const line = detail.split("\n")[0].trim();
   const sentence = line.match(/^.*?[.:](\s|$)/)?.[0]?.trim() ?? line;
   return sentence.length > 240 ? `${sentence.slice(0, 237)}...` : sentence;
+}
+
+/**
+ * An outcome in one line for the orchestrator: the fact it acts on — the
+ * files in conflict, the line of the check that failed, the first blocking
+ * item — not the instructions the worker gets.
+ */
+function eventDetail(outcome: DeliveryOutcome, target: string): string {
+  const files = outcome.files.join(", ");
+  const line = (() => {
+    switch (outcome.outcome) {
+      case "landed":
+        return `landed on ${target} (${short(outcome.merge)})`;
+      case "ready":
+        return `ready to land on ${target}`;
+      case "conflict":
+        return files ? `conflict with ${target} in ${files}` : headline(outcome.detail);
+      case "dirty":
+        return outcome.inCheckout
+          ? `passed, but ${target}'s checkout has local changes in the way${files ? ` (${files})` : ""}: ` +
+              "waits for the person"
+          : `uncommitted changes in the worktree: ${files}`;
+      case "checkFailed": {
+        const check = outcome.check;
+        if (!check) return headline(outcome.detail);
+        const lines = check.tail.split("\n").map((entry) => entry.trim()).filter(Boolean);
+        const telling = lines.find((entry) => /error|fail|panic|assert/i.test(entry)) ?? lines[lines.length - 1];
+        const how = check.timedOut ? `timed out after ${check.seconds} s` : `exited ${check.exitCode ?? "?"}`;
+        return `\`${check.command}\` ${how}${telling ? `: ${telling}` : ""}`;
+      }
+      case "changesRequested": {
+        const blocking = outcome.review?.blocking ?? [];
+        const first = blocking[0];
+        if (!first) return `review: ${outcome.review?.notes.trim() || "changes requested"}`;
+        const more = blocking.length > 1 ? ` (+${blocking.length - 1} more)` : "";
+        return `review: ${first.file}${first.line ? `:${first.line}` : ""}: ${first.problem.trim()}${more}`;
+      }
+      default:
+        return headline(outcome.detail);
+    }
+  })();
+  return line.length > 360 ? `${line.slice(0, 357)}...` : line;
 }
 
 function checkLine(outcome: DeliveryOutcome, checkCommand: string | null): string {
@@ -471,7 +520,7 @@ async function settle(
         .filter(Boolean)
         .join("\n"),
     );
-    post(`landed on ${target} (${short(outcome.merge)})`);
+    post(eventDetail(outcome, target));
     return;
   }
 
@@ -488,11 +537,7 @@ async function settle(
           `: waits for the person to land it once they are committed or set aside (tested as ${short(outcome.merge)}).`;
     await delivery.board.comment(cwd, task.id, HANGAR, [waits, ...details].filter(Boolean).join("\n"));
     if (worker) await delivery.tell(worker.id, outcome.detail);
-    post(
-      outcome.outcome === "ready"
-        ? `ready to land on ${target}`
-        : `passed, but ${target}'s checkout has local changes in the way: waits for the person`,
-    );
+    post(eventDetail(outcome, target));
     return;
   }
 
@@ -522,13 +567,13 @@ async function settle(
         : `Failed deliveries so far: ${failures} of ${MAX_FAILED_DELIVERIES}.`;
     await delivery.tell(worker.id, `Your delivery of "${current.title}" did not land.\n\n${outcome.detail}\n\n${next}`);
   }
-  post(`${headline(outcome.detail)} (failed delivery ${failures} of ${MAX_FAILED_DELIVERIES})`);
+  post(`${eventDetail(outcome, target)} (failed delivery ${failures} of ${MAX_FAILED_DELIVERIES})`);
   if (last) {
     postOrchestratorEvent(ws.id, {
       kind: "taskNeedsYou",
       taskId: task.id,
       title: current.title,
-      reason: `${MAX_FAILED_DELIVERIES} deliveries failed, the last one: ${headline(outcome.detail)}`,
+      reason: `${MAX_FAILED_DELIVERIES} deliveries failed, the last one: ${eventDetail(outcome, target)}`,
     });
   }
 }
@@ -537,7 +582,8 @@ async function settle(
  * Lands a delivery that passed its check and its review but waits for the
  * person, as it does with automatic landing off. Lands the merge that was
  * tested when the branch has not moved since, and tests it again first when
- * it has. Rejects with what stood in the way when it does not land.
+ * it has. Rejects with what stood in the way when it does not land, in words
+ * for the person who asked.
  */
 export async function landDelivery(ws: Workspace, taskId: string, deps: ControlDeps): Promise<void> {
   const delivery = requireDeps(deps);
@@ -560,5 +606,17 @@ export async function landDelivery(ws: Workspace, taskId: string, deps: ControlD
     });
   inFlight.set(taskId, { workspaceId: ws.id, worker: pane.name, since: Date.now(), landing: true });
   const outcome = await deliver(ws, pane, task, plan, null, deps, delivery, true);
-  if (outcome.outcome !== "landed") throw new Error(outcome.detail);
+  if (outcome.outcome === "landed") return;
+  if (outcome.outcome === "dirty" && outcome.inCheckout) {
+    const files = outcome.files.length ? ` (${outcome.files.join(", ")})` : "";
+    throw new Error(
+      `Local changes in ${plan.target}'s checkout are in the way${files}: commit them or set them aside, then ` +
+        "land it again. Nothing was touched.",
+    );
+  }
+  if (outcome.outcome === "error") throw new Error(`It could not land: ${headline(outcome.detail)}`);
+  throw new Error(
+    `It no longer lands as it was tested (${eventDetail(outcome, plan.target)}), so ${pane.name} was told what ` +
+      "to fix.",
+  );
 }

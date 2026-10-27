@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task, TaskPatch } from "./board";
 import type { Caller, ControlDeps } from "./control";
 import {
+  deliveringIn,
   deliveryControl,
   deliveryState,
   landDelivery,
@@ -220,12 +221,14 @@ describe("delivery_submit", () => {
       shell: { id: "pwsh" },
     });
     expect(deliveryState("t1")?.state).toBe("running");
+    expect(deliveringIn("w1")).toBe(true);
     await expect(submit()).rejects.toThrow(/already being merged, checked and reviewed/);
     expect(runs).toHaveLength(1);
 
     finish(outcome({ outcome: "landed", detail: "landed" }));
     await settled();
     expect(deliveryState("t1")?.state).toBe("landed");
+    expect(deliveringIn("w1")).toBe(false);
   });
 
   it("leaves a landing to the person when automatic landing is off", async () => {
@@ -302,7 +305,7 @@ describe("what follows an outcome", () => {
     expect(events.map(({ event }) => event.kind)).toEqual(["delivery"]);
     expect(events[0].event).toMatchObject({
       outcome: "conflict",
-      detail: "Merging worker/t1 onto the current main conflicts in src/a.ts, src/b.ts. (failed delivery 1 of 3)",
+      detail: "conflict with main in src/a.ts, src/b.ts (failed delivery 1 of 3)",
     });
   });
 
@@ -321,6 +324,48 @@ describe("what follows an outcome", () => {
       kind: "taskNeedsYou",
       taskId: "t1",
       reason: "3 deliveries failed, the last one: The check `pnpm test` failed (exit 1) on worker/t1 merged onto main.",
+    });
+  });
+
+  it("tells the orchestrator the fact it acts on, not the worker's instructions", async () => {
+    next = async () =>
+      outcome({
+        outcome: "checkFailed",
+        detail: "The check `pnpm test` failed (exit 1) on worker/t1 merged onto main. It runs in a fresh checkout.",
+        check: {
+          command: "pnpm test",
+          passed: false,
+          exitCode: 1,
+          timedOut: false,
+          seconds: 12,
+          tail:
+            " RUN  v5\n FAIL  src/export.test.ts > exports a row per task\nAssertionError: expected 2 to be 3\n Tests  1 failed",
+        },
+      });
+    await submit();
+    await settled();
+    expect(events[0].event).toMatchObject({
+      detail: "`pnpm test` exited 1: FAIL  src/export.test.ts > exports a row per task (failed delivery 1 of 3)",
+    });
+
+    events.length = 0;
+    next = async () =>
+      outcome({
+        outcome: "changesRequested",
+        detail: "The reviewer asked for changes before worker/t1 lands:",
+        review: {
+          approve: false,
+          blocking: [
+            { file: "src/export/csv.ts", line: 14, problem: "Commas inside a title are not quoted." },
+            { file: "src/export/button.tsx", problem: "Nothing happens on an empty board." },
+          ],
+          notes: "",
+        },
+      });
+    await submit();
+    await settled();
+    expect(events[0].event).toMatchObject({
+      detail: "review: src/export/csv.ts:14: Commas inside a title are not quoted. (+1 more) (failed delivery 2 of 3)",
     });
   });
 
@@ -389,12 +434,30 @@ describe("what follows an outcome", () => {
   it("landing what waited says why when it no longer can, and the worker gets it back", async () => {
     tasks = [task({ column: "review", labels: ["ui", "ready-to-land"] })];
     next = async () =>
-      outcome({ outcome: "conflict", detail: "Merging worker/t1 onto the current main conflicts in src/a.ts." });
+      outcome({
+        outcome: "conflict",
+        files: ["src/a.ts"],
+        detail: "Merging worker/t1 onto the current main conflicts in src/a.ts.",
+      });
 
-    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(/conflicts in src\/a\.ts/);
+    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(
+      "It no longer lands as it was tested (conflict with main in src/a.ts), so Bo was told what to fix.",
+    );
 
     expect(tasks[0]).toMatchObject({ column: "doing", labels: ["ui"] });
     expect(log.find((line) => line.startsWith("tell:p2:"))).toContain("conflicts in src/a.ts");
+  });
+
+  it("landing tells the person when their own changes are in the way", async () => {
+    tasks = [task({ column: "review", labels: ["ui", "ready-to-land"] })];
+    next = async () =>
+      outcome({ outcome: "dirty", inCheckout: true, files: ["src/a.ts"], detail: "passed, but…", landedIn: null });
+
+    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(
+      "Local changes in main's checkout are in the way (src/a.ts): commit them or set them aside, then land it " +
+        "again. Nothing was touched.",
+    );
+    expect(tasks[0]).toMatchObject({ column: "review", labels: ["ui", "ready-to-land"] });
   });
 
   it("landing needs the worker that holds the branch", async () => {
