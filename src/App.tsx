@@ -19,6 +19,8 @@ import { Toolbar, type View } from "./components/Toolbar";
 import { StatusBar } from "./components/StatusBar";
 import { Inspector } from "./components/Inspector";
 import { CommandPalette } from "./components/CommandPalette";
+import { NeedsYou, type LandItem } from "./components/NeedsYou";
+import { OrchestrationPanel } from "./components/OrchestrationPanel";
 import {
   bridgeEnqueue,
   detectAgents,
@@ -28,7 +30,17 @@ import {
   ptyKill,
   ptyWrite,
 } from "./lib/ipc";
-import { usePaneControl } from "./lib/control";
+import { usePaneControl, type ControlDeps } from "./lib/control";
+import { stopAllWorkers } from "./lib/workerControl";
+import { landDelivery } from "./lib/deliveryControl";
+import { beginDelivery } from "./lib/deliveryRuns";
+import { isOrchestrated, useNeedsYou, useNeedsYouNotices } from "./lib/needsYou";
+import { orchestratorOf, workersOf } from "./lib/orchestration";
+import {
+  canCreateOrchestrator,
+  pinRefusal,
+  useOrchestrationActions,
+} from "./lib/orchestrationActions";
 import {
   carryResume,
   isAsleep,
@@ -150,6 +162,10 @@ export default function App() {
   const [showMcp, setShowMcp] = useState(false);
   /** The workspace whose MCP servers are being chosen (McpServersPanel). */
   const [mcpServersFor, setMcpServersFor] = useState<string | null>(null);
+  /** The workspace whose orchestration settings are open (OrchestrationPanel). */
+  const [orchestrationFor, setOrchestrationFor] = useState<string | null>(null);
+  /** « Besoin de toi », open under its toolbar button. */
+  const [needsYouOpen, setNeedsYouOpen] = useState(false);
   const [view, setView] = useState<View>("terminals");
   const [paletteOpen, setPaletteOpen] = useState(false);
   /**
@@ -183,6 +199,8 @@ export default function App() {
   const [pickerPaneId, setPickerPaneId] = useState<string | null>(null);
   /** The reset button is asking "are you sure?" instead of acting. */
   const [confirmReset, setConfirmReset] = useState(false);
+  /** So is « Arrêter les workers », in the same menu. */
+  const [confirmStopWorkers, setConfirmStopWorkers] = useState(false);
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [broadcast, setBroadcast] = useState("");
@@ -396,6 +414,8 @@ export default function App() {
     setShowSettings(false);
     setShowMcp(false);
     setMcpServersFor(null);
+    setOrchestrationFor(null);
+    setNeedsYouOpen(false);
     setShowCreate(false);
     setPickerPaneId(null);
     setActiveWorkspace(workspaceId);
@@ -651,7 +671,7 @@ export default function App() {
   // Defined further down, with the rest of the window handling.
   const detachRef = useRef<(workspaceId: string) => Promise<void>>(async () => undefined);
   const reattachRef = useRef<(workspaceId: string) => void>(() => undefined);
-  usePaneControl(
+  const controlDeps: ControlDeps | null =
     hydrated
       ? {
           snapshot,
@@ -705,8 +725,105 @@ export default function App() {
           // orchestration: workers deps
           // orchestration: delivery deps
         }
-      : null,
+      : null;
+  usePaneControl(controlDeps);
+
+  // ---------------------------------------------------------------------------
+  // Orchestration (lib/orchestration): pinning a workspace's orchestrator, its
+  // settings, stopping its workers, and « Besoin de toi » — what waits for
+  // the person across the workspaces. None of it shows until a workspace has
+  // an orchestrator, but the entries that start one.
+  // ---------------------------------------------------------------------------
+
+  const orchestration = useOrchestrationActions();
+
+  /** Pins or unpins a pane as its workspace's orchestrator, and says so. */
+  const pinOrchestrator = (workspaceId: string, paneId: string, pinned: boolean) => {
+    const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
+    const pane = ws?.panes.find((entry) => entry.id === paneId);
+    if (!ws || !pane) return;
+    if (pinned && !orchestration.pin(workspaceId, paneId)) return;
+    if (!pinned) orchestration.unpin(workspaceId, paneId);
+    setNotice({
+      kind: "agent",
+      text: t(pinned ? "orch.pinned" : "orch.unpinned", { name: pane.name, workspace: ws.name }),
+    });
+  };
+
+  /** A new Claude Code pane, pinned from the start, brought forward. */
+  const createOrchestrator = (workspaceId: string) => {
+    const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
+    if (!ws || !canCreateOrchestrator(ws)) return;
+    const id = orchestration.create(workspaceId, focusByWorkspace[workspaceId] ?? null);
+    if (!id) return setNotice(t("orch.noRoom", { workspace: ws.name }));
+    const pane = snapshot().workspaces.find((entry) => entry.id === workspaceId)?.panes.find((entry) => entry.id === id);
+    activateRef.current(workspaceId, id);
+    setNotice({
+      kind: "agent",
+      text: t("orch.pinned", { name: pane?.name ?? "", workspace: ws.name }),
+    });
+  };
+
+  /** « Arrêter les workers », once confirmed. */
+  const stopWorkers = (workspaceId: string) => {
+    setConfirmStopWorkers(false);
+    const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
+    if (!ws || !controlDeps) return;
+    stopAllWorkers(ws, controlDeps)
+      .then((n) =>
+        setNotice({
+          kind: "agent",
+          text: n
+            ? t("orch.stopped", { n, workspace: ws.name })
+            : t("orch.stoppedNone", { workspace: ws.name }),
+        }),
+      )
+      .catch((err) => setNotice(t("orch.stopFailed", { error: String(err) })));
+  };
+
+  /** « Fusionner »: the delivery runs for as long as it takes, and says so. */
+  const landItem = async (item: LandItem) => {
+    const ws = snapshot().workspaces.find((entry) => entry.id === item.workspaceId);
+    if (!ws || !controlDeps) return;
+    const end = beginDelivery(ws.id, item.task.id);
+    try {
+      await landDelivery(ws, item.task.id, controlDeps);
+      setNotice({ kind: "agent", text: t("needsYou.landed", { title: item.task.title }) });
+    } finally {
+      end();
+    }
+  };
+
+  /** Lands on a pane from « Besoin de toi », keyboard included. */
+  const goToPane = (workspaceId: string, paneId: string) => {
+    activateRef.current(workspaceId, paneId);
+    requestAnimationFrame(() => getTerminal(paneId)?.focus());
+  };
+
+  const openBoardOf = (workspaceId: string) => {
+    if (!windowWorkspaceId) setActiveWorkspace(workspaceId);
+    setView("board");
+  };
+
+  // Every workspace the window knows, in the navigator's order: a workspace
+  // window only knows its own.
+  const needsYouScope = useMemo(
+    () => (windowWorkspaceId ? openWorkspaces : sidebarOrder(state.workspaces, state.folders)),
+    [openWorkspaces, state.workspaces, state.folders],
   );
+  const needsYou = useNeedsYou(needsYouScope);
+  useNeedsYouNotices({
+    enabled: isMainWindow && hydrated,
+    items: needsYou.items,
+    boards: needsYou.boards,
+    workspaces: state.workspaces,
+    settings: state.settings,
+    t,
+  });
+  // Nothing left in it, it has nothing left to show: its button is gone too.
+  useEffect(() => {
+    if (!needsYou.items.length) setNeedsYouOpen(false);
+  }, [needsYou.items.length]);
 
   // ---------------------------------------------------------------------------
   // Workspaces in windows of their own (lib/windows). Moving one never
@@ -918,7 +1035,13 @@ export default function App() {
   // An armed confirmation is about the workspace it was armed on.
   useEffect(() => {
     setConfirmReset(false);
+    setConfirmStopWorkers(false);
   }, [activeWorkspace?.id, view]);
+
+  const cancelStopWorkers = () => {
+    setConfirmStopWorkers(false);
+    if (focusedPaneId) getTerminal(focusedPaneId)?.focus();
+  };
 
   /** Opening always names a category, so a shortcut lands where it promised. */
   const openSettings = useCallback((category = "general") => {
@@ -1014,6 +1137,20 @@ export default function App() {
     map["view.stats"] = () => setView("stats");
     map["view.mcp"] = () => setShowMcp(true);
     map["workspace.mcpServers"] = () => setMcpServersFor(wsId);
+    // Orchestration: its settings are a menu entry anyone may find; the rest
+    // is only there where it applies.
+    map["workspace.orchestration"] = () => setOrchestrationFor(wsId);
+    if (canCreateOrchestrator(activeWorkspace)) {
+      map["workspace.newOrchestrator"] = () => createOrchestrator(wsId);
+    }
+    if (workersOf(activeWorkspace).length) {
+      // Only arms the confirmation, like the reset.
+      map["workspace.stopWorkers"] = () => {
+        setConfirmReset(false);
+        setConfirmStopWorkers(true);
+      };
+    }
+    if (needsYou.items.length) map["view.needsYou"] = () => setNeedsYouOpen(true);
 
     // Everything below acts on panes, which are only on screen — and are only
     // what a keystroke can be about — in the terminals view.
@@ -1051,6 +1188,12 @@ export default function App() {
     const pane = panes.find((p) => p.id === focused);
     if (pane && AGENTS.find((agent) => agent.id === pane.agent)?.resumable) {
       map["pane.sessions"] = () => setPickerPaneId(focused);
+    }
+    if (pinRefusal(activeWorkspace, focused) === null) {
+      map["pane.pinOrchestrator"] = () => pinOrchestrator(wsId, focused, true);
+    }
+    if (orchestratorOf(activeWorkspace)?.id === focused) {
+      map["pane.unpinOrchestrator"] = () => pinOrchestrator(wsId, focused, false);
     }
 
     // Counted through in the order the pane menu lists them — this workspace's
@@ -1144,6 +1287,7 @@ export default function App() {
 
   const pickerPane = panes.find((p) => p.id === pickerPaneId) ?? null;
   const mcpServersWs = state.workspaces.find((ws) => ws.id === mcpServersFor) ?? null;
+  const orchestrationWs = state.workspaces.find((ws) => ws.id === orchestrationFor) ?? null;
 
   if (!hydrated) {
     return <div className="boot">{t("app.loading")}</div>;
@@ -1166,6 +1310,7 @@ export default function App() {
           focusByWorkspace={focusByWorkspace}
           onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
           onOpenMcpServers={setMcpServersFor}
+          onOpenOrchestration={setOrchestrationFor}
         />
       )}
 
@@ -1208,6 +1353,27 @@ export default function App() {
               inspectorOpen={inspectorShown}
               onToggleInspector={toggleInspector}
               onOpenPalette={() => setPaletteOpen(true)}
+              needsYou={
+                <NeedsYou
+                  items={needsYou.items}
+                  workspaces={state.workspaces}
+                  open={needsYouOpen}
+                  onOpenChange={setNeedsYouOpen}
+                  onGoToPane={goToPane}
+                  onOpenBoard={openBoardOf}
+                  onLand={landItem}
+                />
+              }
+              orchestrated={isOrchestrated(activeWorkspace)}
+              workerCount={workersOf(activeWorkspace).length}
+              onOpenOrchestration={() => setOrchestrationFor(activeWorkspace.id)}
+              confirmStopWorkers={confirmStopWorkers}
+              onArmStopWorkers={() => {
+                setConfirmReset(false);
+                setConfirmStopWorkers(true);
+              }}
+              onCancelStopWorkers={cancelStopWorkers}
+              onStopWorkers={() => stopWorkers(activeWorkspace.id)}
             />
 
             {/* Always rendered, whatever the view: the grids below must keep
@@ -1234,6 +1400,8 @@ export default function App() {
                     onSplitPane={(paneId, dir) => splitPane(ws.id, paneId, dir)}
                     onReplacePane={(paneId, patch) => replacePane(ws.id, paneId, patch)}
                     onOpenSessions={setPickerPaneId}
+                    onPinOrchestrator={(paneId, pinned) => pinOrchestrator(ws.id, paneId, pinned)}
+                    onOpenOrchestration={() => setOrchestrationFor(ws.id)}
                   />
                 ))}
 
@@ -1461,6 +1629,22 @@ export default function App() {
             paneIds.forEach((paneId) => replacePane(mcpServersWs.id, paneId, {}))
           }
           onClose={() => setMcpServersFor(null)}
+        />
+      )}
+
+      {orchestrationWs && (
+        <OrchestrationPanel
+          // A panel opened on one workspace's settings starts over on another's.
+          key={orchestrationWs.id}
+          workspace={orchestrationWs}
+          onCreateOrchestrator={() => {
+            setOrchestrationFor(null);
+            createOrchestrator(orchestrationWs.id);
+          }}
+          onSaved={() =>
+            setNotice({ kind: "agent", text: t("orch.saved", { workspace: orchestrationWs.name }) })
+          }
+          onClose={() => setOrchestrationFor(null)}
         />
       )}
 

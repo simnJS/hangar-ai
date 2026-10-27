@@ -1,0 +1,489 @@
+/* ---------- Orchestration ---------- */
+
+/* A workspace's orchestrator and its workers (lib/orchestration): the badge
+   in their pane headers, the mark in the navigator, « Besoin de toi » in the
+   toolbar, and the workspace's « Orchestration » settings. Every colour is a
+   theme token held to its contrast in themes.ts: text on a hairline tint,
+   which is how the app draws a chip. */
+
+/* ---- Pane header badge ---- */
+
+/* Right after the pane's name: what it is to the workspace. The orchestrator
+   in the accent, a worker in the quiet grey with the task it is on. */
+.orch-badge {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale));
+  min-width: 0;
+  height: calc(18px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+
+.orch-badge .icon {
+  width: calc(11px * var(--ui-scale));
+  height: calc(11px * var(--ui-scale));
+}
+
+.orch-badge--lead {
+  flex: none;
+  color: var(--accent-hi);
+}
+
+.orch-badge__role {
+  flex: none;
+}
+
+.orch-badge__sep {
+  flex: none;
+  color: var(--fg-secondary);
+}
+
+/* The task's title gives way first, a few words of it before nothing. */
+.orch-badge__task {
+  min-width: 0;
+  max-width: calc(220px * var(--ui-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+@container pane-bar (max-width: 42em) {
+  .orch-badge__task {
+    max-width: calc(120px * var(--ui-scale));
+  }
+}
+
+@container pane-bar (max-width: 34em) {
+  .orch-badge__sep,
+  .orch-badge__task {
+    display: none;
+  }
+}
+
+/* A narrower header keeps the orchestrator's mark and drops its word, before
+   the agent's name has to give way to it. */
+@container pane-bar (max-width: 40em) {
+  .orch-badge--lead .orch-badge__role {
+    display: none;
+  }
+
+  .orch-badge--lead {
+    padding: 0 calc(4px * var(--ui-scale));
+  }
+}
+
+@container pane-bar (max-width: 15.5em) {
+  .orch-badge {
+    display: none;
+  }
+}
+
+/* ---- Navigator ---- */
+
+/* A workspace that has an orchestrator: the mark in the accent, beside the
+   quiet grey ones of a window of its own or a sleep. */
+.nav-mark--orch {
+  color: var(--accent-hi);
+}
+
+/* ---- « Besoin de toi » in the toolbar ---- */
+
+/* The count of what waits for the person, in the colour of an agent waiting
+   for an answer: everything behind it is waiting for one. */
+.needs-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  margin-right: calc(6px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale)) 0 calc(7px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--state-waiting);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur), box-shadow var(--dur);
+}
+
+.needs-btn .icon {
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
+}
+
+.needs-btn:hover,
+.needs-btn.is-open {
+  background: var(--line-strong);
+  box-shadow: inset 0 0 0 1px var(--state-waiting-fill);
+}
+
+.needs-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.needs-btn__label {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.needs-btn__count {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Its words go before the presets do: the flag and the count say it. */
+@container toolbar (width < 92em) {
+  .needs-btn__label {
+    display: none;
+  }
+}
+
+@container toolbar (width < 64em) {
+  .needs-btn {
+    margin-right: calc(3px * var(--ui-scale));
+  }
+}
+
+/* ---- « Besoin de toi », the list ---- */
+
+.tmenu.needs {
+  width: min(calc(440px * var(--ui-scale)), calc(100vw - 16px));
+  max-height: min(calc(520px * var(--ui-scale)), calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.needs__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+  padding: calc(10px * var(--ui-scale)) calc(14px * var(--ui-scale)) calc(8px * var(--ui-scale));
+  border-bottom: 1px solid var(--line);
+}
+
+.needs__title {
+  flex: 1;
+  margin: 0;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.needs__total {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--state-waiting);
+}
+
+.needs__body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: calc(4px * var(--ui-scale)) calc(6px * var(--ui-scale)) calc(8px * var(--ui-scale));
+}
+
+.needs__group + .needs__group {
+  margin-top: calc(4px * var(--ui-scale));
+  padding-top: calc(4px * var(--ui-scale));
+  border-top: 1px solid var(--line);
+}
+
+.needs__group-title {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  margin: 0;
+  padding: calc(6px * var(--ui-scale)) calc(8px * var(--ui-scale)) calc(4px * var(--ui-scale));
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.needs__group-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.needs__list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* What waits, where, and the thing to do about it. */
+.needs__row {
+  display: grid;
+  grid-template-columns: calc(18px * var(--ui-scale)) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: calc(8px * var(--ui-scale));
+  min-height: calc(40px * var(--ui-scale));
+  padding: calc(5px * var(--ui-scale)) calc(6px * var(--ui-scale)) calc(5px * var(--ui-scale))
+    calc(8px * var(--ui-scale));
+  border-radius: var(--radius-sm);
+}
+
+.needs__row:hover,
+.needs__row:focus-within {
+  background: var(--line);
+}
+
+.needs__mark {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  height: calc(18px * var(--ui-scale));
+}
+
+.needs__mark--question {
+  color: var(--state-waiting);
+}
+
+.needs__mark--land {
+  color: var(--state-working);
+}
+
+.needs__text {
+  display: grid;
+  gap: calc(1px * var(--ui-scale));
+  min-width: 0;
+}
+
+.needs__what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.needs__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+/* The question, or the review's verdict: two lines, the rest in its tooltip. */
+.needs__note {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: calc(2px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  white-space: normal;
+  color: var(--fg-secondary);
+}
+
+.needs__error {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(5px * var(--ui-scale));
+  margin-top: calc(2px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+  line-height: 1.4;
+  white-space: normal;
+  color: var(--danger);
+}
+
+.needs__error .icon {
+  margin-top: 0.2em;
+}
+
+.needs__actions {
+  display: flex;
+  align-items: center;
+  align-self: start;
+  gap: calc(2px * var(--ui-scale));
+}
+
+.needs__icon-btn {
+  display: grid;
+  place-items: center;
+  width: calc(24px * var(--ui-scale));
+  height: calc(22px * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.needs__icon-btn:hover {
+  background: var(--line-strong);
+  color: var(--fg);
+}
+
+.needs__icon-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -1px;
+}
+
+/* ---- Orchestration settings (OrchestrationPanel) ---- */
+
+.modal--orch {
+  width: min(calc(600px * var(--ui-scale)), 100%);
+}
+
+.orch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+}
+
+/* A short window scrolls the body; nothing in it gets squeezed instead. */
+.orch-panel > * {
+  flex-shrink: 0;
+}
+
+/* Who orchestrates, and how many workers are out: the panel's first line. */
+.orch-panel__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: calc(46px * var(--ui-scale));
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--group-bg, var(--bg));
+}
+
+.orch-panel__status-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(28px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
+  border-radius: var(--radius);
+  background: var(--line);
+  color: var(--fg-muted);
+}
+
+.orch-panel__status.is-on .orch-panel__status-icon {
+  color: var(--accent-hi);
+}
+
+.orch-panel__status-text {
+  flex: 1;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  font-size: calc(12.5px * var(--ui-scale));
+}
+
+.orch-panel__status-text strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.orch-panel__status-sub {
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
+}
+
+.orch-panel__section {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.orch-panel__heading {
+  margin: 0;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+/* Labels as wide as the longest one in any section, so the fields of the
+   three line up as one form. */
+.orch-panel__grid {
+  grid-template-columns: calc(170px * var(--ui-scale)) minmax(0, 1fr);
+  row-gap: 12px;
+}
+
+.orch-panel__grid .form-grid__label {
+  justify-self: end;
+}
+
+.orch-panel__grid .form-grid__field--inline {
+  min-height: calc(26px * var(--ui-scale));
+}
+
+.orch-panel__grid p.form-hint {
+  margin: -4px 0 0;
+}
+
+.orch-panel__model .text-input {
+  flex: 0 1 calc(240px * var(--ui-scale));
+  min-width: 0;
+}
+
+.orch-panel__model .form-hint {
+  white-space: nowrap;
+}
+
+.orch-panel__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--danger);
+}
+
+.orch-panel__error .icon {
+  margin-top: 0.15em;
+}
+
+.text-input.is-invalid,
+.text-input.is-invalid:focus {
+  border-color: var(--danger);
+}
+
+.text-input.is-invalid:focus {
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+/* A narrow window stacks each label over its field. */
+@media (max-width: 640px) {
+  .orch-panel__grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+
+  .orch-panel__grid .form-grid__label {
+    justify-self: start;
+    line-height: 1.4;
+  }
+
+  .orch-panel__grid .form-grid__field--solo {
+    grid-column: 1;
+  }
+}

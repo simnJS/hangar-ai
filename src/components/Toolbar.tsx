@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 import { ToolbarActivity } from "./ToolbarActivity";
@@ -71,6 +71,20 @@ export interface ToolbarProps {
   inspectorOpen: boolean;
   onToggleInspector: () => void;
   onOpenPalette: () => void;
+  /** « Besoin de toi », first in the trail; nothing while nothing needs you. */
+  needsYou?: ReactNode;
+  /**
+   * The workspace has an orchestrator or workers: the menu offers its
+   * orchestration settings, and stopping its workers when it has any.
+   */
+  orchestrated: boolean;
+  workerCount: number;
+  onOpenOrchestration: () => void;
+  /** Stopping the workers is asking "are you sure?" instead of acting. */
+  confirmStopWorkers: boolean;
+  onArmStopWorkers: () => void;
+  onCancelStopWorkers: () => void;
+  onStopWorkers: () => void;
 }
 
 export function Toolbar({
@@ -105,6 +119,14 @@ export function Toolbar({
   inspectorOpen,
   onToggleInspector,
   onOpenPalette,
+  needsYou,
+  orchestrated,
+  workerCount,
+  onOpenOrchestration,
+  confirmStopWorkers,
+  onArmStopWorkers,
+  onCancelStopWorkers,
+  onStopWorkers,
 }: ToolbarProps) {
   const t = useT();
   const withKeys = useShortcutTitle();
@@ -114,7 +136,9 @@ export function Toolbar({
   const moreRef = useRef<HTMLButtonElement>(null);
   /** Opened from its button. An armed reset opens it too, from anywhere. */
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuShown = menuOpen || confirmReset;
+  /** Either question, asked in the menu's place. */
+  const confirming = confirmReset || confirmStopWorkers;
+  const menuShown = menuOpen || confirming;
   /** The terminal actions did not fit in the bar and are listed in the menu. */
   const [folded, setFolded] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -163,11 +187,11 @@ export function Toolbar({
 
   // The reset went through, or was called off elsewhere (a view change): the
   // menu it was showing in has nothing left to say.
-  const wasConfirming = useRef(confirmReset);
+  const wasConfirming = useRef(confirming);
   useEffect(() => {
-    if (wasConfirming.current && !confirmReset) setMenuOpen(false);
-    wasConfirming.current = confirmReset;
-  }, [confirmReset]);
+    if (wasConfirming.current && !confirming) setMenuOpen(false);
+    wasConfirming.current = confirming;
+  }, [confirming]);
 
   /**
    * Escape and Tab give the keyboard back to the button that opened the menu.
@@ -177,6 +201,7 @@ export function Toolbar({
   const closeMenu = (reason: MenuCloseReason) => {
     const fromButton = menuOpen;
     if (confirmReset) onCancelReset();
+    if (confirmStopWorkers) onCancelStopWorkers();
     setMenuOpen(false);
     if ((reason === "escape" || reason === "tab") && fromButton) moreRef.current?.focus();
   };
@@ -272,6 +297,7 @@ export function Toolbar({
       />
 
       <div className="toolbar__trail">
+        {needsYou}
         {terminals && (
           <>
             <div className="segmented segmented--icons" role="group" aria-label={t("topbar.layout")}>
@@ -470,6 +496,36 @@ export function Toolbar({
               </button>
             </div>
           </ToolbarMenu>
+        ) : confirmStopWorkers ? (
+          <ToolbarMenu
+            anchorRef={moreRef}
+            role="alertdialog"
+            labelledBy={`${confirmId}-stop-title`}
+            describedBy={`${confirmId}-stop-body`}
+            onClose={closeMenu}
+          >
+            <p className="tmenu__title" id={`${confirmId}-stop-title`}>
+              {t("orch.stopTitle", { n: workerCount })}
+            </p>
+            <p className="tmenu__body" id={`${confirmId}-stop-body`}>
+              {t("orch.stopBody")}
+            </p>
+            <div className="tmenu__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => closeMenu("escape")}
+                // As for the reset: the answer that stops nothing has the
+                // keyboard.
+                autoFocus
+              >
+                {t("create.cancel")}
+              </button>
+              <button type="button" className="btn btn--danger" onClick={onStopWorkers}>
+                {t("orch.stopConfirm", { n: workerCount })}
+              </button>
+            </div>
+          </ToolbarMenu>
         ) : (
           <ToolbarMenu anchorRef={moreRef} label={t("toolbar.menu")} onClose={closeMenu}>
             {folded && terminals && (
@@ -550,6 +606,37 @@ export function Toolbar({
               <span className="tmenu__label">{t("toolbar.palette")}</span>
               {paletteKeys && <kbd className="tmenu__keys">{paletteKeys}</kbd>}
             </button>
+            {orchestrated && (
+              <>
+                <div className="tmenu__sep" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="tmenu__item"
+                  onClick={pick(onOpenOrchestration)}
+                >
+                  <Icon name="orchestrator" size={14} />
+                  <span className="tmenu__label">{t("orch.settingsMenu")}</span>
+                  {keys("workspace.orchestration") && (
+                    <kbd className="tmenu__keys">{keys("workspace.orchestration")}</kbd>
+                  )}
+                </button>
+                {workerCount > 0 && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="tmenu__item tmenu__item--danger"
+                    onClick={onArmStopWorkers}
+                  >
+                    <Icon name="stop" size={14} />
+                    <span className="tmenu__label">{t("orch.stopMenu")}</span>
+                    {keys("workspace.stopWorkers") && (
+                      <kbd className="tmenu__keys">{keys("workspace.stopWorkers")}</kbd>
+                    )}
+                  </button>
+                )}
+              </>
+            )}
             {/* Last, on its own, where the menu's first focus and a stray
                 Enter never land: it throws away every conversation. */}
             <div className="tmenu__sep" role="separator" />

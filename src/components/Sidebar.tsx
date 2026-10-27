@@ -14,6 +14,7 @@ import { useAgentsIn } from "../lib/agentState";
 import { useAsleep } from "../lib/hibernateStore";
 import { proseTime } from "../lib/inspectorFormat";
 import { mcpScopeClear } from "../lib/mcpScope";
+import { orchestratorOf, workersOf } from "../lib/orchestration";
 import { useShortcutTitle } from "../lib/useShortcuts";
 import type { Workspace } from "../types";
 
@@ -26,6 +27,8 @@ interface Props {
   onFocusPane: (workspaceId: string, paneId: string) => void;
   /** Opens the choice of MCP servers for a workspace. */
   onOpenMcpServers: (workspaceId: string) => void;
+  /** Opens a workspace's orchestration settings. */
+  onOpenOrchestration: (workspaceId: string) => void;
 }
 
 interface DragItem {
@@ -87,6 +90,7 @@ export function Sidebar({
   focusByWorkspace,
   onFocusPane,
   onOpenMcpServers,
+  onOpenOrchestration,
 }: Props) {
   const {
     state,
@@ -480,6 +484,13 @@ export function Sidebar({
     const sleep = asleep.get(ws.id);
     const sleepTitle = sleep ? t("sidebar.asleep", { time: proseTime(sleep.at, locale) }) : "";
     const hint = hints.get(ws.id);
+    const orchestrator = orchestratorOf(ws);
+    const workers = orchestrator ? workersOf(ws).length : 0;
+    const orchTitle = orchestrator
+      ? workers
+        ? t("orch.navMarkWorkers", { name: orchestrator.name, n: workers })
+        : t("orch.navMark", { name: orchestrator.name })
+      : "";
 
     return (
       <div
@@ -496,7 +507,7 @@ export function Sidebar({
         aria-level={level}
         aria-current={active ? "true" : undefined}
         aria-labelledby={`${id}-name ${id}-hint`}
-        aria-describedby={`${id}-window ${id}-asleep ${id}-status`}
+        aria-describedby={`${id}-orch ${id}-window ${id}-asleep ${id}-status`}
         // The folder it opens in, which the row does not spell out: only a
         // tooltip, for the rare look it is worth.
         title={ws.cwd}
@@ -531,6 +542,17 @@ export function Sidebar({
               )}
             </span>
             <span className="nav-end">
+              {orchestrator && (
+                <span
+                  className="nav-mark nav-mark--orch"
+                  id={`${id}-orch`}
+                  role="img"
+                  title={orchTitle}
+                  aria-label={orchTitle}
+                >
+                  <Icon name="orchestrator" size={12} />
+                </span>
+              )}
               {ws.detached && (
                 <span
                   className="nav-mark"
@@ -736,6 +758,13 @@ export function Sidebar({
         icon: "plug",
         takesFocus: true,
         onSelect: () => onOpenMcpServers(ws.id),
+      },
+      {
+        kind: "item",
+        label: t("orch.settingsMenu"),
+        icon: "orchestrator",
+        takesFocus: true,
+        onSelect: () => onOpenOrchestration(ws.id),
       },
       { kind: "separator" },
       // Dragging does the same, but a menu is the one way to find out

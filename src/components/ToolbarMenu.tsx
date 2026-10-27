@@ -41,15 +41,20 @@ export function ToolbarMenu({
   label,
   labelledBy,
   describedBy,
+  className,
   onClose,
   children,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
-  /** A menu of items, or a short question asked in its place. */
-  role?: "menu" | "alertdialog";
+  /**
+   * A menu of items, a short question asked in its place, or a small panel
+   * of its own (« Besoin de toi »). The last two keep Tab inside.
+   */
+  role?: "menu" | "alertdialog" | "dialog";
   label?: string;
   labelledBy?: string;
   describedBy?: string;
+  className?: string;
   onClose: (reason: MenuCloseReason) => void;
   children: ReactNode;
 }) {
@@ -146,7 +151,9 @@ export function ToolbarMenu({
   return createPortal(
     <div
       ref={ref}
-      className={`tmenu ${role === "alertdialog" ? "tmenu--confirm" : ""}`}
+      className={["tmenu", role === "alertdialog" && "tmenu--confirm", className]
+        .filter(Boolean)
+        .join(" ")}
       role={role}
       aria-label={label}
       aria-labelledby={labelledBy}

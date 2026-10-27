@@ -116,6 +116,9 @@ const OWNS_FOCUS = new Set<CommandId>([
   "terminal.find",
   "view.focusNavigator",
   "view.focusInspector",
+  "workspace.orchestration",
+  "workspace.stopWorkers",
+  "view.needsYou",
 ]);
 
 const ICONS: Partial<Record<CommandId, IconName>> = {
@@ -148,6 +151,12 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "view.focusInspector": "sidebarRight",
   "terminal.find": "search",
   "app.fullscreen": "expand",
+  "pane.pinOrchestrator": "orchestrator",
+  "pane.unpinOrchestrator": "orchestrator",
+  "workspace.newOrchestrator": "orchestrator",
+  "workspace.orchestration": "sliders",
+  "workspace.stopWorkers": "stop",
+  "view.needsYou": "flag",
 };
 
 const SECTION_ICONS: Record<ShortcutSection, IconName> = {
@@ -175,6 +184,9 @@ const ALIASES: Partial<Record<CommandId, TranslateKey[]>> = {
   "view.modelPreview": ["model.panel"],
   "view.inspector": ["toolbar.inspector"],
   "view.broadcast": ["broadcast.send"],
+  "pane.pinOrchestrator": ["orch.pin"],
+  "workspace.orchestration": ["orch.title"],
+  "view.needsYou": ["needsYou.title"],
 };
 
 const STATE_WORD = {

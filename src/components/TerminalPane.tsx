@@ -60,6 +60,7 @@ import { StateGlyph } from "./StateGlyph";
 import { Icon } from "./Icon";
 import { PaneGauge } from "./PaneGauge";
 import { PaneMenu, type PaneMenuItem } from "./PaneMenu";
+import { OrchestrationBadge } from "./OrchestrationBadge";
 import {
   fileBaseName,
   firstLine,
@@ -145,6 +146,17 @@ interface Props {
   onEditCommand: (command: SavedCommand, scope: CommandScope) => void;
   onRemoveCommand: (command: SavedCommand, scope: CommandScope) => void;
   onAddCommand: () => void;
+  /**
+   * Its part in the workspace's orchestration, for the "…" menu: whether it
+   * may be pinned as the orchestrator, and what pinning, unpinning and the
+   * settings do. Absent, the menu has no such entry.
+   */
+  orchestration?: {
+    canPin: boolean;
+    onPin: () => void;
+    onUnpin: () => void;
+    onSettings: () => void;
+  };
 }
 
 export function TerminalPane({
@@ -180,6 +192,7 @@ export function TerminalPane({
   onEditCommand,
   onRemoveCommand,
   onAddCommand,
+  orchestration,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -1209,6 +1222,36 @@ export function TerminalPane({
         onSelect: pick(onShowDiff),
       });
     }
+    // Last, a group of its own: what the pane is to the workspace rather
+    // than what it does.
+    if (orchestration && pane.role === "orchestrator") {
+      menuItems.push(
+        {
+          id: "orch-unpin",
+          label: t("orch.unpin"),
+          icon: "orchestrator",
+          keys: shortcut("pane.unpinOrchestrator"),
+          separated: true,
+          onSelect: pick(orchestration.onUnpin),
+        },
+        {
+          id: "orch-settings",
+          label: t("orch.settingsMenu"),
+          icon: "sliders",
+          keys: shortcut("workspace.orchestration"),
+          onSelect: pick(orchestration.onSettings),
+        },
+      );
+    } else if (orchestration?.canPin) {
+      menuItems.push({
+        id: "orch-pin",
+        label: t("orch.pin"),
+        icon: "orchestrator",
+        keys: shortcut("pane.pinOrchestrator"),
+        separated: true,
+        onSelect: pick(orchestration.onPin),
+      });
+    }
   }
 
   // What the header says about the pane: the shell's life until it runs,
@@ -1272,6 +1315,8 @@ export function TerminalPane({
         >
           {pane.name}
         </span>
+
+        <OrchestrationBadge pane={pane} cwd={cwd} />
 
         {/* The native select stays, laid transparently over its label: the
             keyboard, the screen reader and the platform's own list all keep

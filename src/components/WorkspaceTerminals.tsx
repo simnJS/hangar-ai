@@ -7,6 +7,7 @@ import { dropText, watchFileDrops, type Point } from "../lib/fileDrop";
 import { leafIds, normalizeTree } from "../lib/layout";
 import { runSavedCommand } from "../lib/savedCommands";
 import { touchWorkspace } from "../lib/hibernateStore";
+import { pinRefusal } from "../lib/orchestrationActions";
 import { resolveShell } from "../lib/shells";
 import { getTerminal, registerDiffOpener } from "../lib/terminalRegistry";
 import { useStore, type CommandScope } from "../store";
@@ -44,6 +45,9 @@ interface Props {
   /** Restart a pane under a fresh id, optionally patching it first. */
   onReplacePane: (paneId: string, patch: Partial<Pane>) => void;
   onOpenSessions: (paneId: string) => void;
+  /** Pins a pane as the workspace's orchestrator, or unpins it. */
+  onPinOrchestrator: (paneId: string, pinned: boolean) => void;
+  onOpenOrchestration: () => void;
 }
 
 export function WorkspaceTerminals({
@@ -59,6 +63,8 @@ export function WorkspaceTerminals({
   onSplitPane,
   onReplacePane,
   onOpenSessions,
+  onPinOrchestrator,
+  onOpenOrchestration,
 }: Props) {
   const {
     setTree,
@@ -277,6 +283,12 @@ export function WorkspaceTerminals({
                 ? () => zoomTo(zoomedId === pane.id ? null : pane.id)
                 : undefined
             }
+            orchestration={{
+              canPin: pinRefusal(workspace, pane.id) === null,
+              onPin: () => onPinOrchestrator(pane.id, true),
+              onUnpin: () => onPinOrchestrator(pane.id, false),
+              onSettings: onOpenOrchestration,
+            }}
           />
         )}
       />
