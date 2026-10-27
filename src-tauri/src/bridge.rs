@@ -58,14 +58,21 @@ pub fn plugin_dir() -> Option<&'static Path> {
     DIR.get_or_init(install).as_deref()
 }
 
+/// `~/.hangar/mods/`, or beside the endpoint file a development build run next
+/// to an installed Hangar was given (endpoint.rs): the installed app's
+/// sessions hot-reload the shared folder, and would run the build's mod.
+fn mods_root() -> Option<PathBuf> {
+    if let Some(file) = std::env::var_os("HANGAR_ENDPOINT_FILE").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(file).parent()?.join("mods"));
+    }
+    Some(dirs::home_dir()?.join(".hangar").join("mods"))
+}
+
 /// Rewrites only the files that changed, so an app update reaches the mod —
 /// Claude Code hot-reloads a plugin directory when its files change — while an
 /// ordinary launch touches nothing.
 fn install() -> Option<PathBuf> {
-    let dir = dirs::home_dir()?
-        .join(".hangar")
-        .join("mods")
-        .join("hangar-bridge");
+    let dir = mods_root()?.join("hangar-bridge");
     for (relative, body) in MOD_FILES {
         let path = dir.join(relative);
         if fs::read_to_string(&path).ok().as_deref() == Some(*body) {
