@@ -134,6 +134,14 @@ in the order of the hero's `marks`) in percent of its crop. It warns when a
 width asks for more pixels than the capture has there, or a rectangle runs off
 it.
 
+Every URL it writes carries `?v=` and the start of the file's hash, and so do
+`styles.css`, `main.js` and the share image `og.png`. The site sends images,
+styles and scripts with a four-hour browser cache, so without it a visitor who
+came before an update would get the new page with the old images under it,
+the hero's outlines landing on the wrong panes. After changing `styles.css`,
+`main.js` or `og.png` by hand, run the script again (`--html-only` is enough)
+so their stamps follow.
+
 A rectangle can also point into the index of element rectangles that comes
 with the captures (`rects`, a path from the captures folder; here
 `../../index.json`, in capture pixels): `{ "ref":
