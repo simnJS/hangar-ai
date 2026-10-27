@@ -193,6 +193,8 @@ describe("the orchestrator's briefing", () => {
       "AskUserQuestion",
       "worker_spawn",
       "worker_stop",
+      // A model reads the list as all the tool takes.
+      "board_update_task {id, title, description, column,",
       "delivery landed",
       "owns",
       "depends_on",
