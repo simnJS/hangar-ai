@@ -193,9 +193,17 @@ impl Inbox {
         queued
     }
 
-    fn pop(&mut self, pane_id: &str) -> Option<Queued> {
+    /// The oldest message, or with `labelled` the oldest one not from the
+    /// person: what a session takes in the middle of a turn, while the
+    /// person's prompts wait for its end.
+    fn pop(&mut self, pane_id: &str, labelled: bool) -> Option<Queued> {
         let queue = self.by_pane.get_mut(pane_id)?;
-        let next = queue.pop_front();
+        let at = if labelled {
+            queue.iter().position(|queued| queued.from.is_some())?
+        } else {
+            0
+        };
+        let next = queue.remove(at);
         if queue.is_empty() {
             self.by_pane.remove(pane_id);
         }
@@ -288,11 +296,12 @@ pub fn bridge_queue(pane_id: String) -> Vec<Queued> {
     inbox().pending(&pane_id)
 }
 
-/// The mod's pull: the oldest prompt for its pane, handed out once.
-pub fn take_next(app: &AppHandle, pane_id: &str) -> Option<Queued> {
+/// The mod's pull: the oldest prompt for its pane, handed out once; with
+/// `labelled`, the oldest an agent or Hangar sent (see `Inbox::pop`).
+pub fn take_next(app: &AppHandle, pane_id: &str, labelled: bool) -> Option<Queued> {
     let (next, pending) = {
         let mut inbox = inbox();
-        let next = inbox.pop(pane_id);
+        let next = inbox.pop(pane_id, labelled);
         (next, inbox.pending(pane_id))
     };
     if next.is_some() {
@@ -396,10 +405,25 @@ mod tests {
         let mut inbox = Inbox::default();
         let first = inbox.push("a", "one".into(), None);
         inbox.push("a", "two".into(), None);
-        assert_eq!(inbox.pop("a"), Some(first));
+        assert_eq!(inbox.pop("a", false), Some(first));
         assert_eq!(inbox.pending("a").len(), 1);
-        assert_eq!(inbox.pop("a").map(|q| q.text), Some("two".into()));
-        assert_eq!(inbox.pop("a"), None);
+        assert_eq!(inbox.pop("a", false).map(|q| q.text), Some("two".into()));
+        assert_eq!(inbox.pop("a", false), None);
+        assert!(inbox.by_pane.is_empty());
+    }
+
+    #[test]
+    fn a_labelled_pull_passes_over_the_persons_prompts() {
+        let mut inbox = Inbox::default();
+        inbox.push("a", "mine".into(), None);
+        assert_eq!(inbox.pop("a", true), None);
+        let event = inbox.push("a", "task done".into(), Some("hangar".into()));
+        inbox.push("a", "from ava".into(), Some("Ava".into()));
+        assert_eq!(inbox.pop("a", true), Some(event));
+        assert_eq!(inbox.pop("a", true).map(|q| q.text), Some("from ava".into()));
+        assert_eq!(inbox.pop("a", true), None);
+        // The person's prompt kept its place, and is what is left.
+        assert_eq!(inbox.pop("a", false).map(|q| q.text), Some("mine".into()));
         assert!(inbox.by_pane.is_empty());
     }
 

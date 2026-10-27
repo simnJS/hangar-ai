@@ -71,8 +71,12 @@ export interface ControlDeps {
   write: (paneId: string, data: string) => Promise<void>;
   alive: (paneId: string) => Promise<boolean>;
   activity: (paneId: string) => PaneActivity | undefined;
-  /** The hangar-bridge queue: submitted once the Claude Code session is idle. */
-  enqueue: (paneId: string, text: string) => Promise<unknown>;
+  /**
+   * The hangar-bridge queue: submitted once the Claude Code session is idle.
+   * `from` names the agent's pane (or `hangar`) when the person did not write
+   * it, and the session then reads it labelled as theirs (see bridgeEnqueue).
+   */
+  enqueue: (paneId: string, text: string, from?: string) => Promise<unknown>;
   dirExists: (path: string) => Promise<boolean>;
   /** Whether workspaces can go to windows of their own at all. */
   canDetach: () => boolean;
@@ -729,7 +733,8 @@ export async function runControl(
         .workspaces.find((entry) => entry.id === ws.id)
         ?.panes.find((pane) => pane.id === id);
       deps.openWorkspace(ws.id);
-      if (prompt) await deps.enqueue(id, prompt);
+      // An agent's words, never the person's: the new session reads who sent them.
+      if (prompt) await deps.enqueue(id, prompt, caller.paneName ?? "unknown");
       if (args.focus === true) deps.activate(ws.id, id);
       const paneName = created?.name ?? name ?? id;
       deps.announce({ kind: "created", by, pane: paneName, workspace: ws.name });
@@ -784,7 +789,7 @@ export async function runControl(
           throw new Error(`when_idle only works with Claude Code panes, and "${pane.name}" runs ${pane.agent}.`);
         }
         if (keys.length > 0) throw new Error("Keys cannot be queued: send them without when_idle.");
-        await deps.enqueue(pane.id, body);
+        await deps.enqueue(pane.id, body, caller.paneName ?? "unknown");
         // Held for a Claude Code that is not running, it would wait for good.
         const starting = !deps.isOpen(ws.id);
         if (starting) deps.openWorkspace(ws.id);

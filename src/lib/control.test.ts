@@ -183,6 +183,8 @@ function setup(overrides: Partial<ControlDeps> = {}) {
   };
   const log: string[] = [];
   const typed: string[] = [];
+  /** Who each queued prompt is from, as the session will read it. */
+  const senders: string[] = [];
   const opened = new Set(["w1"]);
   /** Put to sleep for being left alone. */
   const sleeping = new Set<string>();
@@ -225,7 +227,10 @@ function setup(overrides: Partial<ControlDeps> = {}) {
     alive: async () => true,
     activity: (paneId) =>
       paneId === "p1" ? { workspaceId: "w1", activity: "working", bridged: true } : undefined,
-    enqueue: async (paneId, text) => log.push(`enqueue:${paneId}:${text}`),
+    enqueue: async (paneId, text, from) => {
+      senders.push(`${text} <- ${from ?? "the person"}`);
+      log.push(`enqueue:${paneId}:${text}`);
+    },
     dirExists: async (path) => !path.includes("missing"),
     canDetach: () => true,
     detach: async (id) => {
@@ -277,7 +282,7 @@ function setup(overrides: Partial<ControlDeps> = {}) {
       workspaces: state.workspaces.map((ws) => (ws.id === workspaceId ? { ...ws, ...change } : ws)),
     };
   };
-  return { deps, log, typed, preview, patch, mtimes, sleeping };
+  return { deps, log, typed, preview, patch, mtimes, sleeping, senders };
 }
 
 const fromAva = { caller: { paneId: "p1", paneName: "Ava", cwd: "C:\\dev\\hangar" } };
@@ -322,7 +327,7 @@ describe("runControl", () => {
   });
 
   it("creates a Claude pane with a queued prompt, opening its workspace", async () => {
-    const { deps, log } = setup();
+    const { deps, log, senders } = setup();
     const result = (await runControl(
       "pane_create",
       { ...fromAva, workspace: "Shop", agent: "claude", name: "Reviewer", cwd: "packages/api", prompt: "Review the API" },
@@ -332,6 +337,8 @@ describe("runControl", () => {
     expect(result.pane.cwd).toBe("C:\\dev\\shop\\packages\\api");
     expect(log).toContain("open:w2");
     expect(log).toContain("enqueue:p10:Review the API");
+    // The agent that asked for the pane wrote the prompt, not the person.
+    expect(senders).toEqual(["Review the API <- Ava"]);
     expect(log).toContain("announce:created:Reviewer:Ava");
   });
 
@@ -402,9 +409,10 @@ describe("runControl", () => {
   });
 
   it("queues for an idle Claude Code session only", async () => {
-    const { deps, log } = setup();
+    const { deps, log, senders } = setup();
     await runControl("pane_send", { ...fromAva, pane: "Ava", text: "next task", when_idle: true }, deps);
     expect(log).toContain("enqueue:p1:next task");
+    expect(senders).toEqual(["next task <- Ava"]);
     await expect(
       runControl("pane_send", { ...fromAva, pane: "Max", text: "x", when_idle: true }, deps),
     ).rejects.toThrow(/Claude Code/);
