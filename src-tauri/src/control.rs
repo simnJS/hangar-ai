@@ -35,6 +35,9 @@ pub const OPERATIONS: &[&str] = &[
     "model_snapshot",
     "model_close",
     // orchestration: workers (lib/workerControl.ts)
+    "worker_spawn",
+    "worker_list",
+    "worker_stop",
     // orchestration: delivery (lib/deliveryControl.ts)
 ];
 
@@ -51,9 +54,16 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 /// answering.
 const MODEL_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Starting a worker checks out a worktree of the whole repository, and
+/// stopping one waits for its processes to let go of that worktree before
+/// removing it: on a large repository, longer than a pane operation.
+const WORKER_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
+
 fn answer_timeout(op: &str) -> Duration {
     if op.starts_with("model_") {
         MODEL_ANSWER_TIMEOUT
+    } else if op.starts_with("worker_") {
+        WORKER_ANSWER_TIMEOUT
     } else {
         ANSWER_TIMEOUT
     }
@@ -194,5 +204,13 @@ mod tests {
             assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
         }
         assert_eq!(answer_timeout("pane_read"), Duration::from_secs(20));
+    }
+
+    #[test]
+    fn a_worker_s_worktree_is_given_time_to_check_out() {
+        for op in ["worker_spawn", "worker_list", "worker_stop"] {
+            assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
+            assert_eq!(answer_timeout(op), Duration::from_secs(120), "{op}");
+        }
     }
 }

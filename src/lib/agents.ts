@@ -68,6 +68,11 @@ export function launchCommand(
      * Absent, Claude Code starts with its own servers, as it always did.
      */
     mcpConfig?: string;
+    /**
+     * The model Claude Code starts with (`--model`): an orchestrator's or a
+     * worker's, from the pane (lib/orchestration). Absent, its own default.
+     */
+    model?: string | null;
   } = {},
 ): string | null {
   const command = agentCommand(agent, options.commands);
@@ -82,6 +87,15 @@ export function launchCommand(
             ? ` --name ${options.name}`
             : ` --name "${options.name}"`
           : "";
+      // An alias or an id: `sonnet`, `claude-sonnet-4-5`, `opus[1m]` — the
+      // last quoted, since brackets are a glob to bash and zsh.
+      const model = options.model?.trim();
+      const chosen =
+        model && isQuotable(model)
+          ? /^[\w.-]+$/.test(model)
+            ? ` --model ${model}`
+            : ` --model "${model}"`
+          : "";
       // `--mcp-config` is variadic as well; the flag right behind it closes
       // its list, and `--strict-mcp-config` is what makes it the only source.
       const mcp = options.mcpConfig
@@ -94,7 +108,7 @@ export function launchCommand(
       const added = roots.length
         ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
         : "";
-      return `${command}${resume}${name}${mcp}${added}`;
+      return `${command}${resume}${name}${chosen}${mcp}${added}`;
     }
     case "codex":
       return sessionId ? `${command} resume ${sessionId}` : command;

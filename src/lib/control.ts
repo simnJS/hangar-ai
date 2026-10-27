@@ -9,7 +9,7 @@ import type { ModelHost } from "./modelHost";
 import type { OpenModel, SnapshotAngle } from "./modelStore";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
-import { workerControl } from "./workerControl";
+import { workerControl, type WorkerDeps } from "./workerControl";
 import { deliveryControl } from "./deliveryControl";
 
 /**
@@ -100,6 +100,8 @@ export interface ControlDeps {
    */
   modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
   // orchestration: workers deps
+  /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
+  workers?: WorkerDeps;
   // orchestration: delivery deps
 }
 

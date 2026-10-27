@@ -20,6 +20,7 @@ import {
   type Worktree,
 } from "../lib/git";
 import { dirExists } from "../lib/ipc";
+import { COPY_PATTERNS, sanitizeBranchName, worktreeFolder } from "../lib/worktrees";
 import { useStore } from "../store";
 
 interface Props {
@@ -39,9 +40,6 @@ const samePath = (a: string, b: string) => normalize(a) === normalize(b);
 
 const lastSegment = (path: string) =>
   path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-
-/** A branch name is not a folder name: `feat/login` would nest a level. */
-const folderName = (branch: string) => branch.replace(/[\\/:*?"<>|\s]+/g, "-");
 
 /** Cuts from the head: the tail is what tells two worktrees of a repo apart. */
 const shortenPath = (path: string, max = 54) => {
@@ -63,33 +61,6 @@ const localNameOf = (remote: string) => {
 
 /** Locals and remotes can share a name, so the select keys on both. */
 const refKey = (entry: Branch) => `${entry.kind}:${entry.name}`;
-
-/**
- * Ported from microsoft/vscode, `sanitizeBranchName` in
- * extensions/git/src/commands.ts:650 (MIT). Everything git would refuse in a
- * ref name — and everything a shell would fight over — becomes a dash.
- *
- * The pass can itself leave a leading dash (".env" → "-env"), which git
- * refuses as an option lookalike, so dashes are stripped again after it. An
- * input with nothing else in it comes out empty, and an empty name is what
- * keeps the Create button off.
- */
-const sanitizeBranchName = (name: string) =>
-  name
-    .trim()
-    .replace(/^-+/, "")
-    .replace(
-      /^\.|\/\.|\.\.|~|\^|:|\/$|\.lock$|\.lock\/|\\|\*|\s|^\s*$|\.$|\[|\]$/g,
-      "-",
-    )
-    .replace(/^-+/, "");
-
-/**
- * The files a checkout leaves behind because git ignores them. Defaults taken
- * from Git Worktree Manager's copy-on-create list, trimmed to what actually
- * stops a project from starting: secrets and local editor settings.
- */
-const COPY_PATTERNS = [".env", ".env.*", "*.local", ".vscode/**"];
 
 /** VS Code gives up after 20 suffixes too (repository.ts:1962). */
 const FOLDER_TRIES = 20;
@@ -346,17 +317,11 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
 
   const branch = resolved.plan?.branch ?? "";
 
-  /**
-   * `<parent of the main repo>/<repo>-worktrees/<branch>`: siblings of the
-   * checkout rather than children of it, so git never sees them as content.
-   */
+  /** Siblings of the checkout rather than children of it (lib/worktrees). */
   const suggested = useMemo(() => {
     const root = info?.mainRoot;
     if (!root || !branch) return "";
-    const separator = root.includes("\\") ? "\\" : "/";
-    const segments = root.replace(/[\\/]+$/, "").split(/[\\/]/);
-    const repo = segments.pop() ?? "";
-    return [...segments, `${repo}-worktrees`, folderName(branch)].join(separator);
+    return worktreeFolder(root, branch);
   }, [info?.mainRoot, branch]);
 
   const path = folderTouched ? folder : suggested;

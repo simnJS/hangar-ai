@@ -110,6 +110,8 @@ pub fn run() {
             board_update,
             board_delete,
             board_claim,
+            board_claim_worker,
+            board_release_worker,
             board_comment,
             git::git_repo_info,
             git::git_worktree_list,
@@ -122,6 +124,7 @@ pub fn run() {
             git::git_fetch,
             git::git_branch_delete,
             git::git_copy_untracked,
+            git::git_commits_ahead,
             git::git_changes,
             git::git_file_diff,
             memory::memory_load,
@@ -215,6 +218,36 @@ fn board_delete(cwd: String, id: String) -> Result<(), String> {
 #[tauri::command]
 fn board_claim(cwd: String, id: String, agent: String) -> Result<board::Task, String> {
     ui_store().update(&cwd, |b| board::claim_task(b, &id, &agent))
+}
+
+/// A worker's start and end (lib/workerControl.ts). Done by the window rather
+/// than by an agent over the API, so the board views are told here.
+#[tauri::command]
+fn board_claim_worker(
+    app: tauri::AppHandle,
+    cwd: String,
+    id: String,
+    worker: String,
+    max_attempts: u32,
+) -> Result<board::Task, String> {
+    let task = ui_store().update(&cwd, |b| {
+        board::claim_for_worker(b, &id, &worker, max_attempts)
+    })?;
+    let _ = tauri::Emitter::emit(&app, "board:changed", &cwd);
+    Ok(task)
+}
+
+#[tauri::command]
+fn board_release_worker(
+    app: tauri::AppHandle,
+    cwd: String,
+    id: String,
+    worker: String,
+    undo: bool,
+) -> Result<board::Task, String> {
+    let task = ui_store().update(&cwd, |b| board::release_worker(b, &id, &worker, undo))?;
+    let _ = tauri::Emitter::emit(&app, "board:changed", &cwd);
+    Ok(task)
 }
 
 #[tauri::command]

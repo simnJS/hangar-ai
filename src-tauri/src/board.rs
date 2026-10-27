@@ -309,21 +309,441 @@ pub fn delete_task(board: &mut Board, id: &str) -> Result<(), String> {
 }
 
 /// Takes ownership of a task. Fails when someone else already holds it, which
-/// is what stops two agents working the same item.
+/// is what stops two agents working the same item — or when it would enter
+/// `doing` beside a task that owns some of the same files.
 pub fn claim_task(board: &mut Board, id: &str, agent: &str) -> Result<Task, String> {
-    let task = board.find_mut(id).ok_or("task not found")?;
-    match &task.assignee {
-        Some(owner) if owner != agent => Err(format!("already claimed by {owner}")),
-        _ => {
-            let stamp = now_ms();
-            task.assignee = Some(agent.to_string());
-            if task.column == "todo" {
-                task.enter_column("doing".into(), stamp);
-            }
-            task.updated_at = stamp;
-            Ok(task.clone())
+    let task = board
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or("task not found")?;
+    if let Some(owner) = task.assignee.as_ref().filter(|owner| *owner != agent) {
+        return Err(format!("already claimed by {owner}"));
+    }
+    // Only a task entering `doing` can collide with the ones already there.
+    if task.column == "todo" {
+        if let Some(clash) = ownership_clash(board, task, false) {
+            return Err(format!(
+                "cannot claim \"{}\": {}",
+                task.title,
+                clash.message()
+            ));
         }
     }
+
+    let task = board.find_mut(id).ok_or("task not found")?;
+    let stamp = now_ms();
+    task.assignee = Some(agent.to_string());
+    if task.column == "todo" {
+        task.enter_column("doing".into(), stamp);
+    }
+    task.updated_at = stamp;
+    Ok(task.clone())
+}
+
+/// Hands a todo task to the worker an orchestrator is starting on it
+/// (lib/workerControl.ts), and counts the attempt. Everything that stands in
+/// the way is refused here, under the board's lock, and each refusal says
+/// what to do instead: an orchestrator reads it.
+pub fn claim_for_worker(
+    board: &mut Board,
+    id: &str,
+    worker: &str,
+    max_attempts: u32,
+) -> Result<Task, String> {
+    let task = board.tasks.iter().find(|t| t.id == id).ok_or_else(|| {
+        format!("No task {id} on this board. board_list_tasks lists them with their ids.")
+    })?;
+    let title = &task.title;
+    match task.column.as_str() {
+        "todo" => {}
+        "doing" => {
+            return Err(format!(
+                "\"{title}\" is in doing already{}: someone is on it. Start a worker on a task in todo.",
+                held_by(task)
+            ))
+        }
+        "review" => {
+            return Err(format!(
+                "\"{title}\" is in review: its work waits to be checked, not to be done. Move it back to todo \
+                 (board_update_task) first if it really needs more work."
+            ))
+        }
+        _ => return Err(format!("\"{title}\" is done already.")),
+    }
+    if let Some(owner) = task.assignee.as_ref().filter(|owner| *owner != worker) {
+        return Err(format!(
+            "\"{title}\" is in todo but held by {owner}. If nobody is on it, release it \
+             (board_update_task with release=true) and try again."
+        ));
+    }
+    let waiting: Vec<String> = task
+        .depends_on
+        .iter()
+        .filter_map(|dep| match board.tasks.iter().find(|t| &t.id == dep) {
+            Some(t) if t.column == "done" => None,
+            Some(t) => Some(format!("\"{}\" ({}, in {})", t.title, t.id, t.column)),
+            None => Some(format!("{dep} (no longer on the board)")),
+        })
+        .collect();
+    if !waiting.is_empty() {
+        return Err(format!(
+            "\"{title}\" depends on tasks that are not done: {}. Get those done first; drop one from \
+             depends_on (board_update_task) only if it no longer matters.",
+            waiting.join(", ")
+        ));
+    }
+    if task.attempts >= max_attempts {
+        return Err(format!(
+            "\"{title}\" has had {} worker(s) already, the most one task gets (maxAttempts {max_attempts}). \
+             Do not start another: add the label needs-you (board_update_task labels, keeping its other \
+             labels) and comment on the task what went wrong and what you need from the person.",
+            task.attempts
+        ));
+    }
+    if let Some(clash) = ownership_clash(board, task, true) {
+        return Err(format!("Cannot start \"{title}\": {}", clash.message()));
+    }
+
+    let task = board.find_mut(id).ok_or("task not found")?;
+    let stamp = now_ms();
+    task.assignee = Some(worker.to_string());
+    task.enter_column("doing".into(), stamp);
+    task.attempts += 1;
+    task.updated_at = stamp;
+    Ok(task.clone())
+}
+
+/// Gives a worker's task back (lib/workerControl.ts): to todo, free, when it
+/// was still being worked on; left where it is once it waits for review or is
+/// done. `undo` takes the attempt back as well, for a start that never got
+/// going. A task somebody else holds by now is not the worker's to give.
+pub fn release_worker(
+    board: &mut Board,
+    id: &str,
+    worker: &str,
+    undo: bool,
+) -> Result<Task, String> {
+    let task = board.find_mut(id).ok_or("task not found")?;
+    if task.assignee.as_deref() != Some(worker) {
+        return Ok(task.clone());
+    }
+    let stamp = now_ms();
+    if undo {
+        task.attempts = task.attempts.saturating_sub(1);
+    }
+    if task.column == "todo" || task.column == "doing" {
+        task.assignee = None;
+        task.enter_column("todo".into(), stamp);
+    }
+    task.updated_at = stamp;
+    Ok(task.clone())
+}
+
+fn held_by(task: &Task) -> String {
+    task.assignee
+        .as_ref()
+        .map(|owner| format!(", held by {owner}"))
+        .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Owned files
+//
+// A task's `owns` lists the paths and globs its worker may change. Two tasks in
+// `doing` never share one, which is what lets workers run side by side without
+// their branches colliding when they land. The rule lives here once, for
+// every claim: an agent's `board_claim_task` and a worker an orchestrator
+// starts alike.
+// ---------------------------------------------------------------------------
+
+/// Why a task may not enter `doing` beside another one.
+#[derive(Debug)]
+pub enum Clash<'a> {
+    /// Some path is owned by both: each pair of patterns that meet, the
+    /// entering task's first.
+    Shared {
+        with: &'a Task,
+        paths: Vec<(String, String)>,
+    },
+    /// Neither task says which files it owns.
+    Unscoped { with: &'a Task },
+}
+
+impl Clash<'_> {
+    pub fn message(&self) -> String {
+        match self {
+            Clash::Shared { with, paths } => {
+                let listed: Vec<String> = paths
+                    .iter()
+                    .map(|(mine, theirs)| {
+                        if mine == theirs {
+                            mine.clone()
+                        } else {
+                            format!("{mine} (this task) and {theirs} (that one)")
+                        }
+                    })
+                    .collect();
+                format!(
+                    "it owns files that \"{}\" ({}, in doing{}) owns too: {}. Two tasks in doing never \
+                     share a file. Wait until that one leaves doing, or narrow the owns of one of them \
+                     (board_update_task) so they share no path.",
+                    with.title,
+                    with.id,
+                    held_by(with),
+                    listed.join(", ")
+                )
+            }
+            Clash::Unscoped { with } => format!(
+                "neither it nor \"{}\" ({}, in doing{}) says which files it owns, so both could change \
+                 the same ones, and two such tasks never run at once in one repository. Set owns on this \
+                 task (board_update_task: paths or globs relative to the repository root; a folder covers \
+                 everything under it) and try again.",
+                with.title,
+                with.id,
+                held_by(with)
+            ),
+        }
+    }
+}
+
+/// The first task in `doing` that `task` may not run beside.
+///
+/// `strict` is the orchestrator's rule on top of the overlap: two tasks that
+/// say nothing about their files never run at once either. A plain claim
+/// leaves that to the agents, as it always has — boards that never use
+/// `owns` see no change at all.
+pub fn ownership_clash<'a>(board: &'a Board, task: &Task, strict: bool) -> Option<Clash<'a>> {
+    let scoped = |owns: &[String]| owns.iter().any(|pattern| owned_segments(pattern).is_some());
+    let mine = scoped(&task.owns);
+    board
+        .tasks
+        .iter()
+        .filter(|other| other.id != task.id && other.column == "doing")
+        .find_map(|other| match (mine, scoped(&other.owns)) {
+            (true, true) => {
+                let paths = owns_overlap(&task.owns, &other.owns);
+                (!paths.is_empty()).then_some(Clash::Shared { with: other, paths })
+            }
+            (false, false) if strict => Some(Clash::Unscoped { with: other }),
+            _ => None,
+        })
+}
+
+/// Each pair of patterns, one from each list, that some path matches both of.
+pub fn owns_overlap(mine: &[String], theirs: &[String]) -> Vec<(String, String)> {
+    let read = |pattern: &String| -> Vec<Vec<String>> {
+        expand_braces(pattern)
+            .iter()
+            .filter_map(|each| owned_segments(each))
+            .collect()
+    };
+    let theirs: Vec<(&String, Vec<Vec<String>>)> = theirs.iter().map(|p| (p, read(p))).collect();
+    let mut pairs = Vec::new();
+    for pattern in mine {
+        let ours = read(pattern);
+        for (other, their) in &theirs {
+            let meet = ours
+                .iter()
+                .any(|a| their.iter().any(|b| sequences_meet(a, b)));
+            if meet {
+                pairs.push((pattern.trim().to_string(), other.trim().to_string()));
+            }
+        }
+    }
+    pairs
+}
+
+/// Past this many alternatives a brace pattern is read no further: a pattern
+/// that large is a mistake, and the ones read already decide most overlaps.
+const MAX_ALTERNATIVES: usize = 64;
+
+/// Segments past this are not read: nobody owns a path that deep, and each
+/// `**` makes the comparison more expensive.
+const MAX_SEGMENTS: usize = 32;
+
+/// `src/{lib,components}/x` as the two patterns it stands for.
+fn expand_braces(pattern: &str) -> Vec<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut depth = 0;
+    let mut open = 0;
+    for (at, &c) in chars.iter().enumerate() {
+        match c {
+            '{' => {
+                if depth == 0 {
+                    open = at;
+                }
+                depth += 1;
+            }
+            '}' if depth > 0 => {
+                depth -= 1;
+                if depth > 0 {
+                    continue;
+                }
+                let alternatives = split_alternatives(&chars[open + 1..at]);
+                // `{x}` alone is not a choice: its braces stay as they are.
+                if alternatives.len() < 2 {
+                    continue;
+                }
+                let head: String = chars[..open].iter().collect();
+                let tail: String = chars[at + 1..].iter().collect();
+                return alternatives
+                    .iter()
+                    .flat_map(|alternative| expand_braces(&format!("{head}{alternative}{tail}")))
+                    .take(MAX_ALTERNATIVES)
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    vec![pattern.to_string()]
+}
+
+/// The commas of one brace group that are not inside a nested one.
+fn split_alternatives(inner: &[char]) -> Vec<String> {
+    let mut parts = vec![String::new()];
+    let mut depth = 0;
+    for &c in inner {
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        parts.last_mut().unwrap().push(c);
+    }
+    parts
+}
+
+/// A pattern as the rule compares it: relative, in forward slashes, without
+/// `./`, and in lower case — the filesystems that ignore case would put both
+/// spellings on one file, and erring towards an overlap only costs a refusal
+/// that says why. None for a pattern that names nothing.
+///
+/// A folder owns what is under it, so it ends in an implicit `**`. A name with
+/// an extension reads as a file and does not: `src/app.ts` is not where
+/// `**/*.test.ts` lives. A folder whose name has a dot in it is written with a
+/// trailing slash, or as `name/**`.
+fn owned_segments(pattern: &str) -> Option<Vec<String>> {
+    let normalized = pattern.trim().replace('\\', "/").to_lowercase();
+    let mut segments: Vec<String> = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .take(MAX_SEGMENTS)
+        .map(str::to_string)
+        .collect();
+    let last = segments.last()?;
+    let file = !normalized.ends_with('/') && last.char_indices().any(|(at, c)| c == '.' && at > 0);
+    if !file && last != "**" {
+        segments.push("**".to_string());
+    }
+    Some(segments)
+}
+
+/// Whether some path is matched by both segment lists, `**` standing for any
+/// number of segments, none included.
+fn sequences_meet(a: &[String], b: &[String]) -> bool {
+    match (a.split_first(), b.split_first()) {
+        (None, None) => true,
+        (Some((head, rest)), _) if head == "**" => {
+            sequences_meet(rest, b) || (!b.is_empty() && sequences_meet(a, &b[1..]))
+        }
+        (_, Some((head, rest))) if head == "**" => {
+            sequences_meet(a, rest) || (!a.is_empty() && sequences_meet(&a[1..], b))
+        }
+        (Some((x, xs)), Some((y, ys))) => segments_meet(x, y) && sequences_meet(xs, ys),
+        _ => false,
+    }
+}
+
+const WILDCARDS: [char; 3] = ['*', '?', '['];
+
+/// Whether some name is matched by both segments.
+fn segments_meet(a: &str, b: &str) -> bool {
+    match (a.contains(WILDCARDS), b.contains(WILDCARDS)) {
+        (false, false) => a == b,
+        (true, false) => glob_matches(a, b),
+        (false, true) => glob_matches(b, a),
+        // Two wildcards meet unless their fixed ends disagree: `*.ts` and
+        // `*.tsx` cannot name one file, `use*.ts` and `*Store.ts` can. A
+        // generous reading, on the side of an overlap.
+        (true, true) => {
+            let (head_a, tail_a) = fixed_ends(a);
+            let (head_b, tail_b) = fixed_ends(b);
+            (head_a.starts_with(head_b) || head_b.starts_with(head_a))
+                && (tail_a.ends_with(tail_b) || tail_b.ends_with(tail_a))
+        }
+    }
+}
+
+/// What a wildcard segment fixes before its first wildcard and after its last.
+fn fixed_ends(segment: &str) -> (&str, &str) {
+    let first = segment.find(WILDCARDS).unwrap_or(segment.len());
+    let last = segment
+        .rfind(['*', '?', ']'])
+        .map_or(segment.len(), |at| at + 1)
+        .max(first);
+    (&segment[..first], &segment[last..])
+}
+
+/// One name against one segment pattern: `*`, `?` and `[…]` (`[!…]` or
+/// `[^…]` negated, with ranges). None of them crosses a separator.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    glob_from(&pattern, &name)
+}
+
+fn glob_from(pattern: &[char], name: &[char]) -> bool {
+    match pattern.first() {
+        None => name.is_empty(),
+        Some('*') => {
+            let rest = &pattern[1..];
+            (0..=name.len()).any(|skipped| glob_from(rest, &name[skipped..]))
+        }
+        Some('?') => !name.is_empty() && glob_from(&pattern[1..], &name[1..]),
+        Some('[') => match (char_class(pattern), name.first()) {
+            (Some((length, matches)), Some(&c)) => {
+                matches(c) && glob_from(&pattern[length..], &name[1..])
+            }
+            (Some(_), None) => false,
+            // No closing bracket: a plain `[`.
+            (None, first) => first == Some(&'[') && glob_from(&pattern[1..], &name[1..]),
+        },
+        Some(c) => name.first() == Some(c) && glob_from(&pattern[1..], &name[1..]),
+    }
+}
+
+/// The class `pattern` opens with, as its length and what it accepts.
+#[allow(clippy::type_complexity)]
+fn char_class(pattern: &[char]) -> Option<(usize, Box<dyn Fn(char) -> bool>)> {
+    let mut at = 1;
+    let negated = matches!(pattern.get(at), Some('!') | Some('^'));
+    if negated {
+        at += 1;
+    }
+    let start = at;
+    // A `]` first in the class is one of its characters.
+    let close = (start..pattern.len()).find(|&i| pattern[i] == ']' && i > start)?;
+    let members: Vec<char> = pattern[start..close].to_vec();
+    let accepts = move |c: char| {
+        let mut i = 0;
+        let mut found = false;
+        while i < members.len() {
+            if i + 2 < members.len() && members[i + 1] == '-' {
+                found |= members[i] <= c && c <= members[i + 2];
+                i += 3;
+            } else {
+                found |= members[i] == c;
+                i += 1;
+            }
+        }
+        found != negated
+    };
+    Some((close + 1, Box::new(accepts)))
 }
 
 pub fn add_comment(board: &mut Board, id: &str, author: &str, text: &str) -> Result<Task, String> {
@@ -495,6 +915,310 @@ mod tests {
         assert_eq!(board.tasks[0].doing_since, None);
         let written = serde_json::to_string(&board).unwrap();
         assert!(!written.contains("doing_since"));
+    }
+
+    fn owned(board: &mut Board, title: &str, owns: &[&str]) -> String {
+        create_task(
+            board,
+            NewTask {
+                title: title.into(),
+                description: String::new(),
+                column: None,
+                priority: None,
+                labels: vec![],
+                depends_on: vec![],
+                owns: owns.iter().map(|p| p.to_string()).collect(),
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    fn list(patterns: &[&str]) -> Vec<String> {
+        patterns.iter().map(|p| p.to_string()).collect()
+    }
+
+    fn overlap(mine: &[&str], theirs: &[&str]) -> bool {
+        !owns_overlap(&list(mine), &list(theirs)).is_empty()
+    }
+
+    #[test]
+    fn owned_paths_overlap_when_some_file_is_in_both() {
+        // A folder covers what is under it, written either way.
+        assert!(overlap(&["src/lib/**"], &["src/lib/agents.ts"]));
+        assert!(overlap(&["src/lib"], &["src/lib/agents.ts"]));
+        assert!(overlap(&["./docs/"], &["docs/guide.md"]));
+        assert!(overlap(&[".github"], &[".github/workflows/ci.yml"]));
+        assert!(overlap(&["v1.2/"], &["v1.2/notes.md"]));
+        assert!(overlap(&["**"], &["anything/at/all.rs"]));
+        // Globs against names and against each other.
+        assert!(overlap(&["**/*.test.ts"], &["src/lib/agents.test.ts"]));
+        assert!(overlap(
+            &["src/components/Orchestration*.tsx"],
+            &["src/components/OrchestrationPanel.tsx"]
+        ));
+        assert!(overlap(&["src/use*.ts"], &["src/*Store.ts"]));
+        assert!(overlap(&["src/[ab].ts"], &["src/b.ts"]));
+        assert!(overlap(
+            &["src/{lib,components}/x.ts"],
+            &["src/components/x.ts"]
+        ));
+        // Windows spellings and case name the same file.
+        assert!(overlap(&["SRC\\Lib\\"], &["src/lib/x.ts"]));
+    }
+
+    #[test]
+    fn owned_paths_that_name_different_files_do_not_overlap() {
+        assert!(!overlap(&["src/lib/a.ts"], &["src/lib/b.ts"]));
+        assert!(!overlap(&["src/lib/**"], &["src/components/**"]));
+        // A file is not a folder: nothing lives under it.
+        assert!(!overlap(&["**/*.test.ts"], &["src/lib/agents.ts"]));
+        assert!(!overlap(&["src/*.ts"], &["src/*.tsx"]));
+        assert!(!overlap(
+            &["src/components/Orchestration*.tsx"],
+            &["src/components/NeedsYou.tsx"]
+        ));
+        assert!(!overlap(&["src/[ab].ts"], &["src/c.ts"]));
+        assert!(!overlap(&["src/[!ab].ts"], &["src/a.ts"]));
+        assert!(!overlap(
+            &["src/{lib,components}/x.ts"],
+            &["src/hooks/x.ts"]
+        ));
+        // Blank patterns own nothing.
+        assert!(!overlap(&["", "  "], &["src/x.ts"]));
+    }
+
+    #[test]
+    fn an_overlap_lists_each_pair_of_patterns_that_meet() {
+        assert_eq!(
+            owns_overlap(
+                &list(&["src/lib/", "README.md"]),
+                &list(&["src/lib/board.ts", "docs/**", "README.md"])
+            ),
+            vec![
+                ("src/lib/".to_string(), "src/lib/board.ts".to_string()),
+                ("README.md".to_string(), "README.md".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_claim_into_doing_is_refused_beside_a_task_owning_the_same_files() {
+        let mut board = Board::default();
+        let first = owned(&mut board, "Board API", &["src-tauri/src/board.rs"]);
+        claim_task(&mut board, &first, "ava").unwrap();
+        let second = owned(
+            &mut board,
+            "Board view",
+            &["src-tauri/src/**", "src/BoardView.tsx"],
+        );
+
+        let refused = claim_task(&mut board, &second, "leo").unwrap_err();
+        assert!(refused.contains("\"Board API\""), "{refused}");
+        assert!(refused.contains(&first), "{refused}");
+        assert!(refused.contains("held by ava"), "{refused}");
+        assert!(
+            refused.contains("src-tauri/src/** (this task) and src-tauri/src/board.rs (that one)"),
+            "{refused}"
+        );
+        let second_task = board.tasks.iter().find(|t| t.id == second).unwrap();
+        assert_eq!(second_task.column, "todo");
+        assert_eq!(second_task.assignee, None);
+
+        // Disjoint files: both run.
+        let third = owned(&mut board, "Docs", &["docs/**"]);
+        assert_eq!(
+            claim_task(&mut board, &third, "leo").unwrap().column,
+            "doing"
+        );
+        // Once the first leaves doing, the second may go.
+        move_to(&mut board, &first, "review");
+        assert_eq!(
+            claim_task(&mut board, &second, "mia").unwrap().column,
+            "doing"
+        );
+    }
+
+    /// Boards that never use `owns` keep claiming as they always did.
+    #[test]
+    fn a_plain_claim_never_minds_tasks_that_own_nothing() {
+        let mut board = Board::default();
+        let first = todo_task(&mut board);
+        let second = todo_task(&mut board);
+        let scoped = owned(&mut board, "Scoped", &["src/**"]);
+        claim_task(&mut board, &first, "ava").unwrap();
+        assert_eq!(
+            claim_task(&mut board, &second, "leo").unwrap().column,
+            "doing"
+        );
+        assert_eq!(
+            claim_task(&mut board, &scoped, "mia").unwrap().column,
+            "doing"
+        );
+        // A task already in doing is only being re-taken: nothing enters.
+        assert!(claim_task(&mut board, &scoped, "mia").is_ok());
+    }
+
+    #[test]
+    fn a_worker_claim_moves_the_task_to_doing_and_counts_the_attempt() {
+        let mut board = Board::default();
+        let id = owned(&mut board, "Login form", &["src/login/**"]);
+
+        let claimed = claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        assert_eq!(claimed.column, "doing");
+        assert_eq!(claimed.assignee.as_deref(), Some("Leo"));
+        assert_eq!(claimed.attempts, 1);
+        assert!(claimed.doing_since.is_some());
+    }
+
+    #[test]
+    fn a_worker_claim_says_why_a_task_cannot_be_started() {
+        let mut board = Board::default();
+        let done = owned(&mut board, "Done one", &["a/**"]);
+        move_to(&mut board, &done, "done");
+        let review = owned(&mut board, "Waiting one", &["b/**"]);
+        move_to(&mut board, &review, "review");
+        let doing = owned(&mut board, "Running one", &["c/**"]);
+        claim_task(&mut board, &doing, "ava").unwrap();
+
+        let refusal =
+            |board: &mut Board, id: &str| claim_for_worker(board, id, "Leo", 2).unwrap_err();
+        assert!(refusal(&mut board, "nope").contains("board_list_tasks"));
+        assert!(refusal(&mut board, &done).contains("done already"));
+        assert!(refusal(&mut board, &review).contains("in review"));
+        assert!(refusal(&mut board, &doing).contains("held by ava"));
+
+        let held = owned(&mut board, "Held one", &["d/**"]);
+        patch_task(
+            &mut board,
+            &held,
+            TaskPatch {
+                assignee: Some("max".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(refusal(&mut board, &held).contains("release=true"));
+
+        let waiting = owned(&mut board, "Blocked one", &["e/**"]);
+        patch_task(
+            &mut board,
+            &waiting,
+            TaskPatch {
+                depends_on: Some(vec![review.clone(), done.clone(), "gone".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let blocked = refusal(&mut board, &waiting);
+        assert!(blocked.contains("\"Waiting one\""), "{blocked}");
+        assert!(
+            blocked.contains("gone (no longer on the board)"),
+            "{blocked}"
+        );
+        assert!(!blocked.contains("Done one"), "{blocked}");
+
+        let overlapping = owned(&mut board, "Overlapping one", &["c/x.rs"]);
+        let clash = refusal(&mut board, &overlapping);
+        assert!(clash.contains("\"Running one\""), "{clash}");
+        assert!(
+            clash.contains("c/x.rs (this task) and c/** (that one)"),
+            "{clash}"
+        );
+
+        // Nothing refused moved, and no attempt was counted.
+        for task in &board.tasks {
+            if task.id != doing {
+                assert_ne!(task.column, "doing", "{}", task.title);
+            }
+            assert_eq!(task.attempts, 0, "{}", task.title);
+        }
+    }
+
+    #[test]
+    fn a_worker_claim_stops_at_the_attempt_limit() {
+        let mut board = Board::default();
+        let id = owned(&mut board, "Flaky", &["src/flaky.rs"]);
+        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        release_worker(&mut board, &id, "Leo", false).unwrap();
+        claim_for_worker(&mut board, &id, "Mia", 2).unwrap();
+        release_worker(&mut board, &id, "Mia", false).unwrap();
+
+        let refused = claim_for_worker(&mut board, &id, "Sam", 2).unwrap_err();
+        assert!(refused.contains("2 worker(s) already"), "{refused}");
+        assert!(refused.contains("needs-you"), "{refused}");
+        assert_eq!(board.tasks[0].column, "todo");
+        // The limit is the setting's, not a constant.
+        assert!(claim_for_worker(&mut board, &id, "Sam", 3).is_ok());
+    }
+
+    #[test]
+    fn two_workers_on_tasks_that_own_nothing_never_run_at_once() {
+        let mut board = Board::default();
+        let first = todo_task(&mut board);
+        let second = todo_task(&mut board);
+        claim_for_worker(&mut board, &first, "Leo", 2).unwrap();
+
+        let refused = claim_for_worker(&mut board, &second, "Mia", 2).unwrap_err();
+        assert!(refused.contains("says which files it owns"), "{refused}");
+        assert!(refused.contains("Set owns"), "{refused}");
+        // Once it says what it owns, it runs beside the other one.
+        patch_task(
+            &mut board,
+            &second,
+            TaskPatch {
+                owns: Some(vec!["docs/**".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(claim_for_worker(&mut board, &second, "Mia", 2).is_ok());
+    }
+
+    #[test]
+    fn releasing_a_worker_gives_back_only_what_is_still_its_own() {
+        let mut board = Board::default();
+        let id = owned(&mut board, "Login", &["src/login/**"]);
+
+        // A start that never got going takes its attempt back.
+        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        let undone = release_worker(&mut board, &id, "Leo", true).unwrap();
+        assert_eq!(
+            (undone.column.as_str(), undone.assignee, undone.attempts),
+            ("todo", None, 0)
+        );
+        assert_eq!(undone.doing_since, None);
+
+        // A stopped worker's attempt still counts.
+        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        let stopped = release_worker(&mut board, &id, "Leo", false).unwrap();
+        assert_eq!((stopped.column.as_str(), stopped.attempts), ("todo", 1));
+
+        // Waiting for review: it stays where it is.
+        claim_for_worker(&mut board, &id, "Mia", 2).unwrap();
+        move_to(&mut board, &id, "review");
+        let kept = release_worker(&mut board, &id, "Mia", false).unwrap();
+        assert_eq!(
+            (kept.column.as_str(), kept.assignee.as_deref()),
+            ("review", Some("Mia"))
+        );
+
+        // Somebody else's by now: not the worker's to give.
+        move_to(&mut board, &id, "doing");
+        patch_task(
+            &mut board,
+            &id,
+            TaskPatch {
+                assignee: Some("ava".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let theirs = release_worker(&mut board, &id, "Mia", false).unwrap();
+        assert_eq!(
+            (theirs.column.as_str(), theirs.assignee.as_deref()),
+            ("doing", Some("ava"))
+        );
     }
 
     #[test]

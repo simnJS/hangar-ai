@@ -14,6 +14,8 @@ export const ptySpawn = (args: {
   name?: string;
   /** False keeps the hangar-bridge mod out of this pane's Claude Code. */
   bridge?: boolean;
+  /** A worker's first port: HANGAR_PORT_BASE in its shell (lib/workerControl). */
+  portBase?: number | null;
 }) => invoke<void>("pty_spawn", args);
 
 export const ptyWrite = (id: string, data: string) =>

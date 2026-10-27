@@ -201,7 +201,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "board_claim_task",
-            "description": "Take ownership of a task and move it to 'doing'. Fails if another agent already holds it — pick a different task in that case. Always claim before starting work.",
+            "description": "Take ownership of a task and move it to 'doing'. Fails if another agent already holds it, or if the task owns files that a task already in doing owns too — pick a different task in that case. Always claim before starting work.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -486,6 +486,36 @@ fn tool_definitions() -> Value {
             }
         },
         // orchestration: workers (worker_* tools)
+        {
+            "name": "worker_spawn",
+            "description": "Start a worker on a board task. Hangar claims the task for it (assignee: the worker, column: doing, one more attempt), checks out a git worktree on a new branch from the workspace's target branch, opens a Claude Code pane there with the worker model and twenty ports of its own, and queues its brief: the task's title and description, the files it owns, the check command, how to report, what to do when blocked and how to deliver. The worker starts with a fresh context and knows nothing else, so write the task's description as its whole brief — goal, constraints, acceptance criteria. Refused, with the reason, when the workspace already runs its maxWorkers; the task is not in todo or waits on depends_on that are not done; it owns files a task in doing owns too, or neither of them says what it owns; or it has had maxAttempts workers already. Only the workspace's orchestrator can call it. You hear what the worker does through events — its comments, its delivery, a wait or an exit — so never poll it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "Id of the board task to hand over." },
+                    "name": { "type": "string", "description": "Name for the worker's pane, unique across Hangar. Defaults to the next free first name." },
+                    "model": { "type": "string", "description": "Model the worker runs (--model): sonnet, opus, haiku or a full model id. Defaults to the workspace's worker model." }
+                },
+                "required": ["task"]
+            }
+        },
+        {
+            "name": "worker_list",
+            "description": "List the workers of your workspace: pane name, task (id, title, column, attempts), what the agent is doing (working, waiting for the person, yours = finished its turn, idle), whether it runs, its branch and worktree, model, ports, and where its delivery stands. Only the workspace's orchestrator can call it.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "worker_stop",
+            "description": "Stop a worker: close its pane, give its task back to todo (left as it is in review or done; the attempt still counts), and remove its worktree and branch. They are kept instead when keepWorktree is true, or when they hold work — uncommitted changes, or commits the target branch does not have — and the answer says where. Only the workspace's orchestrator can call it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "worker": { "type": "string", "description": "The worker's pane name, as worker_list shows it." },
+                    "keepWorktree": { "type": "boolean", "description": "Keep the worktree and its branch whatever they hold. Default false." }
+                },
+                "required": ["worker"]
+            }
+        },
         // orchestration: delivery (delivery_* tools)
         {
             "name": "model_close",

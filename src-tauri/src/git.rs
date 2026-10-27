@@ -978,50 +978,88 @@ fn copy_entries(from: &Path, to: &Path, entries: &[String], patterns: &[String])
 ///
 /// Modelled on `git.worktreeIncludeFiles` in microsoft/vscode extensions/git
 /// (MIT) — same purpose, same "copy what is missing, replace nothing" rule.
+///
+/// `ignored_only` leaves out the files git does not ignore: a worker's
+/// worktree (lib/workerControl.ts) gets its `.env` without an untracked file
+/// that a `git add -A` would put on its branch.
 #[tauri::command]
 pub async fn git_copy_untracked(
     from: String,
     to: String,
     patterns: Vec<String>,
+    ignored_only: Option<bool>,
 ) -> Result<CopyResult, String> {
     off_thread(move || {
         let source = Path::new(&from);
-
-        // git decides what the candidates are, not a directory walk of our own:
-        // `--directory` folds a wholly untracked directory into one entry, and
-        // that is what keeps `node_modules` from being enumerated on the way to
-        // finding a `.env` beside it.
-        let mut entries = parse_ls_files(&run_git(
-            source,
-            &[
-                "ls-files",
-                "--others",
-                "--exclude-standard",
-                "--directory",
-                "-z",
-            ],
-        )?);
-        // The ignored files are half the point — `.env` is in `.gitignore` on
-        // every project that has one — and git only lists them when asked
-        // separately.
-        entries.extend(parse_ls_files(&run_git(
-            source,
-            &[
-                "ls-files",
-                "--others",
-                "--ignored",
-                "--exclude-standard",
-                "--directory",
-                "-z",
-            ],
-        )?));
-
-        let mut seen = HashSet::new();
-        entries.retain(|entry| seen.insert(entry.clone()));
-
+        let entries = untracked_entries(source, ignored_only == Some(true))?;
         Ok(copy_entries(source, Path::new(&to), &entries, &patterns))
     })
     .await
+}
+
+/// What a checkout holds that git does not track, the files it ignores
+/// included, as `ls-files` lists them.
+fn untracked_entries(source: &Path, ignored_only: bool) -> Result<Vec<String>, GitError> {
+    // git decides what the candidates are, not a directory walk of our own:
+    // `--directory` folds a wholly untracked directory into one entry, and
+    // that is what keeps `node_modules` from being enumerated on the way to
+    // finding a `.env` beside it.
+    let mut entries = if ignored_only {
+        Vec::new()
+    } else {
+        parse_ls_files(&run_git(
+            source,
+            &[
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ],
+        )?)
+    };
+    // The ignored files are half the point — `.env` is in `.gitignore` on
+    // every project that has one — and git only lists them when asked
+    // separately.
+    entries.extend(parse_ls_files(&run_git(
+        source,
+        &[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ],
+    )?));
+
+    let mut seen = HashSet::new();
+    entries.retain(|entry| seen.insert(entry.clone()));
+    Ok(entries)
+}
+
+/// How many commits `head` has that `base` does not: what removing `head`
+/// would lose once it is no longer checked out anywhere.
+fn commits_ahead(dir: &Path, base: &str, head: &str) -> Result<u32, GitError> {
+    // Read as revisions, never as options.
+    for name in [base, head] {
+        if name.trim().is_empty() || name.starts_with('-') {
+            return Err(GitError::Failed(format!("'{name}' is not a branch name")));
+        }
+    }
+    let range = format!("{base}..{head}");
+    let count = run_git(dir, &["rev-list", "--count", &range, "--"])?;
+    count
+        .trim()
+        .parse()
+        .map_err(|_| GitError::Failed(format!("git counted '{}'", count.trim())))
+}
+
+/// `commits_ahead` for the window (lib/workerControl.ts): whether a worker's
+/// branch still holds work its target branch does not.
+#[tauri::command]
+pub async fn git_commits_ahead(path: String, base: String, head: String) -> Result<u32, String> {
+    off_thread(move || Ok(commits_ahead(Path::new(&path), &base, &head)?)).await
 }
 
 /// git's empty tree in a SHA-1 repository: the answer when git cannot be asked
@@ -2154,5 +2192,68 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// A repository with one commit on main, configured the way the fixture
+    /// above is. None when this machine has no git.
+    fn fixture_repo(tag: &str) -> Option<PathBuf> {
+        let dir = temp_dir(tag);
+        if !fixture_git(&dir, &["init", "-q"]) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return None;
+        }
+        std::fs::write(dir.join(".git/info/exclude"), ".fixture-gitconfig\n").expect("exclude");
+        for (key, value) in [("user.name", "t"), ("user.email", "t@example.com")] {
+            assert!(fixture_git(&dir, &["config", key, value]));
+        }
+        assert!(fixture_git(
+            &dir,
+            &["symbolic-ref", "HEAD", "refs/heads/main"]
+        ));
+        write(&dir, "README.md", "hello\n");
+        assert!(fixture_git(&dir, &["add", "."]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "init"]));
+        Some(dir)
+    }
+
+    #[test]
+    fn a_branch_is_ahead_by_the_commits_its_base_does_not_have() {
+        let Some(dir) = fixture_repo("ahead") else {
+            return;
+        };
+        assert!(fixture_git(&dir, &["branch", "worker"]));
+        assert_eq!(commits_ahead(&dir, "main", "worker").expect("count"), 0);
+
+        assert!(fixture_git(&dir, &["checkout", "-q", "worker"]));
+        write(&dir, "work.txt", "done\n");
+        assert!(fixture_git(&dir, &["add", "."]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "work"]));
+        assert_eq!(commits_ahead(&dir, "main", "worker").expect("count"), 1);
+        // Merged into its base, it holds nothing of its own any more.
+        assert!(fixture_git(&dir, &["checkout", "-q", "main"]));
+        assert!(fixture_git(&dir, &["merge", "-q", "--ff-only", "worker"]));
+        assert_eq!(commits_ahead(&dir, "main", "worker").expect("count"), 0);
+
+        assert!(commits_ahead(&dir, "main", "--all").is_err());
+        assert!(commits_ahead(&dir, "main", "missing").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ignored_only_leaves_out_what_git_would_add() {
+        let Some(dir) = fixture_repo("ignored-only") else {
+            return;
+        };
+        write(&dir, ".gitignore", ".env\n");
+        write(&dir, ".env", "TOKEN=1");
+        write(&dir, "notes.local", "mine");
+
+        let all = untracked_entries(&dir, false).expect("all");
+        assert!(all.contains(&".env".to_string()), "{all:?}");
+        assert!(all.contains(&"notes.local".to_string()), "{all:?}");
+        let ignored = untracked_entries(&dir, true).expect("ignored");
+        assert!(ignored.contains(&".env".to_string()), "{ignored:?}");
+        assert!(!ignored.contains(&"notes.local".to_string()), "{ignored:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
