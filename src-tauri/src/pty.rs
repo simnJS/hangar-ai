@@ -228,6 +228,17 @@ fn apply_ports(cmd: &mut CommandBuilder, port_base: Option<u16>) {
     }
 }
 
+/// The `--mcp-config` file a Claude Code pane starts with, written just
+/// before (lib/mcpScope): the command typed into the shell names this variable
+/// instead of the path, which holds the user's name and would stay on screen.
+/// Never inherited from a Hangar started inside a pane.
+fn apply_mcp_config(cmd: &mut CommandBuilder, path: Option<&str>) {
+    match path.filter(|path| !path.is_empty()) {
+        Some(path) => cmd.env("HANGAR_MCP_CONFIG", path),
+        None => cmd.env_remove("HANGAR_MCP_CONFIG"),
+    }
+}
+
 // The arguments are the command's IPC fields, named as the frontend sends them.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -242,6 +253,7 @@ pub fn pty_spawn(
     name: Option<String>,
     bridge: Option<bool>,
     port_base: Option<u16>,
+    mcp_config: Option<String>,
 ) -> Result<(), String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
@@ -317,6 +329,7 @@ pub fn pty_spawn(
         crate::bridge::apply_env(&mut cmd, &id, name.as_deref());
     }
     apply_ports(&mut cmd, port_base);
+    apply_mcp_config(&mut cmd, mcp_config.as_deref());
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -658,6 +671,24 @@ mod tests {
         apply_ports(&mut other, None);
         assert_eq!(other.get_env("HANGAR_PORT_BASE"), None);
         assert_eq!(other.get_env("HANGAR_PORT_COUNT"), None);
+    }
+
+    #[test]
+    fn the_mcp_config_file_is_handed_to_the_shell_and_never_inherited() {
+        let path = r"C:\Users\Jo Doe\AppData\Roaming\com.simnjs.hangar\mcp\ws.json";
+        let mut pane = CommandBuilder::new("pwsh");
+        apply_mcp_config(&mut pane, Some(path));
+        assert_eq!(
+            pane.get_env("HANGAR_MCP_CONFIG"),
+            Some(std::ffi::OsStr::new(path))
+        );
+
+        for none in [None, Some("")] {
+            let mut other = CommandBuilder::new("sh");
+            other.env("HANGAR_MCP_CONFIG", "/elsewhere.json");
+            apply_mcp_config(&mut other, none);
+            assert_eq!(other.get_env("HANGAR_MCP_CONFIG"), None);
+        }
     }
 
     #[test]

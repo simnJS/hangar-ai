@@ -16,6 +16,8 @@ export const ptySpawn = (args: {
   bridge?: boolean;
   /** A worker's first port: HANGAR_PORT_BASE in its shell (lib/workerControl). */
   portBase?: number | null;
+  /** The pane's `--mcp-config` file: HANGAR_MCP_CONFIG in its shell (lib/mcpScope). */
+  mcpConfig?: string | null;
 }) => invoke<void>("pty_spawn", args);
 
 export const ptyWrite = (id: string, data: string) =>

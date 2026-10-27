@@ -22,7 +22,7 @@ export type OrchestratorEvent =
       taskId: string;
       title: string;
       worker: string;
-      outcome: "landed" | "ready" | "conflict" | "checkFailed" | "changesRequested" | "dirty" | "error";
+      outcome: "landed" | "ready" | "conflict" | "checkFailed" | "changesRequested" | "dirty" | "stale" | "error";
       detail: string;
     };
 
@@ -122,6 +122,8 @@ const DELIVERY: Record<Extract<OrchestratorEvent, { kind: "delivery" }>["outcome
   changesRequested: "came back from review with changes requested; Hangar sent the worker the review",
   // The worker's worktree or the person's checkout: the detail says which.
   dirty: "was held back by uncommitted changes",
+  stale:
+    "was not landed: the worker committed after it was checked and reviewed, so Hangar asked it to submit again",
   error: "failed",
 };
 
@@ -221,7 +223,9 @@ export function settle(batch: JournalEntry[], journal: JournalEntry[], live: Liv
       case "taskMoved": {
         const same = (e: OrchestratorEvent) => taskOf(e) === event.taskId;
         if (event.to === "doing" && near(entry, "workerStarted", same)) return false;
-        if ((event.to === "done" || event.to === "review") && near(entry, "delivery", same)) return false;
+        // Landed, waiting for the person, or back with its worker: the
+        // delivery says so, and why.
+        if (event.to !== "todo" && near(entry, "delivery", same)) return false;
         if (event.to === "todo" && near(entry, "workerStopped", same)) return false;
         return true;
       }

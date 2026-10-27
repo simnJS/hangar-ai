@@ -688,21 +688,46 @@ fn tested_ref(task: &str, part: &str) -> String {
     format!("{TESTED_REFS}/{name}/{part}")
 }
 
-fn save_tested(repo: &Path, task: &str, base: &str, merge: &str) {
+/// `tip` is the head of the worker's branch that was merged.
+fn save_tested(repo: &Path, task: &str, base: &str, merge: &str, tip: &str) {
     let _ = git(repo, &["update-ref", &tested_ref(task, "base"), base]);
     let _ = git(repo, &["update-ref", &tested_ref(task, "merge"), merge]);
+    let _ = git(repo, &["update-ref", &tested_ref(task, "tip"), tip]);
 }
 
-/// The merge a delivery was tested and reviewed as, with the head of its
-/// branch it was tested on.
-fn tested(repo: &Path, task: &str) -> Option<(String, String)> {
+/// A delivery that passed its check and its review and waits for the person.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Tested {
+    /// The head of the branch it lands on, when it was tested.
+    pub base: String,
+    /// The merge it was checked and reviewed as.
+    pub merge: String,
+    /// The worker's branch is still where it was tested. When it is not, what
+    /// waits is not the worker's latest work and never lands as it is.
+    pub current: bool,
+}
+
+/// The delivery of `task` kept tested, measured against `tip`, the head of
+/// the worker's branch now.
+fn tested(repo: &Path, task: &str, tip: &str) -> Option<Tested> {
     let base = rev(repo, &tested_ref(task, "base")).ok()?;
     let merge = rev(repo, &tested_ref(task, "merge")).ok()?;
-    Some((base, merge))
+    let current = match rev(repo, &tested_ref(task, "tip")) {
+        Ok(tested_tip) => tested_tip == tip,
+        // Kept before the branch's head was: the merge holds the head it was
+        // tested on, and none of what the worker committed after.
+        Err(_) => git(repo, &["merge-base", "--is-ancestor", tip, &merge]).is_ok(),
+    };
+    Some(Tested {
+        base,
+        merge,
+        current,
+    })
 }
 
 fn forget_tested(repo: &Path, task: &str) {
-    for part in ["base", "merge"] {
+    for part in ["base", "merge", "tip"] {
         let _ = git_run(repo, &["update-ref", "-d", &tested_ref(task, part)], false);
     }
 }
@@ -1312,6 +1337,9 @@ pub enum Kind {
     CheckFailed,
     ChangesRequested,
     Dirty,
+    /// Asked to land what waited for the person, after the worker's branch
+    /// moved on: nothing landed, and what waited is dropped.
+    Stale,
     Error,
 }
 
@@ -1465,6 +1493,11 @@ pub fn deliver(request: &Delivery, reviewer: &dyn Reviewer, limits: &Limits) -> 
     let turn = turn_of(&repo);
     let _turn = turn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     sweep(&worktree);
+    if !request.reuse {
+        // Submitted again: this one replaces what of the task waited for the
+        // person, whatever it turns out to be.
+        forget_tested(&worktree, &request.task.id);
+    }
 
     let mut reuse = request.reuse;
     for _ in 0..LANDING_TRIES {
@@ -1519,24 +1552,46 @@ fn attempt(
         Ok(sha) => sha,
         Err(err) => return done(Outcome::error(err)),
     };
-    if reuse {
-        if let Some((tested_base, merge)) = tested(worktree, task) {
-            if tested_base == base {
+    let tip = match rev(worktree, &format!("refs/heads/{branch}")) {
+        Ok(sha) => sha,
+        Err(err) => return done(Outcome::error(err)),
+    };
+    // Landing what waited: as it was tested when neither branch moved since,
+    // tested again on the target's new head when only the target did.
+    if request.reuse {
+        if let Some(kept) = tested(worktree, task, &tip) {
+            if !kept.current {
+                // The worker committed after it was tested: landing it would
+                // land its older work, and testing the branch again would land
+                // work it never submitted. Its next delivery_submit does that.
+                forget_tested(worktree, task);
+                let mut outcome = Outcome::new(
+                    Kind::Stale,
+                    format!(
+                        "{branch} has commits that were not part of the delivery waiting to land on {target}, \
+which was checked and reviewed as {}: it was not landed, so that what lands is your latest work. Once that work \
+is finished and committed, call delivery_submit again: the new delivery is merged, checked and reviewed before it \
+can land.",
+                        short(&kept.merge)
+                    ),
+                );
+                outcome.merge = Some(kept.merge);
+                outcome.base = Some(base);
+                return done(outcome);
+            }
+            if reuse && kept.base == base {
                 stage.set("landing");
                 return land_step(
                     request,
                     worktree,
                     &base,
-                    &merge,
+                    &kept.merge,
+                    &tip,
                     Outcome::new(Kind::Landed, String::new()),
                 );
             }
         }
     }
-    let tip = match rev(worktree, &format!("refs/heads/{branch}")) {
-        Ok(sha) => sha,
-        Err(err) => return done(Outcome::error(err)),
-    };
 
     // 2. Merged onto the branch as it is now, away from everyone's checkout.
     let scratch = match Scratch::add(worktree, &base, task) {
@@ -1728,7 +1783,7 @@ working around it.",
 
     // 5. Landed, or kept tested for the person.
     if !request.land {
-        save_tested(worktree, task, &base, &merge);
+        save_tested(worktree, task, &base, &merge, &tip);
         let mut outcome = passed;
         outcome.outcome = Kind::Ready;
         outcome.detail = format!(
@@ -1743,7 +1798,7 @@ land it on {target}. There is nothing more for you to do: stop here.",
         return done(outcome);
     }
     stage.set("landing");
-    land_step(request, worktree, &base, &merge, passed)
+    land_step(request, worktree, &base, &merge, &tip, passed)
 }
 
 enum Landing {
@@ -1857,11 +1912,13 @@ fn land(repo: &Path, target: &str, base: &str, merge: &str) -> Landing {
     Landing::Failed(problem(&finished.err, &finished.out))
 }
 
+/// `tip` is the head of the worker's branch that `merge` holds.
 fn land_step(
     request: &Delivery,
     repo: &Path,
     base: &str,
     merge: &str,
+    tip: &str,
     mut outcome: Outcome,
 ) -> Step {
     let (branch, target, task) = (&request.branch, &request.target, &request.task.id);
@@ -1891,7 +1948,7 @@ fn land_step(
         } => {
             // Tested and reviewed: kept as it is, for the person to land once
             // their checkout lets it through.
-            save_tested(repo, task, base, merge);
+            save_tested(repo, task, base, merge, tip);
             outcome.outcome = Kind::Dirty;
             outcome.in_checkout = true;
             outcome.detail = format!(
@@ -1936,16 +1993,19 @@ pub struct Plan {
     pub target: String,
     /// Commits on the branch that the target does not have.
     pub ahead: u32,
+    /// The task's delivery that waits for the person, when there is one.
+    pub tested: Option<Tested>,
 }
 
 /// What a delivery from `worktree` would be, or why it cannot be one — in
 /// words for the worker. `landing` asks about a delivery already tested,
-/// which only needs the branches.
+/// which only needs the branches; `task` asks about what of it waits.
 fn preflight(
     workspace: &str,
     worktree: &str,
     target: Option<&str>,
     landing: bool,
+    task: Option<&str>,
 ) -> Result<Plan, String> {
     let dir = Path::new(worktree);
     let common =
@@ -2008,12 +2068,17 @@ delivery_submit again."
             ));
         }
     }
+    let tested = task.and_then(|task| {
+        let tip = rev(dir, &format!("refs/heads/{branch}")).ok()?;
+        tested(dir, task, &tip)
+    });
     Ok(Plan {
         repo: repo.to_string_lossy().into_owned(),
         queue,
         branch,
         target,
         ahead,
+        tested,
     })
 }
 
@@ -2130,6 +2195,7 @@ pub async fn delivery_preflight(
     worktree: String,
     target: Option<String>,
     landing: Option<bool>,
+    task: Option<String>,
 ) -> Result<Plan, String> {
     crate::git::off_thread(move || {
         preflight(
@@ -2137,6 +2203,7 @@ pub async fn delivery_preflight(
             &worktree,
             target.as_deref(),
             landing.unwrap_or(false),
+            task.as_deref(),
         )
     })
     .await
@@ -2393,6 +2460,11 @@ mod tests {
         deliver(request, reviewer, &Limits::default())
     }
 
+    /// The task's delivery kept for the person, against the worker's branch now.
+    fn kept(repo: &Repo) -> Option<Tested> {
+        tested(&repo.main, &repo.task, &head(&repo.main, "worker"))
+    }
+
     #[test]
     fn a_branch_ahead_of_the_target_lands_as_a_fast_forward() {
         let repo = repo("ff");
@@ -2427,7 +2499,7 @@ mod tests {
         assert!(prompt.contains("Add b.txt holding one line."));
         assert!(prompt.contains("+bee"), "the diff is in the prompt");
         assert!(prompt.contains("The check `echo checked` already passed"));
-        assert!(tested(&repo.main, &repo.task).is_none());
+        assert!(kept(&repo).is_none());
         assert_no_scratch(&repo);
     }
 
@@ -2663,6 +2735,7 @@ mod tests {
             &repo.worker.to_string_lossy(),
             None,
             false,
+            None,
         )
         .unwrap_err();
         assert!(
@@ -2699,8 +2772,13 @@ mod tests {
             "",
             "nothing was stashed"
         );
-        let (base, merge) = tested(&repo.main, &repo.task).expect("kept tested");
+        let Tested {
+            base,
+            merge,
+            current,
+        } = kept(&repo).expect("kept tested");
         assert_eq!(base, before);
+        assert!(current);
         assert_no_scratch(&repo);
 
         // The person sets their edit aside themselves; the tested merge lands
@@ -2712,7 +2790,7 @@ mod tests {
         assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
         assert_eq!(head(&repo.main, "main"), merge);
         assert_eq!(read(&repo.main, "a.txt"), "one\ntwo (worker)\nthree\n");
-        assert!(tested(&repo.main, &repo.task).is_none());
+        assert!(kept(&repo).is_none());
         assert_no_scratch(&repo);
     }
 
@@ -2769,7 +2847,7 @@ mod tests {
 
         assert_eq!(outcome.outcome, Kind::Ready, "{}", outcome.detail);
         assert_eq!(head(&repo.main, "main"), before, "nothing landed");
-        assert!(tested(&repo.main, &repo.task).is_some());
+        assert!(kept(&repo).is_some());
         assert_no_scratch(&repo);
 
         write(&repo.main, "c.txt", "sea\n");
@@ -2788,6 +2866,170 @@ mod tests {
         assert_eq!(read(&repo.main, "b.txt"), "bee\n");
         assert_eq!(read(&repo.main, "c.txt"), "sea\n");
         assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn a_fix_submitted_after_passing_goes_through_it_all_again_and_only_it_lands() {
+        let repo = repo("resubmit");
+        let (main, worker) = (
+            repo.main.to_string_lossy().into_owned(),
+            repo.worker.to_string_lossy().into_owned(),
+        );
+        write(&repo.worker, "b.txt", "bee\n");
+        commit(&repo.worker, "Add b");
+        let before = head(&repo.main, "main");
+        let mut request = request(&repo);
+        request.land = false;
+        assert_eq!(
+            deliver_now(&request, &fake(Ok(approve()))).outcome,
+            Kind::Ready
+        );
+        let first = kept(&repo).expect("kept tested").merge;
+
+        // Unchanged, what waits is still the worker's latest.
+        let plan = preflight(&main, &worker, None, false, Some(&repo.task)).unwrap();
+        let waiting = plan.tested.expect("it says what waits");
+        assert_eq!(
+            (waiting.merge.as_str(), waiting.current),
+            (first.as_str(), true)
+        );
+
+        // The orchestrator finds a bug; the worker commits the fix.
+        write(&repo.worker, "b.txt", "bee!\n");
+        commit(&repo.worker, "Fix b");
+        let plan = preflight(&main, &worker, None, false, Some(&repo.task)).unwrap();
+        assert!(
+            !plan.tested.expect("still kept").current,
+            "the branch moved"
+        );
+
+        // Submitted again: merged, checked and reviewed again, and kept as the
+        // new one that waits.
+        request.check_command = Some("echo checked".into());
+        let reviewer = fake(Ok(approve()));
+        let outcome = deliver_now(&request, &reviewer);
+
+        assert_eq!(outcome.outcome, Kind::Ready, "{}", outcome.detail);
+        assert_eq!(reviewer.calls.get(), 1, "reviewed again");
+        assert!(outcome.check.is_some(), "checked again");
+        assert!(reviewer.prompts.borrow()[0].contains("+bee!"));
+        let second = kept(&repo).expect("kept tested");
+        assert!(second.current);
+        assert_ne!(second.merge, first);
+        assert_eq!(head(&repo.main, "main"), before, "nothing landed");
+
+        // The person lands it: the fix, as it was tested.
+        request.land = true;
+        request.reuse = true;
+        let outcome = deliver_now(&request, &Never);
+
+        assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
+        assert_eq!(head(&repo.main, "main"), second.merge);
+        assert_eq!(read(&repo.main, "b.txt"), "bee!\n");
+        assert!(kept(&repo).is_none());
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn a_new_delivery_that_fails_leaves_nothing_waiting_to_land() {
+        let repo = repo("resubmit-fails");
+        write(&repo.worker, "b.txt", "bee\n");
+        commit(&repo.worker, "Add b");
+        let mut request = request(&repo);
+        request.land = false;
+        assert_eq!(
+            deliver_now(&request, &fake(Ok(approve()))).outcome,
+            Kind::Ready
+        );
+
+        write(&repo.worker, "b.txt", "bee, broken\n");
+        commit(&repo.worker, "Break b");
+        let outcome = deliver_now(
+            &request,
+            &fake(Ok(Verdict {
+                approve: false,
+                blocking: vec![Blocking {
+                    file: "b.txt".into(),
+                    line: Some(1),
+                    problem: "Broken.".into(),
+                }],
+                notes: String::new(),
+            })),
+        );
+
+        assert_eq!(
+            outcome.outcome,
+            Kind::ChangesRequested,
+            "{}",
+            outcome.detail
+        );
+        assert!(
+            kept(&repo).is_none(),
+            "the first one does not wait any more"
+        );
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn landing_what_waited_after_the_worker_committed_again_lands_nothing() {
+        let repo = repo("stale");
+        write(&repo.worker, "b.txt", "bee\n");
+        commit(&repo.worker, "Add b");
+        let before = head(&repo.main, "main");
+        let mut request = request(&repo);
+        request.land = false;
+        assert_eq!(
+            deliver_now(&request, &fake(Ok(approve()))).outcome,
+            Kind::Ready
+        );
+        let first = kept(&repo).expect("kept tested").merge;
+
+        // The worker commits more, and has not submitted it yet; the target
+        // moved too, which changes nothing.
+        write(&repo.worker, "b.txt", "bee, half done\n");
+        commit(&repo.worker, "Start a fix");
+        write(&repo.main, "c.txt", "sea\n");
+        commit(&repo.main, "The person commits");
+        let target = head(&repo.main, "main");
+        request.land = true;
+        request.reuse = true;
+        let outcome = deliver_now(&request, &Never);
+
+        assert_eq!(outcome.outcome, Kind::Stale, "{}", outcome.detail);
+        assert!(
+            outcome.detail.contains("call delivery_submit again"),
+            "{}",
+            outcome.detail
+        );
+        assert_eq!(outcome.merge.as_deref(), Some(first.as_str()));
+        assert_eq!(head(&repo.main, "main"), target, "nothing landed");
+        assert_ne!(target, before);
+        assert_eq!(read(&repo.main, "b.txt"), "");
+        assert!(kept(&repo).is_none(), "what waited is dropped");
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn what_an_older_version_kept_still_tells_a_branch_that_moved() {
+        let repo = repo("legacy");
+        write(&repo.worker, "b.txt", "bee\n");
+        commit(&repo.worker, "Add b");
+        let mut request = request(&repo);
+        request.land = false;
+        assert_eq!(
+            deliver_now(&request, &fake(Ok(approve()))).outcome,
+            Kind::Ready
+        );
+        // Kept with the target's head and the merge only, as 1.0.0 did.
+        sh(
+            &repo.main,
+            &["update-ref", "-d", &tested_ref(&repo.task, "tip")],
+        );
+        assert!(kept(&repo).expect("kept tested").current);
+
+        write(&repo.worker, "b.txt", "bee!\n");
+        commit(&repo.worker, "Fix b");
+        assert!(!kept(&repo).expect("kept tested").current);
     }
 
     #[test]
@@ -2882,7 +3124,7 @@ mod tests {
         let main = repo.main.to_string_lossy().into_owned();
         let worker = repo.worker.to_string_lossy().into_owned();
 
-        let empty = preflight(&main, &worker, None, false).unwrap_err();
+        let empty = preflight(&main, &worker, None, false, None).unwrap_err();
         assert!(
             empty.contains("worker has no commit that main does not already have"),
             "{empty}"
@@ -2890,20 +3132,20 @@ mod tests {
 
         write(&repo.worker, "b.txt", "bee\n");
         commit(&repo.worker, "Add b");
-        let plan = preflight(&main, &worker, None, false).unwrap();
+        let plan = preflight(&main, &worker, None, false, None).unwrap();
         assert_eq!(
             (plan.branch.as_str(), plan.target.as_str(), plan.ahead),
             ("worker", "main", 1)
         );
         assert_eq!(key(&plan.repo), key(&main));
 
-        let missing = preflight(&main, &worker, Some("release"), false).unwrap_err();
+        let missing = preflight(&main, &worker, Some("release"), false, None).unwrap_err();
         assert!(missing.contains("release, does not exist"), "{missing}");
-        let itself = preflight(&main, &worker, Some("worker"), false).unwrap_err();
+        let itself = preflight(&main, &worker, Some("worker"), false, None).unwrap_err();
         assert!(itself.contains("on worker itself"), "{itself}");
 
         sh(&repo.worker, &["switch", "-q", "--detach"]);
-        let detached = preflight(&main, &worker, None, false).unwrap_err();
+        let detached = preflight(&main, &worker, None, false, None).unwrap_err();
         assert!(detached.contains("detached HEAD"), "{detached}");
     }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { launchCommand } from "./agents";
+import { mcpConfigArg, type ShellFamily } from "./mcpScope";
 
 describe("launchCommand with a model", () => {
   it("starts Claude Code on the pane's model", () => {
@@ -44,6 +45,33 @@ describe("launchCommand for an orchestration pane", () => {
     expect(launchCommand("claude", null, { mcpConfig: "/h.json", mcpStrict: false })).toBe(
       "claude --mcp-config /h.json",
     );
+  });
+
+  it("never shows the config file's path, in any shell that holds it in a variable", () => {
+    const path = "C:\\Users\\Ann Lee\\AppData\\Roaming\\com.simnjs.hangar\\mcp\\ws-1-0123456789abcdef.json";
+    const line = (family: ShellFamily, strict: boolean) =>
+      launchCommand("claude", "abc", {
+        name: "Bo",
+        model: "sonnet",
+        permissionMode: "auto",
+        allowedTools: ["mcp__hangar"],
+        mcpConfig: mcpConfigArg(path, family)!,
+        mcpStrict: strict,
+        extraRoots: ["D:\\shared"],
+      });
+    const flags = "claude --resume abc --name Bo --model sonnet --permission-mode auto --allowedTools mcp__hangar";
+    expect(line("powershell", false)).toBe(`${flags} --mcp-config $env:HANGAR_MCP_CONFIG --add-dir "D:\\shared"`);
+    expect(line("cmd", false)).toBe(`${flags} --mcp-config "%HANGAR_MCP_CONFIG%" --add-dir "D:\\shared"`);
+    expect(line("posix", false)).toBe(`${flags} --mcp-config "$HANGAR_MCP_CONFIG" --add-dir "D:\\shared"`);
+    expect(line("fish", false)).toBe(`${flags} --mcp-config "$HANGAR_MCP_CONFIG" --add-dir "D:\\shared"`);
+    expect(line("nu", false)).toBe(`${flags} --mcp-config $env.HANGAR_MCP_CONFIG --add-dir "D:\\shared"`);
+    // A workspace's own server choice: the same variable, strict.
+    expect(line("powershell", true)).toBe(
+      `${flags} --mcp-config $env:HANGAR_MCP_CONFIG --strict-mcp-config --add-dir "D:\\shared"`,
+    );
+    for (const family of ["powershell", "cmd", "posix", "fish", "nu"] as const) {
+      expect(line(family, true)).not.toMatch(/Ann Lee|AppData|ws-1/);
+    }
   });
 
   it("keeps the person's mode without one, and drops what a shell would misread", () => {

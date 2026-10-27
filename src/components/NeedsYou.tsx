@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 import { ToolbarMenu, type MenuCloseReason } from "./ToolbarMenu";
@@ -55,6 +55,15 @@ export function NeedsYou({
   const titleId = useId();
   /** What « Fusionner » last failed with, by item. */
   const [failures, setFailures] = useState<Record<string, string>>({});
+  // A row that left the list takes its failure with it: the delivery that
+  // comes back under the same task is another one. Its failure can arrive
+  // after it left, a landing refused once its worker moved past it.
+  const keys = items.map((item) => item.key).join("\n");
+  useEffect(() => {
+    const live = new Set(keys.split("\n"));
+    if (Object.keys(failures).every((key) => live.has(key))) return;
+    setFailures(Object.fromEntries(Object.entries(failures).filter(([key]) => live.has(key))));
+  }, [keys, failures]);
 
   if (!items.length) return null;
 

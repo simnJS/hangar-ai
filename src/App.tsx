@@ -808,6 +808,11 @@ export default function App() {
     try {
       await landDelivery(ws, item.task.id, controlDeps);
       setNotice({ kind: "agent", text: t("needsYou.landed", { title: item.task.title }) });
+    } catch (err) {
+      // Said here too, not only on its row: one its worker moved past
+      // leaves the list as it is refused, and its row with it.
+      setNotice(t("needsYou.landFailed", { error: err instanceof Error ? err.message : String(err) }));
+      throw err;
     } finally {
       end();
     }

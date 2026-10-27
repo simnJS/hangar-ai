@@ -11,7 +11,8 @@ import type { ShellInfo, Workspace, WorkspaceMcp } from "../types";
  * workspace. A workspace in `custom` mode names the servers its panes load;
  * the pane then starts Claude Code with `--mcp-config <file>
  * --strict-mcp-config`, the file being written by the Rust side at each
- * launch from Claude Code's own configuration.
+ * launch from Claude Code's own configuration. The command typed names the
+ * file through the shell's HANGAR_MCP_CONFIG (`mcpConfigArg`).
  */
 
 export type McpScopeName = "user" | "local" | "project";
@@ -220,5 +221,39 @@ export function quoteArg(value: string, family: ShellFamily | null): string | nu
     // means nothing to it: a WSL pane keeps its own servers.
     case "wsl":
       return null;
+  }
+}
+
+/**
+ * Where the pane's shell holds the path of its `--mcp-config` file: pty.rs
+ * sets it when the shell starts, the file being written just before.
+ */
+export const MCP_CONFIG_ENV = "HANGAR_MCP_CONFIG";
+
+/**
+ * The `--mcp-config` argument as the pane's shell is to read it: the variable
+ * that holds the file's path rather than the path, which lies in the app's
+ * data folder and so holds the user's name — and the typed command stays on
+ * screen, in front of anyone watching, recording or streaming it. Every shell
+ * below reads the variable as one argument, spaces and all.
+ *
+ * A shell whose syntax is not known gets the path itself (`quoteArg`), and a
+ * WSL pane nothing, as before.
+ */
+export function mcpConfigArg(path: string, family: ShellFamily | null): string | null {
+  switch (family) {
+    case "powershell":
+      return `$env:${MCP_CONFIG_ENV}`;
+    // Expanded before the line is read, so quoted: a path may hold a space,
+    // `&` or `^`, and never a double quote.
+    case "cmd":
+      return `"%${MCP_CONFIG_ENV}%"`;
+    case "posix":
+    case "fish":
+      return `"$${MCP_CONFIG_ENV}"`;
+    case "nu":
+      return `$env.${MCP_CONFIG_ENV}`;
+    default:
+      return quoteArg(path, family);
   }
 }

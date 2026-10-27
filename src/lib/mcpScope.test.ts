@@ -3,6 +3,8 @@ import { launchCommand } from "./agents";
 import {
   INHERIT,
   isLoaded,
+  MCP_CONFIG_ENV,
+  mcpConfigArg,
   needsRestart,
   presetAll,
   presetHangarOnly,
@@ -165,6 +167,30 @@ describe("quoteArg", () => {
     expect(quoteArg("a\nb", "powershell")).toBeNull();
     expect(quoteArg("a\rb", "posix")).toBeNull();
     expect(quoteArg(path, "wsl")).toBeNull();
+  });
+});
+
+describe("mcpConfigArg", () => {
+  const path = "C:\\Users\\Ann Lee\\AppData\\Roaming\\com.simnjs.hangar\\mcp\\ws-1.json";
+
+  it("names the shell's variable, never the path that holds the user's name", () => {
+    expect(MCP_CONFIG_ENV).toBe("HANGAR_MCP_CONFIG");
+    expect(mcpConfigArg(path, "powershell")).toBe("$env:HANGAR_MCP_CONFIG");
+    expect(mcpConfigArg(path, "cmd")).toBe('"%HANGAR_MCP_CONFIG%"');
+    expect(mcpConfigArg(path, "posix")).toBe('"$HANGAR_MCP_CONFIG"');
+    expect(mcpConfigArg("/home/ann/.local/share/mcp/ws.json", "fish")).toBe('"$HANGAR_MCP_CONFIG"');
+    expect(mcpConfigArg(path, "nu")).toBe("$env.HANGAR_MCP_CONFIG");
+  });
+
+  it("takes any path a variable can hold, the ones quoting had to refuse included", () => {
+    expect(mcpConfigArg("C:\\Users\\100%\\ws.json", "cmd")).toBe('"%HANGAR_MCP_CONFIG%"');
+    expect(mcpConfigArg("C:\\Users\\O'Neil\\ws.json", "nu")).toBe("$env.HANGAR_MCP_CONFIG");
+  });
+
+  it("gives an unknown shell the path itself, and a WSL pane nothing, as before", () => {
+    expect(mcpConfigArg(path, null)).toBe(`'${path}'`);
+    expect(mcpConfigArg("C:\\Users\\O'Neil\\ws.json", null)).toBeNull();
+    expect(mcpConfigArg(path, "wsl")).toBeNull();
   });
 });
 
