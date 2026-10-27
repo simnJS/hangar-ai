@@ -1,0 +1,107 @@
+name: Bug report
+description: Something in Hangar.AI does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. For a security problem, do not use this form: see [SECURITY.md](https://github.com/simnJS/hangar-ai/blob/main/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: Hangar version
+      description: Shown at the top of the navigator, and in Settings.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and install type
+      description: For example "Windows 11 24H2", "macOS 15.4 on Apple Silicon", "Ubuntu 24.04, AppImage".
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Agent
+      description: Which agent were the affected panes running?
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Gemini CLI
+        - OpenCode
+        - Plain shell
+        - Not agent-specific
+    validations:
+      required: true
+
+  - type: input
+    id: agent-version
+    attributes:
+      label: Agent version and shell
+      description: The output of `claude --version`, `codex --version`, etc., and the pane's shell (PowerShell, Git Bash, WSL, zsh…).
+      placeholder: "Claude Code 2.1.311, PowerShell 7.5"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Terminals and panes
+        - Orchestrator, workers or deliveries
+        - Task board
+        - Memory
+        - MCP server or agent configuration
+        - Usage statistics
+        - Workspaces, sleep or worktrees
+        - 3D preview
+        - Dictation
+        - Install or update
+        - Something else
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a workspace on a git repository with two Claude Code panes
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include any error message as text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, logs or other context
+      description: Please remove tokens, keys and private paths before you paste anything.

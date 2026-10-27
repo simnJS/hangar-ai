@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest a change or a new feature.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first: agreeing on it saves rewriting a finished pull request. Hangar runs entirely on your machine, so ideas that need a hosted service, accounts or telemetry are out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does Hangar get in the way today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How it could work, from your side of the screen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+      description: Workarounds or other tools you have tried.
+
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Agents concerned
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Gemini CLI
+        - OpenCode
+        - All of them
+        - None (the app itself)
+
+  - type: checkboxes
+    id: mcp
+    attributes:
+      label: MCP
+      options:
+        - label: This changes or adds MCP tools that agents see (board_*, memory_*, pane_*, worker_*, model_*…)
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to work on this myself
