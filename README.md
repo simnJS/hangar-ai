@@ -45,7 +45,8 @@ Hangar keeps them in one window:
 - **A shared memory.** Facts one agent records are there for the next session, in any
   project.
 - **Orchestration (new in 1.0).** One agent plans. Workers do the work in separate git
-  worktrees, and each delivery is checked and reviewed before it is merged locally.
+  worktrees, and each delivery is reviewed, and run through your check command if you set
+  one, before it is merged locally.
 
 Hangar launches the agent CLIs installed on your machine, with your accounts and your
 settings. It is not a model provider, and it has no online service of its own.
@@ -88,8 +89,8 @@ starts workers to carry it out. You follow everything from one window.
    - a separate reviewer agent reads the change with a fresh context and read-only tools;
    - if all of that passes, the branch lands on the target branch by fast-forward.
 
-   If a step fails, the worker receives what failed and fixes it. Nothing is ever pushed,
-   and a landing that would overwrite your uncommitted changes is held back.
+   If a step fails, the worker receives what failed and fixes it. Hangar never pushes, and
+   a landing that would overwrite your uncommitted changes is held back.
 4. **Wake on events.** The orchestrator does not poll. When it is between turns, Hangar
    sends it one batched message: a worker commented, is waiting, or exited; a delivery
    landed or failed.
@@ -100,7 +101,7 @@ starts workers to carry it out. You follow everything from one window.
 
 You set the following per workspace: the models of the orchestrator, workers and reviewer
 (Opus, Sonnet and Sonnet by default), the limits, the check command, the target branch,
-automatic merging and the permission mode. Orchestration needs a git repository and
+automatic merging (on by default) and the permission mode. Orchestration needs a git repository and
 Claude Code.
 
 <table>
@@ -114,7 +115,7 @@ Claude Code.
   </tr>
 </table>
 
-### The Pro interface
+### An interface built like an IDE
 
 - **Navigator** on the left: workspaces and folders, and each workspace's agents and their
   state at a glance.
@@ -160,7 +161,7 @@ Claude Code.
 - **Global memory.** Agents search, write and update facts across projects. You can browse
   and edit them in the Memory view.
 - **Usage statistics.** Tokens, active time and the equivalent cost at API prices, per
-  project and per model. They are read from the transcripts Claude Code and Codex keep on
+  project, agent and model. They are read from the transcripts Claude Code and Codex keep on
   disk. On a Claude or ChatGPT subscription, the cost figure is an equivalent, not a bill.
 
 ![The board of a workspace: two tasks to do, one waiting for a decision and one blocked by another task, one in progress held by a worker, one in review ready to land, and one done](.github/assets/board.webp)
@@ -172,7 +173,7 @@ Claude Code.
 - **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX, USDZ) in a panel,
   and render snapshots to check their own work.
 - **Dictation.** Hold a key, speak, and the text is typed into the focused pane. It runs
-  locally with whisper.cpp, on a model downloaded once. Groq is an optional fallback, with
+  locally with whisper.cpp, on a model downloaded once. Groq is an optional alternative, with
   its key kept in the system keychain.
 - **Discord Rich Presence**, off unless you turn it on.
 
@@ -180,27 +181,28 @@ Claude Code.
 
 Download the file for your system from the
 **[latest release](https://github.com/simnJS/hangar-ai/releases/latest)**, under
-**Assets**. You only download once: the app updates itself after that.
+**Assets**. You only download once: after that, the app offers each new version and
+installs it in one click.
 
 | System | File | Notes |
 |---|---|---|
-| Windows (x64) | `Hangar.AI_<version>_x64-setup.exe` | Installs for your user only, without administrator rights. Needs WebView2, which ships with Windows 11. |
-| macOS (Apple Silicon and Intel) | `Hangar.AI_<version>_universal.dmg` | One universal build for both. |
-| Linux (x86_64) | `.AppImage`, `.deb` or `.rpm` | The AppImage runs without installing (`chmod +x` it first). Needs WebKitGTK 4.1: `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora. |
+| Windows (x64) | `Hangar.AI_<version>_x64-setup.exe` | Installs for your user only, without administrator rights. Needs WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing. |
+| macOS (Apple Silicon and Intel) | `Hangar.AI_<version>_universal.dmg` | One universal build for both, macOS 10.15 or later. |
+| Linux (x86_64) | `.AppImage`, `.deb` or `.rpm` | The AppImage runs without installing (`chmod +x` it first) on distributions with glibc 2.35 or later (2022 on). The `.deb` and `.rpm` need WebKitGTK 4.1, which apt and dnf install with them: `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora. |
 
 > [!NOTE]
 > **Windows: SmartScreen.** The installer is not code-signed, so on first run SmartScreen
 > shows "Windows protected your PC". Click **More info**, then **Run anyway**.
 >
-> **macOS: Gatekeeper.** The release workflow signs and notarises the macOS build when
-> Apple credentials are configured, and the app then opens normally. If a release's notes
-> say the macOS build is unsigned (or you built it yourself), macOS blocks the first
-> launch. Right-click the app and choose **Open**. On macOS 15 and later, go to **System
-> Settings → Privacy & Security** and click **Open Anyway**.
+> **macOS: Gatekeeper.** The macOS build is signed and notarised, so it opens after
+> macOS's usual first-launch confirmation. If a release's notes ever say the macOS build is
+> unsigned (or you built it yourself), macOS blocks the first launch: right-click the app
+> and choose **Open**. On macOS 15 and later, go to **System Settings → Privacy &
+> Security** and click **Open Anyway**.
 
-You also need at least one agent CLI installed and signed in: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview),
+You also need at least one agent CLI installed and signed in: [Claude Code](https://code.claude.com/docs/en/overview),
 [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-or [OpenCode](https://github.com/sst/opencode). Hangar launches them; it does not install
+or [OpenCode](https://opencode.ai). Hangar launches them; it does not install
 them.
 
 ## Getting started
@@ -208,7 +210,8 @@ them.
 1. **Create a workspace** with `Ctrl`/`Cmd`+`Shift`+`N`. Pick a project folder and a
    layout, then click a cell to choose its agent. Agents that are not installed are
    marked as such.
-2. **Connect the agents to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`) and click
+2. **Connect the agents to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`; `Alt` is
+   `Option` on a Mac) and click
    **Configure**. The panel can also write a short playbook into the project's `AGENTS.md`
    and `CLAUDE.md`, telling agents to claim tasks before they start. Restart the agents so
    they load the server.
@@ -241,7 +244,8 @@ The MCP panel registers the server in each tool's own format:
 | VS Code | `.vscode/mcp.json` (project) |
 
 Hangar merges its entry into the existing configuration rather than overwriting it, and
-keeps a backup the first time it writes a file.
+keeps a backup the first time it writes a file. OpenCode is not in the panel yet: add
+`hangar-ai --mcp` to its MCP servers by hand.
 
 | Tools | What agents do with them |
 |---|---|
@@ -290,8 +294,8 @@ You need:
 - **cmake** and **LLVM/clang**: dictation compiles whisper.cpp from source and generates
   its bindings with libclang;
 - the Tauri prerequisites for your system:
-  - **Windows:** the MSVC build tools and WebView2. For example,
-    `winget install Kitware.CMake LLVM.LLVM`;
+  - **Windows:** the MSVC build tools and WebView2, plus cmake and LLVM
+    (`winget install Kitware.CMake LLVM.LLVM`);
   - **macOS:** the Xcode command line tools (`xcode-select --install`, which includes
     clang) and `brew install cmake`;
   - **Linux:** the WebKitGTK, ALSA and libclang headers, as installed by CI on Ubuntu
@@ -328,7 +332,7 @@ src-tauri/installer/ NSIS installer script and artwork
 demo/                the browser demo: src/ compiled unchanged against a fake backend
 site/                the website at hangar.simnjs.fr
 scripts/             logo, installer art, demo model and demo bundling scripts
-.github/workflows/   CI (checks on every push and PR) and Release (builds and publishes on a tag)
+.github/workflows/   CI (checks on pushes to main and on pull requests) and Release (builds and publishes on a tag)
 ```
 
 ## Contributing

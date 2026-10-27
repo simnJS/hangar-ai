@@ -59,7 +59,8 @@ same `HANGAR_ENDPOINT_FILE`. When you are done, delete the `com.simnjs.hangar-de
 
 ## Checks
 
-CI runs these checks on every push and pull request. Run them before you open a PR.
+CI runs these checks on every pull request and every push to `main`. Run them before you
+open a PR.
 
 Frontend, from the repository root:
 

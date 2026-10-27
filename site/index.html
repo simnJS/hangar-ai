@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hangar.AI: run a team of coding agents from one window</title>
-<meta name="description" content="Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side, with a shared board and memory. In 1.0, an orchestrator plans the work, hands it to workers in their own git worktrees, and merges what passes your tests and a review. Free and open source.">
+<meta name="description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side, with a shared board and memory. In 1.0, an orchestrator plans and delegates to workers in git worktrees. Free and open source.">
 <link rel="canonical" href="https://hangar.simnjs.fr/">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#202124">
 
 <link rel="icon" href="favicon.ico" sizes="48x48">
@@ -17,7 +17,7 @@
 <meta property="og:site_name" content="Hangar.AI">
 <meta property="og:url" content="https://hangar.simnjs.fr/">
 <meta property="og:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
-<meta property="og:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans, hands tasks to workers in their own git worktrees, and merges what passes a check and a review. Free, open source, local.">
+<meta property="og:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and hands tasks to workers in their own git worktrees, and Hangar merges what passes a review. Free, open source, local.">
 <meta property="og:image" content="https://hangar.simnjs.fr/og.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
-<meta name="twitter:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans, delegates to workers in git worktrees, and merges what passes. Free and open source.">
+<meta name="twitter:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and delegates to workers in git worktrees, and Hangar merges what passes. Free and open source.">
 <meta name="twitter:image" content="https://hangar.simnjs.fr/og.png">
 <meta name="twitter:image:alt" content="Hangar.AI with an orchestrator pane and two worker panes side by side, under the title: a team of coding agents, in one window.">
 
@@ -57,7 +57,7 @@
 
 <header class="bar" id="bar">
   <div class="bar__in">
-    <a class="brand" href="#top" aria-label="Hangar.AI, back to top">
+    <a class="brand" href="#top" aria-label="Hangar.AI 1.0.0, back to top">
       <svg class="brand__mark" width="18" height="18" viewBox="200 200 624 624" aria-hidden="true">
         <rect x="200" y="200" width="260" height="624" fill="var(--accent)"></rect>
         <rect x="538" y="200" width="286" height="260" fill="var(--fg-hi)"></rect>
@@ -99,9 +99,9 @@
 
     <p class="hero__lede">
       Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side in real terminals,
-      with a task board and a memory they share. Pin one as orchestrator, and it plans the work,
-      hands each task to a worker in its own git worktree, and merges what passes your tests and
-      a review.
+      with a task board and a memory they share. Pin a Claude Code pane as orchestrator: it plans
+      the work and hands each task to a worker in its own git worktree, and Hangar merges each
+      delivery once it passes a review, and your tests if you set them.
     </p>
 
     <div class="hero__cta">
@@ -155,7 +155,7 @@
       <p class="head__lede">
         Orchestration turns one Claude Code pane into a lead that plans and delegates instead of
         writing code. Hangar does the parts a prompt should not be trusted with: the worktrees,
-        the limits, the tests and the merge.
+        the limits, the checks and the merge.
       </p>
     </header>
 
@@ -165,9 +165,9 @@
         <div class="step__copy">
           <h3>Give it an objective</h3>
           <p>
-            Pin any Claude Code pane as the workspace's orchestrator and say what you want. It
-            reads the code, asks you the product questions it cannot settle itself, all in one
-            go, then writes a plan with validation criteria to the shared memory.
+            In a git repository, pin any Claude Code pane as the workspace's orchestrator and say
+            what you want. It reads the code, asks you the product questions it cannot settle
+            itself, all in one go, then writes a plan with validation criteria to the shared memory.
           </p>
         </div>
         <figure class="step__art">
@@ -188,8 +188,8 @@
           <h3>It plans on the board</h3>
           <p>
             The plan becomes tasks on the workspace board, each with a goal, acceptance criteria,
-            the command that proves it, and the files it owns. Tasks that run at the same time
-            never share a file, and a task waits for the ones it depends on.
+            the command that proves it, and the files it owns. Hangar never runs two tasks at once
+            whose files overlap, and a task waits for the ones it depends on.
           </p>
         </div>
         <figure class="step__art">
@@ -210,8 +210,8 @@
           <h3>Workers take the tasks</h3>
           <p>
             Each task goes to a worker: a new Claude Code pane, on Sonnet by default, on a branch
-            of its own in its own git worktree, with 20 ports set aside so dev servers never
-            collide. Three run at once unless you say otherwise, and Hangar refuses the next one.
+            of its own in its own git worktree, with 20 ports set aside so their dev servers do not
+            fight over one. Three run at once by default, and Hangar refuses a fourth.
           </p>
         </div>
         <figure class="step__art">
@@ -229,16 +229,17 @@
       <li class="step">
         <div class="step__rail" aria-hidden="true"><span class="step__n">4</span></div>
         <div class="step__copy">
-          <h3>Every delivery is tested before it lands</h3>
+          <h3>Every delivery is checked before it lands</h3>
           <p>
-            A worker that is done hands in its branch. Hangar merges it in a scratch worktree,
-            runs your check command, and has a reviewer agent with a fresh context read the diff.
-            Only then does it move your branch forward. A step that fails goes back to the worker
-            with the reason, and one delivery runs at a time per repository.
+            A worker that is done hands in its branch. Hangar merges it in a scratch worktree, runs
+            your check command if you set one (<code>pnpm test</code>, <code>cargo test</code>…), and
+            has a reviewer agent with a fresh context read the diff. Only then does it move your
+            branch forward. A step that fails goes back to the worker with the reason, and one
+            delivery runs at a time per repository.
           </p>
         </div>
         <figure class="step__art">
-          <div class="delivery" id="delivery" aria-label="The four stages of a delivery">
+          <div class="delivery" id="delivery" role="group" aria-label="The four stages of a delivery">
             <div class="delivery__head">
               <span class="delivery__title">Delivery of #32</span>
               <span class="delivery__task">Keep the address after a failed payment</span>
@@ -247,7 +248,7 @@
               <li class="dstep" data-state="done">
                 <span class="dstep__mark" aria-hidden="true"></span>
                 <span class="dstep__what">Merged onto <code>main</code> in a scratch worktree</span>
-                <span class="dstep__why">Your own checkout is never worked in.</span>
+                <span class="dstep__why">Your own checkout is left alone until the fast-forward.</span>
               </li>
               <li class="dstep" data-state="done">
                 <span class="dstep__mark" aria-hidden="true"></span>
@@ -291,9 +292,10 @@
       <div class="pair__item">
         <h3>Limits a prompt cannot talk its way past</h3>
         <p>
-          Workers at once, attempts per task, permissions, the check command, the branch work
-          lands on and the models are set per workspace, and enforced by Hangar rather than
-          asked of the model. By default Opus plans, Sonnet works and Sonnet reviews.
+          Workers at once, attempts per task, overlapping files, permissions, the check command
+          and the branch work lands on are set per workspace and enforced by Hangar, not asked of
+          the model. The models are set there too: by default Opus plans, Sonnet works and Sonnet
+          reviews.
         </p>
         <figure class="crop crop--orch">
           <picture>
@@ -308,8 +310,8 @@
 
     <dl class="facts">
       <div>
-        <dt>Nothing is ever pushed</dt>
-        <dd>Merges are local fast-forwards. Pushing, pull requests and releases stay your call.</dd>
+        <dt>Hangar never pushes</dt>
+        <dd>Merges are local fast-forwards, and the orchestrator and its workers are told not to push. Pushing, pull requests and releases stay your call.</dd>
       </div>
       <div>
         <dt>Woken by events, not a loop</dt>
@@ -371,6 +373,7 @@
         <button type="button" class="chip" data-send="write the tests for atomic claims">write the tests</button>
         <button type="button" class="chip" data-send="what can you do here?">what can you do?</button>
       </div>
+      <p class="vh" id="prompts-status" role="status"></p>
     </div>
   </div>
 </section>
@@ -392,7 +395,7 @@
           A navigator lists every workspace and what its agents are doing. An inspector shows the
           focused agent's session, context window, cost and plan usage. A command palette reaches
           every pane, workspace and command from <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>,
-          or <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span> on a Mac.
+          or <span class="keys"><kbd><abbr title="Command">⌘</abbr></kbd><kbd><abbr title="Shift">⇧</abbr></kbd><kbd>P</kbd></span> on a Mac.
         </p>
         <p>
           33 themes restyle the whole window, not only the terminals. Graphite is the default,
@@ -474,7 +477,7 @@
       </div>
       <div>
         <dt>Idle workspaces go to sleep</dt>
-        <dd>Untouched for 10 minutes, a workspace's agents stop to free memory, and resume their sessions when you come back.</dd>
+        <dd>By default, a workspace you have not touched for 10 minutes, and are not looking at, stops its agents to free memory. They resume their sessions when you come back.</dd>
       </div>
       <div>
         <dt>Git worktrees and diffs</dt>
@@ -482,7 +485,7 @@
       </div>
       <div>
         <dt>Sessions come back</dt>
-        <dd>Reopen the window and every pane resumes the conversation it was in, with no session ids to keep track of.</dd>
+        <dd>Reopen the window and every Claude Code and Codex pane resumes the conversation it was in, with no session ids to keep track of.</dd>
       </div>
       <div>
         <dt>Agent states at a glance</dt>
@@ -490,14 +493,14 @@
       </div>
       <div>
         <dt>Dictation</dt>
-        <dd>Hold a key and speak into the focused pane. whisper.cpp runs on your machine, or Groq if you prefer. Off until you turn it on.</dd>
+        <dd>Hold a key and speak into the focused pane. It runs on your machine with whisper.cpp, or on Groq if you prefer. Off until you turn it on.</dd>
       </div>
       <div>
         <dt>Broadcast</dt>
-        <dd>Send one instruction to every pane at once, or to each agent as soon as it is free.</dd>
+        <dd>Send one instruction to every pane at once. Claude Code panes can hold it until their agent is free.</dd>
       </div>
       <div>
-        <dt>Up to 16 panes, any shell</dt>
+        <dt>Up to 16 panes per workspace, any shell</dt>
         <dd>PowerShell, cmd, Git Bash, WSL and Nushell on Windows; zsh, bash, fish, Nushell and pwsh elsewhere.</dd>
       </div>
     </dl>
@@ -510,28 +513,29 @@
     <header class="head">
       <h2 class="head__title" id="download-title">Download Hangar.AI 1.0.0</h2>
       <p class="head__lede">
-        Free and open source under the MIT license. Install it once; it updates itself from then on.
+        Free and open source under the MIT license. Install it once: from then on it offers each new
+        version and installs it in one click.
       </p>
     </header>
 
     <div class="plats">
       <article class="plat" data-os="windows">
         <h3 class="plat__os">Windows</h3>
-        <p class="plat__what">64-bit installer. Installs for you alone, without administrator rights. Needs WebView2, which ships with Windows 11.</p>
+        <p class="plat__what">64-bit installer. Installs for you alone, without administrator rights. Needs WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing.</p>
         <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_x64-setup.exe">Download the installer <span class="ext">.exe</span></a>
         <p class="plat__note">The installer is not code-signed yet, so SmartScreen warns on first run: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
 
       <article class="plat" data-os="macos">
         <h3 class="plat__os">macOS</h3>
-        <p class="plat__what">One universal disk image for Apple Silicon and Intel Macs.</p>
+        <p class="plat__what">One universal disk image for Apple Silicon and Intel Macs, macOS 10.15 or later.</p>
         <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_universal.dmg">Download the disk image <span class="ext">.dmg</span></a>
-        <p class="plat__note">Signed and notarised, so it opens like any other app.</p>
+        <p class="plat__note">Signed and notarised, so it opens like any other app you download.</p>
       </article>
 
       <article class="plat" data-os="linux">
         <h3 class="plat__os">Linux</h3>
-        <p class="plat__what">x86-64. The AppImage runs anywhere; the packages suit apt and dnf. Needs WebKitGTK 4.1.</p>
+        <p class="plat__what">x86-64. The AppImage runs without installing on distributions from 2022 on (glibc 2.35); the packages suit apt and dnf, and bring WebKitGTK 4.1 with them.</p>
         <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_amd64.AppImage">Download the AppImage</a>
         <p class="plat__note plat__alts">
           Or a package:
@@ -549,8 +553,8 @@
       </p>
       <p>
         <a href="https://github.com/simnJS/hangar-ai/releases/latest">Every file of the latest release</a>
-        is on GitHub. To build it yourself, with Node 20, pnpm and a Rust toolchain:
-        <code>pnpm install &amp;&amp; pnpm tauri build</code>
+        is on GitHub. To build it yourself you need Node 22, pnpm 10, Rust, cmake and LLVM:
+        see <a href="https://github.com/simnJS/hangar-ai#build-from-source">Build from source</a>.
       </p>
     </div>
   </div>
@@ -572,8 +576,8 @@
             cost what they already cost you: each one uses its own subscription or API key.
           </p>
           <p>
-            Orchestration runs several sessions at once, an orchestrator, up to three workers and
-            a reviewer for each delivery, so it uses a plan's limits faster than a single agent.
+            Orchestration runs several sessions at once: an orchestrator, three workers by default
+            and a reviewer for each delivery. It uses a plan's limits faster than a single agent.
             The models and the number of workers are yours to set per workspace.
           </p>
         </div>
@@ -611,9 +615,10 @@
             built by GitHub Actions from the public source, and installs for your user only.
           </p>
           <p>
-            The macOS build is signed and notarised, so Gatekeeper opens it without a prompt. If a
-            release ever ships unsigned, its notes say so; the first launch is then right-click,
-            <b>Open</b>.
+            The macOS build is signed and notarised, so it opens after macOS's usual first-launch
+            confirmation. If a release ever ships unsigned, its notes say so: then open it from
+            <b>System Settings → Privacy &amp; Security → Open Anyway</b> (right-click, <b>Open</b>
+            before macOS 15).
           </p>
         </div>
       </details>
@@ -628,8 +633,9 @@
           </p>
           <p>
             Hangar goes online for three things: checking GitHub for updates, downloading the
-            dictation model once if you turn local dictation on, and Groq if you choose it for
-            dictation. Your agents talk to their providers exactly as they do outside Hangar.
+            dictation model from Hugging Face once if you turn local dictation on, and Groq, only if
+            you pick it for dictation or for the optional cleanup of a transcript. Your agents talk
+            to their providers exactly as they do outside Hangar.
           </p>
         </div>
       </details>

@@ -161,6 +161,9 @@
       var chip = event.target.closest ? event.target.closest('.chip') : null;
       if (!chip) return;
       toDemo({ type: 'hangar-demo:type', text: chip.dataset.send });
+      // Said, not only shown: the chip's flash is the only sign it went.
+      var status = document.getElementById('prompts-status');
+      if (status) status.textContent = ready ? 'Sent to Ava: ' + chip.dataset.send + '.' : 'The demo is still starting.';
       chip.classList.add('is-sent');
       setTimeout(function () { chip.classList.remove('is-sent'); }, 900);
     });
@@ -229,10 +232,10 @@
 
     var note = document.getElementById('getnote');
     if (note && os === 'windows') {
-      note.appendChild(document.createTextNode(' Windows warns on first run, as the installer is not signed yet: '));
+      note.appendChild(document.createTextNode(' SmartScreen warns on first run because the installer is not signed yet: '));
       var why = document.createElement('a');
       why.href = '#faq-smartscreen';
-      why.textContent = 'here is why';
+      why.textContent = 'here is what to do';
       note.appendChild(why);
       note.appendChild(document.createTextNode('.'));
     }

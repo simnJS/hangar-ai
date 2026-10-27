@@ -11,7 +11,7 @@ Every release, with its installers, is on the
 ## [1.0.0] - 2026-10-27
 
 The first stable release. It adds orchestrator mode on top of what the 0.12 to 0.15
-releases brought in the days before: the Pro interface, the 3D preview, usage
+releases brought the day before: the Pro interface, the 3D preview, usage
 statistics, workspace sleep and per-workspace MCP servers.
 
 - **Orchestrator mode.** Pin one Claude Code pane per workspace as its orchestrator
@@ -25,7 +25,7 @@ statistics, workspace sleep and per-workspace MCP servers.
 - **Delivery queue.** `delivery_submit` merges a worker's branch onto the target's
   current head in a temporary worktree, runs the workspace's check command if one is
   set, has a fresh `claude -p` session with read-only tools review it, then lands it
-  locally. Nothing is ever pushed. A failure goes back to the worker with the conflicting files
+  locally. Hangar never pushes. A failure goes back to the worker with the conflicting files
   or the failing line; repeated failures are handed to you.
 - **Event-driven orchestrator.** Board moves, comments, workers that wait for you, stop
   or exit, and delivery outcomes reach the orchestrator as batched messages, so it
@@ -34,7 +34,8 @@ statistics, workspace sleep and per-workspace MCP servers.
   starts, resumes or is compacted.
 - **"Needs you" inbox.** Agents waiting for an answer or a permission, tasks handed back
   with a question, and deliveries waiting to land, across every workspace.
-- Per-workspace orchestration settings: maximum workers, attempts, automatic landing,
+- Per-workspace orchestration settings: maximum workers, attempts, automatic landing (on
+  by default),
   check command, models, target branch and permission mode.
 - A prompt queued by an agent or by Hangar is labelled with its sender, and the
   inspector shows who queued it.
