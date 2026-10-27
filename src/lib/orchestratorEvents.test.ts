@@ -137,7 +137,7 @@ function rig(panes: Pane[] = [pane("o", "orch", "orchestrator"), pane("w1", "wor
   };
 }
 
-const delivery = (outcome: "landed" | "checkFailed", taskId = "t1"): OrchestratorEvent => ({
+const delivery = (outcome: "landed" | "checkFailed" | "stale", taskId = "t1"): OrchestratorEvent => ({
   kind: "delivery",
   taskId,
   title: `Task ${taskId}`,
@@ -342,6 +342,12 @@ describe("settling a batch", () => {
     // …unless it is about something else, or long ago.
     const old = { ...started, at: -10 * TIMING.nearMs };
     expect(settle(batch.slice(0, 1), [old, ...batch], live())).toHaveLength(1);
+  });
+
+  it("lets a delivery say why its task went back to doing", () => {
+    const back = entry({ kind: "taskMoved", taskId: "b", title: "B", from: "review", to: "doing", by: null }, 1_000);
+    const stale = entry(delivery("stale", "b"), 1_200);
+    expect(settle([back, stale], [back, stale], live())).toEqual([stale.event]);
   });
 
   it("drops a wait or an idle the moment has overtaken", () => {

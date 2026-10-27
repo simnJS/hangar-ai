@@ -18,6 +18,10 @@ import type { Pane, ShellInfo, Workspace } from "../types";
  * worker goes; a failed one goes back to its worker, as a message from Hangar,
  * with what to fix — until the third failure, which is the person's.
  *
+ * One that passed but waits for the person stands for the branch as it was
+ * tested: new commits on it replace it with a delivery of their own, through
+ * the merge, the check and the review again, and it never lands past them.
+ *
  * Every text below that a model reads is English and says what to do next.
  */
 
@@ -63,6 +67,17 @@ export interface DeliveryPlan {
   target: string;
   /** Commits the target does not have yet. */
   ahead: number;
+  /** The task's delivery that waits for the person, when preflight was asked about a task. */
+  tested?: TestedDelivery | null;
+}
+
+export interface TestedDelivery {
+  /** The head of the target it was tested on. */
+  base: string;
+  /** The merge it was checked and reviewed as. */
+  merge: string;
+  /** The worker's branch has not moved since: what waits is its latest work. */
+  current: boolean;
 }
 
 export interface DeliveryRequest {
@@ -102,6 +117,8 @@ export interface DeliveryDeps {
     worktree: string;
     target: string | null;
     landing: boolean;
+    /** Also says what of this task's delivery waits for the person. */
+    task?: string;
   }) => Promise<DeliveryPlan>;
   /** Resolves once the delivery is over — minutes, with a check and a review. */
   run: (delivery: DeliveryRequest) => Promise<DeliveryOutcome>;
@@ -257,6 +274,8 @@ function eventDetail(outcome: DeliveryOutcome, target: string): string {
         const more = blocking.length > 1 ? ` (+${blocking.length - 1} more)` : "";
         return `review: ${first.file}${first.line ? `:${first.line}` : ""}: ${first.problem.trim()}${more}`;
       }
+      case "stale":
+        return `the person asked to land it on ${target}; it was tested as ${short(outcome.merge)}`;
       default:
         return headline(outcome.detail);
     }
@@ -331,54 +350,107 @@ async function submit(
             "outcome; do not submit again meanwhile.",
     );
   }
-  const task = (await delivery.board.load(ws.cwd)).tasks.find((entry) => entry.id === taskId);
-  if (!task) {
-    throw new Error(
-      `Your task (${taskId}) is no longer on the board, so there is nothing to deliver it for. Stop here, and say ` +
-        "so in your last message.",
-    );
-  }
-  if (task.column === "done") {
-    throw new Error(`"${task.title}" is already done: there is nothing more to deliver. Stop here.`);
-  }
-  if (task.labels.includes(READY_LABEL)) {
-    throw new Error(
-      `"${task.title}" already passed its check and its review, and waits for the person to land it. There is ` +
-        "nothing more for you to do: stop here.",
-    );
-  }
-  if (task.column !== "doing") {
-    throw new Error(
-      `"${task.title}" is in ${task.column}, not doing: nobody is meant to be working on it now. Stop here.`,
-    );
-  }
-
-  const settings = orchestrationOf(ws);
-  const worktree = resolvePath(ws.cwd, pane.cwd || ws.cwd);
-  const plan = await delivery
-    .preflight({ workspace: ws.cwd, worktree, target: settings.branch, landing: false })
-    .catch((err) => {
-      throw new Error(messageOf(err));
-    });
-  const ahead = (await delivery.running().catch(() => [] as RunningDelivery[])).filter(
-    (entry) => entry.queue === plan.queue,
-  ).length;
-
+  // Taken before anything is awaited: the person landing it, or a second
+  // submission, waits for this one.
   inFlight.set(taskId, { workspaceId: ws.id, worker: pane.name, since: Date.now(), landing: false });
-  void deliver(ws, pane, task, plan, text(args.summary), deps, delivery, false);
+  let started = false;
+  try {
+    const task = (await delivery.board.load(ws.cwd)).tasks.find((entry) => entry.id === taskId);
+    if (!task) {
+      throw new Error(
+        `Your task (${taskId}) is no longer on the board, so there is nothing to deliver it for. Stop here, and ` +
+          "say so in your last message.",
+      );
+    }
+    if (task.column === "done") {
+      throw new Error(`"${task.title}" is already done: there is nothing more to deliver. Stop here.`);
+    }
+    // Passed, and waiting for the person to land it.
+    const waiting = task.labels.includes(READY_LABEL);
+    if (task.column !== "doing" && !(waiting && task.column === "review")) {
+      throw new Error(
+        `"${task.title}" is in ${task.column}, not doing: nobody is meant to be working on it now. Stop here.`,
+      );
+    }
 
-  const check = settings.checkCommand ? `runs \`${settings.checkCommand}\` there, ` : "";
+    const settings = orchestrationOf(ws);
+    const worktree = resolvePath(ws.cwd, pane.cwd || ws.cwd);
+    const plan = await delivery
+      .preflight({ workspace: ws.cwd, worktree, target: settings.branch, landing: false, task: taskId })
+      .catch((err) => {
+        throw new Error(messageOf(err));
+      });
+
+    const tested = plan.tested ?? null;
+    if (waiting && tested?.current) {
+      return waitsAlready(ws, pane, task, plan, tested);
+    }
+    if (waiting) {
+      // New commits since it passed: what waited no longer stands for the
+      // branch. It goes, and this one takes the whole way again.
+      await delivery.board.update(ws.cwd, taskId, { column: "doing", labels: without(task.labels, READY_LABEL) });
+      await delivery.board.comment(
+        ws.cwd,
+        taskId,
+        HANGAR,
+        `Submitted again with new commits on ${plan.branch}: the delivery that waited for the person` +
+          `${tested ? ` (tested as ${short(tested.merge)})` : ""} is withdrawn, and this one is merged, checked and ` +
+          "reviewed before it can land.",
+      );
+    }
+    const ahead = (await delivery.running().catch(() => [] as RunningDelivery[])).filter(
+      (entry) => entry.queue === plan.queue,
+    ).length;
+
+    started = true;
+    void deliver(ws, pane, task, plan, text(args.summary), deps, delivery, false);
+
+    const check = settings.checkCommand ? `runs \`${settings.checkCommand}\` there, ` : "";
+    return {
+      submitted: true,
+      task: task.title,
+      branch: plan.branch,
+      target: plan.target,
+      commits: plan.ahead,
+      ...(ahead ? { queuedBehind: ahead } : {}),
+      ...(waiting ? { replaces: tested ? short(tested.merge) : "the delivery that waited for the person" } : {}),
+      next:
+        `Hangar now merges ${plan.branch} onto ${plan.target} in a separate worktree, ${check}and has a reviewer ` +
+        "read the change. The outcome comes to you as a message from Hangar, usually within minutes. End your " +
+        `turn now and wait; do not change ${plan.branch} meanwhile.`,
+    };
+  } finally {
+    if (!started) inFlight.delete(taskId);
+  }
+}
+
+/**
+ * Submitted again without a new commit: what passed still waits for the
+ * person, and the worker has nothing to do. Said to the orchestrator too, which
+ * may be waiting on this submission.
+ */
+function waitsAlready(ws: Workspace, pane: Pane, task: Task, plan: DeliveryPlan, tested: TestedDelivery) {
+  const testedAs = short(tested.merge);
+  postOrchestratorEvent(ws.id, {
+    kind: "delivery",
+    taskId: task.id,
+    title: task.title,
+    worker: pane.name,
+    outcome: "ready",
+    detail: `submitted again without a new commit: still waits to land on ${plan.target} as tested (${testedAs})`,
+  });
   return {
-    submitted: true,
+    submitted: false,
+    waiting: true,
     task: task.title,
     branch: plan.branch,
     target: plan.target,
-    commits: plan.ahead,
-    ...(ahead ? { queuedBehind: ahead } : {}),
+    testedAs,
     next:
-      `Hangar now merges ${plan.branch} onto ${plan.target} in a separate worktree, ${check}and has a reviewer ` +
-      "read the change. The outcome comes to you as a message from Hangar, usually within minutes. End your " +
-      `turn now and wait; do not change ${plan.branch} meanwhile.`,
+      `This delivery already passed its check and its review, as ${testedAs}, and waits for the person to land it on ` +
+      `${plan.target}: ${plan.branch} has no commit since. There is nothing more for you to do: stop here. If you ` +
+      `were asked to change something, commit the change on ${plan.branch}, then call delivery_submit again: the ` +
+      "new delivery replaces the one waiting.",
   };
 }
 
@@ -540,6 +612,22 @@ async function settle(
     return;
   }
 
+  if (outcome.outcome === "stale") {
+    // Nothing landed and nothing failed: the worker moved on past what
+    // waited, which goes; its next submission is the delivery.
+    await delivery.board.update(cwd, task.id, { column: "doing", labels: without(current.labels, READY_LABEL) });
+    await delivery.board.comment(
+      cwd,
+      task.id,
+      HANGAR,
+      `Not landed: ${branch} has commits that were not in the delivery that waited (tested as ` +
+        `${short(outcome.merge)}). It is withdrawn; ${pane.name} was asked to submit again.`,
+    );
+    if (worker) await delivery.tell(worker.id, `"${current.title}" was not landed.\n\n${outcome.detail}`);
+    post(eventDetail(outcome, target));
+    return;
+  }
+
   // A failure: back to the worker, with what to fix.
   const failures =
     current.comments.filter((comment) => comment.author === HANGAR && comment.text.startsWith(FAILED)).length + 1;
@@ -580,32 +668,53 @@ async function settle(
 /**
  * Lands a delivery that passed its check and its review but waits for the
  * person, as it does with automatic landing off. Lands the merge that was
- * tested when the branch has not moved since, and tests it again first when
- * it has. Rejects with what stood in the way when it does not land, in words
- * for the person who asked.
+ * tested when the target branch has not moved since, and tests it again first
+ * when it has; never once the worker's branch has moved past it. Rejects with
+ * what stood in the way when it does not land, in words for the person who
+ * asked.
  */
 export async function landDelivery(ws: Workspace, taskId: string, deps: ControlDeps): Promise<void> {
   const delivery = requireDeps(deps);
   if (inFlight.has(taskId)) throw new Error("This delivery is being tested or landed already.");
-  const task = (await delivery.board.load(ws.cwd)).tasks.find((entry) => entry.id === taskId);
-  if (!task) throw new Error(`No task ${taskId} on the board of "${ws.name}".`);
   const pane = workersOf(ws).find((entry) => entry.taskId === taskId);
-  if (!pane) {
-    throw new Error(`No worker holds "${task.title}" any more, so there is no branch to land.`);
+  // Taken before anything is awaited, like a submission.
+  inFlight.set(taskId, { workspaceId: ws.id, worker: pane?.name ?? "", since: Date.now(), landing: true });
+  let started = false;
+  let plan: DeliveryPlan;
+  let outcome: DeliveryOutcome;
+  try {
+    const task = (await delivery.board.load(ws.cwd)).tasks.find((entry) => entry.id === taskId);
+    if (!task) throw new Error(`No task ${taskId} on the board of "${ws.name}".`);
+    if (!pane) {
+      throw new Error(`No worker holds "${task.title}" any more, so there is no branch to land.`);
+    }
+    // Submitted again since, or sent back: what is there now was not tested.
+    if (!task.labels.includes(READY_LABEL)) {
+      throw new Error(`Nothing of "${task.title}" waits to land any more: the board shows where it is now.`);
+    }
+    plan = await delivery
+      .preflight({
+        workspace: ws.cwd,
+        worktree: resolvePath(ws.cwd, pane.cwd || ws.cwd),
+        target: orchestrationOf(ws).branch,
+        landing: true,
+      })
+      .catch((err) => {
+        throw new Error(messageOf(err));
+      });
+    started = true;
+    outcome = await deliver(ws, pane, task, plan, null, deps, delivery, true);
+  } finally {
+    if (!started) inFlight.delete(taskId);
   }
-  const plan = await delivery
-    .preflight({
-      workspace: ws.cwd,
-      worktree: resolvePath(ws.cwd, pane.cwd || ws.cwd),
-      target: orchestrationOf(ws).branch,
-      landing: true,
-    })
-    .catch((err) => {
-      throw new Error(messageOf(err));
-    });
-  inFlight.set(taskId, { workspaceId: ws.id, worker: pane.name, since: Date.now(), landing: true });
-  const outcome = await deliver(ws, pane, task, plan, null, deps, delivery, true);
   if (outcome.outcome === "landed") return;
+  if (outcome.outcome === "stale") {
+    throw new Error(
+      `${pane.name} committed on ${plan.branch} after it was checked and reviewed, so it would not land what is ` +
+        `there now. Nothing was landed: ${pane.name} was asked to submit it again, and it comes back here once ` +
+        "checked and reviewed.",
+    );
+  }
   if (outcome.outcome === "dirty" && outcome.inCheckout) {
     const files = outcome.files.length ? ` (${outcome.files.join(", ")})` : "";
     throw new Error(

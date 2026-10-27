@@ -10,6 +10,7 @@ import {
   type DeliveryDeps,
   type DeliveryOutcome,
   type DeliveryRequest,
+  type TestedDelivery,
 } from "./deliveryControl";
 import type { OrchestratorEvent } from "./orchestratorEvents";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type Workspace } from "../types";
@@ -67,6 +68,9 @@ let log: string[];
 let runs: DeliveryRequest[];
 let next: (request: DeliveryRequest) => Promise<DeliveryOutcome>;
 let preflightError: string | null;
+/** What preflight says waits for the person, when asked about a task. */
+let tested: TestedDelivery | null;
+let preflightTasks: (string | undefined)[];
 let deps: ControlDeps;
 
 function workspace(): Workspace {
@@ -86,6 +90,8 @@ beforeEach(() => {
   log = [];
   runs = [];
   preflightError = null;
+  tested = null;
+  preflightTasks = [];
   tasks = [task()];
   next = async () => outcome({ outcome: "landed", detail: "worker landed on main (abcdef1)." });
   state = {
@@ -121,8 +127,16 @@ beforeEach(() => {
   const delivery: DeliveryDeps = {
     preflight: async (args) => {
       log.push(`preflight:${args.worktree}:${args.target}:${args.landing}`);
+      preflightTasks.push(args.task);
       if (preflightError) throw preflightError;
-      return { repo: "C:\\dev\\app", queue: "c:/dev/app/.git", branch: "worker/t1", target: "main", ahead: 2 };
+      return {
+        repo: "C:\\dev\\app",
+        queue: "c:/dev/app/.git",
+        branch: "worker/t1",
+        target: "main",
+        ahead: 2,
+        tested: args.task ? tested : null,
+      };
     },
     run: (request) => {
       runs.push(request);
@@ -182,8 +196,8 @@ describe("delivery_submit", () => {
   it("refuses a task that is not being worked on, or already passed", async () => {
     tasks = [task({ column: "done" })];
     await expect(submit()).rejects.toThrow(/already done/);
-    tasks = [task({ column: "review", labels: ["ready-to-land"] })];
-    await expect(submit()).rejects.toThrow(/waits for the person to land it/);
+    tasks = [task({ column: "review" })];
+    await expect(submit()).rejects.toThrow(/is in review, not doing/);
     tasks = [task({ column: "todo" })];
     await expect(submit()).rejects.toThrow(/is in todo, not doing/);
     tasks = [];
@@ -465,6 +479,170 @@ describe("what follows an outcome", () => {
     state.workspaces[0].panes = state.workspaces[0].panes.filter((entry) => entry.id !== "p2");
     await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(/No worker holds/);
     expect(runs).toEqual([]);
+  });
+
+  it("landing needs a delivery that still waits", async () => {
+    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(
+      'Nothing of "Add the export button" waits to land any more',
+    );
+    expect(runs).toEqual([]);
+    expect(deliveryState("t1")).toBeNull();
+    expect(deliveringIn("w1")).toBe(false);
+  });
+});
+
+describe("a delivery that waits for the person, submitted again", () => {
+  const FAILED_BEFORE = { id: "c0", author: "hangar", text: "Delivery failed (conflict, 1 of 3): x", created_at: 0 };
+
+  beforeEach(() => {
+    state.workspaces[0].orchestration!.autoMerge = false;
+    tasks = [task({ column: "review", labels: ["ui", "ready-to-land"], comments: [FAILED_BEFORE] })];
+  });
+
+  it("unchanged, still waits: the worker is told so, without an error, and nothing runs", async () => {
+    tested = { base: "1234567abcdef", merge: "abcdef1234567890", current: true };
+
+    const answer = (await submit()) as Record<string, unknown>;
+
+    expect(preflightTasks).toEqual(["t1"]);
+    expect(answer).toMatchObject({ submitted: false, waiting: true, testedAs: "abcdef1", target: "main" });
+    expect(answer.next).toMatch(/already passed its check and its review, as abcdef1.*stop here/s);
+    expect(answer.next).toMatch(/commit the change on worker\/t1, then call delivery_submit again/);
+    expect(runs).toEqual([]);
+    expect(tasks[0]).toMatchObject({ column: "review", labels: ["ui", "ready-to-land"] });
+    expect(tasks[0].comments).toEqual([FAILED_BEFORE]);
+    expect(events).toEqual([
+      {
+        workspaceId: "w1",
+        event: {
+          kind: "delivery",
+          taskId: "t1",
+          title: "Add the export button",
+          worker: "Bo",
+          outcome: "ready",
+          detail: "submitted again without a new commit: still waits to land on main as tested (abcdef1)",
+        },
+      },
+    ]);
+    expect(deliveryState("t1")).toBeNull();
+    expect(deliveringIn("w1")).toBe(false);
+  });
+
+  it("with new commits, replaces it and takes the whole way again; only the new one lands", async () => {
+    tested = { base: "1234567abcdef", merge: "abcdef1234567890", current: false };
+    let finish: (value: DeliveryOutcome) => void = () => undefined;
+    next = () => new Promise((resolve) => (finish = resolve));
+
+    const answer = (await submit({ summary: "Fixed the empty board." })) as Record<string, unknown>;
+
+    expect(answer).toMatchObject({ submitted: true, replaces: "abcdef1" });
+    expect(runs[0]).toMatchObject({ reuse: false, land: false, summary: "Fixed the empty board." });
+    // Withdrawn at once: nothing offers to land the old one meanwhile.
+    expect(tasks[0]).toMatchObject({ column: "doing", labels: ["ui"] });
+    expect(log).toContain(
+      "comment:t1:hangar:Submitted again with new commits on worker/t1: the delivery that waited for the person " +
+        "(tested as abcdef1) is withdrawn, and this one is merged, checked and reviewed before it can land.",
+    );
+    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(/being tested or landed already/);
+
+    finish(
+      outcome({
+        outcome: "ready",
+        detail: "worker/t1 passed its check and its review. It waits for the person.",
+        merge: "fedcba9876543210",
+        landedIn: null,
+      }),
+    );
+    await settled();
+
+    expect(tasks[0]).toMatchObject({ column: "review", labels: ["ui", "ready-to-land"] });
+    expect(tasks[0].comments[tasks[0].comments.length - 1].text).toContain("tested as fedcba9");
+    expect(events.map(({ event }) => event)).toEqual([
+      expect.objectContaining({ kind: "delivery", outcome: "ready", detail: "ready to land on main" }),
+    ]);
+
+    next = async () => outcome({ outcome: "landed", detail: "landed", merge: "fedcba9876543210" });
+    await landDelivery(workspace(), "t1", deps);
+    expect(runs[1]).toMatchObject({ land: true, reuse: true });
+    expect(tasks[0]).toMatchObject({ column: "done", labels: ["ui"] });
+    // Not one failed delivery more than before.
+    expect(tasks[0].comments.filter((c) => c.text.startsWith("Delivery failed"))).toEqual([FAILED_BEFORE]);
+  });
+
+  it("with new commits that fail, counts that failure once, and nothing waits any more", async () => {
+    tested = { base: "1234567abcdef", merge: "abcdef1234567890", current: false };
+    next = async () =>
+      outcome({ outcome: "conflict", files: ["src/a.ts"], detail: "Merging worker/t1 onto main conflicts in src/a.ts." });
+
+    await submit();
+    await settled();
+
+    expect(tasks[0]).toMatchObject({ column: "doing", labels: ["ui"] });
+    expect(log).toContain(
+      "comment:t1:hangar:Delivery failed (conflict, 2 of 3): Merging worker/t1 onto main conflicts in src/a.ts.",
+    );
+    expect(log.find((line) => line.startsWith("tell:p2:"))).toContain("Failed deliveries so far: 2 of 3.");
+    expect(events.map(({ event }) => event)).toEqual([
+      expect.objectContaining({
+        kind: "delivery",
+        outcome: "conflict",
+        detail: "conflict with main in src/a.ts (failed delivery 2 of 3)",
+      }),
+    ]);
+  });
+
+  it("is never landed past the worker's newer commits: the worker is asked to submit again", async () => {
+    next = async () =>
+      outcome({
+        outcome: "stale",
+        detail:
+          "worker/t1 has commits that were not part of the delivery waiting to land on main, which was checked and " +
+          "reviewed as abcdef1: it was not landed. Once that work is finished and committed, call delivery_submit again.",
+        landedIn: null,
+      });
+
+    await expect(landDelivery(workspace(), "t1", deps)).rejects.toThrow(
+      "Bo committed on worker/t1 after it was checked and reviewed, so it would not land what is there now. " +
+        "Nothing was landed: Bo was asked to submit it again",
+    );
+
+    expect(runs[0]).toMatchObject({ land: true, reuse: true });
+    expect(tasks[0]).toMatchObject({ column: "doing", labels: ["ui"] });
+    expect(log).toContain(
+      "comment:t1:hangar:Not landed: worker/t1 has commits that were not in the delivery that waited (tested as " +
+        "abcdef1). It is withdrawn; Bo was asked to submit again.",
+    );
+    const told = log.find((line) => line.startsWith("tell:p2:"))!;
+    expect(told).toContain('"Add the export button" was not landed.');
+    expect(told).toContain("call delivery_submit again");
+    expect(log.some((line) => line.startsWith("close:") || line.startsWith("cleanup:"))).toBe(false);
+    expect(tasks[0].comments.filter((c) => c.text.startsWith("Delivery failed"))).toEqual([FAILED_BEFORE]);
+    expect(events.map(({ event }) => event)).toEqual([
+      expect.objectContaining({
+        kind: "delivery",
+        outcome: "stale",
+        detail: "the person asked to land it on main; it was tested as abcdef1",
+      }),
+    ]);
+    expect(deliveryState("t1")?.state).toBe("stale");
+
+    // Submitted again, it is a delivery like any other.
+    tested = null;
+    next = async () => outcome({ outcome: "ready", detail: "passed", landedIn: null });
+    await expect(submit()).resolves.toMatchObject({ submitted: true });
+    await settled();
+    expect(tasks[0]).toMatchObject({ column: "review", labels: ["ui", "ready-to-land"] });
+  });
+
+  it("the person landing and the worker submitting never run side by side", async () => {
+    let finish: (value: DeliveryOutcome) => void = () => undefined;
+    next = () => new Promise((resolve) => (finish = resolve));
+    const landing = landDelivery(workspace(), "t1", deps);
+
+    await expect(submit()).rejects.toThrow(/being landed right now/);
+    finish(outcome({ outcome: "landed", detail: "landed" }));
+    await landing;
+    expect(runs).toHaveLength(1);
   });
 });
 
