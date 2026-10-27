@@ -74,7 +74,7 @@ export async function route(command: string, args: Record<string, any>): Promise
 
     /* ── hangar-bridge queue ── */
     case "bridge_enqueue":
-      return shell.enqueue(args.paneId, args.text);
+      return shell.enqueue(args.paneId, args.text, args.from ?? undefined);
     case "bridge_cancel":
       shell.cancelQueued(args.paneId, args.id ?? null);
       return undefined;
