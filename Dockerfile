@@ -1,4 +1,5 @@
-# Site + démo (même build que Vercel : pnpm demo:build → site/), servi par static-web-server
+# The site and its demo (pnpm demo:build fills site/), served by static-web-server behind
+# Cloudflare at https://hangar.simnjs.fr. See site/README.md.
 FROM node:24-alpine AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10 --activate

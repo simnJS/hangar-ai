@@ -1,4 +1,6 @@
-# static-web-server (image Docker) : mêmes en-têtes que vercel.json
+# static-web-server, in the Dockerfile's image. It types each file by its extension
+# (image/avif, image/webp, font/woff2, image/x-icon…), which nosniff below relies on:
+# a file served under the wrong type is refused rather than guessed.
 [general]
 host = "::"
 port = 80

@@ -25,15 +25,14 @@ npx serve site           # or: python -m http.server -d site 8080
 ```
 
 `site/demo/index.html` is build output: one self-contained file, no assets
-folder, Inter included. It is ignored by git and built by Vercel
-(`vercel.json`) and by the `Dockerfile`.
+folder, Inter included. It is ignored by git and built by the `Dockerfile`.
 
 It is a single file on purpose. The demo loads in an iframe, and relative asset
 paths depend on how the host spells the URL: `serve` alone rewrites
 `/demo/index.html` → `/demo/index` → `/demo`, after which `./assets/x.js`
 resolves against the root and 404s. With nothing to resolve, `/demo`, `/demo/`
 and `/demo/index.html` all work, on any host, under any base path. The frame
-needs `X-Frame-Options: SAMEORIGIN`, which `vercel.json` and `sws.toml` send.
+needs `X-Frame-Options: SAMEORIGIN`, which `sws.toml` sends.
 
 ## The page
 
@@ -92,9 +91,13 @@ DevTools protocol:
   instead makes xterm draw its text twice too large), English forced through
   `navigator.language`;
 - Graphite, the demo's default;
-- the hero and most crops are the **checkout-v2** workspace, once the opening
-  scene has Jade working: Iris orchestrates, Jade and Kai are its workers, and
-  its board holds a question and a delivery ready to merge;
+- the hero and most crops are the **checkout-v2** workspace, about 18 seconds
+  after the demo opens (`demo/backend/checkout.ts` tells its story): Iris, the
+  orchestrator, shows her whole turn, from the objective to the worker she
+  started after Lou's delivery landed; Jade is at work on the cart totals; Kai's
+  delivery waits to be merged; the board holds a question and a blocked task;
+- the notice the demo shows above itself on a page of its own is removed before
+  each capture, as the site's frame hides it;
 - the menu with "Pin as orchestrator" is Ava's pane in hangar-ai; the 3D
   preview is Ava after the prompt `show the model`, with its pane zoomed.
 
@@ -103,7 +106,13 @@ Crops are encoded with Pillow: AVIF at quality 62, WebP at 82, at 1× and 2×
 height, and everything below the hero is `loading="lazy"`.
 
 The outlines numbered on the hero (`.mark`) are positioned in percent of that
-1440 × 900 capture. Recapture at another size and they need moving.
+1440 × 900 capture, from the rectangles of `.pane__bar`, `.orch-badge`,
+`.needs-btn` and `.inspector`. Recapture at another size, or change the
+checkout-v2 layout in `demo/backend/state.ts`, and they need moving.
+
+The README's images (`../.github/assets`) come from the same session, with the
+inspector closed, and `../.github/social-preview.png` (1280 × 640) is rendered
+the way `og.png` is.
 
 `og.png` is an HTML page rendered at 1200 × 630: the brand, the headline, one
 line on the orchestrator, and the hero capture bleeding off the bottom.
@@ -124,12 +133,25 @@ Hangar.AI-<v>-1.x86_64.rpm
 ```
 
 `gh release view v<v> --json assets` lists them once the release is out.
-Forgetting to bump is not fatal: the app updates itself after install, and
-"Every file of the latest release" always points at `/releases/latest`.
+Forgetting to bump is not fatal: the app offers each new version once installed,
+and "Every file of the latest release" always points at `/releases/latest`.
 
 ## Deploy
 
-Static. Vercel builds it with `pnpm demo:build` and serves `site/`
-(`vercel.json`); the `Dockerfile` does the same with static-web-server. The
-canonical address is https://hangar.simnjs.fr, which the canonical link and the
-Open Graph tags name.
+Static, served by [static-web-server](https://static-web-server.net) behind
+Cloudflare. The `Dockerfile` at the root runs `pnpm demo:build` and copies
+`site/` into the server's image; `sws.toml` is its configuration: compression,
+and on every response `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+SAMEORIGIN` (the demo's frame), a referrer policy and a permissions policy.
+
+static-web-server picks the `Content-Type` from the extension, and gets every one
+the page uses right (`image/avif`, `image/webp`, `font/woff2`, `image/x-icon`,
+`image/svg+xml`), which `nosniff` makes load-bearing: a wrong one and the browser
+refuses the file. After a change of server or of image format, check them:
+
+```bash
+curl -sI https://hangar.simnjs.fr/img/hero-1280.avif | grep -i content-type
+```
+
+The canonical address is https://hangar.simnjs.fr, which the canonical link and
+the Open Graph tags name.
