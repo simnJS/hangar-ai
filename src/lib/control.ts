@@ -97,6 +97,8 @@ export interface ControlDeps {
   modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
   // orchestration: workers deps
   // orchestration: delivery deps
+  /** Merges, checks, reviews and lands workers' deliveries (lib/deliveryControl). */
+  delivery?: import("./deliveryControl").DeliveryDeps;
 }
 
 export const DISABLED =

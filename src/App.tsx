@@ -29,6 +29,7 @@ import {
   ptyWrite,
 } from "./lib/ipc";
 import { usePaneControl } from "./lib/control";
+import { deliveryDeps } from "./lib/deliveryControl";
 import {
   carryResume,
   isAsleep,
@@ -704,6 +705,7 @@ export default function App() {
             detached ? remoteModelHost(workspaceId) : localModelHost(workspaceId),
           // orchestration: workers deps
           // orchestration: delivery deps
+          delivery: deliveryDeps(() => shells),
         }
       : null,
   );
