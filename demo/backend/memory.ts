@@ -10,6 +10,7 @@
  */
 import { dispatch } from "../mock/event";
 import type { Memory, MemoryEntry, MemoryPatch, NewMemory } from "../../src/lib/memory";
+import { CHECKOUT, ORCHESTRATOR, PLAN, PLAN_TITLE } from "./checkout";
 
 const MAX_ENTRIES = 1000;
 const MAX_TITLE_CHARS = 200;
@@ -43,6 +44,9 @@ function entry(
 }
 
 const entries: MemoryEntry[] = [
+  // checkout-v2's orchestrator keeps its plan here (lib/orchestratorBrief),
+  // tagged "orchestration", rewritten whole after each event.
+  entry(PLAN_TITLE, PLAN, ["orchestration"], CHECKOUT, ORCHESTRATOR, 0.02),
   entry(
     "Board claims go through one lock",
     "Every board write in src-tauri/src/board.rs takes the same mutex, so two agents racing for a task cannot both win. Never read board.json, change it and write it back from outside that lock: the MCP tools and the HTTP routes already do it right.",

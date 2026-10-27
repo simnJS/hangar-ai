@@ -8,6 +8,7 @@
  */
 import { ORCHESTRATION_DEFAULTS } from "../../src/lib/orchestration";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type ShellInfo } from "../../src/types";
+import { CHECK, CHECKOUT, JADE, KAI, ORCHESTRATOR, WORKSPACE } from "./checkout";
 
 export const HOME = "C:\\Users\\you";
 
@@ -73,32 +74,47 @@ export const SEED_STATE: AppState = {
     workspace("ws-site", "marketing-site-redesign", "C:\\dev\\marketing-site-redesign", null, [
       pane("pane-7", "Leo", "claude"),
     ]),
-    // An orchestrator at work: Iris plans, Jade and Kai each do one task in a
-    // worktree of their own. Its board (backend/board) holds a question for
-    // you and a delivery waiting to be merged, which « Besoin de toi » lists.
+    // An orchestrator at work (backend/checkout tells the story): Iris plans,
+    // Jade has just been started on the cart totals, and Kai's delivery waits
+    // for you to land it, each worker in a worktree of its own. Iris takes the
+    // left half, where her transcript has the room to be read.
     {
-      ...workspace("ws-checkout", "checkout-v2", "C:\\dev\\checkout-v2", null, [
-        pane("pane-20", "Iris", "claude", "01J8ZA-plan-checkout", {
+      ...workspace("ws-checkout", WORKSPACE, CHECKOUT, null, [
+        pane("pane-20", ORCHESTRATOR, "claude", "01J8ZA-plan-checkout", {
           role: "orchestrator",
           model: "opus",
         }),
-        pane("pane-21", "Jade", "claude", "01J8ZB-cart-currency", {
+        // Started a minute ago by worker_spawn: a new session, no resume.
+        pane("pane-21", JADE.name, "claude", null, {
           role: "worker",
-          taskId: "31",
+          taskId: JADE.task.id,
           model: "sonnet",
-          portBase: 41000,
-          cwd: "C:\\dev\\checkout-v2-worktrees\\cart-currency",
+          portBase: JADE.portBase,
+          cwd: JADE.worktree,
         }),
-        pane("pane-22", "Kai", "claude", "01J8ZC-keep-address", {
+        pane("pane-22", KAI.name, "claude", "01J8ZC-keep-address", {
           role: "worker",
-          taskId: "32",
+          taskId: KAI.task.id,
           model: "sonnet",
-          portBase: 41020,
-          cwd: "C:\\dev\\checkout-v2-worktrees\\keep-address",
+          portBase: KAI.portBase,
+          cwd: KAI.worktree,
         }),
       ]),
+      tree: {
+        type: "split",
+        dir: "row",
+        ratio: 0.58,
+        a: { type: "pane", id: "pane-20" },
+        b: {
+          type: "split",
+          dir: "col",
+          ratio: 0.5,
+          a: { type: "pane", id: "pane-21" },
+          b: { type: "pane", id: "pane-22" },
+        },
+      },
       // Deliveries wait for you here, and are checked before they do.
-      orchestration: { ...ORCHESTRATION_DEFAULTS, autoMerge: false, checkCommand: "pnpm test" },
+      orchestration: { ...ORCHESTRATION_DEFAULTS, autoMerge: false, checkCommand: CHECK },
     },
     workspace("ws-store", "storefront", "C:\\dev\\storefront", "f-clients", [
       pane("pane-5", "Eve", "claude"),
@@ -144,9 +160,8 @@ export const SESSIONS: Record<string, { id: string; label: string; modified_ms: 
     { id: "01J8Z4-pty-bridge", label: "Refactor the pty bridge for WSL paths", modified_ms: Date.now() - 5 * 60_000 },
     { id: "01J8Y1-theme-port", label: "Port four more VS Code themes", modified_ms: Date.now() - 3 * 3600_000 },
     { id: "01J8W7-installer", label: "Installer bitmaps and the new mark", modified_ms: Date.now() - 26 * 3600_000 },
-    { id: "01J8ZA-plan-checkout", label: "Plan checkout v2 and hand it out", modified_ms: Date.now() - 2 * 60_000 },
-    { id: "01J8ZB-cart-currency", label: "Cart: one total per currency", modified_ms: Date.now() - 4 * 60_000 },
-    { id: "01J8ZC-keep-address", label: "Keep the address after a failed payment", modified_ms: Date.now() - 6 * 60_000 },
+    { id: "01J8ZA-plan-checkout", label: "Plan checkout v2 and hand it out", modified_ms: Date.now() - 60_000 },
+    { id: "01J8ZC-keep-address", label: "Keep the address after a failed payment", modified_ms: Date.now() - 3 * 60_000 },
   ],
   codex: [
     { id: "01J8Z6-board-tests", label: "Tests for atomic board claims", modified_ms: Date.now() - 9 * 60_000 },

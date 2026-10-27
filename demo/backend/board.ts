@@ -8,6 +8,24 @@
  */
 import { dispatch } from "../mock/event";
 import type { BoardColumn, NewTask, Task, TaskPatch } from "../../src/lib/board";
+import {
+  ADDRESS,
+  CART,
+  CHECK,
+  CHECKOUT,
+  COUPON,
+  HELPERS,
+  JADE,
+  KAI,
+  KAI_MERGE,
+  LOU,
+  LOU_MERGE,
+  ORCHESTRATOR,
+  PROVIDER,
+  PROVIDER_QUESTION,
+  TARGET,
+  type StoryTask,
+} from "./checkout";
 
 let serial = 100;
 const now = () => Date.now();
@@ -38,48 +56,69 @@ function task(
 const boards = new Map<string, Task[]>();
 
 function seed(cwd: string): Task[] {
-  // The orchestrated workspace (backend/state): its orchestrator's plan, two
-  // tasks out with workers, a question for you, a delivery waiting for you.
+  // The orchestrated workspace (backend/checkout tells its story): a question
+  // for you, Jade at work, Kai's delivery waiting for you, a task held back
+  // because it owns Kai's folder too, and Lou's delivery landed.
   if (cwd.endsWith("checkout-v2")) {
+    const story = (t: StoryTask, column: BoardColumn, extra: Partial<Task> = {}) =>
+      task(t.id, t.title, column, {
+        description: t.description,
+        priority: t.priority,
+        labels: t.labels,
+        depends_on: t.depends_on,
+        owns: t.owns,
+        ...extra,
+      });
+    const minutes = (n: number) => now() - n * 60_000;
     return [
-      task("30", "Pick the payment provider for EU cards", "todo", {
-        priority: 3,
-        labels: ["needs-you"],
-        description: "Decides how tasks 35 to 37 are built.",
-        comments: [
-          {
-            id: "c30",
-            author: "Iris",
-            text: "Stripe or Adyen for the EU cards? Stripe is already wired for the US; Adyen costs less above 50k a month. I hold the three tasks that depend on it until you say.",
-            created_at: now() - 6 * 60_000,
-          },
-        ],
+      story(PROVIDER, "todo", {
+        created_at: minutes(41),
+        comments: [{ id: "c30", author: ORCHESTRATOR, text: PROVIDER_QUESTION, created_at: minutes(40) }],
       }),
-      task("31", "Cart: one total per currency", "doing", {
-        priority: 2,
-        assignee: "Jade",
-        doing_since: now() - 18 * 60_000,
+      story(COUPON, "todo", { created_at: minutes(41) }),
+      story(CART, "doing", {
+        assignee: JADE.name,
+        attempts: 1,
+        doing_since: now(),
+        created_at: minutes(41),
       }),
-      task("32", "Keep the address after a failed payment", "doing", {
-        assignee: "Kai",
-        doing_since: now() - 9 * 60_000,
-      }),
-      task("33", "Coupon applied twice when a payment is retried", "review", {
-        priority: 2,
-        assignee: "Lou",
+      story(ADDRESS, "review", {
+        assignee: KAI.name,
+        attempts: 1,
         labels: ["ready-to-land"],
-        updated_at: now() - 3 * 60_000,
+        created_at: minutes(41),
+        updated_at: minutes(3),
         comments: [
           {
-            id: "c33",
+            id: "c32a",
+            author: KAI.name,
+            text:
+              "usePaymentRetry() keeps the address and the delivery option on a decline; PaymentStep no longer remounts the form. " +
+              "pnpm test src/checkout: 15 passed.",
+            created_at: minutes(6),
+          },
+          {
+            id: "c32b",
             author: "hangar",
-            text: "Ready to land: pnpm test passed (142 tests), review approved with one note — retryKey could be named for what it holds.",
-            created_at: now() - 3 * 60_000,
+            text: `Passed: waits for the person to land it on ${TARGET} (tested as ${KAI_MERGE}).\nCheck: \`${CHECK}\` passed in 38 s.\nReview (sonnet): approved.`,
+            created_at: minutes(3),
           },
         ],
       }),
-      task("34", "Order confirmation in the customer's language", "todo", { depends_on: ["31"] }),
-      task("29", "Price formatting helpers", "done", { assignee: "Jade" }),
+      story(HELPERS, "done", {
+        assignee: LOU.name,
+        attempts: 1,
+        created_at: minutes(41),
+        updated_at: minutes(1),
+        comments: [
+          {
+            id: "c29",
+            author: "hangar",
+            text: `Landed on ${TARGET} (${LOU_MERGE}), fast-forwarded in ${CHECKOUT}.\nCheck: \`${CHECK}\` passed in 36 s.\nReview (sonnet): approved.`,
+            created_at: minutes(1),
+          },
+        ],
+      }),
     ];
   }
   if (cwd.endsWith("storefront")) {
@@ -154,6 +193,7 @@ export function create(cwd: string, input: NewTask): Task {
     priority: input.priority ?? 1,
     labels: input.labels ?? [],
     depends_on: input.depends_on ?? [],
+    ...(input.owns?.length ? { owns: input.owns } : {}),
     created_at: now(),
     updated_at: now(),
     doing_since: column === "doing" ? now() : null,
@@ -174,6 +214,7 @@ export function update(cwd: string, id: string, patch: TaskPatch): Task {
   if (patch.priority !== undefined) found.priority = patch.priority;
   if (patch.labels !== undefined) found.labels = patch.labels;
   if (patch.depends_on !== undefined) found.depends_on = patch.depends_on;
+  if (patch.owns !== undefined) found.owns = patch.owns;
   if (patch.order !== undefined) found.order = patch.order;
   found.updated_at = now();
   changed(cwd);

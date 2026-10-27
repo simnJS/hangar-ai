@@ -19,6 +19,7 @@ import {
   appState,
   setAppState,
 } from "./state";
+import { shaOf } from "./checkout";
 import type { AppState } from "../../src/types";
 
 const MCP_TARGETS = [
@@ -45,6 +46,59 @@ const MCP_SERVERS = [
   { name: "docs", scope: "user", transport: "http", summary: "mcp.example.com", status: "active", hangar: false, source: "~/.claude.json" },
   { name: "playwright", scope: "project", transport: "stdio", summary: "npx @playwright/mcp", status: "unapproved", hangar: false, source: ".mcp.json" },
 ];
+
+/** A worker's branch from its worktree's folder, as lib/worktrees named the folder after it. */
+function branchOf(worktree: string): string {
+  const folder = worktree.split(/[\\/]/).pop() ?? "";
+  return folder.startsWith("hangar-") ? `hangar/${folder.slice("hangar-".length)}` : "hangar/demo";
+}
+
+/**
+ * delivery.rs, as far as its outcome goes: submitted by a worker, the check
+ * and the review take a few seconds and pass; landed by the person, the merge
+ * tested back then lands at once.
+ */
+function deliver(delivery: {
+  workspace: string;
+  branch: string;
+  target: string;
+  checkCommand: string | null;
+  land: boolean;
+  reuse: boolean;
+}) {
+  const merge = shaOf(delivery.branch);
+  const tested = !delivery.reuse;
+  const outcome = {
+    files: [],
+    inCheckout: false,
+    changed: [],
+    outsideOwns: [],
+    check:
+      tested && delivery.checkCommand
+        ? { command: delivery.checkCommand, passed: true, exitCode: 0, timedOut: false, seconds: 37, tail: "" }
+        : null,
+    review: tested ? { approve: true, blocking: [], notes: "" } : null,
+    merge,
+    base: shaOf(delivery.target),
+  };
+  const answer = delivery.land
+    ? {
+        ...outcome,
+        outcome: "landed",
+        detail: `${delivery.branch} landed on ${delivery.target} (${merge.slice(0, 7)}).`,
+        landedIn: delivery.workspace,
+      }
+    : {
+        ...outcome,
+        outcome: "ready",
+        detail:
+          `${delivery.branch} passed ${delivery.checkCommand ? "its check and " : ""}its review. Automatic landing ` +
+          `is off in this workspace, so it waits for the person to land it on ${delivery.target}. There is nothing ` +
+          "more for you to do: stop here.",
+        landedIn: null,
+      };
+  return new Promise((resolve) => setTimeout(() => resolve(answer), tested ? 9000 : 1500));
+}
 
 /** Flipped by mcp_install so the panel reflects what you just did. */
 const configured = new Set(MCP_TARGETS.filter((t) => t.configured).map((t) => t.id));
@@ -122,24 +176,20 @@ export async function route(command: string, args: Record<string, any>): Promise
       return board.comment(args.cwd, args.id, args.author, args.text);
 
     /* ── deliveries ──
-       The browser has no git: a delivery waiting for the person lands as it
-       was tested, its worker goes, and the board says so. */
+       The browser has no git: a delivery passes as it would with a green
+       check and an approving review, in about the time those take, and says
+       what delivery.rs says. With automatic landing off it waits for the
+       person; landed, its worker goes and the board says so. */
     case "delivery_preflight":
-      return { repo: args.workspace, queue: args.workspace, branch: "hangar/demo", target: "main", ahead: 1 };
-    case "delivery_run":
       return {
-        outcome: "landed",
-        detail: "hangar/demo landed on main (d3m0f00).",
-        files: [],
-        inCheckout: false,
-        changed: [],
-        outsideOwns: [],
-        check: null,
-        review: null,
-        merge: "d3m0f00d",
-        base: null,
-        landedIn: args.delivery?.workspace ?? null,
+        repo: args.workspace,
+        queue: args.workspace,
+        branch: branchOf(String(args.worktree ?? "")),
+        target: "main",
+        ahead: 2,
       };
+    case "delivery_run":
+      return deliver(args.delivery);
     case "delivery_cleanup":
       return { worktreeRemoved: true, branchDeleted: true, kept: [] };
     case "delivery_running":
@@ -233,12 +283,13 @@ export async function route(command: string, args: Record<string, any>): Promise
        installed and the button refuses rather than throwing. */
     case "voice_models":
       return [
+        // The app's one model (src-tauri/src/voice/models.rs).
         {
-          id: "parakeet-tdt-0.6b-v3",
-          label: "Parakeet TDT 0.6b v3",
-          approxBytes: 660_000_000,
-          languages: "25",
-          license: "CC-BY-4.0",
+          id: "whisper-small-q5_1",
+          label: "Whisper small",
+          approxBytes: 181 * 1024 * 1024,
+          languages: "99",
+          license: "MIT",
           installed: false,
         },
       ];

@@ -6,6 +6,38 @@ body,
   height: 100%;
 }
 
+/* The notice above the app, when the demo has a page to itself: the app
+   takes the rest of the height. */
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+#root > .app {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.demo-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  color: var(--fg-muted);
+  font: 12px/1.5 var(--ui-font);
+  text-align: center;
+}
+
+.demo-notice a {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* The app draws its own rounded window; inside an iframe the frame is the
    page's, so square it off and let the embed provide the corners. */
 .app {

@@ -2,16 +2,28 @@
  * What the fake agents answer.
  *
  * These are canned transcripts, chosen by keyword. Nothing here talks to a
- * model. The demo says so in the banner each agent prints on start, and the
- * page around it says so too. Keep it that way.
+ * model. The demo says so once: in the bar above the frame on the site, and
+ * above the app when the demo has a page of its own (demo/main.tsx). Keep it
+ * that way.
  *
  * Some replies really do move the board, so switching to the Board view after
- * watching a pane work shows what the pane just did. One really calls a Hangar
- * tool: "show the model" opens the sample model in the 3D preview.
+ * watching a pane work shows what the pane just did. Some really call a Hangar
+ * tool through the app: "show the model" opens the sample model in the 3D
+ * preview, and checkout-v2's agents hand in deliveries and start workers
+ * (backend/checkoutReplies).
  */
 import * as board from "./board";
 import * as control from "./control";
 import { appState } from "./state";
+import {
+  orchestratorEvent,
+  orchestratorReply,
+  workerBriefReply,
+  workerEvent,
+} from "./checkoutReplies";
+import type { PaneRole } from "../../src/types";
+
+export { historyFor } from "./checkoutReplies";
 
 export interface Ctx {
   cwd: string;
@@ -19,6 +31,10 @@ export interface Ctx {
   /** The pane's id, which is also its PTY's. */
   pane: string;
   name: string | null;
+  /** Where the pane's board is: its workspace's folder, from a worktree too. */
+  board: string;
+  /** An orchestrator's or a worker's part, null for a pane of its own. */
+  role: PaneRole | null;
 }
 
 /**
@@ -78,13 +94,13 @@ function tests(): Step[] {
       text: tool("board_update_task(#11, column: done)", "moved to done"),
       fx: (ctx) => {
         try {
-          board.update(ctx.cwd, "11", { column: "done", assignee: ctx.agent });
+          board.update(ctx.board, "11", { column: "done", assignee: ctx.agent });
         } catch {
           /* the demo board may not hold that id */
         }
       },
     },
-    { after: 400, text: nl(`\r\n  Two agents can't both win a claim now. The second gets an error\r\n  instead of a task someone else is already holding.`) },
+    { after: 400, text: nl(`\r\n  Two agents can't both win a claim now. The second gets an error instead of a task someone else is already holding.`) },
   ];
 }
 
@@ -148,7 +164,7 @@ function refactor(subject: string): Step[] {
     { after: 800, text: tool("Edit(src-tauri/src/pty.rs)", "+18 −6") },
     { after: 700, text: tool("Bash(cargo check)", "Finished in 6.1s") },
     { after: 600, text: ok("cargo check clean") },
-    { after: 500, text: nl(`\r\n  ${subject} now resolves through ${C.cyan}wslpath -w${C.reset} before the spawn,\r\n  so a WSL pane opens in the directory you actually picked.`) },
+    { after: 500, text: nl(`\r\n  ${subject} now resolves through ${C.cyan}wslpath -w${C.reset} before the spawn, so a WSL pane opens in the directory you actually picked.`) },
   ];
 }
 
@@ -162,7 +178,7 @@ function i18n(): Step[] {
       after: 700,
       text: tool("board_create_task(\"Two fr keys are missing\")", "filed"),
       fx: (ctx) => {
-        board.create(ctx.cwd, {
+        board.create(ctx.board, {
           title: "Two fr keys are missing in src/i18n.ts",
           description: "settings.discord.hint and board.emptyColumn",
           labels: ["i18n"],
@@ -170,7 +186,7 @@ function i18n(): Step[] {
         });
       },
     },
-    { after: 600, text: nl(`\r\n  The fr table is typed against en, so this fails the build rather\r\n  than falling back at runtime. Filed it for whoever picks it up.`) },
+    { after: 600, text: nl(`\r\n  The fr table is typed against en, so this fails the build rather than falling back at runtime. Filed it for whoever picks it up.`) },
   ];
 }
 
@@ -185,14 +201,14 @@ function boardWork(): Step[] {
     {
       after: 700,
       text: (ctx) => {
-        const c = board.counts(ctx.cwd);
+        const c = board.counts(ctx.board);
         return nl(`  ${C.dim}${c.todo} open · ${c.doing} in progress · ${c.review} in review · ${c.done} done${C.reset}`);
       },
     },
     {
       after: 700,
       fx: (ctx) => {
-        const t = board.next(ctx.cwd);
+        const t = board.next(ctx.board);
         picked = t ? { id: t.id, title: t.title } : null;
       },
       text: () =>
@@ -205,7 +221,7 @@ function boardWork(): Step[] {
       fx: (ctx) => {
         if (!picked) return;
         try {
-          board.claim(ctx.cwd, picked.id, ctx.agent);
+          board.claim(ctx.board, picked.id, ctx.agent);
         } catch {
           // Someone got there first, which is exactly what the lock is for.
           lost = true;
@@ -221,7 +237,7 @@ function boardWork(): Step[] {
       after: 600,
       text: () =>
         picked && !lost
-          ? nl(`\r\n  Holding ${C.bold}#${picked.id}${C.reset} now. Open the ${C.cyan}Board${C.reset} tab. It moved\r\n  to Doing while you were reading this.`)
+          ? nl(`\r\n  Holding ${C.bold}#${picked.id}${C.reset} now. Open the ${C.cyan}Board${C.reset} tab. It moved to Doing while you were reading this.`)
           : nl(`\r\n  Open the ${C.cyan}Board${C.reset} tab to see where things stand.`),
     },
   ];
@@ -304,13 +320,13 @@ function showModel(french: boolean): Step[] {
                 // The user moved to another workspace meanwhile: the model
                 // waits in this one's preview, as the answer says.
                 french
-                  ? `\r\n  Il t'attend dans l'aperçu 3D de ce workspace : tu es sur un autre en ce\r\n  moment, je ne l'ai pas ouvert par-dessus.`
-                  : `\r\n  It is waiting in this workspace's 3D preview: you are on another one right\r\n  now, so I did not open it over that.`,
+                  ? `\r\n  Il t'attend dans l'aperçu 3D de ce workspace : tu es sur un autre en ce moment, je ne l'ai pas ouvert par-dessus.`
+                  : `\r\n  It is waiting in this workspace's 3D preview: you are on another one right now, so I did not open it over that.`,
               )
             : nl(
               french
-                ? `\r\n  Le voilà, dans l'aperçu 3D à côté des terminaux. Fais-le tourner à la\r\n  souris, molette pour zoomer.`
-                : `\r\n  There it is, in the 3D preview beside the terminals. Drag to turn it,\r\n  scroll to zoom.`,
+                ? `\r\n  Le voilà, dans l'aperçu 3D à côté des terminaux. Fais-le tourner à la souris, molette pour zoomer.`
+                : `\r\n  There it is, in the 3D preview beside the terminals. Drag to turn it, scroll to zoom.`,
             ),
     },
   ];
@@ -334,7 +350,7 @@ function themes(): Step[] {
     { after: 800, text: say("32 palettes, 24 dark and 8 light.") },
     { after: 700, text: nl(`  ${C.dim}Each one carries an accent the window chrome uses,${C.reset}`) },
     { after: 400, text: nl(`  ${C.dim}not just the sixteen ANSI colours.${C.reset}`) },
-    { after: 600, text: nl(`\r\n  Settings → Appearance switches them live. Try it. The whole\r\n  window follows, this pane included.`) },
+    { after: 600, text: nl(`\r\n  Settings → Appearance switches them live. Try it. The whole window follows, this pane included.`) },
   ];
 }
 
@@ -370,8 +386,26 @@ function generic(prompt: string): Step[] {
   ];
 }
 
-export function replyFor(agent: string, prompt: string): Step[] {
+/** Who a line came from and who it went to, when it matters for the answer. */
+export interface About {
+  /** Who queued it (an agent's pane name, or `hangar`); absent for the person. */
+  from?: string;
+  role?: PaneRole | null;
+}
+
+export function replyFor(agent: string, prompt: string, about: About = {}): Step[] {
   if (!prompt.trim()) return [];
+
+  // Hangar's own messages: a delivery's outcome, a batch of events.
+  if (about.from === "hangar") {
+    return about.role === "orchestrator" ? orchestratorEvent(prompt) : workerEvent(prompt);
+  }
+  // A worker's brief, from its orchestrator.
+  if (about.from && about.role === "worker") {
+    const work = workerBriefReply(prompt);
+    if (work) return work;
+  }
+
   // Padded so a word test can bound both sides without missing the first or
   // last word of the line.
   const p = ` ${prompt.toLowerCase()} `;
@@ -398,6 +432,9 @@ export function replyFor(agent: string, prompt: string): Step[] {
     return showModel(french);
   if (has(p, [" hello", " hi ", " hey", " salut", " bonjour", "who are you", "what can you", "help me", "qui es"]))
     return capabilities(agent);
+  // An orchestrator plans and delegates: whatever it is asked, it answers
+  // from the board and its workers, and never takes a task itself.
+  if (about.role === "orchestrator") return orchestratorReply();
   // The jobs backend/scene hands out when the demo opens.
   if (has(p, ["checkout", "coupon"])) return checkout();
   if (has(p, ["migrat", "backfill"])) return migration();

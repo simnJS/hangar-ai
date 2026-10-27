@@ -66,6 +66,24 @@ function PageBridge() {
 }
 
 /**
+ * The one place the demo says what it is, when it stands on its own page. In
+ * the site's frame, the bar above the frame says it instead, so the app keeps
+ * the whole frame. Nothing in the panes repeats it.
+ */
+function DemoNotice() {
+  if (window.self !== window.top) return null;
+  return (
+    <p className="demo-notice">
+      <span>
+        Browser demo of Hangar.AI: the window is the real app, the agents are scripted. No model
+        runs, and nothing is saved.
+      </span>
+      <a href="https://hangar.simnjs.fr/#download">Get the app</a>
+    </p>
+  );
+}
+
+/**
  * Starts what the agents off screen are busy with (backend/scene) once the
  * app has its state, a moment after the workspace on screen has started its
  * own panes.
@@ -86,6 +104,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <StoreProvider>
     <PageBridge />
     <OpeningScene />
+    <DemoNotice />
     <App />
   </StoreProvider>,
 );

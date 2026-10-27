@@ -9,6 +9,7 @@
  * (lib/control), exactly as it does for a real agent.
  */
 import * as control from "./control";
+import { JADE, ORCHESTRATOR, briefOf } from "./checkout";
 import { markAsleep } from "../../src/lib/hibernateStore";
 
 const JOBS: { pane: string; text: string }[] = [
@@ -18,8 +19,6 @@ const JOBS: { pane: string; text: string }[] = [
   { pane: "Max", text: "Migrate the invoice amounts to integer cents" },
   // Done in a few seconds, with nobody looking: your turn.
   { pane: "Leo", text: "Tighten the copy of the pricing page" },
-  // A worker of checkout-v2's orchestrator, on its task: at work.
-  { pane: "Jade", text: "Migrate the cart totals to one per currency" },
 ];
 
 /** Once the app has loaded its state; the control listener comes with it. */
@@ -29,4 +28,15 @@ export function playOpeningScene() {
   for (const job of JOBS) {
     control.ask("pane_send", { ...job, when_idle: true }).catch(() => undefined);
   }
+  // checkout-v2: Iris has just started Jade on the cart totals (backend/checkout),
+  // and the brief lib/workerControl wrote goes to her, signed by Iris, as
+  // worker_spawn queues it.
+  control
+    .ask("pane_send", {
+      pane: JADE.name,
+      text: briefOf(JADE),
+      when_idle: true,
+      caller: { paneId: "pane-20", paneName: ORCHESTRATOR },
+    })
+    .catch(() => undefined);
 }

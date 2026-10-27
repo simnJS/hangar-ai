@@ -29,15 +29,18 @@ mock/notification.ts  stays silent rather than prompting a visitor
 ```
 
 ```
-backend/index.ts      one switch over every command src-tauri exposes
-backend/state.ts      the workspaces, folders, shells and sessions a machine reported
-backend/scene.ts      what the agents off screen are busy with when the demo opens
-backend/board.ts      the task board, in memory, raising board:changed
-backend/memory.ts     the global memory, seeded, raising memory:changed
-backend/shell.ts      the pseudo-terminal: a shell, and an agent mode
-backend/replies.ts    what the agents answer
-backend/model.ts      the 3D preview's file stat, and its URL scheme over fetch()
-backend/stats.ts      four months of made-up usage statistics, seeded
+backend/index.ts            one switch over every command src-tauri exposes
+backend/state.ts            the workspaces, folders, shells and sessions a machine reported
+backend/scene.ts            what the agents off screen are busy with when the demo opens
+backend/checkout.ts         the checkout-v2 story: its tasks, workers, plan and briefs
+backend/checkoutReplies.ts  what checkout-v2's orchestrator and workers say
+backend/board.ts            the task board, in memory, raising board:changed
+backend/memory.ts           the global memory, seeded, raising memory:changed
+backend/shell.ts            the pseudo-terminal: a shell, and an agent mode
+backend/wrap.ts             wraps a transcript at a word, as Claude Code does
+backend/replies.ts          what the agents answer
+backend/model.ts            the 3D preview's file stat, and its URL scheme over fetch()
+backend/stats.ts            four months of made-up usage statistics, seeded
 ```
 
 Because `src/` is untouched, a command that changes name in Rust breaks a panel
@@ -66,14 +69,48 @@ sample needs neither.
 `claude`, `codex`, `gemini` or `opencode`. The app types those itself on launch,
 resume flag included, which is why panes come up already inside an agent.
 
+An agent starts the way Claude Code does: the screen cleared, its header at the
+top. A session the demo has a past for (Iris's and Kai's, in checkout-v2) is
+printed back on resume, as Claude Code prints a conversation it resumes.
+
 In agent mode a line goes to `replies.ts`, which picks a transcript by keyword
 and plays it out on a timer. Some of them really do move the board, so a pane
 that says it claimed a task has claimed it, and the Board view updates while you
-watch.
+watch. Transcripts are wrapped at a word for the pane's width, and drawn again
+when the pane is resized, as Claude Code redraws itself.
+
+A message an agent or Hangar queued for a pane reaches it under the label the
+hangar-bridge mod gives it (`[Hangar] Event — not typed by the person.`), and
+`replies.ts` answers by who sent it: an orchestrator reacts to Hangar's events, a
+worker to its brief and to its delivery's outcome.
 
 **No model runs here, and nothing is written to disk.** Every reply is a string
-in `replies.ts`. The banner each agent prints says so, and so does the page
-around the frame. If you extend this, keep it saying so.
+in `replies.ts` and `checkoutReplies.ts`. The demo says so once: in the bar above
+the frame on the site, and in a line above the app when it is opened on its own
+page (`main.tsx`). Not in every pane, where it would be noise in every capture.
+If you extend this, keep it saying so.
+
+## checkout-v2
+
+The workspace the site's hero is captured on, and the one place the
+orchestration plays out for real. `backend/checkout.ts` holds its story, and the
+board, the memory, the panes and the transcripts all read it:
+
+- Iris, the orchestrator, comes back with her session: the objective, the plan
+  written to memory, five tasks with the files they own, two workers started,
+  then Lou's delivery landing and the cart totals handed to Jade.
+- Jade starts on her brief (`workerBrief` from `src/lib/workerControl.ts`, sent
+  as Iris's message) and does her task live, for about two minutes, down to
+  `delivery_submit`, which goes through the app: the delivery passes (the
+  stand-in in `backend/index.ts` answers as `delivery.rs` would), Needs you
+  lists it, and Iris hears of it.
+- Kai's delivery passed its check and its review and waits for you: **Merge** in
+  Needs you lands it, Kai's pane closes, and Iris tries to start the task it
+  unblocked. `worker_spawn` then fails for real, because the browser has no git
+  for a worktree, and Iris says so.
+
+Branch names, worktree folders and ports follow `src/lib/workerControl.ts`;
+keep them in step if that changes.
 
 ## Adding a reply
 

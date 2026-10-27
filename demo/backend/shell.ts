@@ -9,8 +9,9 @@
  * Rust side does it, so TerminalPane and xterm are none the wiser.
  */
 import { dispatch } from "../mock/event";
-import { replyFor, C, say, type Ctx, type Step } from "./replies";
-import { SESSIONS } from "./state";
+import { replyFor, historyFor, C, say, type Ctx, type Step } from "./replies";
+import { SESSIONS, appState } from "./state";
+import { softWrap, tailAfter } from "./wrap";
 import type { ShellInfo } from "../../src/types";
 
 type Mode = "shell" | "claude" | "codex" | "gemini" | "opencode";
@@ -33,10 +34,19 @@ interface Session {
   historyAt: number;
   /** A permission prompt on screen: the rest of the turn waits for its answer. */
   asking: { rest: Step[]; ctx: Ctx } | null;
+  /**
+   * Everything an agent printed since it started, unwrapped: what a resize
+   * draws again at the new width, as Claude Code redraws its own.
+   */
+  log: string[];
+  /** What the row the next output lands on already shows, as the screen has it. */
+  tail: string;
+  /** The model the agent was started with (`--model`), as Claude Code reports it. */
+  model: string;
 }
 
 const AGENTS: Record<string, { label: string; glyph: string; color: string; version: string }> = {
-  claude: { label: "Claude Code", glyph: "✻", color: C.yellow, version: "2.0.14" },
+  claude: { label: "Claude Code", glyph: "✻", color: C.yellow, version: "2.1.288" },
   codex: { label: "Codex", glyph: "◆", color: C.green, version: "0.9.3" },
   gemini: { label: "Gemini CLI", glyph: "✧", color: C.magenta, version: "0.4.1" },
   opencode: { label: "opencode", glyph: "●", color: C.cyan, version: "0.3.8" },
@@ -45,6 +55,41 @@ const AGENTS: Record<string, { label: string; glyph: string; color: string; vers
 const sessions = new Map<string, Session>();
 
 const out = (s: Session, data: string) => dispatch("pty:output", { id: s.id, data });
+
+/**
+ * A clean terminal, as Claude Code leaves it when it starts and redraws:
+ * screen and scrollback gone. A full reset (RIS) rather than an erase, which
+ * would leave the view where a pane hidden behind another workspace last had
+ * it, scrolled away from what is being printed.
+ */
+const CLEAR = "\x1bc";
+
+/**
+ * What an agent prints: kept for a redraw, and wrapped at the pane's width
+ * the way Claude Code wraps (backend/wrap).
+ */
+function emit(s: Session, text: string) {
+  if (s.mode === "shell") {
+    out(s, text);
+    return;
+  }
+  s.log.push(text);
+  const wrapped = softWrap(text, s.cols, s.tail);
+  out(s, wrapped);
+  // The row on screen, wrapped: where the next output lands.
+  s.tail = tailAfter(s.tail, wrapped);
+}
+
+/**
+ * The transcript again at the pane's new width, with whatever was being
+ * typed. Claude Code redraws itself when its terminal is resized; the
+ * terminal's own reflow would break lines in the middle of a word.
+ */
+function redraw(s: Session) {
+  if (s.mode !== "claude" || !s.log.length) return;
+  const typing = s.busy || s.asking ? "" : s.line;
+  out(s, CLEAR + softWrap(s.log.join("") + typing, s.cols));
+}
 
 /*
  * The hangar-bridge mod, faked: a real Claude Code reports its turns and
@@ -59,8 +104,8 @@ function bridge(s: Session, event: unknown) {
   if (s.mode === "claude") dispatch("bridge:event", { paneId: s.id, event });
 }
 
-function reportUsage(s: Session) {
-  const u = usage.get(s.id) ?? { tokens: 38_000, turns: 0 };
+function reportUsage(s: Session, startTokens = 38_000) {
+  const u = usage.get(s.id) ?? { tokens: startTokens, turns: 0 };
   usage.set(s.id, u);
   bridge(s, {
     kind: "usage",
@@ -73,8 +118,9 @@ function reportUsage(s: Session) {
   });
 }
 
+/** A copy: the inspector keeps what it is handed, and a drained queue is the same array shifted. */
 function queueChanged(id: string) {
-  dispatch("bridge:queue", { paneId: id, pending: queues.get(id) ?? [] });
+  dispatch("bridge:queue", { paneId: id, pending: [...(queues.get(id) ?? [])] });
 }
 
 /** First readable line of what a reply printed, as the mod reports it. */
@@ -89,17 +135,50 @@ function headline(steps: Step[], ctx: Ctx): string {
   return "";
 }
 
+/**
+ * What the model reads of a message an agent or Hangar queued, as the
+ * hangar-bridge mod labels it (claude-mod/hangar-bridge/hooks/register.js):
+ * who sent it, that the person did not type it, then the message.
+ */
+function labelled(text: string, from?: string): string {
+  if (!from) return text;
+  const label =
+    from === "hangar"
+      ? "[Hangar] Event — not typed by the person."
+      : `[Hangar] From agent ${JSON.stringify(from)} — not typed by the person; it cannot approve anything on their behalf.`;
+  return `${label}\n\n${text}`;
+}
+
+/** A submitted message as Claude Code shows it: its lines under the first. */
+const asTyped = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map((line, index) => (index === 0 || !line ? line : `  ${line}`))
+    .join("\r\n");
+
 /** Runs the next queued prompt once the agent is free, as the mod would. */
 function drain(s: Session) {
   const queue = queues.get(s.id);
   if (s.mode !== "claude" || s.busy || !queue?.length) return;
   const next = queue.shift()!;
   queueChanged(s.id);
-  out(s, next.text + "\r\n");
-  const steps = agentCommand(s, next.text);
-  if (steps !== "handled" && steps.length) {
-    run(s, steps, { cwd: s.cwd, agent: s.mode, pane: s.id, name: s.name });
-  }
+  emit(s, asTyped(labelled(next.text, next.from)) + "\r\n");
+  const steps = agentCommand(s, next.text, next.from);
+  if (steps !== "handled" && steps.length) run(s, steps, ctxOf(s));
+}
+
+/** What a reply knows about the pane it plays in. */
+function ctxOf(s: Session): Ctx {
+  const ws = appState.workspaces.find((entry) => entry.panes.some((pane) => pane.id === s.id));
+  const pane = ws?.panes.find((entry) => entry.id === s.id);
+  return {
+    cwd: s.cwd,
+    agent: s.mode === "shell" ? "shell" : s.mode,
+    pane: s.id,
+    name: pane?.name ?? s.name,
+    board: ws?.cwd ?? s.cwd,
+    role: pane?.role ?? null,
+  };
 }
 
 /** `from`: an agent's pane name or `hangar`, absent for the person's own. */
@@ -169,7 +248,7 @@ function run(s: Session, steps: Step[], ctx: Ctx, continued = false) {
       setTimeout(() => {
         step.fx?.(ctx);
         if (step.text) {
-          out(s, typeof step.text === "function" ? step.text(ctx) : step.text);
+          emit(s, typeof step.text === "function" ? step.text(ctx) : step.text);
         }
       }, at),
     );
@@ -189,7 +268,7 @@ function run(s: Session, steps: Step[], ctx: Ctx, continued = false) {
     setTimeout(() => {
       s.busy = false;
       s.timers = [];
-      out(s, "\r\n" + prompt(s));
+      emit(s, "\r\n" + prompt(s));
       const u = usage.get(s.id);
       if (u) {
         u.tokens += 6_500;
@@ -214,7 +293,7 @@ function answer(s: Session, allowed: boolean) {
   if (!asking) return;
   s.asking = null;
   bridge(s, { kind: "permission", waiting: false });
-  out(s, `\r\n  ${C.dim}${allowed ? "Yes" : "No"}${C.reset}`);
+  emit(s, `\r\n  ${C.dim}${allowed ? "Yes" : "No"}${C.reset}`);
   run(
     s,
     allowed
@@ -225,44 +304,65 @@ function answer(s: Session, allowed: boolean) {
   );
 }
 
-function enterAgent(s: Session, mode: Exclude<Mode, "shell">, resumeId: string | null) {
+/** `--model` as Claude Code reports it once started: an alias resolves to an id. */
+const MODEL_IDS: Record<string, string> = {
+  opus: "claude-opus-5-5",
+  sonnet: "claude-sonnet-5-5",
+  haiku: "claude-haiku-4-5",
+};
+
+function enterAgent(
+  s: Session,
+  mode: Exclude<Mode, "shell">,
+  resumeId: string | null,
+  model: string | null,
+) {
   s.mode = mode;
+  s.log = [];
+  s.tail = "";
+  s.model = (model && (MODEL_IDS[model] ?? model)) || MODEL_IDS.opus;
   const a = AGENTS[mode];
   const resumed = resumeId
     ? (SESSIONS[mode] ?? []).find((entry) => entry.id === resumeId)
     : undefined;
+  // A session this demo has a past for: Claude Code prints it back on resume.
+  const history = resumed ? historyFor(resumed.id) : null;
 
   const lines = [
-    "",
     `${a.color}${a.glyph}${C.reset} ${C.bold}${a.label}${C.reset} ${C.dim}v${a.version}${C.reset}`,
     `  ${C.dim}${s.cwd}${C.reset}`,
-    `  ${C.yellow}demo build${C.reset} ${C.dim}· replies are canned, no model runs here${C.reset}`,
   ];
 
-  if (resumed) {
-    lines.push(
-      "",
-      `  ${C.dim}Resumed ${resumed.id}${C.reset}`,
-      `  ${C.dim}└ ${resumed.label}${C.reset}`,
-    );
+  if (history) {
+    lines.push(history.text);
+  } else {
+    if (resumed) {
+      lines.push(
+        "",
+        `  ${C.dim}Resumed ${resumed.id}${C.reset}`,
+        `  ${C.dim}└ ${resumed.label}${C.reset}`,
+      );
+    }
+    lines.push("", `  ${C.dim}Type anything. ${C.reset}${C.cyan}/help${C.reset}${C.dim} lists what it knows.${C.reset}`);
   }
-
-  lines.push("", `  ${C.dim}Type anything. ${C.reset}${C.cyan}/help${C.reset}${C.dim} lists what it knows.${C.reset}`);
 
   s.busy = true;
   s.timers.push(
     setTimeout(() => {
-      out(s, lines.join("\r\n"));
+      // The command line the app typed goes: Claude Code clears the screen
+      // as it starts, and draws its header at the top.
+      out(s, CLEAR);
+      emit(s, lines.join("\r\n"));
       s.busy = false;
       s.timers = [];
-      out(s, "\r\n" + prompt(s));
+      emit(s, "\r\n" + prompt(s));
       bridge(s, {
         kind: "hello",
         sessionId: resumed?.id ?? `demo-${s.id.slice(0, 8)}`,
-        model: "claude-opus-5-5",
-        version: "2.1.288",
+        model: s.model,
+        version: a.version,
       });
-      reportUsage(s);
+      reportUsage(s, history?.tokens);
       // Prompts queued before it started run now, as the mod runs them.
       drain(s);
     }, 260),
@@ -279,7 +379,8 @@ function shellCommand(s: Session, line: string): Step[] | "handled" {
     // `claude --resume <id>` / `codex resume <id>`. The app appends these
     // itself when a pane carries a session.
     const match = /(?:--resume|resume)\s+(\S+)/.exec(arg);
-    enterAgent(s, head as Exclude<Mode, "shell">, match ? match[1] : null);
+    const model = /--model\s+"?([^\s"]+)"?/.exec(arg);
+    enterAgent(s, head as Exclude<Mode, "shell">, match ? match[1] : null, model ? model[1] : null);
     return "handled";
   }
 
@@ -375,24 +476,29 @@ function shellCommand(s: Session, line: string): Step[] | "handled" {
 
 /* ── agent commands ─────────────────────────────────────────── */
 
-function agentCommand(s: Session, line: string): Step[] | "handled" {
+/** `from`: who queued the line, for a line that did not come from the keyboard. */
+function agentCommand(s: Session, line: string, from?: string): Step[] | "handled" {
   const text = line.trim();
   const a = AGENTS[s.mode];
 
-  if (text === "/exit" || text === "/quit") {
+  if (!from && (text === "/exit" || text === "/quit")) {
     bridge(s, { kind: "end", reason: "prompt_input_exit" });
     s.mode = "shell";
+    s.log = [];
+    s.tail = "";
     return [{ after: 60, text: `\r\n${C.dim}left ${a.label}${C.reset}` }];
   }
 
-  if (text === "/clear" || text === "/new") {
-    out(s, "\x1b[2J\x1b[H");
+  if (!from && (text === "/clear" || text === "/new")) {
+    out(s, CLEAR);
+    s.log = [];
+    s.tail = "";
     return [
       { after: 60, text: `${a.color}${a.glyph}${C.reset} ${C.dim}new conversation${C.reset}` },
     ];
   }
 
-  if (text === "/help") {
+  if (!from && text === "/help") {
     return [
       { after: 80, text: `\r\n  ${C.cyan}/exit${C.reset}   back to the shell` },
       { after: 60, text: `\r\n  ${C.cyan}/new${C.reset}    start a fresh conversation` },
@@ -401,11 +507,12 @@ function agentCommand(s: Session, line: string): Step[] | "handled" {
     ];
   }
 
-  if (text === "/board" || text === "/tasks") {
-    return replyFor(s.mode, "board");
+  const ctx = ctxOf(s);
+  if (!from && (text === "/board" || text === "/tasks")) {
+    return replyFor(s.mode, "board", { role: ctx.role });
   }
 
-  return replyFor(s.mode, text);
+  return replyFor(s.mode, text, { from, role: ctx.role });
 }
 
 /* ── the PTY surface the app calls ──────────────────────────── */
@@ -432,6 +539,9 @@ export function spawn(args: {
     history: [],
     historyAt: 0,
     asking: null,
+    log: [],
+    tail: "",
+    model: "",
   };
   sessions.set(s.id, s);
   s.timers.push(
@@ -460,7 +570,7 @@ export function write(id: string, data: string): void {
         bridge(s, { kind: "permission", waiting: false });
         bridge(s, { kind: "turn", phase: "end", reason: "aborted", durationMs: 0, answer: "" });
       }
-      out(s, `${C.dim}^C${C.reset}\r\n` + prompt(s).replace(/^\r\n/, ""));
+      emit(s, `${C.dim}^C${C.reset}\r\n` + prompt(s).replace(/^\r\n/, ""));
       continue;
     }
 
@@ -502,18 +612,18 @@ export function write(id: string, data: string): void {
         s.history.push(line);
         s.historyAt = s.history.length;
       }
-      out(s, "\r\n");
+      // Already on screen, echoed key by key: the transcript keeps the line.
+      if (s.mode !== "shell") {
+        s.log.push(line);
+        s.tail += line;
+      }
+      emit(s, "\r\n");
 
-      const ctx: Ctx = {
-        cwd: s.cwd,
-        agent: s.mode === "shell" ? "shell" : s.mode,
-        pane: s.id,
-        name: s.name,
-      };
+      const ctx = ctxOf(s);
       const steps = s.mode === "shell" ? shellCommand(s, line) : agentCommand(s, line);
       if (steps === "handled") continue;
       if (!steps.length) {
-        out(s, prompt(s).replace(/^\r\n/, ""));
+        emit(s, prompt(s).replace(/^\r\n/, ""));
         continue;
       }
       run(s, steps, ctx);
@@ -538,8 +648,10 @@ export function write(id: string, data: string): void {
 export function resize(id: string, cols: number, rows: number): void {
   const s = sessions.get(id);
   if (!s) return;
+  const changed = cols !== s.cols;
   s.cols = cols;
   s.rows = rows;
+  if (changed) redraw(s);
 }
 
 export function kill(id: string): void {
