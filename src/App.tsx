@@ -1140,6 +1140,11 @@ export default function App() {
         );
       map["workspace.next"] = () => step(1);
       map["workspace.prev"] = () => step(-1);
+      // The navigator's « Mettre en veille », for the workspace on screen:
+      // the main window moves on to another first, so it needs one to go to.
+      // Whatever else keeps it awake is said when it runs.
+      const shown = activeWorkspace.id;
+      map["workspace.sleep"] = () => void forcedSleep.run(shown);
     }
 
     if (!activeWorkspace) return map;

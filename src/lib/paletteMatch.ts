@@ -43,6 +43,7 @@ export const COMMAND_SYNONYMS: Partial<Record<CommandId, readonly string[]>> = {
   "pane.sessions": ["reprendre", "historique", "conversation", "resume", "history", "transcript"],
   "pane.zoom": ["agrandir", "maximiser", "plein écran", "maximize", "focus"],
   "workspace.new": ["projet", "dossier", "créer", "ajouter", "project", "folder", "create", "add"],
+  "workspace.sleep": ["hiberner", "suspendre", "dormir", "libérer", "mémoire", "hibernate", "suspend", "free", "memory", "ram"],
   "terminal.clear": ["cls", "vider", "nettoyer", "reset"],
   "terminal.find": ["chercher", "trouver", "find", "grep"],
   "app.zoomIn": ["taille", "plus grand", "size", "larger"],

@@ -156,6 +156,7 @@ const ICONS: Partial<Record<CommandId, IconName>> = {
   "workspace.newOrchestrator": "orchestrator",
   "workspace.orchestration": "sliders",
   "workspace.stopWorkers": "stop",
+  "workspace.sleep": "moon",
   "view.needsYou": "flag",
 };
 
@@ -186,6 +187,7 @@ const ALIASES: Partial<Record<CommandId, TranslateKey[]>> = {
   "view.broadcast": ["broadcast.send"],
   "pane.pinOrchestrator": ["orch.pin"],
   "workspace.orchestration": ["orch.title"],
+  "workspace.sleep": ["sleep.action"],
   "view.needsYou": ["needsYou.title"],
 };
 

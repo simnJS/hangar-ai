@@ -77,6 +77,7 @@ export type CommandId =
   | "workspace.newOrchestrator"
   | "workspace.orchestration"
   | "workspace.stopWorkers"
+  | "workspace.sleep"
   | `workspace.go${Digit}`
   | "view.settings"
   | "view.shortcuts"
@@ -373,6 +374,15 @@ export const COMMANDS: ShortcutCommand[] = [
     id: "workspace.stopWorkers",
     section: "workspaces",
     labelKey: "cmd.workspace.stopWorkers",
+    defaults: [],
+  },
+  {
+    // Unbound: the navigator's menu offers it on every workspace, and the
+    // palette on the one on screen; nobody puts a workspace to sleep often
+    // enough to spend a chord on it.
+    id: "workspace.sleep",
+    section: "workspaces",
+    labelKey: "cmd.workspace.sleep",
     defaults: [],
   },
   ...workspaceDigits,
