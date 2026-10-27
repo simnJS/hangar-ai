@@ -19,7 +19,8 @@
   <a href="https://hangar.simnjs.fr">Website</a> ·
   <a href="https://hangar.simnjs.fr/demo/">Browser demo</a> ·
   <a href="#install">Download</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://discord.gg/hangarai">Discord</a>
 </p>
 
 ![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Zoe and Eli, each in its own terminal. Iris says Zoe reports the coupon task is done and that she is reading the branch's changes before its delivery reaches you. Zoe has finished and left her report on the task. Eli writes the order receipt in a git worktree of its own. On the right, the inspector shows Iris's session, context use, cost and the Claude plan's usage.](.github/assets/hero.webp)
@@ -337,7 +338,8 @@ scripts/             logo, installer art, demo model and demo bundling scripts
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. Start with
+Questions, setups and ideas are welcome on the [Hangar.AI Discord](https://discord.gg/hangarai).
+Bug reports and pull requests go through GitHub. Start with
 [CONTRIBUTING.md](CONTRIBUTING.md). It covers the setup, the checks CI runs and the commit
 style. Please follow the [code of conduct](CODE_OF_CONDUCT.md). To report a security
 issue, see [SECURITY.md](SECURITY.md) and do not open a public issue.

@@ -3,6 +3,9 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/simnJS/hangar-ai/security/advisories/new
     about: Report it privately. Please do not open a public issue.
+  - name: Ask on Discord
+    url: https://discord.gg/hangarai
+    about: Questions, setups and ideas, with the people who use Hangar.AI.
   - name: Try the browser demo
     url: https://hangar.simnjs.fr/demo/
     about: Check how something is meant to work before reporting it.
