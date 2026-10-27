@@ -450,7 +450,7 @@ const en = {
   "settings.memory": "Memory",
   "settings.hibernate": "Put idle workspaces to sleep",
   "settings.hibernateHint":
-    "Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume (Gemini, OpenCode), nor while a shell runs a command.",
+    "Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume (Gemini, OpenCode), nor while a shell runs a command. Right-click a workspace in the navigator to put it to sleep now.",
   "settings.hibernateDelay": "Put to sleep after",
   "settings.hibernateDelayHint": "Without a keystroke, a click or an agent sending it anything",
   "settings.agentCommands": "Launch commands",
@@ -1796,7 +1796,7 @@ const fr: Record<Key, string> = {
   "settings.memory": "Mémoire",
   "settings.hibernate": "Mettre en veille les workspaces inactifs",
   "settings.hibernateHint":
-    "Arrête les agents d'un workspace laissé de côté pour libérer la mémoire ; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session (Gemini, OpenCode), ni tant qu'un shell exécute une commande.",
+    "Arrête les agents d'un workspace laissé de côté pour libérer la mémoire ; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session (Gemini, OpenCode), ni tant qu'un shell exécute une commande. Fais un clic droit sur un workspace du navigateur pour le mettre en veille tout de suite.",
   "settings.hibernateDelay": "Mettre en veille après",
   "settings.hibernateDelayHint": "Sans frappe, clic ni envoi d'un agent",
   "settings.agentCommands": "Commandes de lancement",

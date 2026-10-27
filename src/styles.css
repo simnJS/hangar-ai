@@ -916,7 +916,15 @@ body.is-sorting * {
   color: var(--accent-fg);
 }
 
-.ctx-menu__item:disabled {
+.ctx-menu__item:disabled,
+.ctx-menu__item[aria-disabled="true"] {
+  color: var(--fg-subtle);
+}
+
+/* Greyed with a reason (NavigatorMenu's `reason`): the pointer and the arrow
+   keys still land on it, to show why, but it never looks pressable. */
+.ctx-menu__item[aria-disabled="true"]:focus {
+  background: var(--surface-hover);
   color: var(--fg-subtle);
 }
 
@@ -934,7 +942,8 @@ body.is-sorting * {
 }
 
 .ctx-menu__item:focus .ctx-menu__icon,
-.ctx-menu__item:disabled .ctx-menu__icon {
+.ctx-menu__item:disabled .ctx-menu__icon,
+.ctx-menu__item[aria-disabled="true"] .ctx-menu__icon {
   color: inherit;
 }
 

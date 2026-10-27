@@ -826,8 +826,8 @@ export function TerminalPane({
           // prints "No conversation found". Asked while the shell settles.
           //
           // A pane its workspace's sleep stopped resumes whatever the setting
-          // says: the sleep was not the user's doing, and must not cost them
-          // a conversation.
+          // says: a sleep — the timer's or one asked for in the navigator —
+          // stops an agent to free memory, and must not cost a conversation.
           const owed = mustResume(pane.id);
           const saved = settingsRef.current.autoResume || owed ? pane.sessionId : null;
           const behind =

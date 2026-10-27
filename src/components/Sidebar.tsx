@@ -10,8 +10,10 @@ import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
 import { agentsIn, bringForward, BUSY, NavigatorStatus, whoIs } from "./NavigatorStatus";
 import { NavigatorPlan } from "./NavigatorPlan";
 import { buildNavTree, namesakeHints, rowKey, type NavFolder } from "./NavigatorModel";
-import { useAgentsIn } from "../lib/agentState";
+import { isWaiting, useAgentsIn, useWorkspaceActivity } from "../lib/agentState";
+import { sleepRefusal, type Verdict } from "../lib/hibernate";
 import { useAsleep } from "../lib/hibernateStore";
+import type { ForcedSleep } from "../lib/useHibernation";
 import { proseTime } from "../lib/inspectorFormat";
 import { mcpScopeClear } from "../lib/mcpScope";
 import { orchestratorOf, workersOf } from "../lib/orchestration";
@@ -29,6 +31,8 @@ interface Props {
   onOpenMcpServers: (workspaceId: string) => void;
   /** Opens a workspace's orchestration settings. */
   onOpenOrchestration: (workspaceId: string) => void;
+  /** « Mettre en veille »: whether a workspace can be put to sleep now, and doing it. */
+  sleep: ForcedSleep;
 }
 
 interface DragItem {
@@ -91,6 +95,7 @@ export function Sidebar({
   onFocusPane,
   onOpenMcpServers,
   onOpenOrchestration,
+  sleep,
 }: Props) {
   const {
     state,
@@ -234,6 +239,30 @@ export function Sidebar({
   }
 
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  /**
+   * « Mettre en veille » in a workspace's menu says why not before it is
+   * clicked. Most of the answer is known at once; whether its shells run
+   * something is asked of the system as the menu opens, and lands a moment
+   * later. The click asks everything again whatever this said.
+   */
+  const menuWorkspace = menu?.kind === "workspace" ? menu.id : null;
+  const [probed, setProbed] = useState<{ menu: MenuState; verdict: Verdict } | null>(null);
+  useEffect(() => {
+    if (!menu || menu.kind !== "workspace") return;
+    let open = true;
+    sleep
+      .check(menu.id)
+      .then((verdict) => {
+        if (open && verdict) setProbed({ menu, verdict });
+      })
+      .catch(() => undefined);
+    return () => {
+      open = false;
+    };
+  }, [menu, sleep]);
+  // An agent starting or ending a turn while the menu is open changes the answer.
+  useWorkspaceActivity(menuWorkspace ?? "");
 
   /** At the pointer for a right-click; under the row for the menu key, which has no pointer. */
   function openMenu(kind: MenuState["kind"], id: string, anchor: Element, event: React.MouseEvent) {
@@ -701,6 +730,26 @@ export function Sidebar({
     return [{ kind: "heading", label: t("sidebar.goTo") }, ...items, { kind: "separator" }];
   }
 
+  /**
+   * Greyed with the reason when a rule says no; the answer from the shells,
+   * once in, stands in for the « ask them » the rules give without it.
+   */
+  function sleepEntry(ws: Workspace, current: MenuState): NavigatorMenuEntry | null {
+    const now = sleep.verdict(ws.id);
+    if (!now) return null;
+    const verdict = now.kind === "probe" && probed?.menu === current ? probed.verdict : now;
+    const reason =
+      verdict.kind === "awake" ? sleepRefusal(t, verdict, ws.panes, isWaiting) : undefined;
+    return {
+      kind: "item",
+      label: t("sleep.action"),
+      icon: "moon",
+      disabled: reason !== undefined,
+      reason,
+      onSelect: () => void sleep.run(ws.id),
+    };
+  }
+
   function menuEntries(current: MenuState): NavigatorMenuEntry[] {
     if (current.kind === "folder") {
       const folder = state.folders.find((entry) => entry.id === current.id);
@@ -736,6 +785,7 @@ export function Sidebar({
       ws.folderId && state.folders.some((folder) => folder.id === ws.folderId)
         ? ws.folderId
         : null;
+    const sleepItem = sleepEntry(ws, current);
     return [
       ...agentEntries([ws]),
       {
@@ -798,6 +848,9 @@ export function Sidebar({
         onSelect: () => moveWorkspace(ws.id, createFolder(), null),
       },
       { kind: "separator" },
+      // Next to deleting it: the two ways to stop what it runs, for a while
+      // or for good.
+      ...(sleepItem ? [sleepItem] : []),
       {
         kind: "item",
         label: t("sidebar.remove"),

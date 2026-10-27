@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./Icon";
 import { StateGlyph, type GlyphState } from "./StateGlyph";
 
@@ -18,6 +18,13 @@ export type NavigatorMenuEntry =
       /** A choice among several, ticked when it is the current one. */
       checked?: boolean;
       disabled?: boolean;
+      /**
+       * Why it is disabled, when that is worth saying: shown on hover and read
+       * with the item by a screen reader. Such an item stays in the arrow
+       * keys' walk — greyed, doing nothing — so the keyboard reaches the
+       * reason too.
+       */
+      reason?: string;
       title?: string;
       /** Puts the focus somewhere of its own (a field, a panel): the row does not take it back. */
       takesFocus?: boolean;
@@ -62,6 +69,11 @@ export function NavigatorMenu({
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  const uid = useId();
+  /** Greyed but reachable, rather than `disabled`, which the arrow keys skip. */
+  const refused = (entry: NavigatorMenuEntry) =>
+    entry.kind === "item" && Boolean(entry.disabled && entry.reason);
+  const reasonId = (index: number) => `${uid}-reason-${index}`;
 
   // Opens at the pointer, pulled back inside the window when a click near an
   // edge would leave it hanging off it.
@@ -166,8 +178,10 @@ export function NavigatorMenu({
             className={`ctx-menu__item ${entry.danger ? "ctx-menu__item--danger" : ""}`}
             role={radio ? "menuitemradio" : "menuitem"}
             aria-checked={radio ? entry.checked : undefined}
-            disabled={entry.disabled}
-            title={entry.title}
+            disabled={entry.disabled && !refused(entry)}
+            aria-disabled={refused(entry) || undefined}
+            aria-describedby={refused(entry) ? reasonId(index) : undefined}
+            title={refused(entry) ? entry.reason : entry.title}
             tabIndex={-1}
             onPointerMove={(event) => {
               if (document.activeElement !== event.currentTarget) {
@@ -175,6 +189,8 @@ export function NavigatorMenu({
               }
             }}
             onClick={() => {
+              // What a native menu does with a greyed item: nothing, staying open.
+              if (refused(entry)) return;
               entry.onSelect();
               if (entry.takesFocus) onClose();
               else closeBack();
@@ -193,6 +209,14 @@ export function NavigatorMenu({
           </button>
         );
       })}
+      {/* Hidden, and still what a greyed item is described by. */}
+      {entries.map((entry, index) =>
+        entry.kind === "item" && refused(entry) ? (
+          <span key={index} id={reasonId(index)} hidden>
+            {entry.reason}
+          </span>
+        ) : null,
+      )}
     </div>
   );
 }

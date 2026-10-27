@@ -8,8 +8,9 @@ import type { PaneRest } from "./hibernate";
  * The panes write here as things happen — a key pressed, a chunk printed, a
  * turn over — so these are plain maps rather than React state: a pane printing
  * a build log would otherwise re-render the app for every line. Nothing reads
- * them but the window's timer, twice a minute. The workspaces asleep are the
- * one thing on screen, and only they notify.
+ * them but the window's timer, twice a minute, and a workspace's menu when it
+ * opens on « Mettre en veille ». The workspaces asleep are the one thing on
+ * screen, and only they notify.
  *
  * Everything is per window and in memory: a reload forgets which workspaces
  * were asleep, and they simply count as never opened.
@@ -72,7 +73,8 @@ export function paneRest(paneId: string): Rest | undefined {
  * Panes put to sleep that have not started again yet. Each resumes its
  * session on its next launch whatever the auto-resume setting says: a user
  * who turned it off still never lost a conversation to a workspace going to
- * sleep behind their back. Taken once, by the launch it was meant for.
+ * sleep, behind their back or at their word. Taken once, by the launch it was
+ * meant for.
  *
  * A workspace window opened on a sleeping workspace is handed the ids in its
  * address (lib/windows), and starts with them here.

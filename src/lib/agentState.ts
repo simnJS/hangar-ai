@@ -91,6 +91,9 @@ export function getPaneActivity(paneId: string): PaneActivity | undefined {
   return panes.get(paneId);
 }
 
+/** The pane's agent is waiting for an answer, rather than at work or done. */
+export const isWaiting = (paneId: string) => panes.get(paneId)?.activity === "waiting";
+
 /** One pane's state, re-rendering only when that pane's entry changes. */
 export function usePaneActivity(paneId: string | null): PaneActivity | undefined {
   return useSyncExternalStore(subscribe, () => (paneId ? panes.get(paneId) : undefined));

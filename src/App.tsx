@@ -51,6 +51,7 @@ import {
   touchWorkspace,
 } from "./lib/hibernateStore";
 import { useHibernation } from "./lib/useHibernation";
+import { sleepRefusal } from "./lib/hibernate";
 import { gitWorktreeList } from "./lib/git";
 import { modelStat } from "./lib/modelFiles";
 import {
@@ -76,7 +77,7 @@ import {
 } from "./lib/windows";
 import { emit } from "@tauri-apps/api/event";
 import { applyRemoteActivity, relayActivity, type PaneActivity } from "./lib/agentState";
-import { getPaneActivity, useBridgedCount } from "./lib/agentState";
+import { getPaneActivity, isWaiting, useBridgedCount } from "./lib/agentState";
 import {
   leafIds,
   neighborOf,
@@ -354,9 +355,10 @@ export default function App() {
   );
 
   // Workspaces left alone go to sleep, their agents stopped to free memory
-  // and resumed when they open again (lib/useHibernation). The main window's
-  // job alone: it is the one that mounts them.
-  useHibernation({
+  // and resumed when they open again (lib/useHibernation); the navigator's
+  // menu and the palette put one to sleep at once. The main window's job
+  // alone: it is the one that mounts them.
+  const forcedSleep = useHibernation({
     enabled: isMainWindow && hydrated && state.settings.hibernateIdle,
     // At least a minute, whatever a hand-edited state.json says.
     delayMs: Math.max(1, state.settings.hibernateAfterMin || 0) * 60_000,
@@ -364,14 +366,26 @@ export default function App() {
     snapshot,
     openedIds,
     unmount: (id) => setOpenedIds((current) => current.filter((entry) => entry !== id)),
+    show: setActiveWorkspace,
     announce: (workspaces, agents) =>
       setNotice({
         kind: "asleep",
         text:
-          workspaces.length === 1
-            ? t("hibernate.notice", { name: workspaces[0].name, n: agents })
-            : t("hibernate.noticeMany", { count: workspaces.length, n: agents }),
+          workspaces.length > 1
+            ? t("hibernate.noticeMany", { count: workspaces.length, n: agents })
+            : agents
+              ? t("hibernate.notice", { name: workspaces[0].name, n: agents })
+              : t("hibernate.noticeNoAgent", { name: workspaces[0].name }),
       }),
+    // What changed between the menu and the click, or what the palette,
+    // which has no greyed-out entries, could not show beforehand.
+    refuse: (workspace, verdict) =>
+      setNotice(
+        t("sleep.refused", {
+          name: workspace.name,
+          reason: sleepRefusal(t, verdict, workspace.panes, isWaiting),
+        }),
+      ),
   });
 
   // Keep focus on a pane that still exists after a layout change.
@@ -1319,6 +1333,7 @@ export default function App() {
           onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
           onOpenMcpServers={setMcpServersFor}
           onOpenOrchestration={setOrchestrationFor}
+          sleep={forcedSleep}
         />
       )}
 
