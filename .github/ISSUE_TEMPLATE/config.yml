@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/simnJS/hangar-ai/security/advisories/new
+    about: Report it privately. Please do not open a public issue.
+  - name: Try the browser demo
+    url: https://hangar.simnjs.fr/demo/
+    about: Check how something is meant to work before reporting it.
+  # Uncomment once GitHub Discussions are enabled on the repository:
+  # - name: Questions and ideas
+  #   url: https://github.com/simnJS/hangar-ai/discussions
+  #   about: Ask a question or discuss an idea before opening an issue.

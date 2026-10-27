@@ -1,204 +1,343 @@
 <p align="center">
-  <img src="assets/logo.png" alt="" width="96" height="96">
+  <img src="assets/logo.png" alt="Hangar.AI logo" width="96" height="96">
 </p>
 
 <h1 align="center">Hangar.AI</h1>
 
-<p align="center">Run Claude Code, Codex and friends side by side, in one window.</p>
-
 <p align="center">
-  <a href="https://github.com/simnJS/hangar-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/simnJS/hangar-ai?style=flat-square&color=7aa2f7"></a>
-  <img alt="Windows, macOS and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2f3549?style=flat-square">
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/github/license/simnJS/hangar-ai?style=flat-square&color=2f3549"></a>
+  Run Claude Code, Codex, Gemini CLI and OpenCode side by side in one window,<br>
+  sharing a task board and a memory over MCP.
 </p>
 
-## Download
+<p align="center">
+  <a href="https://github.com/simnJS/hangar-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/simnJS/hangar-ai?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/simnJS/hangar-ai?style=flat-square"></a>
+  <a href="https://github.com/simnJS/hangar-ai/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/simnJS/hangar-ai/ci.yml?branch=main&style=flat-square&label=CI"></a>
+</p>
 
-**[Get the latest release](https://github.com/simnJS/hangar-ai/releases/latest)**, under
-**Assets**:
+<p align="center">
+  <a href="https://hangar.simnjs.fr">Website</a> ·
+  <a href="https://hangar.simnjs.fr/demo/">Browser demo</a> ·
+  <a href="#install">Download</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-- **Windows** — the `.exe`, 64-bit. It installs for you alone and asks for no administrator
-  rights. Being unsigned, SmartScreen shows a warning on first run: **More info** →
-  **Run anyway**. WebView2 is required and ships with Windows 11.
-- **macOS** — `.dmg`, one universal build for Apple Silicon and Intel. Signed and notarised
-  with an Apple developer account, so it opens on a double-click like anything else.
-- **Linux** — `.AppImage` to run without installing, or `.deb` / `.rpm` for a package
-  manager. WebKitGTK 4.1 is required and every current distribution packages it, as
-  `libwebkit2gtk-4.1-0` on Debian and Ubuntu or `webkit2gtk4.1` on Fedora.
+![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Jade and Kai, each in its own terminal, beside a board panel listing their tasks in progress and a delivery ready to land](.github/assets/hero.webp)
 
-The app updates itself from there, so this is a one-time download.
+<p align="center"><sub>Screenshots are taken from the browser demo, with made-up data.</sub></p>
 
-## What it does
+Hangar.AI is an open-source desktop app for Windows, macOS and Linux, built with Tauri 2
+and React. It runs the coding agents you already use, each in a real terminal, and gives
+them a shared place to coordinate.
 
-- **Tiling panes** — 1, 2, 4 or 8 real terminals. Every split resizes on its own, and each
-  pane picks its shell from whatever is installed: PowerShell, cmd, Git Bash, WSL, MSYS2 and
-  Nushell on Windows; zsh, bash, fish, Nushell and pwsh everywhere else — opened as login
-  shells on macOS, so a pane starts with the PATH your terminal has. Zoom one pane to the
-  whole grid and back, search its scrollback, or drop a file or a screenshot on it to paste
-  its path.
-- **Workspaces** — a project directory plus its pane layout, saved. Reopen one and every
-  pane comes back with its agent.
-- **Session resume** — agents relaunch on the conversation they were in, with no session
-  ids for you to track.
-- **Shared task board** — a kanban board per workspace that the agents themselves read and
-  write, over MCP. Cards show who holds them and what blocks them, and the board can sit
-  in a panel beside the terminals.
-- **3D preview** — an agent shows you the model it is working on in a panel beside the
-  terminals rather than naming a file, and can render it to an image to check its own work.
-- **Agent state at a glance** — each pane says whether its agent is working, waiting for
-  your answer, or done and waiting for you; the sidebar counts the same for every
-  workspace, so a turn that ends in a workspace you left does not go unnoticed.
-- **Broadcast** — one instruction, sent to every pane at once, or held until each agent
-  is free.
-- **Dictation** — hold a key, speak, and it is typed into the focused pane. Runs on this
-  machine through whisper.cpp, on a checkpoint downloaded once: 99 languages, no key, no
-  connection, and nothing recorded leaves the computer. Groq's hosted Whisper is there as
-  a fallback, and an optional pass can tidy the transcript — dropping the hesitations and
-  spelling `useEffect` the way you would type it. The Groq key is kept in the system
-  keychain, never in the app's settings file.
-- **32 themes** — ported from the most-installed VS Code palettes, restyling the whole
-  window rather than just the terminals. Font, size, line height, cursor and padding adjust
-  live, and the interface has a size of its own.
-- **Rebindable shortcuts**, and an interface in English or French.
-- **Discord Rich Presence** — off unless you turn it on.
+## Why Hangar
 
-## The task board
+Running several coding agents at once usually means a pile of terminal windows. You lose
+track of which one is waiting for you, two of them edit the same file, and none of them
+knows what the others are doing.
 
-Every workspace gets a board, and agents work it over MCP:
+Hangar keeps them in one window:
 
-| Tool | What it does |
+- **One window, many agents.** Up to 16 terminals per workspace. Each pane shows whether
+  its agent is working, waiting for your answer, or done.
+- **A shared board.** Agents read and write a kanban board per workspace over MCP. Claims
+  are atomic, so two agents cannot take the same task.
+- **A shared memory.** Facts one agent records are there for the next session, in any
+  project.
+- **Orchestration (new in 1.0).** One agent plans. Workers do the work in separate git
+  worktrees, and each delivery is checked and reviewed before it is merged locally.
+
+Hangar launches the agent CLIs installed on your machine, with your accounts and your
+settings. It is not a model provider, and it has no online service of its own.
+
+## Contents
+
+- [Features](#features)
+- [Install](#install)
+- [Getting started](#getting-started)
+- [How agents use Hangar's MCP server](#how-agents-use-hangars-mcp-server)
+- [Privacy](#privacy)
+- [Build from source](#build-from-source)
+- [Repository layout](#repository-layout)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
+
+### Orchestrator mode
+
+Pin a Claude Code pane as a workspace's orchestrator. It plans the work on the board and
+starts workers to carry it out. You follow everything from one window.
+
+**How it works**
+
+1. **Plan.** The orchestrator breaks the goal into board tasks. Each task lists its
+   dependencies and the files it owns.
+2. **Start workers.** `worker_spawn` gives a task to a new Claude Code pane (Sonnet by
+   default). The worker runs in its own git worktree, on a new branch from the target
+   branch, with a block of 20 ports for its dev servers and tests.
+   Hangar enforces the limits, whatever the prompt says:
+   - it refuses a task whose files overlap a task already in progress;
+   - it runs 3 workers at once by default;
+   - it allows 2 attempts per task by default, then hands the task back to you.
+3. **Deliver.** A worker hands in its branch with `delivery_submit`, and the branch joins
+   a merge queue. Each delivery goes through four steps:
+   - the branch is merged in a temporary worktree;
+   - the workspace's check command (`pnpm test`, `cargo test`…) runs there, if you set
+     one;
+   - a separate reviewer agent reads the change with a fresh context and read-only tools;
+   - if all of that passes, the branch lands on the target branch by fast-forward.
+
+   If a step fails, the worker receives what failed and fixes it. Nothing is ever pushed,
+   and a landing that would overwrite your uncommitted changes is held back.
+4. **Wake on events.** The orchestrator does not poll. When it is between turns, Hangar
+   sends it one batched message: a worker commented, is waiting, or exited; a delivery
+   landed or failed.
+5. **Needs you.** One list, across workspaces, shows what waits for you:
+   - agents asking for a permission or an answer;
+   - questions the orchestrator handed back to you;
+   - deliveries ready to merge, when automatic merging is off.
+
+You set the following per workspace: the models of the orchestrator, workers and reviewer
+(Opus, Sonnet and Sonnet by default), the limits, the check command, the target branch,
+automatic merging and the permission mode. Orchestration needs a git repository and
+Claude Code.
+
+<table>
+  <tr>
+    <td width="50%"><img src=".github/assets/needs-you.webp" alt="The Needs you list: one agent waiting for an answer, one question handed back by the orchestrator, and one delivery ready to merge, whose check and review passed"></td>
+    <td width="50%"><img src=".github/assets/orchestration-settings.webp" alt="A workspace's orchestration settings: workers at once, attempts per task, permissions, automatic merging, check command, target branch and models"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Needs you: what waits for you, across workspaces</sub></td>
+    <td align="center"><sub>Orchestration settings of a workspace</sub></td>
+  </tr>
+</table>
+
+### The Pro interface
+
+- **Navigator** on the left: workspaces and folders, and each workspace's agents and their
+  state at a glance.
+- **Inspector** on the right: the focused pane's session, context use and cost, its board
+  task, its queued prompts and the files it touched.
+- **Command palette** (`Ctrl`/`Cmd`+`Shift`+`P`). Every command, pane and workspace is
+  behind one search field.
+- **33 themes.** Graphite is the default; the others are ported from popular VS Code
+  palettes. Each theme restyles the whole window, not only the terminals.
+- **Keyboard and language.** Every shortcut can be rebound, and `F6` moves between
+  regions. The interface is in English or French.
+
+### Agents and terminals
+
+- **Agents and shells.** Each pane runs Claude Code, Codex, Gemini CLI, OpenCode or a
+  plain shell: PowerShell, cmd, Git Bash, WSL, zsh, bash, fish, Nushell…
+- **Session resume.** Claude Code and Codex panes reopen on the conversation they were in.
+- **Claude Code bridge.** A small mod reports turns, permission prompts, context fill and
+  plan usage, so pane states are exact rather than guessed. When an agent edits a file
+  another pane just changed, it is told who changed it and asked to re-read it.
+- **Broadcast.** Send one instruction to every pane at once. Claude Code panes can also
+  hold it until their agent is free.
+- **Pane tools.** Zoom a pane to the full grid, search its scrollback, drop a file on it
+  to paste its path, or run a saved command in it.
+
+### Workspaces
+
+- **Saved workspaces.** A workspace is a project folder and its layout, and reopening it
+  brings every agent back. Workspaces can be grouped in folders, or moved to a window of
+  their own.
+- **Sleep.** A workspace idle for 10 minutes is put to sleep to free memory. When you open
+  it again, its agents resume their sessions. You can change the delay or turn this off.
+- **MCP servers per workspace.** Choose which MCP servers a workspace's Claude Code panes
+  start, instead of starting every configured server in every pane.
+- **Git worktrees and diffs.** Create, lock and remove worktrees, open one in a pane or in
+  its own workspace, and see what an agent changed in its folder.
+
+### Board, memory and statistics
+
+- **Task board.** Priorities, dependencies, labels, assignees and comments. It opens as a
+  full view or as a panel beside the terminals. Stored in `.hangar/board.json` in the
+  project.
+- **Global memory.** Agents search, write and update facts across projects. You can browse
+  and edit them in the Memory view.
+- **Usage statistics.** Tokens, active time and the equivalent cost at API prices, per
+  project and per model. They are read from the transcripts Claude Code and Codex keep on
+  disk. On a Claude or ChatGPT subscription, the cost figure is an equivalent, not a bill.
+
+![The board of a workspace: tasks to do, including one waiting for a decision and one blocked by another task, two tasks in progress held by workers, one in review ready to land, and one done](.github/assets/board.webp)
+
+![The usage statistics view: tokens, API-equivalent cost, active time and sessions over 30 days, tokens per day, usage by project, and a heatmap of active hours across the week](.github/assets/stats.webp)
+
+### Also
+
+- **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX, USDZ) in a panel,
+  and render snapshots to check their own work.
+- **Dictation.** Hold a key, speak, and the text is typed into the focused pane. It runs
+  locally with whisper.cpp, on a model downloaded once. Groq is an optional fallback, with
+  its key kept in the system keychain.
+- **Discord Rich Presence**, off unless you turn it on.
+
+## Install
+
+Download the file for your system from the
+**[latest release](https://github.com/simnJS/hangar-ai/releases/latest)**, under
+**Assets**. You only download once: the app updates itself after that.
+
+| System | File | Notes |
+|---|---|---|
+| Windows (x64) | `Hangar.AI_<version>_x64-setup.exe` | Installs for your user only, without administrator rights. Needs WebView2, which ships with Windows 11. |
+| macOS (Apple Silicon and Intel) | `Hangar.AI_<version>_universal.dmg` | One universal build for both. |
+| Linux (x86_64) | `.AppImage`, `.deb` or `.rpm` | The AppImage runs without installing (`chmod +x` it first). Needs WebKitGTK 4.1: `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora. |
+
+> [!NOTE]
+> **Windows: SmartScreen.** The installer is not code-signed, so on first run SmartScreen
+> shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+>
+> **macOS: Gatekeeper.** The release workflow signs and notarises the macOS build when
+> Apple credentials are configured, and the app then opens normally. If a release's notes
+> say the macOS build is unsigned (or you built it yourself), macOS blocks the first
+> launch. Right-click the app and choose **Open**. On macOS 15 and later, go to **System
+> Settings → Privacy & Security** and click **Open Anyway**.
+
+You also need at least one agent CLI installed and signed in: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview),
+[Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+or [OpenCode](https://github.com/sst/opencode). Hangar launches them; it does not install
+them.
+
+## Getting started
+
+1. **Create a workspace** with `Ctrl`/`Cmd`+`Shift`+`N`. Pick a project folder and a
+   layout, then click a cell to choose its agent. Agents that are not installed are
+   marked as such.
+2. **Connect the agents to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`) and click
+   **Configure**. The panel can also write a short playbook into the project's `AGENTS.md`
+   and `CLAUDE.md`, telling agents to claim tasks before they start. Restart the agents so
+   they load the server.
+3. **Give them work.** Add tasks on the board (`Ctrl`/`Cmd`+`Alt`+`B`), or ask an agent to
+   split a goal into tasks. Other agents pick tasks up with `board_next_task`.
+4. **Try orchestration.** In a git repository, run **New orchestrator** from the command
+   palette (`Ctrl`/`Cmd`+`Shift`+`P`), or pin an existing Claude Code pane from its **…**
+   menu. Then describe the goal to it. **Orchestration…** in the same menu opens the
+   workspace's settings: models, limits, check command and automatic merging.
+
+The command palette lists every command. Shortcuts can be changed in
+**Settings → Shortcuts**, and the defaults use `Ctrl` on Windows and Linux and `Cmd` on
+macOS.
+
+## How agents use Hangar's MCP server
+
+The MCP server is the app's own binary, started as `hangar-ai --mcp` over stdio. Each call
+goes to the running app through a local HTTP API on `127.0.0.1`. The port and the token
+change at each launch and are never written into agent configs. Every board change goes
+through a single lock, so claims stay atomic across panes.
+
+The MCP panel registers the server in each tool's own format:
+
+| Tool | Config file |
 |---|---|
-| `board_list_tasks` | Read the current state of the work |
-| `board_next_task` | Highest-priority free task whose dependencies are done |
-| `board_claim_task` | Take ownership — fails if someone got there first |
-| `board_create_task` | File work for another agent, with priorities and dependencies |
-| `board_update_task` | Move between columns, edit, or release |
-| `board_comment_task` | Leave notes, which is how agents talk to each other |
-| `board_delete_task` | Remove a task |
-
-Claims are atomic: every change goes through a single lock, so two agents racing for the
-same task cannot both win it.
-
-## The 3D preview
-
-Agents that build game assets show them over MCP too:
-
-| Tool | What it does |
-|---|---|
-| `model_show` | Open a model in the panel and report its triangles, materials, animations and size |
-| `model_snapshot` | Render it to a PNG the agent can look at, from a fixed angle |
-| `model_close` | Close one model, or every model the agent's workspace has open |
-
-It reads glTF and GLB, OBJ with its MTL, STL, PLY, FBX and USDZ, up to 256 MB, and only from
-the workspace's folders and its git worktrees. A model reloads by itself when its file
-changes, so an agent re-exporting it is enough to refresh what you see.
-
-Each workspace has its own preview. A model an agent shows opens in that agent's
-workspace: if you are looking at another one, nothing covers it, and the model is waiting
-when you get there. The agent is told whether you can see it, and its snapshots render
-either way.
-
-## The Claude Code bridge
-
-Claude Code panes load a small [mod](https://code.claude.com/docs/en/plugins/mods/overview),
-`hangar-bridge`, which Hangar writes to `~/.hangar/mods/hangar-bridge` and hands to the
-panes it starts through `CLAUDE_CODE_PLUGIN_DIRS` — nothing is installed in Claude Code
-itself, and a `claude` started outside Hangar never sees it. From inside the session it
-tells Hangar:
-
-- when a turn starts and ends, and when a permission dialog is waiting for you — the
-  pane's state and its notification come from there rather than from a guess;
-- which session the pane is on, so a restart resumes the right conversation;
-- the context window's fill and the plan's 5-hour and weekly usage, shown at the bottom
-  of the sidebar;
-- which files it edits, so that an agent about to edit a file another pane just changed
-  asks you first.
-
-It also takes the prompts you broadcast "when free" and submits them once its session is
-idle. It needs Claude Code 2.1.287 or later; without it, or in a WSL pane, Hangar falls
-back to reading the pane's output as it does for every other agent. Settings → General →
-Claude Code bridge turns it off, and Hangar leaves it out by itself where the machine's
-managed settings forbid sideloaded plugins. Claude Code sessions
-are also named after their pane, so agents can message each other as `@<pane>`.
-
-## Connecting agents
-
-Settings → MCP registers the server in whichever tools it finds, each in its own format:
-
-| Tool | File |
-|---|---|
-| Claude Code | `.mcp.json` |
+| Claude Code | `.mcp.json` (project) |
 | Codex | `~/.codex/config.toml` |
 | Gemini CLI | `~/.gemini/settings.json` |
-| Cursor | `.cursor/mcp.json` |
-| VS Code | `.vscode/mcp.json` |
+| Cursor | `.cursor/mcp.json` (project) |
+| VS Code | `.vscode/mcp.json` (project) |
 
-Existing configuration is merged rather than overwritten, and a backup is kept on first
-write. The API port and its token are resolved at launch and never written into those
-files, so the configs stay valid across restarts.
+Hangar merges its entry into the existing configuration rather than overwriting it, and
+keeps a backup the first time it writes a file.
 
-The same panel can drop an agent playbook into `AGENTS.md` and `CLAUDE.md`, inside a
-delimited block that leaves the rest of the file alone.
-
-## Keyboard
-
-`Ctrl` on Windows, `Cmd` on macOS:
-
-| Shortcut | Action |
+| Tools | What agents do with them |
 |---|---|
-| `Ctrl`/`Cmd` + `1`…`8` | Focus pane N |
-| `Ctrl`/`Cmd` + `,` | Settings |
-| `Ctrl`+`Shift`+`Z` / `Cmd`+`Option`+`Z` | Zoom the focused pane, and back |
-| `Ctrl`+`Shift`+`F` / `Cmd`+`F` | Search the focused pane |
-| Double-click a split | Reset that boundary to 50/50 |
-| Double-click a workspace | Rename |
+| `board_list_tasks`, `board_next_task`, `board_claim_task`, `board_create_task`, `board_update_task`, `board_comment_task`, `board_delete_task` | Read the board, take the highest-priority free task whose dependencies are done, claim it (this fails if another agent holds it), split work into new tasks, move tasks between columns, and leave notes for each other. |
+| `memory_search`, `memory_read`, `memory_write`, `memory_update`, `memory_list`, `memory_delete` | Look up what earlier sessions learned before starting, and record decisions, pitfalls and conventions. Writing an existing title replaces that entry. |
+| `workspace_list`, `workspace_window`, `pane_list`, `pane_create`, `pane_send`, `pane_read`, `pane_restart`, `pane_close`, `pane_focus` | See the other panes and their state, open a pane with another agent (in a worktree, for instance), type into a pane or queue a prompt until it is idle, read its output, and show a pane to you. |
+| `worker_spawn`, `worker_list`, `worker_stop`, `delivery_submit`, `delivery_status` | Orchestration. The orchestrator starts, lists and stops workers. A worker hands in its branch for check, review and merge. |
+| `model_show`, `model_snapshot`, `model_close` | Open a 3D model in the preview panel, render it to an image to check it, and close it. |
 
-Everything else is rebindable from Settings → Shortcuts. The defaults differ where the two
-platforms do: a Mac copies with `Cmd`+`C` rather than `Ctrl`+`Shift`+`C`, splits with
-`Cmd`+`D`, and moves between panes with `Ctrl`+`Option`+arrow — leaving `Option`+arrow to
-the terminal, which uses it to move by word.
-
-## Development
-
-Node 20+, pnpm and a Rust toolchain; on Windows, the MSVC build tools, and on macOS the
-Xcode command line tools (`xcode-select --install`). Linux builds against the system
-WebView, so it needs its headers first:
-
-```bash
-sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-  libxdo-dev libssl-dev patchelf
-```
-
-```bash
-pnpm install
-pnpm tauri dev      # run it
-pnpm tauri build    # build the installers
-```
-
-The MCP server is the same binary, run with `--mcp`:
+You can test the server by hand from a build:
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./src-tauri/target/debug/hangar-ai --mcp
 ```
 
-English is the reference for translations in `src/i18n.ts`: the French table is typed
-against it, so a missing key fails the build instead of falling back at runtime.
+## Privacy
 
-Redrawing the logo regenerates three checked-in copies, in this order. The scripts are
-PowerShell, so this one is a Windows job — the artwork they produce is checked in, and a
-macOS clone never has to run them:
+Hangar has no account, no telemetry and no backend. Your workspaces, the board, the memory
+and the statistics stay on your machine:
 
-```powershell
-powershell -File scripts/logo.ps1            # the masters, assets/logo.png and .svg
-pnpm tauri icon assets/logo.png              # the OS icon set
-powershell -File scripts/installer-art.ps1   # the installer bitmaps
+- each workspace's board is in `.hangar/board.json` in the project. Hangar keeps it out of
+  `git status` through `.git/info/exclude`, unless you commit it yourself;
+- the app state and the memory are in the app's data folder;
+- the statistics are computed from the transcripts the agents already keep locally, and
+  are never sent anywhere;
+- the MCP API listens on `127.0.0.1` only, behind a token that changes at each launch.
+
+Hangar itself only goes online in these cases:
+
+- **Updates.** It checks the GitHub release feed for a new version.
+- **Dictation.** It downloads the speech model from Hugging Face once, when you choose it.
+  It sends audio to Groq only if you choose Groq as the engine, and the transcript only if
+  you turn on the optional cleanup pass, which also runs on Groq.
+- **Discord.** Rich Presence talks to your local Discord client, and only if you turn it
+  on.
+
+The agents you run talk to their own providers under their own settings. Hangar does not
+change that.
+
+## Build from source
+
+You need:
+
+- **Node.js** 22, as in CI (Vite 7 needs at least 20.19), and **pnpm** 10;
+- **Rust** stable;
+- **cmake** and **LLVM/clang**: dictation compiles whisper.cpp from source and generates
+  its bindings with libclang;
+- the Tauri prerequisites for your system:
+  - **Windows:** the MSVC build tools and WebView2. For example,
+    `winget install Kitware.CMake LLVM.LLVM`;
+  - **macOS:** the Xcode command line tools (`xcode-select --install`, which includes
+    clang) and `brew install cmake`;
+  - **Linux:** the WebKitGTK, ALSA and libclang headers, as installed by CI on Ubuntu
+    22.04:
+
+    ```bash
+    sudo apt install build-essential cmake libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+      librsvg2-dev libxdo-dev libssl-dev libasound2-dev libclang-dev patchelf
+    ```
+
+Then:
+
+```bash
+pnpm install
+pnpm tauri dev      # run the app with hot reload
+pnpm tauri build    # build the installers for this platform
+pnpm demo:dev       # the browser demo, with canned agents, on http://localhost:4300
 ```
 
-A fork that wants the Rich Presence badges needs art uploaded to its own Discord
-application under the keys `agent-claude`, `agent-codex`, `agent-gemini` and
-`agent-opencode`, then its application id set in Settings → Discord. Until then the card
-simply shows no badge.
+> [!WARNING]
+> If Hangar is already installed on your machine, a plain `pnpm tauri dev` shares its data
+> and its MCP endpoint. Your installed agents would then talk to the dev build. See
+> [CONTRIBUTING.md](CONTRIBUTING.md#running-a-dev-build-next-to-an-installed-hangar) to run
+> the two side by side.
+
+## Repository layout
+
+```
+src/                 React frontend (components, lib, styles, i18n)
+src-tauri/src/       Rust backend: PTYs, board, memory, MCP server, git, deliveries, stats, dictation
+src-tauri/claude-mod/hangar-bridge/
+                     the Claude Code mod that reports session state to Hangar
+src-tauri/installer/ NSIS installer script and artwork
+demo/                the browser demo: src/ compiled unchanged against a fake backend
+site/                the website at hangar.simnjs.fr
+scripts/             logo, installer art, demo model and demo bundling scripts
+.github/workflows/   CI (checks on every push and PR) and Release (builds and publishes on a tag)
+```
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md). It covers the setup, the checks CI runs and the commit
+style. Please follow the [code of conduct](CODE_OF_CONDUCT.md). To report a security
+issue, see [SECURITY.md](SECURITY.md) and do not open a public issue.
 
 ## License
 
-MIT
+[MIT](LICENSE) © simnJS
