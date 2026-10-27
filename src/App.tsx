@@ -95,6 +95,7 @@ import {
   useShortcuts,
   type ShortcutHandlers,
 } from "./lib/useShortcuts";
+import { liveWorkerDeps } from "./lib/workerControl";
 import { useT } from "./i18n";
 import { useStore } from "./store";
 import { applyThemeToDocument, getTheme } from "./themes";
@@ -140,6 +141,7 @@ export default function App() {
     addPane,
     closePane,
     movePane,
+    updatePane,
     setActiveWorkspace,
     updateSettings,
   } = useStore();
@@ -703,6 +705,7 @@ export default function App() {
           modelHost: async (workspaceId, detached) =>
             detached ? remoteModelHost(workspaceId) : localModelHost(workspaceId),
           // orchestration: workers deps
+          workers: liveWorkerDeps(updatePane),
           // orchestration: delivery deps
         }
       : null,

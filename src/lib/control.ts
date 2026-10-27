@@ -9,7 +9,7 @@ import type { ModelHost } from "./modelHost";
 import type { OpenModel, SnapshotAngle } from "./modelStore";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
-import { workerControl } from "./workerControl";
+import { workerControl, type WorkerDeps } from "./workerControl";
 import { deliveryControl } from "./deliveryControl";
 
 /**
@@ -72,7 +72,7 @@ export interface ControlDeps {
   alive: (paneId: string) => Promise<boolean>;
   activity: (paneId: string) => PaneActivity | undefined;
   /** The hangar-bridge queue: submitted once the Claude Code session is idle. */
-  enqueue: (paneId: string, text: string) => Promise<unknown>;
+  enqueue: (paneId: string, text: string, from?: string) => Promise<unknown>;
   dirExists: (path: string) => Promise<boolean>;
   /** Whether workspaces can go to windows of their own at all. */
   canDetach: () => boolean;
@@ -96,6 +96,8 @@ export interface ControlDeps {
    */
   modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
   // orchestration: workers deps
+  /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
+  workers?: WorkerDeps;
   // orchestration: delivery deps
 }
 

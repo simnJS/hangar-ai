@@ -30,6 +30,10 @@ export interface Task {
   /** When the task last entered `doing`. Missing outside `doing`, and on
       tasks moved there before the board recorded it. */
   doing_since?: number | null;
+  /** Paths and globs its worker may change (orchestration). Missing: none. */
+  owns?: string[];
+  /** Workers started on it so far (orchestration). Missing: none. */
+  attempts?: number;
 }
 
 /**
@@ -55,6 +59,7 @@ export interface TaskPatch {
   labels?: string[];
   depends_on?: string[];
   order?: number;
+  owns?: string[];
 }
 
 export interface NewTask {
@@ -64,6 +69,7 @@ export interface NewTask {
   priority?: number;
   labels?: string[];
   depends_on?: string[];
+  owns?: string[];
 }
 
 export const boardLoad = (cwd: string) => invoke<{ tasks: Task[] }>("board_load", { cwd });
@@ -82,6 +88,18 @@ export const boardClaim = (cwd: string, id: string, agent: string) =>
 
 export const boardComment = (cwd: string, id: string, author: string, text: string) =>
   invoke<Task>("board_comment", { cwd, id, author, text });
+
+/**
+ * A worker's claim (lib/workerControl): todo to doing, one more attempt, and
+ * refused — saying why — for everything that should stop it, owned files
+ * overlapping a task in doing included.
+ */
+export const boardClaimWorker = (cwd: string, id: string, worker: string, maxAttempts: number) =>
+  invoke<Task>("board_claim_worker", { cwd, id, worker, maxAttempts });
+
+/** Back to todo unless it waits for review or is done; `undo` takes the attempt back. */
+export const boardReleaseWorker = (cwd: string, id: string, worker: string, undo: boolean) =>
+  invoke<Task>("board_release_worker", { cwd, id, worker, undo });
 
 export interface McpTarget {
   id: string;

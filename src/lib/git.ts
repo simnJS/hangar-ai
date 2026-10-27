@@ -151,10 +151,19 @@ export const gitWorktreeUnlock = (path: string, worktreePath: string) =>
 /**
  * Copies the files git ignores — a fresh checkout has none of them. Patterns
  * are relative to the root and carry no implicit globstar: ".env" is the one at
- * the root, only `**` walks into folders.
+ * the root, only `**` walks into folders. `ignoredOnly` leaves out the
+ * untracked files git does not ignore, which a `git add -A` would commit.
  */
-export const gitCopyUntracked = (from: string, to: string, patterns: string[]) =>
-  invoke<CopyResult>("git_copy_untracked", { from, to, patterns });
+export const gitCopyUntracked = (
+  from: string,
+  to: string,
+  patterns: string[],
+  ignoredOnly = false,
+) => invoke<CopyResult>("git_copy_untracked", { from, to, patterns, ignoredOnly });
+
+/** How many commits `head` has that `base` does not. */
+export const gitCommitsAhead = (path: string, base: string, head: string) =>
+  invoke<number>("git_commits_ahead", { path, base, head });
 
 /**
  * Everything changed in the working tree holding `path`, untracked files
