@@ -1,388 +1,675 @@
 <!doctype html>
-<html lang="en" data-theme="tokyo-night">
+<html lang="en" data-theme="graphite">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hangar.AI: run Claude Code, Codex and friends side by side</title>
-<meta name="description" content="One window, up to eight real terminals, and a task board your agents read and write themselves. Windows, macOS and Linux. MIT.">
+<title>Hangar.AI: run a team of coding agents from one window</title>
+<meta name="description" content="Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side, with a shared board and memory. In 1.0, an orchestrator plans the work, hands it to workers in their own git worktrees, and merges what passes your tests and a review. Free and open source.">
+<link rel="canonical" href="https://hangar.simnjs.fr/">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#16161e">
+<meta name="theme-color" content="#202124">
+
+<link rel="icon" href="favicon.ico" sizes="48x48">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
-<meta property="og:title" content="Hangar.AI">
-<meta property="og:description" content="Run Claude Code, Codex and friends side by side, in one window.">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Hangar.AI">
+<meta property="og:url" content="https://hangar.simnjs.fr/">
+<meta property="og:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
+<meta property="og:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans, hands tasks to workers in their own git worktrees, and merges what passes a check and a review. Free, open source, local.">
+<meta property="og:image" content="https://hangar.simnjs.fr/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hangar.AI with an orchestrator pane and two worker panes side by side, under the title: a team of coding agents, in one window.">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
+<meta name="twitter:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans, delegates to workers in git worktrees, and merges what passes. Free and open source.">
+<meta name="twitter:image" content="https://hangar.simnjs.fr/og.png">
+<meta name="twitter:image:alt" content="Hangar.AI with an orchestrator pane and two worker panes side by side, under the title: a team of coding agents, in one window.">
+
+<link rel="preload" href="fonts/inter-latin-opsz.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
 <script>document.documentElement.classList.add('js');</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Hangar.AI",
+  "softwareVersion": "1.0.0",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Windows, macOS, Linux",
+  "url": "https://hangar.simnjs.fr/",
+  "downloadUrl": "https://github.com/simnJS/hangar-ai/releases/latest",
+  "license": "https://opensource.org/licenses/MIT",
+  "image": "https://hangar.simnjs.fr/og.png",
+  "author": { "@type": "Person", "name": "simnJS", "url": "https://github.com/simnJS" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 </head>
 <body>
 
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="topbar" id="topbar">
-  <div class="topbar__in">
+<header class="bar" id="bar">
+  <div class="bar__in">
     <a class="brand" href="#top" aria-label="Hangar.AI, back to top">
-      <svg class="brand__mark" width="21" height="21" viewBox="0 0 1024 1024" aria-hidden="true">
-        <rect x="200" y="200" width="260" height="624" fill="var(--acc)"></rect>
-        <rect x="538" y="200" width="286" height="260" fill="var(--ink)"></rect>
-        <rect x="538" y="538" width="286" height="286" fill="var(--ink)"></rect>
+      <svg class="brand__mark" width="18" height="18" viewBox="200 200 624 624" aria-hidden="true">
+        <rect x="200" y="200" width="260" height="624" fill="var(--accent)"></rect>
+        <rect x="538" y="200" width="286" height="260" fill="var(--fg-hi)"></rect>
+        <rect x="538" y="538" width="286" height="286" fill="var(--fg-hi)"></rect>
       </svg>
-      <span class="brand__name">Hangar<span class="brand__dot">.</span>AI</span>
+      <span class="brand__name">Hangar.AI</span>
+      <span class="brand__ver">1.0.0</span>
     </a>
 
-    <nav class="topnav" id="topnav" aria-label="Sections">
-      <a href="#demo">Demo</a>
-      <a href="#features">Features</a>
-      <a href="#board">Board</a>
-      <a href="#themes">Themes</a>
-      <a href="#keys">Keys</a>
+    <nav class="seg" id="nav" aria-label="Sections">
+      <a class="seg__btn" href="#orchestrator">Orchestrator</a>
+      <a class="seg__btn" href="#demo">Demo</a>
+      <a class="seg__btn" href="#features">Features</a>
+      <a class="seg__btn" href="#download">Download</a>
+      <a class="seg__btn" href="#faq">FAQ</a>
     </nav>
 
-    <div class="topbar__right">
-      <a class="ghostlink" href="https://github.com/simnJS/hangar-ai">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"></path>
-        </svg>
-        GitHub
+    <div class="bar__end">
+      <a class="iconlink" href="https://github.com/simnJS/hangar-ai" aria-label="Source code on GitHub">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"></path></svg>
+        <span class="iconlink__text">GitHub</span>
       </a>
-      <a class="btn btn--sm" href="https://github.com/simnJS/hangar-ai/releases/latest">Download</a>
+      <a class="btn btn--primary btn--sm" href="#download">Download</a>
     </div>
   </div>
 </header>
 
 <main id="main">
 
-<!-- ══════════════════════ HERO ══════════════════════ -->
-<section class="hero" id="top">
-  <div class="hero__glow" aria-hidden="true"></div>
-
-  <div class="shell hero__in">
-    <a class="badge" href="https://github.com/simnJS/hangar-ai/releases/latest">
-      <span class="badge__ver">0.6.1</span>
-      <span class="badge__what">Dictation, and a shared task board</span>
-      <span class="badge__go" aria-hidden="true">→</span>
+<!-- Hero ─────────────────────────────────────────────────────────── -->
+<section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="wrap hero__copy">
+    <a class="release" href="https://github.com/simnJS/hangar-ai/releases/tag/v1.0.0">
+      <span class="release__dot" aria-hidden="true"></span>
+      Version 1.0 is out, with the orchestrator
     </a>
 
-    <h1 class="hero__title">
-      Every coding agent,<br><span class="hero__accent">side by side.</span>
-    </h1>
+    <h1 class="hero__title" id="hero-title">A team of coding agents, in&nbsp;one&nbsp;window.</h1>
 
-    <p class="hero__sub">
-      Claude Code, Codex, Gemini and whatever you install next, in real terminals, tiled
-      1, 2, 4 or 8 at a time. Reopen the window and every pane comes back on the
-      conversation it was in.
+    <p class="hero__lede">
+      Hangar.AI runs Claude Code, Codex, Gemini CLI and OpenCode side by side in real terminals,
+      with a task board and a memory they share. Pin one as orchestrator, and it plans the work,
+      hands each task to a worker in its own git worktree, and merges what passes your tests and
+      a review.
     </p>
 
     <div class="hero__cta">
-      <a class="btn btn--lg" href="https://github.com/simnJS/hangar-ai/releases/latest" id="mainget">
-        Download for Windows
-      </a>
-      <a class="btn btn--lg btn--ghost" href="#demo">Try it right here</a>
+      <a class="btn btn--primary btn--lg" id="get" href="#download">Download</a>
+      <a class="btn btn--lg" href="#demo">Try it in the browser</a>
     </div>
+    <p class="hero__fine" id="getnote">
+      Free and open source under the MIT license. No account, no telemetry.
+    </p>
+  </div>
 
-    <p class="hero__fine">
-      <span>MIT</span><i></i><span>No account</span><i></i><span>Updates itself</span>
+  <figure class="shot shot--hero wrap-wide">
+    <div class="shot__frame">
+      <picture>
+        <source type="image/avif" srcset="img/hero-1280.avif 1280w, img/hero-1920.avif 1920w, img/hero-2560.avif 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
+        <source type="image/webp" srcset="img/hero-1280.webp 1280w, img/hero-1920.webp 1920w, img/hero-2560.webp 2560w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
+        <img src="img/hero-1280.webp" width="1280" height="800" fetchpriority="high" decoding="async"
+          alt="Hangar.AI on the checkout-v2 workspace. The navigator on the left lists workspaces with their agents' states. In the middle, Iris, pinned as orchestrator, sits idle while two workers run: Jade, working on the task Cart: one total per currency, and Kai, on Keep the address after a failed payment. The toolbar shows Needs you with 3 items, and the inspector on the right shows Iris's session, context, cost and Claude plan usage.">
+      </picture>
+      <span class="mark" data-n="1" style="--x:0.56%;--y:7.8%;--w:16.4%;--h:35.8%" aria-hidden="true"></span>
+      <span class="mark" data-n="2" style="--x:17.78%;--y:5.22%;--w:4.86%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-n="3" style="--x:48.89%;--y:5.22%;--w:16.39%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark" data-n="3" style="--x:17.78%;--y:50.9%;--w:22.2%;--h:2.67%" aria-hidden="true"></span>
+      <span class="mark mark--side" data-n="4" style="--x:68.06%;--y:0.67%;--w:7.99%;--h:3.56%" aria-hidden="true"></span>
+      <span class="mark" data-n="5" style="--x:79.72%;--y:5.56%;--w:20%;--h:42.2%" aria-hidden="true"></span>
+    </div>
+    <figcaption class="legend">
+      <ol class="legend__list">
+        <li><b>Navigator.</b> Every workspace, and what its agents are doing right now.</li>
+        <li><b>Orchestrator.</b> Iris plans on the board and leaves the code to the workers.</li>
+        <li><b>Workers.</b> Jade and Kai, each on one task, each in a git worktree of their own.</li>
+        <li><b>Needs you.</b> Questions and finished work waiting for your decision.</li>
+        <li><b>Inspector.</b> The focused agent's session, context, cost and plan usage.</li>
+      </ol>
+    </figcaption>
+  </figure>
+
+  <div class="wrap">
+    <p class="works">
+      Works with <b>Claude Code</b>, <b>Codex</b>, <b>Gemini CLI</b>, <b>OpenCode</b>
+      and any shell, on Windows, macOS and Linux.
     </p>
   </div>
 </section>
 
-<!-- ══════════════════════ THE APP ══════════════════════ -->
-<section class="demo" id="demo">
-  <div class="wide">
-    <div class="stage reveal">
-      <div class="stage__bar">
-        <span class="stage__dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="stage__name">Hangar.AI</span>
-        <span class="tag tag--live">Live</span>
-        <a class="stage__out" href="demo/index.html" target="_blank" rel="noopener">
-          Open in a tab <span aria-hidden="true">↗</span>
-        </a>
-      </div>
-
-      <div class="stage__body">
-        <div class="stage__boot" id="stageboot" role="status">
-          <span class="spin" aria-hidden="true"></span>
-          <b>Starting the app…</b>
-          <a class="stage__bootlink" href="demo/index.html" target="_blank" rel="noopener">
-            Taking a while. Open it in a tab ↗
-          </a>
-        </div>
-
-        <iframe
-          class="stage__frame"
-          id="demoframe"
-          src="demo/index.html"
-          title="Hangar.AI running in the browser"
-        ></iframe>
-      </div>
-
-      <p class="stage__narrow">
-        Eight terminals need a wider screen.
-        <a href="demo/index.html">Open the demo in a tab</a>.
+<!-- Orchestrator ─────────────────────────────────────────────────── -->
+<section class="orch" id="orchestrator" aria-labelledby="orch-title">
+  <div class="wrap">
+    <header class="head">
+      <h2 class="head__title" id="orch-title">Pin an orchestrator. It runs the others.</h2>
+      <p class="head__lede">
+        Orchestration turns one Claude Code pane into a lead that plans and delegates instead of
+        writing code. Hangar does the parts a prompt should not be trusted with: the worktrees,
+        the limits, the tests and the merge.
       </p>
-    </div>
-
-    <div class="prompts reveal">
-      <span class="prompts__label">Send a prompt to the Claude Code pane</span>
-      <div class="prompts__row" id="prompts">
-        <button type="button" class="chip" data-send="take the next task on the board">take the next task on the board</button>
-        <button type="button" class="chip" data-send="write the tests for atomic claims">write the tests</button>
-        <button type="button" class="chip" data-send="check the fr table against en">check the fr translations</button>
-        <button type="button" class="chip" data-send="what can you do here?">what can you do?</button>
-      </div>
-      <p class="prompts__note">
-        Or click a pane and type. The bottom-right one is a plain shell; try <code>help</code>.
-        Replies are canned. No model runs here.
-      </p>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════════════ FEATURES ══════════════════════ -->
-<section class="feats" id="features">
-  <div class="shell">
-    <header class="sec-head reveal">
-      <h2 class="sec-title">What it does</h2>
     </header>
 
-    <div class="bento">
-      <article class="bx bx--panes reveal">
-        <div class="bx__art" aria-hidden="true">
-          <div class="mini">
-            <span class="mini__p mini__p--a"></span>
-            <span class="mini__p mini__p--b"></span>
-            <span class="mini__p mini__p--c"></span>
-            <span class="mini__p mini__p--d"></span>
-          </div>
-        </div>
-        <div class="bx__txt">
-          <h3>Tiling panes</h3>
+    <ol class="steps">
+      <li class="step">
+        <div class="step__rail" aria-hidden="true"><span class="step__n">1</span></div>
+        <div class="step__copy">
+          <h3>Give it an objective</h3>
           <p>
-            1, 2, 4 or 8 real terminals. Every split owns its ratio, so dragging one boundary
-            leaves the rest alone. Double-click one to reset it to 50/50.
-          </p>
-          <p class="bx__meta">
-            PowerShell · cmd · Git Bash · WSL · MSYS2 · Nushell · zsh · bash · fish · pwsh
+            Pin any Claude Code pane as the workspace's orchestrator and say what you want. It
+            reads the code, asks you the product questions it cannot settle itself, all in one
+            go, then writes a plan with validation criteria to the shared memory.
           </p>
         </div>
-      </article>
-
-      <article class="bx bx--board reveal">
-        <div class="bx__art" aria-hidden="true">
-          <div class="minicards">
-            <span class="mc"><i style="--k:var(--faint)"></i>free</span>
-            <span class="mc mc--on"><i style="--k:var(--acc)"></i>claude</span>
-            <span class="mc"><i style="--k:var(--green)"></i>codex</span>
+        <figure class="step__art">
+          <div class="crop">
+            <picture>
+              <source type="image/avif" srcset="img/pin-448.avif 448w, img/pin-896.avif 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)">
+              <source type="image/webp" srcset="img/pin-448.webp 448w, img/pin-896.webp 896w" sizes="(min-width: 960px) 448px, calc(100vw - 80px)">
+              <img src="img/pin-448.webp" width="448" height="256" loading="lazy" decoding="async"
+                alt="The menu of a Claude Code pane named Ava, open on its last item: Pin as orchestrator.">
+            </picture>
           </div>
-        </div>
-        <div class="bx__txt">
-          <h3>The shared board</h3>
+        </figure>
+      </li>
+
+      <li class="step">
+        <div class="step__rail" aria-hidden="true"><span class="step__n">2</span></div>
+        <div class="step__copy">
+          <h3>It plans on the board</h3>
           <p>
-            Agents read it, claim from it and close it over MCP. Claims are atomic: two agents
-            racing for one task cannot both win it.
+            The plan becomes tasks on the workspace board, each with a goal, acceptance criteria,
+            the command that proves it, and the files it owns. Tasks that run at the same time
+            never share a file, and a task waits for the ones it depends on.
           </p>
         </div>
-      </article>
-
-      <article class="bx reveal">
-        <h3>Workspaces</h3>
-        <p>A project directory plus its pane layout, saved. Reopen one and every pane comes back with its agent.</p>
-      </article>
-
-      <article class="bx reveal">
-        <h3>Session resume</h3>
-        <p>Agents relaunch on the conversation they were in. No session ids to keep track of.</p>
-      </article>
-
-      <article class="bx reveal">
-        <h3>Broadcast</h3>
-        <p>One instruction, sent to every pane at once.</p>
-      </article>
-
-      <article class="bx bx--themes reveal">
-        <div class="bx__txt">
-          <h3>32 themes</h3>
-          <p>
-            Ported from VS Code. They restyle the whole window, not just the sixteen terminal
-            colours. Font, size, line height, cursor and padding adjust live.
-          </p>
-        </div>
-        <div class="bx__art" aria-hidden="true">
-          <div class="tstrip">
-            <i style="background:#1a1b26"></i><i style="background:#1e1e2e"></i>
-            <i style="background:#282a36"></i><i style="background:#282c34"></i>
-            <i style="background:#2e3440"></i><i style="background:#282828"></i>
-            <i style="background:#1f1f28"></i><i style="background:#ffffff"></i>
+        <figure class="step__art">
+          <div class="crop">
+            <picture>
+              <source type="image/avif" srcset="img/board-892.avif 892w, img/board-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
+              <source type="image/webp" srcset="img/board-892.webp 892w, img/board-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
+              <img src="img/board-892.webp" width="892" height="356" loading="lazy" decoding="async"
+                alt="The checkout-v2 board in four columns. To do: pick the payment provider for EU cards, labelled needs-you, and a task blocked by task 31. In progress: two tasks held by Jade and Kai. Review: a coupon fix labelled ready-to-land. Done: price formatting helpers.">
+            </picture>
           </div>
-        </div>
-      </article>
+        </figure>
+      </li>
 
-      <article class="bx bx--voice reveal">
-        <div class="bx__txt">
-          <h3>Dictation</h3>
+      <li class="step">
+        <div class="step__rail" aria-hidden="true"><span class="step__n">3</span></div>
+        <div class="step__copy">
+          <h3>Workers take the tasks</h3>
           <p>
-            Hold a key and talk. The transcript lands in the focused pane, unsubmitted. Runs on
-            this machine, or through Groq.
+            Each task goes to a worker: a new Claude Code pane, on Sonnet by default, on a branch
+            of its own in its own git worktree, with 20 ports set aside so dev servers never
+            collide. Three run at once unless you say otherwise, and Hangar refuses the next one.
           </p>
-          <p class="bx__meta">Off until you turn it on.</p>
         </div>
-        <div class="bx__art" aria-hidden="true">
-          <div class="wave">
-            <i style="--h:30%"></i><i style="--h:62%"></i><i style="--h:88%"></i><i style="--h:54%"></i>
-            <i style="--h:96%"></i><i style="--h:40%"></i><i style="--h:72%"></i><i style="--h:26%"></i>
-            <i style="--h:58%"></i><i style="--h:84%"></i><i style="--h:36%"></i><i style="--h:64%"></i>
+        <figure class="step__art">
+          <div class="crop">
+            <picture>
+              <source type="image/avif" srcset="img/workers-892.avif 892w, img/workers-1784.avif 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
+              <source type="image/webp" srcset="img/workers-892.webp 892w, img/workers-1784.webp 1784w" sizes="(min-width: 1180px) 680px, (min-width: 960px) 58vw, calc(100vw - 80px)">
+              <img src="img/workers-892.webp" width="892" height="504" loading="lazy" decoding="async"
+                alt="Iris, marked as orchestrator, is idle. Beside her, Jade, a worker on Cart: one total per currency, is working: it reads the schema, writes a migration and runs it. Below, Kai, a worker on Keep the address after a failed payment, was started in the folder checkout-v2-worktrees/keep-address with the Sonnet model.">
+            </picture>
           </div>
-        </div>
-      </article>
-    </div>
-  </div>
-</section>
+        </figure>
+      </li>
 
-<!-- ══════════════════════ BOARD ══════════════════════ -->
-<section class="boardsec" id="board">
-  <div class="shell">
-    <div class="split">
-      <div class="split__copy reveal">
-        <p class="sec-kicker">The task board</p>
-        <h2 class="sec-title">Agents file work for each other.</h2>
-        <p class="sec-lede">
-          Every workspace gets a board. Over MCP the agents read what is open, claim what is
-          free, comment, and close what is done.
+      <li class="step">
+        <div class="step__rail" aria-hidden="true"><span class="step__n">4</span></div>
+        <div class="step__copy">
+          <h3>Every delivery is tested before it lands</h3>
+          <p>
+            A worker that is done hands in its branch. Hangar merges it in a scratch worktree,
+            runs your check command, and has a reviewer agent with a fresh context read the diff.
+            Only then does it move your branch forward. A step that fails goes back to the worker
+            with the reason, and one delivery runs at a time per repository.
+          </p>
+        </div>
+        <figure class="step__art">
+          <div class="delivery" id="delivery" aria-label="The four stages of a delivery">
+            <div class="delivery__head">
+              <span class="delivery__title">Delivery of #33</span>
+              <span class="delivery__task">Coupon applied twice when a payment is retried</span>
+            </div>
+            <ol class="delivery__list">
+              <li class="dstep" data-state="done">
+                <span class="dstep__mark" aria-hidden="true"></span>
+                <span class="dstep__what">Merged onto <code>main</code> in a scratch worktree</span>
+                <span class="dstep__why">Your own checkout is never worked in.</span>
+              </li>
+              <li class="dstep" data-state="done">
+                <span class="dstep__mark" aria-hidden="true"></span>
+                <span class="dstep__what"><code>pnpm test</code> passed</span>
+                <span class="dstep__why">The check command you set, run by your shell.</span>
+              </li>
+              <li class="dstep" data-state="done">
+                <span class="dstep__mark" aria-hidden="true"></span>
+                <span class="dstep__what">Review approved</span>
+                <span class="dstep__why">A reviewer agent with a fresh context read the diff, with read-only tools.</span>
+              </li>
+              <li class="dstep" data-state="done">
+                <span class="dstep__mark" aria-hidden="true"></span>
+                <span class="dstep__what">Landed: <code>main</code> fast-forwarded</span>
+                <span class="dstep__why">Local only. Nothing is pushed.</span>
+              </li>
+            </ol>
+            <p class="delivery__note">An illustration of the stages, with a task from the demo.</p>
+          </div>
+        </figure>
+      </li>
+    </ol>
+
+    <div class="pair">
+      <div class="pair__item">
+        <h3>You stay in charge</h3>
+        <p>
+          One box gathers what waits on you: an agent's question, a product decision the
+          orchestrator escalated, a delivery ready to merge. Deliveries merge by themselves by
+          default; turn that off and each one waits for your click.
         </p>
-        <p class="note">
-          <b>Claims are atomic.</b> Every change goes through a single lock, so the second agent
-          to reach a task gets an error.
+        <figure class="crop crop--needs">
+          <picture>
+            <source type="image/avif" srcset="img/needs-440.avif 440w, img/needs-880.avif 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
+            <source type="image/webp" srcset="img/needs-440.webp 440w, img/needs-880.webp 880w" sizes="(min-width: 960px) 440px, calc(100vw - 32px)">
+            <img src="img/needs-440.webp" width="440" height="368" loading="lazy" decoding="async"
+              alt="The Needs you panel with three items: Eve in storefront waits for an answer; a question from the orchestrator, Stripe or Adyen for EU cards; and a coupon fix ready to merge after pnpm test passed and the review approved, with a Merge button.">
+          </picture>
+        </figure>
+      </div>
+      <div class="pair__item">
+        <h3>Limits a prompt cannot talk its way past</h3>
+        <p>
+          Workers at once, attempts per task, permissions, the check command, the branch work
+          lands on and the models are set per workspace, and enforced by Hangar rather than
+          asked of the model. By default Opus plans, Sonnet works and Sonnet reviews.
         </p>
-      </div>
-
-      <div class="split__aside reveal">
-        <table class="tools">
-          <caption class="sr-only">MCP tools exposed by the board</caption>
-          <tbody>
-            <tr><td><code>board_list_tasks</code></td><td>Read the current state of the work</td></tr>
-            <tr><td><code>board_next_task</code></td><td>Highest-priority free task whose dependencies are done</td></tr>
-            <tr><td><code>board_claim_task</code></td><td>Take ownership, or fail if someone got there first</td></tr>
-            <tr><td><code>board_create_task</code></td><td>File work, with priorities and dependencies</td></tr>
-            <tr><td><code>board_update_task</code></td><td>Move between columns, edit, or release</td></tr>
-            <tr><td><code>board_comment_task</code></td><td>Leave notes, which is how agents talk to each other</td></tr>
-            <tr><td><code>board_delete_task</code></td><td>Remove a task</td></tr>
-          </tbody>
-        </table>
+        <figure class="crop crop--orch">
+          <picture>
+            <source type="image/avif" srcset="img/orch-600.avif 600w, img/orch-1200.avif 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)">
+            <source type="image/webp" srcset="img/orch-600.webp 600w, img/orch-1200.webp 1200w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)">
+            <img src="img/orch-600.webp" width="600" height="676" loading="lazy" decoding="async"
+              alt="The Orchestration settings of checkout-v2: Iris orchestrates with 2 workers running; workers at once 3; attempts per task 2; permissions as in Claude Code; merge by itself off; check command pnpm test; target branch, the workspace's current branch; then the models section.">
+          </picture>
+        </figure>
       </div>
     </div>
 
-    <div class="wiring reveal">
-      <h3 class="wiring__title">Settings → MCP registers the server wherever it finds a tool</h3>
-      <ul class="wiring__list">
-        <li><b>Claude Code</b><code>.mcp.json</code></li>
-        <li><b>Codex</b><code>~/.codex/config.toml</code></li>
-        <li><b>Gemini CLI</b><code>~/.gemini/settings.json</code></li>
-        <li><b>Cursor</b><code>.cursor/mcp.json</code></li>
-        <li><b>VS Code</b><code>.vscode/mcp.json</code></li>
-      </ul>
-      <p class="wiring__note">
-        Existing configuration is merged rather than overwritten, and a backup is kept on first
-        write. The API port and its token are resolved at launch, never written into those files,
-        so the configs stay valid across restarts.
-      </p>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════════════ THEMES ══════════════════════ -->
-<section class="themes" id="themes">
-  <div class="shell">
-    <header class="sec-head reveal">
-      <h2 class="sec-title">Pick one. The whole window follows.</h2>
-      <p class="sec-lede">
-        This page repaints with the app above it, because that is what the setting does.
-        Resets on reload.
-      </p>
-    </header>
-
-    <div class="swatches reveal" id="swatches" role="group" aria-label="Preview a theme"></div>
-  </div>
-</section>
-
-<!-- ══════════════════════ KEYS ══════════════════════ -->
-<section class="keys" id="keys">
-  <div class="shell">
-    <header class="sec-head reveal">
-      <h2 class="sec-title">Defaults follow the platform.</h2>
-      <p class="sec-lede">
-        A Mac copies with <kbd>Cmd</kbd><kbd>C</kbd> and moves between panes with
-        <kbd>Ctrl</kbd><kbd>⌥</kbd><kbd>→</kbd>, leaving <kbd>⌥</kbd><kbd>→</kbd> to the terminal,
-        which uses it to move by word. All of it is rebindable.
-      </p>
-    </header>
-
-    <dl class="keylist reveal">
-      <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>8</kbd></dt><dd>Focus pane N</dd></div>
-      <div><dt><kbd>Ctrl</kbd><kbd>D</kbd></dt><dd>Split the focused pane</dd></div>
-      <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd></dt><dd>Jump to the broadcast field</dd></div>
-      <div><dt><kbd>Ctrl</kbd><kbd>,</kbd></dt><dd>Settings</dd></div>
-      <div><dt>Double-click a split</dt><dd>Reset that boundary to 50/50</dd></div>
-      <div><dt>Double-click a workspace</dt><dd>Rename it</dd></div>
+    <dl class="facts">
+      <div>
+        <dt>Nothing is ever pushed</dt>
+        <dd>Merges are local fast-forwards. Pushing, pull requests and releases stay your call.</dd>
+      </div>
+      <div>
+        <dt>Woken by events, not a loop</dt>
+        <dd>
+          The orchestrator ends its turn while workers run. Hangar wakes it when a task moves, a
+          worker waits or stops, or a delivery lands or fails.
+        </dd>
+      </div>
+      <div>
+        <dt>Survives compaction</dt>
+        <dd>
+          After a restart or a compacted context, the orchestrator gets the board, its plan and the
+          latest events back, and carries on from there.
+        </dd>
+      </div>
     </dl>
   </div>
 </section>
 
-<!-- ══════════════════════ DOWNLOAD ══════════════════════ -->
-<section class="download" id="download">
-  <div class="shell">
-    <header class="sec-head sec-head--mid reveal">
-      <h2 class="sec-title">One file, then it updates itself.</h2>
+<!-- Demo ─────────────────────────────────────────────────────────── -->
+<section class="demo" id="demo" aria-labelledby="demo-title">
+  <div class="wrap">
+    <header class="head head--split">
+      <h2 class="head__title" id="demo-title">The real app, in your browser.</h2>
+      <p class="head__lede">
+        This is Hangar.AI built for the web: the same interface, terminals, board and statistics.
+        The agents answer from a script, no model runs, and nothing is saved. Open
+        <b>checkout-v2</b> in the navigator to find an orchestrator and its workers.
+      </p>
+    </header>
+  </div>
+
+  <div class="wrap-wide">
+    <div class="stage" id="stage">
+      <div class="stage__bar">
+        <span class="stage__title">Hangar.AI demo</span>
+        <span class="stage__note">Scripted replies</span>
+        <a class="stage__out" href="demo/index.html" target="_blank" rel="noopener">Open in a new tab</a>
+      </div>
+      <div class="stage__body">
+        <div class="stage__boot" id="stageboot" role="status">
+          <span class="spin" aria-hidden="true"></span>
+          <span>Starting the app…</span>
+        </div>
+        <iframe class="stage__frame" id="demoframe" data-src="demo/index.html" title="Hangar.AI running in the browser"></iframe>
+        <noscript><iframe class="stage__frame" src="demo/index.html" title="Hangar.AI running in the browser"></iframe></noscript>
+      </div>
+      <div class="stage__small">
+        <p>The demo is the full desktop interface and needs a wider screen.</p>
+        <a class="btn" href="demo/index.html" target="_blank" rel="noopener">Open the demo anyway</a>
+      </div>
+    </div>
+
+    <div class="prompts js-only" id="prompts">
+      <p class="prompts__label" id="prompts-label">Type into Ava, the Claude Code pane of <b>hangar-ai</b>:</p>
+      <div class="prompts__row" role="group" aria-labelledby="prompts-label">
+        <button type="button" class="chip" data-send="take the next task on the board">take the next task on the board</button>
+        <button type="button" class="chip" data-send="show the 3d model">show the 3D model</button>
+        <button type="button" class="chip" data-send="write the tests for atomic claims">write the tests</button>
+        <button type="button" class="chip" data-send="what can you do here?">what can you do?</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features ─────────────────────────────────────────────────────── -->
+<section class="features" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <header class="head">
+      <h2 class="head__title" id="features-title">Everything else in 1.0</h2>
+      <p class="head__lede">
+        Hangar.AI started as a way to tile agents in one window. Here is what it grew around them.
+      </p>
     </header>
 
-    <div class="plats reveal">
+    <article class="show">
+      <div class="show__copy">
+        <h3>An interface built like an IDE</h3>
+        <p>
+          A navigator lists every workspace and what its agents are doing. An inspector shows the
+          focused agent's session, context window, cost and plan usage. A command palette reaches
+          every pane, workspace and command from <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>,
+          or <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span> on a Mac.
+        </p>
+        <p>
+          33 themes restyle the whole window, not only the terminals. Graphite is the default,
+          where colour only marks an agent's state, a diff or the focus.
+          <span class="js-only">Try a few on this page:</span>
+        </p>
+        <div class="swatches" id="swatches" role="group" aria-label="Preview a theme on this page and in the demo"></div>
+      </div>
+      <figure class="show__art">
+        <div class="crop">
+          <picture>
+            <source type="image/avif" srcset="img/palette-640.avif 640w, img/palette-1280.avif 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)">
+            <source type="image/webp" srcset="img/palette-640.webp 640w, img/palette-1280.webp 1280w" sizes="(min-width: 960px) 600px, calc(100vw - 32px)">
+            <img src="img/palette-640.webp" width="640" height="520" loading="lazy" decoding="async"
+              alt="The command palette, suggesting to go to Eve, who waits for an answer in storefront, and to Leo, who finished in marketing-site-redesign, then listing panes and commands with their shortcuts.">
+          </picture>
+        </div>
+      </figure>
+    </article>
+
+    <article class="show show--flip">
+      <div class="show__copy">
+        <h3>See where the tokens go</h3>
+        <p>
+          Hangar reads the transcripts Claude Code and Codex keep on your machine and adds up
+          tokens, active time and an API-equivalent cost by project, agent and model, and maps
+          the hours of the week your agents were busy.
+        </p>
+        <p class="aside">
+          The cost prices every token at the providers' public API rates. It measures the work
+          done, not what a Pro or Max subscription charges you.
+        </p>
+      </div>
+      <figure class="show__art">
+        <div class="crop">
+          <picture>
+            <source type="image/avif" srcset="img/stats-892.avif 892w, img/stats-1784.avif 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)">
+            <source type="image/webp" srcset="img/stats-892.webp 892w, img/stats-1784.webp 1784w" sizes="(min-width: 960px) 640px, calc(100vw - 32px)">
+            <img src="img/stats-892.webp" width="892" height="508" loading="lazy" decoding="async"
+              alt="The statistics view over 30 days, with demo data: tokens, API-equivalent cost, active time and sessions, each compared with the 30 days before, above a chart of tokens per day by kind.">
+          </picture>
+        </div>
+      </figure>
+    </article>
+
+    <article class="show show--wide">
+      <div class="show__copy">
+        <h3>Agents can show you a 3D model</h3>
+        <p>
+          Over MCP, an agent opens a glTF, GLB, OBJ, STL, PLY, FBX or USDZ file in a panel beside
+          its terminal, then renders snapshots to check its own work. Each workspace has its own
+          preview, and a model reloads when its file changes.
+        </p>
+      </div>
+      <figure class="show__art">
+        <div class="crop">
+          <picture>
+            <source type="image/avif" srcset="img/model-1188.avif 1188w, img/model-2376.avif 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)">
+            <source type="image/webp" srcset="img/model-1188.webp 1188w, img/model-2376.webp 2376w" sizes="(min-width: 1260px) 1180px, calc(100vw - 32px)">
+            <img src="img/model-1188.webp" width="1188" height="546" loading="lazy" decoding="async"
+              alt="Ava, a Claude Code pane, was asked to show the model. It calls model_show over MCP, and the 3D preview beside its terminal opens sample.glb, opened by Ava: a drone hangar on a landing pad.">
+          </picture>
+        </div>
+      </figure>
+    </article>
+
+    <dl class="specs">
+      <div>
+        <dt>A board the agents share</dt>
+        <dd>A kanban board per workspace that agents read, claim and comment on over MCP. Claims are atomic: two agents never win the same task.</dd>
+      </div>
+      <div>
+        <dt>A memory across workspaces</dt>
+        <dd>Notes every agent can search and write, wherever it runs: conventions, decisions, the trap someone already fell into.</dd>
+      </div>
+      <div>
+        <dt>MCP servers per workspace</dt>
+        <dd>Pick which servers Claude Code loads in each workspace. Every session starts its own copy of each stdio server, so fewer means less memory.</dd>
+      </div>
+      <div>
+        <dt>Idle workspaces go to sleep</dt>
+        <dd>Untouched for 10 minutes, a workspace's agents stop to free memory, and resume their sessions when you come back.</dd>
+      </div>
+      <div>
+        <dt>Git worktrees and diffs</dt>
+        <dd>Create and remove worktrees from the app, and read what an agent changed before it lands.</dd>
+      </div>
+      <div>
+        <dt>Sessions come back</dt>
+        <dd>Reopen the window and every pane resumes the conversation it was in, with no session ids to keep track of.</dd>
+      </div>
+      <div>
+        <dt>Agent states at a glance</dt>
+        <dd>Every pane says whether its agent is working, waiting for your answer, or done. Claude Code reports it exactly, through a small bridge.</dd>
+      </div>
+      <div>
+        <dt>Dictation</dt>
+        <dd>Hold a key and speak into the focused pane. whisper.cpp runs on your machine, or Groq if you prefer. Off until you turn it on.</dd>
+      </div>
+      <div>
+        <dt>Broadcast</dt>
+        <dd>Send one instruction to every pane at once, or to each agent as soon as it is free.</dd>
+      </div>
+      <div>
+        <dt>Up to 16 panes, any shell</dt>
+        <dd>PowerShell, cmd, Git Bash, WSL and Nushell on Windows; zsh, bash, fish, Nushell and pwsh elsewhere.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- Download ─────────────────────────────────────────────────────── -->
+<section class="download" id="download" aria-labelledby="download-title">
+  <div class="wrap">
+    <header class="head">
+      <h2 class="head__title" id="download-title">Download Hangar.AI 1.0.0</h2>
+      <p class="head__lede">
+        Free and open source under the MIT license. Install it once; it updates itself from then on.
+      </p>
+    </header>
+
+    <div class="plats">
       <article class="plat" data-os="windows">
-        <div class="plat__head"><h3>Windows</h3><span class="plat__you">Your platform</span></div>
-        <p class="plat__files"><code>.exe</code> <code>.msi</code>, 64-bit</p>
-        <p class="plat__req">WebView2 is required, and ships with Windows 11.</p>
-        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the installer</a>
+        <h3 class="plat__os">Windows</h3>
+        <p class="plat__what">64-bit installer. Installs for you alone, without administrator rights. Needs WebView2, which ships with Windows 11.</p>
+        <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_x64-setup.exe">Download the installer <span class="ext">.exe</span></a>
+        <p class="plat__note">The installer is not code-signed yet, so SmartScreen warns on first run: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
 
       <article class="plat" data-os="macos">
-        <div class="plat__head"><h3>macOS</h3><span class="plat__you">Your platform</span></div>
-        <p class="plat__files"><code>.dmg</code>, universal</p>
-        <p class="plat__req">Signed and notarised, so it opens on a double-click. Apple Silicon and Intel in one build.</p>
-        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the disk image</a>
+        <h3 class="plat__os">macOS</h3>
+        <p class="plat__what">One universal disk image for Apple Silicon and Intel Macs.</p>
+        <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_universal.dmg">Download the disk image <span class="ext">.dmg</span></a>
+        <p class="plat__note">Signed and notarised, so it opens like any other app.</p>
       </article>
 
       <article class="plat" data-os="linux">
-        <div class="plat__head"><h3>Linux</h3><span class="plat__you">Your platform</span></div>
-        <p class="plat__files"><code>.AppImage</code> <code>.deb</code> <code>.rpm</code></p>
-        <p class="plat__req">Needs WebKitGTK 4.1: <code>libwebkit2gtk-4.1-0</code> on Debian and Ubuntu, <code>webkit2gtk4.1</code> on Fedora.</p>
-        <a class="btn btn--full" href="https://github.com/simnJS/hangar-ai/releases/latest">Get the build</a>
+        <h3 class="plat__os">Linux</h3>
+        <p class="plat__what">x86-64. The AppImage runs anywhere; the packages suit apt and dnf. Needs WebKitGTK 4.1.</p>
+        <a class="btn btn--primary plat__get" href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_amd64.AppImage">Download the AppImage</a>
+        <p class="plat__note plat__alts">
+          Or a package:
+          <a href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI_1.0.0_amd64.deb">.deb</a>
+          <a href="https://github.com/simnJS/hangar-ai/releases/download/v1.0.0/Hangar.AI-1.0.0-1.x86_64.rpm">.rpm</a>
+        </p>
       </article>
     </div>
 
-    <p class="build reveal">
-      Or build it yourself. Node 20, pnpm and a Rust toolchain:
-      <code>pnpm install &amp;&amp; pnpm tauri build</code>
-    </p>
+    <div class="after">
+      <p>
+        Hangar.AI runs the agents you already use, so install at least one of them and sign in:
+        Claude Code, Codex, Gemini CLI or OpenCode. The orchestrator and its workers are Claude Code
+        sessions.
+      </p>
+      <p>
+        <a href="https://github.com/simnJS/hangar-ai/releases/latest">Every file of the latest release</a>
+        is on GitHub. To build it yourself, with Node 20, pnpm and a Rust toolchain:
+        <code>pnpm install &amp;&amp; pnpm tauri build</code>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ ──────────────────────────────────────────────────────────── -->
+<section class="faq" id="faq" aria-labelledby="faq-title">
+  <div class="wrap faq__in">
+    <header class="head">
+      <h2 class="head__title" id="faq-title">Questions</h2>
+    </header>
+
+    <div class="qa">
+      <details>
+        <summary>What does it cost?</summary>
+        <div class="qa__a">
+          <p>
+            Hangar.AI is free, under the MIT license, with no account and no paid tier. The agents
+            cost what they already cost you: each one uses its own subscription or API key.
+          </p>
+          <p>
+            Orchestration runs several sessions at once, an orchestrator, up to three workers and
+            a reviewer for each delivery, so it uses a plan's limits faster than a single agent.
+            The models and the number of workers are yours to set per workspace.
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Does it work with my Claude Pro or Max plan?</summary>
+        <div class="qa__a">
+          <p>
+            Yes. Hangar starts the <code>claude</code> command you already installed, with the
+            login it already has, whether that is a plan or an API key. It never asks for your
+            credentials. The navigator shows your plan's five-hour and weekly usage as Claude Code
+            reports it.
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Which agents and systems does it support?</summary>
+        <div class="qa__a">
+          <p>
+            Claude Code, Codex, Gemini CLI and OpenCode, plus any shell. The orchestrator and its
+            workers need Claude Code. Hangar.AI runs on Windows (64-bit), macOS (Apple Silicon
+            and Intel) and Linux (x86-64).
+          </p>
+        </div>
+      </details>
+
+      <details id="faq-smartscreen">
+        <summary>Why does Windows warn me about the installer?</summary>
+        <div class="qa__a">
+          <p>
+            The Windows installer is not code-signed yet, so SmartScreen shows a warning the first
+            time you run it. Choose <b>More info</b>, then <b>Run anyway</b>. The installer is
+            built by GitHub Actions from the public source, and installs for your user only.
+          </p>
+          <p>
+            The macOS build is signed and notarised, so Gatekeeper opens it without a prompt. If a
+            release ever ships unsigned, its notes say so; the first launch is then right-click,
+            <b>Open</b>.
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Does my code or data leave my machine?</summary>
+        <div class="qa__a">
+          <p>
+            Not through Hangar. There is no server and no telemetry. The board lives in your
+            project, in <code>.hangar/board.json</code>, kept out of git status; the memory,
+            settings and statistics stay in the app's data folder.
+          </p>
+          <p>
+            Hangar goes online for three things: checking GitHub for updates, downloading the
+            dictation model once if you turn local dictation on, and Groq if you choose it for
+            dictation. Your agents talk to their providers exactly as they do outside Hangar.
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Will the orchestrator push to my repository?</summary>
+        <div class="qa__a">
+          <p>
+            No. Workers commit on branches of their own, and a delivery lands on yours as a local
+            fast-forward. Hangar itself never pushes, opens a pull request, tags or deploys, and
+            the orchestrator and its workers are told not to either.
+          </p>
+        </div>
+      </details>
+    </div>
   </div>
 </section>
 
 </main>
 
 <footer class="foot">
-  <div class="shell foot__in">
-    <span class="brand brand--sm">
-      <svg class="brand__mark" width="17" height="17" viewBox="0 0 1024 1024" aria-hidden="true">
-        <rect x="200" y="200" width="260" height="624" fill="var(--acc)"></rect>
-        <rect x="538" y="200" width="286" height="260" fill="var(--ink)"></rect>
-        <rect x="538" y="538" width="286" height="286" fill="var(--ink)"></rect>
+  <div class="wrap foot__in">
+    <a class="brand brand--foot" href="#top" aria-label="Hangar.AI, back to top">
+      <svg class="brand__mark" width="16" height="16" viewBox="200 200 624 624" aria-hidden="true">
+        <rect x="200" y="200" width="260" height="624" fill="var(--accent)"></rect>
+        <rect x="538" y="200" width="286" height="260" fill="var(--fg-hi)"></rect>
+        <rect x="538" y="538" width="286" height="286" fill="var(--fg-hi)"></rect>
       </svg>
-      Hangar<span class="brand__dot">.</span>AI
-    </span>
-    <nav class="foot__links" aria-label="Elsewhere">
+      <span class="brand__name">Hangar.AI</span>
+    </a>
+    <p class="foot__by">Open source under the MIT license. Made by <a href="https://github.com/simnJS">simnJS</a>.</p>
+    <nav class="foot__links" aria-label="Project">
       <a href="https://github.com/simnJS/hangar-ai">Source</a>
-      <a href="https://github.com/simnJS/hangar-ai/releases/latest">Releases</a>
-      <a href="https://github.com/simnJS/hangar-ai/blob/main/LICENSE">MIT</a>
+      <a href="https://github.com/simnJS/hangar-ai/releases">Releases</a>
+      <a href="https://github.com/simnJS/hangar-ai/issues">Issues</a>
+      <a href="https://github.com/simnJS/hangar-ai/blob/main/LICENSE">License</a>
     </nav>
   </div>
 </footer>
 
-<script src="main.js"></script>
+<script src="main.js" defer></script>
 </body>
 </html>

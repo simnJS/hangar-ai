@@ -74,6 +74,11 @@ for (const file of assets) {
     if (js.includes(ref)) js = js.split(ref).join(uri);
     if (css.includes(ref)) css = css.split(ref).join(uri);
   }
+  // The stylesheet lived in assets/ itself, so it names its neighbours — the
+  // Inter faces — relative to that folder. Left as they are, they resolve
+  // against the page instead and the demo falls back to a system font.
+  const sibling = `url(./${file})`;
+  if (css.includes(sibling)) css = css.split(sibling).join(`url(${uri})`);
 }
 
 // Vite emits imported assets as `new URL("file.png", import.meta.url)`. Inlined
@@ -95,7 +100,7 @@ const page = `<!doctype html>
     <meta name="robots" content="noindex" />
     <style>
 html, body, #root { height: 100%; margin: 0; }
-body { background: #16161e; }
+body { background: #121316; }
 ${css}</style>
   </head>
   <body>
@@ -115,6 +120,8 @@ const left = (page.match(/["'(]\.{0,2}\/?assets\/[A-Za-z0-9._-]+/g) ?? []).filte
 const named = [...new Set(page.match(/new URL\("([^"]+)",\s*import\.meta\.url\)/g) ?? [])].filter(
   (ref) => !UNUSED.test(/"([^"]+)"/.exec(ref)[1]),
 );
-if (left.length || named.length) console.warn("still referencing:", [...new Set([...left, ...named])].join(", "));
+const siblings = css.match(/url\(\.\/[A-Za-z0-9._-]+\)/g) ?? [];
+if (left.length || named.length || siblings.length)
+  console.warn("still referencing:", [...new Set([...left, ...named, ...siblings])].join(", "));
 
 console.log(`site/demo/index.html, ${(page.length / 1024).toFixed(0)} kB, no sub-resources`);
