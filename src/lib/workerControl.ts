@@ -14,3 +14,11 @@ export async function workerControl(
 ): Promise<unknown> {
   throw new Error(`Unknown operation "${op}".`);
 }
+
+/**
+ * Stops every worker of a workspace: the person's « Arrêter les workers ».
+ * Resolves the number stopped.
+ */
+export async function stopAllWorkers(_ws: Workspace, _deps: ControlDeps): Promise<number> {
+  return 0;
+}

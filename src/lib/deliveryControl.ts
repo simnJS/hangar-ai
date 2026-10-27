@@ -14,3 +14,11 @@ export async function deliveryControl(
 ): Promise<unknown> {
   throw new Error(`Unknown operation "${op}".`);
 }
+
+/**
+ * Lands a delivery that passed its check and its review but waits for the
+ * person, as it does with automatic landing off.
+ */
+export async function landDelivery(_ws: Workspace, _taskId: string, _deps: ControlDeps): Promise<void> {
+  throw new Error("Nothing to land yet.");
+}
