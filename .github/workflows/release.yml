@@ -43,9 +43,10 @@ jobs:
               first run: **More info** → **Run anyway**. Requires WebView2,
               which ships with Windows 11.
             - **macOS** — the `.dmg`, universal for Apple Silicon and Intel.${{ secrets.APPLE_CERTIFICATE == '' && ' The build is unsigned, so the first launch is right-click → **Open**.' || '' }}
-            - **Linux** — the `.AppImage` runs anywhere; the `.deb` and `.rpm`
-              are there for a package manager. Needs WebKitGTK 4.1, which every
-              current distribution packages.
+            - **Linux** — the `.AppImage` runs without installing on
+              distributions with glibc 2.35 or later (2022 on); the `.deb` and
+              `.rpm` are there for a package manager, and bring WebKitGTK 4.1
+              with them.
         run: |
           set -euo pipefail
 
