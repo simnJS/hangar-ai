@@ -71,6 +71,9 @@ export function useOrchestrationActions(): OrchestrationActions {
         const ws = workspace(workspaceId);
         if (ws?.panes.find((pane) => pane.id === paneId)?.role !== "orchestrator") return;
         updatePane(workspaceId, paneId, { role: undefined });
+        // orchestration: announce role (agent D)
+        // Its system prompt keeps the role until the next compaction: the
+        // session is told once that it no longer orchestrates.
       },
 
       create(workspaceId, near) {
