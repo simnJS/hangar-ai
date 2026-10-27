@@ -1585,7 +1585,9 @@ fn attempt(
             Kind::Conflict,
             format!(
                 "Merging {branch} onto the current {target} conflicts in {}. Merge {target} into your branch \
-(`git merge {target}`), resolve the conflicts, commit, then call delivery_submit again.",
+(`git merge {target}`) and resolve the conflicts keeping both sides: what landed on {target} is the person's or \
+another worker's work, never yours to drop. Commit, then call delivery_submit again. If both cannot stand \
+together, say so in a comment on your task and stop.",
                 listing(&conflicted)
             ),
         );
