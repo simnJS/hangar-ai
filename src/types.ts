@@ -168,6 +168,12 @@ export interface OrchestrationSettings {
   reviewerModel: string;
   /** The branch deliveries land on; null: the workspace's current branch. */
   branch: string | null;
+  /**
+   * `--permission-mode` of the orchestrator and its workers; null: the
+   * person's own default. Workers nobody watches stop at every prompt this
+   * leaves them.
+   */
+  permissionMode: string | null;
 }
 
 /**

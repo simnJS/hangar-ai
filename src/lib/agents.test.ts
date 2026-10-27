@@ -27,3 +27,30 @@ describe("launchCommand with a model", () => {
     expect(launchCommand("shell", null, { model: "sonnet" })).toBeNull();
   });
 });
+
+describe("launchCommand for an orchestration pane", () => {
+  it("adds Hangar's server on top of Claude Code's own, and lets its tools through", () => {
+    expect(
+      launchCommand("claude", null, {
+        model: "sonnet",
+        permissionMode: "auto",
+        allowedTools: ["mcp__hangar"],
+        mcpConfig: "/h.json",
+        mcpStrict: false,
+        extraRoots: ["/x"],
+      }),
+    ).toBe('claude --model sonnet --permission-mode auto --allowedTools mcp__hangar --mcp-config /h.json --add-dir "/x"');
+    // The last flag, nothing to close its list.
+    expect(launchCommand("claude", null, { mcpConfig: "/h.json", mcpStrict: false })).toBe(
+      "claude --mcp-config /h.json",
+    );
+  });
+
+  it("keeps the person's mode without one, and drops what a shell would misread", () => {
+    expect(launchCommand("claude", null, { permissionMode: null, allowedTools: [] })).toBe("claude");
+    expect(launchCommand("claude", null, { permissionMode: "auto; rm -rf ~" })).toBe("claude");
+    expect(launchCommand("claude", null, { allowedTools: ["mcp__hangar", "Bash(rm *)"] })).toBe(
+      "claude --allowedTools mcp__hangar",
+    );
+  });
+});

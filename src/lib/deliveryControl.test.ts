@@ -110,6 +110,7 @@ beforeEach(() => {
           workerModel: "sonnet",
           reviewerModel: "sonnet",
           branch: null,
+          permissionMode: null,
         },
       },
     ],

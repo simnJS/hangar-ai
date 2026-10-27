@@ -69,6 +69,16 @@ export function launchCommand(
      */
     mcpConfig?: string;
     /**
+     * False: `mcpConfig` comes on top of Claude Code's own servers rather than
+     * in their place — how an orchestration pane gets Hangar's server where
+     * nothing else would give it one, a worker's worktree for one.
+     */
+    mcpStrict?: boolean;
+    /** `--permission-mode`; absent, the person's own default. */
+    permissionMode?: string | null;
+    /** `--allowedTools`: rules let through without asking, on top of theirs. */
+    allowedTools?: string[];
+    /**
      * The model Claude Code starts with (`--model`): an orchestrator's or a
      * worker's, from the pane (lib/orchestration). Absent, its own default.
      */
@@ -96,10 +106,18 @@ export function launchCommand(
             ? ` --model ${model}`
             : ` --model "${model}"`
           : "";
+      const mode = options.permissionMode?.trim();
+      const permission = mode && /^[A-Za-z]+$/.test(mode) ? ` --permission-mode ${mode}` : "";
+      // Variadic, like the two below: the flag after it closes its list.
+      const rules = (options.allowedTools ?? []).filter((rule) => /^[\w*.-]+$/.test(rule));
+      const allowed = rules.length ? ` --allowedTools ${rules.join(" ")}` : "";
       // `--mcp-config` is variadic as well; the flag right behind it closes
       // its list, and `--strict-mcp-config` is what makes it the only source.
+      // Not strict, it may be the last flag, or be closed by `--add-dir`.
       const mcp = options.mcpConfig
-        ? ` --mcp-config ${options.mcpConfig} --strict-mcp-config`
+        ? options.mcpStrict === false
+          ? ` --mcp-config ${options.mcpConfig}`
+          : ` --mcp-config ${options.mcpConfig} --strict-mcp-config`
         : "";
       const roots = (options.extraRoots ?? []).filter(isQuotable);
       // `--add-dir` is variadic, so it comes last: a following flag — one the
@@ -108,7 +126,7 @@ export function launchCommand(
       const added = roots.length
         ? ` --add-dir ${roots.map((root) => `"${root}"`).join(" ")}`
         : "";
-      return `${command}${resume}${name}${chosen}${mcp}${added}`;
+      return `${command}${resume}${name}${chosen}${permission}${allowed}${mcp}${added}`;
     }
     case "codex":
       return sessionId ? `${command} resume ${sessionId}` : command;

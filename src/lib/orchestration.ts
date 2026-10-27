@@ -19,7 +19,18 @@ export const ORCHESTRATION_DEFAULTS: OrchestrationSettings = {
   workerModel: "sonnet",
   reviewerModel: "sonnet",
   branch: null,
+  permissionMode: null,
 };
+
+/** The permission modes offered for an orchestration's agents (null: theirs). */
+export const ORCHESTRATION_PERMISSION_MODES = ["auto", "acceptEdits", "bypassPermissions"] as const;
+
+/**
+ * What an orchestration pane may use without asking, whatever its mode: the
+ * tools of Hangar's own server — the board, workers, deliveries. Each of them
+ * checks who calls it, so this lets nothing else through.
+ */
+export const ORCHESTRATION_ALLOWED_TOOLS = ["mcp__hangar"];
 
 /** A workspace's settings, each one absent or malformed read as its default. */
 export function orchestrationOf(ws: Pick<Workspace, "orchestration">): OrchestrationSettings {
@@ -40,6 +51,11 @@ export function orchestrationOf(ws: Pick<Workspace, "orchestration">): Orchestra
     workerModel: name(saved.workerModel, ORCHESTRATION_DEFAULTS.workerModel),
     reviewerModel: name(saved.reviewerModel, ORCHESTRATION_DEFAULTS.reviewerModel),
     branch: optional(saved.branch),
+    permissionMode: (ORCHESTRATION_PERMISSION_MODES as readonly string[]).includes(
+      saved.permissionMode as string,
+    )
+      ? (saved.permissionMode as string)
+      : null,
   };
 }
 

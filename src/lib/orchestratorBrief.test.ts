@@ -141,6 +141,7 @@ const DEFAULT_ORCH = {
   workerModel: "sonnet",
   reviewerModel: "sonnet",
   branch: null,
+  permissionMode: null,
 };
 
 describe("who gets a briefing", () => {

@@ -78,6 +78,7 @@ import {
   watchForSession,
 } from "../lib/agents";
 import { mcpScopeWrite, quoteArg, shellFamily, workspaceMcp } from "../lib/mcpScope";
+import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
 import type { CommandScope } from "../store";
@@ -88,6 +89,7 @@ import {
   type Pane,
   type SavedCommand,
   type WorkspaceMcp,
+  type OrchestrationSettings,
   type Settings,
   type ShellInfo,
 } from "../types";
@@ -105,6 +107,8 @@ interface Props {
   extraRoots: string[];
   /** The MCP servers the workspace's Claude Code panes start with. */
   mcp?: WorkspaceMcp;
+  /** How the workspace's orchestrator and workers start (lib/orchestration). */
+  orchestration?: OrchestrationSettings;
   settings: Settings;
   theme: TerminalTheme;
   focused: boolean;
@@ -154,6 +158,7 @@ export function TerminalPane({
   cwd,
   extraRoots,
   mcp,
+  orchestration,
   settings,
   theme,
   focused,
@@ -239,6 +244,8 @@ export function TerminalPane({
   extraRootsRef.current = extraRoots;
   const mcpRef = useRef(mcp);
   mcpRef.current = mcp;
+  const orchestrationRef = useRef(orchestration);
+  orchestrationRef.current = orchestration;
   // The terminal effect runs once per pane id, so whatever it reads later must
   // come through a ref rather than the closure captured on mount.
   const focusedRef = useRef(focused);
@@ -501,15 +508,30 @@ export function TerminalPane({
      * Whatever goes wrong — a WSL pane, a path the shell cannot be handed, a
      * failed write — the agent still starts, with its own servers, and the
      * pane says so instead of leaving it to look like the choice applied.
+     *
+     * An orchestrator or a worker gets Hangar's server on top of its own even
+     * then: the board, `worker_*` and `delivery_submit` are its work, and a
+     * worker's worktree sits outside the folder whose `.mcp.json` would give
+     * it the server.
      */
-    async function mcpLaunchConfig(): Promise<string | undefined> {
+    async function mcpLaunchConfig(): Promise<{ arg: string; strict: boolean } | undefined> {
       const scope = workspaceMcp({ mcp: mcpRef.current });
-      if (scope.mode === "inherit") {
-        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
-        return undefined;
-      }
       const warn = (text: string) => term.writeln(`\x1b[33m${text}\x1b[0m`);
       const family = shellFamily(shellRef.current);
+      if (scope.mode === "inherit") {
+        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        if (!pane.role || family === "wsl") return undefined;
+        try {
+          const file = await mcpScopeWrite({ workspaceId, workspaceCwd: cwd, cwd: paneCwd, enabled: [] });
+          const quoted = quoteArg(file.path, family);
+          return quoted ? { arg: quoted, strict: false } : undefined;
+        } catch (err) {
+          if (!disposed) {
+            warn(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
+          }
+          return undefined;
+        }
+      }
       if (family === "wsl") {
         warn(tRef.current("mcpScope.warnWsl"));
         updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
@@ -528,7 +550,7 @@ export function TerminalPane({
           warn(tRef.current("mcpScope.warnMissing", { names: file.missing.join(", ") }));
         }
         updatePaneInsight(pane.id, { mcp: { mode: "custom", servers: file.servers } });
-        return quoted;
+        return { arg: quoted, strict: true };
       } catch (err) {
         if (!disposed) {
           warn(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
@@ -819,8 +841,17 @@ export function TerminalPane({
             // Read when the agent starts: a workspace renamed later shows up
             // on the next launch.
             name: sessionName(pane.name, workspaceNameRef.current),
-            mcpConfig,
+            mcpConfig: mcpConfig?.arg,
+            mcpStrict: mcpConfig?.strict,
             model: pane.model,
+            // An orchestrator and its workers work while nobody watches: the
+            // mode the workspace chose for them, and Hangar's own tools.
+            ...(pane.role
+              ? {
+                  permissionMode: orchestrationOf({ orchestration: orchestrationRef.current }).permissionMode,
+                  allowedTools: ORCHESTRATION_ALLOWED_TOOLS,
+                }
+              : {}),
           });
           if (command) {
             if (resumeId) claim(resumeId);

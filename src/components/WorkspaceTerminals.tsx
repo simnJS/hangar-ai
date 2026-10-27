@@ -223,6 +223,7 @@ export function WorkspaceTerminals({
             cwd={workspace.cwd}
             extraRoots={workspace.extraRoots}
             mcp={workspace.mcp}
+            orchestration={workspace.orchestration}
             settings={settings}
             theme={theme}
             focused={focusedPaneId === pane.id}
