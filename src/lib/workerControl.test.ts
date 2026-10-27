@@ -354,7 +354,7 @@ describe("worker_spawn", () => {
     const first = await app.call("worker_spawn", { task: "t1" });
     const second = await app.call("worker_spawn", { task: "t2" });
 
-    // 41000 is the Blog workspace's.
+    // 21000 is the Blog workspace's.
     expect([first.ports.base, second.ports.base]).toEqual([PORT_POOL_START + 20, PORT_POOL_START + 40]);
     expect(allocatePortBase(app.deps.snapshot().workspaces)).toBe(PORT_POOL_START + 60);
     // A block another pane overlaps is skipped too, aligned or not.

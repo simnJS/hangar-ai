@@ -89,9 +89,14 @@ export const liveWorkerDeps = (updatePane: WorkerDeps["updatePane"]): WorkerDeps
 
 /** How many ports a worker gets: HANGAR_PORT_COUNT (pty.rs). */
 export const PORT_COUNT = 20;
-/** Where the pool every workspace's workers share begins. */
-export const PORT_POOL_START = 41000;
-const PORT_POOL_END = 65535;
+/**
+ * The pool every workspace's workers share: below the range each system hands
+ * out for outgoing connections (Linux from 32768, Windows and macOS from
+ * 49152), so a worker's server never meets a port the system lent elsewhere,
+ * and short of 27017, which MongoDB listens on by default.
+ */
+export const PORT_POOL_START = 21000;
+const PORT_POOL_END = 26999;
 
 /** Branch names tried for one task before giving up: `x`, `x-2`, … */
 const BRANCH_TRIES = 9;
@@ -163,7 +168,7 @@ const startingIn = (workspaceId: string) => starting.byWorkspace.get(workspaceId
 
 /**
  * The first block of PORT_COUNT ports nobody has, from a pool shared by every
- * workspace: 41000, 41020, 41040… A worker keeps its block for as long as
+ * workspace: 21000, 21020, 21040… A worker keeps its block for as long as
  * its pane lives, restarts included. Null when every block is taken.
  */
 export function allocatePortBase(
