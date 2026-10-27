@@ -136,6 +136,32 @@ pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, Contro
     wait(&id, receiver, answer_timeout(op)).await
 }
 
+/// Asks the window one of Hangar's own questions — a pane's orchestration
+/// briefing (orchestrator.rs) — which no agent may ask. It goes out on an event
+/// of its own, never as an operation: no tool offers it, the HTTP control
+/// route refuses it, and the window answers it whether or not pane control is
+/// on. The answer comes back through `control_reply` like any other.
+pub async fn ask_internal(
+    app: &AppHandle,
+    op: &str,
+    args: Value,
+    limit: Duration,
+) -> Result<Value, ControlError> {
+    let (id, receiver) = book();
+    let request = ControlRequest {
+        id: id.clone(),
+        op: op.to_string(),
+        args,
+    };
+    if let Err(err) = app.emit("control:internal", request) {
+        forget(&id);
+        return Err(ControlError::Unavailable(format!(
+            "could not reach the window: {err}"
+        )));
+    }
+    wait(&id, receiver, limit).await
+}
+
 /// The window's answer to a `control:request`. An id nobody waits for any
 /// more — the request timed out — is dropped.
 #[tauri::command]

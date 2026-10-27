@@ -226,6 +226,11 @@ fn tool_definitions() -> Value {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "Task ids that must be done first."
+                    },
+                    "owns": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Paths and globs, relative to the workspace, that the task's worker may change, tests included (e.g. ['src/export/**', 'src/App.tsx']). Two tasks in 'doing' never share one."
                     }
                 },
                 "required": ["title"]
@@ -243,7 +248,22 @@ fn tool_definitions() -> Value {
                     "column": { "type": "string", "enum": ["todo", "doing", "review", "done"] },
                     "priority": { "type": "integer" },
                     "assignee": { "type": "string" },
-                    "release": { "type": "boolean", "description": "Unassign the task so someone else can take it." }
+                    "release": { "type": "boolean", "description": "Unassign the task so someone else can take it." },
+                    "labels": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Replaces the task's labels: pass the ones to keep too."
+                    },
+                    "depends_on": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Replaces the ids of the tasks that must be done first."
+                    },
+                    "owns": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Replaces the paths and globs the task's worker may change."
+                    }
                 },
                 "required": ["id"]
             }
@@ -862,6 +882,19 @@ mod tests {
         assert_eq!(snapshot["properties"]["height"]["maximum"], 2048);
         assert!(snapshot.get("required").is_none());
         assert!(tool("model_close")["inputSchema"].get("required").is_none());
+    }
+
+    /// An orchestrator plans with these: files a task owns, the label that
+    /// hands a task to the person, the order tasks run in.
+    #[test]
+    fn the_board_tools_take_what_an_orchestrator_writes() {
+        let create = &tool("board_create_task")["inputSchema"]["properties"];
+        assert_eq!(create["owns"]["type"], "array");
+        assert_eq!(create["depends_on"]["type"], "array");
+        let update = &tool("board_update_task")["inputSchema"]["properties"];
+        for field in ["owns", "labels", "depends_on"] {
+            assert_eq!(update[field]["items"]["type"], "string", "{field}");
+        }
     }
 
     #[test]

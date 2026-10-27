@@ -373,15 +373,25 @@ async fn bridge_next(
 
 /// What the pane's mod adds to its session: its part in an orchestration and
 /// the state it is handed again (orchestrator.rs). `null` for any other pane.
+/// A window that cannot tell is an error, never a `null`: a mod told "no
+/// role" would start an orchestrator without its rules.
 async fn bridge_briefing(
     State(state): State<Arc<ApiState>>,
     headers: HeaderMap,
     Path(pane): Path<String>,
 ) -> ApiResult {
     authorize(&state, &headers)?;
-    Ok(Json(
-        json!({ "briefing": crate::orchestrator::briefing(&pane) }),
-    ))
+    let briefing = crate::orchestrator::briefing(&state.app, &pane)
+        .await
+        .map_err(|err| match err {
+            crate::control::ControlError::Refused(message) => {
+                bad(StatusCode::INTERNAL_SERVER_ERROR, message)
+            }
+            crate::control::ControlError::Unavailable(message) => {
+                bad(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+        })?;
+    Ok(Json(json!({ "briefing": briefing })))
 }
 
 #[derive(Deserialize)]
