@@ -771,6 +771,7 @@ export function TerminalPane({
             rows: term.rows,
             name: pane.name,
             bridge: settingsRef.current.claudeBridge,
+            portBase: pane.portBase ?? null,
           });
           // Same race as the subscription above: a cleanup that ran during the
           // spawn killed an id the backend did not know yet, so the shell it
@@ -819,6 +820,7 @@ export function TerminalPane({
             // on the next launch.
             name: sessionName(pane.name, workspaceNameRef.current),
             mcpConfig,
+            model: pane.model,
           });
           if (command) {
             if (resumeId) claim(resumeId);

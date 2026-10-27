@@ -204,6 +204,26 @@ fn shell_args(program: &str, recorded: &[String]) -> Vec<String> {
     args
 }
 
+/// How many ports a worker gets from its `HANGAR_PORT_BASE` (lib/workerControl.ts).
+const PORT_COUNT: u16 = 20;
+
+/// A worker's own ports: `HANGAR_PORT_BASE` and the nineteen after it, which
+/// no other pane of any workspace is given, so two workers can each run a dev
+/// server without fighting over one port. Only workers have them; every other
+/// pane starts without, even under a Hangar launched from inside a worker.
+fn apply_ports(cmd: &mut CommandBuilder, port_base: Option<u16>) {
+    match port_base {
+        Some(base) => {
+            cmd.env("HANGAR_PORT_BASE", base.to_string());
+            cmd.env("HANGAR_PORT_COUNT", PORT_COUNT.to_string());
+        }
+        None => {
+            cmd.env_remove("HANGAR_PORT_BASE");
+            cmd.env_remove("HANGAR_PORT_COUNT");
+        }
+    }
+}
+
 // The arguments are the command's IPC fields, named as the frontend sends them.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -217,6 +237,7 @@ pub fn pty_spawn(
     rows: u16,
     name: Option<String>,
     bridge: Option<bool>,
+    port_base: Option<u16>,
 ) -> Result<(), String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
@@ -291,6 +312,7 @@ pub fn pty_spawn(
     if bridge != Some(false) {
         crate::bridge::apply_env(&mut cmd, &id, name.as_deref());
     }
+    apply_ports(&mut cmd, port_base);
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -610,6 +632,28 @@ mod tests {
             ["--login", "-i"]
         );
         assert!(shell_args(r"C:\Windows\System32\cmd.exe", &[]).is_empty());
+    }
+
+    #[test]
+    fn only_a_worker_starts_with_ports_of_its_own() {
+        let mut worker = CommandBuilder::new("sh");
+        apply_ports(&mut worker, Some(41020));
+        assert_eq!(
+            worker.get_env("HANGAR_PORT_BASE"),
+            Some(std::ffi::OsStr::new("41020"))
+        );
+        assert_eq!(
+            worker.get_env("HANGAR_PORT_COUNT"),
+            Some(std::ffi::OsStr::new("20"))
+        );
+
+        // Inherited from a Hangar started inside a worker: not passed on.
+        let mut other = CommandBuilder::new("sh");
+        other.env("HANGAR_PORT_BASE", "41000");
+        other.env("HANGAR_PORT_COUNT", "20");
+        apply_ports(&mut other, None);
+        assert_eq!(other.get_env("HANGAR_PORT_BASE"), None);
+        assert_eq!(other.get_env("HANGAR_PORT_COUNT"), None);
     }
 
     #[test]
