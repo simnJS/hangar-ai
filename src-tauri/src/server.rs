@@ -361,13 +361,22 @@ async fn bridge_event(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct NextQuery {
+    /// Only a message an agent or Hangar sent: the mod asks for these in the
+    /// middle of a turn, where the person's prompts must wait.
+    #[serde(default)]
+    labelled: bool,
+}
+
 async fn bridge_next(
     State(state): State<Arc<ApiState>>,
     headers: HeaderMap,
     Path(pane): Path<String>,
+    Query(q): Query<NextQuery>,
 ) -> ApiResult {
     authorize(&state, &headers)?;
-    let message = crate::bridge::take_next(&state.app, &pane);
+    let message = crate::bridge::take_next(&state.app, &pane, q.labelled);
     Ok(Json(json!({ "message": message })))
 }
 

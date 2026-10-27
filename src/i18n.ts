@@ -1199,6 +1199,8 @@ const en = {
   "update.failed": "Update failed",
   "update.retry": "Retry",
   // orchestration: bridge
+  "inspector.queueFrom": "Sent by {name}, not by you: the agent reads it as such",
+  "pane.event.queuedBy": "Queued by {name}: {text}",
   // orchestration: workers
   // orchestration: delivery
   // orchestration: orchestrator
@@ -2426,6 +2428,8 @@ const fr: Record<Key, string> = {
   "update.failed": "Échec de la mise à jour",
   "update.retry": "Réessayer",
   // orchestration: bridge
+  "inspector.queueFrom": "Envoyé par {name}, pas par toi : l'agent le lit comme tel",
+  "pane.event.queuedBy": "Mis en file par {name} : {text}",
   // orchestration: workers
   // orchestration: delivery
   // orchestration: orchestrator

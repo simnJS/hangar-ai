@@ -6,6 +6,7 @@ import {
   clearPaneInsight,
   getPaneInsight,
   paneEventText,
+  queuedBy,
   recordEditedFile,
   recordPaneEvent,
   updatePaneInsight,
@@ -60,11 +61,26 @@ describe("paneEventText", () => {
     expect(text({ kind: "queued", params: { text: "run the tests" } })).toBe(
       "pane.event.queued(run the tests)",
     );
+    expect(text({ kind: "queued", params: { text: "task done", from: "hangar" } })).toBe(
+      "pane.event.queuedBy(Hangar,task done)",
+    );
+    expect(text({ kind: "queued", params: { text: "review it", from: "Ava" } })).toBe(
+      "pane.event.queuedBy(Ava,review it)",
+    );
     expect(text({ kind: "dropped", params: { text: "run the tests" } })).toBe(
       "pane.event.dropped(run the tests)",
     );
     expect(text({ kind: "exit", params: { what: "agent" } })).toBe("pane.event.end");
     expect(text({ kind: "exit", params: { what: "shell" } })).toBe("pane.event.exit");
+  });
+});
+
+describe("queuedBy", () => {
+  it("names who queued a prompt, and nobody for the person's own", () => {
+    expect(queuedBy(undefined)).toBeNull();
+    expect(queuedBy(null)).toBeNull();
+    expect(queuedBy("Ava")).toBe("Ava");
+    expect(queuedBy("hangar")).toBe("Hangar");
   });
 });
 

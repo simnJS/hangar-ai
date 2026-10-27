@@ -1029,7 +1029,10 @@ export function TerminalPane({
     queueRef.current = queue;
     updatePaneInsight(pane.id, { queue });
     for (const entry of added) {
-      recordPaneEvent(pane.id, { kind: "queued", params: { text: firstLine(entry.text) } });
+      recordPaneEvent(pane.id, {
+        kind: "queued",
+        params: { text: firstLine(entry.text), ...(entry.from ? { from: entry.from } : {}) },
+      });
     }
   }, [pane.id, queue]);
 

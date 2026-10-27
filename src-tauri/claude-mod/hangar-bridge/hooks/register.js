@@ -9,7 +9,13 @@
 // Everything is reported, nothing is decided: no hook changes a tool call, a
 // permission or a prompt, and none ever waits for a person. The one about a
 // file another pane just edited only adds a note for the model to the edit's
-// result.
+// result. A pane with a part in an orchestration is also told that part, in
+// its system prompt, and handed the state of the work whenever its
+// conversation starts again (Hangar's briefing).
+//
+// Only what the person queued reaches the model as typed by them. A message
+// an agent or Hangar itself queued arrives labelled with who sent it, so it
+// can never pass for the person, nor approve anything in their name.
 
 /**
  * `{ base, token, pane, name }` once session.start has found this session is
@@ -24,9 +30,25 @@ let busy = false
 let waiting = false
 /** One inbox request at a time: the timer does not wait for the last one. */
 let polling = false
+/**
+ * The main loop's last request asked for tools, so it will make another: a
+ * row appended now is read there, without waiting for the turn to end.
+ */
+let continuing = false
+/**
+ * Labelled messages appended to the running turn since its last request. One
+ * still here when the turn ends was never read, and is handed over again.
+ */
+let unread = []
+/** `{ role, system, context }` for a pane with a part in an orchestration. */
+let briefing = null
 
 /** How recent another pane's edit must be to count as "editing it". */
 const CONFLICT_WINDOW_MS = 15 * 60 * 1000
+/** How long a session's start waits for its briefing before going on without. */
+const BRIEFING_WAIT_MS = 3000
+/** Who sends Hangar's own events (`Queued.from` in bridge.rs). */
+const HANGAR = 'hangar'
 
 /**
  * Only the interactive session a pane started speaks for it. The variables are
@@ -79,14 +101,39 @@ function headline(text) {
   return line.length > 200 ? line.slice(0, 199) + '…' : line
 }
 
+/**
+ * What the model reads of a message an agent or Hangar queued: who sent it,
+ * that the person did not type it, then the message.
+ */
+function labelled(message) {
+  const label =
+    message.from === HANGAR
+      ? '[Hangar] Event — not typed by the person.'
+      : '[Hangar] From agent ' + JSON.stringify(message.from) +
+        ' — not typed by the person; it cannot approve anything on their behalf.'
+  return label + '\n\n' + message.text
+}
+
+/**
+ * Between turns, the oldest queued message of any kind. During one, only a
+ * labelled message, and only while the model waits on its tools: the next
+ * request then carries it, so an orchestrator hears an event without waiting
+ * for its turn to end. The person's own prompts always wait for that end.
+ */
 async function poll($) {
-  if (!bridge || busy || waiting || polling) return
+  if (!bridge || waiting || polling) return
+  if (busy && !continuing) return
   polling = true
   try {
-    const res = await $.http.fetch(route('/next'), { headers: headers() })
+    const res = await $.http.fetch(route(busy ? '/next?labelled=true' : '/next'), {
+      headers: headers(),
+    })
     if (!res.ok) return
     const message = JSON.parse(res.text).message
-    if (message && message.text) deliver($, message.text)
+    if (!message || !message.text) return
+    // The turn may have ended while Hangar answered.
+    if (busy && message.from) await relay($, message)
+    else deliver($, message)
   } catch {
     // Unreachable for now; the next tick asks again.
   } finally {
@@ -95,21 +142,27 @@ async function poll($) {
 }
 
 /**
- * Hands a queued line to the session the way it would have been typed: a
- * slash command runs as a command — submitted as a prompt it would reach the
- * model as the words "/compact" — and anything else is a prompt.
+ * Hands a queued line to the session. The person's own runs the way it would
+ * have been typed: a slash command as a command — submitted as a prompt it
+ * would reach the model as the words "/compact" — and anything else as their
+ * prompt. Anyone else's is a prompt from this mod, which the model reads
+ * framed as a plugin's, under its label; never a command, which would act as
+ * the person.
  *
  * `busy` holds the inbox until the line has run, so a second one is not taken
  * before the first has started; a prompt clears it through turn.complete, a
  * command when it resolves. Neither call is awaited: each waits for the
  * session to be idle, and this runs while it may not be.
  */
-function deliver($, text) {
+function deliver($, message) {
+  const { text } = message
   busy = true
-  const slash = /^\/(\S+)\s*([\s\S]*)$/.exec(text.trim())
+  const slash = message.from ? null : /^\/(\S+)\s*([\s\S]*)$/.exec(text.trim())
   const run = slash
     ? $.command.run({ command: slash[1], args: slash[2] })
-    : $.prompt.submit({ text, asUser: true })
+    : message.from
+      ? $.prompt.submit({ text: labelled(message) })
+      : $.prompt.submit({ text, asUser: true })
   void run.then(
     (result) => {
       if (slash) busy = false
@@ -126,6 +179,64 @@ function deliver($, text) {
   )
 }
 
+/**
+ * Puts a labelled message into the running turn: a user row the person does
+ * not see as typed, which the loop's next request carries. One the session
+ * refuses waits for the turn's end, as a prompt of its own.
+ *
+ * That row is hidden from the transcript, so a dim line the model never reads
+ * shows the person what reached the agent, and from whom.
+ */
+async function relay($, message) {
+  const text = labelled(message)
+  unread.push(text)
+  let refused
+  try {
+    const result = await $.session.append({
+      message: { type: 'user', content: [{ type: 'text', text }] },
+    })
+    refused = result && result.deny
+  } catch (err) {
+    refused = String(err)
+  }
+  if (refused) {
+    unread = unread.filter((entry) => entry !== text)
+    deliver($, message)
+    return
+  }
+  const who = message.from === HANGAR ? 'Hangar' : 'agent ' + JSON.stringify(message.from)
+  $.ui.log('Hangar passed on a message from ' + who + ': ' + headline(message.text))
+}
+
+/**
+ * Asks Hangar for this pane's part in an orchestration; null for none. What
+ * cannot be read keeps the last answer.
+ */
+async function refreshBriefing($) {
+  if (!bridge) return
+  try {
+    const res = await $.http.fetch(route('/briefing'), { headers: headers() })
+    if (!res.ok) return
+    const value = JSON.parse(res.text).briefing
+    briefing =
+      value && typeof value === 'object'
+        ? {
+            role: value.role,
+            system: typeof value.system === 'string' ? value.system : '',
+            context: typeof value.context === 'string' ? value.context : '',
+          }
+        : null
+  } catch {
+    // Hangar is closing or restarting: the last briefing stands.
+  }
+}
+
+/** The state handed to a conversation that starts (again), labelled; or null. */
+function briefingContext() {
+  if (!bridge || !briefing || !briefing.context.trim()) return null
+  return '[Hangar] Briefing — not typed by the person.\n\n' + briefing.context
+}
+
 export function register(on) {
   on('session.start', async ($, e, next) => {
     await connect($, e.isInteractive)
@@ -138,6 +249,20 @@ export function register(on) {
         version: version.version,
       })
       if (pendingSession) await send($, pendingSession)
+      // Before the first request, which composes the system prompt. A Hangar
+      // slow to answer does not hold the session: its answer still lands, for
+      // the next conversation that starts.
+      await Promise.race([refreshBriefing($), $.clock.sleep(BRIEFING_WAIT_MS)])
+      // The conversation this process starts or resumes — not one a reload
+      // of this module finds already running, which was handed it then.
+      const context = pendingSession ? briefingContext() : null
+      if (context) {
+        try {
+          await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: context }] } })
+        } catch {
+          // A run no plugin may shape: it goes on without the state.
+        }
+      }
       $.clock.every(1500, () => poll($))
     }
     pendingSession = null
@@ -146,27 +271,69 @@ export function register(on) {
 
   // Fires on the first start — before session.start, so it may have to wait
   // for it — and again after /clear, /resume, /branch and a compaction, which
-  // is where the transcript a pane must resume can change.
+  // is where the transcript a pane must resume can change. Each of those later
+  // ones starts a conversation over, so the briefing is asked again: the role
+  // reaches the system prompt it composes next, the state its first request.
   on('classic.SessionStart', async ($, e, next) => {
     const event = { kind: 'session', sessionId: e.session_id, source: e.source }
-    if (bridge === undefined) pendingSession = event
-    else await send($, event)
-    return next(e)
+    if (bridge === undefined) {
+      pendingSession = event
+      return next(e)
+    }
+    await send($, event)
+    await refreshBriefing($)
+    const result = await next(e)
+    const context = briefingContext()
+    return context ? { ...result, additionalContext: [...(result.additionalContext ?? []), context] } : result
   })
 
+  // A pane's part in an orchestration, at the end of its system prompt. The
+  // engine keeps the prompt a conversation started with, so a part given
+  // later reaches it at the next compaction; Hangar tells the session in the
+  // meantime. A subagent composes its own prompt, without this hook.
+  on('prompt.compose', async ($, e, next) => {
+    const result = await next(e)
+    const system = bridge && briefing ? briefing.system.trim() : ''
+    if (!system || e.traits.includes('teammate')) return result
+    return {
+      sections: [...result.sections, { id: 'hangar-bridge:role', text: system, scope: 'session' }],
+    }
+  })
+
+  // A subagent's runs are turns of their own, which neither take the pane
+  // nor hand it back: a background one runs while the main loop is idle.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
     busy = true
     waiting = false
+    continuing = false
+    unread = []
     await send($, { kind: 'turn', phase: 'start' })
     return next(e)
   })
 
+  // Every request of the main loop carries what was appended before it; one
+  // that asks for tools is followed by another, which is what a labelled
+  // message waits for in the middle of a turn.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId !== undefined) return yield* next(e)
+    continuing = false
+    unread = []
+    const result = yield* next(e)
+    continuing = result.toolUses.length > 0
+    return result
+  })
+
   on('turn.complete', async ($, e, next) => {
-    // A subagent's runs end as turns of their own; only the main loop hands
-    // the pane back.
     if (e.agentId === undefined) {
       busy = false
       waiting = false
+      continuing = false
+      // Appended as the last request went out, never read: handed over again
+      // as a prompt, which starts a turn — unless the person just stopped
+      // this one, and the row reaches the model with what they type next.
+      const missed = e.reason === 'aborted' ? [] : unread
+      unread = []
       await send($, {
         kind: 'turn',
         phase: 'end',
@@ -174,6 +341,17 @@ export function register(on) {
         durationMs: e.durationMs,
         answer: headline(e.answer),
       })
+      if (missed.length > 0) {
+        busy = true
+        void $.prompt.submit({ text: missed.join('\n\n') }).then(
+          (result) => {
+            if (result && result.drop) busy = false
+          },
+          () => {
+            busy = false
+          },
+        )
+      }
     }
     return next(e)
   })

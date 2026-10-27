@@ -774,6 +774,17 @@ body.is-dragging-pane .inspector__grip {
   white-space: nowrap;
 }
 
+/* Who queued it, when it was not the person: an agent's pane, or Hangar. */
+.insp-queue__from {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--fg-subtle);
+  font-size: calc(10.5px * var(--ui-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Changed files */
 
 .insp-subhead {

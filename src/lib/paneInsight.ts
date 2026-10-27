@@ -35,7 +35,8 @@ export type PaneEventDetail =
    * the pane that had edited it just before, when one had.
    */
   | { kind: "edit"; params: { file: string; overlap?: string | null } }
-  | { kind: "queued"; params: { text: string } }
+  /** `from`: who queued it when it was not the person (`queuedBy`). */
+  | { kind: "queued"; params: { text: string; from?: string } }
   | { kind: "dropped"; params: { text: string } }
   /** Claude Code quit back to its shell, or the shell itself ended. */
   | { kind: "exit"; params: { what: "agent" | "shell" } };
@@ -46,6 +47,15 @@ export type PaneEvent = PaneEventDetail & {
 };
 
 export type PaneEventKind = PaneEvent["kind"];
+
+/**
+ * Who a queued prompt is from, as shown: null for the person's own, the
+ * sending agent's pane name, or Hangar for its own events.
+ */
+export function queuedBy(from: string | null | undefined): string | null {
+  if (!from) return null;
+  return from === "hangar" ? "Hangar" : from;
+}
 
 /** The line the inspector and the toolbar show for an event. */
 export function paneEventText(event: PaneEventDetail, t: Translator): string {
@@ -72,8 +82,11 @@ export function paneEventText(event: PaneEventDetail, t: Translator): string {
         ? t("pane.event.editShared", { file, name: overlap })
         : t("pane.event.edit", { file });
     }
-    case "queued":
-      return t("pane.event.queued", { text: event.params.text });
+    case "queued": {
+      const { text, from } = event.params;
+      const by = queuedBy(from);
+      return by ? t("pane.event.queuedBy", { name: by, text }) : t("pane.event.queued", { text });
+    }
     case "dropped":
       return t("pane.event.dropped", { text: event.params.text });
     case "exit":

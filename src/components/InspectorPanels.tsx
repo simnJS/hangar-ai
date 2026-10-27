@@ -8,7 +8,7 @@ import { formatTokens, type ContextGauge } from "../lib/context";
 import { bridgeCancel, type QueuedPrompt } from "../lib/ipc";
 import type { RateLimit } from "../lib/bridge";
 import type { Task } from "../lib/board";
-import { paneEventText, type PaneEvent, type PaneMcp } from "../lib/paneInsight";
+import { paneEventText, queuedBy, type PaneEvent, type PaneMcp } from "../lib/paneInsight";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import {
   clockTime,
@@ -436,6 +436,18 @@ export const TaskSection = memo(function TaskSection({
   );
 });
 
+/** Who queued a prompt the person did not: the session reads it labelled. */
+function QueuedFrom({ from }: { from?: string }) {
+  const t = useT();
+  const by = queuedBy(from);
+  if (!by) return null;
+  return (
+    <span className="insp-queue__from" title={t("inspector.queueFrom", { name: by })}>
+      {by}
+    </span>
+  );
+}
+
 export const QueueSection = memo(function QueueSection({
   paneId,
   queue,
@@ -459,6 +471,7 @@ export const QueueSection = memo(function QueueSection({
                 {i + 1}
               </span>
               <span className="insp-queue__text">{entry.text}</span>
+              <QueuedFrom from={entry.from} />
               <button
                 type="button"
                 className="insp-icon-btn"

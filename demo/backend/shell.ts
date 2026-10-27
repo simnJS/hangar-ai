@@ -51,7 +51,7 @@ const out = (s: Session, data: string) => dispatch("pty:output", { id: s.id, dat
  * usage to the app, so the demo's does too, and holds the prompts queued
  * "for when it is free" the way the mod does.
  */
-const queues = new Map<string, { id: string; text: string }[]>();
+const queues = new Map<string, { id: string; text: string; from?: string }[]>();
 const usage = new Map<string, { tokens: number; turns: number }>();
 let queuedIds = 0;
 
@@ -102,8 +102,9 @@ function drain(s: Session) {
   }
 }
 
-export function enqueue(id: string, text: string) {
-  const queued = { id: `q${++queuedIds}`, text };
+/** `from`: an agent's pane name or `hangar`, absent for the person's own. */
+export function enqueue(id: string, text: string, from?: string) {
+  const queued = { id: `q${++queuedIds}`, text, ...(from ? { from } : {}) };
   queues.set(id, [...(queues.get(id) ?? []), queued]);
   queueChanged(id);
   const s = sessions.get(id);
