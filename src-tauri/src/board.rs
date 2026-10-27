@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -155,14 +156,35 @@ fn read_board(workspace_cwd: &str) -> Board {
 }
 
 fn write_board(workspace_cwd: &str, board: &Board) -> Result<(), String> {
-    let path = board_path(&shared_workspace(workspace_cwd));
+    let shared = shared_workspace(workspace_cwd);
+    let path = board_path(&shared);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let body = serde_json::to_string_pretty(board).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    keep_out_of_git(&shared);
+    Ok(())
+}
+
+/// The board is the workspace's own working state, not the project's: once
+/// per workspace and per run of the app, it is kept out of `git status`
+/// (git::exclude_locally), off the writing thread, which holds the board.
+fn keep_out_of_git(root: &str) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let first = SEEN
+        .get_or_init(Mutex::default)
+        .lock()
+        .map(|mut seen| seen.insert(root.to_string()))
+        .unwrap_or(false);
+    if first {
+        let root = PathBuf::from(root);
+        std::thread::spawn(move || {
+            crate::git::exclude_locally(&root, ".hangar", ".hangar/board.json")
+        });
+    }
 }
 
 /// Serializes every mutation per workspace.

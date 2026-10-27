@@ -1521,6 +1521,48 @@ pub fn shared_root(cwd: &str) -> Option<String> {
     resolved
 }
 
+/// Keeps the folder `dir` of `root` (`.hangar`) out of `git status` through
+/// the repository's own `info/exclude`, which is never committed.
+///
+/// Nothing is written when git already tracks `probe`, a file in that folder
+/// (the person commits it on purpose), or already ignores it (a `.gitignore`,
+/// their global excludes, or this same rule from an earlier run). Best effort:
+/// without git, outside a repository, or when the file cannot be written,
+/// things stay as they were.
+pub(crate) fn exclude_locally(root: &Path, dir: &str, probe: &str) {
+    if run_git(root, &["ls-files", "--error-unmatch", "--", probe]).is_ok()
+        || run_git(root, &["check-ignore", "-q", "--", probe]).is_ok()
+    {
+        return;
+    }
+    // One call, two answers in the order asked: where `root` sits in the
+    // repository (empty at its top), and the exclude file — the main one, for
+    // a linked worktree, which is where git reads it.
+    let Ok(out) = run_git(
+        root,
+        &["rev-parse", "--show-prefix", "--git-path", "info/exclude"],
+    ) else {
+        return;
+    };
+    let mut lines = out.lines();
+    let prefix = lines.next().unwrap_or_default().trim();
+    let Some(exclude) = lines.next().map(str::trim).filter(|path| !path.is_empty()) else {
+        return;
+    };
+    let exclude = root.join(exclude);
+    let mut body = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if !body.is_empty() && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(&format!(
+        "# Hangar.AI: the workspace's local task board\n/{prefix}{dir}/\n"
+    ));
+    if let Some(parent) = exclude.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&exclude, body);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1875,6 +1917,73 @@ mod tests {
 
     fn read(root: &Path, relative: &str) -> String {
         std::fs::read_to_string(root.join(relative)).expect("read")
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        run_git(root, args).unwrap_or_else(|_| panic!("git {args:?}"));
+    }
+
+    fn repo(tag: &str) -> PathBuf {
+        let root = temp_dir(tag);
+        git(&root, &["init", "-q"]);
+        root
+    }
+
+    fn untracked(root: &Path) -> String {
+        run_git(root, &["status", "--porcelain", "--untracked-files=all"]).expect("status")
+    }
+
+    #[test]
+    fn the_board_folder_is_left_out_of_git_status_without_a_committed_file() {
+        let root = repo("exclude");
+        write(&root, ".hangar/board.json", "{}");
+        assert!(untracked(&root).contains(".hangar/board.json"));
+
+        exclude_locally(&root, ".hangar", ".hangar/board.json");
+        assert_eq!(untracked(&root), "");
+        assert!(!root.join(".gitignore").exists());
+        // Already ignored by its own rule: not written twice.
+        exclude_locally(&root, ".hangar", ".hangar/board.json");
+        assert_eq!(
+            read(&root, ".git/info/exclude")
+                .matches("/.hangar/")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_workspace_in_a_subfolder_gets_a_rule_anchored_where_it_is() {
+        let root = repo("exclude-sub");
+        write(&root, "apps/web/.hangar/board.json", "{}");
+        write(&root, ".hangar/board.json", "{}");
+
+        exclude_locally(&root.join("apps/web"), ".hangar", ".hangar/board.json");
+        let status = untracked(&root);
+        assert!(!status.contains("apps/web/.hangar"));
+        // Anchored: the board at the top is the top's business.
+        assert!(status.contains(".hangar/board.json"));
+    }
+
+    #[test]
+    fn a_board_the_person_tracks_or_ignores_is_left_to_them() {
+        let tracked = repo("exclude-tracked");
+        write(&tracked, ".hangar/board.json", "{}");
+        git(&tracked, &["add", ".hangar/board.json"]);
+        exclude_locally(&tracked, ".hangar", ".hangar/board.json");
+        assert!(!read(&tracked, ".git/info/exclude").contains("/.hangar/"));
+
+        let ignored = repo("exclude-ignored");
+        write(&ignored, ".gitignore", ".hangar/\n");
+        exclude_locally(&ignored, ".hangar", ".hangar/board.json");
+        assert!(!read(&ignored, ".git/info/exclude").contains("/.hangar/"));
+    }
+
+    #[test]
+    fn outside_a_repository_nothing_is_written() {
+        let root = temp_dir("exclude-none");
+        exclude_locally(&root, ".hangar", ".hangar/board.json");
+        assert!(!root.join(".git").exists());
     }
 
     #[test]
