@@ -182,10 +182,14 @@ const INHERITED_SESSION_MARKERS: &[&str] = &[
 /// PowerShell honours only as its very first argument, and before everything
 /// else, since all that follows `-Command` or `-File` belongs to them.
 fn shell_args(program: &str, recorded: &[String]) -> Vec<String> {
-    let stem = std::path::Path::new(program)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
+    // Both separators, whatever the system: a recorded path is a string, and
+    // `Path` reads a backslash as part of a name everywhere but on Windows.
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
     let is_powershell = stem == "pwsh" || stem == "powershell";
     // PowerShell takes any unambiguous start of a parameter's name, after
     // `-`, `--` or `/`; "nol" is already NoLogo's alone.
