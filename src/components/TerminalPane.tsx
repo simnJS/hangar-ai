@@ -22,6 +22,7 @@ import { isHandingOver } from "../lib/windows";
 import { sessionName } from "../lib/paneNames";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
+  activityAtHello,
   clearPaneActivity,
   flagOverlap,
   setPaneActivity,
@@ -594,10 +595,16 @@ export function TerminalPane({
     }
     function onBridgeEvent(event: BridgeEvent) {
       if (disposed) return;
-      if (event.kind !== "end") setBridged(true);
+      if (event.kind !== "end") {
+        setBridged(true);
+        // Now rather than at the next render: a guess made in between would
+        // land after the hello below and outlive it.
+        bridgedRef.current = true;
+      }
       switch (event.kind) {
         case "hello": {
           noteAgentExited(pane.id, false);
+          setActivity(activityAtHello);
           // Read before the capture below makes it this session's id.
           const resumed = event.sessionId === sessionIdRef.current;
           bridgeModel = event.model;

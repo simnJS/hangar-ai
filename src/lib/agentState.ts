@@ -14,6 +14,15 @@ import type { RateLimit } from "./bridge";
  */
 export type AgentActivity = "working" | "waiting" | "yours" | "idle";
 
+/**
+ * A pane's activity once its Claude Code's mod says hello. The session has
+ * just started and runs no turn yet, so a "working" guessed from its startup
+ * output goes: guesses stop once the mod speaks, and nothing else would take
+ * it back before the first turn. A wait or a hand-back is left as it is.
+ */
+export const activityAtHello = (activity: AgentActivity): AgentActivity =>
+  activity === "working" ? "idle" : activity;
+
 export interface PaneActivity {
   workspaceId: string;
   activity: AgentActivity;
