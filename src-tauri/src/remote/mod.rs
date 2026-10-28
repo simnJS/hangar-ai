@@ -1354,6 +1354,9 @@ pub(super) mod tests {
                 saved.port = test_port(8);
             })
             .unwrap();
+        // The system's holder would really keep this machine awake, and says
+        // it cannot on Linux: this launch is about the saved option.
+        hold_with(&remote);
         remote.set_keep_awake(true).unwrap();
         let file = remote.store.file().to_path_buf();
         assert!(Store::open(file.clone()).read().keep_awake);
