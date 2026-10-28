@@ -1,15 +1,13 @@
 import { useState } from "react";
 import type { RemoteState, Waiting, WaitingKind } from "../api";
-import { FleetStrip, Link, PcChip, useNavigation } from "../components/Chrome";
+import { AgentCounts, Link, PcChip, useNavigation } from "../components/Chrome";
 import { Icon } from "../components/Icon";
-import { Notifications } from "../components/Notifications";
-import { isIos, isStandalone } from "../device";
+import { NotificationsView, pushPlace, useNotifications } from "../components/Notifications";
 import { duration } from "../format";
 import { usePolling } from "../hooks";
 import { locale, t, tn } from "../i18n";
 import { destinationOf, fleetOf, forYouGroups, waitingKey } from "../model";
 import { useRemoteContext } from "../remote";
-import { load, save } from "../storage";
 
 const HEADINGS: Record<WaitingKind, "forYou.panes" | "forYou.questions" | "forYou.lands"> = {
   pane: "forYou.panes",
@@ -17,9 +15,14 @@ const HEADINGS: Record<WaitingKind, "forYou.panes" | "forYou.questions" | "forYo
   readyToLand: "forYou.lands",
 };
 
-/** For you: what waits for the person across every project, and nothing else. */
+/**
+ * For you: what waits for the person across every project, first and within
+ * the thumb's reach; above it, how many agents are in each state; below, the
+ * way into the history and the notifications switch.
+ */
 export function ForYou({ now }: { now: number }) {
   const { state, pc, connection, client, visit } = useRemoteContext();
+  const push = useNotifications();
   const [news, setNews] = useState<number | null>(null);
 
   // How much happened since the last visit, for the way into the history.
@@ -36,6 +39,7 @@ export function ForYou({ now }: { now: number }) {
   const groups = forYouGroups(state.waiting);
   const fleet = fleetOf(state.projects);
   const count = state.waiting.length;
+  const place = pushPlace(push);
 
   return (
     <div className="page">
@@ -45,28 +49,14 @@ export function ForYou({ now }: { now: number }) {
           <PcChip pc={pc} connection={connection} />
         </div>
         <p className="lede">{count ? tn("forYou.count", count) : t("forYou.empty")}</p>
-        <FleetStrip fleet={fleet} />
+        <AgentCounts counts={fleet.counts} />
       </header>
 
-      <InstallNotice />
-
-      <Notifications />
-
-      <Link to={{ name: "history" }} className="row row--history">
-        <Icon name="clock" />
-        <span className="row__main">
-          <span className="row__title">{t("forYou.history")}</span>
-          {news !== null && (
-            <span className="row__sub">{news ? tn("forYou.historyCount", news) : t("forYou.historyNone")}</span>
-          )}
-        </span>
-        <Icon name="chevronRight" className="chevron" />
-      </Link>
+      {place === "top" && <NotificationsView {...push} />}
 
       {groups.length === 0 ? (
-        <p className="calm">
-          {fleet.counts.working ? tn("forYou.emptyWorking", fleet.counts.working) : t("forYou.emptyQuiet")}
-        </p>
+        // The counts above already say who is at work.
+        <p className="calm">{fleet.total ? t("forYou.emptyHint") : t("forYou.emptyQuiet")}</p>
       ) : (
         groups.map((group) => (
           <section className="section" key={group.kind}>
@@ -74,6 +64,7 @@ export function ForYou({ now }: { now: number }) {
               <h2 className="section__title">{t(HEADINGS[group.kind])}</h2>
               <span className="section__count">{group.items.length}</span>
             </div>
+            {group.kind === "readyToLand" && <p className="section__hint">{t("forYou.landOnPc")}</p>}
             <ul className="stack">
               {group.items.map((item) => (
                 <WaitingCard key={waitingKey(item)} item={item} state={state} now={now} />
@@ -82,6 +73,26 @@ export function ForYou({ now }: { now: number }) {
           </section>
         ))
       )}
+
+      <ul className="list section">
+        <li>
+          <Link to={{ name: "history" }} className="row">
+            <Icon name="clock" />
+            <span className="row__main">
+              <span className="row__title">{t("forYou.history")}</span>
+              {news !== null && (
+                <span className="row__sub">{news ? tn("forYou.historyCount", news) : t("forYou.historyNone")}</span>
+              )}
+            </span>
+            <Icon name="chevronRight" className="chevron" />
+          </Link>
+        </li>
+        {place === "foot" && (
+          <li>
+            <NotificationsView {...push} />
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -92,18 +103,16 @@ function WaitingCard({ item, state, now }: { item: Waiting; state: RemoteState; 
   const destination = destinationOf(item, state);
   const go = () =>
     navigate(destination.to === "pane" ? { name: "pane", id: destination.pane } : { name: "project", id: destination.projectId });
-  const title = item.kind === "pane" ? t("forYou.paneWaits", { pane: item.pane ?? "" }) : (item.title ?? "");
+  // A pane's card is headed by its name: its section says what it waits for.
+  const title = item.kind === "pane" ? (item.pane ?? "") : (item.title ?? "");
   const tone = item.kind === "readyToLand" ? "is-yours" : "is-waiting";
 
   return (
     <li className={`card ${tone}`} onClick={go}>
-      <div className="card__meta">
-        <span className="card__project">{item.workspace}</span>
-        <span className="card__since">{t("forYou.since", { duration: duration(now - item.since, locale) })}</span>
-      </div>
+      <p className="card__project">{item.workspace}</p>
       <p className="card__title">{title}</p>
       <div className="card__foot">
-        {item.kind === "readyToLand" && <span className="card__note">{t("forYou.landOnPc")}</span>}
+        <span className="card__since">{t("forYou.since", { duration: duration(now - item.since, locale) })}</span>
         <button
           type="button"
           className={`btn ${destination.to === "pane" ? "btn--primary" : ""}`}
@@ -116,28 +125,5 @@ function WaitingCard({ item, state, now }: { item: Waiting; state: RemoteState; 
         </button>
       </div>
     </li>
-  );
-}
-
-/** On an iPhone in Safari: how to put the app on the Home Screen, once. */
-function InstallNotice() {
-  const [dismissed, setDismissed] = useState(() => load("installNoticeDismissed") === "1");
-  if (dismissed || !isIos(navigator.userAgent, navigator.maxTouchPoints) || isStandalone()) return null;
-  return (
-    <aside className="notice">
-      <Icon name="share" />
-      <p className="notice__title">{t("install.title")}</p>
-      <p className="notice__body">{t("install.body")}</p>
-      <button
-        type="button"
-        className="btn btn--quiet"
-        onClick={() => {
-          save("installNoticeDismissed", "1");
-          setDismissed(true);
-        }}
-      >
-        {t("install.dismiss")}
-      </button>
-    </aside>
   );
 }

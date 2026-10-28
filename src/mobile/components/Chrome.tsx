@@ -2,7 +2,7 @@ import { createContext, useContext, type MouseEvent, type ReactNode } from "reac
 import type { Activity, Connection } from "../api";
 import { moment } from "../format";
 import { locale, t, tn } from "../i18n";
-import type { Fleet } from "../model";
+import { ACTIVITIES, type Fleet } from "../model";
 import { routeHash, type Route, type Tab } from "../route";
 import { Icon, type IconName } from "./Icon";
 
@@ -97,48 +97,22 @@ export function Banner({ connection, now, onRetry }: { connection: Connection; n
   );
 }
 
-/** Every agent as a tile in its state's colour, each project's held together. */
-export function FleetStrip({ fleet }: { fleet: Fleet }) {
-  if (!fleet.total) return null;
-  const states: Activity[] = ["working", "waiting", "yours", "idle"];
+/**
+ * How many agents are in each state, in words, the ones that need the person
+ * first: "1 waiting for your answer, 2 done, your turn, 3 working".
+ */
+export function AgentCounts({ counts }: { counts: Fleet["counts"] }) {
+  const states = ACTIVITIES.filter((state) => counts[state] > 0);
+  if (!states.length) return null;
   return (
-    <div className="fleet">
-      <div className="fleet__tiles" role="img" aria-label={t("fleet.label")}>
-        {fleet.projects.map((project) => (
-          <span className="fleet__project" key={project.id}>
-            <span className="fleet__panes">
-              {project.tiles.map((tile) => (
-                <span key={tile.id} className={`tile ${stateClass(tile.activity)}`} />
-              ))}
-            </span>
-            <span className="fleet__name">{project.name}</span>
-          </span>
-        ))}
-      </div>
-      <ul className="legend">
-        {states
-          .filter((state) => fleet.counts[state] > 0)
-          .map((state) => (
-            <li key={state} className={stateClass(state)}>
-              <span className="dot" />
-              {tn(`fleet.${state}`, fleet.counts[state])}
-            </li>
-          ))}
-      </ul>
-    </div>
-  );
-}
-
-/** A project's agents in small, beside its name. */
-export function Mosaic({ activities }: { activities: (Activity | null)[] }) {
-  const tiles = activities.filter((activity): activity is Activity => activity !== null);
-  if (!tiles.length) return null;
-  return (
-    <span className="mosaic" aria-hidden="true">
-      {tiles.map((activity, index) => (
-        <span key={index} className={`tile ${stateClass(activity)}`} />
+    <ul className="agents" aria-label={t("fleet.label")}>
+      {states.map((state) => (
+        <li key={state} className={`agents__state ${stateClass(state)}`}>
+          <span className="dot" />
+          {tn(`fleet.${state}`, counts[state])}
+        </li>
       ))}
-    </span>
+    </ul>
   );
 }
 

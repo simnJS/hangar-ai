@@ -43,6 +43,15 @@ describe("translating", () => {
     expect(fr.t("forYou.empty")).toBe("Rien ne vous attend");
   });
 
+  it("counts agents with the words their states are shown with", () => {
+    for (const locale of ["en", "fr"] as const) {
+      const { t, tn } = translator(locale);
+      for (const state of ["working", "waiting", "yours", "idle"] as const) {
+        expect(tn(`fleet.${state}`, 1).toLowerCase(), `${locale} ${state}`).toContain(t(`activity.${state}`).toLowerCase());
+      }
+    }
+  });
+
   it("leaves what fills a placeholder as it was written", () => {
     expect(translator("fr").t("composer.placeholder", { name: "Ben : test ?" })).toBe("Écrire à Ben : test ?");
   });

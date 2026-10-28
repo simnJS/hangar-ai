@@ -1,11 +1,11 @@
 import type { Project } from "../api";
-import { BackBar, EmptyState, Link, Mosaic, PcChip, StateLabel, useNavigation } from "../components/Chrome";
+import { AgentCounts, BackBar, EmptyState, Link, PcChip, StateLabel, useNavigation } from "../components/Chrome";
 import { Icon, Logo } from "../components/Icon";
 import { t, tn } from "../i18n";
-import { orchestratorPane, workersOf } from "../model";
+import { fleetOf, orchestratorPane, workersOf } from "../model";
 import { useRemoteContext } from "../remote";
 
-/** Projects: each one's team, board and plan at a glance. */
+/** Projects: each one's needs, agents, board and plan at a glance. */
 export function Projects() {
   const { state, pc, connection } = useRemoteContext();
   if (!state) return null;
@@ -25,14 +25,12 @@ export function Projects() {
                 <div className="project__head">
                   <span className="project__name">{project.name}</span>
                   <ProjectTag project={project} />
-                  <span className="project__end">
-                    <Mosaic activities={project.panes.map((pane) => pane.activity)} />
-                    <Icon name="chevronRight" className="chevron" />
-                  </span>
+                  <Icon name="chevronRight" className="chevron" />
                 </div>
-                <Team project={project} />
                 <Attention project={project} />
-                <Board project={project} />
+                <AgentCounts counts={fleetOf([project]).counts} />
+                {/* An empty board says nothing in the list; the project's own screen shows it. */}
+                {Object.values(project.board).some(Boolean) && <Board project={project} />}
                 {project.planStatus && (
                   <p className="project__plan">
                     <b>{t("project.plan")}</b> {project.planStatus}
@@ -62,14 +60,8 @@ function ProjectTag({ project }: { project: Project }) {
 
 function Team({ project }: { project: Project }) {
   const workers = workersOf(project).length;
-  return (
-    <p className="project__team">
-      <span>
-        {project.orchestrator ? t("project.orchestrator", { name: project.orchestrator.name }) : t("project.noOrchestrator")}
-      </span>
-      {workers > 0 && <span>{tn("project.workers", workers)}</span>}
-    </p>
-  );
+  const lead = project.orchestrator ? t("project.orchestrator", { name: project.orchestrator.name }) : t("project.noOrchestrator");
+  return <p className="project__team">{workers > 0 ? `${lead}, ${tn("project.workers", workers)}` : lead}</p>;
 }
 
 function Attention({ project }: { project: Project }) {
@@ -163,11 +155,11 @@ export function ProjectScreen({ id }: { id: string }) {
             <h2 className="section__title">{t("forYou.lands")}</h2>
             <span className="section__count">{project.readyToLand.length}</span>
           </div>
+          <p className="section__hint">{t("forYou.landOnPc")}</p>
           <ul className="stack">
             {project.readyToLand.map((task) => (
               <li key={task.id} className="card is-yours">
                 <p className="card__title">{task.title}</p>
-                <p className="card__note">{t("forYou.landOnPc")}</p>
               </li>
             ))}
           </ul>
@@ -180,7 +172,7 @@ export function ProjectScreen({ id }: { id: string }) {
           <span className="section__count">{project.panes.length}</span>
         </div>
         {project.panes.length === 0 ? (
-          <p className="card__note">{t("project.noPanes")}</p>
+          <p className="section__hint">{t("project.noPanes")}</p>
         ) : (
           <ul className="list">
             {project.panes.map((pane) => (

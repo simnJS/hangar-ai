@@ -1,4 +1,6 @@
+import { typeset } from "../lib/typography";
 import type { Activity, HistoryEntry, Pane, Project, RemoteState, Screen, SendArgs, Share, Waiting } from "./api";
+import { locale as appLocale, type Locale } from "./i18n";
 
 /**
  * A fake PC, for working on the app without one: the dev server always uses
@@ -14,6 +16,9 @@ import type { Activity, HistoryEntry, Pane, Project, RemoteState, Screen, SendAr
  * - unpaired: the phone has to pair (any code but 000000 works);
  * - offline: the PC stopped answering 47 min ago;
  * - nomanager: no project manager is open.
+ *
+ * Like the real PC, it writes its history in its own language, taken here to
+ * be the phone's; task titles stay as they were written.
  */
 
 export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager";
@@ -41,9 +46,44 @@ interface FakePane extends Pane {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+/** The history's words, as the window writes them (src/lib/activityLog.ts, src/i18n.ts). */
+const LINES = {
+  en: {
+    paneWaiting: "{pane} is waiting for you",
+    needsYou: "Needs you: {title}",
+    boardDone: "Every task is done ({n})",
+    readyToLand: "Ready to merge: {title}",
+    shared: "{pane} shared {name}",
+    landed: "Landed: {title}",
+    awake: "{name} woke up",
+    asleep: "{name} fell asleep",
+    taskDone: "Done: {title}",
+  },
+  fr: {
+    paneWaiting: "{pane} vous attend",
+    needsYou: "Vous attend : {title}",
+    boardDone: "Toutes les tâches sont faites ({n})",
+    readyToLand: "Prête à fusionner : {title}",
+    shared: "{pane} a partagé {name}",
+    landed: "Intégrée : {title}",
+    awake: "{name} s'est réveillé",
+    asleep: "{name} s'est endormi",
+    taskDone: "Terminée : {title}",
+  },
+} satisfies Record<Locale, Record<string, string>>;
+
+type LineKind = keyof (typeof LINES)["en"];
+
 const CLAUDE_PROMPT = ["", "────────────────────────────────────────────────────────", "> ", "────────────────────────────────────────────────────────", "  ⏵⏵ accept edits on (shift+tab to cycle)"];
 
-function scenery(now: number) {
+function scenery(now: number, locale: Locale) {
+  const entry = (minutesAgo: number, workspace: string, kind: LineKind, vars: Record<string, string | number>): HistoryEntry => ({
+    at: now - minutesAgo * MIN,
+    workspace,
+    kind,
+    text: typeset(LINES[locale][kind], locale).replace(/\{(\w+)\}/g, (all, name: string) => String(vars[name] ?? all)),
+  });
+
   const pane = (
     workspaceId: string,
     id: string,
@@ -204,16 +244,16 @@ function scenery(now: number) {
   ];
 
   const history: HistoryEntry[] = [
-    { at: now - 4 * MIN, workspace: "IaBench", kind: "waiting", text: "Ben waits for your permission to run the window ops' tests" },
-    { at: now - 25 * MIN, workspace: "IaBench", kind: "needsYou", text: "Jack asks: should Tailscale Funnel stay out of scope?" },
-    { at: now - 52 * MIN, workspace: "storefront", kind: "boardDone", text: "Every task on the board is done" },
-    { at: now - 70 * MIN, workspace: "IaBench", kind: "readyToLand", text: "Mobile settings: pair a phone by QR code passed its check and its review" },
-    { at: now - 95 * MIN, workspace: "IaBench", kind: "shared", text: "Cora shared mobile-for-you.png" },
-    { at: now - 3 * 60 * MIN, workspace: "storefront", kind: "landed", text: "Landed: product pages load their images lazily" },
-    { at: now - 5 * 60 * MIN, workspace: "recipes-app", kind: "woke", text: "Woke up: Leo resumed its session" },
-    { at: now - 19 * 60 * MIN, workspace: "billing-api", kind: "asleep", text: "Fell asleep after two hours idle" },
-    { at: now - 20 * 60 * MIN, workspace: "billing-api", kind: "landed", text: "Landed: invoices carry the VAT number" },
-    { at: now - 26 * 60 * MIN, workspace: "IaBench", kind: "done", text: "Done: the project manager opens in one click" },
+    entry(4, "IaBench", "paneWaiting", { pane: "Ben" }),
+    entry(25, "IaBench", "needsYou", { title: "Should Tailscale Funnel stay out of scope, or be offered as an option?" }),
+    entry(52, "storefront", "boardDone", { n: 12 }),
+    entry(70, "IaBench", "readyToLand", { title: "Mobile settings: pair a phone by QR code" }),
+    entry(95, "IaBench", "shared", { pane: "Cora", name: "mobile-for-you.png" }),
+    entry(3 * 60, "storefront", "landed", { title: "Product pages load their images lazily" }),
+    entry(5 * 60, "recipes-app", "awake", { name: "recipes-app" }),
+    entry(19 * 60, "billing-api", "asleep", { name: "billing-api" }),
+    entry(20 * 60, "billing-api", "landed", { title: "Invoices carry the VAT number" }),
+    entry(26 * 60, "IaBench", "taskDone", { title: "The project manager opens in one click" }),
   ];
 
   const shares: Share[] = [
@@ -231,7 +271,11 @@ function picture(id: string): string {
   const svg =
     id === "s-chart"
       ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400"><rect width="640" height="400" fill="#121316"/><g stroke="#2c2d30">${[80, 160, 240, 320].map((y) => `<path d="M60 ${y}H610"/>`).join("")}</g><path d="M60 300 L130 280 L200 310 L270 250 L340 120 L410 140" fill="none" stroke="#8c8d91" stroke-width="3"/><path d="M410 140 L480 300 L550 310 L610 305" fill="none" stroke="#3e8bff" stroke-width="3"/><text x="60" y="44" fill="#ecedf0" font-family="sans-serif" font-size="22">p95 latency, ms</text><text x="420" y="130" fill="#68a5ff" font-family="sans-serif" font-size="16">cache on</text></svg>`
-      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 600"><rect width="390" height="600" fill="#121316"/><text x="20" y="70" fill="#ecedf0" font-family="sans-serif" font-size="30" font-weight="600">Pour vous</text><text x="20" y="100" fill="#9c9da2" font-family="sans-serif" font-size="16">3 choses vous attendent</text>${[0, 1, 2, 3, 4, 5, 6].map((i) => `<rect x="${20 + i * 14}" y="120" width="10" height="20" rx="2" fill="${["#5fd27f", "#5fd27f", "#e7c06b", "#6fd4df", "#5fd27f", "#7b7c80", "#5fd27f"][i]}"/>`).join("")}${[0, 1, 2].map((i) => `<rect x="20" y="${180 + i * 120}" width="350" height="104" rx="8" fill="#1b1c1f"/><rect x="20" y="${180 + i * 120}" width="3" height="104" fill="${i === 2 ? "#6fd4df" : "#e7c06b"}"/><rect x="270" y="${236 + i * 120}" width="88" height="36" rx="8" fill="#3e8bff"/>`).join("")}</svg>`;
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 600"><rect width="390" height="600" fill="#121316"/><text x="20" y="70" fill="#ecedf0" font-family="sans-serif" font-size="30" font-weight="600">Pour vous</text><text x="20" y="100" fill="#9c9da2" font-family="sans-serif" font-size="16">3 choses vous attendent</text>${[
+          ["#e7c06b", 20, 70],
+          ["#6fd4df", 118, 72],
+          ["#5fd27f", 218, 56],
+        ].map(([fill, x, width]) => `<rect x="${x}" y="122" width="8" height="8" rx="2" fill="${fill}"/><rect x="${Number(x) + 14}" y="122" width="${width}" height="8" rx="4" fill="#3a3b3f"/>`).join("")}${[0, 1, 2].map((i) => `<rect x="20" y="${160 + i * 136}" width="350" height="120" rx="10" fill="#1b1c1f"/><rect x="20" y="${160 + i * 136}" width="3" height="120" fill="${i === 2 ? "#6fd4df" : "#e7c06b"}"/><rect x="38" y="${180 + i * 136}" width="64" height="8" rx="4" fill="#3a3b3f"/><rect x="38" y="${200 + i * 136}" width="${[210, 270, 230][i]}" height="12" rx="6" fill="#8c8d91"/><rect x="38" y="${248 + i * 136}" width="70" height="8" rx="4" fill="#3a3b3f"/><rect x="${i === 2 ? 238 : 262}" y="${234 + i * 136}" width="${i === 2 ? 116 : 92}" height="36" rx="8" fill="${i === 2 ? "#252629" : "#3e8bff"}"/>`).join("")}</svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -248,8 +292,8 @@ export interface Mock {
   seed: { lastOk: number; state: RemoteState } | null;
 }
 
-export function createMock(scenario: Scenario, now = Date.now()): Mock {
-  const world = scenery(now);
+export function createMock(scenario: Scenario, now = Date.now(), locale: Locale = appLocale): Mock {
+  const world = scenery(now, locale);
   let paired = scenario !== "unpaired";
   const latency = () => pause(90 + Math.random() * 140);
 
