@@ -88,11 +88,13 @@ fn pending() -> &'static Mutex<HashMap<String, oneshot::Sender<Answer>>> {
     PENDING.get_or_init(Default::default)
 }
 
+/// One request as the window receives it, on `control:request` or
+/// `control:internal`; its answer comes back through `control_reply`.
 #[derive(Clone, Serialize)]
-struct ControlRequest {
-    id: String,
-    op: String,
-    args: Value,
+pub struct ControlRequest {
+    pub id: String,
+    pub op: String,
+    pub args: Value,
 }
 
 #[derive(Debug, PartialEq)]
@@ -159,12 +161,31 @@ pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, Contro
 }
 
 /// Asks the window one of Hangar's own questions — a pane's orchestration
-/// briefing (orchestrator.rs) — which no agent may ask. It goes out on an event
-/// of its own, never as an operation: no tool offers it, the HTTP control
-/// route refuses it, and the window answers it whether or not pane control is
-/// on. The answer comes back through `control_reply` like any other.
+/// briefing (orchestrator.rs), a phone's call (remote/) — which no agent may
+/// ask. It goes out on an event of its own, never as an operation: no tool
+/// offers it, the HTTP control route refuses it, and the window answers it
+/// whether or not pane control is on. The answer comes back through
+/// `control_reply` like any other.
 pub async fn ask_internal(
     app: &AppHandle,
+    op: &str,
+    args: Value,
+    limit: Duration,
+) -> Result<Value, ControlError> {
+    ask_internal_via(|request| emit_internal(app, request), op, args, limit).await
+}
+
+/// How an internal request reaches the window: on its own event.
+pub(crate) fn emit_internal(app: &AppHandle, request: ControlRequest) -> Result<(), String> {
+    app.emit("control:internal", request)
+        .map_err(|err| err.to_string())
+}
+
+/// `ask_internal`, with the request handed to `send` rather than emitted. The
+/// mobile server goes through here (remote/), so that its tests can stand in
+/// for the window, answering through `control_reply` as the window does.
+pub(crate) async fn ask_internal_via(
+    send: impl FnOnce(ControlRequest) -> Result<(), String>,
     op: &str,
     args: Value,
     limit: Duration,
@@ -175,7 +196,7 @@ pub async fn ask_internal(
         op: op.to_string(),
         args,
     };
-    if let Err(err) = app.emit("control:internal", request) {
+    if let Err(err) = send(request) {
         forget(&id);
         return Err(ControlError::Unavailable(format!(
             "could not reach the window: {err}"
@@ -233,6 +254,40 @@ mod tests {
         // Must not panic, and must not resurrect anything.
         control_reply(id.clone(), true, None, None);
         assert!(!pending().lock().unwrap().contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn an_internal_request_is_answered_through_control_reply() {
+        let answer = ask_internal_via(
+            |request| {
+                assert_eq!(request.op, "remote_state");
+                assert_eq!(request.args, json!({ "pane": "Ava" }));
+                control_reply(request.id, true, Some(json!({ "panes": 1 })), None);
+                Ok(())
+            },
+            "remote_state",
+            json!({ "pane": "Ava" }),
+            Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(answer, Ok(json!({ "panes": 1 })));
+    }
+
+    #[tokio::test]
+    async fn a_window_that_cannot_be_reached_is_unavailable_at_once() {
+        let mut booked = String::new();
+        let answer = ask_internal_via(
+            |request| {
+                booked = request.id;
+                Err("no window".to_string())
+            },
+            "remote_state",
+            json!({}),
+            Duration::from_secs(30),
+        )
+        .await;
+        assert!(matches!(answer, Err(ControlError::Unavailable(_))));
+        assert!(!pending().lock().unwrap().contains_key(&booked));
     }
 
     #[test]

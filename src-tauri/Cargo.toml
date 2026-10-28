@@ -30,7 +30,10 @@ tauri-plugin-dialog = "2.7.2"
 dirs = "6.0.0"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+# `process` and `io-util`: Hangar Mobile asks the Tailscale CLI, which can sit
+# waiting on the person's browser, so it is read as it goes and given a time
+# limit (remote/tailscale.rs).
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
 toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"
@@ -96,6 +99,22 @@ ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 # in Paris belongs to that night, not to the evening before. Already compiled
 # for tauri with its clock, so naming it adds no crate.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Hangar Mobile — see remote/. The phone's web app is compiled in from
+# dist-mobile/, and `allow_missing` lets a checkout that never built it compile
+# all the same, serving a placeholder instead. The pairing QR code is drawn as
+# SVG only, so none of `image` comes with it. SHA-256 keeps the phones' tokens
+# hashed at rest, and subtle compares them in constant time: rust-embed and
+# rustls compile both anyway.
+rust-embed = "8.13"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+sha2 = "0.11"
+subtle = "2.6"
+
+# The mobile server's tests call its router directly, without a socket.
+# Already compiled for axum, with this feature.
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.
