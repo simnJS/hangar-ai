@@ -32,6 +32,7 @@ import {
 } from "./lib/ipc";
 import { usePaneControl, type ControlDeps } from "./lib/control";
 import { useOrchestrator } from "./lib/orchestratorBrief";
+import { useRemoteControl } from "./lib/remoteControl";
 import { deliveryDeps, landDelivery } from "./lib/deliveryControl";
 import { stopAllWorkers } from "./lib/workerControl";
 import { beginDelivery } from "./lib/deliveryRuns";
@@ -746,6 +747,8 @@ export default function App() {
         }
       : null;
   usePaneControl(controlDeps);
+  // Hangar Mobile: what the phone asks, answered from this window.
+  useRemoteControl(controlDeps);
 
   // ---------------------------------------------------------------------------
   // Orchestration (lib/orchestration): pinning a workspace's orchestrator, its
