@@ -10,7 +10,9 @@
     "test": "vitest run",
     "tauri": "tauri",
     "demo:dev": "vite --config vite.demo.config.ts",
-    "demo:build": "vite build --config vite.demo.config.ts && node scripts/demo-singlefile.mjs"
+    "demo:build": "vite build --config vite.demo.config.ts && node scripts/demo-singlefile.mjs",
+    "mobile:dev": "vite --config vite.mobile.config.ts",
+    "mobile:build": "vite build --config vite.mobile.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.5",
