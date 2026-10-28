@@ -7,7 +7,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::board::{self, BoardStore, NewTask, TaskPatch};
 use crate::memory::{self, MemoryPatch, NewMemory};
@@ -460,6 +460,54 @@ async fn control(
         })
 }
 
+// ---------------------------------------------------------------------------
+// Hangar Mobile
+//
+// What an agent shows the person on their phone: the file is copied and
+// recorded by the remote module (remote/files.rs).
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct PhoneShareBody {
+    path: String,
+    caption: Option<String>,
+    /// The caller's pane, from its environment (the MCP proxy), never from
+    /// the model.
+    #[serde(default, rename = "paneName")]
+    pane_name: String,
+}
+
+async fn phone_share(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Query(q): Query<WorkspaceQuery>,
+    Json(body): Json<PhoneShareBody>,
+) -> ApiResult {
+    authorize(&state, &headers)?;
+    if body.path.trim().is_empty() {
+        return Err(bad(StatusCode::BAD_REQUEST, "missing 'path'"));
+    }
+    let remote = state
+        .app
+        .try_state::<Arc<crate::remote::Remote>>()
+        .ok_or_else(|| {
+            bad(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Hangar Mobile is unavailable",
+            )
+        })?;
+    let share = remote
+        .share(crate::remote::NewShare {
+            source: std::path::PathBuf::from(body.path),
+            caption: body.caption,
+            workspace: q.cwd,
+            pane: body.pane_name,
+        })
+        .await
+        .map_err(|err| bad(StatusCode::BAD_REQUEST, err))?;
+    Ok(Json(json!({ "shared": share })))
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
@@ -499,6 +547,7 @@ pub async fn start(
         .route("/api/bridge/{pane}/conflict", get(bridge_conflict))
         .route("/api/bridge/{pane}/briefing", get(bridge_briefing))
         .route("/api/control/{op}", post(control))
+        .route("/api/phone/share", post(phone_share))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

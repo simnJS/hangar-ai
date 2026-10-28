@@ -566,6 +566,18 @@ fn base_tool_definitions() -> Value {
             }
         },
         {
+            "name": "phone_share",
+            "description": "Show a file on the person's phone, in Hangar Mobile: a screenshot, a render, a PDF, any file. Use it when the person asks to see something on their phone, or for a result clearly worth showing them; never for routine output. The file is copied (50 MB at most), so it stays available if you change or delete it afterwards. Refused when Hangar Mobile is off or no phone is paired: the person can turn it on and pair one in Settings › Mobile.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The file to share, absolute or relative to your working directory." },
+                    "caption": { "type": "string", "description": "One line telling the person what they are looking at." }
+                },
+                "required": ["path"]
+            }
+        },
+        {
             "name": "model_close",
             "description": "Close a model in your workspace's 3D preview. Without a path it closes every model open there; other workspaces' previews are left as they are. The panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
             "inputSchema": {
@@ -789,6 +801,21 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
             let id = str_arg("id").ok_or("missing 'id'")?;
             api.delete(&format!("/api/memory/{id}"))
         }
+        "phone_share" => {
+            let mut body = json!({
+                "path": str_arg("path").ok_or("missing 'path'")?,
+                // The pane is not the model's to state: it comes from the
+                // environment Hangar gave this process.
+                "paneName": env_var(&["HANGAR_PANE_NAME"]).unwrap_or_default(),
+            });
+            if let Some(caption) = str_arg("caption") {
+                body["caption"] = json!(caption);
+            }
+            if let Ok(here) = std::env::current_dir() {
+                absolutize_path(&mut body, &here);
+            }
+            api.send("POST", "/api/phone/share", body)
+        }
         op if crate::control::OPERATIONS.contains(&op) => {
             let mut body = if args.is_object() {
                 args.clone()
@@ -1008,6 +1035,23 @@ mod tests {
         assert!(tool("project_list")["inputSchema"]
             .get("required")
             .is_none());
+    }
+
+    #[test]
+    fn phone_share_asks_for_a_path_and_says_when_not_to_use_it() {
+        let share = tool("phone_share");
+        assert_eq!(share["inputSchema"]["required"], json!(["path"]));
+        assert_eq!(
+            share["inputSchema"]["properties"]["caption"]["type"],
+            "string"
+        );
+        // The pane and workspace are the caller's, not arguments.
+        for key in ["pane", "workspace", "paneName"] {
+            assert!(share["inputSchema"]["properties"].get(key).is_none());
+        }
+        let description = share["description"].as_str().unwrap();
+        assert!(description.contains("never for routine output"));
+        assert!(description.contains("Settings › Mobile"));
     }
 
     #[test]
