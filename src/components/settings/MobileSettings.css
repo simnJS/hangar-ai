@@ -1,0 +1,125 @@
+/* The Mobile page: the rows, switches and buttons are the settings' own; this
+   is only what they have no class for — the steps' text, the QR code, the code. */
+
+.mob {
+  display: grid;
+  gap: 20px;
+}
+
+.mob-step {
+  gap: 10px;
+}
+
+.mob-text {
+  margin: 0;
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.mob-note {
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
+}
+
+.mob-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mob-ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mob-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.mob-address {
+  justify-self: start;
+  max-width: 100%;
+  padding: 6px 10px;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  user-select: text;
+}
+
+.mob-error {
+  margin: 8px 4px 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--danger);
+}
+
+.mob-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+}
+
+/* White whatever the theme: a QR code on a dark ground does not scan. */
+.mob-qr {
+  flex: none;
+  box-sizing: content-box;
+  width: calc(220px * var(--ui-scale));
+  height: calc(220px * var(--ui-scale));
+  padding: 12px;
+  background: #fff;
+  border-radius: var(--radius-lg);
+  transition: opacity var(--dur) ease;
+}
+
+.mob-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mob-qr.is-expired {
+  opacity: 0.25;
+}
+
+.mob-pair__side {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.mob-code {
+  font-family: var(--mono);
+  font-size: calc(30px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--fg);
+  user-select: text;
+}
+
+.mob-count {
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-secondary);
+}
+
+.mob-count.is-expired {
+  color: var(--danger);
+}
+
+.mob-ask {
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+}

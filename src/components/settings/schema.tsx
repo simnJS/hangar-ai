@@ -6,6 +6,7 @@ import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
 import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
+import { MobileSettings } from "./MobileSettings";
 import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import { VoiceCard, VoiceKeyCard } from "./VoiceCard";
@@ -715,6 +716,28 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               hint: t("settings.notifyAwayHint"),
               value: settings.notifyOnlyWhenAway,
               onChange: (value) => set("notifyOnlyWhenAway", value),
+            },
+          ],
+        },
+      ],
+    },
+
+    {
+      id: "mobile",
+      label: t("settings.catMobile"),
+      icon: "broadcast",
+      sections: [
+        {
+          id: "mobile",
+          title: t("settings.catMobile"),
+          items: [
+            {
+              id: "mobile",
+              kind: "custom",
+              bare: true,
+              hint: t("mobile.switchHint"),
+              keywords: t("mobile.keywords"),
+              render: () => <MobileSettings />,
             },
           ],
         },
