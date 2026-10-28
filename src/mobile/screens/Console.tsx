@@ -44,6 +44,9 @@ const KEYS: { key: Key; label: Word; hint: Word; arrow?: boolean }[] = [
   { key: "ctrl+c", label: "key.ctrlC", hint: "key.ctrlCHint" },
 ];
 
+/** Long enough for the PC to pass the answer on and the screen to show it. */
+const ANSWER_SETTLES_MS = 4_000;
+
 type Status =
   | { kind: "busy"; text: string }
   | { kind: "done"; text: string }
@@ -56,15 +59,20 @@ export function Console(props: ConsoleProps) {
   const [screen, setScreen] = useState<Screen | null>(null);
   const [gone, setGone] = useState(false);
   const [status, setStatus] = useState<Status>(null);
-  /** The waiting the person just answered, until the pane moves on. */
-  const [answered, setAnswered] = useState(false);
+  /**
+   * When the person last answered a permission: the bar steps aside until the
+   * pane moves on, or a few seconds, in case it asks again straight away.
+   */
+  const [answeredAt, setAnsweredAt] = useState<number | null>(null);
 
   usePolling(async () => {
     try {
       const next = await client.screen(props.paneId);
       setScreen(next);
       setGone(false);
-      if (next.activity !== "waiting") setAnswered(false);
+      if (answeredAt !== null && (next.activity !== "waiting" || Date.now() - answeredAt > ANSWER_SETTLES_MS)) {
+        setAnsweredAt(null);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.kind === "refused") setGone(true);
     }
@@ -91,12 +99,12 @@ export function Console(props: ConsoleProps) {
   };
 
   const answer = async (allow: boolean) => {
-    setAnswered(true);
+    setAnsweredAt(Date.now());
     const ok = await act(
       () => client.permission(props.paneId, allow),
       allow ? t("permission.allowed") : t("permission.denied"),
     );
-    if (!ok) setAnswered(false);
+    if (!ok) setAnsweredAt(null);
   };
 
   return (
@@ -118,7 +126,7 @@ export function Console(props: ConsoleProps) {
 
       <ScreenText screen={screen} gone={gone} name={props.name} notice={props.notice} />
 
-      {activity === "waiting" && !answered && !gone && (
+      {activity === "waiting" && answeredAt === null && !gone && (
         <div className="ask" role="group" aria-label={t("permission.title", { name: props.name })}>
           <p className="ask__title">{t("permission.title", { name: props.name })}</p>
           <p className="ask__hint">{t("permission.hint")}</p>
