@@ -69,6 +69,42 @@ const PATHS = {
     </>
   ),
   check: <path d="m3.5 8.4 2.9 2.9 6.1-6.6" />,
+  chevronDown: <path d="M3.5 6 8 10.5 12.5 6" />,
+  // The chat's actions, by what they do to the project.
+  pencil: (
+    <>
+      <path d="M10.7 2.8a1.5 1.5 0 0 1 2.1 0l.4.4a1.5 1.5 0 0 1 0 2.1L6 12.5l-3.3.8.8-3.3z" />
+      <path d="m9.4 4.1 2.5 2.5" />
+    </>
+  ),
+  terminal: (
+    <>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+      <path d="m4.6 6.3 2 1.7-2 1.7M8.3 9.9h3.1" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M4.25 1.9h4.9l2.6 2.6v9.6h-7.5z" />
+      <path d="M9 2v2.7h2.7M6.2 8.3h3.6M6.2 10.8h3.6" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="7.1" cy="7.1" r="4.35" />
+      <path d="m10.3 10.3 3.3 3.3" />
+    </>
+  ),
+  tool: (
+    <path d="M10.1 2.2a3.1 3.1 0 0 0-3.6 4.1l-4 4a1.4 1.4 0 0 0 2 2l4-4a3.1 3.1 0 0 0 4.1-3.6l-1.8 1.8-1.7-.4-.4-1.7z" />
+  ),
+  failed: (
+    <>
+      <circle cx="8" cy="8" r="5.75" />
+      <path d="m6.1 6.1 3.8 3.8M9.9 6.1 6.1 9.9" />
+    </>
+  ),
+  stop: <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.6" />,
   // Notifications.
   bell: (
     <>

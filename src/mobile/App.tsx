@@ -6,7 +6,7 @@ import { t } from "./i18n";
 import { unseenShares } from "./model";
 import { RemoteContext, useRemote, type Boot } from "./remote";
 import { routeHash, tabOf, type Route } from "./route";
-import { ManagerScreen, PaneScreen } from "./screens/Console";
+import { ManagerScreen, PaneScreen } from "./screens/Pane";
 import { ForYou } from "./screens/ForYou";
 import { History } from "./screens/History";
 import { Pairing } from "./screens/Pairing";
