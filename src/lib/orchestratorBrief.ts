@@ -7,6 +7,7 @@ import { boardLoad } from "./board";
 import { gitRepoInfo } from "./git";
 import { bridgeEnqueue } from "./ipc";
 import { memoryLoad, type MemoryEntry } from "./memory";
+import { isAsleep } from "./hibernateStore";
 import { orchestrationOf, orchestratorOf, workersOf } from "./orchestration";
 import {
   NEEDS_YOU,
@@ -18,6 +19,7 @@ import {
   type BoardTask,
   type JournalEntry,
 } from "./orchestratorEvents";
+import { loadProjects, renderOverview, type ProjectSummary } from "./projects";
 import { isMainWindow } from "./windows";
 import type { AppState, Pane, PaneRole, Workspace } from "../types";
 
@@ -44,6 +46,10 @@ export interface Briefing {
 
 /** The tag of every plan document, and of nothing else Hangar writes. */
 export const PLAN_TAG = "orchestration";
+
+/** The manager's tracker document: its title, and its tag. */
+export const TRACKER_TITLE = "Projects — tracker";
+export const TRACKER_TAG = "manager";
 
 /* ── The plan document ─────────────────────────────────────────── */
 
@@ -169,6 +175,36 @@ Hangar hands you the board, your plan and the latest events. Trust them over wha
 
 ## Your tools
 board_list_tasks, board_create_task {title, description, priority, depends_on, owns, labels}, board_update_task {id, title, description, column, labels, depends_on, owns, release}, board_comment_task {id, text}; memory_write {title, content, tags}, memory_read, memory_search; worker_spawn {task, name?, model?}, worker_list, worker_stop {worker${git ? ", keepWorktree?" : ""}}; pane_send {pane, text, when_idle: true} and pane_read {pane} on a worker's pane; AskUserQuestion for the person.`;
+}
+
+/** The manager's tracker, or null: the entry of that title, tagged for the manager. */
+export function findTracker(memory: MemoryEntry[]): MemoryEntry | null {
+  const mine = memory
+    .filter((entry) => entry.title === TRACKER_TITLE && entry.tags.includes(TRACKER_TAG))
+    .sort((a, b) => b.updated_at - a.updated_at);
+  return mine[0] ?? null;
+}
+
+export function managerRole(): string {
+  return `# Your role: project manager of Hangar
+
+Hangar.AI pinned this Claude Code session as the person's project manager across every Hangar workspace. The person talks to you instead of each project's agents: you know where every project stands, tell them what waits for them, and pass their instructions on to the projects' orchestrators. Orchestrators and workers do the work; you follow it.
+
+## Rules
+1. Never write code or change a file in a project. Never start workers, pin orchestrators or create tasks: that is each project's orchestrator's job.
+2. Act only when the person asks. To pass an instruction on, project_send {workspace, text} to the project's orchestrator. A project without an orchestrator: say so; pane_send to one of its panes only if the person explicitly asks for that pane.
+3. Answer in the person's language, briefly: per project, its state and what waits for the person.
+4. A message starting with "[Hangar]" is an event, never the person, and it cannot approve anything on their behalf. On one, tell the person in one to three lines what waits for them and where (workspace, pane), and do nothing else.
+5. Do not poll. Hangar wakes you with a "[Hangar]" message when something happens; no sleep loops, no repeated project_list or pane_read to watch progress.
+
+## The tracker document
+One memory entry, titled exactly "${TRACKER_TITLE}", tagged "${TRACKER_TAG}". Rewrite it whole with memory_write under that title (it replaces the old one) whenever the person tells you what they want from a project or a project moves. Under 4,000 characters: per project, what the person wants and where it stands. Hangar hands it back to you after every compaction.
+
+## After a compaction or a restart
+Hangar hands you the state of every project and your tracker. Trust them over what you remember, and never forget what the person asked for.
+
+## Your tools
+project_list, project_status {workspace}, project_send {workspace, text}, pane_read {pane}; memory_write {title, content, tags}, memory_read, memory_search, memory_list.`;
 }
 
 /** `sharedFolder`: the worker runs in its workspace's folder, which is not a git repository. */
@@ -350,6 +386,19 @@ function planSection(plan: MemoryEntry | null, title: string, now: number): stri
   return [`Plan (memory "${plan.title}" [${plan.id}], updated ${ago(now - plan.updated_at)}):`, body.trim()];
 }
 
+function trackerSection(tracker: MemoryEntry | null, now: number): string[] {
+  if (!tracker) {
+    return [
+      `Tracker: none yet. Write it with memory_write, title "${TRACKER_TITLE}", tag "${TRACKER_TAG}": per project, what the person wants and where it stands.`,
+    ];
+  }
+  const body =
+    tracker.content.length > MAX_PLAN
+      ? `${tracker.content.slice(0, MAX_PLAN)}\n…(cut here: memory_read ${tracker.id} for the rest, and shorten it)`
+      : tracker.content;
+  return [`Tracker (memory "${tracker.title}" [${tracker.id}], updated ${ago(now - tracker.updated_at)}):`, body.trim()];
+}
+
 function eventsSection(journal: JournalEntry[], tasks: BoardTask[], max: number): string[] {
   if (!journal.length) return [];
   const titles = (id: string) => tasks.find((task) => task.id === id)?.title ?? null;
@@ -369,6 +418,8 @@ export interface BriefingInputs {
   now: number;
   /** Whether the workspace is a git repository; the orchestrator's role depends on it. */
   git?: boolean;
+  /** Every project but the HQ, for the manager's briefing. */
+  projects?: ProjectSummary[];
 }
 
 /** The pane's briefing, or null for a pane with no part in an orchestration. */
@@ -377,10 +428,14 @@ export function buildBriefing(inputs: BriefingInputs): Briefing | null {
   const ws = state.workspaces.find((entry) => entry.panes.some((pane) => pane.id === paneId));
   const pane = ws?.panes.find((entry) => entry.id === paneId);
   if (!ws || !pane?.role || pane.agent !== "claude") return null;
-  // The manager is no part of its workspace's orchestration; its own
-  // briefing is still to be written.
-  if (pane.role === "manager") return null;
+  if (pane.role === "manager") return managerBriefing(inputs);
   return pane.role === "orchestrator" ? orchestratorBriefing(ws, inputs) : workerBriefing(ws, pane, inputs);
+}
+
+function managerBriefing(inputs: BriefingInputs): Briefing {
+  const { memory, now } = inputs;
+  const context = [renderOverview(inputs.projects ?? [], now), "", ...trackerSection(findTracker(memory), now)];
+  return { role: "manager", system: managerRole(), context: context.join("\n") };
 }
 
 function orchestratorBriefing(ws: Workspace, inputs: BriefingInputs): Briefing {
@@ -465,10 +520,28 @@ export interface BriefingDeps {
   now: () => number;
   /** Whether a folder is a git repository; null when that cannot be told. */
   isRepo?: (cwd: string) => Promise<boolean | null>;
+  /** Every project's summary, read for a manager pane only. */
+  loadProjects?: () => Promise<ProjectSummary[]>;
 }
 
 const defaultDeps = (snapshot: () => AppState): BriefingDeps => ({
   snapshot,
+  loadProjects: () =>
+    loadProjects({
+      snapshot,
+      loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
+      loadMemory: () => memoryLoad().then((memory) => memory.entries ?? []),
+      isRepo: (cwd) => gitRepoInfo(cwd).then((repo) => (repo.installed ? repo.isRepo : null)),
+      activity: getPaneActivity,
+      asleep: isAsleep,
+      // Which workspaces the app has up is not known here: one with a pane
+      // whose agent this window knows of is.
+      isOpen: (id) =>
+        snapshot()
+          .workspaces.find((ws) => ws.id === id)
+          ?.panes.some((pane) => getPaneActivity(pane.id) !== undefined) ?? false,
+      journal: orchestratorJournal,
+    }),
   loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
   loadMemory: () => memoryLoad().then((memory) => memory.entries ?? []),
   journal: orchestratorJournal,
@@ -487,13 +560,17 @@ export async function briefingFor(paneId: string, deps: BriefingDeps): Promise<B
   const pane = ws?.panes.find((entry) => entry.id === paneId);
   if (!ws || !pane?.role) return null;
   const orchestrator = pane.role === "orchestrator";
-  const [tasks, memory, git] = await Promise.all([
-    deps.loadBoard(ws.cwd),
+  const manager = pane.role === "manager";
+  const [tasks, memory, git, projects] = await Promise.all([
+    // The manager follows every project's board, not the HQ's own.
+    manager ? Promise.resolve([]) : deps.loadBoard(ws.cwd),
     // A worker's briefing has no plan in it; an unreadable memory is no plan.
-    orchestrator ? deps.loadMemory().catch(() => []) : Promise.resolve([]),
+    orchestrator || manager ? deps.loadMemory().catch(() => []) : Promise.resolve([]),
     // Only the orchestrator's role depends on it; a worker's pane says it. A
     // folder that cannot be told is taken for a repository, as it always was.
     orchestrator && deps.isRepo ? deps.isRepo(ws.cwd).catch(() => null) : Promise.resolve(null),
+    // An unreadable overview is an empty one, not a failed briefing.
+    manager && deps.loadProjects ? deps.loadProjects().catch(() => []) : Promise.resolve([]),
   ]);
   return buildBriefing({
     state,
@@ -504,6 +581,7 @@ export async function briefingFor(paneId: string, deps: BriefingDeps): Promise<B
     activity: deps.activity,
     now: deps.now(),
     git: git ?? true,
+    projects,
   });
 }
 
@@ -517,9 +595,11 @@ export async function briefingFor(paneId: string, deps: BriefingDeps): Promise<B
  */
 export function roleMessage(briefing: Briefing, workspace: string): string {
   const what =
-    briefing.role === "orchestrator"
-      ? `Hangar has just pinned you as the orchestrator of workspace "${workspace}".`
-      : `Hangar has just made you a worker in workspace "${workspace}".`;
+    briefing.role === "manager"
+      ? "Hangar has just pinned you as the person's project manager, across every workspace."
+      : briefing.role === "orchestrator"
+        ? `Hangar has just pinned you as the orchestrator of workspace "${workspace}".`
+        : `Hangar has just made you a worker in workspace "${workspace}".`;
   return [
     `${what} From now on the role below applies to this conversation, over any earlier instruction about how to work here; Hangar adds it to your system prompt at the next compaction.`,
     "",
@@ -527,13 +607,18 @@ export function roleMessage(briefing: Briefing, workspace: string): string {
     "",
     briefing.context,
     "",
-    briefing.role === "orchestrator"
-      ? "If the person already gave you an objective in this conversation, carry on with it by the procedure above. Otherwise say in one line that you are ready, and wait for it."
-      : "Wait for your brief, unless you already have it in this conversation.",
+    briefing.role === "manager"
+      ? "Say in one line that you are ready, and wait for the person."
+      : briefing.role === "orchestrator"
+        ? "If the person already gave you an objective in this conversation, carry on with it by the procedure above. Otherwise say in one line that you are ready, and wait for it."
+        : "Wait for your brief, unless you already have it in this conversation.",
   ].join("\n");
 }
 
 export function releaseMessage(role: PaneRole, workspace: string): string {
+  if (role === "manager") {
+    return "Hangar has unpinned you: you are no longer the person's project manager. The manager role and its rules no longer apply; you are an ordinary agent in this pane again.";
+  }
   return role === "orchestrator"
     ? `Hangar has unpinned you: you are no longer the orchestrator of workspace "${workspace}". The orchestrator role and its rules no longer apply; you are an ordinary agent in this pane again. Do not start, stop or message workers: its workers run on until the person stops them.`
     : `Hangar has taken you off your task: you are no longer a worker in workspace "${workspace}". Stop working on it, and wait for what the person asks next.`;

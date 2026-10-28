@@ -9,6 +9,7 @@ import {
   roleMessage,
   type BriefingInputs,
 } from "./orchestratorBrief";
+import { loadProjects } from "./projects";
 import type { MemoryEntry } from "./memory";
 import type { BoardTask, JournalEntry } from "./orchestratorEvents";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
@@ -355,5 +356,83 @@ describe("a role given mid-session", () => {
     expect(text).toContain(briefing.system);
     expect(text).toContain(briefing.context);
     expect(releaseMessage("orchestrator", "Shop")).toContain("no longer the orchestrator");
+  });
+});
+
+describe("the manager's briefing", () => {
+  function managerSetup() {
+    const inputs = setup();
+    const hq = workspace("hq", "HQ", [pane("m", "manager", "manager")], { hq: true });
+    const state: AppState = { ...inputs.state, workspaces: [hq, ...inputs.state.workspaces] };
+    return { ...inputs, state, paneId: "m" };
+  }
+
+  const deps = (inputs: BriefingInputs, memoryEntries = inputs.memory) => ({
+    snapshot: () => inputs.state,
+    loadBoard: async () => inputs.tasks,
+    loadMemory: async () => memoryEntries,
+    journal: () => inputs.journal,
+    activity: inputs.activity,
+    now: () => NOW,
+    loadProjects: () =>
+      loadProjects({
+        snapshot: () => inputs.state,
+        loadBoard: async () => inputs.tasks,
+        loadMemory: async () => memoryEntries,
+        isRepo: async () => true,
+        activity: inputs.activity,
+        asleep: () => false,
+        isOpen: () => true,
+        journal: () => inputs.journal,
+      }),
+  });
+
+  it("gives it its role, its rules and its tools", () => {
+    const briefing = buildBriefing(managerSetup())!;
+    expect(briefing.role).toBe("manager");
+    expect(briefing.system).toContain("project manager");
+    expect(briefing.system).toContain("Never write code");
+    expect(briefing.system).toContain("project_send");
+    expect(briefing.system).toContain("project_list");
+    expect(briefing.system).toContain('"Projects — tracker"');
+  });
+
+  it("hands back the overview without the HQ, and says where the tracker goes when there is none", async () => {
+    const inputs = managerSetup();
+    const briefing = (await briefingFor("m", deps(inputs)))!;
+    expect(briefing.role).toBe("manager");
+    expect(briefing.context).toContain("# Hangar projects at 14:05");
+    expect(briefing.context).toContain("Shop");
+    expect(briefing.context).toContain("Blog");
+    expect(briefing.context).not.toContain("HQ —");
+    expect(briefing.context).toContain('Tracker: none yet. Write it with memory_write, title "Projects — tracker", tag "manager"');
+  });
+
+  it("hands back the tracker the manager wrote", async () => {
+    const inputs = managerSetup();
+    const tracker = memory("Projects — tracker", "Shop: the person wants login first.", { tags: ["manager"] });
+    const briefing = (await briefingFor("m", deps(inputs, [...inputs.memory, tracker])))!;
+    expect(briefing.context).toContain('Tracker (memory "Projects — tracker"');
+    expect(briefing.context).toContain("the person wants login first");
+    expect(briefing.context).not.toContain("Tracker: none yet");
+  });
+
+  it("reads no board for itself, and leaves the orchestrator and the worker alone", async () => {
+    const inputs = managerSetup();
+    const boards: string[] = [];
+    const watched = { ...deps(inputs), loadBoard: async (cwd: string) => (boards.push(cwd), inputs.tasks) };
+    await briefingFor("m", watched);
+    expect(boards).not.toContain("C:\dev\hq");
+    expect((await briefingFor("o", watched))?.context).toContain("let people log in");
+    expect((await briefingFor("w1", watched))?.role).toBe("worker");
+    expect(buildBriefing(setup())?.system).toBe(buildBriefing({ ...setup(), projects: [] })?.system);
+  });
+
+  it("is told its role mid-session, and when it loses it", async () => {
+    const briefing = (await briefingFor("m", deps(managerSetup())))!;
+    const text = roleMessage(briefing, "HQ");
+    expect(text.startsWith("Hangar has just pinned you as the person's project manager")).toBe(true);
+    expect(text).toContain(briefing.context);
+    expect(releaseMessage("manager", "HQ")).toContain("no longer the person's project manager");
   });
 });
