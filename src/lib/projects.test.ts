@@ -162,7 +162,7 @@ const byName = (projects: ProjectSummary[], name: string) => {
 };
 
 describe("the manager role", () => {
-  it("is neither an orchestrator nor a worker, and has no briefing yet", () => {
+  it("is neither an orchestrator nor a worker, and has a briefing of its own", () => {
     const { state } = setup();
     const home = state.workspaces[0];
     expect(orchestratorOf(home)).toBeNull();
@@ -173,8 +173,8 @@ describe("the manager role", () => {
     expect(orchestratorOf(mixed)?.id).toBe("o2");
     expect(workersOf(mixed)).toEqual([]);
     expect(
-      buildBriefing({ state, paneId: "m", tasks: [], memory: [], journal: [], activity: () => undefined, now: NOW }),
-    ).toBeNull();
+      buildBriefing({ state, paneId: "m", tasks: [], memory: [], journal: [], activity: () => undefined, now: NOW })?.role,
+    ).toBe("manager");
   });
 
   it("is found across the workspaces, beside the HQ", () => {
