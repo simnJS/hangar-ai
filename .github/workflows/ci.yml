@@ -115,12 +115,14 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
-      # tauri-build embeds whatever `frontendDist` points at. The Rust checks do
-      # not care about its contents, so a placeholder saves installing Node and
-      # rebuilding the bundle the frontend job already produced.
-      - name: Stub frontend bundle
+      # tauri-build embeds whatever `frontendDist` points at, and remote/ embeds
+      # Hangar Mobile's dist-mobile/. The Rust checks do not care about their
+      # contents, so placeholders save installing Node and rebuilding the
+      # bundles the frontend job already produced. An empty dist-mobile serves
+      # the same placeholder page as a missing one.
+      - name: Stub frontend bundles
         shell: bash
-        run: mkdir -p dist && touch dist/index.html
+        run: mkdir -p dist dist-mobile && touch dist/index.html
 
       # One platform is enough: formatting does not vary by OS, and running it
       # twice only makes the same failure appear twice.

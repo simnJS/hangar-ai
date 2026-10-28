@@ -18,6 +18,7 @@ mod path_env;
 mod pricing;
 mod procs;
 mod pty;
+mod remote;
 mod server;
 mod sessions;
 mod shells;
@@ -76,6 +77,16 @@ pub fn run() {
                     Err(err) => eprintln!("board API failed to start: {err}"),
                 }
             });
+
+            // Hangar Mobile: a listener of its own, off until the person turns
+            // it on, and on again at launch once they have (remote/).
+            match remote::Remote::open(app.handle()) {
+                Ok(remote) => {
+                    app.manage(remote.clone());
+                    tauri::async_runtime::spawn(async move { remote.resume().await });
+                }
+                Err(err) => eprintln!("Hangar Mobile is unavailable: {err}"),
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -159,6 +170,13 @@ pub fn run() {
             voice::key::voice_key_status,
             voice::key::voice_key_set,
             voice::key::voice_key_clear,
+            remote::remote_status,
+            remote::remote_set_enabled,
+            remote::remote_pair_start,
+            remote::remote_devices,
+            remote::remote_revoke,
+            remote::remote_tailscale,
+            remote::remote_tailscale_serve,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
