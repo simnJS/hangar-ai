@@ -41,6 +41,10 @@ pub const OPERATIONS: &[&str] = &[
     // orchestration: delivery (lib/deliveryControl.ts)
     "delivery_submit",
     "delivery_status",
+    // orchestration: the project manager (lib/managerControl.ts)
+    "project_list",
+    "project_status",
+    "project_send",
 ];
 
 /// Long enough for a window that is busy repainting eight streaming panes;
@@ -61,11 +65,17 @@ const MODEL_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 /// removing it: on a large repository, longer than a pane operation.
 const WORKER_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// project_list and project_status read every project's board: longer than a
+/// pane operation, far short of a worktree.
+const PROJECT_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
+
 fn answer_timeout(op: &str) -> Duration {
     if op.starts_with("model_") {
         MODEL_ANSWER_TIMEOUT
     } else if op.starts_with("worker_") {
         WORKER_ANSWER_TIMEOUT
+    } else if op.starts_with("project_") {
+        PROJECT_ANSWER_TIMEOUT
     } else {
         ANSWER_TIMEOUT
     }
@@ -232,6 +242,14 @@ mod tests {
             assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
         }
         assert_eq!(answer_timeout("pane_read"), Duration::from_secs(20));
+    }
+
+    #[test]
+    fn the_project_manager_reading_every_board_is_given_time() {
+        for op in ["project_list", "project_status", "project_send"] {
+            assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
+            assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
+        }
     }
 
     #[test]

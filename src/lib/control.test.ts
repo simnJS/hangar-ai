@@ -308,6 +308,11 @@ describe("runControl", () => {
     await expect(runControl("pane_list", fromAva, deps)).rejects.toThrow(DISABLED);
   });
 
+  it("hands project_* to the project manager's module, which refuses an ordinary agent", async () => {
+    const { deps } = setup();
+    await expect(runControl("project_list", fromAva, deps)).rejects.toThrow(/is for the project manager/);
+  });
+
   it("lists the caller's panes, marking the caller and its activity", async () => {
     const { deps } = setup();
     const result = (await runControl("pane_list", fromAva, deps)) as any;

@@ -11,6 +11,8 @@ import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "
 import { isMainWindow, type PaneTerminal } from "./windows";
 import { workerControl, type WorkerDeps } from "./workerControl";
 import { deliveryControl } from "./deliveryControl";
+import { managerControl } from "./managerControl";
+import type { ProjectsDeps } from "./projects";
 
 /**
  * Agents driving the panes through the MCP server (see src-tauri/src/control.rs).
@@ -105,6 +107,9 @@ export interface ControlDeps {
   // orchestration: delivery deps
   /** Merges, checks, reviews and lands workers' deliveries (lib/deliveryControl). */
   delivery?: import("./deliveryControl").DeliveryDeps;
+  // orchestration: project manager deps
+  /** Where the project manager reads every project from; the window's own by default (lib/projects). */
+  projects?: ProjectsDeps;
 }
 
 export const DISABLED =
@@ -652,6 +657,9 @@ export async function runControl(
       })),
     };
   }
+
+  // The project manager works across workspaces: lib/managerControl finds its own.
+  if (op.startsWith("project_")) return managerControl(op, args, caller, deps);
 
   const ws = workspaceFor(state, args, caller);
   // What an agent does to a workspace's panes counts as using it, like typing

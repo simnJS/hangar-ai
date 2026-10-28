@@ -171,6 +171,16 @@ fn urlencode(value: &str) -> String {
 }
 
 fn tool_definitions() -> Value {
+    let mut tools = base_tool_definitions();
+    if let (Some(all), Some(manager)) =
+        (tools.as_array_mut(), manager_tool_definitions().as_array())
+    {
+        all.extend(manager.iter().cloned());
+    }
+    tools
+}
+
+fn base_tool_definitions() -> Value {
     let workspace_arg = json!({
         "type": "string",
         "description": "Workspace name or folder. Defaults to the one you are working in."
@@ -568,6 +578,42 @@ fn tool_definitions() -> Value {
     ])
 }
 
+/// The project manager's tools, apart from the rest: one `json!` this long
+/// would run out of the macro's recursion limit.
+fn manager_tool_definitions() -> Value {
+    json!([
+        // orchestration: the project manager (project_* tools)
+        {
+            "name": "project_list",
+            "description": "List every project of Hangar except the HQ: for each, whether it is open or asleep, its orchestrator (or that it has none) and what it is doing, its workers, the panes waiting for the person, its board counts, the tasks that need the person or are ready to land, its plan's status and its latest events. Returns the structured summaries and a short text overview, those with something for the person first. Only the project manager (the pane of the HQ workspace) can call it. You never act on a project without the person asking: report, and wait for their instruction.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "project_status",
+            "description": "One project in detail: its orchestrator, each worker and its task, the board, what is in doing, what needs the person or waits to land, the panes waiting, its plan's status and its latest events. Returns the structured summary and the text. An unknown project is refused with the list of names. Only the project manager (the pane of the HQ workspace) can call it. You never act on a project without the person asking.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": { "type": "string", "description": "The project's name or folder, as project_list shows it." }
+                },
+                "required": ["workspace"]
+            }
+        },
+        {
+            "name": "project_send",
+            "description": "Pass the person's instruction on to a project's orchestrator: the text is queued, framed as relayed by the project manager from the person, and delivered once the orchestrator is idle. A workspace that is asleep or not open is opened first. Refused when the project has no orchestrator (only the person can pin one) and for the HQ itself. The orchestrator's progress comes back to you as events; do not poll. Only the project manager (the pane of the HQ workspace) can call it, and only when the person asked for what you relay: never send on your own initiative.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": { "type": "string", "description": "The project's name or folder, as project_list shows it." },
+                    "text": { "type": "string", "description": "The person's instruction, complete enough for the orchestrator to act on without asking you." }
+                },
+                "required": ["workspace", "text"]
+            }
+        }
+    ])
+}
+
 /// A relative `path` argument, made absolute against `base`.
 ///
 /// The window would resolve it against `caller.cwd`, and that is the
@@ -943,6 +989,25 @@ mod tests {
         for field in ["owns", "labels", "depends_on"] {
             assert_eq!(update[field]["items"]["type"], "string", "{field}");
         }
+    }
+
+    #[test]
+    fn the_project_manager_s_tools_are_offered() {
+        for name in ["project_list", "project_status", "project_send"] {
+            let description = tool(name)["description"].as_str().unwrap().to_owned();
+            assert!(description.contains("project manager"), "{name}");
+        }
+        assert_eq!(
+            tool("project_status")["inputSchema"]["required"],
+            json!(["workspace"])
+        );
+        assert_eq!(
+            tool("project_send")["inputSchema"]["required"],
+            json!(["workspace", "text"])
+        );
+        assert!(tool("project_list")["inputSchema"]
+            .get("required")
+            .is_none());
     }
 
     #[test]
