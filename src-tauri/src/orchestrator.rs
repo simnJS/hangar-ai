@@ -43,10 +43,11 @@ pub async fn briefing(app: &AppHandle, pane_id: &str) -> Result<Option<Value>, C
 
 /// The window's answer in the one shape the mod relies on —
 /// `{ role, system, context }` — or None, which is also what a pane with no
-/// role is answered.
+/// role is answered. The manager, who follows every workspace from the HQ,
+/// is briefed the same way.
 fn checked(answer: &Value) -> Option<Value> {
     let role = answer.get("role")?.as_str()?;
-    if role != "orchestrator" && role != "worker" {
+    if !matches!(role, "orchestrator" | "worker" | "manager") {
         return None;
     }
     let system = answer.get("system")?.as_str()?;
@@ -89,6 +90,25 @@ mod tests {
                 "context": "Board: empty."
             }))
         );
+    }
+
+    #[test]
+    fn a_manager_is_briefed_like_the_others() {
+        let answer = json!({
+            "role": "manager",
+            "system": "You follow every project.",
+            "context": "Projects: 2."
+        });
+        assert_eq!(
+            checked(&answer),
+            Some(json!({
+                "role": "manager",
+                "system": "You follow every project.",
+                "context": "Projects: 2."
+            }))
+        );
+        let empty = json!({ "role": "manager", "system": "  ", "context": "x" });
+        assert_eq!(checked(&empty), None);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import type { OrchestrationSettings, Pane, Workspace } from "../types";
+import type { AppState, OrchestrationSettings, Pane, Workspace } from "../types";
 
 /**
  * A workspace's orchestration: one Claude Code pane pinned as its
@@ -73,3 +73,20 @@ export const orchestratorOf = (ws: Pick<Workspace, "panes">): Pane | null =>
 /** The workspace's worker panes. */
 export const workersOf = (ws: Pick<Workspace, "panes">): Pane[] =>
   ws.panes.filter((pane) => pane.role === "worker");
+
+/**
+ * The manager pane, wherever it is: one for the whole of Hangar, which
+ * follows every workspace from the HQ (lib/projects) and is neither an
+ * orchestrator nor a worker of the workspace it sits in.
+ */
+export function managerOf(state: Pick<AppState, "workspaces">): { ws: Workspace; pane: Pane } | null {
+  for (const ws of state.workspaces) {
+    const pane = ws.panes.find((entry) => entry.role === "manager");
+    if (pane) return { ws, pane };
+  }
+  return null;
+}
+
+/** The HQ workspace, the manager's, if Hangar has created it. */
+export const hqOf = (state: Pick<AppState, "workspaces">): Workspace | null =>
+  state.workspaces.find((ws) => ws.hq === true) ?? null;

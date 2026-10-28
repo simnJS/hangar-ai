@@ -377,6 +377,9 @@ export function buildBriefing(inputs: BriefingInputs): Briefing | null {
   const ws = state.workspaces.find((entry) => entry.panes.some((pane) => pane.id === paneId));
   const pane = ws?.panes.find((entry) => entry.id === paneId);
   if (!ws || !pane?.role || pane.agent !== "claude") return null;
+  // The manager is no part of its workspace's orchestration; its own
+  // briefing is still to be written.
+  if (pane.role === "manager") return null;
   return pane.role === "orchestrator" ? orchestratorBriefing(ws, inputs) : workerBriefing(ws, pane, inputs);
 }
 

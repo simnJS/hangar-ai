@@ -90,8 +90,12 @@ export interface Pane {
   sharedFolder?: boolean;
 }
 
-/** An orchestrator coordinates; a worker does one board task in its worktree. */
-export type PaneRole = "orchestrator" | "worker";
+/**
+ * An orchestrator coordinates; a worker does one board task in its worktree.
+ * The manager, one pane in the HQ workspace, follows every workspace and
+ * speaks to their orchestrators (lib/projects); it is neither of the others.
+ */
+export type PaneRole = "orchestrator" | "worker" | "manager";
 
 /**
  * A command kept around to be run again — `pnpm tauri dev`, `cargo check`, the
@@ -154,6 +158,11 @@ export interface Workspace {
    * defaults there; a workspace without an orchestrator ignores it.
    */
   orchestration?: OrchestrationSettings;
+  /**
+   * The HQ: the workspace Hangar creates for the manager pane, left out of
+   * the projects it follows (lib/projects). Absent on every other workspace.
+   */
+  hq?: boolean;
 }
 
 export interface OrchestrationSettings {
