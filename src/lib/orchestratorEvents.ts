@@ -107,7 +107,7 @@ export interface EngineDeps {
 
 /* ── Wording ───────────────────────────────────────────────────── */
 
-const oneLine = (text: string, max = MAX_TEXT) => {
+export const oneLine = (text: string, max = MAX_TEXT) => {
   const flat = text.replace(/\s*\n\s*/g, " / ").replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };

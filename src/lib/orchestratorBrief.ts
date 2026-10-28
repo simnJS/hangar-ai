@@ -19,6 +19,13 @@ import {
   type BoardTask,
   type JournalEntry,
 } from "./orchestratorEvents";
+import {
+  describeManagerEvent,
+  managerJournal,
+  startManagerEvents,
+  stopManagerEvents,
+  type ManagerJournalEntry,
+} from "./managerEvents";
 import { loadProjects, renderOverview, type ProjectSummary } from "./projects";
 import { isMainWindow } from "./windows";
 import type { AppState, Pane, PaneRole, Workspace } from "../types";
@@ -408,6 +415,16 @@ function eventsSection(journal: JournalEntry[], tasks: BoardTask[], max: number)
   ];
 }
 
+/** What lately waited for the person, as the manager was told. */
+function managerEventsSection(journal: ManagerJournalEntry[], max: number): string[] {
+  if (!journal.length) return [];
+  return [
+    "Latest things that waited for the person, oldest first:",
+    ...journal.slice(-max).map((entry) => `- ${clock(entry.at)} ${describeManagerEvent(entry.event)}`),
+    "",
+  ];
+}
+
 export interface BriefingInputs {
   state: AppState;
   paneId: string;
@@ -420,6 +437,8 @@ export interface BriefingInputs {
   git?: boolean;
   /** Every project but the HQ, for the manager's briefing. */
   projects?: ProjectSummary[];
+  /** What lately waited for the person, for the manager's briefing. */
+  managerEvents?: ManagerJournalEntry[];
 }
 
 /** The pane's briefing, or null for a pane with no part in an orchestration. */
@@ -434,7 +453,12 @@ export function buildBriefing(inputs: BriefingInputs): Briefing | null {
 
 function managerBriefing(inputs: BriefingInputs): Briefing {
   const { memory, now } = inputs;
-  const context = [renderOverview(inputs.projects ?? [], now), "", ...trackerSection(findTracker(memory), now)];
+  const context = [
+    renderOverview(inputs.projects ?? [], now),
+    "",
+    ...managerEventsSection(inputs.managerEvents ?? [], EVENTS_IN_BRIEFING),
+    ...trackerSection(findTracker(memory), now),
+  ];
   return { role: "manager", system: managerRole(), context: context.join("\n") };
 }
 
@@ -522,10 +546,13 @@ export interface BriefingDeps {
   isRepo?: (cwd: string) => Promise<boolean | null>;
   /** Every project's summary, read for a manager pane only. */
   loadProjects?: () => Promise<ProjectSummary[]>;
+  /** What lately waited for the person, for a manager pane only. */
+  managerJournal?: () => ManagerJournalEntry[];
 }
 
 const defaultDeps = (snapshot: () => AppState): BriefingDeps => ({
   snapshot,
+  managerJournal,
   loadProjects: () =>
     loadProjects({
       snapshot,
@@ -582,6 +609,7 @@ export async function briefingFor(paneId: string, deps: BriefingDeps): Promise<B
     now: deps.now(),
     git: git ?? true,
     projects,
+    managerEvents: manager ? (deps.managerJournal?.() ?? []) : [],
   });
 }
 
@@ -694,11 +722,20 @@ export function useOrchestrator(snapshot: (() => AppState) | null) {
       activity: getPaneActivity,
       loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
     });
+    const manager = startManagerEvents({
+      snapshot: current,
+      enqueue: bridgeEnqueue,
+      activity: getPaneActivity,
+      loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
+    });
     const deps = defaultDeps(current);
     briefingDeps = deps;
 
     const stops = [
-      listen("board:changed", () => engine.boardChanged()),
+      listen("board:changed", () => {
+        engine.boardChanged();
+        manager.boardChanged();
+      }),
       listen<{ paneId: string; event: BridgeEvent }>("bridge:event", (event) =>
         engine.bridgeEvent(event.payload.paneId, event.payload.event),
       ),
@@ -715,13 +752,18 @@ export function useOrchestrator(snapshot: (() => AppState) | null) {
           .catch(() => undefined);
       }),
     ];
-    const timer = window.setInterval(() => void engine.tick(), TICK_MS);
+    const timer = window.setInterval(() => {
+      void engine.tick();
+      void manager.tick();
+    }, TICK_MS);
     void engine.tick();
+    void manager.tick();
     return () => {
       window.clearInterval(timer);
       for (const stop of stops) stop.then((off) => off()).catch(() => undefined);
       if (briefingDeps === deps) briefingDeps = null;
       stopOrchestratorEvents();
+      stopManagerEvents();
     };
   }, [ready]);
 }
