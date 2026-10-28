@@ -7,7 +7,10 @@
    are Graphite lightened the same way, the accent deepened to read on white.
 
    Built for one hand at arm's length: 16px body text, 44px targets at the
-   least, the actions within the thumb's reach at the bottom. */
+   least, the actions within the thumb's reach at the bottom. What waits for
+   the person comes first on every screen it appears on; each card has one
+   thing to do, at its bottom right, with how long it has waited beside it.
+   Every text meets WCAG AA on what it sits on, in both themes. */
 
 :root {
   color-scheme: light;
@@ -22,14 +25,15 @@
   --fg-hi: #0f1114;
   --fg: #24272c;
   --fg-2: #55585e;
-  --fg-3: #686b71;
+  --fg-3: #63666c;
   --accent: #1765d8;
-  --accent-text: #1765d8;
+  /* Deeper than the fill, to read on the accent's own tint too. */
+  --accent-text: #155fcc;
   --accent-fg: #ffffff;
   --accent-soft: rgba(23, 101, 216, 0.1);
   --accent-ring: rgba(23, 101, 216, 0.45);
   --working: #1a7f37;
-  --waiting: #9a5b00;
+  --waiting: #8f5500;
   --waiting-fill: #c27c0e;
   --waiting-soft: rgba(194, 124, 14, 0.1);
   --yours: #0f7178;
@@ -390,103 +394,28 @@ img {
   box-shadow: inset 0 0 0 1.5px var(--idle);
 }
 
-/* ── The fleet ─────────────────────────────────────────────────────
-   Every agent as a pane of the logo's own drawing: a squared tile in its
-   state's colour, each project's tiles held together. The one picture the
-   app draws; the rest is words. */
+/* ── Agents by state ───────────────────────────────────────────────
+   How many agents are in each state, in words beside the state's colour:
+   read at a glance, nothing to decode. */
 
-.fleet {
-  margin-top: 18px;
-}
-
-.fleet__tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 18px;
-}
-
-.fleet__project {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.fleet__panes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.fleet__name {
-  max-width: 9em;
-  color: var(--fg-3);
-  font-size: 12.5px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tile {
-  width: 14px;
-  height: 30px;
-  border-radius: 2px;
-  background: var(--state-fill);
-}
-
-.tile.is-idle {
-  background: var(--idle);
-  opacity: 0.55;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .tile.is-working {
-    animation: working 2.4s var(--ease) infinite alternate;
-  }
-}
-
-@keyframes working {
-  to {
-    opacity: 0.45;
-  }
-}
-
-.legend {
+.agents {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
   margin-top: 12px;
   color: var(--fg-2);
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.4;
 }
 
-.legend li {
+.agents__state {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
 
-.legend .dot {
+.agents .dot {
   background: var(--state-fill);
-}
-
-.legend .is-idle .dot {
-  opacity: 0.55;
-}
-
-/* A project's tiles, smaller, beside its name. */
-.mosaic {
-  display: inline-flex;
-  flex: none;
-  gap: 2px;
-}
-
-.mosaic .tile {
-  width: 7px;
-  height: 16px;
-  border-radius: 1.5px;
 }
 
 /* ── Sections and cards ─────────────────────────────────────────── */
@@ -515,20 +444,37 @@ img {
   font-variant-numeric: tabular-nums;
 }
 
+/* What a whole section asks, said once above its cards. */
+.section__hint {
+  margin: -4px 2px 10px;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .stack {
   display: grid;
   gap: 10px;
 }
 
-/* Something that waits for the person: where, what, since when, and the
-   one thing to do about it. The rule on its left is the state it is in. */
+/* Something that waits for the person: where, what, and the one thing to
+   do about it, with how long it has waited beside it. The rule on its left
+   is the state it is in; the whole card leads where its button does. */
 .card {
   position: relative;
-  padding: 14px 16px 14px 18px;
+  padding: 14px 14px 14px 18px;
   border-radius: var(--r-card);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--line);
   overflow: hidden;
+}
+
+.card:has(.btn) {
+  cursor: pointer;
+}
+
+.card:has(.btn):active {
+  background: var(--raised);
 }
 
 .card::before {
@@ -541,29 +487,16 @@ img {
   background: var(--state-fill, transparent);
 }
 
-.card__meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--fg-3);
-  font-size: 13.5px;
-}
-
 .card__project {
+  color: var(--fg-2);
+  font-size: 14px;
+  font-weight: 560;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 560;
-  color: var(--fg-2);
-}
-
-.card__since {
-  flex: none;
-  font-variant-numeric: tabular-nums;
 }
 
 .card__title {
-  margin-top: 4px;
   color: var(--fg-hi);
   font-size: 17px;
   line-height: 1.32;
@@ -571,26 +504,26 @@ img {
   overflow-wrap: anywhere;
 }
 
+.card__project + .card__title {
+  margin-top: 2px;
+}
+
 .card__foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
-.card__note {
+.card__since {
   color: var(--fg-3);
   font-size: 14px;
-  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
 
 .card__foot .btn {
   margin-left: auto;
-}
-
-.card__title + .card__note {
-  margin-top: 6px;
 }
 
 /* A row that leads somewhere: the history, a pane. */
@@ -643,17 +576,10 @@ img {
   color: var(--fg-3);
 }
 
-.row--history {
-  margin-top: 22px;
-}
-
-.row--history > .icon {
+/* A row's own icon, at the head of the rows at the foot of For you. */
+.row > .icon:first-child {
   --icon: 22px;
   color: var(--accent-text);
-}
-
-.row--history .row__sub {
-  color: var(--fg-2);
 }
 
 /* A list of rows in one block, hairlines between them. */
@@ -676,13 +602,14 @@ img {
 
 .tag {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--raised);
   color: var(--fg-2);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 560;
   white-space: nowrap;
 }
@@ -705,7 +632,7 @@ img {
   border-radius: var(--r-control);
   background: var(--raised);
   color: var(--fg-hi);
-  font-size: 15.5px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   transition: background 120ms var(--ease), transform 120ms var(--ease);
@@ -748,9 +675,8 @@ img {
 /* ── Calm and empty ─────────────────────────────────────────────── */
 
 .calm {
-  margin-top: 30px;
-  padding: 18px 2px 0;
-  border-top: 1px solid var(--line);
+  margin-top: 28px;
+  padding: 0 2px;
   color: var(--fg-2);
   font-size: 16px;
   max-width: 34em;
@@ -823,32 +749,34 @@ img {
 .banner__hint {
   display: block;
   color: var(--fg-2);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
 .banner .btn {
-  min-height: 40px;
+  flex: none;
   padding: 0 14px;
   background: var(--surface);
-  font-size: 14.5px;
+  font-size: 15px;
 }
 
-/* ── The install notice (iPhone in Safari) ─────────────────────────── */
+/* ── Notices: the offer of notifications, what they take ─────────── */
 
+/* Its icon beside its title; what it says and its buttons across the whole
+   notice, so a thumb finds them. */
 .notice {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 14px;
+  align-items: center;
+  gap: 6px 10px;
   margin-top: 22px;
-  padding: 16px;
+  padding: 14px 16px 12px;
   border-radius: var(--r-card);
   background: var(--accent-soft);
 }
 
 .notice > .icon {
-  --icon: 26px;
-  grid-row: span 2;
+  --icon: 22px;
   color: var(--accent-text);
 }
 
@@ -859,44 +787,38 @@ img {
 }
 
 .notice__body {
+  grid-column: 1 / -1;
   color: var(--fg-2);
   font-size: 15px;
 }
 
-.notice .btn {
-  grid-column: 2;
-  justify-self: start;
-  margin: 8px 0 0 -12px;
-}
-
-/* The offer to turn notifications on: its button first, "not now" beside. */
+/* Its button first, "not now" beside; the second goes under the first when
+   they do not fit. */
 .notice__actions {
-  grid-column: 2;
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 4px 8px;
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
-.notice__actions .btn {
-  margin: 0;
+.notice__actions .btn--primary {
+  flex: 1 1 auto;
 }
 
 .notice__actions .btn--quiet {
-  padding: 0 12px;
+  padding: 0 14px;
 }
 
-/* ── Notifications, once offered ───────────────────────────────── */
+/* A lone quiet button lines its word up with the text above. */
+.notice__actions .btn--quiet:first-child {
+  margin-left: -14px;
+}
+
+/* ── Notifications, once offered: a row at the foot of For you ─────── */
 
 .row--push {
-  margin-top: 22px;
   padding-right: 8px;
-}
-
-.row--push > .icon {
-  --icon: 22px;
-  color: var(--accent-text);
 }
 
 .row--push .btn {
@@ -904,15 +826,33 @@ img {
   padding: 0 14px;
 }
 
-.row--push + .row--history {
-  margin-top: 10px;
+/* Where they stand is the row's point: it wraps rather than being cut. */
+.row--push .row__sub {
+  white-space: normal;
+}
+
+/* What it takes, under the row that asked. */
+.row__more {
+  padding: 0 14px 10px 50px;
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.row__more .btn {
+  margin: 4px 0 0 -14px;
+  padding: 0 14px;
 }
 
 .push__error {
   margin-top: 8px;
   padding: 0 2px;
   color: var(--danger);
-  font-size: 14.5px;
+  font-size: 14px;
+}
+
+.list .push__error {
+  margin: 0;
+  padding: 0 16px 12px 50px;
 }
 
 /* ── Projects ──────────────────────────────────────────────────── */
@@ -942,37 +882,36 @@ img {
   white-space: nowrap;
 }
 
-.project__end {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.project__head .chevron {
   margin-left: auto;
 }
 
 .project__team {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
   margin-top: 4px;
   color: var(--fg-2);
   font-size: 15px;
 }
 
+/* What the project asks of the person, first under its name. */
 .project__attention {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
   color: var(--waiting);
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 560;
+}
+
+.project .agents {
+  margin-top: 8px;
+  font-size: 14px;
 }
 
 .project__plan {
   margin-top: 12px;
   color: var(--fg-2);
-  font-size: 14.5px;
+  font-size: 14px;
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1001,7 +940,7 @@ img {
 
 .board dt {
   color: var(--fg-3);
-  font-size: 12.5px;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1009,7 +948,7 @@ img {
 
 .board dd {
   color: var(--fg-hi);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.2;
   font-weight: 620;
   font-variant-numeric: tabular-nums;
@@ -1023,7 +962,7 @@ img {
 .plan {
   margin-top: 14px;
   color: var(--fg);
-  font-size: 15.5px;
+  font-size: 15px;
 }
 
 .plan b {
@@ -1090,7 +1029,9 @@ img {
 }
 
 .console__head .back {
-  padding: 0 6px;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0;
 }
 
 .console__head .back .icon {
@@ -1196,8 +1137,8 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
-  padding: 0 16px;
+  min-height: 44px;
+  padding: 0 18px;
   border: 0;
   border-radius: 999px;
   background: var(--fg-hi);
@@ -1268,14 +1209,14 @@ img {
 }
 
 .key {
-  min-height: 40px;
+  min-height: 44px;
   min-width: 0;
   padding: 0 4px;
   border: 0;
   border-radius: var(--r-control);
   background: var(--raised);
   color: var(--fg);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1376,18 +1317,19 @@ img {
 }
 
 .status .btn {
-  min-height: 36px;
+  flex: none;
   margin-left: auto;
-  padding: 0 12px;
-  font-size: 14px;
+  padding: 0 14px;
+  font-size: 15px;
 }
 
 /* ── Shares ────────────────────────────────────────────────────── */
 
+/* A border, not an inset line: the picture would paint over that. */
 .share {
+  border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
   overflow: hidden;
 }
 
@@ -1396,14 +1338,16 @@ img {
   background: var(--raised);
 }
 
+/* Tall enough to make out, short enough to see the next share below it:
+   the whole picture opens with a tap. */
 .share__image img {
   width: 100%;
-  max-height: 72vh;
+  max-height: min(56vh, 480px);
   object-fit: contain;
 }
 
 .share__body {
-  padding: 12px 16px 14px;
+  padding: 12px 14px 14px 16px;
 }
 
 .share__caption {
@@ -1413,17 +1357,30 @@ img {
   overflow-wrap: anywhere;
 }
 
+/* Like a card's foot: who shared it and when, then the one thing to do. */
+.share__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
 .share__meta {
-  margin-top: 2px;
+  min-width: 0;
   color: var(--fg-3);
   font-size: 14px;
+  line-height: 1.35;
+}
+
+.share__foot .btn {
+  flex: none;
 }
 
 .file {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
-  padding: 14px 14px 14px 16px;
 }
 
 .file__type {
@@ -1435,7 +1392,7 @@ img {
   border-radius: 6px;
   background: var(--raised);
   color: var(--fg-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -1456,7 +1413,13 @@ img {
 .file__caption {
   display: block;
   color: var(--fg-2);
-  font-size: 14.5px;
+  font-size: 15px;
+}
+
+.file__size {
+  display: block;
+  color: var(--fg-3);
+  font-size: 14px;
 }
 
 /* ── History ───────────────────────────────────────────────────── */
@@ -1481,7 +1444,7 @@ img {
 
 .event__text {
   color: var(--fg-hi);
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -1490,7 +1453,7 @@ img {
   display: block;
   margin-top: 1px;
   color: var(--fg-3);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 /* ── Pairing ───────────────────────────────────────────────────── */
@@ -1621,7 +1584,7 @@ img {
   border: 0;
   background: transparent;
   color: var(--fg-3);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.15;
   text-align: center;
@@ -1652,7 +1615,7 @@ img {
   border-radius: 9px;
   background: var(--waiting-fill);
   color: #1b1405;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 18px;
   font-variant-numeric: tabular-nums;

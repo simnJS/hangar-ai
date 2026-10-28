@@ -51,6 +51,18 @@ describe("the fake PC", () => {
     expect((await settle(client.state())).waiting.some((item) => item.kind === "pane")).toBe(false);
   });
 
+  it("writes its history in the phone's language, task titles as they were written", async () => {
+    for (const [locale, words] of [
+      ["en", "Needs you: "],
+      ["fr", "Vous attend : "],
+    ] as const) {
+      const mock = createMock("default", Date.now(), locale);
+      const { entries } = await settle(createClient({ fetch: mock.fetch }).history(0));
+      const ask = entries.find((entry) => entry.kind === "needsYou");
+      expect(ask?.text).toBe(`${words}Should Tailscale Funnel stay out of scope, or be offered as an option?`);
+    }
+  });
+
   it("has nothing waiting in its empty scenario", async () => {
     expect((await settle(fakePc("empty").state())).waiting).toEqual([]);
   });

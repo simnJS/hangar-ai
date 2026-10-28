@@ -154,30 +154,29 @@ const EXPLAIN: Partial<Record<PushStatus, Key>> = {
  * On For you: the offer to turn notifications on, until the person does or
  * says not now; then one row that says where they stand, with the switch.
  * On an iPhone in Safari, or a browser without them, the button explains
- * what it takes instead.
+ * what it takes instead. For you shows the offer at its top and the row with
+ * the others at its foot, from one `useNotifications`.
  */
-export function Notifications() {
+export function useNotifications(): NotificationsViewProps {
   const { client } = useRemoteContext();
   const { status, busy, error, turnOn, turnOff } = usePush(client);
   const [dismissed, setDismissed] = useState(() => load("pushOfferDismissed") === "1");
   const [explaining, setExplaining] = useState(false);
-  return (
-    <NotificationsView
-      status={status}
-      busy={busy}
-      error={error}
-      dismissed={dismissed}
-      explaining={explaining}
-      onTurnOn={turnOn}
-      onTurnOff={() => void turnOff()}
-      onExplain={setExplaining}
-      onNotNow={() => {
-        save("pushOfferDismissed", "1");
-        setDismissed(true);
-        setExplaining(false);
-      }}
-    />
-  );
+  return {
+    status,
+    busy,
+    error,
+    dismissed,
+    explaining,
+    onTurnOn: turnOn,
+    onTurnOff: () => void turnOff(),
+    onExplain: setExplaining,
+    onNotNow: () => {
+      save("pushOfferDismissed", "1");
+      setDismissed(true);
+      setExplaining(false);
+    },
+  };
 }
 
 export interface NotificationsViewProps {
@@ -194,8 +193,17 @@ export interface NotificationsViewProps {
   onNotNow: () => void;
 }
 
+const offered = ({ status, dismissed }: Pick<NotificationsViewProps, "status" | "dismissed">) =>
+  !dismissed && status !== "on" && status !== "denied";
+
+/** Where For you shows it: the offer at the top, the row with the others at the foot. */
+export function pushPlace(props: Pick<NotificationsViewProps, "status" | "dismissed">): "top" | "foot" | null {
+  if (props.status === "checking") return null;
+  return offered(props) ? "top" : "foot";
+}
+
 export function NotificationsView(props: NotificationsViewProps) {
-  const { status, busy, error, dismissed, explaining } = props;
+  const { status, busy, error, explaining } = props;
   if (status === "checking") return null;
   const explanation = EXPLAIN[status];
   const tap = () => (explanation ? props.onExplain(true) : props.onTurnOn());
@@ -204,21 +212,24 @@ export function NotificationsView(props: NotificationsViewProps) {
       {error}
     </p>
   );
+  const gotIt = (
+    <button type="button" className="btn btn--quiet" onClick={() => props.onExplain(false)}>
+      {t("install.dismiss")}
+    </button>
+  );
 
-  if (explaining && explanation) {
-    return (
-      <aside className="notice" aria-live="polite">
-        <Icon name="bell" />
-        <p className="notice__title">{t(status === "install" ? "push.installTitle" : "push.row")}</p>
-        <p className="notice__body">{t(explanation)}</p>
-        <button type="button" className="btn btn--quiet" onClick={() => props.onExplain(false)}>
-          {t("install.dismiss")}
-        </button>
-      </aside>
-    );
-  }
-
-  if (!dismissed && status !== "on" && status !== "denied") {
+  if (offered(props)) {
+    // What it takes, in place of the offer that asked.
+    if (explaining && explanation) {
+      return (
+        <aside className="notice" aria-live="polite">
+          <Icon name={status === "install" ? "share" : "bell"} />
+          <p className="notice__title">{t(status === "install" ? "push.installTitle" : "push.row")}</p>
+          <p className="notice__body">{t(explanation)}</p>
+          <div className="notice__actions">{gotIt}</div>
+        </aside>
+      );
+    }
     return (
       <>
         <aside className="notice">
@@ -240,6 +251,7 @@ export function NotificationsView(props: NotificationsViewProps) {
   }
 
   const switchable = status === "off" || status === "install";
+  const told = explaining && explanation;
   return (
     <>
       <div className="row row--push">
@@ -252,16 +264,23 @@ export function NotificationsView(props: NotificationsViewProps) {
           <button type="button" className="btn btn--quiet" disabled={busy} onClick={props.onTurnOff}>
             {t("push.turnOff")}
           </button>
-        ) : switchable ? (
+        ) : switchable && !told ? (
           <button type="button" className="btn" disabled={busy} onClick={tap}>
             {busy ? t("push.turningOn") : t("push.turnOnShort")}
           </button>
-        ) : explanation ? (
+        ) : explanation && !told ? (
           <button type="button" className="btn btn--quiet" onClick={() => props.onExplain(true)}>
             {t("push.why")}
           </button>
         ) : null}
       </div>
+      {told && (
+        // What it takes, under the row that asked.
+        <div className="row__more" aria-live="polite">
+          <p>{t(explanation)}</p>
+          {gotIt}
+        </div>
+      )}
       {failure}
     </>
   );
