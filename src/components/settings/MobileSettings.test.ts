@@ -43,8 +43,11 @@ function props(locale: "en" | "fr", patch: Partial<Props> = {}): Props {
     pairing: null,
     justPaired: null,
     revoking: null,
-    busy: { toggle: false, serve: false, pair: false },
+    busy: { toggle: false, serve: false, pair: false, options: false },
     error: null,
+    options: { keepAwake: false, keepAwakeSupported: true, autostart: false },
+    onKeepAwake: noop,
+    onAutostart: noop,
     onToggle: noop,
     onServe: noop,
     onRecheck: noop,
@@ -109,7 +112,7 @@ describe.each(["en", "fr"] as const)("Mobile settings (%s)", (locale) => {
     expect(html).toContain(text("mobile.serve"));
     expect(html).toContain(text("mobile.serveHint"));
     expect(html).not.toContain("https://pc.tail1234.ts.net<");
-    expect(render(locale, { tailscale: ts({ serving: false }), busy: { toggle: false, serve: true, pair: false } })).toContain(
+    expect(render(locale, { tailscale: ts({ serving: false }), busy: { toggle: false, serve: true, pair: false, options: false } })).toContain(
       text("mobile.serving"),
     );
   });
@@ -120,6 +123,36 @@ describe.each(["en", "fr"] as const)("Mobile settings (%s)", (locale) => {
     expect(html).toContain(text("mobile.pairShow"));
     expect(html).not.toContain(text("mobile.pairBlocked"));
     expect(html).toContain(text("mobile.iphoneOpen"));
+  });
+
+  it("leaving for a while: the two options, off until the person turns them on", () => {
+    const html = render(locale);
+    expect(html).toContain(text("mobile.away"));
+    expect(html).toContain(text("mobile.keepAwake"));
+    expect(html).toContain(text("mobile.keepAwakeHint"));
+    expect(html).toContain(text("mobile.autostart"));
+    expect(html).toContain(text("mobile.autostartHint"));
+    // The Hangar Mobile switch alone is on.
+    expect(html.match(/checked/g)).toHaveLength(1);
+  });
+
+  it("the options as the PC has them", () => {
+    const html = render(locale, { options: { keepAwake: true, keepAwakeSupported: true, autostart: false } });
+    expect(html.match(/checked/g)).toHaveLength(2);
+    expect(render(locale, { options: { keepAwake: true, keepAwakeSupported: true, autostart: true } }).match(/checked/g)).toHaveLength(3);
+  });
+
+  it("keeping the PC awake says it is not supported where it is not, and cannot be turned on", () => {
+    const html = render(locale, { options: { keepAwake: false, keepAwakeSupported: false, autostart: false } });
+    expect(html).toContain(text("mobile.keepAwakeUnsupported"));
+    expect(html).not.toContain(text("mobile.keepAwakeHint"));
+    // Only the unsupported option is out of reach.
+    expect(html.match(/disabled/g)).toHaveLength(1);
+  });
+
+  it("the options are not drawn before the PC has answered, nor while Hangar Mobile is off", () => {
+    expect(render(locale, { options: null })).not.toContain(text("mobile.away"));
+    expect(render(locale, { remote: off })).not.toContain(text("mobile.away"));
   });
 
   it("pairing blocked until Tailscale is ready", () => {

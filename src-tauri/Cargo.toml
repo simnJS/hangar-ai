@@ -39,6 +39,9 @@ toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2.3.1"
+# Hangar at login, an option of the Mobile settings (remote/awake.rs): the
+# window never calls the plugin, the settings' own commands do.
+tauri-plugin-autostart = "2"
 discord-rich-presence = "1.1.0"
 # Microphone capture for dictation.
 #
@@ -152,6 +155,7 @@ tauri-winrt-notification = "0.7.3"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Power",
   "Win32_System_Threading",
 ] }
 

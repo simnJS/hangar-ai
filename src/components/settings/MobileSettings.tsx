@@ -25,6 +25,7 @@ import {
   type RemoteStatus,
   type TailscaleStatus,
 } from "../../lib/remote";
+import { mobileOptions, setAutostart, setKeepAwake, type MobileOptions } from "./mobileOptions";
 import "./MobileSettings.css";
 
 /**
@@ -49,9 +50,13 @@ export interface MobileViewProps {
   justPaired: string | null;
   /** The device whose revocation is waiting for its second click. */
   revoking: string | null;
-  busy: { toggle: boolean; serve: boolean; pair: boolean };
+  busy: { toggle: boolean; serve: boolean; pair: boolean; options: boolean };
   error: string | null;
+  /** Null until the PC has answered. */
+  options: MobileOptions | null;
   onToggle: (enabled: boolean) => void;
+  onKeepAwake: (enabled: boolean) => void;
+  onAutostart: (enabled: boolean) => void;
   onServe: () => void;
   onRecheck: () => void;
   onOpenLink: (url: string) => void;
@@ -283,6 +288,67 @@ function DevicesBlock({ props }: { props: MobileViewProps }) {
   );
 }
 
+function Switch({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="set-row set-row--toggle">
+      <span className="set-row__text">
+        <span className="set-row__label">{label}</span>
+        <span className="set-row__hint">{hint}</span>
+      </span>
+      <span className="set-row__control">
+        <span className="switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={checked}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.checked)}
+          />
+          <span className="switch__track" aria-hidden="true">
+            <span className="switch__knob" />
+          </span>
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** Leaving for a week: the PC kept awake, and Hangar there when it is back from a restart. */
+function AwayBlock({ props }: { props: MobileViewProps }) {
+  const { t, options, busy } = props;
+  if (!options) return null;
+  return (
+    <Block title={t("mobile.away")} hint={t("mobile.awayHint")}>
+      <Switch
+        label={t("mobile.keepAwake")}
+        hint={options.keepAwakeSupported ? t("mobile.keepAwakeHint") : t("mobile.keepAwakeUnsupported")}
+        checked={options.keepAwake}
+        disabled={busy.options || !options.keepAwakeSupported}
+        onChange={props.onKeepAwake}
+      />
+      <Switch
+        label={t("mobile.autostart")}
+        hint={t("mobile.autostartHint")}
+        checked={options.autostart}
+        disabled={busy.options}
+        onChange={props.onAutostart}
+      />
+    </Block>
+  );
+}
+
 export function MobileView(props: MobileViewProps) {
   const { t, remote, busy } = props;
   const enabled = !!remote?.enabled;
@@ -325,6 +391,7 @@ export function MobileView(props: MobileViewProps) {
           <TailscaleBlock props={props} />
           <PairBlock props={props} />
           <DevicesBlock props={props} />
+          <AwayBlock props={props} />
           <Block title={t("mobile.iphone")}>
             <div className="set-row set-row--block mob-step">
               <p className="mob-text">{t("mobile.iphoneOpen")}</p>
@@ -349,7 +416,8 @@ export function MobileSettings() {
   const [pairing, setPairing] = useState<PairStart | null>(null);
   const [justPaired, setJustPaired] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
-  const [busy, setBusy] = useState({ toggle: false, serve: false, pair: false });
+  const [options, setOptions] = useState<MobileOptions | null>(null);
+  const [busy, setBusy] = useState({ toggle: false, serve: false, pair: false, options: false });
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -384,7 +452,7 @@ export function MobileSettings() {
   }, []);
 
   useEffect(() => {
-    void guard(() => remoteStatus().then(setRemote));
+    void guard(() => Promise.all([remoteStatus().then(setRemote), mobileOptions().then(setOptions)]));
   }, [guard]);
 
   // Tailscale and the list only matter while Hangar Mobile is on.
@@ -433,6 +501,19 @@ export function MobileSettings() {
       revoking={revoking}
       busy={busy}
       error={error}
+      options={options}
+      onKeepAwake={(on) =>
+        void work("options", async () => {
+          await setKeepAwake(on);
+          setOptions(await mobileOptions());
+        })
+      }
+      onAutostart={(on) =>
+        void work("options", async () => {
+          await setAutostart(on);
+          setOptions(await mobileOptions());
+        })
+      }
       onToggle={(on) =>
         void work("toggle", async () => {
           setRemote(await remoteSetEnabled(on));

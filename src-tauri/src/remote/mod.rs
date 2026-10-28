@@ -13,6 +13,9 @@
 //! window answers.
 //!
 //! - store.rs: what is kept on disk, in remote.json.
+//! - activity.rs: the history of what happened, a file a day for 30 days,
+//!   what the phone reads as "Since your last visit".
+//! - awake.rs: keeping the PC from sleeping while Hangar Mobile is on.
 //! - files.rs: the files that go both ways, shared by an agent or uploaded
 //!   by the phone.
 //! - pairing.rs: the six-digit code and the QR code a phone pairs with.
@@ -32,7 +35,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::control::{self, ControlError, ControlRequest};
 
+mod activity;
 mod assets;
+mod awake;
 mod files;
 mod pairing;
 mod push;
@@ -40,6 +45,9 @@ mod server;
 mod store;
 mod tailscale;
 
+use activity::ActivityLog;
+pub use activity::Entry as ActivityEntry;
+use awake::KeepAwake;
 use files::Shares;
 pub use files::{NewShare, Share};
 use pairing::{PairError, Pairing};
@@ -121,6 +129,8 @@ pub struct Remote {
     push_key: Mutex<Option<Arc<PushKey>>>,
     push_key_file: PathBuf,
     push_agent: ureq::Agent,
+    activity: ActivityLog,
+    awake: Mutex<KeepAwake>,
 }
 
 #[derive(Default)]
@@ -137,6 +147,18 @@ pub struct RemoteStatus {
     pub running: bool,
     pub port: u16,
     pub error: Option<String>,
+}
+
+/// The two options that keep Hangar reachable during a week away.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Options {
+    /// Keep the PC from sleeping while Hangar Mobile is on.
+    pub keep_awake: bool,
+    /// False where it cannot work (Linux): the settings say so.
+    pub keep_awake_supported: bool,
+    /// Start Hangar when the person logs in.
+    pub autostart: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -183,9 +205,17 @@ impl Remote {
                 .join("remote")
                 .join("shares"),
         );
+        let store = Store::open(file.clone());
+        let keep_awake = store.read().keep_awake;
         Self {
+            activity: ActivityLog::open(
+                file.parent()
+                    .unwrap_or_else(|| std::path::Path::new(""))
+                    .join("activity"),
+            ),
+            awake: Mutex::new(KeepAwake::new(awake::system(), keep_awake)),
             push_key_file: push::key_file(&file),
-            store: Store::open(file),
+            store,
             pairing: Mutex::new(None),
             listening: Default::default(),
             window,
@@ -218,6 +248,7 @@ impl Remote {
             Ok(running) => {
                 listening.running = Some(running);
                 listening.error = None;
+                self.hold_awake(true);
                 Ok(())
             }
             Err(err) => {
@@ -232,6 +263,7 @@ impl Remote {
         if let Some(running) = listening.running.take() {
             running.stop();
         }
+        self.hold_awake(false);
         listening.error = None;
         *self.pairing.lock().unwrap() = None;
     }
@@ -250,6 +282,54 @@ impl Remote {
             self.store.update(|saved| saved.enabled = false)?;
         }
         Ok(self.status().await)
+    }
+
+    /// Hangar Mobile listening or not, for the PC to be kept awake accordingly.
+    /// A PC that cannot be held awake does not stop Hangar Mobile.
+    fn hold_awake(&self, on: bool) {
+        if let Err(err) = self.awake.lock().unwrap().set_mobile_on(on) {
+            eprintln!("Hangar could not keep the PC awake: {err}");
+        }
+    }
+
+    pub fn options(&self, autostart: bool) -> Options {
+        Options {
+            keep_awake: self.store.read().keep_awake,
+            keep_awake_supported: self.awake.lock().unwrap().supported(),
+            autostart,
+        }
+    }
+
+    /// The option, in effect now if Hangar Mobile is on, and kept for the
+    /// next launch. Either both happen or neither.
+    pub fn set_keep_awake(&self, enabled: bool) -> Result<(), String> {
+        let mut awake = self.awake.lock().unwrap();
+        awake.set_wanted(enabled)?;
+        if let Err(err) = self.store.update(|saved| saved.keep_awake = enabled) {
+            let _ = awake.set_wanted(!enabled);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Lines for the history, from the window.
+    pub fn activity_append(&self, entries: &[ActivityEntry]) -> Result<(), String> {
+        self.activity.append(entries, now_ms())
+    }
+
+    pub fn activity_read(&self, since: Option<u64>, limit: Option<usize>) -> Vec<ActivityEntry> {
+        self.activity
+            .read(since.unwrap_or(0), limit.unwrap_or(activity::DEFAULT_LIMIT))
+    }
+
+    /// Hangar is closing. Nobody else can say so.
+    pub fn activity_stopped(&self) {
+        let _ = self.activity_append(&[ActivityEntry {
+            at: now_ms(),
+            workspace: String::new(),
+            kind: "appStopped".to_string(),
+            text: String::new(),
+        }]);
     }
 
     pub async fn status(&self) -> RemoteStatus {
@@ -608,6 +688,53 @@ pub async fn remote_tailscale_serve(
     remote: State<'_, Arc<Remote>>,
 ) -> Result<TailscaleStatus, String> {
     remote.tailscale_serve().await
+}
+
+/// The two options that keep Hangar reachable: the PC kept awake, and Hangar
+/// started at login.
+#[tauri::command]
+pub fn remote_options(app: AppHandle, remote: State<'_, Arc<Remote>>) -> Options {
+    use tauri_plugin_autostart::ManagerExt;
+    remote.options(app.autolaunch().is_enabled().unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn remote_set_keep_awake(remote: State<'_, Arc<Remote>>, enabled: bool) -> Result<(), String> {
+    remote.set_keep_awake(enabled)
+}
+
+#[tauri::command]
+pub fn remote_set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launch = app.autolaunch();
+    if enabled {
+        launch.enable()
+    } else {
+        launch.disable()
+    }
+    .map_err(|err| err.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// The history (lib/activityLog)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn activity_append(
+    remote: State<'_, Arc<Remote>>,
+    entries: Vec<ActivityEntry>,
+) -> Result<(), String> {
+    remote.activity_append(&entries)
+}
+
+/// Newest first, after `since` (ms), at most `limit`.
+#[tauri::command]
+pub fn activity_read(
+    remote: State<'_, Arc<Remote>>,
+    since: Option<u64>,
+    limit: Option<usize>,
+) -> Vec<ActivityEntry> {
+    remote.activity_read(since, limit)
 }
 
 // ---------------------------------------------------------------------------
@@ -1180,5 +1307,105 @@ pub(super) mod tests {
         assert!(received.lock().unwrap().is_empty());
         // Kept for when it is on again.
         assert!(remote.store.read().devices[0].push.is_some());
+    }
+
+    /// Stands a recording holder in for the system's.
+    fn hold_with(remote: &Remote) -> awake::tests::Fake {
+        let fake = awake::tests::Fake::new();
+        *remote.awake.lock().unwrap() =
+            KeepAwake::new(Box::new(fake.clone()), remote.store.read().keep_awake);
+        fake
+    }
+
+    #[tokio::test]
+    async fn the_pc_is_kept_awake_only_while_mobile_and_the_option_are_on() {
+        let remote = remote_with(Fake::echo(), assets::tests::no_app);
+        let fake = hold_with(&remote);
+        remote
+            .store
+            .update(|saved| saved.port = test_port(7))
+            .unwrap();
+        assert!(!remote.options(false).keep_awake);
+
+        remote.set_keep_awake(true).unwrap();
+        assert!(remote.options(false).keep_awake);
+        assert!(fake.calls().is_empty(), "Mobile is off: nothing held yet");
+
+        remote.set_enabled(true).await.unwrap();
+        assert_eq!(fake.calls(), ["acquire"]);
+        remote.set_enabled(false).await.unwrap();
+        assert_eq!(fake.calls(), ["acquire", "release"]);
+
+        remote.set_enabled(true).await.unwrap();
+        remote.set_keep_awake(false).unwrap();
+        assert_eq!(fake.calls(), ["acquire", "release", "acquire", "release"]);
+        assert!(!remote.options(true).keep_awake);
+        assert!(remote.options(true).autostart);
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_option_is_remembered_and_holds_again_at_launch() {
+        let remote = remote_with(Fake::echo(), assets::tests::no_app);
+        remote
+            .store
+            .update(|saved| {
+                saved.enabled = true;
+                saved.port = test_port(8);
+            })
+            .unwrap();
+        remote.set_keep_awake(true).unwrap();
+        let file = remote.store.file().to_path_buf();
+        assert!(Store::open(file.clone()).read().keep_awake);
+        drop(remote);
+
+        // The next launch, from the same file.
+        let again = Arc::new(Remote::new(
+            file,
+            Fake::echo().window(),
+            Duration::from_millis(200),
+            assets::tests::no_app,
+        ));
+        let fake = hold_with(&again);
+        again.resume().await;
+        assert_eq!(fake.calls(), ["acquire"]);
+        assert!(again.options(false).keep_awake);
+        again.set_enabled(false).await.unwrap();
+    }
+
+    #[test]
+    fn the_history_is_kept_on_disk_beside_the_settings() {
+        let remote = remote_with(Fake::echo(), assets::tests::no_app);
+        let entry = |at: u64, text: &str| ActivityEntry {
+            at,
+            workspace: "Shop".into(),
+            kind: "delivered".into(),
+            text: text.into(),
+        };
+        let now = now_ms();
+        remote
+            .activity_append(&[entry(now - 2000, "first"), entry(now - 1000, "second")])
+            .unwrap();
+        remote.activity_stopped();
+        let file = remote.store.file().to_path_buf();
+        drop(remote);
+
+        // Read again by a launch of its own.
+        let again = Arc::new(Remote::new(
+            file,
+            Fake::echo().window(),
+            Duration::from_millis(200),
+            assets::tests::no_app,
+        ));
+        let all = again.activity_read(None, None);
+        assert_eq!(
+            all.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+            ["appStopped", "delivered", "delivered"]
+        );
+        let since = again.activity_read(Some(now - 1500), Some(10));
+        assert_eq!(
+            since.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            ["", "second"]
+        );
     }
 }

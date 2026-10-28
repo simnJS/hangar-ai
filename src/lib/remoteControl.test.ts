@@ -267,26 +267,65 @@ describe("remote_manager", () => {
 });
 
 describe("remote_history", () => {
-  it("merges the journals, newest first, after `since`", async () => {
-    journals.manager = [
-      { at: 3000, event: { kind: "readyToLand", workspaceId: "shop", workspace: "Shop", taskId: "t9", title: "Ship" } },
-    ];
-    journals.orchestrators = {
-      shop: [
-        { at: 1000, quiet: false, event: { kind: "workerStarted", worker: "Ben", taskId: null } },
-        { at: 2000, quiet: false, event: { kind: "workerStopped", worker: "Ben", taskId: null } },
-      ],
-    };
+  const stored = [
+    { at: 1000, workspace: "Shop", kind: "landed", text: "Landed: Cart" },
+    { at: 3000, workspace: "Shop", kind: "needsYou", text: "Needs you: Ship" },
+    { at: 2000, workspace: "", kind: "appStopped", text: "" },
+  ];
+  const disk = (reads: number[] = []) => ({
+    read: async (since: number) => {
+      reads.push(since);
+      return stored.filter((entry) => entry.at > since);
+    },
+  });
+
+  it("answers from the log on disk, newest first, after `since`", async () => {
     const { deps } = rig([shop()]);
-    const all = (await runRemote("remote_history", {}, deps)) as RemoteHistory;
+    const reads: number[] = [];
+    const all = (await runRemote("remote_history", {}, deps, disk(reads))) as RemoteHistory;
     expect(all.entries.map((e) => [e.at, e.workspace, e.kind])).toEqual([
-      [3000, "Shop", "readyToLand"],
-      [2000, "Shop", "workerStopped"],
-      [1000, "Shop", "workerStarted"],
+      [3000, "Shop", "needsYou"],
+      [2000, "", "appStopped"],
+      [1000, "Shop", "landed"],
     ]);
-    expect(all.entries[0].text).toContain("Ship");
-    const recent = (await runRemote("remote_history", { since: 1500 }, deps)) as RemoteHistory;
+    const recent = (await runRemote("remote_history", { since: 1500 }, deps, disk(reads))) as RemoteHistory;
     expect(recent.entries.map((e) => e.at)).toEqual([3000, 2000]);
+    expect(reads).toEqual([0, 1500]);
+  });
+
+  it("does not read the journals in memory, which a restart forgets", async () => {
+    journals.manager = [
+      { at: 9000, event: { kind: "readyToLand", workspaceId: "shop", workspace: "Shop", taskId: "t9", title: "Ship" } },
+    ];
+    const { deps } = rig([shop()]);
+    const answer = (await runRemote("remote_history", {}, deps, { read: async () => [] })) as RemoteHistory;
+    expect(answer.entries).toEqual([]);
+  });
+
+  it("words a line written without text in the language of the PC", async () => {
+    const base = rig([shop()]).deps;
+    const inLocale = (locale: "en" | "fr"): ControlDeps => ({
+      ...base,
+      snapshot: () => ({ ...base.snapshot(), settings: { ...base.snapshot().settings, locale } }),
+    });
+    const en = (await runRemote("remote_history", {}, inLocale("en"), disk())) as RemoteHistory;
+    expect(en.entries.find((e) => e.kind === "appStopped")?.text).toBe("Hangar stopped");
+
+    const french = inLocale("fr");
+    const fr = (await runRemote("remote_history", {}, french, disk())) as RemoteHistory;
+    expect(fr.entries.find((e) => e.kind === "appStopped")?.text).toBe("Hangar s'est arrêté");
+    expect(fr.entries.find((e) => e.kind === "landed")?.text).toBe("Landed: Cart");
+  });
+
+  it("is an error when the log cannot be read", async () => {
+    const { deps } = rig([shop()]);
+    await expect(
+      runRemote("remote_history", {}, deps, {
+        read: async () => {
+          throw new Error("disk");
+        },
+      }),
+    ).rejects.toThrow("disk");
   });
 });
 
@@ -296,7 +335,7 @@ describe("internal requests", () => {
     const sent: unknown[][] = [];
     const send = async (...args: unknown[]) => void sent.push(args);
     expect(answerRemote({ id: "1", op: "orchestrator_briefing", args: {} }, deps, send)).toBe(false);
-    expect(answerRemote({ id: "2", op: "remote_history", args: {} }, deps, send)).toBe(true);
+    expect(answerRemote({ id: "2", op: "remote_state", args: {} }, deps, send)).toBe(true);
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0].slice(0, 2)).toEqual(["2", true]);
   });

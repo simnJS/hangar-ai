@@ -3,16 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getPaneActivity } from "./agentState";
 import { runControl, type ControlDeps } from "./control";
-import { describeManagerEvent, managerJournal, type ManagerEvent } from "./managerEvents";
+import { activityHistory, startActivityLog, textOf, type ActivityHistory } from "./activityLog";
+import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
-import { describeEvent, orchestratorJournal } from "./orchestratorEvents";
 import { loadProjects, projectsDeps } from "./projects";
 import { isMainWindow } from "./windows";
+import { systemLocale, translate, type TranslateKey, type TranslateParams } from "../i18n";
 import {
   REMOTE_KEYS,
   type RemoteActivity,
   type RemoteHistory,
-  type RemoteHistoryEntry,
   type RemoteKey,
   type RemoteScreen,
   type RemoteState,
@@ -232,32 +232,37 @@ async function remoteManager(deps: ControlDeps, args: Record<string, unknown>): 
   return { sent: true };
 }
 
-function remoteHistory(deps: ControlDeps, args: Record<string, unknown>): RemoteHistory {
-  const from = typeof args.since === "number" ? args.since : 0;
-  const entries: RemoteHistoryEntry[] = managerJournal().map((entry) => ({
-    at: entry.at,
-    workspace: entry.event.workspace,
-    kind: entry.event.kind,
-    text: describeManagerEvent(entry.event),
-  }));
-  for (const ws of deps.snapshot().workspaces) {
-    if (ws.hq) continue;
-    for (const entry of orchestratorJournal(ws.id)) {
-      entries.push({
-        at: entry.at,
-        workspace: ws.name,
-        kind: entry.event.kind,
-        text: describeEvent(entry.event, () => null),
-      });
-    }
-  }
-  return { entries: entries.filter((entry) => entry.at > from).sort((a, b) => b.at - a.at) };
+/**
+ * What happened, from the log kept on disk (lib/activityLog), newest first:
+ * the journals in memory forget with every restart, the disk does not.
+ */
+async function remoteHistory(
+  deps: ControlDeps,
+  args: Record<string, unknown>,
+  history: ActivityHistory,
+): Promise<RemoteHistory> {
+  const from = typeof args.since === "number" && args.since > 0 ? args.since : 0;
+  const locale = deps.snapshot().settings.locale ?? systemLocale();
+  const say = (key: TranslateKey, params?: TranslateParams) =>
+    translate(locale, key, params);
+  const entries = await history.read(from);
+  return {
+    entries: entries
+      .filter((entry) => entry.at > from)
+      .map((entry) => ({ ...entry, text: textOf(entry, say) }))
+      .sort((a, b) => b.at - a.at),
+  };
 }
 
 /** Every op this module answers; any other is not its to answer. */
 export const isRemoteOp = (op: string) => op.startsWith("remote_");
 
-export async function runRemote(op: string, args: Record<string, unknown>, deps: ControlDeps): Promise<unknown> {
+export async function runRemote(
+  op: string,
+  args: Record<string, unknown>,
+  deps: ControlDeps,
+  history: ActivityHistory = activityHistory,
+): Promise<unknown> {
   // The person asks: not the agents' switch (agentPaneControl) to refuse.
   const asPerson: ControlDeps = { ...deps, enabled: () => true };
   switch (op) {
@@ -272,7 +277,7 @@ export async function runRemote(op: string, args: Record<string, unknown>, deps:
     case "remote_manager":
       return remoteManager(asPerson, args);
     case "remote_history":
-      return remoteHistory(asPerson, args);
+      return remoteHistory(asPerson, args, history);
     default:
       throw new Error(`Unknown remote request "${op}".`);
   }
@@ -309,6 +314,13 @@ export function answerRemote(request: InternalRequest, deps: ControlDeps | null,
 export function useRemoteControl(deps: ControlDeps | null) {
   const depsRef = useRef(deps);
   depsRef.current = deps;
+  const loaded = deps !== null;
+
+  // The history is written from the moment the store has loaded.
+  useEffect(() => {
+    if (!isMainWindow || !loaded) return;
+    return startActivityLog(() => depsRef.current!.snapshot());
+  }, [loaded]);
 
   useEffect(() => {
     if (!isMainWindow) return;

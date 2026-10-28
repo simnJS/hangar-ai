@@ -44,6 +44,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        // Hangar at login: an option of the Mobile settings (remote/).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(pty::PtyManager::default())
         .manage(discord::DiscordPresence::default())
         .manage(voice::VoiceManager::default())
@@ -179,6 +184,11 @@ pub fn run() {
             remote::remote_tailscale_serve,
             remote::remote_push,
             remote::remote_push_subscribers,
+            remote::remote_options,
+            remote::remote_set_keep_awake,
+            remote::remote_set_autostart,
+            remote::activity_append,
+            remote::activity_read,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -198,6 +208,10 @@ pub fn run() {
                 // panes running for the main window to take back.
                 WindowEvent::Destroyed if label == "main" => {
                     pty::kill_all(&app.state::<pty::PtyManager>());
+                    // The history says Hangar stopped; the PC may sleep again.
+                    if let Some(remote) = app.try_state::<std::sync::Arc<remote::Remote>>() {
+                        remote.activity_stopped();
+                    }
                     // A check or a review still running goes with the app.
                     delivery::cancel_all();
                     // Stale endpoint files would make agents try to reach a dead port.
