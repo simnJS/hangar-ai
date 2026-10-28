@@ -1,5 +1,6 @@
 mod board;
 mod bridge;
+mod chat;
 mod context;
 mod control;
 mod delivery;
@@ -113,6 +114,7 @@ pub fn run() {
             sessions::session_exists,
             sessions::detect_agents,
             context::context_usage,
+            chat::chat_page,
             stats::usage_stats,
             shells::detect_shells,
             store::load_state,

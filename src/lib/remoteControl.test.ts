@@ -4,9 +4,9 @@ import type { ControlDeps } from "./control";
 import type { ManagerJournalEntry } from "./managerEvents";
 import type { BoardTask, JournalEntry } from "./orchestratorEvents";
 import type { ProjectsDeps } from "./projects";
-import { answerRemote, runRemote } from "./remoteControl";
+import { answerRemote, runRemote, type ChatPage, type ChatReader } from "./remoteControl";
 import { answerInternal } from "./orchestratorBrief";
-import type { RemoteHistory, RemoteScreen, RemoteState } from "../remote/types";
+import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState } from "../remote/types";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
 
 const journals = vi.hoisted(() => ({
@@ -326,6 +326,126 @@ describe("remote_history", () => {
         },
       }),
     ).rejects.toThrow("disk");
+  });
+});
+
+describe("remote_chat", () => {
+  const items: ChatItem[] = [
+    { id: "u1", at: 1000, kind: "user", text: "Fix the cart", from: "person", images: 0 },
+    { id: "t1", at: 2000, kind: "action", tool: "Bash", title: "Ran pnpm test", detail: "pnpm test", state: "running" },
+  ];
+  const page = (patch: Partial<ChatPage> = {}): ChatPage => ({
+    items,
+    older: true,
+    cursor: "4096",
+    question: null,
+    openCall: null,
+    ...patch,
+  });
+  const reader = (answer: ChatPage | null) => {
+    const asked: Parameters<ChatReader>[0][] = [];
+    const read: ChatReader = async (args) => {
+      asked.push(args);
+      return answer;
+    };
+    return { read, asked };
+  };
+  const chatShop = () =>
+    workspace("shop", "Shop", [
+      { ...pane("w1", "Ben", "worker"), sessionId: "sess-1", cwd: "C:\\wt\\ben" },
+      { ...pane("orch", "Jack", "orchestrator"), sessionId: "sess-2" },
+      { ...pane("new", "Ava", "worker") },
+      { ...pane("sh", "term", undefined, "shell"), sessionId: "nope" },
+    ]);
+  const chat = (deps: ControlDeps, args: Record<string, unknown>, read: ChatReader) =>
+    runRemote("remote_chat", args, deps, { read: async () => [] }, read) as Promise<RemoteChat>;
+
+  it("reads a Claude Code pane's transcript, in its own folder, and passes the cursor on", async () => {
+    act("w1", "shop", "working");
+    const { deps } = rig([chatShop()]);
+    const { read, asked } = reader(page());
+    const answer = await chat(deps, { pane: "Ben", before: "9000", limit: 20 }, read);
+    expect(asked).toEqual([{ sessionId: "sess-1", cwd: "C:\\wt\\ben", before: "9000", limit: 20 }]);
+    expect(answer).toEqual({
+      paneId: "w1",
+      pane: "Ben",
+      workspace: "Shop",
+      agent: "claude",
+      activity: "working",
+      sessionId: "sess-1",
+      items,
+      older: true,
+      cursor: "4096",
+      pending: null,
+    });
+  });
+
+  it("reads a pane without a folder of its own in its workspace's, newest page first", async () => {
+    const { deps } = rig([chatShop()]);
+    const { read, asked } = reader(page({ older: false, cursor: null }));
+    const answer = await chat(deps, { pane: "orch" }, read);
+    expect(asked).toEqual([{ sessionId: "sess-2", cwd: "C:\\dev\\shop" }]);
+    expect(answer).toMatchObject({ older: false, cursor: null, activity: null });
+  });
+
+  it("answers no items and why for a shell, a pane without a session, a session not written yet", async () => {
+    const { deps } = rig([chatShop()]);
+    const { read, asked } = reader(null);
+    const shell = await chat(deps, { pane: "term" }, read);
+    expect(shell).toMatchObject({ agent: "shell", items: [], older: false, cursor: null, pending: null, reason: "notClaude" });
+    const fresh = await chat(deps, { pane: "Ava" }, read);
+    expect(fresh).toMatchObject({ sessionId: null, items: [], pending: null, reason: "noSession" });
+    expect(asked).toEqual([]);
+    const unwritten = await chat(deps, { pane: "Ben" }, read);
+    expect(unwritten).toMatchObject({ sessionId: "sess-1", items: [], reason: "noTranscript" });
+    expect(asked).toHaveLength(1);
+  });
+
+  it("derives a pending permission from the pane waiting on a call without its result", async () => {
+    const openCall = { tool: "Bash", title: "Ran pnpm test", detail: "pnpm test" };
+    const { deps } = rig([chatShop()]);
+    act("w1", "shop", "waiting");
+    const waiting = await chat(deps, { pane: "Ben" }, reader(page({ openCall })).read);
+    expect(waiting.pending).toEqual({ kind: "permission", ...openCall });
+
+    // Running on its own: the call is under way, nothing asks the person.
+    act("w1", "shop", "working");
+    const working = await chat(deps, { pane: "Ben" }, reader(page({ openCall })).read);
+    expect(working.pending).toBeNull();
+
+    // Waiting with every call answered: nothing this chat can name.
+    act("w1", "shop", "waiting");
+    const settled = await chat(deps, { pane: "Ben" }, reader(page()).read);
+    expect(settled.pending).toBeNull();
+  });
+
+  it("puts an unanswered question first, whatever the activity", async () => {
+    const question = {
+      toolUseId: "toolu_q",
+      questions: [
+        {
+          question: "Which currency?",
+          header: "Currency",
+          multiSelect: false,
+          options: [{ label: "EUR", description: "Euro" }],
+        },
+      ],
+    };
+    const { deps } = rig([chatShop()]);
+    act("w1", "shop", "waiting");
+    const answer = await chat(
+      deps,
+      { pane: "Ben" },
+      reader(page({ question, openCall: { tool: "Bash", title: "Ran ls" } })).read,
+    );
+    expect(answer.pending).toEqual({ kind: "question", ...question });
+  });
+
+  it("refuses a cursor that is not one and an unknown pane", async () => {
+    const { deps } = rig([chatShop()]);
+    const { read } = reader(page());
+    await expect(chat(deps, { pane: "Ben", before: 12 }, read)).rejects.toThrow("cursor");
+    await expect(chat(deps, { pane: "ghost" }, read)).rejects.toThrow('No pane "ghost"');
   });
 });
 

@@ -241,8 +241,8 @@ fn scan(agent: &str, path: &Path, cursor: &mut Cursor, drop_first: bool) {
 }
 
 /// `~/.claude/projects/<flattened cwd>/<session>.jsonl` — the same layout
-/// `claude_sessions` lists from.
-fn claude_transcript(cwd: &str, session_id: &str) -> Option<PathBuf> {
+/// `claude_sessions` lists from. The chat (chat/) reads the same file.
+pub(crate) fn claude_transcript(cwd: &str, session_id: &str) -> Option<PathBuf> {
     let path = dirs::home_dir()?
         .join(".claude")
         .join("projects")
@@ -276,14 +276,17 @@ fn codex_transcript(session_id: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-fn usage_snapshot(agent: &str, session_id: &str, cwd: &str) -> Option<ContextUsage> {
-    // The id lands in a path; anything beyond what our own watchers produce
-    // (uuids, hex, dashes) is refused rather than resolved.
-    if session_id.is_empty()
-        || !session_id
+/// The id lands in a path; anything beyond what our own watchers produce
+/// (uuids, hex, dashes) is refused rather than resolved.
+pub(crate) fn valid_session_id(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
+}
+
+fn usage_snapshot(agent: &str, session_id: &str, cwd: &str) -> Option<ContextUsage> {
+    if !valid_session_id(session_id) {
         return None;
     }
     let path = match agent {

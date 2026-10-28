@@ -11,7 +11,12 @@ import { isMainWindow } from "./windows";
 import { systemLocale, translate, type TranslateKey, type TranslateParams } from "../i18n";
 import {
   REMOTE_KEYS,
+  type ChatItem,
+  type ChatPending,
+  type ChatQuestion,
   type RemoteActivity,
+  type RemoteChat,
+  type RemoteChatReason,
   type RemoteHistory,
   type RemoteKey,
   type RemoteScreen,
@@ -254,6 +259,83 @@ async function remoteHistory(
   };
 }
 
+/** A page of a transcript, as the chat_page command reads it (chat/ in Rust). */
+export interface ChatPage {
+  items: ChatItem[];
+  older: boolean;
+  cursor: string | null;
+  /** An AskUserQuestion still without its answer. */
+  question: { toolUseId: string; questions: ChatQuestion[] } | null;
+  /** The last tool call, when it has no result yet. */
+  openCall: { tool: string; title: string; detail?: string } | null;
+}
+
+/** null: the session has written no transcript yet. */
+export type ChatReader = (args: {
+  sessionId: string;
+  cwd: string;
+  before?: string;
+  limit?: number;
+}) => Promise<ChatPage | null>;
+
+const readTranscript: ChatReader = (args) => invoke<ChatPage | null>("chat_page", args);
+
+/**
+ * What the pane waits on the person for. A question is in the transcript
+ * itself; a permission prompt is not, so it is the last call still without a
+ * result while the mod reports the pane waiting.
+ */
+function pendingOf(page: ChatPage, activity: RemoteActivity): ChatPending | null {
+  if (page.question) return { kind: "question", ...page.question };
+  if (activity === "waiting" && page.openCall) return { kind: "permission", ...page.openCall };
+  return null;
+}
+
+async function remoteChat(
+  deps: ControlDeps,
+  args: Record<string, unknown>,
+  read: ChatReader,
+): Promise<RemoteChat> {
+  const { ws, pane } = findPane(deps.snapshot(), args.pane);
+  const before = args.before;
+  if (before !== undefined && typeof before !== "string") {
+    throw new Error('"before" is a cursor from an earlier answer.');
+  }
+  const activity = activityOf(pane.id);
+  const chat = {
+    paneId: pane.id,
+    pane: pane.name,
+    workspace: ws.name,
+    agent: pane.agent,
+    activity,
+    sessionId: pane.sessionId,
+  };
+  const empty = (reason: RemoteChatReason): RemoteChat => ({
+    ...chat,
+    items: [],
+    older: false,
+    cursor: null,
+    pending: null,
+    reason,
+  });
+  if (pane.agent !== "claude") return empty("notClaude");
+  if (!pane.sessionId) return empty("noSession");
+  const page = await read({
+    sessionId: pane.sessionId,
+    cwd: pane.cwd || ws.cwd,
+    ...(typeof before === "string" ? { before } : {}),
+    ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+  });
+  if (!page) return empty("noTranscript");
+  return {
+    ...chat,
+    items: page.items,
+    older: page.older,
+    cursor: page.cursor,
+    pending: pendingOf(page, activity),
+  };
+}
+
 /** Every op this module answers; any other is not its to answer. */
 export const isRemoteOp = (op: string) => op.startsWith("remote_");
 
@@ -262,6 +344,7 @@ export async function runRemote(
   args: Record<string, unknown>,
   deps: ControlDeps,
   history: ActivityHistory = activityHistory,
+  chat: ChatReader = readTranscript,
 ): Promise<unknown> {
   // The person asks: not the agents' switch (agentPaneControl) to refuse.
   const asPerson: ControlDeps = { ...deps, enabled: () => true };
@@ -278,6 +361,8 @@ export async function runRemote(
       return remoteManager(asPerson, args);
     case "remote_history":
       return remoteHistory(asPerson, args, history);
+    case "remote_chat":
+      return remoteChat(asPerson, args, chat);
     default:
       throw new Error(`Unknown remote request "${op}".`);
   }
