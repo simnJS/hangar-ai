@@ -39,9 +39,12 @@ toml_edit = "0.25.13"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2.3.1"
-# Hangar at login, an option of the Mobile settings (remote/awake.rs): the
-# window never calls the plugin, the settings' own commands do.
-tauri-plugin-autostart = "2"
+# Hangar at login, an option of the Mobile settings (remote/mod.rs): the
+# window never calls the plugin, the settings' own commands do. Held at 2.5.1:
+# 2.6 and later need a newer tauri than the one locked, and take dozens of
+# crates with them (among them `windows` 0.62, which cpal cannot build with —
+# see below).
+tauri-plugin-autostart = "=2.5.1"
 discord-rich-presence = "1.1.0"
 # Microphone capture for dictation.
 #
