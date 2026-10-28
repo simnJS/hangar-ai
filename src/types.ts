@@ -82,6 +82,12 @@ export interface Pane {
   model?: string | null;
   /** First of the ports a worker may bind (HANGAR_PORT_BASE in its shell). */
   portBase?: number | null;
+  /**
+   * A worker started in its workspace's own folder, beside the other workers,
+   * because the workspace is not a git repository: no worktree, no branch,
+   * and nothing merged. Absent on every worker that has a worktree.
+   */
+  sharedFolder?: boolean;
 }
 
 /** An orchestrator coordinates; a worker does one board task in its worktree. */

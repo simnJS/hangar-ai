@@ -261,6 +261,53 @@ describe("the orchestrator's briefing", () => {
   });
 });
 
+describe("a workspace that is not a git repository", () => {
+  it("tells the orchestrator its workers share the folder, rather than to ask for a repository", () => {
+    const { system, context } = buildBriefing(setup({ git: false }))!;
+    expect(system).toContain("in the workspace's folder, beside the other workers");
+    expect(system).toContain("do not ask the person to make it one");
+    expect(system).toContain("delivery is in");
+    expect(system).toContain("worker_stop {worker}");
+    expect(system).not.toMatch(/git worktree|git log|delivery landed|merge branches|keepWorktree/);
+    expect(context).toContain("Not a git repository: workers share the workspace's folder");
+    expect(context).toContain("check `pnpm test`, run by the workers");
+  });
+
+  it("asks only for the orchestrator, and takes a folder it cannot tell for a repository", async () => {
+    const inputs = setup();
+    const asked: string[] = [];
+    const deps = {
+      snapshot: () => inputs.state,
+      loadBoard: async () => inputs.tasks,
+      loadMemory: async () => inputs.memory,
+      journal: () => inputs.journal,
+      activity: inputs.activity,
+      now: () => NOW,
+      isRepo: async (cwd: string) => {
+        asked.push(cwd);
+        return false;
+      },
+    };
+    expect((await briefingFor("o", deps))?.system).toContain("## No git here");
+    expect((await briefingFor("w1", deps))?.system).toContain("in a git worktree");
+    expect(asked).toEqual(["C:\\dev\\shop"]);
+    const unknown = { ...deps, isRepo: async () => null };
+    expect((await briefingFor("o", unknown))?.system).not.toContain("## No git here");
+  });
+
+  it("gives a worker in the shared folder rules that keep it off the others' files", () => {
+    const inputs = setup({ paneId: "w1" });
+    const shop = inputs.state.workspaces[0];
+    const panes = shop.panes.map((entry) => (entry.id === "w1" ? { ...entry, sharedFolder: true } : entry));
+    const state = { ...inputs.state, workspaces: [{ ...shop, panes }, ...inputs.state.workspaces.slice(1)] };
+    const { system } = buildBriefing({ ...inputs, state })!;
+    expect(system).toContain("The workspace is not a git repository: you work in its folder itself");
+    expect(system).toContain("Never revert, move, reformat or delete a file that is not yours");
+    expect(system).toContain("Nothing is merged or reviewed here");
+    expect(system).not.toMatch(/worktree|branch|Commit/);
+  });
+});
+
 describe("a worker's briefing", () => {
   it("gives it its task, its files, its check and its ports", () => {
     const { system, context } = buildBriefing(setup({ paneId: "w1" }))!;

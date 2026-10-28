@@ -253,6 +253,45 @@ describe("delivery_submit", () => {
   });
 });
 
+describe("a worker in a workspace without git", () => {
+  it("is done when it delivers: nothing runs, the orchestrator hears it, and its pane goes after the answer", async () => {
+    const [orchestrator, , other] = state.workspaces[0].panes;
+    state.workspaces[0].panes = [orchestrator, { ...WORKER, cwd: "C:\\dev\\app", sharedFolder: true }, other];
+    tasks = [task({ labels: ["ui", "needs-you"] })];
+    let answered: () => void = () => undefined;
+    deps.sleep = () => new Promise<void>((resolve) => (answered = resolve));
+
+    const answer = (await submit({ summary: " Added the button. " })) as Record<string, unknown>;
+
+    expect(answer).toMatchObject({ submitted: true, done: true, task: "Add the export button" });
+    expect(answer.next).toMatch(/nothing to merge.*End your turn/);
+    expect(log.some((line) => line.startsWith("preflight:"))).toBe(false);
+    expect(runs).toEqual([]);
+    expect(tasks[0]).toMatchObject({ column: "done", labels: ["ui"] });
+    const comment = log.find((line) => line.startsWith("comment:"))!;
+    expect(comment).toContain("comment:t1:hangar:Done by Bo in the workspace's folder.");
+    expect(comment).toContain("Summary: Added the button.");
+    expect(deliveryState("t1")?.state).toBe("done");
+    expect(deliveringIn("w1")).toBe(false);
+    expect(events).toEqual([
+      {
+        workspaceId: "w1",
+        event: {
+          kind: "delivery",
+          taskId: "t1",
+          title: "Add the export button",
+          worker: "Bo",
+          outcome: "done",
+          detail: "summary: Added the button.",
+        },
+      },
+    ]);
+    expect(log).not.toContain("close:w1:p2");
+    answered();
+    await vi.waitFor(() => expect(log).toContain("close:w1:p2"));
+  });
+});
+
 describe("what follows an outcome", () => {
   it("a landed delivery finishes the task and lets the worker go", async () => {
     tasks = [task({ labels: ["ui", "needs-you"] })];

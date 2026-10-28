@@ -45,6 +45,10 @@ import type { Pane, Workspace } from "../types";
  * The limits — workers at once, attempts per task, files two tasks in doing
  * may not share — are refused here and in board.rs, never left to a prompt.
  *
+ * A workspace that is not a git repository has no worktree to give: its
+ * workers start in its own folder, side by side (Pane.sharedFolder), and
+ * board.rs holds every task that runs beside another to the files it owns.
+ *
  * Like the rest of lib/control, what is thrown is read by a model: English,
  * and saying what to do next.
  */
@@ -57,7 +61,7 @@ export interface WorkerDeps {
   killPane: (paneId: string) => Promise<void>;
   boardLoad: (cwd: string) => Promise<{ tasks: Task[] }>;
   /** board.rs `claim_for_worker`: refused, with the reason, for every limit on the task. */
-  claim: (cwd: string, id: string, worker: string, maxAttempts: number) => Promise<Task>;
+  claim: (cwd: string, id: string, worker: string, maxAttempts: number, sharedFolder: boolean) => Promise<Task>;
   /** board.rs `release_worker`. */
   release: (cwd: string, id: string, worker: string, undo: boolean) => Promise<Task>;
   repoInfo: (path: string) => Promise<RepoInfo>;
@@ -222,9 +226,12 @@ export interface BriefFacts {
   /** Null when the person started it rather than an orchestrator. */
   orchestrator: string | null;
   workspace: string;
-  branch: string;
-  target: string;
-  worktree: string;
+  /** Where the worker runs: its worktree, or the workspace's folder without git. */
+  folder: string;
+  /** All three null in a workspace that is not a git repository. */
+  branch: string | null;
+  target: string | null;
+  worktree: string | null;
   portBase: number;
   checkCommand: string | null;
   attempt: number;
@@ -240,6 +247,26 @@ export interface BriefFacts {
 export function workerBrief(facts: BriefFacts): string {
   const { task, worker, orchestrator, branch, target, worktree, portBase } = facts;
   const owns = (task.owns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
+  const git = branch && target && worktree ? { branch, target, worktree } : null;
+  const where = git
+    ? `- Your folder is a git worktree of its own: ${git.worktree}, on branch ${git.branch}, made from ${git.target}. ` +
+      `Work and commit there only. Never push, and never merge into ${git.target} yourself.`
+    : `- You work in the workspace's own folder: ${facts.folder}. It is not a git repository: there is no branch ` +
+      "and nothing to commit, and what you save is in place at once. Other workers may be changing other files " +
+      "in this folder right now: never revert, move, reformat or delete a file that is not yours, and run nothing " +
+      "that rewrites the whole folder.";
+  const done = git
+    ? `Commit everything on ${git.branch}, leave the comment above, then call delivery_submit {summary} with a one-line summary. ` +
+      "Hangar checks your branch, has it reviewed and lands it; if anything fails, a message tells you what to fix."
+    : "Leave the comment above, then call delivery_submit {summary} with a one-line summary. Nothing is merged or " +
+      "reviewed here: Hangar marks your task done, tells the orchestrator and closes your pane.";
+  const check = facts.checkCommand
+    ? git
+      ? `- \`${facts.checkCommand}\` passes in your worktree. It runs again, with a review of your diff, when you deliver.`
+      : `- \`${facts.checkCommand}\` passes in the folder.`
+    : git
+      ? "- The project's own checks pass for what you changed: its tests, its build. A reviewer reads your diff when you deliver."
+      : "- The project's own checks pass for what you changed, where it has any: its tests, its build.";
   const lines: (string | null)[] = [
     `You are ${worker}, a worker in the Hangar workspace "${facts.workspace}". ` +
       (orchestrator ? `Its orchestrator, ${orchestrator}, started you` : "The person started you") +
@@ -253,8 +280,7 @@ export function workerBrief(facts: BriefFacts): string {
       : null,
     "",
     "## Where you work",
-    `- Your folder is a git worktree of its own: ${worktree}, on branch ${branch}, made from ${target}. ` +
-      `Work and commit there only. Never push, and never merge into ${target} yourself.`,
+    where,
     owns.length
       ? `- Files you own: ${owns.map((pattern) => `\`${pattern}\``).join(", ")}. Change nothing outside them. ` +
         "If the task cannot be done without another file, name it in a comment on the task and stop."
@@ -266,9 +292,7 @@ export function workerBrief(facts: BriefFacts): string {
     "",
     "## Done means",
     "- What the task above asks for, its acceptance criteria included.",
-    facts.checkCommand
-      ? `- \`${facts.checkCommand}\` passes in your worktree. It runs again, with a review of your diff, when you deliver.`
-      : "- The project's own checks pass for what you changed: its tests, its build. A reviewer reads your diff when you deliver.",
+    check,
     "",
     "## Report",
     `Before you stop, whatever the reason, leave one short comment on your task with ` +
@@ -279,8 +303,7 @@ export function workerBrief(facts: BriefFacts): string {
       "say what it is in a comment on the task and stop. Never mock, stub or guess your way past it.",
     "",
     "## When done",
-    `Commit everything on ${branch}, leave the comment above, then call delivery_submit {summary} with a one-line summary. ` +
-      "Hangar checks your branch, has it reviewed and lands it; if anything fails, a message tells you what to fix.",
+    done,
   ];
   return lines.filter((line): line is string => line !== null).join("\n");
 }
@@ -410,9 +433,11 @@ export interface SpawnedWorker {
   worker: string;
   task: { id: string; title: string; attempt: number; maxAttempts: number };
   model: string;
-  branch: string;
-  base: string;
-  worktree: string;
+  /** The folder it works in; the three after it are null without git. */
+  folder: string;
+  branch: string | null;
+  base: string | null;
+  worktree: string | null;
   ports: { base: number; count: number };
   brief: string;
   note: string;
@@ -471,40 +496,42 @@ export async function spawnWorker(
   const undo: { what: string; run: () => Promise<unknown> }[] = [];
   try {
     const repo = await workers.repoInfo(ws.cwd);
-    if (!repo.installed) {
-      throw new Error("git is not installed, or not on the PATH Hangar sees: workers need it for their worktrees.");
-    }
-    if (!repo.isRepo || !repo.root || !repo.mainRoot) {
-      throw new Error(
-        `"${ws.name}" (${ws.cwd}) is not a git repository, and each worker works in a git worktree of its own. ` +
-          "Ask the person whether to make it one (git init and a first commit).",
-      );
-    }
-    const target = settings.branch ?? repo.branch;
-    if (!target) {
+    // Without git, there is no worktree to give: the worker starts in the
+    // workspace's own folder, beside the others, and nothing is merged.
+    const git =
+      repo.installed && repo.isRepo && repo.root && repo.mainRoot
+        ? { root: repo.root, mainRoot: repo.mainRoot }
+        : null;
+    const target = git ? (settings.branch ?? repo.branch) : null;
+    if (git && !target) {
       throw new Error(
         `${ws.cwd} is on a detached HEAD, so there is no branch to start workers from. Ask the person to check ` +
           "one out, or to set the branch in the workspace's orchestration settings.",
       );
     }
 
-    const task = await workers.claim(ws.cwd, taskId, name, settings.maxAttempts).catch((err) => {
+    const task = await workers.claim(ws.cwd, taskId, name, settings.maxAttempts, !git).catch((err) => {
       throw new Error(messageOf(err));
     });
     undo.push({ what: "give the task back", run: () => workers.release(ws.cwd, taskId, name, true) });
 
-    const { branch, path } = await addWorktree(ws, repo.mainRoot, task, target, deps);
-    // A workspace on a subfolder of its repository: the same subfolder there.
-    const folder = joinPath(path, inside(repo.root, ws.cwd) ?? "");
-    undo.push({
-      what: `remove the worktree ${path}`,
-      run: async () => {
-        await removeWorktree(ws, path, deps);
-        await workers.branchDelete(ws.cwd, branch, true);
-      },
-    });
-    // A convenience, as in the worktree panel: a failed copy never undoes the start.
-    await workers.copyIgnored(repo.root, path, COPY_PATTERNS).catch(() => null);
+    let tree: { branch: string; path: string } | null = null;
+    let folder = ws.cwd;
+    if (git && target) {
+      tree = await addWorktree(ws, git.mainRoot, task, target, deps);
+      const { branch, path } = tree;
+      // A workspace on a subfolder of its repository: the same subfolder there.
+      folder = joinPath(path, inside(git.root, ws.cwd) ?? "");
+      undo.push({
+        what: `remove the worktree ${path}`,
+        run: async () => {
+          await removeWorktree(ws, path, deps);
+          await workers.branchDelete(ws.cwd, branch, true);
+        },
+      });
+      // A convenience, as in the worktree panel: a failed copy never undoes the start.
+      await workers.copyIgnored(git.root, path, COPY_PATTERNS).catch(() => null);
+    }
 
     // Read again: the workspace may have changed during the awaits above.
     const current = deps.snapshot().workspaces.find((entry) => entry.id === ws.id);
@@ -518,7 +545,13 @@ export async function spawnWorker(
       );
     }
     // In the same tick as the pane itself: its terminal mounts with all of it.
-    workers.updatePane(ws.id, id, { role: "worker", taskId: task.id, model, portBase });
+    workers.updatePane(ws.id, id, {
+      role: "worker",
+      taskId: task.id,
+      model,
+      portBase,
+      ...(git ? {} : { sharedFolder: true }),
+    });
     undo.push({
       what: "close its pane",
       run: async () => {
@@ -542,9 +575,10 @@ export async function spawnWorker(
       worker: name,
       orchestrator: by?.name ?? null,
       workspace: ws.name,
-      branch,
+      folder,
+      branch: tree?.branch ?? null,
       target,
-      worktree: path,
+      worktree: tree?.path ?? null,
       portBase,
       checkCommand: settings.checkCommand,
       attempt: task.attempts ?? 1,
@@ -563,12 +597,18 @@ export async function spawnWorker(
         maxAttempts: settings.maxAttempts,
       },
       model,
-      branch,
+      folder,
+      branch: tree?.branch ?? null,
       base: target,
-      worktree: path,
+      worktree: tree?.path ?? null,
       ports: { base: portBase, count: PORT_COUNT },
       brief: "queued: submitted as soon as its Claude Code session is ready",
       note:
+        (git
+          ? ""
+          : `"${ws.name}" is not a git repository, so the worker works in its folder, beside any other worker: ` +
+            "no worktree, no branch, nothing merged or reviewed. Its changes are in place as it saves them, and " +
+            "its task is done when it delivers. ") +
         "Its comments, its delivery, a wait for the person or an exit reach you as events: do not poll it. " +
         "worker_list shows where every worker stands.",
     };
@@ -612,9 +652,9 @@ async function removeWorktree(ws: Workspace, path: string, deps: ControlDeps): P
 }
 
 /** Where a delivery stands, as far as the board says. */
-function deliveryOf(task: Task | undefined): string | null {
+function deliveryOf(task: Task | undefined, sharedFolder: boolean): string | null {
   if (!task) return null;
-  if (task.column === "done") return "landed";
+  if (task.column === "done") return sharedFolder ? "done" : "landed";
   if (task.labels.includes(READY_TO_LAND_LABEL)) return "ready";
   if (task.labels.includes(NEEDS_YOU_LABEL)) return "needs-you";
   if (task.column === "review") return "review";
@@ -639,7 +679,8 @@ export async function listWorkers(ws: Workspace, deps: ControlDeps): Promise<unk
     workers: await Promise.all(
       panes.map(async (pane) => {
         const task = board.tasks.find((entry) => entry.id === pane.taskId);
-        const tree = pane.cwd ? worktreeOf(trees, pane.cwd) : undefined;
+        const shared = pane.sharedFolder === true;
+        const tree = pane.cwd && !shared ? worktreeOf(trees, pane.cwd) : undefined;
         return {
           name: pane.name,
           task: task
@@ -650,10 +691,12 @@ export async function listWorkers(ws: Workspace, deps: ControlDeps): Promise<unk
           activity: deps.activity(pane.id)?.activity ?? null,
           running: open ? await deps.alive(pane.id).catch(() => false) : false,
           branch: tree?.branch ?? null,
-          worktree: tree && pane.cwd ? rootOf(tree, pane.cwd) : (pane.cwd ?? null),
+          worktree: shared ? null : tree && pane.cwd ? rootOf(tree, pane.cwd) : (pane.cwd ?? null),
+          // No git: it works in the workspace's folder, beside the others.
+          ...(shared ? { folder: pane.cwd ?? ws.cwd } : {}),
           model: pane.model ?? null,
           ports: typeof pane.portBase === "number" ? { base: pane.portBase, count: PORT_COUNT } : null,
-          delivery: deliveryOf(task),
+          delivery: deliveryOf(task, shared),
         };
       }),
     ),
@@ -715,9 +758,10 @@ export async function stopWorker(
   by: string | null,
 ): Promise<StoppedWorker> {
   const workers = workerDeps(deps);
+  const shared = pane.sharedFolder === true;
   // Read while the worktree still exists: it names the branch.
-  const trees = pane.cwd ? await deps.worktrees(ws.cwd).catch(() => [] as Worktree[]) : [];
-  const tree = pane.cwd ? worktreeOf(trees, pane.cwd) : undefined;
+  const trees = pane.cwd && !shared ? await deps.worktrees(ws.cwd).catch(() => [] as Worktree[]) : [];
+  const tree = pane.cwd && !shared ? worktreeOf(trees, pane.cwd) : undefined;
   const path = tree && pane.cwd ? rootOf(tree, pane.cwd) : pane.cwd;
 
   // Its processes first: nothing writes in the worktree once it is looked at,
@@ -736,7 +780,11 @@ export async function stopWorker(
     removed: false,
     branchDeleted: false,
   };
-  if (!path || !tree) {
+  if (shared) {
+    worktree.kept =
+      "it worked in the workspace's own folder, which is not a git repository: there is no worktree, and what it " +
+      "changed stays in the folder as it is";
+  } else if (!path || !tree) {
     if (path) worktree.kept = "git does not list it as a worktree any more";
   } else if (tree.isMain || inside(tree.path, ws.cwd) !== null) {
     worktree.kept = "it is the workspace's own checkout, not one Hangar made for the worker";

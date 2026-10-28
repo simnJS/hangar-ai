@@ -94,8 +94,13 @@ export const boardComment = (cwd: string, id: string, author: string, text: stri
  * refused — saying why — for everything that should stop it, owned files
  * overlapping a task in doing included.
  */
-export const boardClaimWorker = (cwd: string, id: string, worker: string, maxAttempts: number) =>
-  invoke<Task>("board_claim_worker", { cwd, id, worker, maxAttempts });
+export const boardClaimWorker = (
+  cwd: string,
+  id: string,
+  worker: string,
+  maxAttempts: number,
+  sharedFolder = false,
+) => invoke<Task>("board_claim_worker", { cwd, id, worker, maxAttempts, sharedFolder });
 
 /** Back to todo unless it waits for review or is done; `undo` takes the attempt back. */
 export const boardReleaseWorker = (cwd: string, id: string, worker: string, undo: boolean) =>

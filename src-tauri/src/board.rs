@@ -367,11 +367,16 @@ pub fn claim_task(board: &mut Board, id: &str, agent: &str) -> Result<Task, Stri
 /// (lib/workerControl.ts), and counts the attempt. Everything that stands in
 /// the way is refused here, under the board's lock, and each refusal says
 /// what to do instead: an orchestrator reads it.
+///
+/// `shared_folder`: the workspace is not a git repository, so the worker
+/// starts in its folder beside the others rather than in a worktree of its
+/// own (`folder_clash`).
 pub fn claim_for_worker(
     board: &mut Board,
     id: &str,
     worker: &str,
     max_attempts: u32,
+    shared_folder: bool,
 ) -> Result<Task, String> {
     let task = board.tasks.iter().find(|t| t.id == id).ok_or_else(|| {
         format!("No task {id} on this board. board_list_tasks lists them with their ids.")
@@ -423,7 +428,12 @@ pub fn claim_for_worker(
             task.attempts
         ));
     }
-    if let Some(clash) = ownership_clash(board, task, true) {
+    let clash = if shared_folder {
+        folder_clash(board, task).or_else(|| ownership_clash(board, task, true))
+    } else {
+        ownership_clash(board, task, true)
+    };
+    if let Some(clash) = clash {
         return Err(format!("Cannot start \"{title}\": {}", clash.message()));
     }
 
@@ -490,6 +500,9 @@ pub enum Clash<'a> {
     },
     /// Neither task says which files it owns.
     Unscoped { with: &'a Task },
+    /// Workers share one folder, outside git, and one of the two tasks does
+    /// not say which files it owns: the entering one when `mine`.
+    Folder { with: &'a Task, mine: bool },
 }
 
 impl Clash<'_> {
@@ -525,6 +538,24 @@ impl Clash<'_> {
                 with.id,
                 held_by(with)
             ),
+            Clash::Folder { with, mine: true } => format!(
+                "it does not say which files it owns, and \"{}\" ({}, in doing{}) is being worked on \
+                 in the same folder: the workspace is not a git repository, so its workers share one folder \
+                 and change it as they go. Set owns on this task (board_update_task: paths or globs \
+                 relative to the workspace folder; a folder covers everything under it) and try again, or \
+                 start it once that one leaves doing.",
+                with.title,
+                with.id,
+                held_by(with)
+            ),
+            Clash::Folder { with, mine: false } => format!(
+                "\"{}\" ({}, in doing{}) does not say which files it owns, and the workspace is not a \
+                 git repository, so its workers share one folder and change it as they go. Start this one \
+                 once that one leaves doing, or set owns on that one (board_update_task) and try again.",
+                with.title,
+                with.id,
+                held_by(with)
+            ),
         }
     }
 }
@@ -536,7 +567,6 @@ impl Clash<'_> {
 /// leaves that to the agents, as it always has — boards that never use
 /// `owns` see no change at all.
 pub fn ownership_clash<'a>(board: &'a Board, task: &Task, strict: bool) -> Option<Clash<'a>> {
-    let scoped = |owns: &[String]| owns.iter().any(|pattern| owned_segments(pattern).is_some());
     let mine = scoped(&task.owns);
     board
         .tasks
@@ -549,6 +579,29 @@ pub fn ownership_clash<'a>(board: &'a Board, task: &Task, strict: bool) -> Optio
             }
             (false, false) if strict => Some(Clash::Unscoped { with: other }),
             _ => None,
+        })
+}
+
+/// Whether `owns` names any file at all.
+fn scoped(owns: &[String]) -> bool {
+    owns.iter().any(|pattern| owned_segments(pattern).is_some())
+}
+
+/// The first task in `doing` that `task` may not run beside when workers share
+/// the workspace's folder: outside git, nothing keeps one worker's changes
+/// apart from another's until a merge, so both tasks have to say which files
+/// they own. The overlap itself is `ownership_clash`'s.
+fn folder_clash<'a>(board: &'a Board, task: &Task) -> Option<Clash<'a>> {
+    let mine = scoped(&task.owns);
+    board
+        .tasks
+        .iter()
+        .filter(|other| other.id != task.id && other.column == "doing")
+        .find_map(|other| {
+            (!mine || !scoped(&other.owns)).then_some(Clash::Folder {
+                with: other,
+                mine: !mine,
+            })
         })
 }
 
@@ -1086,7 +1139,7 @@ mod tests {
         let mut board = Board::default();
         let id = owned(&mut board, "Login form", &["src/login/**"]);
 
-        let claimed = claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        let claimed = claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
         assert_eq!(claimed.column, "doing");
         assert_eq!(claimed.assignee.as_deref(), Some("Leo"));
         assert_eq!(claimed.attempts, 1);
@@ -1104,7 +1157,7 @@ mod tests {
         claim_task(&mut board, &doing, "ava").unwrap();
 
         let refusal =
-            |board: &mut Board, id: &str| claim_for_worker(board, id, "Leo", 2).unwrap_err();
+            |board: &mut Board, id: &str| claim_for_worker(board, id, "Leo", 2, false).unwrap_err();
         assert!(refusal(&mut board, "nope").contains("board_list_tasks"));
         assert!(refusal(&mut board, &done).contains("done already"));
         assert!(refusal(&mut board, &review).contains("in review"));
@@ -1161,17 +1214,17 @@ mod tests {
     fn a_worker_claim_stops_at_the_attempt_limit() {
         let mut board = Board::default();
         let id = owned(&mut board, "Flaky", &["src/flaky.rs"]);
-        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
         release_worker(&mut board, &id, "Leo", false).unwrap();
-        claim_for_worker(&mut board, &id, "Mia", 2).unwrap();
+        claim_for_worker(&mut board, &id, "Mia", 2, false).unwrap();
         release_worker(&mut board, &id, "Mia", false).unwrap();
 
-        let refused = claim_for_worker(&mut board, &id, "Sam", 2).unwrap_err();
+        let refused = claim_for_worker(&mut board, &id, "Sam", 2, false).unwrap_err();
         assert!(refused.contains("2 worker(s) already"), "{refused}");
         assert!(refused.contains("needs-you"), "{refused}");
         assert_eq!(board.tasks[0].column, "todo");
         // The limit is the setting's, not a constant.
-        assert!(claim_for_worker(&mut board, &id, "Sam", 3).is_ok());
+        assert!(claim_for_worker(&mut board, &id, "Sam", 3, false).is_ok());
     }
 
     #[test]
@@ -1179,9 +1232,9 @@ mod tests {
         let mut board = Board::default();
         let first = todo_task(&mut board);
         let second = todo_task(&mut board);
-        claim_for_worker(&mut board, &first, "Leo", 2).unwrap();
+        claim_for_worker(&mut board, &first, "Leo", 2, false).unwrap();
 
-        let refused = claim_for_worker(&mut board, &second, "Mia", 2).unwrap_err();
+        let refused = claim_for_worker(&mut board, &second, "Mia", 2, false).unwrap_err();
         assert!(refused.contains("says which files it owns"), "{refused}");
         assert!(refused.contains("Set owns"), "{refused}");
         // Once it says what it owns, it runs beside the other one.
@@ -1194,7 +1247,38 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(claim_for_worker(&mut board, &second, "Mia", 2).is_ok());
+        assert!(claim_for_worker(&mut board, &second, "Mia", 2, false).is_ok());
+    }
+
+    #[test]
+    fn workers_sharing_a_folder_without_git_all_say_what_they_own() {
+        let mut board = Board::default();
+        let unscoped = todo_task(&mut board);
+        let scoped = owned(&mut board, "Scoped", &["docs/**"]);
+        let other = owned(&mut board, "Other", &["src/**"]);
+        let overlapping = owned(&mut board, "Overlapping", &["docs/guide.md"]);
+
+        // Alone, a task that owns nothing runs.
+        claim_for_worker(&mut board, &unscoped, "Leo", 2, true).unwrap();
+        // Beside it, nothing else does, however scoped.
+        let refused = claim_for_worker(&mut board, &scoped, "Mia", 2, true).unwrap_err();
+        assert!(
+            refused.contains("does not say which files it owns"),
+            "{refused}"
+        );
+        assert!(refused.contains("not a git repository"), "{refused}");
+        // In a repository, worktrees keep them apart until they land.
+        claim_for_worker(&mut board, &scoped, "Mia", 2, false).unwrap();
+        release_worker(&mut board, &scoped, "Mia", true).unwrap();
+
+        release_worker(&mut board, &unscoped, "Leo", true).unwrap();
+        claim_for_worker(&mut board, &scoped, "Mia", 2, true).unwrap();
+        let refused = claim_for_worker(&mut board, &unscoped, "Leo", 2, true).unwrap_err();
+        assert!(refused.contains("Set owns on this task"), "{refused}");
+        // Scoped and apart, they run side by side; sharing a file, they do not.
+        claim_for_worker(&mut board, &other, "Sam", 2, true).unwrap();
+        let refused = claim_for_worker(&mut board, &overlapping, "Ivy", 2, true).unwrap_err();
+        assert!(refused.contains("owns too"), "{refused}");
     }
 
     #[test]
@@ -1203,7 +1287,7 @@ mod tests {
         let id = owned(&mut board, "Login", &["src/login/**"]);
 
         // A start that never got going takes its attempt back.
-        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
         let undone = release_worker(&mut board, &id, "Leo", true).unwrap();
         assert_eq!(
             (undone.column.as_str(), undone.assignee, undone.attempts),
@@ -1212,12 +1296,12 @@ mod tests {
         assert_eq!(undone.doing_since, None);
 
         // A stopped worker's attempt still counts.
-        claim_for_worker(&mut board, &id, "Leo", 2).unwrap();
+        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
         let stopped = release_worker(&mut board, &id, "Leo", false).unwrap();
         assert_eq!((stopped.column.as_str(), stopped.attempts), ("todo", 1));
 
         // Waiting for review: it stays where it is.
-        claim_for_worker(&mut board, &id, "Mia", 2).unwrap();
+        claim_for_worker(&mut board, &id, "Mia", 2, false).unwrap();
         move_to(&mut board, &id, "review");
         let kept = release_worker(&mut board, &id, "Mia", false).unwrap();
         assert_eq!(

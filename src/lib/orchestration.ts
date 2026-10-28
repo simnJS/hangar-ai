@@ -3,7 +3,9 @@ import type { OrchestrationSettings, Pane, Workspace } from "../types";
 /**
  * A workspace's orchestration: one Claude Code pane pinned as its
  * orchestrator, which plans on the board and hands each task to a worker pane
- * of its own, in a worktree, then lands what the workers deliver.
+ * of its own, in a worktree, then lands what the workers deliver. In a folder
+ * that is not a git repository, the workers share that folder instead and
+ * nothing is merged: a task is done when its worker delivers.
  *
  * The limits here are Hangar's to hold, not the orchestrator's: a prompt can
  * ask a model to start no more than three workers, only code can refuse the

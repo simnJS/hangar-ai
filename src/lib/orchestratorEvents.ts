@@ -22,7 +22,16 @@ export type OrchestratorEvent =
       taskId: string;
       title: string;
       worker: string;
-      outcome: "landed" | "ready" | "conflict" | "checkFailed" | "changesRequested" | "dirty" | "stale" | "error";
+      outcome:
+        | "landed"
+        | "done"
+        | "ready"
+        | "conflict"
+        | "checkFailed"
+        | "changesRequested"
+        | "dirty"
+        | "stale"
+        | "error";
       detail: string;
     };
 
@@ -116,6 +125,8 @@ const onTask = (taskId: string | null, titles: Titles) =>
 
 const DELIVERY: Record<Extract<OrchestratorEvent, { kind: "delivery" }>["outcome"], string> = {
   landed: "landed: merged on the branch, task done",
+  // A worker in a workspace that is not a git repository: nothing to merge.
+  done: "is in: its changes are in the workspace's folder, task done",
   ready: "passed its check and review; it waits for the person to land it",
   conflict: "hit a merge conflict; Hangar sent the worker what to fix",
   checkFailed: "failed the check; Hangar sent the worker the output",
@@ -324,7 +335,9 @@ export function renderDelta(events: OrchestratorEvent[], tasks: BoardTask[], wor
   const out = [head, ...lines];
 
   const finished = events.some(
-    (e) => (e.kind === "delivery" && e.outcome === "landed") || (e.kind === "taskMoved" && e.to === "done"),
+    (e) =>
+      (e.kind === "delivery" && (e.outcome === "landed" || e.outcome === "done")) ||
+      (e.kind === "taskMoved" && e.to === "done"),
   );
   if (finished && tasks.length) {
     const ready = readyTasks(tasks);

@@ -22,6 +22,9 @@ import type { Pane, ShellInfo, Workspace } from "../types";
  * tested: new commits on it replace it with a delivery of their own, through
  * the merge, the check and the review again, and it never lands past them.
  *
+ * A worker in a workspace that is not a git repository has no branch: what it
+ * hands in is done as it is (doneInFolder).
+ *
  * Every text below that a model reads is English and says what to do next.
  */
 
@@ -149,6 +152,8 @@ export { NEEDS_YOU_LABEL };
 export const MAX_FAILED_DELIVERIES = 3;
 /** How the board's comments count the failed deliveries: they outlive the app. */
 const FAILED = "Delivery failed";
+/** A worker done without git keeps its pane this long: its answer has to reach it first. */
+const CLOSE_AFTER_MS = 5_000;
 
 /** The app's own wiring: delivery.rs, the board, the hangar-bridge queue. */
 export function deliveryDeps(shells: () => ShellInfo[]): DeliveryDeps {
@@ -372,6 +377,7 @@ async function submit(
         `"${task.title}" is in ${task.column}, not doing: nobody is meant to be working on it now. Stop here.`,
       );
     }
+    if (pane.sharedFolder) return doneInFolder(ws, pane, task, text(args.summary), deps, delivery);
 
     const settings = orchestrationOf(ws);
     const worktree = resolvePath(ws.cwd, pane.cwd || ws.cwd);
@@ -422,6 +428,60 @@ async function submit(
   } finally {
     if (!started) inFlight.delete(taskId);
   }
+}
+
+/**
+ * A worker in a workspace that is not a git repository hands its task in:
+ * there is no branch to merge, check or review, and its changes are in the
+ * folder already. The task is done and the orchestrator told; the pane goes,
+ * as it does once a delivery lands, a moment after this answer reaches it.
+ */
+async function doneInFolder(
+  ws: Workspace,
+  pane: Pane,
+  task: Task,
+  summary: string | null,
+  deps: ControlDeps,
+  delivery: DeliveryDeps,
+): Promise<unknown> {
+  await delivery.board.update(ws.cwd, task.id, {
+    column: "done",
+    labels: without(task.labels, READY_LABEL, NEEDS_YOU_LABEL),
+  });
+  await delivery.board.comment(
+    ws.cwd,
+    task.id,
+    HANGAR,
+    [
+      `Done by ${pane.name} in the workspace's folder. It is not a git repository, so Hangar merged, checked and ` +
+        "reviewed nothing: the changes are in place as the worker left them.",
+      summary ? `Summary: ${summary}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  const detail = summary ? `summary: ${summary}` : "";
+  settled.set(task.id, { outcome: "done", detail, at: Date.now() });
+  postOrchestratorEvent(ws.id, {
+    kind: "delivery",
+    taskId: task.id,
+    title: task.title,
+    worker: pane.name,
+    outcome: "done",
+    detail,
+  });
+  void deps.sleep(CLOSE_AFTER_MS).then(() => {
+    const current = deps.snapshot().workspaces.find((entry) => entry.id === ws.id);
+    if (current?.panes.some((entry) => entry.id === pane.id)) deps.closePane(ws.id, pane.id);
+  });
+  return {
+    submitted: true,
+    done: true,
+    task: task.title,
+    next:
+      "Your task is done: the workspace is not a git repository, so there is nothing to merge, and the " +
+      "orchestrator has been told. End your turn now; Hangar closes your pane in a moment.",
+  };
 }
 
 /**

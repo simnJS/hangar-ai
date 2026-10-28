@@ -130,7 +130,12 @@ function world(
   /** Uncommitted files per worktree, and commits ahead per branch. */
   const dirty = new Map<string, ChangedFile[]>();
   const ahead = new Map<string, number>();
-  const fail: { worktreeAdd?: string; addPane?: boolean; enqueue?: string; repo?: "none" | "detached" } = {};
+  const fail: {
+    worktreeAdd?: string;
+    addPane?: boolean;
+    enqueue?: string;
+    repo?: "none" | "detached" | "noGit";
+  } = {};
   let next = 10;
 
   const mapWorkspace = (id: string, map: (ws: Workspace) => Workspace) => {
@@ -149,8 +154,8 @@ function world(
       log.push(`kill:${paneId}`);
     },
     boardLoad: async () => ({ tasks: [...tasks.values()] }),
-    claim: async (_cwd, id, worker, maxAttempts) => {
-      log.push(`claim:${id}:${worker}:${maxAttempts}`);
+    claim: async (_cwd, id, worker, maxAttempts, sharedFolder) => {
+      log.push(`claim:${id}:${worker}:${maxAttempts}${sharedFolder ? ":shared" : ""}`);
       const entry = tasks.get(id);
       if (!entry) throw `No task ${id} on this board.`;
       if (entry.column !== "todo") throw `"${entry.title}" is in ${entry.column} already.`;
@@ -180,10 +185,10 @@ function world(
       return { ...entry };
     },
     repoInfo: async () => ({
-      installed: true,
-      isRepo: fail.repo !== "none",
-      root: fail.repo === "none" ? null : REPO,
-      mainRoot: fail.repo === "none" ? null : REPO,
+      installed: fail.repo !== "noGit",
+      isRepo: fail.repo !== "none" && fail.repo !== "noGit",
+      root: fail.repo === "none" || fail.repo === "noGit" ? null : REPO,
+      mainRoot: fail.repo === "none" || fail.repo === "noGit" ? null : REPO,
       isLinkedWorktree: false,
       branch: fail.repo === "detached" ? null : "main",
       head: "abc1234",
@@ -453,19 +458,17 @@ describe("worker_spawn", () => {
     expect(brief).toContain("This is attempt 2 of 2");
   });
 
-  it("refuses a workspace with no room, no repository or no branch to start from", async () => {
+  it("refuses a workspace with no room, or a repository with no branch to start from", async () => {
     const crowded = Array.from({ length: MAX_PANES }, (_, at) =>
       pane(`c${at}`, `C${at}`, "shell", at === 0 ? { role: "orchestrator", agent: "claude" } : {}),
     );
     const full = world({ tasks: [task("t1", "One")], panes: crowded });
     await expect(full.call("worker_spawn", { task: "t1" }, { paneId: "c0" })).rejects.toThrow(/is full/);
 
-    const bare = world({ tasks: [task("t1", "One")] });
-    bare.fail.repo = "none";
-    await expect(bare.call("worker_spawn", { task: "t1" })).rejects.toThrow(/not a git repository/);
-    bare.fail.repo = "detached";
-    await expect(bare.call("worker_spawn", { task: "t1" })).rejects.toThrow(/detached HEAD/);
-    expect(bare.log).toEqual([]);
+    const detached = world({ tasks: [task("t1", "One")] });
+    detached.fail.repo = "detached";
+    await expect(detached.call("worker_spawn", { task: "t1" })).rejects.toThrow(/detached HEAD/);
+    expect(detached.log).toEqual([]);
   });
 
   it("undoes the claim when the worktree cannot be made", async () => {
@@ -587,6 +590,53 @@ describe("worker_spawn", () => {
     const state = app.deps.snapshot();
     app.deps.snapshot = () => ({ ...state, settings: { ...state.settings, claudeBridge: false } });
     await expect(app.call("worker_spawn", { task: "t1" })).rejects.toThrow(/bridge is turned off/);
+  });
+});
+
+describe("a workspace that is not a git repository", () => {
+  it("starts the worker in its folder: no worktree, no branch, and a brief that says so", async () => {
+    const app = world({ tasks: [task("t1", "Arena timer", { owns: ["Content/Arena/**"] })] });
+    app.fail.repo = "none";
+
+    const spawned = await app.call("worker_spawn", { task: "t1" });
+
+    expect(spawned).toMatchObject({ worker: "Mia", folder: REPO, branch: null, base: null, worktree: null });
+    expect(spawned.note).toMatch(/"Shop" is not a git repository.*its task is done when it delivers/);
+    expect(app.paneNamed("Mia")).toMatchObject({ cwd: REPO, role: "worker", taskId: "t1", sharedFolder: true });
+    expect(app.log.filter((line) => /^(claim|worktree|copy):/.test(line))).toEqual(["claim:t1:Mia:2:shared"]);
+    const brief = app.briefs.get(app.paneNamed("Mia")!.id)!;
+    expect(brief).toContain(`You work in the workspace's own folder: ${REPO}. It is not a git repository`);
+    expect(brief).toContain("Files you own: `Content/Arena/**`");
+    expect(brief).toContain("Nothing is merged or reviewed here");
+    expect(brief).not.toMatch(/worktree|Commit everything/);
+
+    const listed = await app.call("worker_list");
+    expect(listed.workers[0]).toMatchObject({ name: "Mia", folder: REPO, branch: null, worktree: null });
+
+    const stopped = await app.call("worker_stop", { worker: "Mia" });
+    expect(stopped.worktree).toMatchObject({ path: REPO, removed: false, branchDeleted: false });
+    expect(stopped.worktree.kept).toMatch(/workspace's own folder.*stays in the folder/);
+    expect(app.log.some((line) => /^(unworktree|unbranch|ahead):/.test(line))).toBe(false);
+    expect(app.tasks.get("t1")).toMatchObject({ column: "todo", assignee: null });
+  });
+
+  it("does the same when git is not installed at all", async () => {
+    const app = world({ tasks: [task("t1", "One", { owns: ["a/**"] })] });
+    app.fail.repo = "noGit";
+    expect(await app.call("worker_spawn", { task: "t1" })).toMatchObject({ folder: REPO, worktree: null });
+  });
+
+  it("undoes a start that fails without leaving anything in the folder to remove", async () => {
+    const app = world({ tasks: [task("t1", "One", { owns: ["a/**"] })] });
+    app.fail.repo = "none";
+    app.fail.enqueue = "the bridge is gone";
+
+    await expect(app.call("worker_spawn", { task: "t1" })).rejects.toThrow(/the bridge is gone.*Nothing was left behind/);
+    expect(app.log.filter((line) => /^(kill|close|unworktree|release):/.test(line))).toEqual([
+      "kill:p10",
+      "close:p10",
+      "release:t1:Mia:true",
+    ]);
   });
 });
 
@@ -716,6 +766,7 @@ describe("names", () => {
       worker: "Sam",
       orchestrator: null,
       workspace: "Shop",
+      folder: "/w",
       branch: "hangar/t-t",
       target: "main",
       worktree: "/w",
@@ -731,5 +782,26 @@ describe("names", () => {
     // Spelled out: a worker that guesses them calls with task_id and comment.
     expect(brief).toContain('board_comment_task {id: "t", text}');
     expect(brief).toContain("delivery_submit {summary}");
+  });
+
+  it("writes a brief for a folder without git that never mentions a branch", () => {
+    const brief = workerBrief({
+      task: { id: "t", title: "T", description: "Do it.", owns: ["Content/**"] },
+      worker: "Sam",
+      orchestrator: "Ava",
+      workspace: "Island",
+      folder: "C:\\uefn\\Island",
+      branch: null,
+      target: null,
+      worktree: null,
+      portBase: PORT_POOL_START,
+      checkCommand: "verse-check",
+      attempt: 1,
+      maxAttempts: 2,
+    });
+    expect(brief).toContain("Its orchestrator, Ava, started you");
+    expect(brief).toContain("- `verse-check` passes in the folder.");
+    expect(brief).toContain("never revert, move, reformat or delete a file that is not yours");
+    expect(brief).not.toMatch(/worktree|on branch|Commit everything/);
   });
 });
