@@ -238,6 +238,20 @@ jobs:
           # away from them is what lets all three run at once.
           includeUpdaterJson: false
 
+      # `tauri build` makes the phone app first (beforeBuildCommand in
+      # tauri.conf.json), and the binary embeds whatever dist-mobile/ holds.
+      # Without it the build still succeeds and every phone gets a page saying
+      # the app is missing, so this job fails instead: the release stays a
+      # draft and nothing reaches /releases/latest/.
+      - name: Check that Hangar Mobile is in the build
+        shell: bash
+        run: |
+          if ! grep -q '<div id="root"></div>' dist-mobile/index.html 2>/dev/null || [ ! -f dist-mobile/sw.js ]; then
+            echo "::error::dist-mobile/ is missing or incomplete: the installers would serve the placeholder instead of Hangar Mobile"
+            exit 1
+          fi
+          ls dist-mobile dist-mobile/assets
+
   # The single writer of `latest.json`, and the only thing that publishes.
   # Everything the updater relies on is decided here, once, with all three
   # platforms already on the release.

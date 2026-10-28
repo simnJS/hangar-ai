@@ -50,6 +50,12 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # Hangar Mobile, the phone app the desktop binary embeds. `pnpm build`
+      # type-checks it but bundles only the desktop's entry, so a phone app
+      # that no longer builds would otherwise first fail on a release tag.
+      - name: Build Hangar Mobile
+        run: pnpm mobile:build
+
       # The same command Vercel runs, so a site that will not build is a red
       # check on the commit rather than a failed production deployment nobody
       # is told about. It is what caught nothing on the day five of them went

@@ -57,6 +57,7 @@ settings. It is not a model provider, and it has no online service of its own.
 - [Features](#features)
 - [Install](#install)
 - [Getting started](#getting-started)
+- [Hangar Mobile](#hangar-mobile)
 - [How agents use Hangar's MCP server](#how-agents-use-hangars-mcp-server)
 - [Privacy](#privacy)
 - [Build from source](#build-from-source)
@@ -227,6 +228,54 @@ The command palette lists every command. Shortcuts can be changed in
 **Settings → Shortcuts**, and the defaults use `Ctrl` on Windows and Linux and `Cmd` on
 macOS.
 
+## Hangar Mobile
+
+Hangar Mobile follows and steers your projects from your phone, while Hangar keeps running
+on your PC. **For you** lists what waits for you in every project: an agent asking for a
+permission, a question from an orchestrator, a delivery ready to land. You can read any
+pane's screen as it updates, answer an agent, allow or deny a permission, press `Esc` or
+`Enter`, and attach a photo or a file. You can also talk to the project manager, open the
+images and files agents share with you, and see what happened since your last visit.
+Notifications reach the phone even with the app closed. Merging a delivery is still done
+on the PC.
+
+It is a web app that Hangar itself serves, and that you add to the phone's Home Screen.
+There is no app store, no account and no server of ours in between.
+
+**Set it up** (once, about a minute):
+
+1. **Install [Tailscale](https://tailscale.com/download)** on the PC and on the phone, and
+   sign in to the same account on both. It is a free app that links your own devices
+   through a private network, wherever they are.
+2. **Turn Hangar Mobile on** in Hangar, under **Settings → Mobile**.
+3. **Click "Turn on HTTPS access"** in the same section. Tailscale then gives Hangar
+   Mobile an address like `https://your-pc.your-tailnet.ts.net`. The first time, Tailscale
+   may ask you to allow HTTPS on your network: open the page Hangar shows, then click
+   again.
+4. **Click "Show the code" and scan the QR code** with the phone's camera. It opens Hangar
+   Mobile and pairs the phone. You can also type the 6-digit code, which works once and
+   for five minutes.
+5. **Add it to the Home Screen.** On an iPhone, in Safari, tap **Share**, then **Add to
+   Home Screen**. On Android, in Chrome, open the menu and choose **Add to Home screen**
+   (or **Install app**). Open Hangar from there and tap **Turn on notifications**.
+
+> [!NOTE]
+> On an iPhone, notifications need **iOS 16.4 or later**, and they only reach the app
+> opened from the Home Screen, not a Safari tab.
+
+**Security:**
+
+- Hangar Mobile listens on `127.0.0.1` only, on a port of its own, apart from the agents'
+  API: nothing is opened on your local network or on the Internet.
+- Tailscale Serve is the only way in, over HTTPS, and only from devices on your own
+  Tailscale network.
+- Each phone pairs with a one-time code. **Settings → Mobile** lists the paired phones, and
+  revoking one cuts it off and stops its notifications.
+
+Your PC has to stay on, with Hangar open, for the phone to reach it. For a few days away,
+**Settings → Mobile** has two options: keep the PC from going to sleep while Hangar Mobile
+is on, and start Hangar when you log in, with your workspaces and Hangar Mobile.
+
 ## How agents use Hangar's MCP server
 
 The MCP server is the app's own binary, started as `hangar-ai --mcp` over stdio. Each call
@@ -255,6 +304,7 @@ keeps a backup the first time it writes a file. OpenCode is not in the panel yet
 | `workspace_list`, `workspace_window`, `pane_list`, `pane_create`, `pane_send`, `pane_read`, `pane_restart`, `pane_close`, `pane_focus` | See the other panes and their state, open a pane with another agent (in a worktree, for instance), type into a pane or queue a prompt until it is idle, read its output, and show a pane to you. |
 | `worker_spawn`, `worker_list`, `worker_stop`, `delivery_submit`, `delivery_status` | Orchestration. The orchestrator starts, lists and stops workers. A worker hands in its branch for check, review and merge. |
 | `model_show`, `model_snapshot`, `model_close` | Open a 3D model in the preview panel, render it to an image to check it, and close it. |
+| `phone_share` | Send you a file on your phone through [Hangar Mobile](#hangar-mobile): a screenshot, a render, a report you asked to see. |
 
 You can test the server by hand from a build:
 
@@ -272,7 +322,9 @@ and the statistics stay on your machine:
 - the app state and the memory are in the app's data folder;
 - the statistics are computed from the transcripts the agents already keep locally, and
   are never sent anywhere;
-- the MCP API listens on `127.0.0.1` only, behind a token that changes at each launch.
+- the MCP API listens on `127.0.0.1` only, behind a token that changes at each launch;
+- [Hangar Mobile](#hangar-mobile), off until you turn it on, listens on `127.0.0.1` too, and
+  only your own devices reach it, through Tailscale.
 
 Hangar itself only goes online in these cases:
 
@@ -282,6 +334,9 @@ Hangar itself only goes online in these cases:
   you turn on the optional cleanup pass, which also runs on Groq.
 - **Discord.** Rich Presence talks to your local Discord client, and only if you turn it
   on.
+- **Hangar Mobile notifications.** Once you turn them on on a phone, the PC sends them
+  through that phone's push service (Apple's, Google's or Mozilla's), encrypted for that
+  phone alone, so the push service cannot read them.
 
 The agents you run talk to their own providers under their own settings. Hangar does not
 change that.
@@ -312,8 +367,10 @@ Then:
 ```bash
 pnpm install
 pnpm tauri dev      # run the app with hot reload
-pnpm tauri build    # build the installers for this platform
+pnpm tauri build    # build the installers for this platform, Hangar Mobile included
 pnpm demo:dev       # the browser demo, with canned agents, on http://localhost:4300
+pnpm mobile:dev     # Hangar Mobile against a fake PC, on http://localhost:4310
+pnpm mobile:build   # Hangar Mobile into dist-mobile/, which a dev build serves to the phone
 ```
 
 > [!WARNING]
@@ -326,6 +383,7 @@ pnpm demo:dev       # the browser demo, with canned agents, on http://localhost:
 
 ```
 src/                 React frontend (components, lib, styles, i18n)
+src/mobile/          Hangar Mobile, the phone app, built into dist-mobile/ and embedded in the binary
 src-tauri/src/       Rust backend: PTYs, board, memory, MCP server, git, deliveries, stats, dictation
 src-tauri/claude-mod/hangar-bridge/
                      the Claude Code mod that reports session state to Hangar
