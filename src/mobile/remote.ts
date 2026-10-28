@@ -15,31 +15,29 @@ import { parseVisit, touchVisit, type Visit } from "./visit";
 
 export interface Boot {
   client: Client;
-  mock: boolean;
   /** A pairing code from the QR code's link (`?code=`). */
   code: string | null;
-  /** The fake PC's offline scenario: what it last said, and when. */
-  seed: { lastOk: number; state: RemoteState } | null;
 }
 
 /** Reads the address: the fake PC or the real one, and a code to pair with. */
 export async function bootstrap(): Promise<Boot> {
   const params = new URLSearchParams(location.search);
-  const mock = params.has("mock") || import.meta.env.DEV;
   const code = params.get("code");
-  if (!mock) {
-    return { client: createClient({ lastOk: loadNumber("lastOk"), ...answers() }), mock, code, seed: null };
+  if (!params.has("mock") && !import.meta.env.DEV) {
+    return { client: createClient({ lastOk: loadNumber("lastOk"), ...answers() }), code };
   }
-  keepMockApart();
   const { createMock, scenarioOf } = await import("./mock");
-  const fake = createMock(scenarioOf(params.get("mock")));
+  const scenario = scenarioOf(params.get("mock"));
+  keepMockApart(scenario);
+  const fake = createMock(scenario);
+  // Offline, the fake PC never answers: the phone remembers what it said last.
   if (fake.seed) {
     save("lastOk", String(fake.seed.lastOk));
     save("state", JSON.stringify(fake.seed.state));
     save("paired", "1");
   }
   const client = createClient({ fetch: fake.fetch, fileUrl: fake.fileUrl, lastOk: loadNumber("lastOk"), ...answers() });
-  return { client, mock, code, seed: fake.seed };
+  return { client, code };
 }
 
 /** The client's callbacks, which the app subscribes to once it runs. */
@@ -49,20 +47,8 @@ const answers = () => ({
   onAnswer: (at: number) => listeners.answer(at),
 });
 
-/** Writes at most every `ms`, so a 2 s poll does not rewrite storage each time. */
-function throttled(ms: number, write: () => void) {
-  let last = 0;
-  return () => {
-    const now = Date.now();
-    if (now - last < ms) return;
-    last = now;
-    write();
-  };
-}
-
 export interface Remote {
   client: Client;
-  mock: boolean;
   /** null until the PC (or what the phone remembers) says. */
   paired: boolean | null;
   /** The phone was paired, and the PC no longer knows it. */
@@ -100,7 +86,7 @@ export function useRemote(boot: Boot): Remote {
   sharesRef.current = shares;
 
   useEffect(() => {
-    listeners.answer = throttled(10_000, () => save("lastOk", String(client.connection().lastOk)));
+    listeners.answer = (at) => save("lastOk", String(at));
     listeners.unpaired = () => {
       setLostPairing(load("paired") === "1");
       save("paired", null);
@@ -206,5 +192,5 @@ export function useRemote(boot: Boot): Remote {
     30_000,
   );
 
-  return { client, mock: boot.mock, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, pair, refresh };
+  return { client, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, pair, refresh };
 }

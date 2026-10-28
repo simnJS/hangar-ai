@@ -122,6 +122,16 @@ describe("the client's errors", () => {
     expect(onUnpaired).toHaveBeenCalledOnce();
   });
 
+  it("reads a pairing code turned down as refused, not as a lost pairing", async () => {
+    const onUnpaired = vi.fn();
+    const { fetch } = fakeFetch(json(401, { error: "bad-code" }), json(403, { error: "expired" }));
+    const client = createClient({ fetch, onUnpaired });
+    const wrong = await failure(client.pair("000000", "phone"));
+    expect([wrong.kind, wrong.code, wrong.status]).toEqual(["refused", "bad-code", 401]);
+    expect((await failure(client.pair("111111", "phone"))).code).toBe("expired");
+    expect(onUnpaired).not.toHaveBeenCalled();
+  });
+
   it("turns a 503 pc-busy into `busy`", async () => {
     const { fetch } = fakeFetch(json(503, { error: "pc-busy" }));
     const error = await failure(createClient({ fetch }).state());

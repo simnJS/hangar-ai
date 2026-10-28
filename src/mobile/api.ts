@@ -212,6 +212,7 @@ export function createClient(options: ClientOptions = {}) {
     body: BodyInit | undefined,
     headers: Record<string, string>,
     timeoutMs: number,
+    { pairing = false } = {},
   ): Promise<unknown> {
     const abort = new AbortController();
     const entry = { at: now() };
@@ -243,7 +244,7 @@ export function createClient(options: ClientOptions = {}) {
     }
     answered();
     if (response.status === 401) {
-      options.onUnpaired?.();
+      if (!pairing) options.onUnpaired?.();
       throw new ApiError("unpaired", reason ?? "unpaired", 401);
     }
     if (!response.ok) throw new ApiError("refused", reason ?? `http-${response.status}`, response.status);
@@ -271,8 +272,22 @@ export function createClient(options: ClientOptions = {}) {
 
   return {
     health: () => request("GET", "/m/api/health", undefined, {}, 6_000) as Promise<Health>,
-    pair: (code: string, device: string) =>
-      post("/m/api/pair", { code, device }) as Promise<{ device: Device }>,
+    /** A code the PC turns down is `refused`, whatever its status: the phone was never paired by it. */
+    pair: async (code: string, device: string) => {
+      try {
+        return (await request(
+          "POST",
+          "/m/api/pair",
+          JSON.stringify({ code, device }),
+          { "Content-Type": "application/json" },
+          CALL_TIMEOUT_MS,
+          { pairing: true },
+        )) as { device: Device };
+      } catch (error) {
+        if (error instanceof ApiError && error.kind === "unpaired") throw new ApiError("refused", error.code, error.status);
+        throw error;
+      }
+    },
 
     state: () => call<RemoteState>("state", {}),
     screen: (pane: string, lines?: number) =>

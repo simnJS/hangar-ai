@@ -3,14 +3,14 @@
  * or refuse writes (private browsing, cleared data): every read falls back to
  * nothing, and the app works without it.
  *
- * The fake PC keeps its own, so trying it never leaves fake projects behind
- * for the real app to show while the PC is away.
+ * The fake PC keeps its own, one per scenario, so trying it never leaves
+ * fake projects behind for the real app to show while the PC is away.
  */
 
 let prefix = "hangar.mobile.";
 
-export function keepMockApart(): void {
-  prefix = "hangar.mobile.mock.";
+export function keepMockApart(scenario: string): void {
+  prefix = `hangar.mobile.mock.${scenario}.`;
 }
 
 export function load(key: string): string | null {

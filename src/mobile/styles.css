@@ -638,13 +638,6 @@ img {
   white-space: nowrap;
 }
 
-.row__end {
-  flex: none;
-  color: var(--fg-3);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
 .chevron {
   --icon: 16px;
   color: var(--fg-3);

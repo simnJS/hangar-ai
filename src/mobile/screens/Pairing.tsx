@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { Logo } from "../components/Icon";
 import { errorText } from "../errors";
@@ -15,7 +15,12 @@ export function Pairing() {
   const { pair, lostPairing, codeRefused } = useRemoteContext();
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
-  const [error, setError] = useState<string | null>(() => (codeRefused ? refusal(codeRefused) : null));
+  const [error, setError] = useState<string | null>(null);
+
+  // The QR code's own code, tried before this screen knew.
+  useEffect(() => {
+    if (codeRefused) setError(refusal(codeRefused));
+  }, [codeRefused]);
 
   const submit = async (value: string) => {
     if (value.length !== 6 || pairing) return;
@@ -78,6 +83,6 @@ export function Pairing() {
 
 /** A refused code says so; the PC away or busy says that instead. */
 function refusal(error: unknown): string {
-  if (error instanceof ApiError && (error.kind === "refused" || error.kind === "unpaired")) return t("pair.refused");
+  if (error instanceof ApiError && error.kind === "refused") return t("pair.refused");
   return errorText(error);
 }
