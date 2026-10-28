@@ -8,7 +8,9 @@
  * it last knew even with the PC out of reach. Nothing under /m/ is ever
  * cached: the API and the shared files always come from the PC.
  *
- * Push notifications (task M4) add their handlers here.
+ * It also shows the push notifications the PC sends
+ * (src-tauri/src/remote/push.rs), app closed or not, and opens the screen one
+ * is about when it is tapped.
  */
 
 const SHELL = /*SHELL*/[];
@@ -62,5 +64,87 @@ self.addEventListener("fetch", (event) => {
           return response;
         }),
     ),
+  );
+});
+
+/* ── Push notifications ──────────────────────────────────────────── */
+
+/** A screen of the app from a notification's `url`; anything off this site is the app's start. */
+function screenOf(url) {
+  try {
+    const target = new URL(typeof url === "string" ? url : "./#/", self.registration.scope);
+    return target.origin === self.location.origin ? target.href : self.registration.scope;
+  } catch {
+    return self.registration.scope;
+  }
+}
+
+// Every push is shown: a browser takes one that shows nothing for abuse, and
+// stops delivering them.
+self.addEventListener("push", (event) => {
+  let message = {};
+  try {
+    message = event.data ? event.data.json() : {};
+  } catch {
+    message = { body: event.data ? event.data.text() : "" };
+  }
+  const title = typeof message.title === "string" && message.title ? message.title : "Hangar";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: typeof message.body === "string" ? message.body : "",
+      icon: "./icon-192.png",
+      badge: "./icon-192.png",
+      data: { url: screenOf(message.url) },
+    }),
+  );
+});
+
+// The app already open is brought forward and told the screen (hooks.ts,
+// useNotificationOpens); otherwise it opens on it.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = screenOf(event.notification.data && event.notification.data.url);
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const open = windows.find((client) => client.focused) ?? windows[0];
+      if (open) {
+        try {
+          await open.focus();
+          open.postMessage({ type: "hangar:open", url });
+          return;
+        } catch {
+          // It could not be brought forward: a window of its own, then.
+        }
+      }
+      await self.clients.openWindow(url);
+    })(),
+  );
+});
+
+// The browser moved this phone's subscription: the PC is given the new one,
+// in the phone's language, rather than pushing to the old one in vain.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(
+    (async () => {
+      const answer = await fetch("/m/api/push/key", { credentials: "same-origin", cache: "no-store" });
+      if (!answer.ok) return;
+      const { key } = await answer.json();
+      const base64 = key.replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
+      const subscription = await self.registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: Uint8Array.from(raw, (char) => char.charCodeAt(0)),
+      });
+      const lang = /^fr(-|_|$)/i.test(self.navigator.language || "") ? "fr" : "en";
+      await fetch("/m/api/push/subscribe", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-Hangar": "1" },
+        body: JSON.stringify({ subscription: subscription.toJSON(), lang }),
+      });
+    })().catch(() => {
+      // The next time the app opens, it subscribes again.
+    }),
   );
 });

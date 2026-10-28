@@ -26,6 +26,13 @@ export function scenarioOf(value: string | null): Scenario {
 
 const MIN = 60_000;
 
+/**
+ * The fake PC's VAPID key: a real P-256 point (RFC 8291's example browser
+ * key), so a browser subscribes with it all the same; nothing is ever pushed.
+ */
+export const PUSH_KEY =
+  "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
 interface FakePane extends Pane {
   workspaceId: string;
   /** The screen above Claude Code's input box. */
@@ -359,6 +366,15 @@ export function createMock(scenario: Scenario, now = Date.now()): Mock {
     if (path.startsWith("/m/api/shares")) {
       const since = Number(new URL(path, "http://pc").searchParams.get("since") ?? 0);
       return json(200, { shares: world.shares.filter((share) => share.at > since) });
+    }
+    if (path === "/m/api/push/key") return json(200, { key: PUSH_KEY });
+    if (path === "/m/api/push/subscribe") {
+      if (method === "DELETE") return json(200, { subscribed: false });
+      const endpoint = (body as { subscription?: { endpoint?: unknown } } | undefined)?.subscription?.endpoint;
+      if (typeof endpoint !== "string" || !endpoint.startsWith("https://")) {
+        return json(400, { error: "bad-subscription", message: "the endpoint is not an https address" });
+      }
+      return json(200, { subscribed: true });
     }
     if (path.startsWith("/m/api/upload")) {
       const name = new URL(path, "http://pc").searchParams.get("name") ?? "file";

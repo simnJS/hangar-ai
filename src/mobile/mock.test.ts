@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, createClient } from "./api";
-import { createMock, scenarioOf } from "./mock";
+import { PUSH_KEY, createMock, scenarioOf } from "./mock";
 
 /** The fake PC, reached through the real client, so it keeps to the contract. */
 function fakePc(scenario: Parameters<typeof createMock>[0] = "default") {
@@ -80,5 +80,19 @@ describe("the fake PC", () => {
     const client = fakePc();
     const { path } = await settle(client.upload("ws-iabench", new Blob(["x"]), "photo.jpg"), 1_000);
     expect(path).toMatch(/\.hangar\\uploads\\.*-photo\.jpg$/);
+  });
+
+  it("takes a push subscription like the PC, an https one only", async () => {
+    const client = fakePc();
+    expect(await settle(client.pushKey())).toEqual({ key: PUSH_KEY });
+    const keys = { p256dh: PUSH_KEY, auth: "BTBZMqHH6r4Tts7J_aSIgg" };
+    expect(await settle(client.pushSubscribe({ endpoint: "https://push.example/a", keys }, "en"))).toEqual({
+      subscribed: true,
+    });
+    await expect(settle(client.pushSubscribe({ endpoint: "http://push.example/a", keys }, "en"))).rejects.toMatchObject({
+      kind: "refused",
+      code: "bad-subscription",
+    });
+    expect(await settle(client.pushUnsubscribe())).toEqual({ subscribed: false });
   });
 });

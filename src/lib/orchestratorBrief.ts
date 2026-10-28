@@ -27,6 +27,7 @@ import {
   type ManagerJournalEntry,
 } from "./managerEvents";
 import { loadProjects, renderOverview, type ProjectSummary } from "./projects";
+import { startRemotePush } from "./remotePush";
 import { isMainWindow } from "./windows";
 import type { AppState, Pane, PaneRole, Workspace } from "../types";
 
@@ -722,10 +723,12 @@ const TICK_MS = 10_000;
 
 /**
  * Runs the orchestration's watchers for as long as the main window is up:
- * the event engine (lib/orchestratorEvents), and the answers to the briefing
- * requests Rust relays. `snapshot` is null until the store has loaded. A
- * workspace without an orchestrator costs a loop over the workspaces every
- * few seconds, and nothing else.
+ * the event engine (lib/orchestratorEvents), what waits for the person, told
+ * the project manager and pushed to the phones (lib/managerEvents,
+ * lib/remotePush), and the answers to the briefing requests Rust relays.
+ * `snapshot` is null until the store has loaded. A workspace without an
+ * orchestrator costs a loop over the workspaces every few seconds, and
+ * nothing else.
  */
 export function useOrchestrator(snapshot: (() => AppState) | null) {
   const snapshotRef = useRef(snapshot);
@@ -741,12 +744,16 @@ export function useOrchestrator(snapshot: (() => AppState) | null) {
       activity: getPaneActivity,
       loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
     });
+    const push = startRemotePush(current);
     const manager = startManagerEvents({
       snapshot: current,
       enqueue: bridgeEnqueue,
       activity: getPaneActivity,
       loadBoard: (cwd) => boardLoad(cwd).then((board) => (board.tasks ?? []) as BoardTask[]),
+      push: push.sink,
     });
+    // Whether a phone listens decides whether the manager feed watches.
+    const watch = () => void push.refresh().then(() => manager.tick());
     const deps = defaultDeps(current);
     briefingDeps = deps;
 
@@ -765,16 +772,17 @@ export function useOrchestrator(snapshot: (() => AppState) | null) {
     ];
     const timer = window.setInterval(() => {
       void engine.tick();
-      void manager.tick();
+      watch();
     }, TICK_MS);
     void engine.tick();
-    void manager.tick();
+    watch();
     return () => {
       window.clearInterval(timer);
       for (const stop of stops) stop.then((off) => off()).catch(() => undefined);
       if (briefingDeps === deps) briefingDeps = null;
       stopOrchestratorEvents();
       stopManagerEvents();
+      push.stop();
     };
   }, [ready]);
 }

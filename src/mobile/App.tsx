@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Banner, NavigationContext, TabBar } from "./components/Chrome";
 import { Logo } from "./components/Icon";
-import { useNow, useRoute, useVisibleViewport } from "./hooks";
+import { useNotificationOpens, useNow, useRoute, useVisibleViewport } from "./hooks";
 import { t } from "./i18n";
 import { unseenShares } from "./model";
 import { RemoteContext, useRemote, type Boot } from "./remote";
@@ -20,6 +20,7 @@ export function App({ boot }: { boot: Boot }) {
   const navigation = useMemo(() => ({ navigate, back }), [navigate, back]);
   const now = useNow();
   useVisibleViewport();
+  useNotificationOpens();
 
   const [sharesSeen, setSharesSeen] = useState(() => loadNumber("sharesSeen"));
   const onSharesSeen = useCallback((at: number) => {

@@ -110,6 +110,26 @@ describe("the client's requests", () => {
     expect(createClient().fileUrl("a/b c")).toBe("/m/files/a%2Fb%20c");
     expect(createClient({ fileUrl: (id) => `data:${id}` }).fileUrl("x")).toBe("data:x");
   });
+
+  it("reads the push key, subscribes in the phone's language, and unsubscribes", async () => {
+    const { fetch, calls } = fakeFetch(json(200, { key: "BKey" }), json(200, { subscribed: true }), json(200, { subscribed: false }));
+    const client = createClient({ fetch });
+    const subscription = { endpoint: "https://web.push.apple.com/QGx1", keys: { p256dh: "BP", auth: "au" } };
+    expect(await client.pushKey()).toEqual({ key: "BKey" });
+    expect(await client.pushSubscribe(subscription, "fr")).toEqual({ subscribed: true });
+    expect(await client.pushUnsubscribe()).toEqual({ subscribed: false });
+
+    expect(calls.map((call) => [call.init.method, call.path])).toEqual([
+      ["GET", "/m/api/push/key"],
+      ["POST", "/m/api/push/subscribe"],
+      ["DELETE", "/m/api/push/subscribe"],
+    ]);
+    expect(calls[0].init.headers).not.toHaveProperty("X-Hangar");
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ subscription, lang: "fr" });
+    // Whatever is not a read carries the header the server asks of it.
+    expect(calls[1].init.headers).toMatchObject({ "X-Hangar": "1", "Content-Type": "application/json" });
+    expect(calls[2].init.headers).toMatchObject({ "X-Hangar": "1" });
+  });
 });
 
 describe("the client's errors", () => {

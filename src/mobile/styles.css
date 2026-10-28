@@ -869,6 +869,52 @@ img {
   margin: 8px 0 0 -12px;
 }
 
+/* The offer to turn notifications on: its button first, "not now" beside. */
+.notice__actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 10px;
+}
+
+.notice__actions .btn {
+  margin: 0;
+}
+
+.notice__actions .btn--quiet {
+  padding: 0 12px;
+}
+
+/* ── Notifications, once offered ───────────────────────────────── */
+
+.row--push {
+  margin-top: 22px;
+  padding-right: 8px;
+}
+
+.row--push > .icon {
+  --icon: 22px;
+  color: var(--accent-text);
+}
+
+.row--push .btn {
+  flex: none;
+  padding: 0 14px;
+}
+
+.row--push + .row--history {
+  margin-top: 10px;
+}
+
+.push__error {
+  margin-top: 8px;
+  padding: 0 2px;
+  color: var(--danger);
+  font-size: 14.5px;
+}
+
 /* ── Projects ──────────────────────────────────────────────────── */
 
 .project {

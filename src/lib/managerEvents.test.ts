@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentActivity } from "./agentState";
-import { createManagerFeed, settleManager, type ManagerJournalEntry } from "./managerEvents";
+import { createManagerFeed, settleManager, type ManagerEvent, type ManagerJournalEntry } from "./managerEvents";
 import { TIMING, type BoardTask } from "./orchestratorEvents";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
 
@@ -76,9 +76,12 @@ function fakeTime() {
   };
 }
 
-function rig(options: { manager?: boolean } = {}) {
+function rig(options: { manager?: boolean; push?: boolean } = {}) {
   const time = fakeTime();
   const withManager = options.manager ?? true;
+  /** The phone's sink, listening or not. */
+  const push = { on: options.push ?? false, posted: [] as ManagerEvent[] };
+  let boardReads = 0;
   const state: AppState = {
     workspaces: [
       workspace("hq", "HQ", [pane("m", "manager", withManager ? "manager" : undefined), pane("hw", "hq-agent")], true),
@@ -105,12 +108,16 @@ function rig(options: { manager?: boolean } = {}) {
       const activity = activities.get(id);
       return activity ? { workspaceId: "x", activity, bridged: true } : undefined;
     },
-    loadBoard: async (cwd) => boards.get(cwd) ?? [],
+    loadBoard: async (cwd) => {
+      boardReads++;
+      return boards.get(cwd) ?? [];
+    },
+    push: { active: () => push.on, post: (event) => push.posted.push(event) },
     now: time.now,
     setTimer: time.setTimer,
     clearTimer: time.clearTimer,
   });
-  return { feed, time, state, sent, activities, boards };
+  return { feed, time, state, sent, activities, boards, push, boardReads: () => boardReads };
 }
 
 /** The baseline read, then the batch window. */
@@ -296,6 +303,134 @@ describe("manager feed", () => {
     expect(lines[0]).toBe("20 things wait for the person:");
     expect(lines).toHaveLength(1 + 12 + 1);
     expect(lines[lines.length - 1]).toContain("…and 8 more");
+  });
+});
+
+describe("manager feed, two sinks", () => {
+  const needsYou = () => [task("t1", { labels: ["needs-you"] }), task("t2")];
+
+  it("pushes to the phone with no manager at all", async () => {
+    const r = rig({ manager: false, push: true });
+    await primed(r);
+    r.boards.set("C:\\dev\\a", needsYou());
+    r.activities.set("p", "waiting");
+    await r.feed.tick();
+    await r.time.advance(TIMING.waitingMs);
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.push.posted.map((event) => event.kind)).toEqual(["taskNeedsYou", "paneWaiting"]);
+    expect(r.sent).toHaveLength(0);
+    // What waited is in the journal all the same, for the phone's history.
+    expect(r.feed.journal()).toHaveLength(2);
+  });
+
+  it("tells the manager without pushing when no phone listens", async () => {
+    const r = rig({ push: false });
+    await primed(r);
+    r.boards.set("C:\\dev\\a", needsYou());
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.sent).toHaveLength(1);
+    expect(r.push.posted).toHaveLength(0);
+  });
+
+  it("gives each sink every event, the push at once", async () => {
+    const r = rig({ push: true });
+    await primed(r);
+    r.boards.set("C:\\dev\\a", needsYou());
+    r.boards.set("C:\\dev\\b", [task("u1", { column: "done" })]);
+    await r.feed.tick();
+    // The push is not held for the manager's batch…
+    expect(r.push.posted.map((event) => event.kind)).toEqual(["taskNeedsYou", "boardDone"]);
+    expect(r.sent).toHaveLength(0);
+    await r.time.advance(TIMING.maxWaitMs);
+    // …nor the manager for the push.
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0].text).toContain("2 things wait for the person");
+  });
+
+  it("does not hold the push while the manager is in a turn", async () => {
+    const r = rig({ push: true });
+    await primed(r);
+    r.activities.set("m", "working");
+    r.boards.set("C:\\dev\\a", needsYou());
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.push.posted).toHaveLength(1);
+    expect(r.sent).toHaveLength(0);
+  });
+
+  it("keeps pushing when the manager stops, and telling it when the phone does", async () => {
+    const r = rig({ push: true });
+    await primed(r);
+    r.activities.delete("m");
+    r.boards.set("C:\\dev\\a", needsYou());
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.push.posted).toHaveLength(1);
+    expect(r.sent).toHaveLength(0);
+
+    r.activities.set("m", "idle");
+    r.push.on = false;
+    r.boards.set("C:\\dev\\a", [task("t1", { labels: ["needs-you"] }), task("t2", { labels: ["ready-to-land"] })]);
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.push.posted).toHaveLength(1);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0].text).toContain("ready to land");
+  });
+
+  it("a push that throws leaves the manager its event", async () => {
+    const r = rig({ push: true });
+    await primed(r);
+    r.push.posted.push = () => {
+      throw new Error("no phone");
+    };
+    r.boards.set("C:\\dev\\a", needsYou());
+    await r.feed.tick();
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.sent).toHaveLength(1);
+  });
+
+  it("watches nothing without a manager or a subscription", async () => {
+    const r = rig({ manager: false, push: false });
+    await r.feed.tick();
+    r.boards.set("C:\\dev\\a", needsYou());
+    r.activities.set("p", "waiting");
+    await r.feed.tick();
+    r.feed.boardChanged();
+    await r.time.advance(TIMING.waitingMs + TIMING.maxWaitMs);
+    await r.feed.tick();
+    expect(r.boardReads()).toBe(0);
+    expect(r.sent).toHaveLength(0);
+    expect(r.push.posted).toHaveLength(0);
+    expect(r.feed.journal()).toHaveLength(0);
+  });
+
+  it("starts from a fresh baseline when a phone subscribes", async () => {
+    const r = rig({ manager: false, push: false });
+    r.boards.set("C:\\dev\\a", needsYou());
+    await r.feed.tick();
+    r.push.on = true;
+    // What already waited when the phone subscribed is not news.
+    await r.feed.tick();
+    await r.feed.tick();
+    expect(r.push.posted).toHaveLength(0);
+    r.boards.set("C:\\dev\\a", [task("t1", { labels: ["needs-you"] }), task("t2", { labels: ["needs-you"] })]);
+    await r.feed.tick();
+    expect(r.push.posted).toHaveLength(1);
+    expect(r.push.posted[0]).toMatchObject({ kind: "taskNeedsYou", taskId: "t2", workspace: "Shop" });
+  });
+
+  it("pushes nothing of the HQ", async () => {
+    const r = rig({ manager: false, push: true });
+    await primed(r);
+    r.boards.set("C:\\dev\\hq", [task("h1", { column: "done", labels: ["needs-you", "ready-to-land"] })]);
+    r.activities.set("hw", "waiting");
+    await r.feed.tick();
+    await r.time.advance(TIMING.waitingMs);
+    await r.feed.tick();
+    expect(r.push.posted).toHaveLength(0);
   });
 });
 

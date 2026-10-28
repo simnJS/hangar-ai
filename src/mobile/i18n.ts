@@ -169,6 +169,30 @@ const en = {
     "In Safari, tap Share, then “Add to Home Screen”. Hangar then opens full screen, like an app.",
   "install.dismiss": "Got it",
 
+  "push.title": "Get notified on this phone",
+  "push.body": "When something waits for you or an agent sends you a file, even with Hangar closed.",
+  "push.turnOn": "Turn on notifications",
+  "push.turnOnShort": "Turn on",
+  "push.turningOn": "Turning on…",
+  "push.notNow": "Not now",
+  "push.row": "Notifications",
+  "push.on": "On for this phone",
+  "push.off": "Off",
+  "push.blocked": "Blocked in the phone's settings",
+  "push.needsInstall": "Add Hangar to the Home Screen first",
+  "push.needsUpdate": "Need iOS 16.4 or later",
+  "push.notHere": "Not available in this browser",
+  "push.turnOff": "Turn off",
+  "push.why": "Learn more",
+  "push.installTitle": "First, add Hangar to your Home Screen",
+  "push.install":
+    "On an iPhone, only apps on the Home Screen get notifications, with iOS 16.4 or later. In Safari, tap Share, then “Add to Home Screen”; open Hangar from there and turn them on.",
+  "push.oldIos": "Notifications need iOS 16.4 or later. Update the iPhone in Settings, then turn them on here.",
+  "push.unsupported": "This browser cannot receive notifications. Open Hangar in Safari, Chrome, Edge or Firefox.",
+  "push.denied": "Notifications are blocked for Hangar. Allow them in the phone's settings, then come back here.",
+  "push.failed": "Notifications could not be turned on. {reason}",
+  "push.browserFailed": "The phone's browser could not subscribe: try again in a moment.",
+
   "time.now": "just now",
 } as const;
 
@@ -329,6 +353,33 @@ const fr: Record<Key, string> = {
   "install.body":
     "Dans Safari, touchez Partager, puis « Sur l'écran d'accueil ». Hangar s'ouvre alors en plein écran, comme une app.",
   "install.dismiss": "Compris",
+
+  "push.title": "Soyez prévenu sur ce téléphone",
+  "push.body": "Quand quelque chose vous attend ou qu'un agent vous envoie un fichier, même Hangar fermé.",
+  "push.turnOn": "Activer les notifications",
+  "push.turnOnShort": "Activer",
+  "push.turningOn": "Activation…",
+  "push.notNow": "Plus tard",
+  "push.row": "Notifications",
+  "push.on": "Activées sur ce téléphone",
+  "push.off": "Désactivées",
+  "push.blocked": "Bloquées dans les réglages du téléphone",
+  "push.needsInstall": "Ajoutez d'abord Hangar à l'écran d'accueil",
+  "push.needsUpdate": "iOS 16.4 ou plus récent requis",
+  "push.notHere": "Indisponibles dans ce navigateur",
+  "push.turnOff": "Désactiver",
+  "push.why": "En savoir plus",
+  "push.installTitle": "D'abord, ajoutez Hangar à l'écran d'accueil",
+  "push.install":
+    "Sur iPhone, seules les apps de l'écran d'accueil reçoivent des notifications, avec iOS 16.4 ou plus récent. Dans Safari, touchez Partager, puis « Sur l'écran d'accueil » ; ouvrez Hangar depuis l'écran d'accueil et activez-les.",
+  "push.oldIos":
+    "Les notifications demandent iOS 16.4 ou plus récent. Mettez l'iPhone à jour dans les Réglages, puis activez-les ici.",
+  "push.unsupported":
+    "Ce navigateur ne peut pas recevoir de notifications. Ouvrez Hangar dans Safari, Chrome, Edge ou Firefox.",
+  "push.denied":
+    "Les notifications sont bloquées pour Hangar. Autorisez-les dans les réglages du téléphone, puis revenez ici.",
+  "push.failed": "Impossible d'activer les notifications. {reason}",
+  "push.browserFailed": "Le navigateur du téléphone n'a pas pu s'abonner : réessayez dans un instant.",
 
   "time.now": "à l'instant",
 };

@@ -2,8 +2,8 @@
  * The phone's side of the contract with the PC's mobile server: the shapes it
  * answers with, and one client that makes every call.
  *
- * Same origin, a cookie session set by pairing, and every POST carries
- * `X-Hangar: 1`. A 401 anywhere means the phone has to pair again; a 503
+ * Same origin, a cookie session set by pairing, and every POST or DELETE
+ * carries `X-Hangar: 1`. A 401 anywhere means the phone has to pair again; a 503
  * `pc-busy` means the window did not answer in time and the call can be made
  * again. The client also keeps the time of the last call the PC answered, so
  * the app can say how long it has been unreachable.
@@ -207,7 +207,7 @@ export function createClient(options: ClientOptions = {}) {
   };
 
   async function request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     body: BodyInit | undefined,
     headers: Record<string, string>,
@@ -223,7 +223,7 @@ export function createClient(options: ClientOptions = {}) {
       response = await doFetch(path, {
         method,
         body,
-        headers: method === "POST" ? { "X-Hangar": "1", ...headers } : headers,
+        headers: method === "GET" ? headers : { "X-Hangar": "1", ...headers },
         credentials: "same-origin",
         cache: "no-store",
         signal: abort.signal,
@@ -321,6 +321,20 @@ export function createClient(options: ClientOptions = {}) {
       ) as Promise<{ path: string }>;
     },
     fileUrl: options.fileUrl ?? ((id: string) => `/m/files/${encodeURIComponent(id)}`),
+
+    /** The PC's public VAPID key, base64url: what the phone subscribes with. */
+    pushKey: () => request("GET", "/m/api/push/key", undefined, {}, CALL_TIMEOUT_MS) as Promise<{ key: string }>,
+    /** Where this phone's notifications go, and the language they are written in. */
+    pushSubscribe: (subscription: PushSubscriptionJSON, lang: "en" | "fr") =>
+      request(
+        "POST",
+        "/m/api/push/subscribe",
+        JSON.stringify({ subscription, lang }),
+        { "Content-Type": "application/json" },
+        CALL_TIMEOUT_MS,
+      ) as Promise<{ subscribed: boolean }>,
+    pushUnsubscribe: () =>
+      request("DELETE", "/m/api/push/subscribe", undefined, {}, CALL_TIMEOUT_MS) as Promise<{ subscribed: boolean }>,
 
     /** Whether the PC answers, and since when it has not. */
     connection: (): Connection => {

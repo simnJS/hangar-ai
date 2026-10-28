@@ -4,6 +4,9 @@
 //!
 //! A phone is known by the SHA-256 of the token in its cookie. The token
 //! itself only ever exists on the phone: a copy of this file opens nothing.
+//! Where its notifications go is kept with it, so a phone revoked takes its
+//! subscription along; sending to it takes the PC's VAPID key, which lives in
+//! a file of its own (push.rs).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +15,8 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+
+use super::push::Subscription;
 
 /// Fixed rather than ephemeral like the agents' API: `tailscale serve` is
 /// told this port once, and keeps proxying to it across launches.
@@ -51,6 +56,9 @@ pub struct Device {
     /// Milliseconds since the epoch, like the board's stamps.
     pub created: u64,
     pub last_seen: u64,
+    /// Where its browser takes push notifications, once it turned them on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<Subscription>,
 }
 
 /// A phone as the settings list it: everything but the hash.
@@ -197,6 +205,7 @@ pub(super) mod tests {
             token_hash: token_hash(token),
             created: 1_000,
             last_seen,
+            push: None,
         }
     }
 

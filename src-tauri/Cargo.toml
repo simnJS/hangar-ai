@@ -110,11 +110,27 @@ rust-embed = "8.13"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 sha2 = "0.11"
 subtle = "2.6"
+# Push notifications to the paired phones, sent by the PC itself (Web Push:
+# RFC 8291 encryption, RFC 8292 VAPID) — see remote/push.rs. web-push-native
+# encrypts, in pure Rust on the RustCrypto crates (p256, hkdf, aes-gcm), where
+# `web-push` goes through `ece` and OpenSSL, a C library none of the bundles
+# carry. It only builds the request; ureq sends it.
+#
+# Without its `vapid` feature, which signs through jwt-simple and some seventy
+# crates (RSA, ML-DSA, P-384…) for one ES256 signature: p256's own ECDSA signs
+# the VAPID token, and rand_core's OsRng draws the key. Both are what
+# web-push-native compiles already, at these versions.
+web-push-native = { version = "0.5", default-features = false }
+p256 = { version = "0.13", features = ["ecdsa"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 # The mobile server's tests call its router directly, without a socket.
 # Already compiled for axum, with this feature.
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+# The push's encryption checked byte for byte against RFC 8291's example.
+# Already compiled for web-push-native, which encrypts with it.
+ece-native = "0.5"
 
 # Signalling a pane's whole process group on the way out, which `Child::kill`
 # does not do: it reaches the shell only, and leaves the agent behind it.

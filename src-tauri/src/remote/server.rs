@@ -20,7 +20,7 @@ use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -28,6 +28,8 @@ use tokio::sync::oneshot;
 
 use super::files;
 use super::pairing::PairError;
+use super::push;
+use super::store::DeviceView;
 use super::{assets, Remote};
 use crate::control::ControlError;
 
@@ -47,6 +49,8 @@ pub const CALLS: &[&str] = &[
 const CALL_LIMIT: usize = 64 * 1024;
 /// A pairing is a code and a phone's name.
 const PAIR_LIMIT: usize = 4 * 1024;
+/// A push subscription is an address and two keys.
+const PUSH_LIMIT: usize = 8 * 1024;
 
 const COOKIE: &str = "hangar_device";
 const COOKIE_MAX_AGE: u64 = 365 * 24 * 60 * 60;
@@ -61,7 +65,11 @@ pub fn router(remote: Arc<Remote>) -> Router {
         .route("/m/api/shares", get(shares))
         .route("/m/files/{id}", get(shared_file))
         .route("/m/api/upload", post(upload))
-        // /m/api/push/* joins here, behind the same cookie.
+        .route("/m/api/push/key", get(push_key))
+        .route(
+            "/m/api/push/subscribe",
+            post(push_subscribe).delete(push_unsubscribe),
+        )
         .route("/m/{*rest}", any(unknown))
         .route_layer(middleware::from_fn_with_state(remote.clone(), paired_only));
     Router::new()
@@ -355,6 +363,62 @@ async fn upload(
         )
             .into_response(),
         Err(_) => refuse(StatusCode::INTERNAL_SERVER_ERROR, "storage"),
+    }
+}
+
+fn storage(message: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": "storage", "message": message })),
+    )
+        .into_response()
+}
+
+/// The PC's public VAPID key, `{ key }`: what the phone subscribes with.
+async fn push_key(State(remote): State<Arc<Remote>>) -> Response {
+    match remote.push_key() {
+        Ok(key) => Json(json!({ "key": key.public() })).into_response(),
+        Err(message) => storage(message),
+    }
+}
+
+/// `{ subscription, lang }`: where this phone's notifications go from now on,
+/// and the language they are written in.
+async fn push_subscribe(
+    State(remote): State<Arc<Remote>>,
+    Extension(device): Extension<DeviceView>,
+    body: Body,
+) -> Response {
+    let body = match read_json(body, PUSH_LIMIT).await {
+        Ok(body) => body,
+        Err((status, error)) => return refuse(status, error),
+    };
+    let subscription = match push::subscription(&body, super::now_ms()) {
+        Ok(subscription) => subscription,
+        Err(message) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "bad-subscription", "message": message })),
+            )
+                .into_response()
+        }
+    };
+    match remote.subscribe(&device.id, subscription) {
+        Ok(true) => Json(json!({ "subscribed": true })).into_response(),
+        // Revoked between its cookie being read and now.
+        Ok(false) => refuse(StatusCode::UNAUTHORIZED, "unpaired"),
+        Err(message) => storage(message),
+    }
+}
+
+/// This phone takes no more notifications.
+async fn push_unsubscribe(
+    State(remote): State<Arc<Remote>>,
+    Extension(device): Extension<DeviceView>,
+) -> Response {
+    match remote.unsubscribe(&device.id) {
+        Ok(()) => Json(json!({ "subscribed": false })).into_response(),
+        Err(message) => storage(message),
     }
 }
 
@@ -1285,6 +1349,138 @@ mod tests {
             let answer = ask(&remote, get_from(&path, None)).await;
             assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{path}");
         }
+    }
+
+    fn delete_from(path: &str, cookie: Option<&str>, marked: bool) -> HttpRequest<Body> {
+        let mut request = HttpRequest::delete(path);
+        if let Some(token) = cookie {
+            request = request.header(header::COOKIE, format!("{COOKIE}={token}"));
+        }
+        if marked {
+            request = request.header("x-hangar", "1");
+        }
+        request.body(Body::empty()).unwrap()
+    }
+
+    fn a_subscription(endpoint: &str, lang: &str) -> String {
+        json!({
+            "subscription": {
+                "endpoint": endpoint,
+                "expirationTime": null,
+                "keys": {
+                    "p256dh": push::tests::rfc8291::UA_PUBLIC,
+                    "auth": push::tests::rfc8291::AUTH,
+                },
+            },
+            "lang": lang,
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn the_push_key_is_the_pc_s_and_stays_the_same() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let first = ask(&remote, get_from("/m/api/push/key", Some(&token))).await;
+        assert_eq!(first.status, StatusCode::OK);
+        let key = first.body["key"].as_str().unwrap().to_string();
+        assert_eq!(push::tests::b64(&key).len(), 65);
+        let again = ask(&remote, get_from("/m/api/push/key", Some(&token))).await;
+        assert_eq!(again.body["key"], key.as_str());
+        // A launch later, the same key from the file.
+        let reopened = super::super::PushKey::open(&remote.push_key_file).unwrap();
+        assert_eq!(reopened.public(), key);
+        let unpaired = ask(&remote, get_from("/m/api/push/key", None)).await;
+        assert_eq!(unpaired.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_phone_subscribes_and_unsubscribes_itself() {
+        let window = Fake::echo();
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let _other = paired_phone(&remote).await;
+        let changes = *window.changes.lock().unwrap();
+
+        let answer = ask(
+            &remote,
+            post_to(
+                "/m/api/push/subscribe",
+                Some(&token),
+                true,
+                a_subscription("https://web.push.apple.com/QGx1", "fr"),
+            ),
+        )
+        .await;
+        assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+        assert_eq!(answer.body, json!({ "subscribed": true }));
+        let id = remote.store.find(&token, 0).unwrap().id;
+        let saved = remote.store.read();
+        let phone = saved.devices.iter().find(|d| d.id == id).unwrap();
+        let subscription = phone.push.as_ref().unwrap();
+        assert_eq!(subscription.endpoint, "https://web.push.apple.com/QGx1");
+        assert_eq!(subscription.lang, push::Lang::Fr);
+        // The other phone is not subscribed by it.
+        assert_eq!(saved.devices.iter().filter(|d| d.push.is_some()).count(), 1);
+        // Kept across launches, and the window told.
+        let reopened = super::super::Store::open(remote.store.file().to_path_buf()).read();
+        assert!(reopened
+            .devices
+            .iter()
+            .any(|d| d.id == id && d.push.is_some()));
+        assert!(*window.changes.lock().unwrap() > changes);
+        // Nothing of it reaches the settings' list.
+        let listed = serde_json::to_value(remote.devices()).unwrap();
+        assert!(!listed.to_string().contains("web.push.apple.com"));
+
+        let answer = ask(
+            &remote,
+            delete_from("/m/api/push/subscribe", Some(&token), true),
+        )
+        .await;
+        assert_eq!(answer.status, StatusCode::OK);
+        assert_eq!(answer.body, json!({ "subscribed": false }));
+        assert!(remote.store.read().devices.iter().all(|d| d.push.is_none()));
+    }
+
+    #[tokio::test]
+    async fn a_subscription_takes_the_cookie_the_header_and_a_push_service() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let good = || a_subscription("https://fcm.googleapis.com/fcm/send/abc", "en");
+
+        let unpaired = ask(
+            &remote,
+            post_to("/m/api/push/subscribe", None, true, good()),
+        )
+        .await;
+        assert_eq!(unpaired.status, StatusCode::UNAUTHORIZED);
+        let unmarked = ask(
+            &remote,
+            post_to("/m/api/push/subscribe", Some(&token), false, good()),
+        )
+        .await;
+        assert_eq!(unmarked.status, StatusCode::FORBIDDEN);
+        let unmarked = ask(
+            &remote,
+            delete_from("/m/api/push/subscribe", Some(&token), false),
+        )
+        .await;
+        assert_eq!(unmarked.status, StatusCode::FORBIDDEN);
+        for body in [
+            a_subscription("http://192.168.1.10/hook", "en"),
+            a_subscription("https://push.example/x", "en")
+                .replace(push::tests::rfc8291::UA_PUBLIC, "BAAA"),
+            "{ nope".to_string(),
+        ] {
+            let answer = ask(
+                &remote,
+                post_to("/m/api/push/subscribe", Some(&token), true, body.clone()),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::BAD_REQUEST, "{body}");
+        }
+        assert!(remote.store.read().devices.iter().all(|d| d.push.is_none()));
     }
 
     #[tokio::test]

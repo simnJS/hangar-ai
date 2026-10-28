@@ -69,6 +69,13 @@ const PATHS = {
     </>
   ),
   check: <path d="m3.5 8.4 2.9 2.9 6.1-6.6" />,
+  // Notifications.
+  bell: (
+    <>
+      <path d="M4.1 11.2V7.4a3.9 3.9 0 0 1 7.8 0v3.8l1.3 1.4H2.8z" />
+      <path d="M6.6 14.2h2.8" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;

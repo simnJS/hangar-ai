@@ -16,6 +16,12 @@ import type { AppState, Workspace } from "../types";
  * The workspaces need no orchestrator. The manager's end of turn is what
  * raises the Windows notification (TerminalPane), so nothing is sent to the
  * desktop from here.
+ *
+ * The phone's push notifications (lib/remotePush) are a second sink of the
+ * same detection: it runs while a manager runs or a phone is subscribed, and
+ * each sink gets what it is owed whether the other exists or not — the push
+ * takes every event as it is seen and keeps its own pace, the manager's batch
+ * is not held for it, nor it for the manager's turn.
  */
 export type ManagerEvent =
   | { kind: "paneWaiting"; workspaceId: string; workspace: string; paneId: string; pane: string; forMs: number }
@@ -28,11 +34,19 @@ export interface ManagerJournalEntry {
   event: ManagerEvent;
 }
 
+/** A sink beside the manager's pane: it hears every event while `active()` says it listens. */
+export interface ManagerSink {
+  active: () => boolean;
+  post: (event: ManagerEvent) => void;
+}
+
 export interface ManagerFeedDeps {
   snapshot: () => AppState;
   enqueue: (paneId: string, text: string, from: string) => Promise<unknown>;
   activity: (paneId: string) => PaneActivity | undefined;
   loadBoard: (cwd: string) => Promise<BoardTask[]>;
+  /** The phone's notifications (lib/remotePush). */
+  push?: ManagerSink;
   now?: () => number;
   setTimer?: (run: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -140,13 +154,25 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
     return found && deps.activity(found.pane.id) !== undefined ? found : null;
   };
 
+  const pushing = () => deps.push?.active() === true;
+  /** Someone to tell: the detection runs only then. */
+  const listened = () => pushing() || manager() !== null;
+
   const watched = (): Workspace[] => deps.snapshot().workspaces.filter((ws) => ws.hq !== true);
 
   function post(event: ManagerEvent) {
-    if (stopped || !manager()) return;
+    if (stopped) return;
     const entry = { at: now(), event };
     journal.push(entry);
     if (journal.length > JOURNAL_SIZE) journal.splice(0, journal.length - JOURNAL_SIZE);
+    if (pushing()) {
+      try {
+        deps.push?.post(event);
+      } catch {
+        // The push's trouble is not the manager's.
+      }
+    }
+    if (!manager()) return;
     pending.push(entry);
     if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING);
     firstPendingAt ??= entry.at;
@@ -282,7 +308,7 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
   return {
     async tick() {
       if (stopped) return;
-      if (!manager()) {
+      if (!listened()) {
         // Nobody to tell: forget what was gathered, and start over when there is.
         pending = [];
         firstPendingAt = null;
@@ -294,7 +320,7 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
       watchPanes();
     },
     boardChanged() {
-      if (stopped || boardTimer !== null || !manager()) return;
+      if (stopped || boardTimer !== null || !listened()) return;
       boardTimer = setTimer(() => {
         boardTimer = null;
         void readAll();

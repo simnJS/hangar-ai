@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RemoteState, Waiting, WaitingKind } from "../api";
 import { FleetStrip, Link, PcChip, useNavigation } from "../components/Chrome";
 import { Icon } from "../components/Icon";
+import { Notifications } from "../components/Notifications";
 import { isIos, isStandalone } from "../device";
 import { duration } from "../format";
 import { usePolling } from "../hooks";
@@ -48,6 +49,8 @@ export function ForYou({ now }: { now: number }) {
       </header>
 
       <InstallNotice />
+
+      <Notifications />
 
       <Link to={{ name: "history" }} className="row row--history">
         <Icon name="clock" />

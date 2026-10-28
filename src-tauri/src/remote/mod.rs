@@ -16,6 +16,7 @@
 //! - files.rs: the files that go both ways, shared by an agent or uploaded
 //!   by the phone.
 //! - pairing.rs: the six-digit code and the QR code a phone pairs with.
+//! - push.rs: the notifications the PC pushes to the phones, app closed.
 //! - server.rs: the listener, its routes and their doors.
 //! - assets.rs: the web app, compiled in from dist-mobile/.
 //! - tailscale.rs: the CLI, asked for the PC's name and told to serve.
@@ -34,6 +35,7 @@ use crate::control::{self, ControlError, ControlRequest};
 mod assets;
 mod files;
 mod pairing;
+mod push;
 mod server;
 mod store;
 mod tailscale;
@@ -41,6 +43,7 @@ mod tailscale;
 use files::Shares;
 pub use files::{NewShare, Share};
 use pairing::{PairError, Pairing};
+use push::{Delivery, Message, PushKey, Subscription, Text};
 use store::{Device, DeviceView, Store};
 use tailscale::TailscaleStatus;
 
@@ -114,6 +117,10 @@ pub struct Remote {
     call_timeout: Duration,
     assets: assets::Lookup,
     shares: Arc<Shares>,
+    /// The PC's VAPID key, read or made the first time it is needed.
+    push_key: Mutex<Option<Arc<PushKey>>>,
+    push_key_file: PathBuf,
+    push_agent: ureq::Agent,
 }
 
 #[derive(Default)]
@@ -143,6 +150,17 @@ pub struct PairStart {
     pub expires_at: u64,
 }
 
+/// What became of a push: phones that took it, subscriptions forgotten
+/// because their push service said they are gone, and failures, tried again
+/// with the next one.
+#[derive(Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutcome {
+    pub sent: usize,
+    pub dropped: usize,
+    pub failed: usize,
+}
+
 impl Remote {
     pub fn open(app: &AppHandle) -> Result<Arc<Self>, String> {
         let dir = app
@@ -166,6 +184,7 @@ impl Remote {
                 .join("shares"),
         );
         Self {
+            push_key_file: push::key_file(&file),
             store: Store::open(file),
             pairing: Mutex::new(None),
             listening: Default::default(),
@@ -174,6 +193,8 @@ impl Remote {
             call_timeout,
             assets,
             shares: Arc::new(shares),
+            push_key: Mutex::new(None),
+            push_agent: push::agent(),
         }
     }
 
@@ -287,6 +308,7 @@ impl Remote {
             token_hash: store::token_hash(&token),
             created: now,
             last_seen: now,
+            push: None,
         };
         let view = device.view();
         self.store
@@ -305,7 +327,8 @@ impl Remote {
         self.store.read().devices.iter().map(Device::view).collect()
     }
 
-    /// Forgets a phone: its very next request is turned away. Revoking one
+    /// Forgets a phone: its very next request is turned away, and nothing is
+    /// pushed to it again — its subscription was kept with it. Revoking one
     /// already gone is no error.
     pub fn revoke(&self, id: &str) -> Result<(), String> {
         self.store
@@ -335,6 +358,165 @@ impl Remote {
             .map_err(|err| format!("the share failed: {err}"))??;
         self.window.shared(&share);
         Ok(share)
+    }
+
+    /// The PC's VAPID key, made the first time it is needed and kept.
+    fn push_key(&self) -> Result<Arc<PushKey>, String> {
+        let mut kept = self.push_key.lock().unwrap();
+        if let Some(key) = kept.as_ref() {
+            return Ok(key.clone());
+        }
+        let key = Arc::new(PushKey::open(&self.push_key_file)?);
+        *kept = Some(key.clone());
+        Ok(key)
+    }
+
+    /// Where a phone's notifications go from now on: the one subscription a
+    /// device has, replaced, and taken from any other device that had the
+    /// same address — a phone paired again keeps its browser's subscription,
+    /// and would otherwise get everything twice. False when the device is
+    /// no longer paired.
+    fn subscribe(&self, device: &str, subscription: Subscription) -> Result<bool, String> {
+        let same = |kept: &Subscription| {
+            kept.endpoint == subscription.endpoint
+                && kept.p256dh == subscription.p256dh
+                && kept.auth == subscription.auth
+                && kept.lang == subscription.lang
+        };
+        let saved = self.store.read();
+        let Some(phone) = saved.devices.iter().find(|phone| phone.id == device) else {
+            return Ok(false);
+        };
+        let shared = saved.devices.iter().any(|other| {
+            other.id != device
+                && other
+                    .push
+                    .as_ref()
+                    .is_some_and(|kept| kept.endpoint == subscription.endpoint)
+        });
+        // The phone says it again each time the app opens: nothing to write.
+        if phone.push.as_ref().is_some_and(same) && !shared {
+            return Ok(true);
+        }
+        let found = self.store.update(|saved| {
+            let mut found = false;
+            for phone in &mut saved.devices {
+                if phone.id == device {
+                    phone.push = Some(subscription.clone());
+                    found = true;
+                } else if phone
+                    .push
+                    .as_ref()
+                    .is_some_and(|kept| kept.endpoint == subscription.endpoint)
+                {
+                    phone.push = None;
+                }
+            }
+            found
+        })?;
+        if found {
+            self.window.changed();
+        }
+        Ok(found)
+    }
+
+    /// The phone turned its notifications off.
+    fn unsubscribe(&self, device: &str) -> Result<(), String> {
+        let subscribed = self
+            .store
+            .read()
+            .devices
+            .iter()
+            .any(|phone| phone.id == device && phone.push.is_some());
+        if !subscribed {
+            return Ok(());
+        }
+        self.store.update(|saved| {
+            for phone in &mut saved.devices {
+                if phone.id == device {
+                    phone.push = None;
+                }
+            }
+        })?;
+        self.window.changed();
+        Ok(())
+    }
+
+    /// How many phones take notifications: none while Hangar Mobile is off,
+    /// which is when the window has no reason to watch for them.
+    pub async fn push_subscribers(&self) -> usize {
+        if self.listening.lock().await.running.is_none() {
+            return 0;
+        }
+        self.store
+            .read()
+            .devices
+            .iter()
+            .filter(|phone| phone.push.is_some())
+            .count()
+    }
+
+    /// The window's `remote_push`: one notification to every subscribed
+    /// phone, each in its own language. A subscription its push service
+    /// says is gone (404, 410) is forgotten; nothing goes out while Hangar
+    /// Mobile is off.
+    pub async fn push(&self, message: Message) -> Result<PushOutcome, String> {
+        if self.listening.lock().await.running.is_none() {
+            return Ok(PushOutcome::default());
+        }
+        let targets: Vec<Subscription> = self
+            .store
+            .read()
+            .devices
+            .into_iter()
+            .filter_map(|phone| phone.push)
+            .collect();
+        if targets.is_empty() {
+            return Ok(PushOutcome::default());
+        }
+        let key = self.push_key()?;
+        let agent = self.push_agent.clone();
+        let delivered = tokio::task::spawn_blocking(move || {
+            targets
+                .into_iter()
+                .map(|target| {
+                    let payload = push::payload(&message, target.lang);
+                    let delivery = push::deliver(&agent, &key, &target, payload);
+                    (target.endpoint, delivery)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|err| format!("the push failed: {err}"))?;
+
+        let mut outcome = PushOutcome::default();
+        let mut gone = Vec::new();
+        for (endpoint, delivery) in delivered {
+            match delivery {
+                Delivery::Delivered => outcome.sent += 1,
+                Delivery::Gone => gone.push(endpoint),
+                Delivery::Failed(err) => {
+                    outcome.failed += 1;
+                    eprintln!("Hangar Mobile could not push to a phone: {err}");
+                }
+            }
+        }
+        if !gone.is_empty() {
+            self.store.update(|saved| {
+                for phone in &mut saved.devices {
+                    if phone
+                        .push
+                        .as_ref()
+                        .is_some_and(|kept| gone.contains(&kept.endpoint))
+                    {
+                        phone.push = None;
+                    }
+                }
+            })?;
+            outcome.dropped = gone.len();
+            self.window.changed();
+        }
+        Ok(outcome)
     }
 
     pub async fn tailscale(&self) -> TailscaleStatus {
@@ -428,6 +610,30 @@ pub async fn remote_tailscale_serve(
     remote.tailscale_serve().await
 }
 
+// ---------------------------------------------------------------------------
+// The window's push (lib/remotePush)
+// ---------------------------------------------------------------------------
+
+/// A notification to every subscribed phone. `title` and `body` are one text
+/// or `{ en, fr }`, each phone getting its language; `url` is the screen it
+/// opens, `./#/pane/<id>`, `./#/shares`, `./#/`.
+#[tauri::command]
+pub async fn remote_push(
+    remote: State<'_, Arc<Remote>>,
+    title: Text,
+    body: Text,
+    url: String,
+) -> Result<PushOutcome, String> {
+    remote.push(Message { title, body, url }).await
+}
+
+/// How many phones take notifications, for the window to know whether to
+/// watch for what it would push.
+#[tauri::command]
+pub async fn remote_push_subscribers(remote: State<'_, Arc<Remote>>) -> Result<usize, String> {
+    Ok(remote.push_subscribers().await)
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -442,6 +648,8 @@ pub(super) mod tests {
         pub asked: Arc<Mutex<Vec<String>>>,
         /// What was announced as `remote:shared`.
         pub shared: Arc<Mutex<Vec<Share>>>,
+        /// How many times `remote:changed` was.
+        pub changes: Arc<Mutex<usize>>,
         answer: Arc<dyn Fn(&ControlRequest) -> Answer + Send + Sync>,
     }
 
@@ -452,6 +660,7 @@ pub(super) mod tests {
             Self {
                 asked: Default::default(),
                 shared: Default::default(),
+                changes: Default::default(),
                 answer: Arc::new(answer),
             }
         }
@@ -485,7 +694,10 @@ pub(super) mod tests {
                     }
                     Ok(())
                 }),
-                changed: Arc::new(|| {}),
+                changed: {
+                    let fake = self.clone();
+                    Arc::new(move || *fake.changes.lock().unwrap() += 1)
+                },
                 shared: {
                     let fake = self.clone();
                     Arc::new(move |share: &Share| fake.shared.lock().unwrap().push(share.clone()))
@@ -727,5 +939,246 @@ pub(super) mod tests {
     #[test]
     fn the_pc_has_a_name() {
         assert!(!pc_name().is_empty());
+    }
+
+    // -- Push ---------------------------------------------------------------
+
+    /// A request a push service took: its path, headers and body.
+    type Received = (String, axum::http::HeaderMap, Vec<u8>);
+
+    /// A push service on the loopback: it answers 410 to an address ending
+    /// in `gone`, 404 to one ending in `missing`, 500 to `flaky`, and 201
+    /// (Created, as the real ones do) to anything else.
+    async fn push_service(port: u16) -> (String, Arc<Mutex<Vec<Received>>>) {
+        use axum::extract::State as Shared;
+        use axum::http::{StatusCode, Uri};
+        let received: Arc<Mutex<Vec<Received>>> = Default::default();
+        let app = axum::Router::new()
+            .fallback(
+                |Shared(received): Shared<Arc<Mutex<Vec<Received>>>>,
+                 uri: Uri,
+                 headers: axum::http::HeaderMap,
+                 body: axum::body::Bytes| async move {
+                    let path = uri.path().to_string();
+                    let status = if path.ends_with("gone") {
+                        StatusCode::GONE
+                    } else if path.ends_with("missing") {
+                        StatusCode::NOT_FOUND
+                    } else if path.ends_with("flaky") {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    } else {
+                        StatusCode::CREATED
+                    };
+                    received
+                        .lock()
+                        .unwrap()
+                        .push((path, headers, body.to_vec()));
+                    status
+                },
+            )
+            .with_state(received.clone());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), received)
+    }
+
+    /// Hangar Mobile on, on a port of its own, with two phones paired.
+    async fn two_phones(window: Fake, port: u16) -> (Arc<Remote>, String, String) {
+        let remote = remote_with(window, assets::tests::no_app);
+        remote.store.update(|saved| saved.port = port).unwrap();
+        remote.set_enabled(true).await.unwrap();
+        pair_a_phone(&remote);
+        pair_a_phone(&remote);
+        let ids: Vec<String> = remote.devices().into_iter().map(|d| d.id).collect();
+        (remote, ids[0].clone(), ids[1].clone())
+    }
+
+    fn waits(lang_en: &str, lang_fr: &str) -> Message {
+        Message {
+            title: Text::ByLang {
+                en: lang_en.into(),
+                fr: Some(lang_fr.into()),
+            },
+            body: Text::Same("Shop".into()),
+            url: "./#/pane/p1".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_push_reaches_each_phone_encrypted_signed_and_in_its_language() {
+        let (service, received) = push_service(test_port(11)).await;
+        let (remote, en, fr) = two_phones(Fake::echo(), test_port(10)).await;
+        let phone = |lang| push::tests::rfc_subscription(&format!("{service}/push/{lang:?}"), lang);
+        assert!(remote.subscribe(&en, phone(push::Lang::En)).unwrap());
+        assert!(remote.subscribe(&fr, phone(push::Lang::Fr)).unwrap());
+        assert_eq!(remote.push_subscribers().await, 2);
+
+        let outcome = remote
+            .push(waits("Ava waits for you", "Ava vous attend"))
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            PushOutcome {
+                sent: 2,
+                dropped: 0,
+                failed: 0
+            }
+        );
+        let received = received.lock().unwrap().clone();
+        assert_eq!(received.len(), 2);
+        let key = remote.push_key().unwrap();
+        for (path, headers, body) in received {
+            assert_eq!(headers["content-encoding"], "aes128gcm");
+            assert_eq!(headers["ttl"], (12 * 60 * 60).to_string());
+            assert_eq!(headers["urgency"], "high");
+            let authorization = headers["authorization"].to_str().unwrap();
+            assert!(authorization.ends_with(&format!(", k={}", key.public())));
+            let claims = push::tests::check_vapid(authorization);
+            assert_eq!(claims["aud"], service);
+            let read = push::tests::open_as_the_rfc_browser(body);
+            let title = if path.ends_with("Fr") {
+                "Ava vous attend"
+            } else {
+                "Ava waits for you"
+            };
+            assert_eq!(
+                read,
+                serde_json::json!({ "title": title, "body": "Shop", "url": "./#/pane/p1" })
+            );
+        }
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_subscription_its_service_calls_gone_is_dropped() {
+        let (service, received) = push_service(test_port(13)).await;
+        let (remote, first, second) = two_phones(Fake::echo(), test_port(12)).await;
+        let third = {
+            pair_a_phone(&remote);
+            remote.devices()[2].id.clone()
+        };
+        for (device, path) in [(&first, "gone"), (&second, "missing"), (&third, "flaky")] {
+            let subscription =
+                push::tests::rfc_subscription(&format!("{service}/push/{path}"), push::Lang::En);
+            remote.subscribe(device, subscription).unwrap();
+        }
+
+        let outcome = remote.push(waits("a", "b")).await.unwrap();
+        assert_eq!(
+            outcome,
+            PushOutcome {
+                sent: 0,
+                dropped: 2,
+                failed: 1
+            }
+        );
+        assert_eq!(received.lock().unwrap().len(), 3);
+        let kept: Vec<Option<String>> = remote
+            .store
+            .read()
+            .devices
+            .into_iter()
+            .map(|phone| phone.push.map(|push| push.endpoint))
+            .collect();
+        // 410 and 404 are forgotten, on disk too; a 500 is tried next time.
+        assert_eq!(kept, [None, None, Some(format!("{service}/push/flaky"))]);
+        let reopened = Store::open(remote.store.file().to_path_buf()).read();
+        assert!(reopened.devices[0].push.is_none() && reopened.devices[2].push.is_some());
+        assert_eq!(remote.push_subscribers().await, 1);
+
+        // The next push goes to the one left only.
+        remote.push(waits("a", "b")).await.unwrap();
+        assert_eq!(received.lock().unwrap().len(), 4);
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_revoked_phone_takes_its_subscription_along() {
+        let (service, received) = push_service(test_port(15)).await;
+        let (remote, revoked, kept) = two_phones(Fake::echo(), test_port(14)).await;
+        let at = |path: &str| {
+            push::tests::rfc_subscription(&format!("{service}/{path}"), push::Lang::En)
+        };
+        remote.subscribe(&revoked, at("revoked")).unwrap();
+        remote.subscribe(&kept, at("kept")).unwrap();
+        assert_eq!(remote.push_subscribers().await, 2);
+
+        remote.revoke(&revoked).unwrap();
+        assert_eq!(remote.push_subscribers().await, 1);
+        let outcome = remote.push(waits("a", "b")).await.unwrap();
+        assert_eq!(outcome.sent, 1);
+        let paths: Vec<String> = received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.0.clone())
+            .collect();
+        assert_eq!(paths, ["/kept"]);
+        // A device no longer paired cannot subscribe again.
+        assert!(!remote.subscribe(&revoked, at("revoked")).unwrap());
+        assert_eq!(remote.push_subscribers().await, 1);
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_address_belongs_to_one_phone_and_saying_it_again_writes_nothing() {
+        let window = Fake::echo();
+        let (remote, old, new) = two_phones(window.clone(), test_port(16)).await;
+        let address = push::tests::rfc_subscription("https://push.example/same", push::Lang::En);
+        remote.subscribe(&old, address.clone()).unwrap();
+        let changes = *window.changes.lock().unwrap();
+
+        // The app opened again: the same subscription, nothing to save.
+        remote.subscribe(&old, address.clone()).unwrap();
+        assert_eq!(*window.changes.lock().unwrap(), changes);
+
+        // The browser paired again under a new device keeps its address.
+        remote.subscribe(&new, address.clone()).unwrap();
+        let pushes: Vec<bool> = remote
+            .store
+            .read()
+            .devices
+            .iter()
+            .map(|phone| phone.push.is_some())
+            .collect();
+        assert_eq!(pushes, [false, true]);
+        assert_eq!(remote.push_subscribers().await, 1);
+
+        // A language changed is saved.
+        let french = Subscription {
+            lang: push::Lang::Fr,
+            ..address
+        };
+        remote.subscribe(&new, french).unwrap();
+        assert_eq!(
+            remote.store.read().devices[1].push.as_ref().unwrap().lang,
+            push::Lang::Fr
+        );
+        remote.unsubscribe(&new).unwrap();
+        assert_eq!(remote.push_subscribers().await, 0);
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn nothing_is_pushed_while_hangar_mobile_is_off() {
+        let (service, received) = push_service(test_port(18)).await;
+        let (remote, phone, _) = two_phones(Fake::echo(), test_port(17)).await;
+        let subscription =
+            push::tests::rfc_subscription(&format!("{service}/push/a"), push::Lang::En);
+        remote.subscribe(&phone, subscription).unwrap();
+        remote.set_enabled(false).await.unwrap();
+
+        assert_eq!(remote.push_subscribers().await, 0);
+        let outcome = remote.push(waits("a", "b")).await.unwrap();
+        assert_eq!(outcome, PushOutcome::default());
+        assert!(received.lock().unwrap().is_empty());
+        // Kept for when it is on again.
+        assert!(remote.store.read().devices[0].push.is_some());
     }
 }

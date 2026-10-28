@@ -60,6 +60,34 @@ export function useRoute() {
   return { route, navigate, back };
 }
 
+/** The screen a notification's address names, as its hash: `#/pane/p1`, `#/shares`, `#/`. */
+export function hashOf(url: string, base: string): string {
+  try {
+    return new URL(url, base).hash || "#/";
+  } catch {
+    return "#/";
+  }
+}
+
+/**
+ * A notification tapped while the app is open: the service worker brings it
+ * forward and says which screen (sw.js), and the app goes there.
+ */
+export function useNotificationOpens(): void {
+  useEffect(() => {
+    const worker = "serviceWorker" in navigator ? navigator.serviceWorker : null;
+    if (!worker) return;
+    const open = (event: MessageEvent) => {
+      const message = event.data as { type?: unknown; url?: unknown } | null;
+      if (message?.type !== "hangar:open" || typeof message.url !== "string") return;
+      const hash = hashOf(message.url, location.href);
+      if (location.hash !== hash) location.hash = hash;
+    };
+    worker.addEventListener("message", open);
+    return () => worker.removeEventListener("message", open);
+  }, []);
+}
+
 /**
  * The part of the screen above the on-screen keyboard: iOS keeps the layout
  * viewport when it opens and scrolls it instead, so a composer pinned to the

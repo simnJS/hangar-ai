@@ -177,6 +177,8 @@ pub fn run() {
             remote::remote_revoke,
             remote::remote_tailscale,
             remote::remote_tailscale_serve,
+            remote::remote_push,
+            remote::remote_push_subscribers,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
