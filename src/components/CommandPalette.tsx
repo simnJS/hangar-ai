@@ -58,6 +58,8 @@ export interface CommandPaletteProps {
   focusedPaneId: string | null;
   onFocusPane: (workspaceId: string, paneId: string) => void;
   onActivateWorkspace: (workspaceId: string) => void;
+  /** « Ouvrir le chef de projet »: the same action as the navigator's button. */
+  onOpenManager: () => void;
 }
 
 interface Entry extends PaletteEntry {
@@ -211,6 +213,7 @@ export function CommandPalette({
   focusedPaneId,
   onFocusPane,
   onActivateWorkspace,
+  onOpenManager,
 }: CommandPaletteProps) {
   const t = useT();
   const locale = useLocale();
@@ -344,6 +347,24 @@ export function CommandPalette({
             keys: index < 9 ? keysOf(`workspace.go${index + 1}` as CommandId) : "",
             run: () => onActivateWorkspace(ws.id),
           });
+        });
+      }
+
+      if (section === "workspaces") {
+        list.push({
+          key: "manager:open",
+          group,
+          label: t("manager.open"),
+          keywords: [
+            ...elsewhere("manager.open"),
+            t("manager.hqName"),
+            ...elsewhere("manager.hqName"),
+            "manager",
+            "HQ",
+          ],
+          icon: <Icon name="orchestrator" size={13} />,
+          keys: "",
+          run: onOpenManager,
         });
       }
 

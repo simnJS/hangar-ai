@@ -103,6 +103,7 @@ pub fn run() {
             store::save_state,
             store::dir_exists,
             store::home_dir,
+            hq_dir,
             workspace_file::read_code_workspace,
             workspace_file::find_code_workspace,
             board_load,
@@ -199,6 +200,20 @@ use std::sync::OnceLock;
 fn ui_store() -> &'static BoardStore {
     static STORE: OnceLock<BoardStore> = OnceLock::new();
     STORE.get_or_init(BoardStore::default)
+}
+
+/// The project manager's folder: `<app data dir>/hq`, created if missing. Its
+/// Claude Code works from here rather than from any project.
+#[tauri::command]
+fn hq_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("hq");
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("could not create {}: {err}", dir.display()))?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

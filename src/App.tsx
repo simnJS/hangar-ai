@@ -769,6 +769,25 @@ export default function App() {
     });
   };
 
+  /** « Ouvrir le chef de projet »: the HQ and its manager, made if need be, then shown. */
+  const openManager = () => {
+    orchestration
+      .openManager(t("manager.hqName"))
+      .then((result) => {
+        if (result.kind === "failed") {
+          return setNotice(
+            result.error ? t("manager.failedWith", { error: result.error }) : t("manager.failed"),
+          );
+        }
+        setView("terminals");
+        activateRef.current(result.workspaceId, result.paneId);
+        if (result.kind !== "shown") {
+          setNotice({ kind: "agent", text: t(`manager.${result.kind}`) });
+        }
+      })
+      .catch((err) => setNotice(t("manager.failedWith", { error: String(err) })));
+  };
+
   /** A new Claude Code pane, pinned from the start, brought forward. */
   const createOrchestrator = (workspaceId: string) => {
     const ws = snapshot().workspaces.find((entry) => entry.id === workspaceId);
@@ -1343,6 +1362,7 @@ export default function App() {
           onFocusPane={(workspaceId, paneId) => activateRef.current(workspaceId, paneId)}
           onOpenMcpServers={setMcpServersFor}
           onOpenOrchestration={setOrchestrationFor}
+          onOpenManager={openManager}
           sleep={forcedSleep}
         />
       )}
@@ -1631,6 +1651,7 @@ export default function App() {
             setActiveWorkspace(id);
             setView("terminals");
           }}
+          onOpenManager={openManager}
         />
       )}
 
