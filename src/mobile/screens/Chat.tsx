@@ -14,6 +14,7 @@ import {
   mergeLatest,
   mergeOlder,
   noteFolds,
+  noticeText,
   PAGE_LIMIT,
   pathParts,
   pendingKey,
@@ -486,7 +487,7 @@ const Row = memo(function Row({ row }: { row: ChatRow }) {
     case "question":
       return <AnsweredQuestion item={row.item} />;
     case "notice":
-      return <li className="chat-notice">{row.text}</li>;
+      return <li className="chat-notice">{noticeText(row.text, t)}</li>;
   }
 });
 

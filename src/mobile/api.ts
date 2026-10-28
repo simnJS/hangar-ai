@@ -144,7 +144,10 @@ export type ChatItem = ChatItemBase &
 /** What the pane waits for the person to answer, if anything. */
 export type Pending =
   | { kind: "question"; toolUseId: string; questions: ChatQuestion[] }
-  | { kind: "permission"; tool: string; title: string; detail: string };
+  | { kind: "permission"; tool: string; title: string; detail?: string };
+
+/** Why a pane has no chat to show: not Claude Code, no session captured yet, no transcript written yet. */
+export type ChatReason = "notClaude" | "noSession" | "noTranscript";
 
 export interface Chat {
   paneId: string;
@@ -160,8 +163,8 @@ export interface Chat {
   /** Passed as `before`, gets the page before these items. */
   cursor: string | null;
   pending: Pending | null;
-  /** Why there is no chat: not Claude Code, no session yet. The terminal shows instead. */
-  reason?: string;
+  /** Why there is no chat; the terminal shows instead. */
+  reason?: ChatReason;
 }
 
 export type Key = "enter" | "escape" | "tab" | "up" | "down" | "ctrl+c";

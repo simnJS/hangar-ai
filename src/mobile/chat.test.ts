@@ -23,6 +23,7 @@ import {
   mergeLatest,
   mergeOlder,
   noteFolds,
+  noticeText,
   pathParts,
   pendingKey,
   shouldLoadOlder,
@@ -108,10 +109,40 @@ describe("what an item shows as", () => {
     expect(actionTitle("Ran cargo test remote::", fr)).toBe("Exécuté cargo test remote::");
     expect(actionLine("Read 4 files", fr)).toEqual({ before: "", subject: "4", after: " fichiers lus" });
     expect(actionLine("Something else", fr)).toEqual({ before: "", subject: "Something else", after: "" });
+    // The longer shapes the PC writes win over the shorter ones they start like.
+    expect(actionTitle("Ran agent: review the diff", fr)).toBe("Agent lancé : review the diff");
+    expect(actionTitle("Searched the web for tailscale serve", fr)).toBe("Cherché sur le web « tailscale serve »");
+    expect(actionTitle("Used skill frontend-design", fr)).toBe("Utilisé le skill frontend-design");
+    expect(actionTitle("Updated the to-do list", fr)).toBe("Liste de tâches mise à jour");
+    expect(actionLine("Loaded tools", fr)).toEqual({ before: "Outils chargés", subject: "", after: "" });
     const en = translator("en").t;
-    for (const title of ["Edited src/a.ts", "Ran pnpm test", "Read 4 files", "Searched for foo", "Used project_list"]) {
-      expect(actionTitle(title, en)).toBe(title);
-    }
+    const titles = [
+      "Edited src/a.ts",
+      "Wrote src/b.ts",
+      "Ran pnpm test",
+      "Ran agent: review the diff",
+      "Read 4 files",
+      "Read src/x.ts",
+      "Fetched https://example.com",
+      "Searched the web for foo",
+      "Searched for foo",
+      "Used skill frontend-design",
+      "Used project_list",
+      "Updated the to-do list",
+      "Loaded tools",
+      "Presented a plan",
+    ];
+    for (const title of titles) expect(actionTitle(title, en)).toBe(title);
+  });
+
+  it("puts the PC's notices in the phone's words, an error Claude Code reported as written", () => {
+    const fr = translator("fr").t;
+    expect(noticeText("Conversation compacted", fr)).toBe("Conversation compactée");
+    expect(noticeText("Turn interrupted", fr)).toBe("Réponse interrompue");
+    expect(noticeText("Session resumed", fr)).toBe("Session reprise");
+    expect(noticeText("API Error: 529 Overloaded", fr)).toBe("API Error: 529 Overloaded");
+    expect(noticeText("constructor", fr)).toBe("constructor");
+    expect(noticeText("Session resumed", translator("en").t)).toBe("Session resumed");
   });
 
   it("puts a path's file first, its folder after it", () => {

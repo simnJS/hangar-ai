@@ -40,19 +40,39 @@ const KINDS: Record<string, ActionKind> = {
 export const actionKind = (tool: string): ActionKind => KINDS[tool] ?? "other";
 
 /**
- * The PC writes an action's line in English: "Edited src/a.ts", "Ran pnpm
- * test", "Read 4 files". Its verb is put in the phone's words; a line in
- * another shape stays as written.
+ * The PC writes an action's line in English (src-tauri/src/chat/tools.rs):
+ * "Edited src/a.ts", "Ran pnpm test", "Read 4 files". Its verb is put in
+ * the phone's words; a line in another shape stays as written. The longer
+ * shapes come first: "Ran agent: …" before "Ran …".
  */
 const TITLES: { pattern: RegExp; key: Key }[] = [
   { pattern: /^Edited (.+)$/s, key: "action.edited" },
   { pattern: /^Wrote (.+)$/s, key: "action.wrote" },
+  { pattern: /^Ran agent: (.+)$/s, key: "action.agent" },
   { pattern: /^Ran (.+)$/s, key: "action.ran" },
   { pattern: /^Read (\d+) files$/, key: "action.readFiles" },
   { pattern: /^Read (.+)$/s, key: "action.read" },
+  { pattern: /^Fetched (.+)$/s, key: "action.fetched" },
+  { pattern: /^Searched the web for (.+)$/s, key: "action.searchedWeb" },
   { pattern: /^Searched for (.+)$/s, key: "action.searched" },
+  { pattern: /^Used skill (.+)$/s, key: "action.skill" },
   { pattern: /^Used (.+)$/s, key: "action.used" },
+  { pattern: /^Updated the to-do list()$/, key: "action.todos" },
+  { pattern: /^Loaded tools()$/, key: "action.tools" },
+  { pattern: /^Presented a plan()$/, key: "action.plan" },
 ];
+
+/** The notices the PC writes (src-tauri/src/chat/thread.rs); an error Claude Code reported stays as written. */
+const NOTICES = new Map<string, Key>([
+  ["Conversation compacted", "notice.compacted"],
+  ["Turn interrupted", "notice.interrupted"],
+  ["Session resumed", "notice.resumed"],
+]);
+
+export function noticeText(text: string, t: (key: Key) => string): string {
+  const key = NOTICES.get(text);
+  return key ? t(key) : text;
+}
 
 type Translate = (key: Key, vars?: Record<string, string>) => string;
 

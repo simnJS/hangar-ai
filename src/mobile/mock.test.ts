@@ -163,9 +163,9 @@ describe("the fake PC's conversations", () => {
 
   it("says why a pane has no chat: another agent, or no session yet", async () => {
     const client = fakePc();
-    expect(await settle(client.chat("p-shell"))).toMatchObject({ items: [], reason: "not-claude", sessionId: null });
-    expect(await settle(client.chat("Leo"))).toMatchObject({ items: [], reason: "not-claude" });
-    expect(await settle(client.chat("Noé"))).toMatchObject({ items: [], reason: "no-session" });
+    expect(await settle(client.chat("p-shell"))).toMatchObject({ items: [], reason: "notClaude", sessionId: null });
+    expect(await settle(client.chat("Leo"))).toMatchObject({ items: [], reason: "notClaude" });
+    expect(await settle(client.chat("Noé"))).toMatchObject({ items: [], reason: "noSession" });
     await expect(settle(client.chat("p-ada", { before: "nowhere" }))).rejects.toMatchObject({ kind: "refused", code: "bad-cursor" });
   });
 

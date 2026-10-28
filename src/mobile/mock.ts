@@ -472,7 +472,7 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     const project = world.projects.find((candidate) => candidate.id === pane.workspaceId);
     const head = { paneId: pane.id, pane: pane.name, workspace: project?.name ?? "HQ", agent: pane.agent, activity: pane.activity };
     if (!pane.chat) {
-      const reason = pane.agent === "claude" ? "no-session" : "not-claude";
+      const reason = pane.agent === "claude" ? "noSession" : "notClaude";
       return json(200, { ...head, sessionId: null, items: [], older: false, cursor: null, pending: null, reason } satisfies Chat);
     }
     const page = chatPage(pane.chat.items, typeof args.before === "string" ? args.before : undefined, Number(args.limit ?? 60));
