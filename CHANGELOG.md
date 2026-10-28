@@ -8,6 +8,25 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.1.0] - 2026-10-28
+
+- **Hangar Mobile.** Follow and steer your projects from your phone while Hangar keeps
+  running on your PC. It is a web app that Hangar itself serves and that you add to the
+  phone's Home Screen: no app store, no account, no server of ours in between. Set it up
+  in about a minute under **Settings → Mobile** (see the README).
+  - **For you** lists what waits for you in every project: an agent asking for a
+    permission, a question for you, a delivery ready to land.
+  - Read any pane's screen as it updates, answer an agent, allow or deny a permission,
+    press `Esc` or `Enter`, attach a photo or a file, and talk to the project manager.
+  - Agents can share images and files with your phone through the new `phone_share`
+    MCP tool; images show in **Shares**.
+  - Push notifications reach the phone even with the app closed, sent by the PC itself.
+  - **Since your last visit** shows what happened while you were away, kept across
+    restarts for 30 days. For a few days away, two options: keep the PC from sleeping
+    while Hangar Mobile is on, and start Hangar when you log in.
+  - Security: it listens on `127.0.0.1` only and is reached through Tailscale Serve over
+    HTTPS; each phone pairs with a one-time code and can be revoked. Off by default.
+
 ## [1.0.3] - 2026-10-28
 
 - **Project manager.** One agent to talk to instead of every project's agents. Open it
