@@ -8,6 +8,24 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.0.3] - 2026-10-28
+
+- **Project manager.** One agent to talk to instead of every project's agents. Open it
+  from the top of the sidebar or the command palette: Hangar creates an HQ workspace
+  with its own folder and one Claude Code agent (Opus by default) that follows every
+  workspace, with or without an orchestrator.
+  - Ask it where your projects stand: agents, boards, what waits for you, deliveries
+    ready to land, each plan's status.
+  - Ask it to pass an instruction on: it is queued for that project's orchestrator,
+    and a sleeping workspace wakes up.
+  - It speaks up by itself only for what waits for you: an agent waiting for an answer
+    or a permission, a task marked needs-you, a delivery ready to land, a board whose
+    tasks are all done.
+  - It keeps a tracker of what you want from each project, handed back after every
+    compaction. It never writes code, never acts on its own, and the HQ never sleeps.
+- **New MCP tools for it:** `project_list`, `project_status` and `project_send`, which
+  only the project manager can call.
+
 ## [1.0.2] - 2026-10-28
 
 - **Orchestrator mode without git.** A workspace that is not a git repository, such as
