@@ -1,6 +1,20 @@
 import { typeset } from "../lib/typography";
-import type { Activity, HistoryEntry, Pane, Project, RemoteState, Screen, SendArgs, Share, Waiting } from "./api";
+import type {
+  Activity,
+  Chat,
+  ChatAnswer,
+  ChatItem,
+  HistoryEntry,
+  Pane,
+  Project,
+  RemoteState,
+  Screen,
+  SendArgs,
+  Share,
+  Waiting,
+} from "./api";
 import { locale as appLocale, type Locale } from "./i18n";
+import { chatPage, conversations, type FakeChat } from "./mockChat";
 
 /**
  * A fake PC, for working on the app without one: the dev server always uses
@@ -8,8 +22,10 @@ import { locale as appLocale, type Locale } from "./i18n";
  * real mobile server, through a `fetch` of its own, so every call the app
  * makes goes through the real client.
  *
- * Its projects live: a message gets an answer, a permission granted sets the
- * agent back to work, and a few seconds later it hands back.
+ * Its projects live: a message gets an answer, a permission granted or a
+ * question answered sets the agent back to work, and a few seconds later it
+ * hands back. Its Claude Code panes have their conversations too
+ * (mockChat.ts), which the chat reads page by page.
  *
  * `?mock=<scenario>` shows a state that is hard to come by otherwise:
  * - empty: nothing waits for the person;
@@ -42,6 +58,8 @@ interface FakePane extends Pane {
   workspaceId: string;
   /** The screen above Claude Code's input box. */
   body: string[];
+  /** Its conversation, for a Claude Code pane with a session. */
+  chat?: FakeChat;
   waitingSince?: number;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -145,7 +163,7 @@ function scenery(now: number, locale: Locale) {
       "│   3. No, and tell Claude what to do differently (esc)                │",
       "╰──────────────────────────────────────────────────────────────────────╯",
     ]),
-    pane("ws-iabench", "p-cora", "Cora", "worker", "yours", [
+    pane("ws-iabench", "p-cora", "Cora", "worker", "waiting", [
       "⏺ The phone app builds into dist-mobile/ and every screen works in mock",
       "  mode, light and dark, in French and English.",
       "",
@@ -154,7 +172,18 @@ function scenery(now: number, locale: Locale) {
       "  - pnpm test: 61 files, 1 024 tests passed",
       "  - pnpm mobile:build: dist-mobile/ in 1.9 s",
       "",
-      "  Shall I submit the delivery?",
+      "────────────────────────────────────────────────────────────────────────",
+      " ☐ Delivery  ☐ Report  ☐ Next  ✔ Submit  →",
+      "",
+      "Shall I submit the delivery now?",
+      "",
+      "❯ 1. Submit now",
+      "     Hangar merges it in a scratch worktree, runs the check and has it reviewed",
+      "  2. Wait for the screenshots",
+      "     I take the 390×844 shots, light and dark, then submit",
+      "  3. Type something.",
+      "",
+      "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
     ]),
     pane("ws-storefront", "p-mia", "Mia", "orchestrator", "yours", [
       "⏺ All twelve tasks are done and landed on main. The storefront passes",
@@ -195,6 +224,9 @@ function scenery(now: number, locale: Locale) {
     ]),
   ];
   panes.find((candidate) => candidate.id === "p-ben")!.waitingSince = now - 4 * MIN;
+  panes.find((candidate) => candidate.id === "p-cora")!.waitingSince = now - 2 * MIN;
+  const chats = conversations(now);
+  for (const candidate of panes) candidate.chat = chats[candidate.id];
 
   const projects: Omit<Project, "panes" | "orchestrator">[] = [
     {
@@ -285,6 +317,18 @@ function json(status: number, body: unknown): Response {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** A tool call a pane makes while it answers. */
+interface Step {
+  tool: string;
+  title: string;
+  detail: string;
+  result: string;
+}
+
+const LOOK: Step = { tool: "Read", title: "Read CHANGELOG.md", detail: "CHANGELOG.md", result: "214 lines" };
+
 export interface Mock {
   fetch: typeof fetch;
   fileUrl: (id: string) => string;
@@ -301,6 +345,7 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     for (const pane of world.panes) {
       if (pane.activity === "waiting") pane.activity = "working";
       delete pane.waitingSince;
+      if (pane.chat) pane.chat.pending = null;
     }
     for (const project of world.projects) {
       project.needsYou = [];
@@ -369,17 +414,35 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     };
   }
 
-  /** The agent's turn: it works a moment, says `reply`, and hands back (or keeps working). */
-  function respond(pane: FakePane, said: string[], reply: string[], then: Activity = "yours") {
+  let written = 0;
+  /** Writes into a pane's conversation, as Claude Code does into its transcript. */
+  function say(pane: FakePane, item: DistributiveOmit<ChatItem, "id" | "at">): ChatItem | null {
+    if (!pane.chat) return null;
+    const said = { ...item, id: `${pane.id}-live-${++written}`, at: Date.now() } as ChatItem;
+    pane.chat.items.push(said);
+    return said;
+  }
+
+  /**
+   * The agent's turn: it works a moment, says `reply`, and hands back (or
+   * keeps working). Its conversation gets the same: the tool call it makes,
+   * running then done, and its answer.
+   */
+  function respond(pane: FakePane, said: string[], reply: string[], then: Activity = "yours", step: Step = LOOK) {
     const before = [...pane.body, ...(said.length ? ["", ...said] : [])];
     pane.activity = "working";
     delete pane.waitingSince;
     pane.body = [...before, "", "✻ Thinking… (esc to interrupt)"];
     clearTimeout(pane.timer);
     pane.timer = setTimeout(() => {
-      pane.body = [...before, "", ...reply];
-      pane.activity = then;
-    }, 2400);
+      const call = say(pane, { kind: "action", tool: step.tool, title: step.title, detail: step.detail, state: "running" });
+      pane.timer = setTimeout(() => {
+        if (call) Object.assign(call, { state: "done", result: { ok: true, text: step.result } });
+        pane.body = [...before, "", ...reply];
+        say(pane, { kind: "assistant", text: reply.map((line) => line.replace(/^⏺ /, "")).join("\n") });
+        pane.activity = then;
+      }, 1500);
+    }, 900);
   }
 
   function send(args: SendArgs): Response {
@@ -390,9 +453,65 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       clearTimeout(pane.timer);
       pane.body = [...pane.body.filter((line) => !line.startsWith("✻")), "  ⎿  Interrupted by user"];
       pane.activity = "yours";
+      for (const item of pane.chat?.items ?? []) {
+        if (item.kind === "action" && item.state === "running") {
+          Object.assign(item, { state: "error", result: { ok: false, text: "Interrupted by the person" } });
+        }
+      }
+      say(pane, { kind: "notice", text: "Turn interrupted" });
     }
-    if (args.text && args.submit) respond(pane, [`> ${args.text}`], ["⏺ On it. I'll write here when it's done."]);
+    if (args.text && args.submit) {
+      say(pane, { kind: "user", text: args.text, from: "person", images: 0 });
+      respond(pane, [`> ${args.text}`], ["⏺ On it. I'll write here when it's done."]);
+    }
     return json(200, { sent: true });
+  }
+
+  /** A page of a pane's conversation; a pane without one says why, as the PC does. */
+  function chat(pane: FakePane, args: Record<string, unknown>): Response {
+    const project = world.projects.find((candidate) => candidate.id === pane.workspaceId);
+    const head = { paneId: pane.id, pane: pane.name, workspace: project?.name ?? "HQ", agent: pane.agent, activity: pane.activity };
+    if (!pane.chat) {
+      const reason = pane.agent === "claude" ? "no-session" : "not-claude";
+      return json(200, { ...head, sessionId: null, items: [], older: false, cursor: null, pending: null, reason } satisfies Chat);
+    }
+    const page = chatPage(pane.chat.items, typeof args.before === "string" ? args.before : undefined, Number(args.limit ?? 60));
+    if (!page) return json(400, { error: "bad-cursor" });
+    return json(200, { ...head, sessionId: pane.chat.sessionId, ...page, pending: pane.chat.pending } satisfies Chat);
+  }
+
+  /** The answers to a pane's question, checked as Claude Code would: one per question, from its options. */
+  function answer(pane: FakePane, args: Record<string, unknown>): Response {
+    const pending = pane.chat?.pending;
+    if (pending?.kind !== "question" || pending.toolUseId !== args.toolUseId) {
+      return json(409, { error: "That pane is not asking this question" });
+    }
+    const answers = args.answers as ChatAnswer[];
+    const fits =
+      Array.isArray(answers) &&
+      answers.length === pending.questions.length &&
+      answers.every(({ selected, other }, index) => {
+        const question = pending.questions[index];
+        const count = selected.length + (other ? 1 : 0);
+        return (
+          selected.every((label) => question.options.some((option) => option.label === label)) &&
+          count > 0 &&
+          (question.multiSelect || count === 1)
+        );
+      });
+    if (!fits) return json(400, { error: "bad-answers" });
+    const asked = pane.chat!.items.find((item) => item.kind === "question" && item.toolUseId === pending.toolUseId);
+    if (asked?.kind === "question") asked.answer = answers;
+    pane.chat!.pending = null;
+    const chosen = answers.map(({ selected, other }) => [...selected, ...(other ? [other] : [])].join(", "));
+    pane.body = pane.body.slice(0, pane.body.findIndex((line) => line.startsWith("────")));
+    respond(pane, [`⏺ You answered: ${chosen.join(" / ")}`], [`⏺ Thanks. ${chosen.join("; ")}: on it.`], "working", {
+      tool: "Bash",
+      title: "Ran git status --short",
+      detail: "git status --short",
+      result: " M src/mobile/styles.css",
+    });
+    return json(200, { answered: true });
   }
 
   async function route(path: string, method: string, body: unknown): Promise<Response> {
@@ -439,11 +558,33 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       }
       case "send":
         return send(args as unknown as SendArgs);
+      case "chat": {
+        const pane = paneById(String(args.pane));
+        return pane ? chat(pane, args) : json(400, { error: `No pane named ${String(args.pane)}` });
+      }
+      case "answer": {
+        const pane = paneById(String(args.pane));
+        return pane ? answer(pane, args) : json(400, { error: `No pane named ${String(args.pane)}` });
+      }
       case "permission": {
         const pane = paneById(String(args.pane));
-        if (!pane || pane.activity !== "waiting") return json(409, { error: "That pane is not waiting for an answer" });
+        // A question is answered with `answer`, not Allow / Deny.
+        if (!pane || pane.activity !== "waiting" || pane.chat?.pending?.kind === "question") {
+          return json(409, { error: "That pane is not waiting for a permission" });
+        }
         const allowed = Boolean(args.allow);
         pane.body = pane.body.slice(0, pane.body.findIndex((line) => line.startsWith("╭")));
+        // The tool call that waited runs, or is turned down.
+        const waited = pane.chat?.items[pane.chat.items.length - 1];
+        if (pane.chat) pane.chat.pending = null;
+        if (waited?.kind === "action" && waited.state === "running") {
+          Object.assign(
+            waited,
+            allowed
+              ? { state: "done", result: { ok: true, text: "✓ src/lib/remoteControl.test.ts (31 tests) 412ms" } }
+              : { state: "error", result: { ok: false, text: "The person denied this command" } },
+          );
+        }
         respond(
           pane,
           ["⏺ Bash(pnpm vitest run src/lib/remoteControl.test.ts)", allowed ? "  ⎿  ✓ src/lib/remoteControl.test.ts (31 tests) 412ms" : "  ⎿  User rejected the command"],
@@ -455,7 +596,13 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       case "manager": {
         const boss = manager();
         if (!boss) return json(409, { error: "Open the project manager on the PC" });
-        respond(boss, [`> ${String(args.text)}`], ["⏺ Noted. I'll pass it on and tell you here how it goes."]);
+        say(boss, { kind: "user", text: String(args.text), from: "person", images: 0 });
+        respond(boss, [`> ${String(args.text)}`], ["⏺ Noted. I'll pass it on and tell you here how it goes."], "yours", {
+          tool: "mcp__hangar__project_list",
+          title: "Used project_list",
+          detail: "{}",
+          result: "4 projects",
+        });
         return json(200, { sent: true });
       }
       case "history": {

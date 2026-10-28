@@ -99,6 +99,71 @@ export interface Screen {
   text: string;
 }
 
+/* ── The chat: a Claude Code pane's conversation, read from its transcript ── */
+
+export interface ChatQuestion {
+  question: string;
+  /** A short label for the question: "Delivery", "Auth method". */
+  header: string;
+  multiSelect: boolean;
+  options: { label: string; description: string }[];
+}
+
+/** The answer to one question: the labels of the options chosen, and what was typed instead. */
+export interface ChatAnswer {
+  selected: string[];
+  other?: string;
+}
+
+export type ActionState = "running" | "done" | "error";
+
+interface ChatItemBase {
+  id: string;
+  /** In ms. */
+  at: number;
+}
+
+export type ChatItem = ChatItemBase &
+  (
+    | { kind: "user"; text: string; from: "person" | "hangar"; images: number }
+    | { kind: "assistant"; text: string }
+    | {
+        kind: "action";
+        tool: string;
+        /** One line, as the PC writes it: "Edited src/a.ts", "Ran pnpm test". */
+        title: string;
+        /** The input that matters: the command, the diff, the pattern. */
+        detail?: string;
+        result?: { ok: boolean; text: string };
+        state: ActionState;
+      }
+    | { kind: "question"; toolUseId: string; questions: ChatQuestion[]; answer?: ChatAnswer[] }
+    | { kind: "notice"; text: string }
+  );
+
+/** What the pane waits for the person to answer, if anything. */
+export type Pending =
+  | { kind: "question"; toolUseId: string; questions: ChatQuestion[] }
+  | { kind: "permission"; tool: string; title: string; detail: string };
+
+export interface Chat {
+  paneId: string;
+  pane: string;
+  workspace: string;
+  agent: string;
+  activity: Activity | null;
+  sessionId: string | null;
+  /** Oldest first. */
+  items: ChatItem[];
+  /** There are items before these. */
+  older: boolean;
+  /** Passed as `before`, gets the page before these items. */
+  cursor: string | null;
+  pending: Pending | null;
+  /** Why there is no chat: not Claude Code, no session yet. The terminal shows instead. */
+  reason?: string;
+}
+
 export type Key = "enter" | "escape" | "tab" | "up" | "down" | "ctrl+c";
 
 export interface SendArgs {
@@ -296,6 +361,12 @@ export function createClient(options: ClientOptions = {}) {
     permission: (pane: string, allow: boolean) =>
       call<{ answered: boolean }>("permission", { pane, allow }, { retries: 1 }),
     manager: (text: string) => call<{ sent: boolean }>("manager", { text }, { retries: 1 }),
+    /** A page of a pane's conversation: the latest, or the one before `before`. */
+    chat: (pane: string, { before, limit }: { before?: string; limit?: number } = {}) =>
+      call<Chat>("chat", { pane, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }),
+    /** Answers the pane's pending question, one answer per question, in their order. */
+    answer: (pane: string, toolUseId: string, answers: ChatAnswer[]) =>
+      call<{ answered: boolean }>("answer", { pane, toolUseId, answers }, { retries: 1 }),
     history: (since?: number) =>
       call<{ entries: HistoryEntry[] }>("history", since === undefined ? {} : { since }),
 

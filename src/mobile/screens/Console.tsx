@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, type Activity, type Key, type Screen } from "../api";
-import { EmptyState, PcChip, StateLabel, useNavigation } from "../components/Chrome";
+import { StateLabel, useNavigation } from "../components/Chrome";
 import { Icon } from "../components/Icon";
 import { errorText } from "../errors";
 import { usePolling } from "../hooks";
 import { t, type Key as Word } from "../i18n";
-import { locatePane, screenLines } from "../model";
+import { screenLines } from "../model";
 import { useRemoteContext } from "../remote";
 import type { Route } from "../route";
 
@@ -13,10 +13,12 @@ import type { Route } from "../route";
  * A pane on the phone: its screen as text, following the bottom as it
  * grows, read every second; the Allow / Deny bar while it waits for a
  * permission; and the composer, with the keys a terminal needs and a photo
- * or a file to attach. The project manager's tab shows its pane the same way.
+ * or a file to attach. A Claude Code pane opens on its chat (Chat.tsx)
+ * instead, and shows this behind its Terminal button; the project manager's
+ * tab does the same.
  */
 
-interface ConsoleProps {
+export interface ConsoleProps {
   paneId: string;
   name: string;
   /** Under the name: the project, or what this pane is. */
@@ -29,6 +31,9 @@ interface ConsoleProps {
   /** Where an attached file goes; no attaching without one. */
   workspaceId?: string;
   back?: Route;
+  /** Where the back button leads when it is not a screen: the chat, from its terminal. */
+  onBack?: () => void;
+  backLabel?: string;
   /** A tab bar sits below. */
   tabbed?: boolean;
   /** Shown above the screen: why it may be empty. */
@@ -47,18 +52,44 @@ const KEYS: { key: Key; label: Word; hint: Word; arrow?: boolean }[] = [
 /** Long enough for the PC to pass the answer on and the screen to show it. */
 const ANSWER_SETTLES_MS = 4_000;
 
-type Status =
+export type Status =
   | { kind: "busy"; text: string }
   | { kind: "done"; text: string }
   | { kind: "error"; text: string; retry?: () => void }
   | null;
 
+/**
+ * The line over the composer, and the actions that write it: a status that
+ * is only news fades; a failure stays, with its retry, until the next action.
+ */
+export function useStatus() {
+  const [status, setStatus] = useState<Status>(null);
+
+  useEffect(() => {
+    if (status?.kind !== "done") return;
+    const timer = setTimeout(() => setStatus(null), 2_500);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  const act = async (run: () => Promise<unknown>, done?: string): Promise<boolean> => {
+    try {
+      await run();
+      setStatus(done ? { kind: "done", text: done } : null);
+      return true;
+    } catch (error) {
+      setStatus({ kind: "error", text: errorText(error), retry: () => void act(run, done) });
+      return false;
+    }
+  };
+
+  return { status, setStatus, act };
+}
+
 export function Console(props: ConsoleProps) {
   const { client } = useRemoteContext();
-  const { back } = useNavigation();
   const [screen, setScreen] = useState<Screen | null>(null);
   const [gone, setGone] = useState(false);
-  const [status, setStatus] = useState<Status>(null);
+  const { status, setStatus, act } = useStatus();
   /**
    * When the person last answered a permission: the bar steps aside until the
    * pane moves on, or a few seconds, in case it asks again straight away.
@@ -78,25 +109,7 @@ export function Console(props: ConsoleProps) {
     }
   }, 1_000);
 
-  // A status that is only news fades; a failure stays until the next action.
-  useEffect(() => {
-    if (status?.kind !== "done") return;
-    const timer = setTimeout(() => setStatus(null), 2_500);
-    return () => clearTimeout(timer);
-  }, [status]);
-
   const activity = screen ? screen.activity : props.activity;
-
-  const act = async (run: () => Promise<unknown>, done?: string) => {
-    try {
-      await run();
-      setStatus(done ? { kind: "done", text: done } : null);
-      return true;
-    } catch (error) {
-      setStatus({ kind: "error", text: errorText(error), retry: () => void act(run, done) });
-      return false;
-    }
-  };
 
   const answer = async (allow: boolean) => {
     setAnsweredAt(Date.now());
@@ -109,20 +122,7 @@ export function Console(props: ConsoleProps) {
 
   return (
     <div className="console">
-      <header className="console__head">
-        {props.back && (
-          <button type="button" className="back" onClick={() => back(props.back!)} aria-label={t("pane.back")}>
-            <Icon name="chevronLeft" />
-          </button>
-        )}
-        <div className={`console__who ${props.back ? "" : "console__who--alone"}`}>
-          <h1 className="console__name">{props.name}</h1>
-          <p className="console__where">
-            <span>{props.where}</span>
-            <StateLabel activity={activity} />
-          </p>
-        </div>
-      </header>
+      <PaneHeader {...props} activity={activity} />
 
       <ScreenText screen={screen} gone={gone} name={props.name} notice={props.notice} />
 
@@ -142,13 +142,48 @@ export function Console(props: ConsoleProps) {
       )}
 
       <Composer
-        {...props}
+        send={props.send}
+        placeholder={props.placeholder}
+        workspaceId={props.workspaceId}
+        tabbed={props.tabbed}
         status={status}
         setStatus={setStatus}
         act={act}
         press={(key) => act(() => client.send({ pane: props.paneId, keys: [key] }))}
+        sent={t("composer.sent")}
       />
     </div>
+  );
+}
+
+/** A pane's name, where it is and its state, under the way back; `aside` at its right. */
+export function PaneHeader({
+  name,
+  where,
+  activity,
+  back: to,
+  onBack,
+  backLabel,
+  aside,
+}: Pick<ConsoleProps, "name" | "where" | "activity" | "back" | "onBack" | "backLabel"> & { aside?: ReactNode }) {
+  const { back } = useNavigation();
+  const leave = onBack ?? (to ? () => back(to) : null);
+  return (
+    <header className="console__head">
+      {leave && (
+        <button type="button" className="back" onClick={leave} aria-label={backLabel ?? t("pane.back")}>
+          <Icon name="chevronLeft" />
+        </button>
+      )}
+      <div className={`console__who ${leave ? "" : "console__who--alone"}`}>
+        <h1 className="console__name">{name}</h1>
+        <p className="console__where">
+          <span>{where}</span>
+          <StateLabel activity={activity} />
+        </p>
+      </div>
+      {aside}
+    </header>
   );
 }
 
@@ -204,14 +239,34 @@ function ScreenText({ screen, gone, name, notice }: { screen: Screen | null; gon
   );
 }
 
-interface ComposerProps extends ConsoleProps {
+interface ComposerProps {
+  send: (text: string) => Promise<unknown>;
+  placeholder: string;
+  workspaceId?: string;
+  tabbed?: boolean;
   status: Status;
   setStatus: (status: Status) => void;
   act: (run: () => Promise<unknown>, done?: string) => Promise<boolean>;
-  press: (key: Key) => Promise<boolean>;
+  /** The terminal's keys; the chat keeps them behind its Terminal button. */
+  press?: (key: Key) => Promise<boolean>;
+  /** Said once a message is sent; the chat shows the message itself instead. */
+  sent?: string;
+  /** Above the status: the chat's "Claude is working". */
+  children?: ReactNode;
 }
 
-function Composer({ send, placeholder, workspaceId, tabbed, status, setStatus, act, press }: ComposerProps) {
+export function Composer({
+  send,
+  placeholder,
+  workspaceId,
+  tabbed,
+  status,
+  setStatus,
+  act,
+  press,
+  sent,
+  children,
+}: ComposerProps) {
   const { client } = useRemoteContext();
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -229,7 +284,7 @@ function Composer({ send, placeholder, workspaceId, tabbed, status, setStatus, a
   const submit = async () => {
     const message = text.trim();
     if (!message) return;
-    if (await act(() => send(message), t("composer.sent"))) setText("");
+    if (await act(() => send(message), sent)) setText("");
   };
 
   const attach = async (file: File) => {
@@ -251,6 +306,7 @@ function Composer({ send, placeholder, workspaceId, tabbed, status, setStatus, a
 
   return (
     <div className={`composer ${tabbed ? "composer--tabbed" : ""}`}>
+      {children}
       {status && (
         <p className={`status status--${status.kind}`} role={status.kind === "error" ? "alert" : "status"}>
           {status.kind === "done" && <Icon name="check" size={16} />}
@@ -262,21 +318,23 @@ function Composer({ send, placeholder, workspaceId, tabbed, status, setStatus, a
           )}
         </p>
       )}
-      <div className="keys" role="group" aria-label={t("composer.keys")}>
-        {KEYS.map(({ key, label, hint, arrow }) => (
-          <button
-            key={key}
-            type="button"
-            className={`key ${arrow ? "key--arrow" : ""}`}
-            aria-label={t(hint)}
-            onClick={() => void press(key)}
-          >
-            {t(label)}
-          </button>
-        ))}
-      </div>
+      {press && (
+        <div className="keys" role="group" aria-label={t("composer.keys")}>
+          {KEYS.map(({ key, label, hint, arrow }) => (
+            <button
+              key={key}
+              type="button"
+              className={`key ${arrow ? "key--arrow" : ""}`}
+              aria-label={t(hint)}
+              onClick={() => void press(key)}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+      )}
       <form
-        className="compose"
+        className={`compose ${press ? "" : "compose--alone"}`}
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
@@ -327,64 +385,5 @@ function Composer({ send, placeholder, workspaceId, tabbed, status, setStatus, a
         </button>
       </form>
     </div>
-  );
-}
-
-/** A pane of a project, opened from the project or from a card. */
-export function PaneScreen({ id }: { id: string }) {
-  const { state, client } = useRemoteContext();
-  const located = state ? locatePane(state, id) : null;
-  const paneId = located?.pane.id ?? id;
-  const name = located?.pane.name ?? id;
-  return (
-    <Console
-      key={paneId}
-      paneId={paneId}
-      name={name}
-      where={located?.project.name ?? ""}
-      activity={located?.pane.activity ?? null}
-      send={(text) => client.send({ pane: paneId, text, submit: true })}
-      placeholder={t("composer.placeholder", { name })}
-      workspaceId={located?.project.id}
-      back={located ? { name: "project", id: located.project.id } : { name: "projects" }}
-      notice={
-        located?.project.asleep ? (
-          <p className="asleep">
-            <Icon name="moon" />
-            {t("project.asleepHint")}
-          </p>
-        ) : undefined
-      }
-    />
-  );
-}
-
-/** The project manager's tab: its pane, and a composer that talks to it. */
-export function ManagerScreen() {
-  const { state, client, pc, connection } = useRemoteContext();
-  if (!state) return null;
-  const manager = state.manager;
-  if (!manager) {
-    return (
-      <div className="page">
-        <div className="top">
-          <h1 className="title">{t("manager.title")}</h1>
-          <PcChip pc={pc} connection={connection} />
-        </div>
-        <EmptyState title={t("manager.none")} text={t("manager.noneHint")} mark={<Icon name="orchestrator" size={40} />} />
-      </div>
-    );
-  }
-  return (
-    <Console
-      key={manager.paneId}
-      paneId={manager.paneId}
-      name={manager.name}
-      where={t("manager.title")}
-      activity={manager.activity}
-      send={(text) => client.manager(text)}
-      placeholder={t("manager.placeholder")}
-      tabbed
-    />
   );
 }

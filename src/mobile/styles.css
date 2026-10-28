@@ -20,6 +20,8 @@
   --pressed: #dedee1;
   --bar: #f9f9fa;
   --term: #ffffff;
+  /* The person's own messages in the chat. */
+  --bubble: #ffffff;
   --line: rgba(0, 0, 0, 0.08);
   --line-strong: rgba(0, 0, 0, 0.14);
   --fg-hi: #0f1114;
@@ -66,6 +68,7 @@
     --pressed: #313234;
     --bar: #1b1c1f;
     --term: #121316;
+    --bubble: #252629;
     --line: rgba(255, 255, 255, 0.07);
     --line-strong: rgba(255, 255, 255, 0.12);
     --fg-hi: #ecedf0;
@@ -97,6 +100,7 @@
   --pressed: #313234;
   --bar: #1b1c1f;
   --term: #121316;
+  --bubble: #252629;
   --line: rgba(255, 255, 255, 0.07);
   --line-strong: rgba(255, 255, 255, 0.12);
   --fg-hi: #ecedf0;
@@ -1145,6 +1149,8 @@ img {
   color: var(--bg);
   font-size: 14px;
   font-weight: 600;
+  /* Centred from the middle, it would otherwise fit in half the width. */
+  white-space: nowrap;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
@@ -1321,6 +1327,910 @@ img {
   margin-left: auto;
   padding: 0 14px;
   font-size: 15px;
+}
+
+/* ── Chat: a Claude Code pane's conversation ───────────────────────
+   Claude's answers are documents, so they get the whole width, set as
+   text on the page; the person's messages are short, so they sit on the
+   right in a bubble. Tool calls are one quiet line each, grouped between
+   them; Hangar's messages are notes of the system, small and framed. What
+   the pane waits for comes last, as the one card with colour in it. */
+
+.chat {
+  background: var(--bg);
+}
+
+/* The terminal, behind its button at the header's right: its word under
+   its icon, as a toolbar has them, so the pane's name and state keep the
+   width. */
+.head-action {
+  flex: none;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 60px;
+  min-height: 48px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.head-action .icon {
+  --icon: 22px;
+  color: var(--fg-hi);
+}
+
+.head-action:active {
+  background: var(--raised);
+}
+
+.chat__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat__scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  /* The list keeps its place itself when a page is put above. */
+  overflow-anchor: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat__content {
+  padding: 14px calc(var(--gutter) + var(--safe-right)) 20px calc(var(--gutter) + var(--safe-left));
+}
+
+/* A card in the composer's place: the list keeps clear of the home bar itself. */
+.chat--asking:not(.chat--tabbed) .chat__content {
+  padding-bottom: calc(20px + var(--safe-bottom));
+}
+
+.chat__content > .asleep {
+  margin: 0 0 16px;
+}
+
+.chat__note {
+  margin: 8px 2px;
+  color: var(--fg-3);
+  font-size: 15px;
+}
+
+/* The top of what the phone holds. */
+.chat__edge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-bottom: 8px;
+  color: var(--fg-3);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+.chat__edge--failed {
+  color: var(--danger);
+}
+
+.chat__edge .btn {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.chat__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Messages ── */
+
+.msg--claude {
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.msg--you {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding-left: 12%;
+}
+
+.bubble {
+  max-width: 100%;
+  padding: 9px 14px 10px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--bubble);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-hi);
+  font-size: 16px;
+  line-height: 1.42;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg--sending .bubble {
+  opacity: 0.7;
+}
+
+.msg__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+.chat-time,
+.chat-notice {
+  align-self: center;
+  max-width: 100%;
+  color: var(--fg-3);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-time {
+  margin-top: 6px;
+  font-weight: 560;
+}
+
+.chat-notice {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--raised);
+}
+
+/* What Hangar queued: a note of the system, not the person. */
+.note {
+  padding: 10px 14px 4px;
+  border-radius: var(--r-card);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-2);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.note__from {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  color: var(--fg-3);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.note__from .logo {
+  fill: var(--fg-3);
+}
+
+.note__from .logo__active {
+  fill: var(--fg-2);
+}
+
+.note__body {
+  padding-bottom: 6px;
+}
+
+.note__body--folded {
+  max-height: 7.4em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 60%, transparent);
+  mask-image: linear-gradient(#000 60%, transparent);
+}
+
+.note .md {
+  font-size: inherit;
+}
+
+.note .md__h {
+  font-size: 15px;
+}
+
+.note__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: -4px 0 0 -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.is-flipped {
+  transform: rotate(180deg);
+}
+
+/* ── Actions: one line per tool call ── */
+
+.actions {
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.actions > li + li {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.action__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14.5px;
+  text-align: left;
+}
+
+button.action__line:active {
+  background: var(--raised);
+}
+
+.action__icon {
+  color: var(--fg-3);
+}
+
+.action__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action__file {
+  color: var(--fg-hi);
+  font-weight: 560;
+}
+
+.action__dir {
+  color: var(--fg-3);
+}
+
+.action__more {
+  color: var(--fg-2);
+  font-weight: 560;
+}
+
+.action__state {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  color: var(--fg-3);
+}
+
+.action__state--running {
+  color: var(--working);
+}
+
+.action__state--error {
+  color: var(--danger);
+}
+
+.action--error .action__icon {
+  color: var(--danger);
+}
+
+.action__chevron {
+  color: var(--fg-3);
+  transition: transform 160ms var(--ease);
+}
+
+.action__detail {
+  padding: 2px 12px 12px;
+}
+
+.action__label {
+  margin: 8px 0 4px;
+  color: var(--fg-3);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* A command, a diff, an output: scrolled inside itself, never the chat. */
+.detail {
+  max-height: 260px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: var(--r-control);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  -webkit-overflow-scrolling: touch;
+}
+
+.detail--failed {
+  background: var(--danger-soft);
+}
+
+.detail__line {
+  display: block;
+  min-width: max-content;
+  margin: 0 -11px;
+  padding: 0 11px;
+}
+
+.detail__line--add {
+  background: rgba(26, 127, 55, 0.12);
+  color: var(--working);
+}
+
+.detail__line--del {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.detail__line--hunk {
+  color: var(--fg-3);
+}
+
+/* ── Claude's markdown ── */
+
+.md > * + * {
+  margin-top: 0.7em;
+}
+
+.md li > * + * {
+  margin-top: 0.35em;
+}
+
+.md__h {
+  color: var(--fg-hi);
+  line-height: 1.3;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.md__h1 {
+  font-size: 19px;
+}
+
+.md__h2 {
+  font-size: 17.5px;
+}
+
+.md__h3,
+.md__h4 {
+  font-size: 16px;
+}
+
+.md > .md__h:not(:first-child) {
+  margin-top: 1.1em;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.35em;
+}
+
+.md ul {
+  list-style: disc;
+}
+
+.md ol {
+  list-style: decimal;
+}
+
+.md li + li {
+  margin-top: 0.25em;
+}
+
+.md li::marker {
+  color: var(--fg-3);
+}
+
+.md__task {
+  list-style: none;
+  margin-left: -1.35em;
+  display: flex;
+  gap: 8px;
+}
+
+.md__box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0.2em 0 0;
+  accent-color: var(--accent);
+}
+
+.md strong {
+  color: var(--fg-hi);
+  font-weight: 650;
+}
+
+.md__code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--raised);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
+.md__pre {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--r-control);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-hi);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  -webkit-overflow-scrolling: touch;
+}
+
+.md blockquote {
+  margin: 0;
+  padding-left: 12px;
+  box-shadow: inset 3px 0 0 var(--line-strong);
+  color: var(--fg-2);
+}
+
+.md hr {
+  height: 1px;
+  border: 0;
+  background: var(--line-strong);
+}
+
+.md__link {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.md__table {
+  overflow-x: auto;
+  border-radius: var(--r-control);
+  box-shadow: inset 0 0 0 1px var(--line);
+  -webkit-overflow-scrolling: touch;
+}
+
+.md table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+
+.md th,
+.md td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.md th {
+  color: var(--fg-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.md tr + tr td,
+.md tbody tr:first-child td {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+/* ── A question answered earlier ── */
+
+.asked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.asked__one {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asked__question {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  color: var(--fg-2);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.asked__answer {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: 12%;
+  white-space: normal;
+}
+
+.asked__answer li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.asked__answer .icon {
+  align-self: center;
+  color: var(--fg-3);
+}
+
+.asked__none {
+  align-self: flex-end;
+  color: var(--fg-3);
+  font-size: 14px;
+}
+
+/* ── What the pane waits for: a question, a permission ── */
+
+.ask-card {
+  position: relative;
+  margin-top: 18px;
+  padding: 14px 14px 14px 18px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  overflow: hidden;
+}
+
+.ask-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--state-fill);
+}
+
+.ask-card__who {
+  color: var(--waiting);
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.ask-card__what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 8px 0 10px;
+  color: var(--fg-hi);
+  font-size: 17px;
+  line-height: 1.32;
+  font-weight: 560;
+}
+
+.ask-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ask-card__actions .btn {
+  min-height: 50px;
+  font-size: 16.5px;
+}
+
+.ask-card__actions .btn--primary {
+  min-width: 132px;
+}
+
+.ask-card__actions .btn:first-child:not(:last-child) {
+  margin-right: auto;
+}
+
+.ask-card__actions--both {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.ask-card__actions--both .btn {
+  min-width: 0;
+}
+
+.question {
+  min-width: 0;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.question__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+}
+
+.question__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.question__step {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: 13.5px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.question__text {
+  margin-top: 2px;
+  color: var(--fg-hi);
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.question__hint {
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.options {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* One option: the whole row is the target, its mark at the left. */
+.option,
+.option__other {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 52px;
+  padding: 13px 14px;
+  border-radius: var(--r-control);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.option:has(> input:checked),
+.option--other.is-open {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.option:active {
+  background: var(--raised);
+}
+
+.option input,
+.option__other input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.option:has(> input:focus-visible),
+.option__other:has(> input:focus-visible) {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* "Other…" is a row like the others, its field under it once chosen. */
+.option--other {
+  display: block;
+  padding: 0;
+  cursor: default;
+}
+
+.option__other {
+  background: transparent;
+  box-shadow: none;
+}
+
+.option__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+  background: var(--surface);
+}
+
+.option__mark--box {
+  border-radius: 6px;
+}
+
+input:checked + .option__mark {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+input:checked + .option__mark--dot::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-fg);
+}
+
+input:checked + .option__mark--box::after {
+  content: "";
+  width: 11px;
+  height: 6px;
+  margin-top: -3px;
+  border-left: 2px solid var(--accent-fg);
+  border-bottom: 2px solid var(--accent-fg);
+  transform: rotate(-45deg);
+}
+
+.option__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.option__label {
+  color: var(--fg-hi);
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 580;
+  overflow-wrap: anywhere;
+}
+
+.option__desc {
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.option__field {
+  display: block;
+  width: calc(100% - 28px);
+  min-height: 44px;
+  margin: 0 14px 14px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-hi);
+  font-size: 16px;
+  outline: none;
+}
+
+.option__field:focus {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.option__field::placeholder {
+  color: var(--fg-3);
+}
+
+.ask-card .status {
+  margin: 12px 0 0;
+}
+
+/* ── Claude at work, above the composer ── */
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 8px 4px;
+  color: var(--working);
+}
+
+.working__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: 15px;
+  font-weight: 560;
+}
+
+.working__stop {
+  flex: none;
+  padding: 0 14px 0 12px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: 15px;
+}
+
+.working__stop .icon {
+  color: var(--danger);
+}
+
+.compose--alone {
+  margin-top: 0;
+}
+
+.spinner {
+  flex: none;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+
+  .action__chevron {
+    transition: none;
+  }
 }
 
 /* ── Shares ────────────────────────────────────────────────────── */
@@ -1564,7 +2474,8 @@ img {
 }
 
 /* Typing: the keyboard takes the bottom, the tabs step aside. */
-.app:has(.compose__field:focus) .tabs {
+.app:has(.compose__field:focus) .tabs,
+.app:has(.option__field:focus) .tabs {
   display: none;
 }
 

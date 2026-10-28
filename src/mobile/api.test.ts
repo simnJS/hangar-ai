@@ -68,6 +68,25 @@ describe("the client's requests", () => {
     ]);
   });
 
+  it("asks for the chat's pages and answers its questions as the contract names them", async () => {
+    const { fetch, calls } = fakeFetch(json(200, { answered: true }));
+    const client = createClient({ fetch });
+    await client.chat("p-ada");
+    await client.chat("p-ada", { limit: 30 });
+    await client.chat("p-ada", { before: "ada-12", limit: 60 });
+    await client.answer("p-cora", "toolu_1", [{ selected: ["Submit now"] }, { selected: [], other: "Later" }]);
+    expect(calls.map((call) => [call.path, JSON.parse(String(call.init.body))])).toEqual([
+      ["/m/api/call/chat", { pane: "p-ada" }],
+      ["/m/api/call/chat", { pane: "p-ada", limit: 30 }],
+      ["/m/api/call/chat", { pane: "p-ada", before: "ada-12", limit: 60 }],
+      [
+        "/m/api/call/answer",
+        { pane: "p-cora", toolUseId: "toolu_1", answers: [{ selected: ["Submit now"] }, { selected: [], other: "Later" }] },
+      ],
+    ]);
+    expect(calls.every((call) => (call.init.headers as Record<string, string>)["X-Hangar"] === "1")).toBe(true);
+  });
+
   it("reads health and shares with GET, without the POST header", async () => {
     const { fetch, calls } = fakeFetch(json(200, { ok: true, pc: "PC", version: "1.1.0", paired: true }), json(200, { shares: [] }));
     const client = createClient({ fetch });
