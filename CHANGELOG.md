@@ -8,6 +8,20 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.0.2] - 2026-10-28
+
+- **Orchestrator mode without git.** A workspace that is not a git repository, such as
+  a UEFN island, can now run workers. They start in the workspace's own folder, side by
+  side, with no worktree and no branch. When a worker delivers, nothing is merged,
+  checked or reviewed: its task is done and its pane closes. Since nothing keeps two
+  workers' changes apart there, a task that does not list the files it owns never runs
+  beside another one. The orchestrator no longer asks you to make the folder a
+  repository.
+- **A pane that just started is no longer shown as working.** A Claude Code pane stayed
+  "working" until its first turn, in the navigator, in `pane_list` and for sleep, so a
+  workspace of fresh sessions never went to sleep. It now shows idle once its session
+  is ready.
+
 ## [1.0.1] - 2026-10-27
 
 - **Put a workspace to sleep by hand.** Right-click a workspace in the navigator, or run
