@@ -15,16 +15,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
+use super::files;
 use super::pairing::PairError;
 use super::{assets, Remote};
 use crate::control::ControlError;
@@ -56,8 +58,10 @@ fn refuse(status: StatusCode, error: &str) -> Response {
 pub fn router(remote: Arc<Remote>) -> Router {
     let paired = Router::new()
         .route("/m/api/call/{op}", post(call))
-        // /m/api/shares, /m/files/{id} and /m/api/upload, then /m/api/push/*,
-        // join here, behind the same cookie.
+        .route("/m/api/shares", get(shares))
+        .route("/m/files/{id}", get(shared_file))
+        .route("/m/api/upload", post(upload))
+        // /m/api/push/* joins here, behind the same cookie.
         .route("/m/{*rest}", any(unknown))
         .route_layer(middleware::from_fn_with_state(remote.clone(), paired_only));
     Router::new()
@@ -226,6 +230,131 @@ async fn call(State(remote): State<Arc<Remote>>, Path(op): Path<String>, body: B
         )
             .into_response(),
         Err(ControlError::Unavailable(_)) => refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+    }
+}
+
+#[derive(Deserialize)]
+struct SinceQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+/// What agents shared with the phones, newest first.
+async fn shares(State(remote): State<Arc<Remote>>, Query(query): Query<SinceQuery>) -> Response {
+    Json(json!({ "shares": remote.shares.list(query.since) })).into_response()
+}
+
+/// A shared file. Shown in place only if it is a picture the browser cannot
+/// be made to run; anything else is handed over to be saved, whatever it
+/// says it is.
+async fn shared_file(State(remote): State<Arc<Remote>>, Path(id): Path<String>) -> Response {
+    let Some((share, path)) = remote.shares.find(&id) else {
+        return refuse(StatusCode::NOT_FOUND, "not-found");
+    };
+    let Ok(Ok(bytes)) = tokio::task::spawn_blocking(move || std::fs::read(path)).await else {
+        return refuse(StatusCode::NOT_FOUND, "not-found");
+    };
+    let disposition = if files::inline_image(&share.mime) {
+        "inline".to_string()
+    } else {
+        let ascii: String = share
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_graphic() && !matches!(c, '"' | '\\') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let encoded =
+            percent_encoding::utf8_percent_encode(&share.name, percent_encoding::NON_ALPHANUMERIC);
+        format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{encoded}")
+    };
+    let mut response = Response::new(Body::from(bytes));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(files::served_type(&share.mime)),
+    );
+    if let Ok(value) = HeaderValue::from_str(&disposition) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    // Nothing in a file may load or run anything, even if it is opened.
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    // A share never changes: the phone may keep it.
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=31536000, immutable"),
+    );
+    response
+}
+
+#[derive(Deserialize)]
+struct UploadQuery {
+    workspace: Option<String>,
+    #[serde(default)]
+    name: String,
+}
+
+/// A file from the phone, saved in the workspace's folder: `{ path }`. The
+/// folder is the window's to say; the name is sanitized and the size capped.
+async fn upload(
+    State(remote): State<Arc<Remote>>,
+    Query(query): Query<UploadQuery>,
+    body: Body,
+) -> Response {
+    let Some(workspace) = query.workspace.filter(|id| !id.is_empty()) else {
+        return refuse(StatusCode::BAD_REQUEST, "bad-request");
+    };
+    let bytes = match to_bytes(body, files::MAX_UPLOAD).await {
+        Ok(bytes) => bytes,
+        Err(_) => return refuse(StatusCode::PAYLOAD_TOO_LARGE, "too-large"),
+    };
+    if bytes.is_empty() {
+        return refuse(StatusCode::BAD_REQUEST, "empty");
+    }
+    let folder = match remote
+        .window
+        .ask(
+            "remote_workspace",
+            json!({ "workspace": workspace }),
+            remote.call_timeout,
+        )
+        .await
+    {
+        Ok(answer) => answer["cwd"].as_str().map(std::path::PathBuf::from),
+        Err(ControlError::Refused(message)) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "refused", "message": message })),
+            )
+                .into_response()
+        }
+        Err(ControlError::Unavailable(_)) => {
+            return refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy")
+        }
+    };
+    let Some(folder) = folder else {
+        return refuse(StatusCode::BAD_REQUEST, "unknown-workspace");
+    };
+    let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S").to_string();
+    let saved = tokio::task::spawn_blocking(move || {
+        files::save_upload(&folder, &query.name, &bytes, &stamp)
+    })
+    .await;
+    match saved {
+        Ok(Ok(path)) => Json(json!({ "path": path.to_string_lossy() })).into_response(),
+        Ok(Err(message)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": message })),
+        )
+            .into_response(),
+        Err(_) => refuse(StatusCode::INTERNAL_SERVER_ERROR, "storage"),
     }
 }
 
@@ -855,6 +984,307 @@ mod tests {
         );
         assert_eq!(cookie_token(&headers), Some("tok"));
         assert_eq!(cookie_token(&HeaderMap::new()), None);
+    }
+
+    fn scratch_folder() -> std::path::PathBuf {
+        let dir = super::super::store::tests::scratch_file("ws")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn put_share(remote: &Arc<Remote>, name: &str, bytes: &[u8], at: u64) -> files::Share {
+        let source = scratch_folder().join(name);
+        std::fs::write(&source, bytes).unwrap();
+        remote
+            .shares
+            .add(
+                files::NewShare {
+                    source,
+                    caption: None,
+                    workspace: "C:/work".into(),
+                    pane: "Ava".into(),
+                },
+                at,
+            )
+            .unwrap()
+    }
+
+    fn file_of(remote_token: &str, id: &str) -> HttpRequest<Body> {
+        get_from(&format!("/m/files/{id}"), Some(remote_token))
+    }
+
+    #[tokio::test]
+    async fn the_shares_are_listed_newest_first_since_a_time() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let first = put_share(&remote, "a.png", b"a", 1_000);
+        let second = put_share(&remote, "b.txt", b"b", 2_000);
+
+        let answer = ask(&remote, get_from("/m/api/shares", Some(&token))).await;
+        assert_eq!(answer.status, StatusCode::OK);
+        let ids: Vec<&str> = answer.body["shares"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|share| share["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, [second.id.as_str(), first.id.as_str()]);
+        assert_eq!(answer.body["shares"][0]["name"], "b.txt");
+        assert_eq!(answer.body["shares"][0]["mime"], "text/plain");
+
+        let answer = ask(&remote, get_from("/m/api/shares?since=1000", Some(&token))).await;
+        assert_eq!(answer.body["shares"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_picture_is_served_in_place_with_its_type() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let share = put_share(&remote, "shot.png", b"png bytes", 1);
+        let answer = ask(&remote, file_of(&token, &share.id)).await;
+        assert_eq!(answer.status, StatusCode::OK);
+        assert_eq!(answer.body, Value::String("png bytes".into()));
+        assert_eq!(answer.headers[header::CONTENT_TYPE], "image/png");
+        assert_eq!(answer.headers[header::CONTENT_DISPOSITION], "inline");
+        assert_eq!(answer.headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    }
+
+    #[tokio::test]
+    async fn anything_that_could_run_is_an_attachment() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        for (name, served) in [
+            ("page.html", "application/octet-stream"),
+            ("drawing.svg", "application/octet-stream"),
+            ("data.xml", "application/octet-stream"),
+            ("notes.txt", "text/plain; charset=utf-8"),
+            ("report.pdf", "application/pdf"),
+            ("blob", "application/octet-stream"),
+        ] {
+            let share = put_share(&remote, name, b"<script>alert(1)</script>", 1);
+            let answer = ask(&remote, file_of(&token, &share.id)).await;
+            assert_eq!(answer.status, StatusCode::OK, "{name}");
+            assert_eq!(answer.headers[header::CONTENT_TYPE], served, "{name}");
+            let disposition = answer.headers[header::CONTENT_DISPOSITION]
+                .to_str()
+                .unwrap();
+            assert!(
+                disposition.starts_with("attachment; filename=\""),
+                "{name}: {disposition}"
+            );
+            assert_eq!(
+                answer.headers[header::X_CONTENT_TYPE_OPTIONS],
+                "nosniff",
+                "{name}"
+            );
+            assert!(answer.headers[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .contains("sandbox"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_with_an_odd_name_still_downloads() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let share = put_share(&remote, "été 1.txt", b"x", 1);
+        let answer = ask(&remote, file_of(&token, &share.id)).await;
+        assert_eq!(answer.status, StatusCode::OK);
+        let disposition = answer.headers[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap();
+        assert!(
+            disposition.contains("filename*=UTF-8''%C3%A9"),
+            "{disposition}"
+        );
+        assert!(!disposition.contains("été"), "{disposition}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_file_id_is_not_found_and_never_a_path() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        put_share(&remote, "a.png", b"a", 1);
+        for id in ["nope", "..%2Fremote.json", "%2E%2E", "..%5C..%5Cx"] {
+            let answer = ask(&remote, file_of(&token, id)).await;
+            assert_eq!(answer.status, StatusCode::NOT_FOUND, "{id}");
+        }
+    }
+
+    /// The window as it answers `remote_workspace`: a folder for the id `w1`.
+    fn window_with_folder(folder: &std::path::Path) -> Fake {
+        let folder = folder.to_string_lossy().into_owned();
+        Fake::answering(move |request| {
+            Some(if request.args["workspace"] == "w1" {
+                Ok(json!({ "cwd": folder }))
+            } else {
+                Err("No workspace with that id".to_string())
+            })
+        })
+    }
+
+    fn upload_to(
+        path: &str,
+        token: Option<&str>,
+        marked: bool,
+        body: Vec<u8>,
+    ) -> HttpRequest<Body> {
+        let mut request = HttpRequest::post(path).header(header::CONTENT_TYPE, "image/jpeg");
+        if let Some(token) = token {
+            request = request.header(header::COOKIE, format!("{COOKIE}={token}"));
+        }
+        if marked {
+            request = request.header("x-hangar", "1");
+        }
+        request.body(Body::from(body)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_upload_lands_in_the_workspace_and_its_path_comes_back() {
+        let folder = scratch_folder();
+        let window = window_with_folder(&folder);
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+
+        let answer = ask(
+            &remote,
+            upload_to(
+                "/m/api/upload?workspace=w1&name=IMG%201.jpg",
+                Some(&token),
+                true,
+                b"jpeg bytes".to_vec(),
+            ),
+        )
+        .await;
+        assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+        let path = std::path::PathBuf::from(answer.body["path"].as_str().unwrap());
+        assert_eq!(
+            path.parent().unwrap(),
+            folder.join(".hangar").join("uploads")
+        );
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // yyyy-mm-dd-hhmmss-IMG 1.jpg
+        let (stamp, rest) = name.split_at(17);
+        assert_eq!(rest, "-IMG 1.jpg");
+        let shaped = stamp.chars().enumerate().all(|(i, c)| match i {
+            4 | 7 | 10 => c == '-',
+            _ => c.is_ascii_digit(),
+        });
+        assert!(shaped, "{stamp}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"jpeg bytes");
+        assert_eq!(*window.asked.lock().unwrap(), ["remote_workspace"]);
+    }
+
+    #[tokio::test]
+    async fn an_upload_name_cannot_leave_the_uploads_folder() {
+        let folder = scratch_folder();
+        let remote = remote_with(window_with_folder(&folder), no_app);
+        let token = paired_phone(&remote).await;
+        let uploads = folder.join(".hangar").join("uploads");
+
+        for name in [
+            "..%2F..%2Fescape.txt",
+            "..%5C..%5Cescape.txt",
+            "%2Fetc%2Fpasswd",
+            "..",
+            "",
+        ] {
+            let answer = ask(
+                &remote,
+                upload_to(
+                    &format!("/m/api/upload?workspace=w1&name={name}"),
+                    Some(&token),
+                    true,
+                    b"x".to_vec(),
+                ),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::OK, "{name}");
+            let path = std::path::PathBuf::from(answer.body["path"].as_str().unwrap());
+            assert_eq!(path.parent().unwrap(), uploads, "{name}");
+        }
+        assert!(!folder.join("escape.txt").exists());
+        assert!(!folder.parent().unwrap().join("escape.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn an_upload_is_capped_at_25_mb() {
+        let folder = scratch_folder();
+        let window = window_with_folder(&folder);
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let upload = |size: usize| {
+            upload_to(
+                "/m/api/upload?workspace=w1&name=big.bin",
+                Some(&token),
+                true,
+                vec![0; size],
+            )
+        };
+
+        let answer = ask(&remote, upload(files::MAX_UPLOAD + 1)).await;
+        assert_eq!(answer.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(answer.body, json!({ "error": "too-large" }));
+        assert!(window.asked.lock().unwrap().is_empty());
+        assert!(!folder.join(".hangar").exists());
+
+        let answer = ask(&remote, upload(files::MAX_UPLOAD)).await;
+        assert_eq!(answer.status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn an_upload_needs_the_cookie_the_header_and_a_known_workspace() {
+        let folder = scratch_folder();
+        let remote = remote_with(window_with_folder(&folder), no_app);
+        let token = paired_phone(&remote).await;
+        let path = "/m/api/upload?workspace=w1&name=a.jpg";
+        let one = || b"x".to_vec();
+
+        let unpaired = ask(&remote, upload_to(path, None, true, one())).await;
+        assert_eq!(unpaired.status, StatusCode::UNAUTHORIZED);
+        let forged = ask(&remote, upload_to(path, Some("forged"), true, one())).await;
+        assert_eq!(forged.status, StatusCode::UNAUTHORIZED);
+        let unmarked = ask(&remote, upload_to(path, Some(&token), false, one())).await;
+        assert_eq!(unmarked.status, StatusCode::FORBIDDEN);
+        let nameless = ask(
+            &remote,
+            upload_to("/m/api/upload?name=a.jpg", Some(&token), true, one()),
+        )
+        .await;
+        assert_eq!(nameless.status, StatusCode::BAD_REQUEST);
+        let empty = ask(&remote, upload_to(path, Some(&token), true, vec![])).await;
+        assert_eq!(empty.status, StatusCode::BAD_REQUEST);
+        let unknown = ask(
+            &remote,
+            upload_to(
+                "/m/api/upload?workspace=nope&name=a.jpg",
+                Some(&token),
+                true,
+                one(),
+            ),
+        )
+        .await;
+        assert_eq!(unknown.status, StatusCode::BAD_REQUEST);
+        assert_eq!(unknown.body["message"], "No workspace with that id");
+        assert!(!folder.join(".hangar").exists());
+    }
+
+    #[tokio::test]
+    async fn the_shares_routes_are_closed_to_the_unpaired() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let share = put_share(&remote, "a.png", b"a", 1);
+        for path in [
+            "/m/api/shares".to_string(),
+            "/m/api/shares?since=0".to_string(),
+            format!("/m/files/{}", share.id),
+        ] {
+            let answer = ask(&remote, get_from(&path, None)).await;
+            assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{path}");
+        }
     }
 
     #[tokio::test]

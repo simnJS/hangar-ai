@@ -13,6 +13,8 @@
 //! window answers.
 //!
 //! - store.rs: what is kept on disk, in remote.json.
+//! - files.rs: the files that go both ways, shared by an agent or uploaded
+//!   by the phone.
 //! - pairing.rs: the six-digit code and the QR code a phone pairs with.
 //! - server.rs: the listener, its routes and their doors.
 //! - assets.rs: the web app, compiled in from dist-mobile/.
@@ -30,11 +32,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::control::{self, ControlError, ControlRequest};
 
 mod assets;
+mod files;
 mod pairing;
 mod server;
 mod store;
 mod tailscale;
 
+use files::Shares;
+pub use files::{NewShare, Share};
 use pairing::{PairError, Pairing};
 use store::{Device, DeviceView, Store};
 use tailscale::TailscaleStatus;
@@ -64,16 +69,23 @@ fn now_ms() -> u64 {
 struct Window {
     send: Arc<dyn Fn(ControlRequest) -> Result<(), String> + Send + Sync>,
     changed: Arc<dyn Fn() + Send + Sync>,
+    /// A file shared with the phones, announced as `remote:shared`, for the
+    /// push to listen to.
+    shared: Arc<dyn Fn(&Share) + Send + Sync>,
 }
 
 impl Window {
     fn of(app: &AppHandle) -> Self {
         let events = app.clone();
         let changes = app.clone();
+        let shares = app.clone();
         Self {
             send: Arc::new(move |request| control::emit_internal(&events, request)),
             changed: Arc::new(move || {
                 let _ = changes.emit("remote:changed", ());
+            }),
+            shared: Arc::new(move |share| {
+                let _ = shares.emit("remote:shared", share);
             }),
         }
     }
@@ -84,6 +96,10 @@ impl Window {
 
     fn changed(&self) {
         (self.changed)()
+    }
+
+    fn shared(&self, share: &Share) {
+        (self.shared)(share)
     }
 }
 
@@ -97,6 +113,7 @@ pub struct Remote {
     pc: String,
     call_timeout: Duration,
     assets: assets::Lookup,
+    shares: Arc<Shares>,
 }
 
 #[derive(Default)]
@@ -141,6 +158,13 @@ impl Remote {
     }
 
     fn new(file: PathBuf, window: Window, call_timeout: Duration, assets: assets::Lookup) -> Self {
+        // <app data>/remote/shares/, beside remote.json.
+        let shares = Shares::open(
+            file.parent()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .join("remote")
+                .join("shares"),
+        );
         Self {
             store: Store::open(file),
             pairing: Mutex::new(None),
@@ -149,6 +173,7 @@ impl Remote {
             pc: pc_name(),
             call_timeout,
             assets,
+            shares: Arc::new(shares),
         }
     }
 
@@ -289,6 +314,29 @@ impl Remote {
         Ok(())
     }
 
+    /// An agent's `phone_share`: the file copied in and announced. Refused,
+    /// with words the agent can pass on, while Hangar Mobile is off or no
+    /// phone is paired to see it.
+    pub async fn share(&self, new: NewShare) -> Result<Share, String> {
+        if self.listening.lock().await.running.is_none() {
+            return Err(
+                "Hangar Mobile is off: the person can turn it on in Settings › Mobile".to_string(),
+            );
+        }
+        if self.store.read().devices.is_empty() {
+            return Err(
+                "No phone is paired with Hangar Mobile: the person can pair one in Settings › Mobile"
+                    .to_string(),
+            );
+        }
+        let shares = self.shares.clone();
+        let share = tokio::task::spawn_blocking(move || shares.add(new, now_ms()))
+            .await
+            .map_err(|err| format!("the share failed: {err}"))??;
+        self.window.shared(&share);
+        Ok(share)
+    }
+
     pub async fn tailscale(&self) -> TailscaleStatus {
         tailscale::status(self.store.read().port).await
     }
@@ -392,13 +440,18 @@ pub(super) mod tests {
     #[derive(Clone)]
     pub struct Fake {
         pub asked: Arc<Mutex<Vec<String>>>,
+        /// What was announced as `remote:shared`.
+        pub shared: Arc<Mutex<Vec<Share>>>,
         answer: Arc<dyn Fn(&ControlRequest) -> Answer + Send + Sync>,
     }
 
     impl Fake {
-        fn answering(answer: impl Fn(&ControlRequest) -> Answer + Send + Sync + 'static) -> Self {
+        pub fn answering(
+            answer: impl Fn(&ControlRequest) -> Answer + Send + Sync + 'static,
+        ) -> Self {
             Self {
                 asked: Default::default(),
+                shared: Default::default(),
                 answer: Arc::new(answer),
             }
         }
@@ -433,6 +486,10 @@ pub(super) mod tests {
                     Ok(())
                 }),
                 changed: Arc::new(|| {}),
+                shared: {
+                    let fake = self.clone();
+                    Arc::new(move |share: &Share| fake.shared.lock().unwrap().push(share.clone()))
+                },
             }
         }
     }
@@ -568,6 +625,103 @@ pub(super) mod tests {
         let mut keys: Vec<&str> = device.keys().map(String::as_str).collect();
         keys.sort();
         assert_eq!(keys, ["created", "id", "lastSeen", "name"]);
+    }
+
+    fn new_share(source: PathBuf) -> NewShare {
+        NewShare {
+            source,
+            caption: Some("the render".into()),
+            workspace: "C:/work".into(),
+            pane: "Ava".into(),
+        }
+    }
+
+    fn a_file(tag: &str) -> PathBuf {
+        let dir = store::tests::scratch_file(tag)
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("shot.png");
+        std::fs::write(&file, b"png").unwrap();
+        file
+    }
+
+    fn pair_a_phone(remote: &Remote) {
+        let code = remote
+            .begin_pairing("atelier.tail1234.ts.net")
+            .unwrap()
+            .code;
+        remote.pair(&code, "Pixel").unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_share_needs_hangar_mobile_on() {
+        let remote = remote_with(Fake::echo(), assets::tests::no_app);
+        pair_a_phone(&remote);
+
+        let refused = remote.share(new_share(a_file("off"))).await.unwrap_err();
+        assert_eq!(
+            refused,
+            "Hangar Mobile is off: the person can turn it on in Settings › Mobile"
+        );
+        assert!(remote.shares.list(0).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_share_needs_a_paired_phone() {
+        let remote = remote_with(Fake::echo(), assets::tests::no_app);
+        remote
+            .store
+            .update(|saved| saved.port = test_port(5))
+            .unwrap();
+        remote.set_enabled(true).await.unwrap();
+
+        let refused = remote
+            .share(new_share(a_file("unpaired")))
+            .await
+            .unwrap_err();
+        assert!(refused.contains("No phone is paired"), "{refused}");
+        assert!(remote.shares.list(0).is_empty());
+        remote.set_enabled(false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_share_is_copied_recorded_and_announced() {
+        let window = Fake::echo();
+        let remote = remote_with(window.clone(), assets::tests::no_app);
+        remote
+            .store
+            .update(|saved| saved.port = test_port(6))
+            .unwrap();
+        remote.set_enabled(true).await.unwrap();
+        pair_a_phone(&remote);
+
+        let source = a_file("shared");
+        let share = remote.share(new_share(source.clone())).await.unwrap();
+        std::fs::remove_file(source).unwrap();
+        assert_eq!(share.name, "shot.png");
+        assert_eq!(share.pane, "Ava");
+        assert_eq!(remote.shares.list(0), vec![share.clone()]);
+        let (_, copy) = remote.shares.find(&share.id).unwrap();
+        assert_eq!(std::fs::read(copy).unwrap(), b"png");
+        assert_eq!(*window.shared.lock().unwrap(), vec![share.clone()]);
+
+        // What the push listens to carries the whole record.
+        let announced = serde_json::to_value(&share).unwrap();
+        for key in [
+            "id",
+            "at",
+            "workspace",
+            "pane",
+            "name",
+            "mime",
+            "size",
+            "caption",
+        ] {
+            assert!(announced.get(key).is_some(), "{key} missing: {announced}");
+        }
+        remote.set_enabled(false).await.unwrap();
     }
 
     #[test]
