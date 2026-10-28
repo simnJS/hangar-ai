@@ -163,6 +163,39 @@ describe("hibernationVerdict", () => {
     });
   });
 
+  describe("the HQ", () => {
+    const manager: Pane = { ...pane("m", "claude"), role: "manager" };
+
+    it("never sleeps, left alone however long, whatever its manager is doing", () => {
+      const panes = [manager, pane("c", "codex")];
+      expect(hibernationVerdict(input({ panes }))).toEqual({
+        kind: "awake",
+        reason: "manager",
+        paneId: "m",
+      });
+      expect(reason(hibernationVerdict(input({ panes, rest: {} })))).toBe("manager");
+    });
+
+    it("refuses a sleep asked for by hand too, with a sentence", () => {
+      const panes = [manager];
+      const verdict = forcedSleepVerdict({
+        panes,
+        asleep: false,
+        mounted: true,
+        onScreen: false,
+        canStepAside: true,
+        detached: false,
+        delivering: false,
+        rest: { m: rest() },
+      });
+      expect(reason(verdict)).toBe("manager");
+      if (verdict.kind !== "awake") throw new Error("expected awake");
+      expect(sleepRefusal((key, params) => translate("en", key, params), verdict, panes, () => false)).toBe(
+        "m is the project manager: it has to hear what happens",
+      );
+    });
+  });
+
   it("keeps awake while a pane has not been seen at all", () => {
     expect(hibernationVerdict(input({ rest: { a: rest(), b: rest() } }))).toEqual({
       kind: "awake",
@@ -429,6 +462,7 @@ describe("sleepRefusal", () => {
       alone: true,
       detached: true,
       worker: true,
+      manager: true,
       delivering: true,
       recentInteraction: true,
       noAgents: true,

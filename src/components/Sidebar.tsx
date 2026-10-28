@@ -31,6 +31,8 @@ interface Props {
   onOpenMcpServers: (workspaceId: string) => void;
   /** Opens a workspace's orchestration settings. */
   onOpenOrchestration: (workspaceId: string) => void;
+  /** « Ouvrir le chef de projet »: creates the HQ if need be, then shows it. */
+  onOpenManager: () => void;
   /** « Mettre en veille »: whether a workspace can be put to sleep now, and doing it. */
   sleep: ForcedSleep;
 }
@@ -95,6 +97,7 @@ export function Sidebar({
   onFocusPane,
   onOpenMcpServers,
   onOpenOrchestration,
+  onOpenManager,
   sleep,
 }: Props) {
   const {
@@ -156,16 +159,19 @@ export function Sidebar({
   }, []);
 
   const activeId = activeWorkspace?.id ?? null;
+  // The HQ is not a project: it shows apart, above the list.
+  const projects = useMemo(() => state.workspaces.filter((ws) => !ws.hq), [state.workspaces]);
+  const hq = state.workspaces.find((ws) => ws.hq) ?? null;
   const tree = useMemo(
     () =>
       buildNavTree({
-        workspaces: state.workspaces,
+        workspaces: projects,
         folders: state.folders,
         query,
         attentionOnly,
         wantsYou: (paneId) => wanting.waiting.includes(paneId) || wanting.yours.includes(paneId),
       }),
-    [state.workspaces, state.folders, query, attentionOnly, wanting],
+    [projects, state.folders, query, attentionOnly, wanting],
   );
 
   const rowsByKey = useMemo(() => new Map(tree.rows.map((row) => [row.key, row])), [tree]);
@@ -895,6 +901,31 @@ export function Sidebar({
         </button>
       </div>
 
+      {/* The project manager's HQ: one click opens it, made if it was not
+          there. Apart from the list, which is the projects'. */}
+      <button
+        className={`nav-hq ${hq && hq.id === activeId ? "nav-hq--active" : ""}`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "calc(8px * var(--ui-scale))",
+          margin: "0 calc(8px * var(--ui-scale)) calc(6px * var(--ui-scale))",
+          padding: "calc(6px * var(--ui-scale)) calc(8px * var(--ui-scale))",
+          border: "1px solid var(--accent-hi)",
+          borderRadius: "var(--radius)",
+          background: hq && hq.id === activeId ? "var(--surface-hover)" : "transparent",
+          color: "var(--accent-hi)",
+          font: "inherit",
+          cursor: "pointer",
+        }}
+        title={t("manager.openHint")}
+        aria-current={hq && hq.id === activeId ? "page" : undefined}
+        onClick={onOpenManager}
+      >
+        <Icon name="orchestrator" size={14} />
+        <span>{t("manager.open")}</span>
+      </button>
+
       {/* The heading of the workspaces filed nowhere, which sit right under
           it: dropping one on it takes it out of its folder. */}
       <div
@@ -933,9 +964,9 @@ export function Sidebar({
           {tree.folders.map(renderFolder)}
         </div>
 
-        {state.workspaces.length === 0 && <p className="nav-empty">{t("sidebar.empty")}</p>}
+        {projects.length === 0 && <p className="nav-empty">{t("sidebar.empty")}</p>}
 
-        {filtered && state.workspaces.length > 0 && tree.rows.length === 0 && (
+        {filtered && projects.length > 0 && tree.rows.length === 0 && (
           <div className="nav-empty nav-empty--filter" role="status">
             <p>
               {query.trim()

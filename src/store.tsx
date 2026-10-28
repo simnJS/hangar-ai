@@ -127,7 +127,7 @@ const EMPTY: AppState = {
   settings: DEFAULT_SETTINGS,
 };
 
-interface StoreValue {
+export interface StoreValue {
   state: AppState;
   /**
    * The state as every write so far left it, including the ones of this very

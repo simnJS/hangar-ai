@@ -1,9 +1,11 @@
 import { useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { preferredDir } from "./layout";
-import { orchestrationOf, orchestratorOf } from "./orchestration";
+import { hqOf, managerOf, orchestrationOf, orchestratorOf } from "./orchestration";
 import { announceRole } from "./orchestratorBrief";
 import { useStore } from "../store";
 import type { Workspace } from "../types";
+import type { StoreValue } from "../store";
 
 /**
  * Pinning, unpinning and creating a workspace's orchestrator: the one Claude
@@ -24,11 +26,20 @@ export type PinRefusal =
   /** It is the orchestrator already. */
   | "pinned"
   /** Another pane of the workspace is. */
-  | "taken";
+  | "taken"
+  /** It is the project manager: its role is its own, never an orchestrator's. */
+  | "manager"
+  /** The workspace is the HQ, where the manager lives and no project is planned. */
+  | "hq";
 
-export function pinRefusal(ws: Pick<Workspace, "panes">, paneId: string): PinRefusal | null {
+export function pinRefusal(
+  ws: Pick<Workspace, "panes"> & { hq?: boolean },
+  paneId: string,
+): PinRefusal | null {
   const pane = ws.panes.find((entry) => entry.id === paneId);
   if (!pane) return "missing";
+  if (pane.role === "manager") return "manager";
+  if (ws.hq) return "hq";
   if (pane.role === "orchestrator") return "pinned";
   if (pane.role === "worker") return "worker";
   if (pane.agent !== "claude") return "notClaude";
@@ -37,7 +48,100 @@ export function pinRefusal(ws: Pick<Workspace, "panes">, paneId: string): PinRef
 }
 
 /** Whether the workspace can have an orchestrator created in it. */
-export const canCreateOrchestrator = (ws: Pick<Workspace, "panes">) => !orchestratorOf(ws);
+export const canCreateOrchestrator = (ws: Pick<Workspace, "panes"> & { hq?: boolean }) =>
+  !ws.hq && !orchestratorOf(ws);
+
+/** What `openManager` did, for the notice that follows. */
+export type OpenManager =
+  /** The HQ and its manager did not exist: both are there now. */
+  | { kind: "created"; workspaceId: string; paneId: string }
+  /** The HQ was there without its manager (closed): a new one is in it. */
+  | { kind: "restored"; workspaceId: string; paneId: string }
+  /** The manager was there already: shown. */
+  | { kind: "shown"; workspaceId: string; paneId: string }
+  /** The HQ has no room for a pane, or its folder could not be made. */
+  | { kind: "failed"; error?: string };
+
+/** What `openManager` reads and does: the store's, and the HQ's folder. */
+export interface ManagerDeps
+  extends Pick<
+    StoreValue,
+    "snapshot" | "addWorkspace" | "updateWorkspace" | "setActiveWorkspace" | "addPane" | "updatePane"
+  > {
+  /** `<app data dir>/hq`, created if missing. */
+  hqDir: () => Promise<string>;
+  /** The HQ's name, in the language of the window. */
+  hqName: string;
+}
+
+/** The HQ's folder, from Rust. */
+export const hqDir = () => invoke<string>("hq_dir");
+
+let opening: Promise<OpenManager> | null = null;
+
+/**
+ * « Ouvrir le chef de projet »: the one way to the manager. Hangar has one
+ * manager, in one HQ workspace: with neither, both are made — the pane a
+ * Claude Code with the role from the start, on the orchestrator's model, so
+ * it launches with Hangar's server and its role — with the HQ only, a new
+ * manager is added; with both, they are shown. Never a second manager.
+ * Calls made while one is under way share its answer.
+ */
+export function openManager(deps: ManagerDeps): Promise<OpenManager> {
+  opening ??= run(deps).finally(() => {
+    opening = null;
+  });
+  return opening;
+}
+
+async function run(deps: ManagerDeps): Promise<OpenManager> {
+  const { snapshot, setActiveWorkspace } = deps;
+  const existing = managerOf(snapshot());
+  if (existing) {
+    setActiveWorkspace(existing.ws.id);
+    return { kind: "shown", workspaceId: existing.ws.id, paneId: existing.pane.id };
+  }
+
+  let hq = hqOf(snapshot());
+  let created = false;
+  if (!hq) {
+    let cwd: string;
+    try {
+      cwd = await deps.hqDir();
+    } catch (err) {
+      return { kind: "failed", error: String(err) };
+    }
+    // Another call may have made it while the folder was.
+    hq = hqOf(snapshot());
+    if (!hq) {
+      const id = deps.addWorkspace({
+        name: deps.hqName,
+        cwd,
+        layout: 1,
+        agents: ["claude"],
+        shellId: null,
+      });
+      deps.updateWorkspace(id, { hq: true });
+      hq = snapshot().workspaces.find((ws) => ws.id === id) ?? null;
+      created = true;
+    }
+  }
+  if (!hq) return { kind: "failed" };
+
+  // The first pane of a new HQ is the Claude Code it was made with; an HQ
+  // whose manager was closed gets one again.
+  const paneId = created
+    ? (hq.panes[0]?.id ?? null)
+    : deps.addPane(hq.id, { agent: "claude", near: null, dir: "row" });
+  if (!paneId) return { kind: "failed" };
+  // Same tick as the add: the pane mounts, and launches, as the manager.
+  deps.updatePane(hq.id, paneId, {
+    role: "manager",
+    model: orchestrationOf(hq).orchestratorModel,
+  });
+  setActiveWorkspace(hq.id);
+  return { kind: created ? "created" : "restored", workspaceId: hq.id, paneId };
+}
 
 export interface OrchestrationActions {
   /** Pins the pane; false when `pinRefusal` has a reason not to. */
@@ -50,10 +154,13 @@ export interface OrchestrationActions {
    * orchestrator or no room for a pane.
    */
   create: (workspaceId: string, near: string | null) => string | null;
+  /** « Ouvrir le chef de projet »: see `openManager`. */
+  openManager: (hqName: string) => Promise<OpenManager>;
 }
 
 export function useOrchestrationActions(): OrchestrationActions {
-  const { snapshot, addPane, updatePane } = useStore();
+  const store = useStore();
+  const { snapshot, addPane, updatePane } = store;
   return useMemo(() => {
     const workspace = (id: string) => snapshot().workspaces.find((ws) => ws.id === id) ?? null;
     return {
@@ -96,6 +203,8 @@ export function useOrchestrationActions(): OrchestrationActions {
         });
         return id;
       },
+
+      openManager: (hqName) => openManager({ ...store, hqDir, hqName }),
     };
-  }, [snapshot, addPane, updatePane]);
+  }, [snapshot, addPane, updatePane, store.addWorkspace, store.updateWorkspace, store.setActiveWorkspace]);
 }

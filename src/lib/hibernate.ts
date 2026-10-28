@@ -83,6 +83,8 @@ export type Blocker =
   | "alone"
   | "detached"
   | "worker"
+  /** The project manager lives here: it must hear events, so the HQ never sleeps. */
+  | "manager"
   | "delivering"
   | "recentInteraction"
   | "noAgents"
@@ -119,7 +121,7 @@ const always = () => true;
  * The rules, in the order that answers cheapest:
  *
  * 1. Mounted here, not the workspace on screen, not in a window of its own.
- *    No worker of an orchestrator in it, and no delivery running: work
+ *    Never the HQ (the manager must hear events). No worker of an orchestrator in it, and no delivery running: work
  *    handed out goes on with nobody looking — that is the point of handing
  *    it out — and a worker stopped mid-task, or a delivery mid-merge, is
  *    work lost rather than memory saved.
@@ -177,6 +179,8 @@ export function forcedSleepVerdict(input: ForcedSleepInput): Verdict {
  * mid-task, or a delivery mid-merge, is work lost rather than memory saved.
  */
 function workInFlight(panes: Pane[], delivering: boolean): Awake | null {
+  const manager = panes.find((pane) => pane.role === "manager");
+  if (manager) return { kind: "awake", reason: "manager", paneId: manager.id };
   const worker = panes.find((pane) => pane.role === "worker");
   if (worker) return { kind: "awake", reason: "worker", paneId: worker.id };
   if (delivering) return { kind: "awake", reason: "delivering" };
@@ -284,6 +288,8 @@ export function sleepRefusal(
       return t("sleep.alone");
     case "worker":
       return t("sleep.worker", { name });
+    case "manager":
+      return t("sleep.manager", { name });
     case "delivering":
       return t("sleep.delivering");
     case "noAgents":
