@@ -1,0 +1,427 @@
+import type { Activity, HistoryEntry, Pane, Project, RemoteState, Screen, SendArgs, Share, Waiting } from "./api";
+
+/**
+ * A fake PC, for working on the app without one: the dev server always uses
+ * it, a build with `?mock` in the address. It answers the same routes as the
+ * real mobile server, through a `fetch` of its own, so every call the app
+ * makes goes through the real client.
+ *
+ * Its projects live: a message gets an answer, a permission granted sets the
+ * agent back to work, and a few seconds later it hands back.
+ *
+ * `?mock=<scenario>` shows a state that is hard to come by otherwise:
+ * - empty: nothing waits for the person;
+ * - unpaired: the phone has to pair (any code but 000000 works);
+ * - offline: the PC stopped answering 47 min ago;
+ * - nomanager: no project manager is open.
+ */
+
+export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager";
+
+export function scenarioOf(value: string | null): Scenario {
+  return value === "empty" || value === "unpaired" || value === "offline" || value === "nomanager"
+    ? value
+    : "default";
+}
+
+const MIN = 60_000;
+
+interface FakePane extends Pane {
+  workspaceId: string;
+  /** The screen above Claude Code's input box. */
+  body: string[];
+  waitingSince?: number;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+const CLAUDE_PROMPT = ["", "────────────────────────────────────────────────────────", "> ", "────────────────────────────────────────────────────────", "  ⏵⏵ accept edits on (shift+tab to cycle)"];
+
+function scenery(now: number) {
+  const pane = (
+    workspaceId: string,
+    id: string,
+    name: string,
+    role: string | null,
+    activity: Activity | null,
+    body: string[],
+    agent = "claude",
+  ): FakePane => ({ workspaceId, id, name, role, activity, agent, body });
+
+  const panes: FakePane[] = [
+    pane("ws-iabench", "p-jack", "Jack", "orchestrator", "working", [
+      "> Plan the Hangar Mobile work and hand it out",
+      "",
+      "⏺ I split it into seven tasks on the board: the server (M0a), the window's",
+      "  ops (M1), the phone app (M2), files both ways (M0b), settings (M3), push",
+      "  (M4) and the week away (M5). M0a, M1 and M2 run side by side.",
+      "",
+      "⏺ hangar - worker_spawn (MCP)(task: \"81070ac8\", name: \"Ada\")",
+      "  ⎿  Ada started on « Hangar Mobile — serveur distant »",
+      "",
+      "⏺ hangar - worker_spawn (MCP)(task: \"f804a999\", name: \"Ben\")",
+      "  ⎿  Ben started on « ce que la fenêtre répond au téléphone »",
+      "",
+      "⏺ hangar - worker_spawn (MCP)(task: \"26e29387\", name: \"Cora\")",
+      "  ⎿  Cora started on « l'app sur le téléphone (PWA) »",
+      "",
+      "✻ Watching the three workers… (esc to interrupt)",
+    ]),
+    pane("ws-iabench", "p-ada", "Ada", "worker", "working", [
+      "⏺ Update(src-tauri/src/remote/pair.rs)",
+      "  ⎿  Updated src-tauri/src/remote/pair.rs with 38 additions and 4 removals",
+      "",
+      "⏺ The pairing code is now single use, valid five minutes, and dies after",
+      "  five wrong tries. Next: the cookie flags and the 401 on every route.",
+      "",
+      "⏺ Bash(cargo test --manifest-path src-tauri/Cargo.toml remote::)",
+      "  ⎿  running 14 tests",
+      "     test remote::pair::a_code_is_single_use ... ok",
+      "     test remote::pair::a_code_expires_after_five_minutes ... ok",
+      "     test remote::pair::five_wrong_tries_kill_the_code ... ok",
+      "     test result: ok. 14 passed; 0 failed",
+      "",
+      "✻ Writing the cookie tests… (2m 14s · ↓ 3.1k tokens · esc to interrupt)",
+    ]),
+    pane("ws-iabench", "p-ben", "Ben", "worker", "waiting", [
+      "⏺ remote_permission answers Claude Code's prompt with the key of its",
+      "  first or last choice. Let me check it against the real prompt.",
+      "",
+      "╭──────────────────────────────────────────────────────────────────────╮",
+      "│ Bash command                                                         │",
+      "│                                                                      │",
+      "│   pnpm vitest run src/lib/remoteControl.test.ts                      │",
+      "│   Run the window ops' tests                                          │",
+      "│                                                                      │",
+      "│ Do you want to proceed?                                              │",
+      "│ ❯ 1. Yes                                                             │",
+      "│   2. Yes, and don't ask again for pnpm vitest commands               │",
+      "│   3. No, and tell Claude what to do differently (esc)                │",
+      "╰──────────────────────────────────────────────────────────────────────╯",
+    ]),
+    pane("ws-iabench", "p-cora", "Cora", "worker", "yours", [
+      "⏺ The phone app builds into dist-mobile/ and every screen works in mock",
+      "  mode, light and dark, in French and English.",
+      "",
+      "  Checks:",
+      "  - pnpm exec tsc --noEmit: clean",
+      "  - pnpm test: 61 files, 1 024 tests passed",
+      "  - pnpm mobile:build: dist-mobile/ in 1.9 s",
+      "",
+      "  Shall I submit the delivery?",
+    ]),
+    pane("ws-storefront", "p-mia", "Mia", "orchestrator", "yours", [
+      "⏺ All twelve tasks are done and landed on main. The storefront passes",
+      "  Lighthouse at 98 on mobile; the report is in docs/lighthouse.html.",
+      "",
+      "  Anything else for this sprint?",
+    ]),
+    pane("ws-storefront", "p-shell", "shell", null, null, [
+      "PS C:\\Users\\simnJS\\Documents\\storefront> pnpm preview",
+      "",
+      "  ➜  Local:   http://localhost:4173/",
+      "  ➜  Network: use --host to expose",
+    ], "shell"),
+    pane("ws-billing", "p-noe", "Noé", "orchestrator", null, [], "claude"),
+    pane("ws-recipes", "p-leo", "Leo", null, "working", [
+      "codex",
+      "",
+      "▌ Add the shopping list export",
+      "",
+      "• Reading src/lists/export.ts",
+      "• Running pnpm test lists",
+      "",
+      "  ✓ 23 tests passed",
+      "",
+      "• Writing the CSV and PDF exporters…",
+    ], "codex"),
+    pane("hq", "p-max", "Max", "manager", "idle", [
+      "> Where does everything stand?",
+      "",
+      "⏺ hangar - project_list (MCP)",
+      "",
+      "⏺ Four projects:",
+      "  - IaBench: Jack orchestrates three workers on Hangar Mobile. Ben waits",
+      "    for a permission; one delivery is ready to merge.",
+      "  - storefront: all twelve tasks done, Mia waits for what's next.",
+      "  - billing-api: asleep since yesterday evening, two tasks to do.",
+      "  - recipes-app: Leo (Codex) is adding the shopping list export.",
+    ]),
+  ];
+  panes.find((candidate) => candidate.id === "p-ben")!.waitingSince = now - 4 * MIN;
+
+  const projects: Omit<Project, "panes" | "orchestrator">[] = [
+    {
+      id: "ws-iabench",
+      name: "IaBench",
+      open: true,
+      asleep: false,
+      git: true,
+      board: { todo: 4, doing: 3, review: 1, done: 22 },
+      planStatus: "Hangar Mobile: 3 of 7 tasks under way, the server in review",
+      needsYou: [{ id: "t-funnel", title: "Should Tailscale Funnel stay out of scope, or be offered as an option?" }],
+      readyToLand: [{ id: "t-settings", title: "Mobile settings: pair a phone by QR code" }],
+    },
+    {
+      id: "ws-storefront",
+      name: "storefront",
+      open: true,
+      asleep: false,
+      git: true,
+      board: { todo: 0, doing: 0, review: 0, done: 12 },
+      planStatus: "Done: the twelve tasks landed",
+      needsYou: [],
+      readyToLand: [],
+    },
+    {
+      id: "ws-billing",
+      name: "billing-api",
+      open: false,
+      asleep: true,
+      git: true,
+      board: { todo: 2, doing: 0, review: 0, done: 9 },
+      planStatus: null,
+      needsYou: [],
+      readyToLand: [],
+    },
+    {
+      id: "ws-recipes",
+      name: "recipes-app",
+      open: true,
+      asleep: false,
+      git: false,
+      board: { todo: 0, doing: 0, review: 0, done: 0 },
+      planStatus: null,
+      needsYou: [],
+      readyToLand: [],
+    },
+  ];
+
+  const history: HistoryEntry[] = [
+    { at: now - 4 * MIN, workspace: "IaBench", kind: "waiting", text: "Ben waits for your permission to run the window ops' tests" },
+    { at: now - 25 * MIN, workspace: "IaBench", kind: "needsYou", text: "Jack asks: should Tailscale Funnel stay out of scope?" },
+    { at: now - 52 * MIN, workspace: "storefront", kind: "boardDone", text: "Every task on the board is done" },
+    { at: now - 70 * MIN, workspace: "IaBench", kind: "readyToLand", text: "Mobile settings: pair a phone by QR code passed its check and its review" },
+    { at: now - 95 * MIN, workspace: "IaBench", kind: "shared", text: "Cora shared mobile-for-you.png" },
+    { at: now - 3 * 60 * MIN, workspace: "storefront", kind: "landed", text: "Landed: product pages load their images lazily" },
+    { at: now - 5 * 60 * MIN, workspace: "recipes-app", kind: "woke", text: "Woke up: Leo resumed its session" },
+    { at: now - 19 * 60 * MIN, workspace: "billing-api", kind: "asleep", text: "Fell asleep after two hours idle" },
+    { at: now - 20 * 60 * MIN, workspace: "billing-api", kind: "landed", text: "Landed: invoices carry the VAT number" },
+    { at: now - 26 * 60 * MIN, workspace: "IaBench", kind: "done", text: "Done: the project manager opens in one click" },
+  ];
+
+  const shares: Share[] = [
+    { id: "s-render", at: now - 95 * MIN, workspace: "IaBench", pane: "Cora", name: "mobile-for-you.png", mime: "image/png", size: 182_340, caption: "The For you screen, in dark mode" },
+    { id: "s-lighthouse", at: now - 3 * 60 * MIN, workspace: "storefront", pane: "Mia", name: "lighthouse.html", mime: "text/html", size: 412_903, caption: "Lighthouse report, mobile" },
+    { id: "s-chart", at: now - 22 * 60 * MIN, workspace: "billing-api", pane: "Noé", name: "latency-p95.png", mime: "image/png", size: 96_120, caption: "p95 latency before and after the cache" },
+    { id: "s-csv", at: now - 30 * 60 * MIN, workspace: "billing-api", pane: "Noé", name: "invoices-october.csv", mime: "text/csv", size: 18_400, caption: null },
+  ];
+
+  return { panes, projects, history, shares };
+}
+
+/** The shared images, drawn rather than shipped. */
+function picture(id: string): string {
+  const svg =
+    id === "s-chart"
+      ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400"><rect width="640" height="400" fill="#121316"/><g stroke="#2c2d30">${[80, 160, 240, 320].map((y) => `<path d="M60 ${y}H610"/>`).join("")}</g><path d="M60 300 L130 280 L200 310 L270 250 L340 120 L410 140" fill="none" stroke="#8c8d91" stroke-width="3"/><path d="M410 140 L480 300 L550 310 L610 305" fill="none" stroke="#3e8bff" stroke-width="3"/><text x="60" y="44" fill="#ecedf0" font-family="sans-serif" font-size="22">p95 latency, ms</text><text x="420" y="130" fill="#68a5ff" font-family="sans-serif" font-size="16">cache on</text></svg>`
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 600"><rect width="390" height="600" fill="#121316"/><text x="20" y="70" fill="#ecedf0" font-family="sans-serif" font-size="30" font-weight="600">Pour vous</text><text x="20" y="100" fill="#9c9da2" font-family="sans-serif" font-size="16">3 choses vous attendent</text>${[0, 1, 2, 3, 4, 5, 6].map((i) => `<rect x="${20 + i * 14}" y="120" width="10" height="20" rx="2" fill="${["#5fd27f", "#5fd27f", "#e7c06b", "#6fd4df", "#5fd27f", "#7b7c80", "#5fd27f"][i]}"/>`).join("")}${[0, 1, 2].map((i) => `<rect x="20" y="${180 + i * 120}" width="350" height="104" rx="8" fill="#1b1c1f"/><rect x="20" y="${180 + i * 120}" width="3" height="104" fill="${i === 2 ? "#6fd4df" : "#e7c06b"}"/><rect x="270" y="${236 + i * 120}" width="88" height="36" rx="8" fill="#3e8bff"/>`).join("")}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export interface Mock {
+  fetch: typeof fetch;
+  fileUrl: (id: string) => string;
+  /** The offline scenario's last answer and the state it gave. */
+  seed: { lastOk: number; state: RemoteState } | null;
+}
+
+export function createMock(scenario: Scenario, now = Date.now()): Mock {
+  const world = scenery(now);
+  let paired = scenario !== "unpaired";
+  const latency = () => pause(90 + Math.random() * 140);
+
+  if (scenario === "empty") {
+    for (const pane of world.panes) {
+      if (pane.activity === "waiting") pane.activity = "working";
+      delete pane.waitingSince;
+    }
+    for (const project of world.projects) {
+      project.needsYou = [];
+      project.readyToLand = [];
+    }
+  }
+
+  const paneById = (idOrName: string) =>
+    world.panes.find((pane) => pane.id === idOrName) ?? world.panes.find((pane) => pane.name === idOrName);
+
+  const manager = () => (scenario === "nomanager" ? undefined : world.panes.find((pane) => pane.role === "manager"));
+
+  function state(): RemoteState {
+    const projects: Project[] = world.projects.map((project) => {
+      const panes = world.panes.filter((pane) => pane.workspaceId === project.id);
+      const orchestrator = panes.find((pane) => pane.role === "orchestrator");
+      return {
+        ...project,
+        orchestrator: orchestrator ? { name: orchestrator.name, activity: orchestrator.activity } : null,
+        panes: panes.map(({ id, name, agent, role, activity }) => ({ id, name, agent, role, activity })),
+      };
+    });
+    const waiting: Waiting[] = [];
+    for (const pane of world.panes) {
+      if (pane.activity !== "waiting" || pane.workspaceId === "hq") continue;
+      const project = world.projects.find((candidate) => candidate.id === pane.workspaceId)!;
+      waiting.push({
+        kind: "pane",
+        workspaceId: project.id,
+        workspace: project.name,
+        paneId: pane.id,
+        pane: pane.name,
+        since: pane.waitingSince ?? Date.now(),
+      });
+    }
+    for (const project of world.projects) {
+      for (const task of project.needsYou) {
+        waiting.push({ kind: "needsYou", workspaceId: project.id, workspace: project.name, taskId: task.id, title: task.title, since: now - 25 * MIN });
+      }
+      for (const task of project.readyToLand) {
+        waiting.push({ kind: "readyToLand", workspaceId: project.id, workspace: project.name, taskId: task.id, title: task.title, since: now - 70 * MIN });
+      }
+    }
+    const boss = manager();
+    return {
+      at: Date.now(),
+      manager: boss ? { paneId: boss.id, name: boss.name, activity: boss.activity } : null,
+      waiting,
+      projects,
+    };
+  }
+
+  /** Claude Code's input box under its transcript, unless a prompt of its own replaced it. */
+  const lines = (pane: FakePane) =>
+    pane.agent === "claude" && pane.activity !== "waiting" && pane.body.length ? [...pane.body, ...CLAUDE_PROMPT] : pane.body;
+
+  function screen(pane: FakePane): Screen {
+    const project = world.projects.find((candidate) => candidate.id === pane.workspaceId);
+    return {
+      paneId: pane.id,
+      pane: pane.name,
+      workspace: project?.name ?? "HQ",
+      agent: pane.agent,
+      activity: pane.activity,
+      text: lines(pane).join("\n"),
+    };
+  }
+
+  /** The agent's turn: it works a moment, says `reply`, and hands back (or keeps working). */
+  function respond(pane: FakePane, said: string[], reply: string[], then: Activity = "yours") {
+    const before = [...pane.body, ...(said.length ? ["", ...said] : [])];
+    pane.activity = "working";
+    delete pane.waitingSince;
+    pane.body = [...before, "", "✻ Thinking… (esc to interrupt)"];
+    clearTimeout(pane.timer);
+    pane.timer = setTimeout(() => {
+      pane.body = [...before, "", ...reply];
+      pane.activity = then;
+    }, 2400);
+  }
+
+  function send(args: SendArgs): Response {
+    const pane = paneById(args.pane);
+    if (!pane) return json(400, { error: `No pane named ${args.pane}` });
+    const interrupt = args.keys?.some((key) => key === "escape" || key === "ctrl+c");
+    if (interrupt && pane.activity === "working") {
+      clearTimeout(pane.timer);
+      pane.body = [...pane.body.filter((line) => !line.startsWith("✻")), "  ⎿  Interrupted by user"];
+      pane.activity = "yours";
+    }
+    if (args.text && args.submit) respond(pane, [`> ${args.text}`], ["⏺ On it. I'll write here when it's done."]);
+    return json(200, { sent: true });
+  }
+
+  async function route(path: string, method: string, body: unknown): Promise<Response> {
+    if (scenario === "offline") throw new TypeError("Failed to fetch");
+    await latency();
+    if (path === "/m/api/health") return json(200, { ok: true, pc: "PC-SIMON", version: "1.1.0", paired });
+    if (path === "/m/api/pair" && method === "POST") {
+      const { code } = body as { code: string };
+      if (code === "000000" || !/^\d{6}$/.test(code)) return json(401, { error: "bad-code" });
+      paired = true;
+      return json(200, { device: { id: "d-phone", name: "iPhone (Safari)" } });
+    }
+    if (!paired) return json(401, { error: "unpaired" });
+
+    if (path.startsWith("/m/api/shares")) {
+      const since = Number(new URL(path, "http://pc").searchParams.get("since") ?? 0);
+      return json(200, { shares: world.shares.filter((share) => share.at > since) });
+    }
+    if (path.startsWith("/m/api/upload")) {
+      const name = new URL(path, "http://pc").searchParams.get("name") ?? "file";
+      const size = body instanceof Blob ? body.size : 0;
+      await pause(Math.min(4000, 400 + size / 2000));
+      const stamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
+      return json(200, { path: `C:\\Users\\simnJS\\Documents\\IaBench\\.hangar\\uploads\\${stamp}-${name}` });
+    }
+
+    const op = /^\/m\/api\/call\/(\w+)$/.exec(path)?.[1];
+    const args = (body ?? {}) as Record<string, unknown>;
+    switch (op) {
+      case "state":
+        return json(200, state());
+      case "screen": {
+        const pane = paneById(String(args.pane));
+        return pane ? json(200, screen(pane)) : json(400, { error: `No pane named ${String(args.pane)}` });
+      }
+      case "send":
+        return send(args as unknown as SendArgs);
+      case "permission": {
+        const pane = paneById(String(args.pane));
+        if (!pane || pane.activity !== "waiting") return json(409, { error: "That pane is not waiting for an answer" });
+        const allowed = Boolean(args.allow);
+        pane.body = pane.body.slice(0, pane.body.findIndex((line) => line.startsWith("╭")));
+        respond(
+          pane,
+          ["⏺ Bash(pnpm vitest run src/lib/remoteControl.test.ts)", allowed ? "  ⎿  ✓ src/lib/remoteControl.test.ts (31 tests) 412ms" : "  ⎿  User rejected the command"],
+          [allowed ? "⏺ Every op is covered and passes. Committing, then I'll submit the delivery." : "⏺ Understood, I won't run it. What would you rather I check?"],
+          allowed ? "working" : "yours",
+        );
+        return json(200, { answered: true });
+      }
+      case "manager": {
+        const boss = manager();
+        if (!boss) return json(409, { error: "Open the project manager on the PC" });
+        respond(boss, [`> ${String(args.text)}`], ["⏺ Noted. I'll pass it on and tell you here how it goes."]);
+        return json(200, { sent: true });
+      }
+      case "history": {
+        const since = typeof args.since === "number" ? args.since : 0;
+        return json(200, { entries: world.history.filter((entry) => entry.at > since) });
+      }
+      default:
+        return json(404, { error: "unknown-op" });
+    }
+  }
+
+  const mockFetch: typeof fetch = async (input, init) => {
+    const path = typeof input === "string" ? input : input instanceof URL ? `${input.pathname}${input.search}` : input.url;
+    const method = init?.method ?? "GET";
+    let body: unknown = init?.body;
+    if (typeof body === "string") body = JSON.parse(body);
+    return route(path, method, body);
+  };
+
+  return {
+    fetch: mockFetch,
+    fileUrl: (id) => {
+      const share = world.shares.find((candidate) => candidate.id === id);
+      if (share && share.mime.startsWith("image/")) return picture(id);
+      return `data:${share?.mime ?? "text/plain"};charset=utf-8,${encodeURIComponent(`${share?.name ?? id}\nA file shared by an agent, in the fake PC.`)}`;
+    },
+    seed: scenario === "offline" ? { lastOk: now - 47 * MIN, state: (() => { paired = true; return state(); })() } : null,
+  };
+}

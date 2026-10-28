@@ -1,0 +1,1636 @@
+/* Hangar Mobile.
+
+   The desktop's Graphite, carried to a phone: near-monochrome, so that colour
+   only ever means something. Green is an agent at work, amber one waiting on
+   you, cyan your turn, blue the thing to tap. The dark values are the
+   desktop's own (src/themes.ts derives them for its chrome); the light ones
+   are Graphite lightened the same way, the accent deepened to read on white.
+
+   Built for one hand at arm's length: 16px body text, 44px targets at the
+   least, the actions within the thumb's reach at the bottom. */
+
+:root {
+  color-scheme: light;
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --raised: #ebebed;
+  --pressed: #dedee1;
+  --bar: #f9f9fa;
+  --term: #ffffff;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.14);
+  --fg-hi: #0f1114;
+  --fg: #24272c;
+  --fg-2: #55585e;
+  --fg-3: #686b71;
+  --accent: #1765d8;
+  --accent-text: #1765d8;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(23, 101, 216, 0.1);
+  --accent-ring: rgba(23, 101, 216, 0.45);
+  --working: #1a7f37;
+  --waiting: #9a5b00;
+  --waiting-fill: #c27c0e;
+  --waiting-soft: rgba(194, 124, 14, 0.1);
+  --yours: #0f7178;
+  --yours-fill: #1b8a91;
+  --idle: #8b8e93;
+  --danger: #c4242e;
+  --danger-soft: rgba(196, 36, 46, 0.08);
+
+  --ui: "Inter Variable", -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, "Roboto Mono", Consolas, monospace;
+
+  --gutter: 16px;
+  --r-control: 8px;
+  --r-card: 10px;
+  --tab-h: 56px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Graphite itself. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121316;
+    --surface: #1b1c1f;
+    --raised: #252629;
+    --pressed: #313234;
+    --bar: #1b1c1f;
+    --term: #121316;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.12);
+    --fg-hi: #ecedf0;
+    --fg: #c8c9ce;
+    --fg-2: #9c9da2;
+    --fg-3: #8c8d91;
+    --accent: #3e8bff;
+    --accent-text: #68a5ff;
+    --accent-fg: #0b192e;
+    --accent-soft: rgba(62, 139, 255, 0.14);
+    --accent-ring: rgba(62, 139, 255, 0.5);
+    --working: #5fd27f;
+    --waiting: #e7c06b;
+    --waiting-fill: #e7c06b;
+    --waiting-soft: rgba(231, 192, 107, 0.1);
+    --yours: #6fd4df;
+    --yours-fill: #6fd4df;
+    --idle: #7b7c80;
+    --danger: #ff7b72;
+    --danger-soft: rgba(255, 123, 114, 0.12);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121316;
+  --surface: #1b1c1f;
+  --raised: #252629;
+  --pressed: #313234;
+  --bar: #1b1c1f;
+  --term: #121316;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --fg-hi: #ecedf0;
+  --fg: #c8c9ce;
+  --fg-2: #9c9da2;
+  --fg-3: #8c8d91;
+  --accent: #3e8bff;
+  --accent-text: #68a5ff;
+  --accent-fg: #0b192e;
+  --accent-soft: rgba(62, 139, 255, 0.14);
+  --accent-ring: rgba(62, 139, 255, 0.5);
+  --working: #5fd27f;
+  --waiting: #e7c06b;
+  --waiting-fill: #e7c06b;
+  --waiting-soft: rgba(231, 192, 107, 0.1);
+  --yours: #6fd4df;
+  --yours-fill: #6fd4df;
+  --idle: #7b7c80;
+  --danger: #ff7b72;
+  --danger-soft: rgba(255, 123, 114, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+}
+
+body {
+  color: var(--fg);
+  font-family: var(--ui);
+  font-size: 16px;
+  line-height: 1.45;
+  font-feature-settings: "cv11", "ss01";
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.icon {
+  flex: none;
+  width: var(--icon, 20px);
+  height: var(--icon, 20px);
+}
+
+/* ── The frame ─────────────────────────────────────────────────────
+   Pinned to the part of the screen the keyboard leaves (hooks.ts), so the
+   composer rides above it on iOS too. */
+
+.app {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100dvh);
+  display: flex;
+  flex-direction: column;
+}
+
+.app__main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A console fills its screen and scrolls its own text. */
+.app__main--fixed {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page {
+  padding: calc(var(--safe-top) + 12px) calc(var(--gutter) + var(--safe-right)) 32px
+    calc(var(--gutter) + var(--safe-left));
+}
+
+/* Under the banner, the safe area is the banner's. */
+.app--banner .page,
+.app--banner .console__head {
+  padding-top: 12px;
+}
+
+/* ── Headers ───────────────────────────────────────────────────── */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.title {
+  color: var(--fg-hi);
+  font-size: 30px;
+  line-height: 1.12;
+  font-weight: 680;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+.lede {
+  margin-top: 6px;
+  color: var(--fg-2);
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+/* The PC this phone talks to, and whether it answers. */
+.pc {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: 50%;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--fg-2);
+  font-size: 13px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.pc__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc .dot {
+  background: var(--working);
+}
+
+.pc--away .dot {
+  background: var(--waiting-fill);
+}
+
+.backbar {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin: 0 0 4px -10px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 0 12px 0 6px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 16px;
+  font-weight: 540;
+}
+
+.back:active {
+  background: var(--accent-soft);
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+/* ── States ────────────────────────────────────────────────────── */
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--idle);
+}
+
+.is-working {
+  --state: var(--working);
+  --state-fill: var(--working);
+}
+.is-waiting {
+  --state: var(--waiting);
+  --state-fill: var(--waiting-fill);
+}
+.is-yours {
+  --state: var(--yours);
+  --state-fill: var(--yours-fill);
+}
+.is-idle {
+  --state: var(--fg-3);
+  --state-fill: var(--idle);
+}
+.is-none {
+  --state: var(--fg-3);
+  --state-fill: transparent;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--state, var(--fg-3));
+  font-size: 14px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.state .dot,
+.dot.is-working,
+.dot.is-waiting,
+.dot.is-yours,
+.dot.is-idle {
+  background: var(--state-fill);
+}
+
+.dot.is-none,
+.state.is-none .dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--idle);
+}
+
+/* ── The fleet ─────────────────────────────────────────────────────
+   Every agent as a pane of the logo's own drawing: a squared tile in its
+   state's colour, each project's tiles held together. The one picture the
+   app draws; the rest is words. */
+
+.fleet {
+  margin-top: 18px;
+}
+
+.fleet__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+}
+
+.fleet__project {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fleet__panes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.fleet__name {
+  max-width: 9em;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile {
+  width: 14px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--state-fill);
+}
+
+.tile.is-idle {
+  background: var(--idle);
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tile.is-working {
+    animation: working 2.4s var(--ease) infinite alternate;
+  }
+}
+
+@keyframes working {
+  to {
+    opacity: 0.45;
+  }
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 12px;
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.legend .dot {
+  background: var(--state-fill);
+}
+
+.legend .is-idle .dot {
+  opacity: 0.55;
+}
+
+/* A project's tiles, smaller, beside its name. */
+.mosaic {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.mosaic .tile {
+  width: 7px;
+  height: 16px;
+  border-radius: 1.5px;
+}
+
+/* ── Sections and cards ─────────────────────────────────────────── */
+
+.section {
+  margin-top: 30px;
+}
+
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 2px 10px;
+}
+
+.section__title {
+  color: var(--fg-2);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.section__count {
+  color: var(--fg-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+/* Something that waits for the person: where, what, since when, and the
+   one thing to do about it. The rule on its left is the state it is in. */
+.card {
+  position: relative;
+  padding: 14px 16px 14px 18px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--state-fill, transparent);
+}
+
+.card__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-3);
+  font-size: 13.5px;
+}
+
+.card__project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 560;
+  color: var(--fg-2);
+}
+
+.card__since {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.card__title {
+  margin-top: 4px;
+  color: var(--fg-hi);
+  font-size: 17px;
+  line-height: 1.32;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.card__note {
+  color: var(--fg-3);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.card__foot .btn {
+  margin-left: auto;
+}
+
+.card__title + .card__note {
+  margin-top: 6px;
+}
+
+/* A row that leads somewhere: the history, a pane. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px 10px 16px;
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+}
+
+.row:active,
+.project:active {
+  background: var(--raised);
+}
+
+.row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.row__title {
+  display: block;
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__sub {
+  display: block;
+  margin-top: 1px;
+  color: var(--fg-3);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__end {
+  flex: none;
+  color: var(--fg-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  --icon: 16px;
+  color: var(--fg-3);
+}
+
+.row--history {
+  margin-top: 22px;
+}
+
+.row--history > .icon {
+  --icon: 22px;
+  color: var(--accent-text);
+}
+
+.row--history .row__sub {
+  color: var(--fg-2);
+}
+
+/* A list of rows in one block, hairlines between them. */
+.list {
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.list > li + li {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.list .row {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.tag .icon {
+  --icon: 13px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--raised);
+  color: var(--fg-hi);
+  font-size: 15.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 120ms var(--ease), transform 120ms var(--ease);
+}
+
+.btn:active {
+  background: var(--pressed);
+  transform: scale(0.98);
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn--primary:active {
+  background: var(--accent);
+  filter: brightness(0.92);
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--accent-text);
+}
+
+.btn--wide {
+  width: 100%;
+  min-height: 52px;
+  font-size: 17px;
+}
+
+.btn:disabled {
+  background: var(--raised);
+  color: var(--fg-3);
+  filter: none;
+  transform: none;
+  cursor: default;
+}
+
+/* ── Calm and empty ─────────────────────────────────────────────── */
+
+.calm {
+  margin-top: 30px;
+  padding: 18px 2px 0;
+  border-top: 1px solid var(--line);
+  color: var(--fg-2);
+  font-size: 16px;
+  max-width: 34em;
+}
+
+.empty {
+  margin-top: 36px;
+  max-width: 30em;
+}
+
+.empty__mark {
+  margin-bottom: 18px;
+  color: var(--fg-3);
+}
+
+.empty__mark .logo {
+  fill: var(--line-strong);
+}
+
+.empty__mark .logo__active {
+  fill: var(--fg-3);
+}
+
+.empty__title {
+  color: var(--fg-hi);
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 620;
+}
+
+.empty__text {
+  margin-top: 6px;
+  color: var(--fg-2);
+}
+
+.empty .btn {
+  margin-top: 18px;
+}
+
+/* ── The banner: the PC away ─────────────────────────────────────── */
+
+.banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(var(--safe-top) + 10px) calc(var(--gutter) + var(--safe-right)) 10px
+    calc(var(--gutter) + var(--safe-left));
+  background: var(--waiting-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.banner > .icon {
+  --icon: 20px;
+  color: var(--waiting);
+}
+
+.banner__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner__title {
+  display: block;
+  color: var(--fg-hi);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.banner__hint {
+  display: block;
+  color: var(--fg-2);
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+
+.banner .btn {
+  min-height: 40px;
+  padding: 0 14px;
+  background: var(--surface);
+  font-size: 14.5px;
+}
+
+/* ── The install notice (iPhone in Safari) ─────────────────────────── */
+
+.notice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin-top: 22px;
+  padding: 16px;
+  border-radius: var(--r-card);
+  background: var(--accent-soft);
+}
+
+.notice > .icon {
+  --icon: 26px;
+  grid-row: span 2;
+  color: var(--accent-text);
+}
+
+.notice__title {
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.notice__body {
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.notice .btn {
+  grid-column: 2;
+  justify-self: start;
+  margin: 8px 0 0 -12px;
+}
+
+/* ── Projects ──────────────────────────────────────────────────── */
+
+.project {
+  display: block;
+  padding: 16px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.project__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project__name {
+  min-width: 0;
+  color: var(--fg-hi);
+  font-size: 19px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project__end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.project__team {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 4px;
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.project__attention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--waiting);
+  font-size: 14.5px;
+  font-weight: 560;
+}
+
+.project__plan {
+  margin-top: 12px;
+  color: var(--fg-2);
+  font-size: 14.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.project__plan b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* The board in four counts, read across like the board's own columns. */
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.board div {
+  min-width: 0;
+}
+
+.board dt {
+  color: var(--fg-3);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board dd {
+  color: var(--fg-hi);
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.board .is-zero dd {
+  color: var(--fg-3);
+  font-weight: 500;
+}
+
+.plan {
+  margin-top: 14px;
+  color: var(--fg);
+  font-size: 15.5px;
+}
+
+.plan b {
+  display: block;
+  color: var(--fg-3);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.panel {
+  padding: 16px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.panel .board {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.asleep {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: var(--r-card);
+  background: var(--raised);
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.asleep .icon {
+  --icon: 20px;
+  margin-top: 1px;
+}
+
+.role {
+  margin-left: 8px;
+  color: var(--fg-3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ── Console: a pane's screen, and what to send it ─────────────────── */
+
+.console {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--term);
+}
+
+.console__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: calc(var(--safe-top) + 6px) calc(10px + var(--safe-right)) 8px calc(6px + var(--safe-left));
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+.console__head .back {
+  padding: 0 6px;
+}
+
+.console__head .back .icon {
+  --icon: 22px;
+}
+
+.console__who {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
+.console__who--alone {
+  padding-left: 10px;
+}
+
+.console__name {
+  display: block;
+  color: var(--fg-hi);
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 640;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console__where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 1px;
+  color: var(--fg-3);
+  font-size: 14px;
+  min-width: 0;
+}
+
+.console__where > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console__where .state {
+  font-size: 14px;
+}
+
+.screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.screen__scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 14px calc(14px + var(--safe-right)) 18px calc(14px + var(--safe-left));
+}
+
+/* The terminal's text: wrapped rather than scrolled sideways, at a size
+   still readable at arm's length. */
+.screen__text {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-variant-ligatures: none;
+  tab-size: 4;
+}
+
+.screen__line {
+  display: block;
+  min-height: 1.55em;
+}
+
+.screen__rule {
+  display: block;
+  height: 1px;
+  margin: calc(0.775em - 0.5px) 0;
+  background: var(--line-strong);
+}
+
+.screen__note {
+  color: var(--fg-3);
+  font-size: 15px;
+}
+
+.screen .asleep {
+  margin: 0 0 16px;
+}
+
+.to-end {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fg-hi);
+  color: var(--bg);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.to-end .icon {
+  --icon: 16px;
+}
+
+/* The permission prompt's answer, the one decision of the screen. */
+.ask {
+  flex: none;
+  padding: 14px calc(var(--gutter) + var(--safe-right)) 14px calc(var(--gutter) + var(--safe-left));
+  background: var(--waiting-soft);
+  border-top: 1px solid var(--line);
+  box-shadow: inset 3px 0 0 var(--waiting-fill);
+}
+
+.ask__title {
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.ask__hint {
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.ask__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ask__actions .btn {
+  min-height: 50px;
+  font-size: 16.5px;
+}
+
+.btn--deny {
+  background: var(--surface);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.composer {
+  flex: none;
+  padding: 8px calc(10px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(10px + var(--safe-left));
+  background: var(--bar);
+  border-top: 1px solid var(--line);
+}
+
+/* Above the tab bar, the tab bar takes the safe area. */
+.composer--tabbed {
+  padding-bottom: 10px;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.key {
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.key:active {
+  background: var(--pressed);
+}
+
+.key--arrow {
+  font-size: 17px;
+}
+
+.compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.compose__field {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  min-height: 44px;
+  max-height: 132px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-hi);
+  font-size: 16px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+.compose__field:focus {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.compose__field::placeholder {
+  color: var(--fg-3);
+}
+
+.compose__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 22px;
+  background: transparent;
+  color: var(--fg-2);
+}
+
+.compose__icon .icon {
+  --icon: 22px;
+}
+
+.compose__icon:active {
+  background: var(--raised);
+}
+
+.compose__send {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.compose__send:active {
+  background: var(--accent);
+  filter: brightness(0.92);
+}
+
+.compose__send:disabled {
+  background: var(--raised);
+  color: var(--fg-3);
+  filter: none;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 4px 8px;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.status--error {
+  color: var(--danger);
+}
+
+.status--done {
+  color: var(--working);
+}
+
+.status .btn {
+  min-height: 36px;
+  margin-left: auto;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+/* ── Shares ────────────────────────────────────────────────────── */
+
+.share {
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.share__image {
+  display: block;
+  background: var(--raised);
+}
+
+.share__image img {
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+.share__body {
+  padding: 12px 16px 14px;
+}
+
+.share__caption {
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.share__meta {
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-size: 14px;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 14px 14px 16px;
+}
+
+.file__type {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 52px;
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--fg-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.file__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.file__name {
+  display: block;
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.file__caption {
+  display: block;
+  color: var(--fg-2);
+  font-size: 14.5px;
+}
+
+/* ── History ───────────────────────────────────────────────────── */
+
+.events {
+  margin-top: 8px;
+}
+
+.event {
+  display: grid;
+  grid-template-columns: 3.6em 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.event__time {
+  color: var(--fg-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+
+.event__text {
+  color: var(--fg-hi);
+  font-size: 15.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.event__where {
+  display: block;
+  margin-top: 1px;
+  color: var(--fg-3);
+  font-size: 13.5px;
+}
+
+/* ── Pairing ───────────────────────────────────────────────────── */
+
+.pairing {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding-bottom: calc(var(--safe-bottom) + 40px);
+}
+
+.pairing .logo {
+  fill: var(--fg-hi);
+}
+
+.pairing .logo__active {
+  fill: var(--accent);
+}
+
+.pairing .title {
+  margin-top: 22px;
+}
+
+.pairing__hint {
+  margin-top: 10px;
+  color: var(--fg-2);
+  font-size: 16px;
+}
+
+.pairing__lost {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: var(--r-control);
+  background: var(--waiting-soft);
+  color: var(--fg);
+  font-size: 15px;
+}
+
+.pairing form {
+  margin-top: 26px;
+}
+
+.code {
+  display: block;
+  width: 100%;
+  height: 68px;
+  padding: 0 0 0 0.5em;
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-hi);
+  font-size: 32px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5em;
+  text-align: center;
+  outline: none;
+}
+
+.code:focus {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.code::placeholder {
+  color: var(--line-strong);
+}
+
+.pairing .btn--wide {
+  margin-top: 12px;
+}
+
+.pairing__error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 15px;
+}
+
+.splash {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  color: var(--fg-3);
+}
+
+.splash .logo {
+  fill: var(--fg-3);
+}
+
+.splash .logo__active {
+  fill: var(--accent);
+}
+
+/* ── The tab bar ───────────────────────────────────────────────── */
+
+.tabs {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
+  background: var(--bar);
+  border-top: 1px solid var(--line);
+}
+
+/* Typing: the keyboard takes the bottom, the tabs step aside. */
+.app:has(.compose__field:focus) .tabs {
+  display: none;
+}
+
+.app:has(.compose__field:focus) .composer--tabbed {
+  padding-bottom: calc(10px + var(--safe-bottom));
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: var(--tab-h);
+  padding: 6px 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.tab .icon {
+  --icon: 24px;
+}
+
+.tab[aria-current="page"] {
+  color: var(--accent-text);
+}
+
+.tab__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 6px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--waiting-fill);
+  color: #1b1405;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--bar);
+}
+
+.badge--accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.logo {
+  display: block;
+  flex: none;
+  fill: var(--fg);
+}
+
+.logo__active {
+  fill: var(--accent);
+}
