@@ -698,6 +698,25 @@ interface InternalRequest {
 const reply = (id: string, ok: boolean, value: unknown, error: string | null) =>
   invoke<void>("control_reply", { id, ok, value: value ?? null, error });
 
+/**
+ * Answers the internal requests this module owns and leaves every other op to
+ * the listener that does (lib/remoteControl answers remote_*): a second reply
+ * to one id would be an error for a request already answered.
+ */
+export function answerInternal(
+  request: InternalRequest,
+  deps: BriefingDeps,
+  send: (id: string, ok: boolean, value: unknown, error: string | null) => Promise<void>,
+): boolean {
+  const { id, op, args } = request;
+  if (op !== "orchestrator_briefing") return false;
+  briefingFor(String(args?.paneId ?? ""), deps)
+    .then((value) => send(id, true, value, null))
+    .catch((err) => send(id, false, null, err instanceof Error ? err.message : String(err)))
+    .catch(() => undefined);
+  return true;
+}
+
 /** How often the watched boards are read and the workers looked at. */
 const TICK_MS = 10_000;
 
@@ -741,15 +760,7 @@ export function useOrchestrator(snapshot: (() => AppState) | null) {
       ),
       listen<{ id: string }>("pty:exit", (event) => engine.ptyExited(event.payload.id)),
       listen<InternalRequest>("control:internal", (event) => {
-        const { id, op, args } = event.payload;
-        const run =
-          op === "orchestrator_briefing"
-            ? briefingFor(String(args?.paneId ?? ""), deps)
-            : Promise.reject(new Error(`Unknown internal request "${op}".`));
-        run
-          .then((value) => reply(id, true, value, null))
-          .catch((err) => reply(id, false, null, err instanceof Error ? err.message : String(err)))
-          .catch(() => undefined);
+        answerInternal(event.payload, deps, reply);
       }),
     ];
     const timer = window.setInterval(() => {
