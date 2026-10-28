@@ -87,6 +87,9 @@ impl Drop for KeepAwake {
 }
 
 /// This system's way, or the one that says it cannot.
+// On Linux `System` is a unit struct, where clippy would rather see `System`;
+// on Windows and macOS it has fields, and `default()` is the one spelling for all.
+#[allow(clippy::default_constructed_unit_structs)]
 pub fn system() -> Box<dyn Holder> {
     Box::new(System::default())
 }
