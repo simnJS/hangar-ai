@@ -11,6 +11,7 @@ describe("routes", () => {
     { name: "shares" },
     { name: "manager" },
     { name: "history" },
+    { name: "stats" },
   ];
 
   it("read back what they write", () => {
@@ -28,6 +29,7 @@ describe("routes", () => {
     expect(tabOf({ name: "project", id: "x" })).toBe("projects");
     expect(tabOf({ name: "history" })).toBe("forYou");
     expect(tabOf({ name: "manager" })).toBe("manager");
+    expect(tabOf({ name: "stats" })).toBe("stats");
   });
 });
 

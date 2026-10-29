@@ -12,6 +12,7 @@ import { History } from "./screens/History";
 import { Pairing } from "./screens/Pairing";
 import { ProjectScreen, Projects } from "./screens/Projects";
 import { Shares } from "./screens/Shares";
+import { Stats } from "./screens/Stats";
 import { loadNumber, save } from "./storage";
 
 export function App({ boot }: { boot: Boot }) {
@@ -81,5 +82,7 @@ function Screen({ route, now, onSharesSeen }: { route: Route; now: number; onSha
       return <ManagerScreen />;
     case "history":
       return <History now={now} />;
+    case "stats":
+      return <Stats now={now} />;
   }
 }

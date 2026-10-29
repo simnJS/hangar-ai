@@ -2791,12 +2791,444 @@ button.share__image {
   fill: var(--accent);
 }
 
+/* ── Stats ─────────────────────────────────────────────────────────
+   The usage, as the desktop's statistics page counts it. Every mark of the
+   data is the accent, one hue, as on the desktop (src/styles/stats.css):
+   colour only says "how much" there. The plan's windows are the one place
+   it says more — amber from 70 % used, red from 90 %, the words beside it
+   saying the same. Gridlines are hairlines; numbers that line up in a
+   column are tabular, a figure on its own is not. */
+
+.limits {
+  display: grid;
+  gap: 18px;
+}
+
+.limit__head,
+.limit__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.limit__label {
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 560;
+}
+
+/* What is left: the number a phone is opened for. */
+.limit__left {
+  color: var(--fg-hi);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.limit {
+  --limit: var(--accent);
+  --limit-track: var(--accent-soft);
+}
+
+.limit--warn {
+  --limit: var(--waiting-fill);
+  --limit-track: var(--waiting-soft);
+}
+
+.limit--danger {
+  --limit: var(--danger);
+  --limit-track: var(--danger-soft);
+}
+
+.limit__track {
+  display: block;
+  height: 8px;
+  margin: 8px 0 6px;
+  border-radius: 4px;
+  background: var(--limit-track);
+  overflow: hidden;
+}
+
+.limit__fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--limit);
+}
+
+.limit--past .limit__track {
+  background: var(--raised);
+}
+
+.limit__foot {
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.limit__reset {
+  margin-left: auto;
+  text-align: right;
+}
+
+.limits__reported {
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+/* The period and the measure: one row over everything they scope. */
+.stats__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 26px;
+}
+
+.stats__choice .segmented__option {
+  padding: 0 11px;
+}
+
+.stats__choice .segmented__option[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--fg-hi);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.stats__choice:first-child {
+  flex: 1 1 auto;
+}
+
+.stats__choice:first-child .segmented__option {
+  flex: 1;
+}
+
+.stats__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+/* A new period on its way: the last one held, faded, in its place. */
+.stats__body {
+  transition: opacity 160ms var(--ease);
+}
+
+.stats__body.is-stale {
+  opacity: 0.55;
+}
+
+.stats__note {
+  margin-top: 14px;
+  padding: 0 2px;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+.stats__view {
+  min-height: 44px;
+  margin: -12px -8px -12px 0;
+  padding: 0 8px;
+  font-size: 15px;
+}
+
+.stats__view.btn {
+  min-width: 44px;
+}
+
+/* The totals: four tiles, two by two. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.kpi__label {
+  color: var(--fg-2);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.kpi__value {
+  color: var(--fg-hi);
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.kpi__trend {
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.kpi__arrow {
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.kpi__note {
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+/* The chart a day: columns from one baseline, the one read out darker. */
+.vchart__readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  margin-bottom: 10px;
+}
+
+.vchart__value {
+  color: var(--fg-hi);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.vchart__date {
+  color: var(--fg-2);
+  font-size: 14px;
+  text-align: right;
+}
+
+.vchart__frame {
+  position: relative;
+  height: 168px;
+  margin-left: 44px;
+}
+
+.vchart__tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--line);
+}
+
+.vchart__tick:first-child {
+  border-top-color: var(--line-strong);
+}
+
+.vchart__tick-label {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: -8px;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vchart__plot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  touch-action: pan-y;
+  cursor: crosshair;
+  outline: none;
+}
+
+.vchart__plot--dense {
+  gap: 1px;
+}
+
+.vchart__plot:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.vchart__col {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+}
+
+.vchart__bar {
+  width: 100%;
+  max-width: 24px;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+}
+
+.vchart__plot--dense .vchart__bar {
+  border-radius: 1px 1px 0 0;
+}
+
+.vchart__bar.has-value {
+  min-height: 1px;
+}
+
+.vchart__col.is-on .vchart__bar {
+  background: var(--fg-hi);
+}
+
+.vchart__axis {
+  position: relative;
+  height: 20px;
+  margin: 6px 0 0 44px;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vchart__label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.vchart__label.is-first {
+  left: 0 !important;
+  transform: none;
+}
+
+.vchart__label.is-last {
+  left: auto !important;
+  right: 0;
+  transform: none;
+}
+
+.vchart__empty {
+  padding: 28px 0;
+  color: var(--fg-2);
+  text-align: center;
+}
+
+.vlist {
+  max-height: 340px;
+  margin: -6px 0;
+  overflow-y: auto;
+}
+
+.vlist__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 15px;
+}
+
+.vlist__row + .vlist__row {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.vlist__date {
+  color: var(--fg-2);
+}
+
+.vlist__value {
+  color: var(--fg-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A ranking: each row's bar against the heaviest. */
+.rank__row {
+  padding: 12px 16px 14px;
+}
+
+.rank__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rank__name {
+  min-width: 0;
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank__row--other .rank__name {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+
+.rank__value {
+  flex: none;
+  color: var(--fg-hi);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank__line--sub {
+  margin-top: 1px;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+.rank__sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank__share {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank__track {
+  display: block;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.rank__fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.rank__row--other .rank__fill {
+  background: var(--idle);
+}
+
 /* ── The tab bar ───────────────────────────────────────────────── */
 
 .tabs {
   flex: none;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
   background: var(--bar);
   border-top: 1px solid var(--line);
@@ -2812,15 +3244,16 @@ button.share__image {
   padding-bottom: calc(10px + var(--safe-bottom));
 }
 
+/* Icons on one line across the bar, whichever label takes two. */
 .tab {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 3px;
   min-height: var(--tab-h);
-  padding: 6px 2px 4px;
+  padding: 8px 2px 5px;
   border: 0;
   background: transparent;
   color: var(--fg-3);
@@ -2838,11 +3271,16 @@ button.share__image {
   color: var(--accent-text);
 }
 
+/* Five tabs leave a label 74 px: one too long for them ("Chef de projet")
+   takes a second line rather than losing its end. */
 .tab__label {
+  display: -webkit-box;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  text-wrap: balance;
 }
 
 .badge {

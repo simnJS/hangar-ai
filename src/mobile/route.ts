@@ -1,6 +1,6 @@
 /**
  * Where the app is, in the address's hash: the browser's back gesture works,
- * and a notification can open a screen (#/pane/<id>, #/shares, #/).
+ * and a notification can open a screen (#/pane/<id>, #/shares, #/stats, #/).
  */
 
 export type Route =
@@ -10,9 +10,10 @@ export type Route =
   | { name: "pane"; id: string }
   | { name: "shares" }
   | { name: "manager" }
-  | { name: "history" };
+  | { name: "history" }
+  | { name: "stats" };
 
-export type Tab = "forYou" | "projects" | "shares" | "manager";
+export type Tab = "forYou" | "projects" | "shares" | "manager" | "stats";
 
 export function parseRoute(hash: string): Route {
   const [head, ...rest] = hash.replace(/^#\/?/, "").split("/");
@@ -28,6 +29,8 @@ export function parseRoute(hash: string): Route {
       return { name: "manager" };
     case "history":
       return { name: "history" };
+    case "stats":
+      return { name: "stats" };
     default:
       return { name: "forYou" };
   }

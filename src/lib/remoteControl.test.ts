@@ -4,9 +4,20 @@ import type { ControlDeps } from "./control";
 import type { ManagerJournalEntry } from "./managerEvents";
 import type { BoardTask, JournalEntry } from "./orchestratorEvents";
 import type { ProjectsDeps } from "./projects";
-import { answerRemote, noteBridgeEvent, runRemote, type ChatPage, type ChatReader } from "./remoteControl";
+import {
+  answerRemote,
+  noteBridgeEvent,
+  runRemote,
+  statsSources,
+  usageReader,
+  type ChatPage,
+  type ChatReader,
+  type StatsSources,
+} from "./remoteControl";
 import { answerInternal } from "./orchestratorBrief";
-import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState } from "../remote/types";
+import type { StatsBucket, UsageStats } from "./stats";
+import { addDays, modelLabel, startOfDay } from "./statsModel";
+import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState, RemoteStats } from "../remote/types";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
 
 const journals = vi.hoisted(() => ({
@@ -779,5 +790,290 @@ describe("internal requests", () => {
     expect(answerInternal({ id: "5", op: "orchestrator_briefing", args: { paneId: "x" } }, briefing, send)).toBe(true);
     await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
     expect(sent.every((args) => args[0] === "5")).toBe(true);
+  });
+});
+
+describe("remote_stats", () => {
+  const HOUR = 3_600_000;
+  // A Wednesday afternoon, on the PC's clock.
+  const NOW = new Date(2026, 9, 28, 15, 0).getTime();
+  /** 10 a.m., `days` days before today. */
+  const daysAgo = (days: number) => addDays(startOfDay(NOW), -days) + 10 * HOUR;
+
+  function bucket(session: number, at: number, model: number, patch: Partial<StatsBucket> = {}): StatsBucket {
+    return {
+      session,
+      at,
+      model,
+      input: 0,
+      output: 0,
+      cacheWrite: 0,
+      cacheRead: 0,
+      cost: 0,
+      costInput: 0,
+      costOutput: 0,
+      costCacheWrite: 0,
+      costCacheRead: 0,
+      calls: 0,
+      turns: 0,
+      activeMs: 0,
+      ...patch,
+    };
+  }
+
+  const FOLDERS = ["C:\\dev\\shop", "C:\\dev\\shop-worktrees\\feature", "C:\\elsewhere\\scratch"];
+
+  function usage(buckets: StatsBucket[], cwds = FOLDERS): UsageStats {
+    return {
+      generatedAt: NOW - 5_000,
+      scan: { files: 3, parsed: 1, reused: 2, failed: 0, bytes: 1_000, ms: 40, cachedOnly: false },
+      sources: [],
+      activeGapCapMs: 5 * 60_000,
+      sessions: cwds.map((cwd, index) => ({
+        agent: index === 2 ? "codex" : "claude",
+        id: `s${index}`,
+        cwd,
+        title: `Session ${index}`,
+        firstAt: NOW - 50 * 24 * HOUR,
+        lastAt: NOW,
+      })),
+      models: [
+        { id: "claude-opus-5-5", priced: true },
+        { id: "gpt-5.6-sol", priced: true },
+        { id: "local-llama", priced: false },
+      ],
+      buckets,
+    };
+  }
+
+  /**
+   * Shop's own session today, one in a worktree of it three days ago, Codex
+   * in a folder of no workspace ten days ago, and a model without a price
+   * forty days ago.
+   */
+  const rows = () => [
+    bucket(0, daysAgo(0), 0, { input: 1_000, output: 500, cacheRead: 3_000, cost: 1.5, calls: 3 }),
+    bucket(0, daysAgo(0), -1, { turns: 2, activeMs: 30 * 60_000 }),
+    bucket(1, daysAgo(3), 0, { input: 2_000, output: 1_000, cost: 3, calls: 2 }),
+    bucket(1, daysAgo(3), -1, { turns: 1, activeMs: 60 * 60_000 }),
+    bucket(2, daysAgo(10), 1, { input: 10_000, cost: 0.5, calls: 1 }),
+    bucket(2, daysAgo(10), -1, { turns: 1, activeMs: 20 * 60_000 }),
+    bucket(0, daysAgo(40), 2, { input: 50_000, calls: 4 }),
+  ];
+
+  function sources(data: UsageStats, patch: Partial<StatsSources> = {}): StatsSources {
+    return {
+      usage: async () => data,
+      worktrees: async (cwd) => (cwd === "C:\\dev\\shop" ? ["C:/dev/shop", "C:/dev/shop-worktrees/feature"] : []),
+      plan: () => null,
+      now: () => NOW,
+      ...patch,
+    };
+  }
+
+  const stats = async (args: Record<string, unknown>, from: StatsSources) =>
+    (await runRemote("remote_stats", args, rig([shop()]).deps, undefined, undefined, from)) as RemoteStats;
+
+  it("sums up the last 7 days the statistics page's way, a worktree's sessions in their workspace", async () => {
+    const answer = await stats({ period: "7d" }, sources(usage(rows())));
+    expect(answer).toMatchObject({
+      period: "7d",
+      measure: "tokens",
+      readAt: NOW - 5_000,
+      cachedOnly: false,
+      granularity: "day",
+      range: { from: addDays(startOfDay(NOW), -6), to: addDays(startOfDay(NOW), 1), days: 7 },
+      totals: { tokens: 7_500, cacheRead: 3_000, cost: 4.5, activeMs: 90 * 60_000, sessions: 2, turns: 3 },
+      previous: { tokens: 10_000, cost: 0.5, sessions: 1, turns: 1 },
+      activeDays: 2,
+    });
+    expect(answer.series).toHaveLength(7);
+    expect(answer.series[6]).toEqual({ at: startOfDay(NOW), value: 4_500 });
+    expect(answer.series[3]).toEqual({ at: addDays(startOfDay(NOW), -3), value: 3_000 });
+    expect(answer.series.filter((point) => point.value === 0)).toHaveLength(5);
+    expect(answer.projects).toEqual({
+      rows: [{ key: "ws:shop", label: "Shop", tokens: 7_500, cost: 4.5, activeMs: 90 * 60_000, sessions: 2, share: 1 }],
+      other: null,
+    });
+    expect(answer.agents.rows.map((row) => [row.label, row.tokens, row.sessions])).toEqual([["Claude Code", 7_500, 2]]);
+    expect(answer.models.rows.map((row) => [row.key, row.label, row.share])).toEqual([
+      ["claude-opus-5-5", modelLabel("claude-opus-5-5"), 1],
+    ]);
+    // Never the hourly rows themselves.
+    expect(JSON.stringify(answer)).not.toContain("costCacheRead");
+  });
+
+  it("ranks and draws by the measure asked for", async () => {
+    const byTokens = await stats({ period: "30d", measure: "tokens" }, sources(usage(rows())));
+    const byCost = await stats({ period: "30d", measure: "cost" }, sources(usage(rows())));
+    expect(byTokens.projects.rows.map((row) => [row.label, row.share])).toEqual([
+      ["scratch", 10_000 / 17_500],
+      ["Shop", 7_500 / 17_500],
+    ]);
+    expect(byCost.projects.rows.map((row) => [row.label, row.share])).toEqual([
+      ["Shop", 0.9],
+      ["scratch", 0.1],
+    ]);
+    expect(byCost.agents.rows.map((row) => row.label)).toEqual(["Claude Code", "Codex"]);
+    expect(byCost.series).toHaveLength(30);
+    expect(byCost.series[29].value).toBe(1.5);
+    expect(byTokens.series[29].value).toBe(4_500);
+    expect(byCost.measure).toBe("cost");
+  });
+
+  it("takes 30 days and tokens by default, 90 days and all of it when asked", async () => {
+    const plain = await stats({}, sources(usage(rows())));
+    expect([plain.period, plain.measure, plain.range.days]).toEqual(["30d", "tokens", 30]);
+    expect(plain.totals.tokens).toBe(17_500);
+
+    const quarter = await stats({ period: "90d" }, sources(usage(rows())));
+    expect(quarter.range.days).toBe(90);
+    expect(quarter.totals.tokens).toBe(67_500);
+    expect(quarter.previous).toMatchObject({ tokens: 0, sessions: 0 });
+
+    const all = await stats({ period: "all" }, sources(usage(rows())));
+    expect(all).toMatchObject({
+      range: { from: addDays(startOfDay(NOW), -40), days: 41 },
+      firstAt: daysAgo(40),
+      previous: null,
+      unpricedTokens: 50_000,
+    });
+    expect(all.series).toHaveLength(41);
+    expect(all.models.rows.find((row) => row.key === "local-llama")).toMatchObject({ unpriced: true, cost: 0 });
+  });
+
+  it("folds the rows past the sixth into one", async () => {
+    const folders = Array.from({ length: 8 }, (_, index) => `D:\\p${index}`);
+    const data = usage(
+      folders.map((_, index) => bucket(index, daysAgo(1), 0, { input: (index + 1) * 100 })),
+      folders,
+    );
+    const answer = await stats({ period: "7d" }, sources(data));
+    expect(answer.projects.rows.map((row) => row.label)).toEqual(["p7", "p6", "p5", "p4", "p3"]);
+    expect(answer.projects.other).toMatchObject({ count: 3, tokens: 600, cost: 0, activeMs: 0 });
+    expect(answer.projects.other?.share).toBeCloseTo(600 / 3_600);
+  });
+
+  it("answers zeros and empty rankings without any data", async () => {
+    const answer = await stats({ period: "30d" }, sources(usage([])));
+    expect(answer).toMatchObject({
+      firstAt: null,
+      totals: { tokens: 0, cost: 0, activeMs: 0, sessions: 0, turns: 0 },
+      previous: { tokens: 0 },
+      activeDays: 0,
+      projects: { rows: [], other: null },
+      agents: { rows: [], other: null },
+      models: { rows: [], other: null },
+      unpricedTokens: 0,
+      plan: null,
+    });
+    expect(answer.series).toHaveLength(30);
+    expect(answer.series.every((point) => point.value === 0)).toBe(true);
+    const all = await stats({ period: "all" }, sources(usage([])));
+    expect(all.range).toEqual({ from: startOfDay(NOW), to: addDays(startOfDay(NOW), 1), days: 1 });
+  });
+
+  it("says nothing of the plan until a session reported it, then its windows, whole, with when they reset", async () => {
+    expect((await stats({}, sources(usage(rows())))).plan).toBeNull();
+    const reported = sources(usage(rows()), {
+      plan: () => ({
+        at: NOW - 60_000,
+        limits: [
+          { kind: "five_hour", percentUsed: 34.4, resetsAt: "2026-10-28T17:00:00Z" },
+          { kind: "seven_day", percentUsed: 140, resetsAt: null },
+          { kind: "seven_day_opus", percentUsed: 12, resetsAt: "not a date" },
+        ],
+      }),
+    });
+    expect((await stats({}, reported)).plan).toEqual({
+      at: NOW - 60_000,
+      windows: [
+        { kind: "five_hour", percentUsed: 34, resetsAt: Date.parse("2026-10-28T17:00:00Z") },
+        { kind: "seven_day", percentUsed: 100, resetsAt: null },
+        { kind: "seven_day_opus", percentUsed: 12, resetsAt: null },
+      ],
+    });
+  });
+
+  it("keeps the plan its sessions' mods report; one without limits does not erase it", async () => {
+    const limits = [{ kind: "five_hour", percentUsed: 81, resetsAt: "2026-10-28T19:30:00Z" }];
+    const reports = (rateLimits: typeof limits) =>
+      ({ kind: "usage", context: { tokens: 1, window: 200_000, percent: 0 }, rateLimits, costUsd: null }) as const;
+    noteBridgeEvent("orch", reports(limits), NOW - 1_000);
+    noteBridgeEvent("w1", reports([]), NOW - 500);
+    const answer = await stats({}, { ...sources(usage([])), plan: statsSources.plan });
+    expect(answer.plan).toEqual({
+      at: NOW - 1_000,
+      windows: [{ kind: "five_hour", percentUsed: 81, resetsAt: Date.parse("2026-10-28T19:30:00Z") }],
+    });
+  });
+
+  it("refuses a period or a measure it does not know", async () => {
+    await expect(stats({ period: "1y" }, sources(usage([])))).rejects.toThrow(
+      'Unknown period "1y". One of: 7d, 30d, 90d, all.',
+    );
+    await expect(stats({ measure: "time" }, sources(usage([])))).rejects.toThrow(
+      'Unknown measure "time". One of: tokens, cost.',
+    );
+  });
+
+  it("places sessions by the workspace's own folders when git cannot list its worktrees", async () => {
+    const answer = await stats(
+      { period: "7d" },
+      sources(usage(rows()), { worktrees: () => Promise.reject(new Error("no git")) }),
+    );
+    expect(answer.projects.rows.map((row) => row.label)).toEqual(["Shop", "feature"]);
+  });
+});
+
+describe("usageReader", () => {
+  const data = (cachedOnly: boolean, generatedAt: number) =>
+    ({ generatedAt, scan: { cachedOnly } }) as unknown as UsageStats;
+  const never = () => new Promise<void>(() => {});
+
+  it("reuses a fresh scan, and scans again once it is not", async () => {
+    let clock = 0;
+    const read = vi.fn(async () => data(false, clock));
+    const reader = usageReader(read, { now: () => clock, freshMs: 60_000, wait: never });
+    expect((await reader()).generatedAt).toBe(0);
+    clock = 59_000;
+    expect((await reader()).generatedAt).toBe(0);
+    clock = 61_000;
+    expect((await reader()).generatedAt).toBe(61_000);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("joins a scan under way rather than starting a second", async () => {
+    let finish!: (value: UsageStats) => void;
+    const read = vi.fn(() => new Promise<UsageStats>((resolve) => (finish = resolve)));
+    const reader = usageReader(read, { wait: never });
+    const first = reader();
+    const second = reader();
+    finish(data(false, 1));
+    expect(await first).toBe(await second);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers from the cache when the scan takes too long, and from the scan once it is done", async () => {
+    let finish!: (value: UsageStats) => void;
+    const read = vi.fn((args: { cachedOnly?: boolean }) =>
+      args.cachedOnly ? Promise.resolve(data(true, 1)) : new Promise<UsageStats>((resolve) => (finish = resolve)),
+    );
+    let late!: () => void;
+    const reader = usageReader(read, { wait: () => new Promise<void>((resolve) => (late = resolve)) });
+    const answer = reader();
+    await vi.waitFor(() => expect(late).toBeTypeOf("function"));
+    late();
+    expect((await answer).scan.cachedOnly).toBe(true);
+    finish(data(false, 2));
+    expect((await reader()).scan.cachedOnly).toBe(false);
+    expect(read.mock.calls.filter(([args]) => !args.cachedOnly)).toHaveLength(1);
+  });
+
+  it("passes a failed scan on, and scans again on the next call", async () => {
+    const read = vi.fn().mockRejectedValueOnce(new Error("no transcripts")).mockResolvedValue(data(false, 3));
+    const reader = usageReader(read, { wait: never });
+    await expect(reader()).rejects.toThrow("no transcripts");
+    expect((await reader()).generatedAt).toBe(3);
   });
 });
