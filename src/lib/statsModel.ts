@@ -547,6 +547,9 @@ export function formatTick(value: number, measure: Measure, locale: string): str
     currency: "USD",
     currencyDisplay: "narrowSymbol",
     notation: "compact",
+    // Stated, not left to the runtime: older ICU (Node 22) keeps a decimal
+    // on a currency by default, and 0 would read "0,0 $".
+    minimumFractionDigits: 0,
     maximumFractionDigits: value < 10 ? 1 : 0,
   }).format(value);
 }
