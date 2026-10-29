@@ -10,16 +10,18 @@ import {
   reloadModel,
   requestSnapshot,
   setModelPanel,
-  showModel,
+  showPreview,
   takeModelScope,
   whenSettled,
   type ModelScope,
-  type OpenModel,
+  type OpenPreview,
+  type PreviewToShow,
   type SnapshotOptions,
 } from "./modelStore";
 
 /**
- * A workspace's 3D preview, as the MCP control handlers reach it.
+ * A workspace's preview, as the MCP control handlers reach it: its 3D models
+ * and every other file it has open.
  *
  * Every window keeps the previews of the workspaces it draws (lib/modelStore),
  * but only the main one carries out the agents' requests (lib/control). A
@@ -28,33 +30,34 @@ import {
  * the same way lib/windows lends the main window a detached pane's terminal.
  *
  * A host is bound to one workspace: it lists, shows, renders and closes that
- * workspace's models and no other's, whichever workspace is on screen.
+ * workspace's files and no other's, whichever workspace is on screen.
  *
  * Everything is asynchronous, even here, so the local preview and a remote
  * one are interchangeable behind `ModelHost`.
  */
 
 /** The host decides the workspace. */
-export type ModelToShow = Omit<Parameters<typeof showModel>[0], "workspaceId">;
+export type ModelToShow = PreviewToShow;
 
 export interface ModelList {
-  models: OpenModel[];
+  /** Every tab, of every kind. */
+  models: OpenPreview[];
   activeId: string | null;
   /** The workspace is the one its window has on screen. */
   onScreen: boolean;
-  /** And its preview panel is on screen with it: the model in front can be seen. */
+  /** And its preview panel is on screen with it: the file in front can be seen. */
   shown: boolean;
 }
 
 export interface ModelHost {
   list: () => Promise<ModelList>;
-  /** Opens the model, or reloads it when it is open already; returns its id. */
-  show: (model: ModelToShow) => Promise<string>;
-  /** Puts the model in front, and the workspace's panel open. */
+  /** Opens the file, or reloads it when it is open already; returns its id. */
+  show: (file: ModelToShow) => Promise<string>;
+  /** Puts the file in front, and the workspace's panel open. */
   reveal: (id: string) => Promise<void>;
   reload: (id: string, modifiedMs: number) => Promise<void>;
-  /** The model once it has loaded or failed, or null after `ms`. */
-  whenSettled: (id: string, ms: number) => Promise<OpenModel | null>;
+  /** The file once it has loaded or failed, or null after `ms`. */
+  whenSettled: (id: string, ms: number) => Promise<OpenPreview | null>;
   /** Base64 PNG, without the data: prefix. */
   snapshot: (id: string, options: SnapshotOptions) => Promise<string>;
   close: (ids: string[]) => Promise<void>;
@@ -67,11 +70,11 @@ const MOUNT_POLL_MS = 150;
 
 const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-const NOT_HERE = "That model is not open in this workspace.";
+const NOT_HERE = "That file is not open in this workspace.";
 
 /** A workspace's preview, in the window this code runs in. */
 export function localModelHost(workspaceId: string): ModelHost {
-  const owns = (id: string) => modelScope(workspaceId).models.some((model) => model.id === id);
+  const owns = (id: string) => modelScope(workspaceId).models.some((entry) => entry.id === id);
   return {
     list: async () => {
       const { models, activeId } = modelScope(workspaceId);
@@ -79,7 +82,7 @@ export function localModelHost(workspaceId: string): ModelHost {
       const onScreen = view.workspaceId === workspaceId;
       return { models, activeId, onScreen, shown: onScreen && view.panelShown };
     },
-    show: async (model) => showModel({ ...model, workspaceId }),
+    show: async (file) => showPreview({ ...file, workspaceId }),
     reveal: async (id) => {
       if (!owns(id)) throw new Error(NOT_HERE);
       activateModel(id);
@@ -180,7 +183,7 @@ export async function remoteModelHost(workspaceId: string): Promise<ModelHost | 
     askWindow(workspaceId, method, args, ms) as Promise<T>;
   return {
     list: () => call("list", []),
-    show: (model) => call("show", [model]),
+    show: (file) => call("show", [file]),
     reveal: (id) => call("reveal", [id]),
     reload: (id, modifiedMs) => call("reload", [id, modifiedMs]),
     // The other window does the waiting; this one only needs to outlast it.
@@ -233,7 +236,7 @@ const handOver = (handover: Handover) => emit("model:handover", handover).catch(
 
 /**
  * Workspace window: answers the main window's requests about the preview of
- * the workspace it shows, and asks for the models the main window had open
+ * the workspace it shows, and asks for the files the main window had open
  * for it before it moved here. Returns the unsubscribe.
  */
 export function serveModelHost(workspaceId: string): () => void {
@@ -273,7 +276,7 @@ export function serveModelHost(workspaceId: string): () => void {
 /**
  * Main window: gives a workspace's preview to the window it moved to, when
  * that window asks for it, and takes it back when the workspace returns —
- * the models follow the workspace rather than staying where nobody sees them.
+ * its files follow the workspace rather than staying where nobody sees them.
  */
 export function serveModelHandovers(): () => void {
   const stopClaims = listenFor<{ workspaceId: string }>("model:claim", ({ workspaceId }) => {
@@ -289,7 +292,7 @@ export function serveModelHandovers(): () => void {
   };
 }
 
-/** Workspace window, its workspace going back to the main window: its models go too. */
+/** Workspace window, its workspace going back to the main window: its files go too. */
 export function handBackModels(workspaceId: string) {
   const scope = takeModelScope(workspaceId);
   if (scope) void handOver({ to: MAIN, workspaceId, scope });

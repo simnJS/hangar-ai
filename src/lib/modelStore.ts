@@ -1,20 +1,22 @@
 import { useSyncExternalStore } from "react";
 import type { ModelFormat } from "./modelFiles";
+import type { FileKind } from "./preview";
 
 /**
- * The 3D models open in this window, one preview per workspace: which models
- * each workspace has open, which is in front, whether its panel shows and
+ * What is open in this window's previews, one preview per workspace: the
+ * files each workspace has open — 3D models, images, videos, sounds, text,
+ * Markdown, PDF, web pages — which is in front, whether its panel shows and
  * whether it fills the work area. Switching workspaces switches previews; a
- * model an agent shows in a workspace that is not on screen waits there.
+ * file an agent shows in a workspace that is not on screen waits there.
  *
- * Written by the MCP control handlers (an agent showing a model), by the
- * panel itself (the user closing a tab, the viewer reporting what it loaded)
- * and read by both. Outside React for the same reason as lib/paneInsight: the
- * writers are nowhere near the panel in the tree.
+ * Written by the MCP control handlers (an agent showing a file), by the
+ * panel itself (the user closing a tab, the 3D viewer reporting what it
+ * loaded) and read by both. Outside React for the same reason as
+ * lib/paneInsight: the writers are nowhere near the panel in the tree.
  *
- * Models are ids across the whole window: the one viewer the window has
- * (ModelPanel) holds them all, whichever workspace they belong to. Nothing
- * here is saved; a reload starts every preview empty.
+ * Entries are ids across the whole window: the one 3D viewer the window has
+ * (ModelPanel) holds the models of every workspace, whichever it belongs to.
+ * Nothing here is saved; a reload starts every preview empty.
  */
 
 export interface ModelInfo {
@@ -29,12 +31,12 @@ export interface ModelInfo {
   center: [number, number, number];
 }
 
-export interface OpenModel {
+/** What every open file has, whatever its kind. */
+interface OpenEntry {
   id: string;
   /** Canonical absolute path. */
   path: string;
   title: string;
-  format: ModelFormat;
   /** The workspace whose preview it is open in. */
   workspaceId: string;
   /** The pane name of the agent that opened it; null when the user did. */
@@ -44,10 +46,41 @@ export interface OpenModel {
   modifiedMs: number;
   /** Bumped to make the viewer load the file again. */
   revision: number;
+  /** A file that is not a model is ready as soon as it is open: its viewer reads it on screen. */
   status: "loading" | "ready" | "error";
-  info: ModelInfo | null;
   error: string | null;
 }
+
+export interface OpenModel extends OpenEntry {
+  kind: "model";
+  format: ModelFormat;
+  info: ModelInfo | null;
+}
+
+export interface OpenFile extends OpenEntry {
+  kind: FileKind;
+  mime: string;
+  /** In bytes, when it was shown. */
+  size: number;
+}
+
+/** A tab of the preview. */
+export type OpenPreview = OpenModel | OpenFile;
+
+export const isModel = (entry: OpenPreview): entry is OpenModel => entry.kind === "model";
+
+/** What opening a file takes, its id and workspace aside. */
+export type PreviewToShow =
+  | { kind: "model"; path: string; title?: string; format: ModelFormat; openedBy: string | null; modifiedMs: number }
+  | {
+      kind: FileKind;
+      path: string;
+      title?: string;
+      mime: string;
+      size: number;
+      openedBy: string | null;
+      modifiedMs: number;
+    };
 
 export type SnapshotAngle = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
 
@@ -62,7 +95,8 @@ export type Snapshotter = (modelId: string, options: SnapshotOptions) => Promise
 
 /** One workspace's preview. */
 export interface ModelScope {
-  models: OpenModel[];
+  /** Every tab, in order: models and the other kinds together. */
+  models: OpenPreview[];
   activeId: string | null;
   panelOpen: boolean;
   /** The panel takes the whole work area instead of sitting beside it. */
@@ -72,9 +106,11 @@ export interface ModelScope {
 }
 
 interface State {
-  /** By workspace id; a workspace with no model open has no entry. */
+  /** By workspace id; a workspace with nothing open has no entry. */
   scopes: Readonly<Record<string, ModelScope>>;
-  /** Every workspace's models in one list: what this window's viewer may hold. */
+  /** Everything open in the window, every workspace's, every kind. */
+  entries: OpenPreview[];
+  /** Every workspace's 3D models in one list: what this window's 3D viewer may hold. */
   all: OpenModel[];
 }
 
@@ -86,11 +122,11 @@ const EMPTY: ModelScope = Object.freeze({
   unseen: false,
 }) as ModelScope;
 
-let state: State = { scopes: {}, all: [] };
+let state: State = { scopes: {}, entries: [], all: [] };
 const listeners = new Set<() => void>();
 let snapshotter: Snapshotter | null = null;
-/** Callers waiting for a model to finish loading, by model id. */
-const settleWaiters = new Map<string, Set<(model: OpenModel) => void>>();
+/** Callers waiting for a file to finish loading, by id. */
+const settleWaiters = new Map<string, Set<(entry: OpenPreview) => void>>();
 
 /** Replaces the scopes named in `patch`; null drops one. */
 function set(patch: Record<string, ModelScope | null>) {
@@ -99,14 +135,22 @@ function set(patch: Record<string, ModelScope | null>) {
     if (scope && scope.models.length) scopes[workspaceId] = scope;
     else delete scopes[workspaceId];
   }
-  state = { scopes, all: Object.values(scopes).flatMap((scope) => scope.models) };
+  const entries = Object.values(scopes).flatMap((scope) => scope.models);
+  // The 3D list keeps its identity while its models do, so a viewer
+  // watching it is not woken by an image opening.
+  const models = entries.filter(isModel);
+  const all =
+    models.length === state.all.length && models.every((model, i) => model === state.all[i])
+      ? state.all
+      : models;
+  state = { scopes, entries, all };
   for (const listener of listeners) listener();
-  for (const model of state.all) {
-    if (model.status === "loading") continue;
-    const waiters = settleWaiters.get(model.id);
+  for (const entry of state.entries) {
+    if (entry.status === "loading") continue;
+    const waiters = settleWaiters.get(entry.id);
     if (!waiters) continue;
-    settleWaiters.delete(model.id);
-    for (const resolve of waiters) resolve(model);
+    settleWaiters.delete(entry.id);
+    for (const resolve of waiters) resolve(entry);
   }
 }
 
@@ -120,48 +164,59 @@ const newId = () =>
     ? crypto.randomUUID()
     : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-const find = (id: string) => state.all.find((model) => model.id === id);
+const find = (id: string) => state.entries.find((entry) => entry.id === id);
 
 /** The workspace's preview; an empty one when it has nothing open. */
 export function modelScope(workspaceId: string | null): ModelScope {
   return (workspaceId && state.scopes[workspaceId]) || EMPTY;
 }
 
-/** One model of a scope rewritten. */
-const withModel = (scope: ModelScope, id: string, change: (model: OpenModel) => OpenModel) => ({
+/** One entry of a scope rewritten. */
+const withEntry = (scope: ModelScope, id: string, change: (entry: OpenPreview) => OpenPreview) => ({
   ...scope,
-  models: scope.models.map((model) => (model.id === id ? change(model) : model)),
+  models: scope.models.map((entry) => (entry.id === id ? change(entry) : entry)),
 });
 
 /**
- * Opens a model in its workspace's preview, or brings it forward and reloads
+ * The fields that depend on the kind, as the file is now. A model waits for
+ * the 3D viewer; any other kind is ready, its viewer reading it on screen.
+ */
+const kindFields = (file: PreviewToShow) =>
+  file.kind === "model"
+    ? ({ kind: "model", format: file.format, modifiedMs: file.modifiedMs, info: null, status: "loading" } as const)
+    : ({ kind: file.kind, mime: file.mime, size: file.size, modifiedMs: file.modifiedMs, status: "ready" } as const);
+
+/**
+ * Opens a file in its workspace's preview, or brings it forward and reloads
  * it when that workspace has it open already — an agent showing the same file
  * again has usually just rewritten it. Opens that workspace's panel, and only
- * that one. Returns the model's id.
+ * that one. Returns the entry's id.
  */
-export function showModel(model: {
-  path: string;
-  title?: string;
-  format: ModelFormat;
-  workspaceId: string;
-  openedBy: string | null;
-  modifiedMs: number;
-}): string {
-  const scope = modelScope(model.workspaceId);
-  const existing = scope.models.find((m) => m.path === model.path);
-  const title = model.title?.trim() || model.path.replace(/\\/g, "/").split("/").pop() || model.path;
+export function showPreview(file: PreviewToShow & { workspaceId: string }): string {
+  const scope = modelScope(file.workspaceId);
+  const existing = scope.models.find((entry) => entry.path === file.path);
+  const title = file.title?.trim() || file.path.replace(/\\/g, "/").split("/").pop() || file.path;
   if (existing) {
     set({
-      [model.workspaceId]: {
-        ...withModel(scope, existing.id, (m) => ({
-          ...m,
-          title,
-          openedBy: model.openedBy ?? m.openedBy,
-          modifiedMs: model.modifiedMs,
-          revision: m.revision + 1,
-          status: "loading",
-          error: null,
-        })),
+      [file.workspaceId]: {
+        ...withEntry(
+          scope,
+          existing.id,
+          (entry) =>
+            ({
+              id: entry.id,
+              path: entry.path,
+              workspaceId: entry.workspaceId,
+              openedAt: entry.openedAt,
+              title,
+              openedBy: file.openedBy ?? entry.openedBy,
+              revision: entry.revision + 1,
+              error: null,
+              ...kindFields(file),
+              // A model keeps what it last showed until the new version lands.
+              ...(entry.kind === "model" && file.kind === "model" ? { info: entry.info } : {}),
+            }) as OpenPreview,
+        ),
         activeId: existing.id,
         panelOpen: true,
         unseen: true,
@@ -170,22 +225,19 @@ export function showModel(model: {
     return existing.id;
   }
   const id = newId();
-  const entry: OpenModel = {
+  const entry = {
     id,
-    path: model.path,
+    path: file.path,
     title,
-    format: model.format,
-    workspaceId: model.workspaceId,
-    openedBy: model.openedBy,
+    workspaceId: file.workspaceId,
+    openedBy: file.openedBy,
     openedAt: Date.now(),
-    modifiedMs: model.modifiedMs,
     revision: 0,
-    status: "loading",
-    info: null,
     error: null,
-  };
+    ...kindFields(file),
+  } as OpenPreview;
   set({
-    [model.workspaceId]: {
+    [file.workspaceId]: {
       ...scope,
       models: [...scope.models, entry],
       activeId: id,
@@ -197,7 +249,7 @@ export function showModel(model: {
 }
 
 /**
- * Closes models, wherever they are open. A workspace left with none has its
+ * Closes entries, wherever they are open. A workspace left with none has its
  * panel closed; one that still has some keeps its panel as it was, the last
  * of them in front if the one in front went.
  */
@@ -205,8 +257,8 @@ export function closeModels(ids: Iterable<string>) {
   const closing = new Set(ids);
   const patch: Record<string, ModelScope | null> = {};
   for (const [workspaceId, scope] of Object.entries(state.scopes)) {
-    if (!scope.models.some((model) => closing.has(model.id))) continue;
-    const models = scope.models.filter((model) => !closing.has(model.id));
+    if (!scope.models.some((entry) => closing.has(entry.id))) continue;
+    const models = scope.models.filter((entry) => !closing.has(entry.id));
     const activeId =
       scope.activeId && closing.has(scope.activeId)
         ? (models[models.length - 1]?.id ?? null)
@@ -220,14 +272,14 @@ export function closeModel(id: string) {
   closeModels([id]);
 }
 
-/** Every model of one workspace: its preview goes away. */
+/** Everything one workspace has open: its preview goes away. */
 export function closeWorkspaceModels(workspaceId: string) {
   if (state.scopes[workspaceId]) set({ [workspaceId]: null });
 }
 
-/** Every model of every workspace. */
+/** Everything every workspace has open. */
 export function closeAllModels() {
-  if (!state.all.length) return;
+  if (!state.entries.length) return;
   set(Object.fromEntries(Object.keys(state.scopes).map((id) => [id, null])));
 }
 
@@ -238,40 +290,43 @@ export function pruneModels(live: Iterable<string>) {
   if (gone.length) set(Object.fromEntries(gone.map((id) => [id, null])));
 }
 
-/** Puts a model in front in its workspace's preview. */
+/** Puts an entry in front in its workspace's preview. */
 export function activateModel(id: string) {
-  const model = find(id);
-  if (!model) return;
-  const scope = modelScope(model.workspaceId);
+  const entry = find(id);
+  if (!entry) return;
+  const scope = modelScope(entry.workspaceId);
   if (scope.activeId === id) return;
-  set({ [model.workspaceId]: { ...scope, activeId: id } });
+  set({ [entry.workspaceId]: { ...scope, activeId: id } });
 }
 
-/** The viewer's report on a load: what it found, or why it failed. */
+/** The 3D viewer's report on a load: what it found, or why it failed. */
 export function settleModel(id: string, result: { info: ModelInfo } | { error: string }) {
   const model = find(id);
-  if (!model) return;
+  if (!model || !isModel(model)) return;
   set({
-    [model.workspaceId]: withModel(modelScope(model.workspaceId), id, (m) =>
+    [model.workspaceId]: withEntry(modelScope(model.workspaceId), id, (m) =>
       "info" in result
-        ? { ...m, status: "ready", info: result.info, error: null }
+        ? { ...(m as OpenModel), status: "ready", info: result.info, error: null }
         : { ...m, status: "error", error: result.error },
     ),
   });
 }
 
-/** A rewritten file: load it again, keeping the camera where the user left it. */
-export function reloadModel(id: string, modifiedMs: number) {
-  const model = find(id);
-  if (!model) return;
+/**
+ * A rewritten file: load it again — a model keeping the camera where the user
+ * left it, and waiting for the 3D viewer; any other kind read afresh by its
+ * viewer, its new size noted when it is known.
+ */
+export function reloadModel(id: string, modifiedMs: number, size?: number) {
+  const entry = find(id);
+  if (!entry) return;
   set({
-    [model.workspaceId]: {
-      ...withModel(modelScope(model.workspaceId), id, (m) => ({
-        ...m,
-        modifiedMs,
-        revision: m.revision + 1,
-        status: "loading",
-      })),
+    [entry.workspaceId]: {
+      ...withEntry(modelScope(entry.workspaceId), id, (e) =>
+        isModel(e)
+          ? { ...e, modifiedMs, revision: e.revision + 1, status: "loading" }
+          : { ...e, modifiedMs, revision: e.revision + 1, size: size ?? e.size },
+      ),
       unseen: true,
     },
   });
@@ -310,11 +365,11 @@ export function takeModelScope(workspaceId: string): ModelScope | null {
  */
 export function adoptModelScope(workspaceId: string, scope: ModelScope) {
   const here = state.scopes[workspaceId];
-  const known = new Set(state.all.map((model) => model.id));
-  const paths = new Set(here?.models.map((model) => model.path));
+  const known = new Set(state.entries.map((entry) => entry.id));
+  const paths = new Set(here?.models.map((entry) => entry.path));
   const arriving = scope.models
-    .filter((model) => !known.has(model.id) && !paths.has(model.path))
-    .map((model) => ({ ...model, workspaceId }));
+    .filter((entry) => !known.has(entry.id) && !paths.has(entry.path))
+    .map((entry) => ({ ...entry, workspaceId }));
   if (!arriving.length) return;
   set({
     [workspaceId]: here
@@ -322,24 +377,24 @@ export function adoptModelScope(workspaceId: string, scope: ModelScope) {
       : {
           ...scope,
           models: arriving,
-          activeId: arriving.some((model) => model.id === scope.activeId)
+          activeId: arriving.some((entry) => entry.id === scope.activeId)
             ? scope.activeId
             : arriving[arriving.length - 1].id,
         },
   });
 }
 
-/** Resolves once the model has loaded or failed, or with null after `ms`. */
-export function whenSettled(id: string, ms: number): Promise<OpenModel | null> {
+/** Resolves once the entry has loaded or failed, or with null after `ms`. */
+export function whenSettled(id: string, ms: number): Promise<OpenPreview | null> {
   const now = find(id);
   if (!now) return Promise.resolve(null);
   if (now.status !== "loading") return Promise.resolve(now);
   return new Promise((resolve) => {
     const waiters = settleWaiters.get(id) ?? new Set();
-    const done = (model: OpenModel | null) => {
+    const done = (entry: OpenPreview | null) => {
       window.clearTimeout(timer);
       waiters.delete(done);
-      resolve(model);
+      resolve(entry);
     };
     const timer = window.setTimeout(() => done(null), ms);
     waiters.add(done);
@@ -352,7 +407,7 @@ export function whenSettled(id: string, ms: number): Promise<OpenModel | null> {
 /**
  * The workspace this window has on screen, and whether its preview panel is
  * on screen with it — docked, an open drawer or expanded. Kept by App for the
- * agents' answers: a model shown elsewhere is not one the user can see.
+ * agents' answers: a file shown elsewhere is not one the user can see.
  */
 let view: { workspaceId: string | null; panelShown: boolean } = {
   workspaceId: null,
@@ -367,7 +422,7 @@ export function modelView(): Readonly<typeof view> {
   return view;
 }
 
-/* ── the viewer ───────────────────────────────────────────────── */
+/* ── the 3D viewer ────────────────────────────────────────────── */
 
 /** The viewer registers how it renders a snapshot; null when it unmounts. */
 export function registerSnapshotter(fn: Snapshotter | null) {
@@ -393,12 +448,12 @@ export function useModels(workspaceId: string | null): ModelScope {
   return useSyncExternalStore(subscribe, () => modelScope(workspaceId));
 }
 
-/** Every model open in this window, whichever workspace has it. */
+/** Every 3D model open in this window, whichever workspace has it. */
 export function useAllModels(): OpenModel[] {
   return useSyncExternalStore(subscribe, () => state.all);
 }
 
-/** Whether any workspace of this window has a model open; a load landing does not change it. */
+/** Whether any workspace of this window has anything open in its preview; a load landing does not change it. */
 export function useAnyModels(): boolean {
-  return useSyncExternalStore(subscribe, () => state.all.length > 0);
+  return useSyncExternalStore(subscribe, () => state.entries.length > 0);
 }

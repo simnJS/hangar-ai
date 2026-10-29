@@ -9,7 +9,8 @@ import {
 } from "./control";
 import type { Worktree } from "./git";
 import { createRootGrants, type ModelHost } from "./modelHost";
-import type { ModelInfo, OpenModel } from "./modelStore";
+import type { ModelInfo, OpenFile, OpenModel, OpenPreview } from "./modelStore";
+import type { PreviewKind } from "./preview";
 import { localTerminal, readLines } from "./windows";
 import { DEFAULT_SETTINGS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 
@@ -62,6 +63,7 @@ const INFO: ModelInfo = {
 
 function openModel(id: string, path: string, patch: Partial<OpenModel> = {}): OpenModel {
   return {
+    kind: "model",
     id,
     path,
     title: path.split(/[\\/]/).pop()!,
@@ -78,14 +80,67 @@ function openModel(id: string, path: string, patch: Partial<OpenModel> = {}): Op
   };
 }
 
+function openFile(
+  id: string,
+  path: string,
+  kind: OpenFile["kind"],
+  patch: Partial<OpenFile> = {},
+): OpenFile {
+  return {
+    kind,
+    id,
+    path,
+    title: path.split(/[\\/]/).pop()!,
+    mime: MIMES[kind] ?? "",
+    size: 4096,
+    workspaceId: "w1",
+    openedBy: "Ava",
+    openedAt: 0,
+    modifiedMs: 100,
+    revision: 0,
+    status: "ready",
+    error: null,
+    ...patch,
+  };
+}
+
+/** What Rust's `preview_inspect` says a file is, by its extension (src-tauri decides it for real). */
+const KINDS: Record<string, string> = {
+  png: "image",
+  gif: "image",
+  mp4: "video",
+  ogg: "audio",
+  txt: "text",
+  json: "text",
+  log: "text",
+  md: "markdown",
+  pdf: "pdf",
+  html: "html",
+  glb: "model",
+  gltf: "model",
+  // A kind this window has no viewer for.
+  xyz: "binary",
+};
+
+const MIMES: Partial<Record<PreviewKind, string>> = {
+  image: "image/png",
+  video: "video/mp4",
+  audio: "audio/ogg",
+  text: "text/plain",
+  markdown: "text/plain",
+  pdf: "application/pdf",
+  html: "text/html",
+  model: "model/gltf-binary",
+};
+
 /**
  * A window's previews, in memory, reached through the workspace the host was
- * asked for: it lists that workspace's models only. A load ends the way
+ * asked for: it lists that workspace's files only. A load ends the way
  * `settle` says: loaded, failed, or still going when the caller stops waiting.
  */
 function fakePreview(log: string[]) {
   const preview = {
-    models: [] as OpenModel[],
+    models: [] as OpenPreview[],
     activeId: null as string | null,
     /** The workspace the last host was asked for. */
     workspace: "w1",
@@ -109,15 +164,24 @@ function fakePreview(log: string[]) {
       const existing = preview.models.find(
         (entry) => entry.path === model.path && entry.workspaceId === preview.workspace,
       );
-      const id = existing?.id ?? `m${next++}`;
+      const id = existing?.id ?? (model.kind === "model" ? `m${next++}` : `f${next++}`);
       if (!existing) {
         preview.models.push(
-          openModel(id, model.path, {
-            workspaceId: preview.workspace,
-            openedBy: model.openedBy,
-            status: "loading",
-            info: null,
-          }),
+          model.kind === "model"
+            ? openModel(id, model.path, {
+                workspaceId: preview.workspace,
+                openedBy: model.openedBy,
+                status: "loading",
+                info: null,
+              })
+            : openFile(id, model.path, model.kind, {
+                title: model.title ?? model.path,
+                workspaceId: preview.workspace,
+                openedBy: model.openedBy,
+                mime: model.mime,
+                size: model.size,
+                modifiedMs: model.modifiedMs,
+              }),
         );
       }
       preview.activeId = id;
@@ -133,6 +197,8 @@ function fakePreview(log: string[]) {
     whenSettled: async (id, ms) => {
       log.push(`settle:${id}:${ms}`);
       const model = preview.models.find((entry) => entry.id === id)!;
+      // A file has nothing to load: it is ready as soon as it is open.
+      if (model.kind !== "model") return model;
       if (preview.settle === "timeout") return null;
       return preview.settle === "error"
         ? { ...model, status: "error", error: "not a glTF file" }
@@ -270,6 +336,26 @@ function setup(overrides: Partial<ControlDeps> = {}) {
       log.push(`host:${workspaceId}:${detached ? "own window" : "here"}`);
       preview.workspace = workspaceId;
       return preview.host;
+    },
+    // Rust's rules, roughly, as for modelStat; the kind by extension.
+    previewInspect: async (path) => {
+      log.push(`inspect:${path}`);
+      const lower = path.toLowerCase();
+      if (!allowed.some((root) => lower.startsWith(root.toLowerCase()))) {
+        throw `${path} is outside every folder the preview may read`;
+      }
+      if (lower.includes("missing")) throw `No such file: ${path}`;
+      const extension = lower.split(".").pop() ?? "";
+      const kind = KINDS[extension];
+      if (!kind) throw `The preview does not show .${extension} files.`;
+      return {
+        path,
+        kind,
+        mime: MIMES[kind as PreviewKind] ?? "application/octet-stream",
+        size: 4096,
+        name: path.split(/[\\/]/).pop(),
+        modifiedMs: mtimes[path] ?? 100,
+      };
     },
     ...overrides,
   };
@@ -592,7 +678,7 @@ describe("model_show", () => {
     const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
     const result = (await runControl("model_show", { ...fromShop, path: "car.glb" }, deps)) as any;
     expect(result).toMatchObject({ opened: true, workspace: "Shop", visible: false, info: INFO });
-    expect(result.note).toMatch(/open in the 3D preview of "Shop", which is not the workspace on screen/);
+    expect(result.note).toMatch(/open in the preview of "Shop", which is not the workspace on screen/);
     expect(log).toContain("host:w2:here");
     expect(log).toContain("show:C:\\dev\\shop\\car.glb:car.glb:Ava:w2");
     // Hangar is the one on screen: the line at the bottom names Shop.
@@ -604,7 +690,7 @@ describe("model_show", () => {
     preview.shown = false;
     const result = (await runControl("model_show", { ...fromAva, path: "chair.glb" }, deps)) as any;
     expect(result).toMatchObject({ workspace: "Hangar", visible: false });
-    expect(result.note).toMatch(/"Hangar" is on screen, but its 3D preview is not.*toolbar button/);
+    expect(result.note).toMatch(/"Hangar" is on screen, but its preview is not.*toolbar button/);
   });
 
   it("wakes a sleeping workspace it shows a model in, as pane_send does", async () => {
@@ -874,6 +960,199 @@ describe("model_close", () => {
     expect(await runControl("model_close", fromAva, deps)).toEqual({ closed: [], open: 0 });
     await expect(runControl("model_close", { ...fromAva, path: "a.glb" }, deps)).rejects.toThrow(
       /No 3D model is open/,
+    );
+    expect(log.some((entry) => entry.startsWith("announce:"))).toBe(false);
+  });
+});
+
+describe("the model tools beside other kinds of files", () => {
+  it("snapshot the last model when a file is in front, and close only models", async () => {
+    const { deps, log, preview } = setup();
+    preview.models = [
+      openModel("m1", "C:\\dev\\hangar\\a.glb"),
+      openFile("f1", "C:\\dev\\hangar\\shot.png", "image"),
+    ];
+    preview.activeId = "f1";
+    expect(await runControl("model_snapshot", fromAva, deps)).toMatchObject({ path: "C:\\dev\\hangar\\a.glb" });
+    expect(log).toContain("snapshot:m1:iso:1024x768");
+    await expect(runControl("model_snapshot", { ...fromAva, path: "shot.png" }, deps)).rejects.toThrow(
+      /No open model matches "shot\.png"/,
+    );
+    expect(await runControl("model_close", fromAva, deps)).toEqual({ closed: ["C:\\dev\\hangar\\a.glb"], open: 0 });
+    expect(preview.models.map((entry) => entry.id)).toEqual(["f1"]);
+  });
+
+  it("say no model is open when only other files are", async () => {
+    const { deps, preview } = setup();
+    preview.models = [openFile("f1", "C:\\dev\\hangar\\notes.md", "markdown")];
+    await expect(runControl("model_snapshot", fromAva, deps)).rejects.toThrow(/No 3D model is open in "Hangar"/);
+    expect(await runControl("model_close", fromAva, deps)).toEqual({ closed: [], open: 0 });
+  });
+});
+
+describe("preview_show", () => {
+  it("opens a file from the caller's folder, announces it and answers with its kind, name and size", async () => {
+    const { deps, log } = setup();
+    const result = await runControl("preview_show", { ...fromAva, path: "out\\shot.png" }, deps);
+    expect(result).toEqual({
+      opened: true,
+      kind: "image",
+      name: "shot.png",
+      size: 4096,
+      path: "C:\\dev\\hangar\\out\\shot.png",
+      mime: "image/png",
+      title: "shot.png",
+      workspace: "Hangar",
+      visible: true,
+    });
+    expect(log).toContain("allow:w1:C:\\dev\\hangar|C:\\dev\\hangar-wt\\feature");
+    expect(log).toContain("inspect:C:\\dev\\hangar\\out\\shot.png");
+    expect(log).toContain("show:C:\\dev\\hangar\\out\\shot.png:shot.png:Ava:w1");
+    expect(log).toContain("announce:modelShown:shot.png:Ava");
+    expect(log).toContain("touch:w1");
+    // Nothing to load before answering: its viewer reads it on screen.
+    expect(log.some((entry) => entry.startsWith("settle:"))).toBe(false);
+  });
+
+  it("opens each kind in a tab of its own, one per path, the last one in front", async () => {
+    const { deps, preview } = setup();
+    for (const path of ["notes.md", "report.pdf", "site\\index.html", "clip.mp4", "theme.ogg", "run.log"]) {
+      await runControl("preview_show", { ...fromAva, path }, deps);
+    }
+    expect(preview.models.map((entry) => [entry.kind, entry.title])).toEqual([
+      ["markdown", "notes.md"],
+      ["pdf", "report.pdf"],
+      ["html", "index.html"],
+      ["video", "clip.mp4"],
+      ["audio", "theme.ogg"],
+      ["text", "run.log"],
+    ]);
+    // Rust's mtime, which the panel watches to read a rewritten file again.
+    expect(preview.models.every((entry) => entry.modifiedMs === 100)).toBe(true);
+    const again = (await runControl("preview_show", { ...fromAva, path: "./notes.md", title: "Notes" }, deps)) as any;
+    expect(again).toMatchObject({ kind: "markdown", title: "Notes" });
+    expect(preview.models).toHaveLength(6);
+    expect(preview.activeId).toBe(preview.models[0].id);
+  });
+
+  it("sends a 3D model through model_show's own load, and answers with what the viewer found", async () => {
+    const { deps, log } = setup();
+    const result = (await runControl("preview_show", { ...fromAva, path: "assets/chair.glb" }, deps)) as any;
+    expect(result).toMatchObject({
+      kind: "model",
+      name: "chair.glb",
+      size: 4096,
+      opened: true,
+      path: "C:\\dev\\hangar\\assets\\chair.glb",
+      format: "glb",
+      info: INFO,
+    });
+    // What preview_inspect found is the model's stat: nothing is asked twice.
+    expect(log.some((entry) => entry.startsWith("stat:"))).toBe(false);
+    expect(log).toContain("show:C:\\dev\\hangar\\assets\\chair.glb:chair.glb:Ava:w1");
+    expect(log).toContain("settle:m1:45000");
+  });
+
+  it("refuses without a path, outside the workspace, and what Rust will not show or no viewer draws", async () => {
+    const { deps, log } = setup();
+    await expect(runControl("preview_show", fromAva, deps)).rejects.toThrow(/Give the path of the file/);
+    await expect(
+      runControl("preview_show", { ...fromAva, path: "D:\\downloads\\shot.png" }, deps),
+    ).rejects.toThrow(/outside your workspace\. The preview only opens files from C:\\dev\\hangar/);
+    await expect(runControl("preview_show", { ...fromAva, path: "..\\shop\\logo.png" }, deps)).rejects.toThrow(
+      /C:\\dev\\shop\\logo\.png is outside your workspace/,
+    );
+    await expect(runControl("preview_show", { ...fromAva, path: "setup.exe" }, deps)).rejects.toThrow(
+      "The preview does not show .exe files.",
+    );
+    await expect(runControl("preview_show", { ...fromAva, path: "missing.png" }, deps)).rejects.toThrow(
+      "No such file: C:\\dev\\hangar\\missing.png",
+    );
+    await expect(runControl("preview_show", { ...fromAva, path: "dump.xyz" }, deps)).rejects.toThrow(
+      /no viewer for dump\.xyz \(binary\)\. It shows: model, image, video/,
+    );
+    expect(log.some((entry) => /^(show|announce):/.test(entry))).toBe(false);
+  });
+
+  it("opens in the caller's own workspace, wakes it if it sleeps, and says it is not on screen", async () => {
+    const { deps, log, preview, sleeping } = setup();
+    sleeping.add("w2");
+    preview.onScreen = false;
+    preview.shown = false;
+    const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+    const result = (await runControl("preview_show", { ...fromShop, path: "logo.png" }, deps)) as any;
+    expect(result).toMatchObject({ kind: "image", workspace: "Shop", visible: false, woke: true });
+    expect(result.note).toMatch(/"Shop" was asleep.*open in the preview of "Shop"/);
+    expect(log).toContain("open:w2");
+    expect(log).toContain("show:C:\\dev\\shop\\logo.png:logo.png:Ava:w2");
+    expect(log).toContain("announce:modelShownElsewhere:logo.png:Ava");
+  });
+
+  it("goes through a detached workspace's own window, and says so when it does not answer", async () => {
+    const { deps, log, patch } = setup();
+    patch("w1", { detached: true });
+    await runControl("preview_show", { ...fromAva, path: "notes.md" }, deps);
+    expect(log).toContain("host:w1:own window");
+    deps.modelHost = async () => null;
+    await expect(runControl("preview_show", { ...fromAva, path: "notes.md" }, deps)).rejects.toThrow(
+      /"Hangar" is shown in a window of its own, and that window is not answering, so the preview/,
+    );
+  });
+
+  it("is refused with preview_close when pane control is off", async () => {
+    const { deps, log } = setup({ enabled: () => false });
+    await expect(runControl("preview_show", { ...fromAva, path: "a.png" }, deps)).rejects.toThrow(DISABLED);
+    await expect(runControl("preview_close", fromAva, deps)).rejects.toThrow(DISABLED);
+    expect(log).toEqual([]);
+  });
+});
+
+describe("preview_close", () => {
+  it("closes one file by path or by name, whatever its kind, and announces it", async () => {
+    const { deps, log, preview } = setup();
+    preview.models = [
+      openModel("m1", "C:\\dev\\hangar\\a.glb"),
+      openFile("f1", "C:\\dev\\hangar\\shot.png", "image"),
+      openFile("f2", "C:\\dev\\hangar\\docs\\notes.md", "markdown"),
+    ];
+    expect(await runControl("preview_close", { ...fromAva, path: "docs/notes.md" }, deps)).toEqual({
+      closed: ["C:\\dev\\hangar\\docs\\notes.md"],
+      open: 2,
+    });
+    expect(log).toContain("closeModels:f2");
+    expect(log).toContain("announce:modelClosed:notes.md:Ava");
+    expect(await runControl("preview_close", { ...fromAva, path: "a.glb" }, deps)).toEqual({
+      closed: ["C:\\dev\\hangar\\a.glb"],
+      open: 1,
+    });
+    expect(preview.models.map((entry) => entry.id)).toEqual(["f1"]);
+  });
+
+  it("closes everything in the caller's workspace, models included, and leaves the others'", async () => {
+    const { deps, log, preview } = setup();
+    preview.models = [
+      openModel("m1", "C:\\dev\\hangar\\a.glb"),
+      openFile("f1", "C:\\dev\\shop\\logo.png", "image", { workspaceId: "w2" }),
+      openFile("f2", "C:\\dev\\hangar\\page.html", "html"),
+    ];
+    expect(await runControl("preview_close", fromAva, deps)).toEqual({
+      closed: ["C:\\dev\\hangar\\a.glb", "C:\\dev\\hangar\\page.html"],
+      open: 0,
+    });
+    expect(log).toContain("closeModels:m1,f2");
+    expect(log).toContain("announce:modelClosed:a.glb, page.html:Ava");
+    expect(preview.models.map((entry) => entry.id)).toEqual(["f1"]);
+  });
+
+  it("has nothing to close in an empty preview, and refuses a path that is not open", async () => {
+    const { deps, log, preview } = setup();
+    expect(await runControl("preview_close", fromAva, deps)).toEqual({ closed: [], open: 0 });
+    await expect(runControl("preview_close", { ...fromAva, path: "a.png" }, deps)).rejects.toThrow(
+      'Nothing is open in the preview of "Hangar", so nothing matches "a.png".',
+    );
+    preview.models = [openFile("f1", "C:\\dev\\hangar\\shot.png", "image")];
+    await expect(runControl("preview_close", { ...fromAva, path: "other.png" }, deps)).rejects.toThrow(
+      /No open file matches "other\.png"\. Open: C:\\dev\\hangar\\shot\.png/,
     );
     expect(log.some((entry) => entry.startsWith("announce:"))).toBe(false);
   });

@@ -5,24 +5,27 @@ import {
   adoptModelScope,
   closeAllModels,
   closeModel,
+  closeModels,
   closeWorkspaceModels,
   getModels,
+  isModel,
   markModelsSeen,
   modelScope,
   pruneModels,
   reloadModel,
   setModelPanel,
   settleModel,
-  showModel,
+  showPreview,
   takeModelScope,
   whenSettled,
+  type OpenPreview,
 } from "./modelStore";
 
 // whenSettled arms a timer through window.setTimeout.
 vi.stubGlobal("window", globalThis);
 
 const show = (path: string, openedBy: string | null = "Ava", workspaceId = "ws") =>
-  showModel({ path, format: "glb", workspaceId, openedBy, modifiedMs: 1 });
+  showPreview({ kind: "model", path, format: "glb", workspaceId, openedBy, modifiedMs: 1 });
 
 const info = {
   triangles: 12,
@@ -181,6 +184,114 @@ describe("one preview per workspace", () => {
     expect(modelScope("A").models.map((model) => model.title)).toEqual(["chair.glb", "lamp.glb", "stool.glb"]);
     expect(modelScope("A").models[0].id).toBe(fresh);
     expect(modelScope("A").models.some((model) => model.id === chair)).toBe(false);
+  });
+});
+
+describe("files of every kind beside the models", () => {
+  beforeEach(() => closeAllModels());
+
+  const file = (
+    kind: Exclude<OpenPreview["kind"], "model">,
+    path: string,
+    workspaceId = "ws",
+    openedBy: string | null = "Ava",
+  ) => showPreview({ kind, path, mime: "application/octet-stream", size: 100, workspaceId, openedBy, modifiedMs: 1 });
+
+  it("opens each kind as a tab of its workspace, the latest in front", () => {
+    const chair = show("C:/a/chair.glb");
+    const shot = file("image", "C:/a/shot.png");
+    const notes = file("markdown", "C:/a/NOTES.md");
+    const scope = modelScope("ws");
+    expect(scope.models.map((entry) => [entry.kind, entry.title])).toEqual([
+      ["model", "chair.glb"],
+      ["image", "shot.png"],
+      ["markdown", "NOTES.md"],
+    ]);
+    expect(scope.activeId).toBe(notes);
+    expect(scope.panelOpen).toBe(true);
+    // A file is ready at once; only a model waits for the 3D viewer.
+    expect(scope.models.map((entry) => entry.status)).toEqual(["loading", "ready", "ready"]);
+    activateModel(shot);
+    expect(modelScope("ws").activeId).toBe(shot);
+    activateModel(chair);
+    expect(modelScope("ws").activeId).toBe(chair);
+  });
+
+  it("keeps the 3D viewer's list to the models, and the window's to everything", () => {
+    const chair = show("C:/a/chair.glb", "Ava", "A");
+    const page = file("html", "C:/b/page.html", "B");
+    const before = getModels().all;
+    expect(before.map((model) => model.id)).toEqual([chair]);
+    expect(getModels().entries.map((entry) => entry.id).sort()).toEqual([chair, page].sort());
+    // An image opening does not disturb the viewer, which watches its list.
+    file("image", "C:/b/shot.png", "B");
+    expect(getModels().all).toBe(before);
+    expect(getModels().all.every(isModel)).toBe(true);
+  });
+
+  it("brings a file shown again forward, once, with a new revision for its viewer", () => {
+    const log = file("text", "C:/a/run.log", "ws", "Ava");
+    file("pdf", "C:/a/report.pdf");
+    const again = showPreview({
+      kind: "text",
+      path: "C:/a/run.log",
+      title: "Run log",
+      mime: "text/plain",
+      size: 900,
+      workspaceId: "ws",
+      openedBy: "Ben",
+      modifiedMs: 7,
+    });
+    expect(again).toBe(log);
+    const scope = modelScope("ws");
+    expect(scope.models).toHaveLength(2);
+    expect(scope.activeId).toBe(log);
+    expect(scope.models[0]).toMatchObject({ title: "Run log", revision: 1, size: 900, openedBy: "Ben", modifiedMs: 7 });
+  });
+
+  it("closes one kind or another, and the last one shuts its panel", () => {
+    const chair = show("C:/a/chair.glb");
+    const clip = file("video", "C:/a/clip.mp4");
+    const song = file("audio", "C:/a/theme.ogg");
+    closeModel(song);
+    expect(modelScope("ws").activeId).toBe(clip);
+    closeModels([chair, clip]);
+    expect(modelScope("ws")).toMatchObject({ models: [], panelOpen: false });
+    expect(getModels().entries).toEqual([]);
+  });
+
+  it("keeps each workspace's files apart, and closes one workspace's only", () => {
+    const pageA = file("html", "C:/shared/index.html", "A");
+    const pageB = file("html", "C:/shared/index.html", "B");
+    expect(pageA).not.toBe(pageB);
+    show("C:/b/car.glb", "Ben", "B");
+    closeWorkspaceModels("B");
+    expect(modelScope("B").models).toEqual([]);
+    expect(modelScope("A").models.map((entry) => entry.id)).toEqual([pageA]);
+  });
+
+  it("answers a waiting caller at once for a file, which has nothing to load", async () => {
+    const pdf = file("pdf", "C:/a/report.pdf");
+    expect((await whenSettled(pdf, 1000))?.status).toBe("ready");
+  });
+
+  it("settles models only, and has a rewritten file read again, ready all along", () => {
+    const shot = file("image", "C:/a/shot.png");
+    settleModel(shot, { error: "not a glTF file" });
+    expect(modelScope("ws").models[0]).toMatchObject({ status: "ready", revision: 0, error: null });
+    markModelsSeen("ws");
+    reloadModel(shot, 99, 2048);
+    expect(modelScope("ws").models[0]).toMatchObject({ status: "ready", revision: 1, modifiedMs: 99, size: 2048 });
+    expect(modelScope("ws").unseen).toBe(true);
+  });
+
+  it("hands a mixed preview over to another window as it was", () => {
+    show("C:/a/chair.glb", "Ava", "A");
+    const page = file("html", "C:/a/page.html", "A");
+    const scope = takeModelScope("A")!;
+    adoptModelScope("A", scope);
+    expect(modelScope("A").models.map((entry) => entry.kind)).toEqual(["model", "html"]);
+    expect(modelScope("A").activeId).toBe(page);
   });
 });
 

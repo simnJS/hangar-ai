@@ -6,7 +6,8 @@ import type { Worktree } from "./git";
 import { leafIds, MAX_PANES, normalizeTree } from "./layout";
 import { MAX_MODEL_BYTES, MODEL_FORMATS, modelFormatOf, type ModelFileInfo } from "./modelFiles";
 import type { ModelHost } from "./modelHost";
-import type { OpenModel, SnapshotAngle } from "./modelStore";
+import { isModel, type OpenModel, type OpenPreview, type SnapshotAngle } from "./modelStore";
+import { checkPreviewFile, previewInspect, type PreviewFile } from "./preview";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
 import { workerControl, type WorkerDeps } from "./workerControl";
@@ -97,10 +98,15 @@ export interface ControlDeps {
   /** Every worktree of the repository holding `path`; rejects outside one. */
   worktrees: (path: string) => Promise<Worktree[]>;
   /**
-   * A workspace's 3D preview: in this window, or in the window of its own a
+   * A workspace's preview: in this window, or in the window of its own a
    * detached workspace is shown in; null when that window does not answer.
    */
   modelHost: (workspaceId: string, detached: boolean) => Promise<ModelHost | null>;
+  /**
+   * What Rust makes of a file an agent shows (lib/preview): its kind, or why
+   * the preview may not open it. The real command unless a test hands in its own.
+   */
+  previewInspect?: (path: string) => Promise<unknown>;
   // orchestration: workers deps
   /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
   workers?: WorkerDeps;
@@ -263,7 +269,7 @@ function keySequence(name: string, applicationCursor: boolean): string {
   return key;
 }
 
-/* ── 3D models ─────────────────────────────────────────────────── */
+/* ── the preview: 3D models, then every other file ─────────────── */
 
 /** How long model_show waits for the viewer before answering "loading". The
     MCP side gives a model_* call 60 s in all. */
@@ -364,40 +370,58 @@ async function previewOf(ws: Workspace, deps: ControlDeps): Promise<ModelHost> {
   const host = await deps.modelHost(ws.id, Boolean(ws.detached));
   if (host) return host;
   throw new Error(
-    `"${ws.name}" is shown in a window of its own, and that window is not answering, so the 3D ` +
+    `"${ws.name}" is shown in a window of its own, and that window is not answering, so the ` +
       "preview cannot open there. Try again in a few seconds.",
   );
 }
 
+/** `preview_inspect`, its answer checked (lib/preview). */
+const inspectFile = async (deps: ControlDeps, path: string): Promise<PreviewFile> =>
+  checkPreviewFile(await (deps.previewInspect ?? previewInspect)(path));
+
 /**
- * The form `model_show` stored a path in: Rust's canonical one, whatever
- * casing, link or Git Bash spelling (/c/…) the agent used this time. Falls
- * back to the plain resolution when the file is gone.
+ * The form a path was stored in when it was shown: Rust's canonical one,
+ * whatever casing, link or Git Bash spelling (/c/…) the agent used this time.
+ * Asked the way it was shown — `model_stat` for a model, `preview_inspect`
+ * for any file — and the plain resolution when the file is gone.
  */
-async function canonicalPath(deps: ControlDeps, base: string, given: string): Promise<string> {
+async function canonicalPath(
+  base: string,
+  given: string,
+  canon: (path: string) => Promise<{ path: string }>,
+): Promise<string> {
   const resolved = resolvePath(base, given);
-  const file = await deps.modelStat(resolved).catch(() => null);
+  const file = await canon(resolved).catch(() => null);
   return file?.path ?? resolved;
 }
 
-/** An open model by path (already resolved, see canonicalPath), or by its
-    file name alone when only one open model has it. */
-function findModel(models: OpenModel[], given: string, resolved: string): OpenModel {
+/** An open file by path (already resolved, see canonicalPath), or by its
+    file name alone when only one open file has it. `none` is the word for
+    an empty preview. */
+function findOpen<T extends OpenPreview>(open: T[], given: string, resolved: string, none: string): T {
   const target = comparable(resolved);
-  const exact = models.find((model) => comparable(model.path) === target);
+  const exact = open.find((entry) => comparable(entry.path) === target);
   if (exact) return exact;
   // The same file reached through a link, or named without its folder.
   const name = basename(given).toLowerCase();
-  const named = models.filter(
-    (model) => basename(model.path).toLowerCase() === name || same(model.title, given),
+  const named = open.filter(
+    (entry) => basename(entry.path).toLowerCase() === name || same(entry.title, given),
   );
   if (named.length === 1) return named[0];
+  if (!open.length) throw new Error(none);
   throw new Error(
-    models.length
-      ? `No open model matches "${given}". Open: ${models.map((model) => model.path).join(", ")}.`
-      : `No 3D model is open, so none matches "${given}". Show it with model_show first.`,
+    `No open ${open.every(isModel) ? "model" : "file"} matches "${given}". ` +
+      `Open: ${open.map((entry) => entry.path).join(", ")}.`,
   );
 }
+
+const findModel = (models: OpenModel[], given: string, resolved: string) =>
+  findOpen(
+    models,
+    given,
+    resolved,
+    `No 3D model is open, so none matches "${given}". Show it with model_show first.`,
+  );
 
 function sizeArg(value: unknown, fallback: number): number {
   const wanted = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -430,21 +454,35 @@ async function modelShow(
       `"${given}" is not a 3D model the preview can open. Formats: ${MODEL_FORMATS.join(", ")}.`,
     );
   }
+  const file = await admit(ws, path, "models", deps, deps.modelStat);
+  return openModel(ws, file, path, args, caller, deps);
+}
 
+/**
+ * Lets Rust serve the workspace's folders, then asks it about `path` with
+ * `ask`: what it found, or the refusal worth passing on.
+ */
+async function admit<T extends { path: string }>(
+  ws: Workspace,
+  path: string,
+  what: "models" | "files",
+  deps: ControlDeps,
+  ask: (path: string) => Promise<T>,
+): Promise<T> {
   const roots = await modelRoots(ws, deps);
   const outside = () =>
     new Error(
-      `${path} is outside your workspace. The preview only opens models from ${roots.join(", ")} ` +
+      `${path} is outside your workspace. The preview only opens ${what} from ${roots.join(", ")} ` +
         "(and their subfolders). Move or copy the file into one of them, then show it from there.",
     );
   await deps.modelAllowRoots(ws.id, roots);
   // Rust is the real gate, on the canonical path. The folders it allows are
-  // every workspace's that showed a model, though, and this one is checked
+  // every workspace's that showed a file, though, and this one is checked
   // against the caller's own: the path as given, or where its links lead.
   const givenInside = inside(path, roots);
-  let file: ModelFileInfo;
+  let file: T;
   try {
-    file = await deps.modelStat(path);
+    file = await ask(path);
   } catch (err) {
     // Refused for being out of bounds, or missing out of bounds: either way,
     // the workspace is the thing worth naming.
@@ -452,6 +490,31 @@ async function modelShow(
     throw new Error(messageOf(err));
   }
   if (!givenInside && !inside(file.path, roots)) throw outside();
+  return file;
+}
+
+/**
+ * Whatever showing something in a workspace's preview does to the workspace:
+ * it is using it, as sending to its panes is. Asleep, it wakes the way
+ * pane_send wakes it: its window does not load models for a workspace whose
+ * memory it gave back. Says whether it woke.
+ */
+function wakeFor(ws: Workspace, deps: ControlDeps): boolean {
+  const woke = deps.asleep(ws.id);
+  if (woke) deps.openWorkspace(ws.id);
+  deps.touch(ws.id);
+  return woke;
+}
+
+/** A model Rust let through, opened in the workspace's preview and waited for. */
+async function openModel(
+  ws: Workspace,
+  file: ModelFileInfo,
+  path: string,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<Record<string, unknown>> {
   const title = text(args.title) ?? basename(file.path);
   if (file.size > MAX_MODEL_BYTES) {
     const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
@@ -460,16 +523,17 @@ async function modelShow(
         "Export a lighter version (decimated, or compressed with Draco or meshopt) and show that.",
     );
   }
-  const format = modelFormatOf(file.path) ?? modelFormatOf(path)!;
+  const format = modelFormatOf(file.path) ?? modelFormatOf(path);
+  if (!format) {
+    throw new Error(
+      `${basename(path)} is not a 3D model the preview can open. Formats: ${MODEL_FORMATS.join(", ")}.`,
+    );
+  }
 
   const preview = await previewOf(ws, deps);
-  // Showing a model in a workspace is using it, as sending to its panes is.
-  // Asleep, it wakes the way pane_send wakes it: its window does not load
-  // models for a workspace whose memory it gave back.
-  const woke = deps.asleep(ws.id);
-  if (woke) deps.openWorkspace(ws.id);
-  deps.touch(ws.id);
+  const woke = wakeFor(ws, deps);
   const id = await preview.show({
+    kind: "model",
     path: file.path,
     title,
     format,
@@ -506,7 +570,14 @@ async function modelShow(
         .join(" "),
     };
   }
-  return { opened: true, path: file.path, format, title: settled.title, info: settled.info, ...seen };
+  return {
+    opened: true,
+    path: file.path,
+    format,
+    title: settled.title,
+    info: isModel(settled) ? settled.info : null,
+    ...seen,
+  };
 }
 
 /** The workspace is the one its window shows: the main window's active one, or one of its own. */
@@ -514,8 +585,8 @@ const onScreen = (state: AppState, ws: Workspace) =>
   Boolean(ws.detached) || state.activeWorkspaceId === ws.id;
 
 /**
- * Whether the user can see the model just shown, told to the agent straight:
- * a model shown in a workspace that is not on screen waits there, and an
+ * Whether the user can see the file just shown, told to the agent straight:
+ * a file shown in a workspace that is not on screen waits there, and an
  * agent saying "look at the preview" would send the user looking for nothing.
  */
 async function sight(
@@ -532,9 +603,9 @@ async function sight(
     visible
       ? null
       : where?.onScreen
-        ? `"${ws.name}" is on screen, but its 3D preview is not: another view is open, or there is ` +
-          "no room beside the terminals. The preview's toolbar button tells the user there is a model to see."
-        : `It is open in the 3D preview of "${ws.name}", which is not the workspace on screen: the user ` +
+        ? `"${ws.name}" is on screen, but its preview is not: another view is open, or there is ` +
+          "no room beside the terminals. The preview's toolbar button tells the user there is something to see."
+        : `It is open in the preview of "${ws.name}", which is not the workspace on screen: the user ` +
           "sees it when they go to that workspace. Tell them it is there if they should look now.",
   ].filter(Boolean);
   return {
@@ -555,7 +626,10 @@ async function modelSnapshot(
   const width = sizeArg(args.width, SNAPSHOT_WIDTH);
   const height = sizeArg(args.height, SNAPSHOT_HEIGHT);
   const preview = await previewOf(ws, deps);
-  const { models, activeId } = await preview.list();
+  const listed = await preview.list();
+  // The preview's other tabs are not the 3D viewer's to render.
+  const models = listed.models.filter(isModel);
+  const activeId = listed.activeId;
   const given = text(args.path);
   if (!models.length) {
     throw new Error(
@@ -563,7 +637,7 @@ async function modelSnapshot(
     );
   }
   const model = given
-    ? findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))
+    ? findModel(models, given, await canonicalPath(callerFolder(ws, caller), given, deps.modelStat))
     : (models.find((entry) => entry.id === activeId) ?? models[models.length - 1]);
 
   // In front in its workspace's preview, so the user sees what the agent is
@@ -604,7 +678,8 @@ async function modelSnapshot(
     }
     throw new Error(`Could not render ${model.title}: ${message}`);
   }
-  return { png, mimeType: "image/png", path: model.path, angle, width, height, info: ready.info };
+  const info = isModel(ready) ? ready.info : model.info;
+  return { png, mimeType: "image/png", path: model.path, angle, width, height, info };
 }
 
 async function modelClose(
@@ -614,12 +689,13 @@ async function modelClose(
   deps: ControlDeps,
 ): Promise<unknown> {
   const preview = await previewOf(ws, deps);
-  const { models } = await preview.list();
+  // Its models only: the preview's other tabs are preview_close's.
+  const models = (await preview.list()).models.filter(isModel);
   const given = text(args.path);
   // The caller's own workspace's preview only, the one listed: without a
-  // path, everything in it.
+  // path, every model in it.
   const closing = given
-    ? [findModel(models, given, await canonicalPath(deps, callerFolder(ws, caller), given))]
+    ? [findModel(models, given, await canonicalPath(callerFolder(ws, caller), given, deps.modelStat))]
     : models;
   if (!closing.length) return { closed: [], open: models.length };
   await preview.close(closing.map((model) => model.id));
@@ -630,6 +706,89 @@ async function modelClose(
     workspace: ws.name,
   });
   return { closed: closing.map((model) => model.path), open: models.length - closing.length };
+}
+
+/**
+ * Any file in the workspace's preview, one tab per path, as model_show opens
+ * a model: Rust says what the file is (`preview_inspect`), and a model goes
+ * through model_show's own load, the rest straight to its viewer.
+ */
+async function previewShow(
+  ws: Workspace,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const given = text(args.path);
+  if (!given) {
+    throw new Error("Give the path of the file to show, absolute or relative to your folder.");
+  }
+  const path = resolvePath(callerFolder(ws, caller), given);
+  const file = await admit(ws, path, "files", deps, (target) => inspectFile(deps, target));
+  const about = { kind: file.kind, name: file.name, size: file.size };
+  if (file.kind === "model") {
+    // Rust judged it with model_show's own rules: what it found is a model's stat.
+    const stat = { path: file.path, size: file.size, modifiedMs: file.modifiedMs };
+    return { ...about, ...(await openModel(ws, stat, file.path, args, caller, deps)) };
+  }
+
+  const title = text(args.title) ?? file.name;
+  const preview = await previewOf(ws, deps);
+  const woke = wakeFor(ws, deps);
+  await preview.show({
+    kind: file.kind,
+    path: file.path,
+    title,
+    mime: file.mime,
+    size: file.size,
+    openedBy: caller.paneName,
+    modifiedMs: file.modifiedMs,
+  });
+  deps.announce({
+    kind: onScreen(deps.snapshot(), ws) ? "modelShown" : "modelShownElsewhere",
+    by: caller.paneName,
+    file: title,
+    workspace: ws.name,
+  });
+  return {
+    opened: true,
+    ...about,
+    path: file.path,
+    mime: file.mime,
+    title,
+    ...(await sight(ws, preview, woke)),
+  };
+}
+
+/** One file of the workspace's preview, whatever its kind, or all of them. */
+async function previewClose(
+  ws: Workspace,
+  args: Record<string, unknown>,
+  caller: Caller,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const preview = await previewOf(ws, deps);
+  const { models: open } = await preview.list();
+  const given = text(args.path);
+  const closing = given
+    ? [
+        findOpen(
+          open,
+          given,
+          await canonicalPath(callerFolder(ws, caller), given, (target) => inspectFile(deps, target)),
+          `Nothing is open in the preview of "${ws.name}", so nothing matches "${given}".`,
+        ),
+      ]
+    : open;
+  if (!closing.length) return { closed: [], open: open.length };
+  await preview.close(closing.map((entry) => entry.id));
+  deps.announce({
+    kind: onScreen(deps.snapshot(), ws) ? "modelClosed" : "modelClosedElsewhere",
+    by: caller.paneName,
+    file: closing.map((entry) => entry.title).join(", "),
+    workspace: ws.name,
+  });
+  return { closed: closing.map((entry) => entry.path), open: open.length - closing.length };
 }
 
 export async function runControl(
@@ -882,6 +1041,12 @@ export async function runControl(
 
     case "model_close":
       return modelClose(ws, args, caller, deps);
+
+    case "preview_show":
+      return previewShow(ws, args, caller, deps);
+
+    case "preview_close":
+      return previewClose(ws, args, caller, deps);
 
     default:
       throw new Error(`Unknown operation "${op}".`);
