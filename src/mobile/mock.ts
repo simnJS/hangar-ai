@@ -11,10 +11,12 @@ import type {
   Screen,
   SendArgs,
   Share,
+  ShareKind,
   Waiting,
 } from "./api";
 import { locale as appLocale, type Locale } from "./i18n";
 import { chatPage, conversations, type FakeChat } from "./mockChat";
+import { fakeFile, fakeFileUrl, fileResponse } from "./mockFiles";
 
 /**
  * A fake PC, for working on the app without one: the dev server always uses
@@ -292,15 +294,44 @@ function scenery(now: number, locale: Locale) {
     entry(26 * 60, "IaBench", "taskDone", { title: "The project manager opens in one click" }),
   ];
 
+  // One of each kind the phone shows, and one it does not; typed as the PC serves them.
+  const shared = (id: string, minutes: number, workspace: string, pane: string, name: string, kind: ShareKind, caption: string | null, size?: number): Share => ({
+    id,
+    at: now - minutes * MIN,
+    workspace,
+    pane,
+    name,
+    mime: SERVED[kind] ?? (kind === "pdf" ? "application/pdf" : "application/octet-stream"),
+    kind,
+    size: size ?? fakeFile(id)?.length ?? 0,
+    caption,
+  });
   const shares: Share[] = [
-    { id: "s-render", at: now - 95 * MIN, workspace: "IaBench", pane: "Cora", name: "mobile-for-you.png", mime: "image/png", size: 182_340, caption: "The For you screen, in dark mode" },
-    { id: "s-lighthouse", at: now - 3 * 60 * MIN, workspace: "storefront", pane: "Mia", name: "lighthouse.html", mime: "text/html", size: 412_903, caption: "Lighthouse report, mobile" },
-    { id: "s-chart", at: now - 22 * 60 * MIN, workspace: "billing-api", pane: "Noé", name: "latency-p95.png", mime: "image/png", size: 96_120, caption: "p95 latency before and after the cache" },
-    { id: "s-csv", at: now - 30 * 60 * MIN, workspace: "billing-api", pane: "Noé", name: "invoices-october.csv", mime: "text/csv", size: 18_400, caption: null },
+    shared("s-clip", 12, "IaBench", "Ada", "share-flow.mp4", "video", "The Shared tab, filmed on the phone"),
+    shared("s-retry", 40, "storefront", "Mia", "retry.ts", "text", "The retry helper, after the review"),
+    shared("s-render", 95, "IaBench", "Cora", "mobile-for-you.png", "image", "The For you screen, in dark mode", 182_340),
+    shared("s-notes", 2 * 60, "IaBench", "Cora", "RELEASE_NOTES.md", "markdown", "Notes for 1.3, to read before the release"),
+    shared("s-lighthouse", 3 * 60, "storefront", "Mia", "lighthouse.html", "html", "Lighthouse report, mobile"),
+    shared("s-log", 5 * 60, "billing-api", "Noé", "build.log", "text", "The whole log of the failing build"),
+    shared("s-voice", 8 * 60, "recipes-app", "Ben", "standup-summary.wav", "audio", "Today's summary, read aloud"),
+    shared("s-invoice", 20 * 60, "billing-api", "Noé", "invoice-2026-10.pdf", "pdf", "October's invoice, as the API renders it"),
+    shared("s-chart", 22 * 60, "billing-api", "Noé", "latency-p95.png", "image", "p95 latency before and after the cache", 96_120),
+    shared("s-csv", 30 * 60, "billing-api", "Noé", "invoices-october.csv", "text", null),
+    shared("s-bundle", 2 * 24 * 60, "storefront", "Mia", "storefront-build.zip", "file", null, 18_432_000),
   ];
 
   return { panes, projects, history, shares };
 }
+
+/** The Content-Type each kind is served with, as src-tauri/src/remote/files.rs serves it. */
+const SERVED: Partial<Record<ShareKind, string>> = {
+  image: "image/png",
+  video: "video/mp4",
+  audio: "audio/wav",
+  text: "text/plain; charset=utf-8",
+  markdown: "text/plain; charset=utf-8",
+  html: "text/html; charset=utf-8",
+};
 
 /** The shared images, drawn rather than shipped. */
 function picture(id: string): string {
@@ -556,7 +587,7 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     return json(200, { answered: true });
   }
 
-  async function route(path: string, method: string, body: unknown): Promise<Response> {
+  async function route(path: string, method: string, body: unknown, headers: Headers = new Headers()): Promise<Response> {
     if (scenario === "offline") throw new TypeError("Failed to fetch");
     await latency();
     if (path === "/m/api/health") return json(200, { ok: true, pc: "PC-SIMON", version: "1.1.0", paired });
@@ -568,6 +599,13 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     }
     if (!paired) return json(401, { error: "unpaired" });
 
+    const file = /^\/m\/files\/([^/?]+)$/.exec(path);
+    if (file && method === "GET") {
+      const share = world.shares.find((candidate) => candidate.id === decodeURIComponent(file[1]));
+      const bytes = share && fakeFile(share.id);
+      if (!share || !bytes) return json(404, { error: "not-found" });
+      return fileResponse(bytes, share.mime, headers.get("Range"));
+    }
     if (path.startsWith("/m/api/shares")) {
       const since = Number(new URL(path, "http://pc").searchParams.get("since") ?? 0);
       return json(200, { shares: world.shares.filter((share) => share.at > since) });
@@ -666,15 +704,15 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     const method = init?.method ?? "GET";
     let body: unknown = init?.body;
     if (typeof body === "string") body = JSON.parse(body);
-    return route(path, method, body);
+    return route(path, method, body, new Headers(init?.headers));
   };
 
   return {
     fetch: mockFetch,
     fileUrl: (id) => {
       const share = world.shares.find((candidate) => candidate.id === id);
-      if (share && share.mime.startsWith("image/")) return picture(id);
-      return `data:${share?.mime ?? "text/plain"};charset=utf-8,${encodeURIComponent(`${share?.name ?? id}\nA file shared by an agent, in the fake PC.`)}`;
+      if (share?.kind === "image") return picture(id);
+      return fakeFileUrl(id, share?.mime ?? "application/octet-stream");
     },
     seed: scenario === "offline" ? { lastOk: now - 47 * MIN, state: (() => { paired = true; return state(); })() } : null,
   };

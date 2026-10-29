@@ -1,16 +1,18 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Share } from "../api";
 import { EmptyState, PcChip } from "../components/Chrome";
 import { Icon } from "../components/Icon";
-import { ago, fileSize } from "../format";
-import { locale, t } from "../i18n";
-import { isImage } from "../model";
+import { ShareView } from "../components/ShareView";
+import { Zoom } from "../components/Zoom";
+import { t } from "../i18n";
 import { useRemoteContext } from "../remote";
 
-/** What agents shared with the phone, newest first: images shown, files to open. */
+/** What agents shared with the phone, newest first, each in the viewer of its kind. */
 export function Shares({ now, onSeen }: { now: number; onSeen: (at: number) => void }) {
   const { shares, client, pc, connection } = useRemoteContext();
   const newest = shares[0]?.at;
+  const zoom = useZoomStep();
+  const zoomed = zoom.id === null ? undefined : shares.find((share) => share.id === zoom.id);
 
   // Seen as soon as they are on screen.
   useEffect(() => {
@@ -29,59 +31,39 @@ export function Shares({ now, onSeen }: { now: number; onSeen: (at: number) => v
         <ul className="stack section">
           {shares.map((share) => (
             <li key={share.id} className="share">
-              {isImage(share) ? <Picture share={share} url={client.fileUrl(share.id)} now={now} /> : <File share={share} url={client.fileUrl(share.id)} now={now} />}
+              <ShareView share={share} now={now} onZoom={zoom.open} />
             </li>
           ))}
         </ul>
       )}
+      {zoomed && <Zoom src={client.fileUrl(zoomed.id)} alt={zoomed.caption ?? zoomed.name} onClose={zoom.close} />}
     </div>
   );
 }
 
-const from = (share: Share, now: number) =>
-  `${t("shares.from", { pane: share.pane, workspace: share.workspace })}, ${ago(share.at, now, locale)}`;
+const zoomOf = (state: unknown) => {
+  const zoom = (state as { zoom?: unknown } | null)?.zoom;
+  return typeof zoom === "string" ? zoom : null;
+};
 
-/** Who shared it and when, and the one thing to do: open it. */
-function Foot({ share, url, now }: { share: Share; url: string; now: number }) {
-  return (
-    <div className="share__foot">
-      <span className="share__meta">{from(share, now)}</span>
-      <a className="btn" href={url} target="_blank" rel="noopener" aria-label={`${t("shares.open")} ${share.name}`}>
-        {t("shares.open")}
-      </a>
-    </div>
-  );
-}
-
-function Picture({ share, url, now }: { share: Share; url: string; now: number }) {
-  return (
-    <figure>
-      <a className="share__image" href={url} target="_blank" rel="noopener" tabIndex={-1} aria-hidden="true">
-        <img src={url} alt={share.caption ?? share.name} loading="lazy" decoding="async" />
-      </a>
-      <figcaption className="share__body">
-        <p className="share__caption">{share.caption ?? share.name}</p>
-        <Foot share={share} url={url} now={now} />
-      </figcaption>
-    </figure>
-  );
-}
-
-function File({ share, url, now }: { share: Share; url: string; now: number }) {
-  const extension = /\.([a-z0-9]{1,5})$/i.exec(share.name)?.[1]?.toUpperCase() ?? "";
-  return (
-    <div className="share__body">
-      <div className="file">
-        <span className="file__type" aria-hidden="true">
-          {extension}
-        </span>
-        <span className="file__main">
-          <span className="file__name">{share.name}</span>
-          {share.caption && <span className="file__caption">{share.caption}</span>}
-          <span className="file__size">{fileSize(share.size, locale)}</span>
-        </span>
-      </div>
-      <Foot share={share} url={url} now={now} />
-    </div>
-  );
+/**
+ * A picture zoomed into, as a step of its own in the phone's history: the
+ * back gesture, or the close button, returns to the list.
+ */
+function useZoomStep() {
+  const [id, setId] = useState<string | null>(() => zoomOf(history.state));
+  useEffect(() => {
+    const update = () => setId(zoomOf(history.state));
+    addEventListener("popstate", update);
+    return () => removeEventListener("popstate", update);
+  }, []);
+  const open = useCallback((share: Share) => {
+    history.pushState({ ...history.state, depth: (history.state?.depth ?? 0) + 1, zoom: share.id }, "");
+    setId(share.id);
+  }, []);
+  const close = useCallback(() => {
+    if (zoomOf(history.state) !== null) history.back();
+    else setId(null);
+  }, []);
+  return { id, open, close };
 }

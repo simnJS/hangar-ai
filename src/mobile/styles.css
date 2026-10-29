@@ -43,6 +43,8 @@
   --idle: #8b8e93;
   --danger: #c4242e;
   --danger-soft: rgba(196, 36, 46, 0.08);
+  /* A key or an attribute in shared code: none of the states' colours. */
+  --syntax-attr: #7c3aed;
 
   --ui: "Inter Variable", -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, "Roboto Mono", Consolas, monospace;
@@ -89,6 +91,7 @@
     --idle: #7b7c80;
     --danger: #ff7b72;
     --danger-soft: rgba(255, 123, 114, 0.12);
+    --syntax-attr: #c4a5ff;
   }
 }
 
@@ -121,6 +124,7 @@
   --idle: #7b7c80;
   --danger: #ff7b72;
   --danger-soft: rgba(255, 123, 114, 0.12);
+  --syntax-attr: #c4a5ff;
 }
 
 *,
@@ -2316,7 +2320,8 @@ input:checked + .option__mark--box::after {
     animation-duration: 2.4s;
   }
 
-  .action__chevron {
+  .action__chevron,
+  .zoom__img--ease {
     transition: none;
   }
 }
@@ -2418,6 +2423,242 @@ input:checked + .option__mark--box::after {
   display: block;
   color: var(--fg-3);
   font-size: 14px;
+}
+
+/* A PDF's line opens it, as its Open button does. */
+.file--link {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ── Share viewers ─────────────────────────────────────────────── */
+
+button.share__image {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: zoom-in;
+}
+
+.share__video {
+  display: block;
+  width: 100%;
+  max-height: min(56vh, 480px);
+  background: #000;
+}
+
+.share__audio {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* A page draws on its own background, white unless it says otherwise. */
+.share__page {
+  display: block;
+  width: 100%;
+  height: min(64vh, 560px);
+  margin-top: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-control);
+  background: #fff;
+  /* Under its translucent border, the card, not the white. */
+  background-clip: padding-box;
+}
+
+.viewer__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.viewer__tool {
+  padding: 0 12px;
+  font-size: 15px;
+}
+
+.viewer__tool[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+
+/* Two ways to see one file: the one shown is raised. */
+.segmented {
+  display: inline-flex;
+  border-radius: var(--r-control);
+  background: var(--raised);
+}
+
+.segmented__option {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.segmented__option[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--fg-hi);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.viewer__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 44px;
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.viewer__note {
+  margin-top: 8px;
+  color: var(--fg-3);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* A screenful, faded where it is cut, and opened in place: the list scrolls,
+   never the body. */
+.fold__body {
+  max-height: 340px;
+  overflow: hidden;
+}
+
+.fold--cut .fold__body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
+
+.fold--open .fold__body {
+  max-height: none;
+}
+
+.fold__more {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.viewer__md {
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* Code as the chat shows it: in its own block, sideways unless wrapped. */
+.viewer__code {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--r-control);
+  background: var(--term);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-hi);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  -webkit-overflow-scrolling: touch;
+}
+
+.viewer__code--wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tok--comment {
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+.tok--string {
+  color: var(--working);
+}
+
+.tok--number {
+  color: var(--waiting);
+}
+
+.tok--keyword {
+  color: var(--accent-text);
+}
+
+.tok--tag {
+  color: var(--yours);
+}
+
+.tok--attr {
+  color: var(--syntax-attr);
+}
+
+/* ── A picture zoomed into ─────────────────────────────────────── */
+
+/* Dark whatever the theme: a picture reads best on black. */
+.zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #000;
+}
+
+.zoom__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.zoom__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 0 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.zoom__img--ease {
+  transition: transform 220ms var(--ease);
+}
+
+.zoom__close {
+  position: absolute;
+  top: calc(var(--safe-top) + 8px);
+  right: calc(var(--safe-right) + 8px);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.zoom__close:active {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.zoom__hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--safe-bottom) + 18px);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
 }
 
 /* ── History ───────────────────────────────────────────────────── */

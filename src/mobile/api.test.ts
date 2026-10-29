@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, CALL_TIMEOUT_MS, UNREACHABLE_AFTER_MS, UPLOAD_MAX_BYTES, createClient } from "./api";
+import { ApiError, CALL_TIMEOUT_MS, UNREACHABLE_AFTER_MS, UPLOAD_MAX_BYTES, createClient, decodeHead } from "./api";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -130,6 +130,40 @@ describe("the client's requests", () => {
   it("reads a shared file from /m/files/<id>, unless told otherwise", () => {
     expect(createClient().fileUrl("a/b c")).toBe("/m/files/a%2Fb%20c");
     expect(createClient({ fileUrl: (id) => `data:${id}` }).fileUrl("x")).toBe("data:x");
+  });
+
+  it("reads a short text whole, without a range", async () => {
+    const { fetch, calls } = fakeFetch(new Response("fn main() {}\n", { status: 200 }));
+    const client = createClient({ fetch });
+    expect(await client.fileText("s 1", 13, 1024)).toEqual({ text: "fn main() {}\n", partial: false });
+    expect(calls[0].path).toBe("/m/files/s%201");
+    expect(calls[0].init.headers).toEqual({});
+    expect(calls[0].init.method).toBe("GET");
+  });
+
+  it("reads a long text's head as a byte range, cut after its last whole line", async () => {
+    const { fetch, calls } = fakeFetch(new Response("line one\nline two\nline th", { status: 206 }));
+    const client = createClient({ fetch });
+    expect(await client.fileText("log", 5_000_000, 26)).toEqual({ text: "line one\nline two\n", partial: true });
+    expect(calls[0].init.headers).toEqual({ Range: "bytes=0-25" });
+  });
+
+  it("cuts a text the PC sent whole although a head was asked for", async () => {
+    const { fetch } = fakeFetch(new Response("aaaa\nbbbb\ncccc\n", { status: 200 }));
+    expect(await createClient({ fetch }).fileText("log", 15, 12)).toEqual({ text: "aaaa\nbbbb\n", partial: true });
+  });
+
+  it("says when a file cannot be read, and when the phone is no longer paired", async () => {
+    const onUnpaired = vi.fn();
+    const missing = fakeFetch(json(404, { error: "not-found" }));
+    const gone = await failure(createClient({ fetch: missing.fetch }).fileText("x", 1, 10));
+    expect([gone.kind, gone.status]).toEqual(["refused", 404]);
+    const unpaired = fakeFetch(json(401, { error: "unpaired" }));
+    const out = await failure(createClient({ fetch: unpaired.fetch, onUnpaired }).fileText("x", 1, 10));
+    expect(out.kind).toBe("unpaired");
+    expect(onUnpaired).toHaveBeenCalledOnce();
+    const offline = fakeFetch(new TypeError("Failed to fetch"));
+    expect((await failure(createClient({ fetch: offline.fetch }).fileText("x", 1, 10))).kind).toBe("offline");
   });
 
   it("reads the push key, subscribes in the phone's language, and unsubscribes", async () => {
@@ -307,5 +341,22 @@ describe("when the PC stops answering", () => {
     vi.advanceTimersByTime(UNREACHABLE_AFTER_MS);
     await failure(client.state());
     expect(client.connection().unreachable).toBe(true);
+  });
+});
+
+describe("a text's head", () => {
+  const bytes = (text: string) => new TextEncoder().encode(text);
+
+  it("is the whole text when it is not a head", () => {
+    expect(decodeHead(bytes("été\nfin sans saut"), false)).toBe("été\nfin sans saut");
+  });
+
+  it("ends on its last whole line", () => {
+    expect(decodeHead(bytes("un\ndeux\ntro"), true)).toBe("un\ndeux\n");
+  });
+
+  it("drops a character cut in two when it has no line to end on", () => {
+    const cut = bytes("déjà").subarray(0, 5); // d, é, j and the first byte of à
+    expect(decodeHead(cut, true)).toBe("déj");
   });
 });
