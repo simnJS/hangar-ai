@@ -249,6 +249,155 @@ export interface RemoteAnswerArgs {
   answers: ChatAnswer[];
 }
 
+/* ── Deliveries: a worker's branch that passed and waits to land ──── */
+
+/**
+ * remote_delivery: what a worker's delivery that passed its check and its
+ * review brings, read from its worktree against the branch it lands on, and
+ * what the check and the review said (the board's hangar comment). Refused
+ * unless the task waits for the person to land it.
+ */
+export interface RemoteDeliveryArgs {
+  /** The board task's id. */
+  task: string;
+}
+
+/** What runs for a delivery on the PC, as delivery.rs names its stages. */
+export type RemoteDeliveryStage = "queued" | "merging" | "checking" | "reviewing" | "landing";
+
+export interface RemoteDeliveryCheck {
+  command: string;
+  passed: boolean;
+  seconds: number;
+}
+
+export interface RemoteDeliveryBlocking {
+  file: string;
+  line?: number;
+  problem: string;
+}
+
+export interface RemoteDeliveryReview {
+  approved: boolean;
+  notes: string;
+  blocking: RemoteDeliveryBlocking[];
+}
+
+export type RemoteDeliveryFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface RemoteDeliveryFile {
+  /** Relative to the repository's root, forward slashes. */
+  path: string;
+  /** Where a renamed file came from. */
+  oldPath?: string;
+  status: RemoteDeliveryFileStatus;
+  /** Lines; 0 for a binary file. */
+  additions: number;
+  deletions: number;
+  binary?: true;
+}
+
+/** A delivery of the task that failed before this one, from the board's comments. */
+export interface RemoteDeliveryEarlier {
+  at: number;
+  /** delivery.rs's outcome: checkFailed, changesRequested, conflict, dirty, error… */
+  outcome: string;
+  /** Its first sentence, as the PC wrote it for the worker (English). */
+  text: string;
+  /** What the review asked for, when it asked for changes. */
+  blocking?: RemoteDeliveryBlocking[];
+}
+
+export interface RemoteDelivery {
+  taskId: string;
+  title: string;
+  workspace: string;
+  workspaceId: string;
+  /** The worker pane's name. */
+  worker: string;
+  branch: string;
+  /** The branch it lands on. */
+  target: string;
+  /** What the worker said of it when it submitted; null without a summary. */
+  summary: string | null;
+  /** null: no check is set for the workspace. */
+  check: RemoteDeliveryCheck | null;
+  review: RemoteDeliveryReview | null;
+  /** Untracked files are left out: only commits are delivered. */
+  files: RemoteDeliveryFile[];
+  /** More files changed than are listed. */
+  moreFiles?: true;
+  /** It waits for the person: nothing of it runs on the PC right now. */
+  waiting: boolean;
+  /** What runs for it now when it is not waiting: landed, or tested again first. */
+  stage: RemoteDeliveryStage | null;
+  /**
+   * The merge it was checked and reviewed as, short. Passed back to
+   * remote_land and remote_rework, which refuse once another delivery has
+   * taken its place.
+   */
+  merge: string | null;
+  /** When it passed, ms. */
+  passedAt: number | null;
+  /** The worker committed on its branch since: landing it is refused, its next delivery replaces it. */
+  moved: boolean;
+  /**
+   * Local changes in the PC's checkout of the target stood in the way of
+   * landing it: the files git named. null when nothing did.
+   */
+  inTheWay: string[] | null;
+  /** Oldest first. */
+  earlier: RemoteDeliveryEarlier[];
+}
+
+/** remote_delivery_file: the unified diff of one file of a delivery. */
+export interface RemoteDeliveryFileArgs {
+  task: string;
+  /** A `path` of the delivery's `files`. */
+  file: string;
+}
+export interface RemoteDeliveryPatch {
+  path: string;
+  /** Unified, as `git diff` prints it; empty for a binary file. */
+  patch: string;
+  binary: boolean;
+  /** Cut at a line boundary past 200 KB: the rest is only on the PC. */
+  truncated: boolean;
+}
+
+/**
+ * remote_land: lands the delivery, as the PC's « Fusionner » does. A landing
+ * whose target moved is tested again, which takes minutes: the window waits
+ * a few seconds, then answers `landed: false` with its stage, and the same
+ * call made again waits for that landing rather than starting another, until
+ * it answers `landed: true`, or is refused with why it did not land (in
+ * English, for the person: local changes in the way on the PC, the worker's
+ * branch moved, the check failing…).
+ */
+export interface RemoteLandArgs {
+  task: string;
+  /** The `merge` the phone showed: refused if another delivery took its place. */
+  merge?: string;
+}
+export type RemoteLanded =
+  | { landed: true; target: string }
+  | { landed: false; stage: RemoteDeliveryStage | null };
+
+/**
+ * remote_rework: the person's instruction for the worker, as their own words
+ * through the queue its Claude Code session takes once ready (its project
+ * woken for it), and a comment on the task that records it. What waits
+ * stays until the worker's next delivery replaces it.
+ */
+export interface RemoteReworkArgs {
+  task: string;
+  text: string;
+  merge?: string;
+}
+export interface RemoteReworked {
+  sent: true;
+}
+
 /* ── remote_stats ─────────────────────────────────────────────────── */
 
 export type RemoteStatsPeriod = "7d" | "30d" | "90d" | "all";

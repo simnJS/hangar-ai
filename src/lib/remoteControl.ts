@@ -10,6 +10,7 @@ import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
 import { loadProjects, projectsDeps } from "./projects";
 import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers, type Choice } from "./remoteAnswer";
+import { deliverySources, isDeliveryOp, runDelivery, type DeliverySources } from "./remoteDelivery";
 import { usageStats, type UsageStats } from "./stats";
 import { PERIODS, projectFor, summarize, workspaceRoots, type Measure } from "./statsModel";
 import { isMainWindow } from "./windows";
@@ -327,6 +328,18 @@ async function type(
     { workspace: ws.id, pane: pane.id, text: input.text, keys: input.keys, submit: input.submit },
     deps,
   );
+  return { sent: true };
+}
+
+/**
+ * The person's words for a worker sent back from the phone: through the
+ * queue, which its Claude Code session takes once it is ready, its project
+ * woken for it; typed as remote_send does where the mod does not run.
+ */
+async function toWorker(deps: ControlDeps, ws: Workspace, pane: Pane, text: string): Promise<RemoteSent> {
+  if (!queues(deps)) return type(deps, ws, pane, { text });
+  await deps.enqueue(pane.id, text);
+  wake(deps, ws);
   return { sent: true };
 }
 
@@ -782,9 +795,13 @@ export async function runRemote(
   history: ActivityHistory = activityHistory,
   chat: ChatReader = readTranscript,
   stats: StatsSources = statsSources,
+  delivery: DeliverySources = deliverySources,
 ): Promise<unknown> {
   // The person asks: not the agents' switch (agentPaneControl) to refuse.
   const asPerson: ControlDeps = { ...deps, enabled: () => true };
+  if (isDeliveryOp(op)) {
+    return runDelivery(op, args, asPerson, (ws, pane, text) => toWorker(asPerson, ws, pane, text), delivery);
+  }
   switch (op) {
     case "remote_state":
       return remoteState(asPerson);
