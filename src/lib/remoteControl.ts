@@ -2,19 +2,23 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getPaneActivity } from "./agentState";
+import type { BridgeEvent } from "./bridge";
 import { runControl, type ControlDeps } from "./control";
 import { activityHistory, startActivityLog, textOf, type ActivityHistory } from "./activityLog";
 import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
 import { loadProjects, projectsDeps } from "./projects";
+import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers } from "./remoteAnswer";
 import { isMainWindow } from "./windows";
 import { systemLocale, translate, type TranslateKey, type TranslateParams } from "../i18n";
+import { askedQuestions, describeCall } from "../remote/calls";
 import {
   REMOTE_KEYS,
   type ChatItem,
   type ChatPending,
   type ChatQuestion,
   type RemoteActivity,
+  type RemoteAnswered,
   type RemoteChat,
   type RemoteChatReason,
   type RemoteHistory,
@@ -33,8 +37,10 @@ import type { AppState, Pane, Workspace } from "../types";
  *
  * Claude Code's permission prompt takes one key: Enter accepts the highlighted
  * "1. Yes", Escape is "No, and tell Claude what to do differently". The
- * hangar-bridge mod only reports that a prompt waits (permission {waiting}),
- * never what it offers, so those two keys are all that is sent.
+ * hangar-bridge mod reports what the call would do (permission {waiting,
+ * tool, input}), never which choices the prompt offers, so those two keys are
+ * all that is sent. A question (AskUserQuestion) is answered through its
+ * dialog too, by lib/remoteAnswer.
  */
 
 const SCREEN_DEFAULT = 80;
@@ -280,15 +286,107 @@ export type ChatReader = (args: {
 
 const readTranscript: ChatReader = (args) => invoke<ChatPage | null>("chat_page", args);
 
+/** A call a pane's mod reported started and not yet ended. */
+interface LiveCall {
+  toolUseId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  at: number;
+}
+
 /**
- * What the pane waits on the person for. A question is in the transcript
- * itself; a permission prompt is not, so it is the last call still without a
- * result while the mod reports the pane waiting.
+ * What a pane's hangar-bridge mod reports that its transcript cannot say yet:
+ * Claude Code writes a call there only once it has its result, so neither a
+ * call running, nor the question or permission the pane waits on, is in it.
  */
-function pendingOf(page: ChatPage, activity: RemoteActivity): ChatPending | null {
-  if (page.question) return { kind: "question", ...page.question };
-  if (activity === "waiting" && page.openCall) return { kind: "permission", ...page.openCall };
+interface Live {
+  /** Oldest first. */
+  calls: LiveCall[];
+  /** The permission dialog open, with the input of the call it asks about. */
+  permission: { tool: string; input: unknown } | null;
+}
+
+const live = new Map<string, Live>();
+
+/** Keeps what a pane's mod reports of its calls and dialogs (bridge:event). */
+export function noteBridgeEvent(paneId: string, event: BridgeEvent, at = Date.now()) {
+  if (event.kind === "hello" || event.kind === "session" || event.kind === "turn" || event.kind === "end") {
+    // A turn that starts or ends, a conversation that starts over: nothing
+    // from before still runs or waits.
+    live.delete(paneId);
+    return;
+  }
+  if (event.kind !== "tool" && event.kind !== "permission") return;
+  const pane = live.get(paneId) ?? { calls: [], permission: null };
+  if (event.kind === "permission") {
+    pane.permission = event.waiting && event.tool ? { tool: event.tool, input: event.input } : null;
+  } else {
+    pane.calls = pane.calls.filter((call) => call.toolUseId !== event.toolUseId);
+    if (event.phase === "start") pane.calls.push({ toolUseId: event.toolUseId, tool: event.tool, input: event.input ?? {}, at });
+  }
+  if (pane.calls.length === 0 && !pane.permission) live.delete(paneId);
+  else live.set(paneId, pane);
+}
+
+/** The question a pane's AskUserQuestion call puts to the person, while it runs. */
+function liveQuestion(paneId: string): { toolUseId: string; questions: ChatQuestion[] } | null {
+  const calls = live.get(paneId)?.calls ?? [];
+  for (let at = calls.length - 1; at >= 0; at--) {
+    const call = calls[at];
+    if (call.tool !== "AskUserQuestion") continue;
+    const questions = askedQuestions(call.input);
+    if (questions.length > 0) return { toolUseId: call.toolUseId, questions };
+  }
   return null;
+}
+
+/**
+ * What the pane waits on the person for: what its mod reports first, then
+ * what the transcript says — a question without its answer, or the last call
+ * without a result while the pane waits.
+ */
+function pendingOf(paneId: string, page: ChatPage, activity: RemoteActivity, cwd: string | null): ChatPending | null {
+  const question = liveQuestion(paneId) ?? page.question;
+  if (question) return { kind: "question", ...question };
+  if (activity !== "waiting") return null;
+  const permission = live.get(paneId)?.permission;
+  if (permission) {
+    const { ask, detail } = describeCall(permission.tool, permission.input, cwd);
+    return { kind: "permission", tool: permission.tool, title: ask, ...(detail ? { detail } : {}) };
+  }
+  if (page.openCall) return { kind: "permission", ...page.openCall };
+  return null;
+}
+
+/**
+ * The calls the pane runs now, as actions after the transcript's: not a
+ * question (the pending card shows it), nor the call a permission dialog
+ * holds, which has not run yet.
+ */
+function runningOf(paneId: string, page: ChatPage, pending: ChatPending | null, cwd: string | null): ChatItem[] {
+  const known = new Set(page.items.map((item) => item.id));
+  const calls = (live.get(paneId)?.calls ?? []).filter(
+    (call) => call.tool !== "AskUserQuestion" && !known.has(call.toolUseId),
+  );
+  if (pending?.kind === "permission") {
+    for (let at = calls.length - 1; at >= 0; at--) {
+      if (calls[at].tool !== pending.tool) continue;
+      calls.splice(at, 1);
+      break;
+    }
+  }
+  return calls.map((call) => {
+    const { title, detail } = describeCall(call.tool, call.input, cwd);
+    return {
+      id: call.toolUseId,
+      at: call.at,
+      kind: "action",
+      tool: call.tool,
+      title,
+      ...(detail ? { detail } : {}),
+      state: "running",
+    };
+  });
 }
 
 async function remoteChat(
@@ -320,20 +418,71 @@ async function remoteChat(
   });
   if (pane.agent !== "claude") return empty("notClaude");
   if (!pane.sessionId) return empty("noSession");
+  const cwd = pane.cwd || ws.cwd;
   const page = await read({
     sessionId: pane.sessionId,
-    cwd: pane.cwd || ws.cwd,
+    cwd,
     ...(typeof before === "string" ? { before } : {}),
     ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
   });
   if (!page) return empty("noTranscript");
+  const pending = pendingOf(pane.id, page, activity, cwd);
   return {
     ...chat,
-    items: page.items,
+    // What runs now comes last: on the newest page alone.
+    items: typeof before === "string" ? page.items : [...page.items, ...runningOf(pane.id, page, pending, cwd)],
     older: page.older,
     cursor: page.cursor,
-    pending: pendingOf(page, activity),
+    pending,
   };
+}
+
+/** Panes an answer is being typed into: a second one would type over it. */
+const answering = new Set<string>();
+
+/** Lines read to find a question's dialog: four questions' review fits well within. */
+const ANSWER_SCREEN = 120;
+
+/**
+ * Answers the question a Claude Code pane waits on, through its dialog on the
+ * PC (lib/remoteAnswer): only the one its mod reports open, or its
+ * transcript shows unanswered, so a phone showing an older one is refused.
+ */
+async function remoteAnswer(
+  deps: ControlDeps,
+  args: Record<string, unknown>,
+  read: ChatReader,
+): Promise<RemoteAnswered> {
+  const { ws, pane } = findPane(deps.snapshot(), args.pane);
+  const toolUseId = typeof args.toolUseId === "string" ? args.toolUseId : "";
+  if (!toolUseId) throw new Error('Name the question: its "toolUseId", from the chat.');
+  if (pane.agent !== "claude" || !pane.sessionId) {
+    throw new Error(`"${pane.name}" has no Claude Code question to answer.`);
+  }
+  if (answering.has(pane.id)) throw new Error(`An answer is being typed into "${pane.name}" already.`);
+  answering.add(pane.id);
+  try {
+    const page = await read({ sessionId: pane.sessionId, cwd: pane.cwd || ws.cwd });
+    const questions = pendingQuestions(liveQuestion(pane.id) ?? page?.question ?? null, page?.items ?? [], toolUseId);
+    const choices = choicesOf(questions, args.answers);
+    if (!(await deps.terminal(pane.id))) throw new Error(NOT_ON_SCREEN);
+    const at = { workspace: ws.id, pane: pane.id };
+    await typeAnswers(
+      {
+        read: async () =>
+          ((await runControl("pane_read", { ...at, lines: ANSWER_SCREEN }, deps)) as { text: string }).text,
+        type: async (step) => {
+          await runControl("pane_send", { ...at, text: step.text, keys: step.keys, submit: false }, deps);
+        },
+        sleep: deps.sleep,
+      },
+      questions,
+      choices,
+    );
+    return { answered: true };
+  } finally {
+    answering.delete(pane.id);
+  }
 }
 
 /** Every op this module answers; any other is not its to answer. */
@@ -363,6 +512,8 @@ export async function runRemote(
       return remoteHistory(asPerson, args, history);
     case "remote_chat":
       return remoteChat(asPerson, args, chat);
+    case "remote_answer":
+      return remoteAnswer(asPerson, args, chat);
     default:
       throw new Error(`Unknown remote request "${op}".`);
   }
@@ -410,18 +561,24 @@ export function useRemoteControl(deps: ControlDeps | null) {
   useEffect(() => {
     if (!isMainWindow) return;
     let cancelled = false;
-    let off: (() => void) | null = null;
+    const offs: (() => void)[] = [];
+    const keep = (stop: () => void) => {
+      if (cancelled) stop();
+      else offs.push(stop);
+    };
     listen<InternalRequest>("control:internal", (event) => {
       answerRemote(event.payload, depsRef.current);
     })
-      .then((stop) => {
-        if (cancelled) stop();
-        else off = stop;
-      })
+      .then(keep)
+      .catch(() => undefined);
+    listen<{ paneId: string; event: BridgeEvent }>("bridge:event", (event) => {
+      noteBridgeEvent(event.payload.paneId, event.payload.event);
+    })
+      .then(keep)
       .catch(() => undefined);
     return () => {
       cancelled = true;
-      off?.();
+      for (const off of offs) off();
     };
   }, []);
 }

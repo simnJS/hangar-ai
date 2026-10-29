@@ -28,7 +28,16 @@ export type BridgeEvent =
       kind: "permission";
       waiting: boolean;
       tool?: string;
+      /** What the call would do, as the dialog opens: its input, long texts cut. */
+      input?: unknown;
     }
+  /**
+   * A call of the main loop, as it starts — its input, long texts cut — and
+   * as it ends, however it ends. The transcript has a call only once it has
+   * its result; an AskUserQuestion's input is the questions the person has.
+   */
+  | { kind: "tool"; phase: "start"; toolUseId: string; tool: string; input: Record<string, unknown> }
+  | { kind: "tool"; phase: "end"; toolUseId: string }
   | {
       kind: "usage";
       context: { tokens: number | null; window: number; percent: number | null };
