@@ -121,6 +121,7 @@ const TABS: { tab: Tab; route: Route; icon: IconName; label: () => string }[] = 
   { tab: "projects", route: { name: "projects" }, icon: "panes", label: () => t("tab.projects") },
   { tab: "shares", route: { name: "shares" }, icon: "image", label: () => t("tab.shares") },
   { tab: "manager", route: { name: "manager" }, icon: "orchestrator", label: () => t("tab.manager") },
+  { tab: "stats", route: { name: "stats" }, icon: "chart", label: () => t("tab.stats") },
 ];
 
 export function TabBar({ current, badges }: { current: Tab; badges: Partial<Record<Tab, { count: number; tone: "waiting" | "accent" }>> }) {

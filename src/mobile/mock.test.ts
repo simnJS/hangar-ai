@@ -212,3 +212,50 @@ describe("the fake PC's conversations", () => {
     expect(ben.items.slice(-1)[0]).toMatchObject({ kind: "action", tool: "Bash", state: "done", result: { ok: true } });
   });
 });
+
+describe("the fake PC's statistics", () => {
+  beforeEach(() => vi.useFakeTimers({ now: new Date(2026, 9, 29, 15, 0) }));
+  afterEach(() => vi.useRealTimers());
+
+  it("counts five months the PC's way, for every period and measure", async () => {
+    const client = fakePc();
+    for (const period of ["7d", "30d", "90d", "all"] as const) {
+      for (const measure of ["tokens", "cost"] as const) {
+        const stats = await settle(client.stats(period, measure), 600);
+        expect(stats).toMatchObject({ period, measure, cachedOnly: false });
+        // A column a day, or a week past four months: the first one partly before the period.
+        const weeks = Math.ceil(stats.range.days / 7);
+        if (stats.granularity === "day") expect(stats.series).toHaveLength(stats.range.days);
+        else expect([weeks, weeks + 1]).toContain(stats.series.length);
+        expect(stats.totals.tokens).toBeGreaterThan(0);
+        expect(stats.totals.cost).toBeGreaterThan(0);
+        // Heaviest first, by what was asked.
+        const values = stats.projects.rows.map((row) => row[measure]);
+        expect(values).toEqual([...values].sort((a, b) => b - a));
+        expect(stats.projects.rows.length + (stats.projects.other ? 1 : 0)).toBeLessThanOrEqual(6);
+      }
+    }
+    const month = await settle(client.stats("30d", "tokens"), 600);
+    expect(month.projects.rows[0].label).toBe("IaBench");
+    expect(month.agents.rows.map((row) => row.label)).toEqual(["Claude Code", "Codex"]);
+    expect(month.plan?.windows.map((window) => [window.kind, window.percentUsed])).toEqual([
+      ["five_hour", 72],
+      ["seven_day", 38],
+    ]);
+    const all = await settle(client.stats("all", "cost"), 600);
+    expect(all.granularity).toBe("week");
+    expect(all.previous).toBeNull();
+    expect(all.projects.other?.count).toBeGreaterThan(0);
+    expect(all.unpricedTokens).toBeGreaterThan(0);
+  });
+
+  it("knows nothing on a PC where no agent has worked yet", async () => {
+    const stats = await settle(fakePc("nostats").stats("30d", "tokens"), 600);
+    expect(stats).toMatchObject({ firstAt: null, plan: null, totals: { tokens: 0 }, projects: { rows: [], other: null } });
+  });
+
+  it("refuses a period it does not know, as the PC does", async () => {
+    const client = fakePc();
+    await expect(settle(client.stats("1y" as never, "tokens"), 600)).rejects.toMatchObject({ kind: "refused" });
+  });
+});

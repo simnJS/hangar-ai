@@ -248,3 +248,108 @@ export interface RemoteAnswerArgs {
    */
   answers: ChatAnswer[];
 }
+
+/* ── remote_stats ─────────────────────────────────────────────────── */
+
+export type RemoteStatsPeriod = "7d" | "30d" | "90d" | "all";
+/** What the series and the rankings measure. */
+export type RemoteStatsMeasure = "tokens" | "cost";
+
+/**
+ * remote_stats: the agents' usage, summed up on the PC as its statistics
+ * page does (lib/statsModel), all projects together: never the hourly rows
+ * themselves. Refused for a period or a measure outside these.
+ */
+export interface RemoteStatsArgs {
+  /** Whole days up to today; "all" from the first day with data. Default "30d". */
+  period?: RemoteStatsPeriod;
+  /** Default "tokens". */
+  measure?: RemoteStatsMeasure;
+}
+
+export interface RemoteStatsTotals {
+  /** Input, output, cache writes and cache reads together. */
+  tokens: number;
+  /** Of `tokens`, read from the prompt cache. */
+  cacheRead: number;
+  /** API-equivalent, US dollars: at list prices, not what a plan costs. */
+  cost: number;
+  activeMs: number;
+  sessions: number;
+  /** The person's prompts. */
+  turns: number;
+}
+
+/** A row of a ranking: a project, an agent, a model. */
+export interface RemoteStatsRow {
+  key: string;
+  /** A workspace's name, a folder's, an agent's ("Claude Code"), a model's ("Opus 5.5"). */
+  label: string;
+  tokens: number;
+  cost: number;
+  activeMs: number;
+  /** Not counted for a model: 0. */
+  sessions: number;
+  /** Of the measure, 0–1. */
+  share: number;
+  /** A model the price table does not know: its tokens are not in the cost. */
+  unpriced?: true;
+}
+
+/** The rows past the first ones, folded into one. */
+export interface RemoteStatsOther {
+  count: number;
+  tokens: number;
+  cost: number;
+  activeMs: number;
+  share: number;
+}
+
+/** Heaviest first, by the measure: six rows at most, the sixth on being "others". */
+export interface RemoteStatsRanking {
+  rows: RemoteStatsRow[];
+  other: RemoteStatsOther | null;
+}
+
+/** One of the plan's rate-limit windows. */
+export interface RemoteStatsWindow {
+  /** `five_hour`, `seven_day`, or a gateway's own window. */
+  kind: string;
+  /** 0–100, whole. */
+  percentUsed: number;
+  /** When it frees up, ms; null when the session did not say. */
+  resetsAt: number | null;
+}
+
+export interface RemoteStats {
+  period: RemoteStatsPeriod;
+  measure: RemoteStatsMeasure;
+  /** When the PC read the transcripts, ms. */
+  readAt: number;
+  /** Read from the PC's cache alone: it is still reading what changed since. */
+  cachedOnly: boolean;
+  /** `to` excluded: the midnight after today, on the PC. */
+  range: { from: number; to: number; days: number };
+  /** A point a day; a week past 120 days. */
+  granularity: "day" | "week";
+  /** The first hour with anything in it, over all time; null without any data. */
+  firstAt: number | null;
+  totals: RemoteStatsTotals;
+  /** The same length just before, for the trends; null for "all". */
+  previous: RemoteStatsTotals | null;
+  /** Days of the period with any active time. */
+  activeDays: number;
+  /** Every day (or week) of the period, quiet ones included, oldest first: the measure's value. */
+  series: { at: number; value: number }[];
+  projects: RemoteStatsRanking;
+  agents: RemoteStatsRanking;
+  models: RemoteStatsRanking;
+  /** Tokens of models without a price, left out of the cost. */
+  unpricedTokens: number;
+  /**
+   * The plan's windows as the last Claude Code session to report them saw
+   * them (the hangar-bridge mod), when: one account behind every pane. null
+   * until one has, or on a plan without such limits.
+   */
+  plan: { at: number; windows: RemoteStatsWindow[] } | null;
+}

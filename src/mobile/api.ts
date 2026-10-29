@@ -1,3 +1,5 @@
+import type { RemoteStats as Stats, RemoteStatsMeasure as StatsMeasure, RemoteStatsPeriod as StatsPeriod } from "../remote/types";
+
 /**
  * The phone's side of the contract with the PC's mobile server: the shapes it
  * answers with, and one client that makes every call.
@@ -207,6 +209,10 @@ export interface Share {
   caption: string | null;
 }
 
+/* ── The usage statistics: the shared contract's own shapes ───────── */
+
+export type { Stats, StatsMeasure, StatsPeriod };
+
 /* ── Errors ────────────────────────────────────────────────────── */
 
 /**
@@ -395,6 +401,8 @@ export function createClient(options: ClientOptions = {}) {
       call<{ answered: boolean }>("answer", { pane, toolUseId, answers }, { retries: 1 }),
     history: (since?: number) =>
       call<{ entries: HistoryEntry[] }>("history", since === undefined ? {} : { since }),
+    /** The agents' usage over a period, summed up on the PC, and the plan's limits when known. */
+    stats: (period: StatsPeriod, measure: StatsMeasure) => call<Stats>("stats", { period, measure }, { retries: 1 }),
     /** Wakes a project asleep; `waking` is false when it was not. The state says when it is awake. */
     wake: (projectId: string) => call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1 }),
 

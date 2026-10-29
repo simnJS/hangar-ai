@@ -17,6 +17,8 @@ import type {
 import { locale as appLocale, type Locale } from "./i18n";
 import { chatPage, conversations, type FakeChat } from "./mockChat";
 import { fakeFile, fakeFileUrl, fileResponse } from "./mockFiles";
+import { mockStats } from "./mockStats";
+import { MEASURES, PERIODS } from "./stats";
 
 /**
  * A fake PC, for working on the app without one: the dev server always uses
@@ -34,18 +36,22 @@ import { fakeFile, fakeFileUrl, fileResponse } from "./mockFiles";
  * - empty: nothing waits for the person;
  * - unpaired: the phone has to pair (any code but 000000 works);
  * - offline: the PC stopped answering 47 min ago;
- * - nomanager: no project manager is open.
+ * - nomanager: no project manager is open;
+ * - nostats: no agent has worked on the PC yet, and no plan limit is known.
+ *
+ * Its usage statistics are five months of hourly rows (mockStats.ts), summed
+ * up per period as the PC does.
  *
  * Like the real PC, it writes its history in its own language, taken here to
  * be the phone's; task titles stay as they were written.
  */
 
-export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager";
+export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager" | "nostats";
+
+const SCENARIOS: readonly Scenario[] = ["empty", "unpaired", "offline", "nomanager", "nostats"];
 
 export function scenarioOf(value: string | null): Scenario {
-  return value === "empty" || value === "unpaired" || value === "offline" || value === "nomanager"
-    ? value
-    : "default";
+  return SCENARIOS.find((scenario) => scenario === value) ?? "default";
 }
 
 const MIN = 60_000;
@@ -373,6 +379,7 @@ export interface Mock {
 
 export function createMock(scenario: Scenario, now = Date.now(), locale: Locale = appLocale): Mock {
   const world = scenery(now, locale);
+  const usage = mockStats(now, { none: scenario === "nostats" });
   let paired = scenario !== "unpaired";
   const latency = () => pause(90 + Math.random() * 140);
 
@@ -693,6 +700,16 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
         const project = world.projects.find((candidate) => candidate.id === args.workspace || candidate.name === args.workspace);
         if (!project) return json(400, { error: `No project "${String(args.workspace)}" in Hangar.` });
         return json(200, { waking: wake(project) });
+      }
+      case "stats": {
+        // Refused as the PC refuses them: an answer, not a crash.
+        const period = args.period ?? "30d";
+        const measure = args.measure ?? "tokens";
+        if (!PERIODS.includes(period as never)) return json(400, { error: "refused", message: `Unknown period "${String(period)}".` });
+        if (!MEASURES.includes(measure as never)) return json(400, { error: "refused", message: `Unknown measure "${String(measure)}".` });
+        // Counting takes the PC a moment longer than the other calls.
+        await pause(250);
+        return json(200, usage.answer(period as (typeof PERIODS)[number], measure as (typeof MEASURES)[number]));
       }
       default:
         return json(404, { error: "unknown-op" });

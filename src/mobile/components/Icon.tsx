@@ -114,6 +114,8 @@ const PATHS = {
   ),
   // Close a viewer.
   close: <path d="m4 4 8 8M12 4l-8 8" />,
+  // Stats: columns on a baseline.
+  chart: <path d="M2.25 13.75h11.5M4.5 11V8.25M8 11V3.75M11.5 11V6.25" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

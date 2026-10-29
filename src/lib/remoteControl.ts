@@ -2,16 +2,20 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getPaneActivity } from "./agentState";
-import type { BridgeEvent } from "./bridge";
+import type { BridgeEvent, RateLimit } from "./bridge";
 import { runControl, type ControlDeps } from "./control";
 import { activityHistory, startActivityLog, textOf, type ActivityHistory } from "./activityLog";
+import { gitWorktreeList } from "./git";
 import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
 import { loadProjects, projectsDeps } from "./projects";
 import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers, type Choice } from "./remoteAnswer";
+import { usageStats, type UsageStats } from "./stats";
+import { PERIODS, projectFor, summarize, workspaceRoots, type Measure } from "./statsModel";
 import { isMainWindow } from "./windows";
 import { systemLocale, translate, type TranslateKey, type TranslateParams } from "../i18n";
 import { askedQuestions, describeCall } from "../remote/calls";
+import { remoteStatsOf } from "../remote/stats";
 import {
   REMOTE_KEYS,
   type ChatItem,
@@ -26,10 +30,13 @@ import {
   type RemoteScreen,
   type RemoteSent,
   type RemoteState,
+  type RemoteStats,
+  type RemoteStatsMeasure,
+  type RemoteStatsPeriod,
   type RemoteWaiting,
   type RemoteWoken,
 } from "../remote/types";
-import type { AppState, Pane, Workspace } from "../types";
+import { AGENTS, type AppState, type Pane, type Workspace } from "../types";
 
 /**
  * What the window answers to Hangar Mobile (the phone app): the remote_*
@@ -435,10 +442,21 @@ interface Live {
 
 const live = new Map<string, Live>();
 
-/** Keeps what a pane's mod reports of its calls and dialogs (bridge:event). */
+/**
+ * The plan's rate-limit windows, from whichever session reported last, as
+ * the navigator shows them (lib/agentState): one account behind every pane.
+ */
+let planLimits: { limits: RateLimit[]; at: number } | null = null;
+
+/** Keeps what a pane's mod reports of its calls and dialogs, and of the plan (bridge:event). */
 export function noteBridgeEvent(paneId: string, event: BridgeEvent, at = Date.now()) {
   // Its Claude Code is up, or has quit: either way, no longer resuming.
   resuming.delete(paneId);
+  if (event.kind === "usage") {
+    // A session without such limits (an API key) says nothing of the plan.
+    if (event.rateLimits.length) planLimits = { limits: event.rateLimits, at };
+    return;
+  }
   if (event.kind === "hello" || event.kind === "session" || event.kind === "turn" || event.kind === "end") {
     // A turn that starts or ends, a conversation that starts over: nothing
     // from before still runs or waits.
@@ -632,6 +650,128 @@ async function remoteAnswer(
   }
 }
 
+/** A scan this recent is still the truth: another period or measure does not redo it. */
+const STATS_FRESH_MS = 60_000;
+/**
+ * A scan longer than this — the first after a launch reads every transcript —
+ * is answered from the cache instead, within the 10 s the mobile server gives
+ * the window; it carries on for the next call.
+ */
+const STATS_WAIT_MS = 6_000;
+
+/** The usage statistics, as stats.rs reads them; see `usageReader`. */
+export type UsageReader = () => Promise<UsageStats>;
+
+/** Where remote_stats reads from; the tests bring their own. */
+export interface StatsSources {
+  usage: UsageReader;
+  /** The worktrees of a workspace's repository: their sessions are the workspace's. */
+  worktrees: (cwd: string) => Promise<string[]>;
+  plan: () => { limits: RateLimit[]; at: number } | null;
+  now: () => number;
+}
+
+/**
+ * The statistics a scan at a time: the last full one while it is fresh, a
+ * call during a scan joining it, and the cache's answer when the scan takes
+ * longer than `waitMs`.
+ */
+export function usageReader(
+  read: (args: { cachedOnly?: boolean }) => Promise<UsageStats>,
+  {
+    freshMs = STATS_FRESH_MS,
+    waitMs = STATS_WAIT_MS,
+    now = Date.now,
+    wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  }: { freshMs?: number; waitMs?: number; now?: () => number; wait?: (ms: number) => Promise<void> } = {},
+): UsageReader {
+  let last: { data: UsageStats; at: number } | null = null;
+  let scan: Promise<UsageStats> | null = null;
+  return async () => {
+    if (last && now() - last.at < freshMs) return last.data;
+    if (!scan) {
+      const started = read({}).then((data) => {
+        last = { data, at: now() };
+        return data;
+      });
+      scan = started;
+      started
+        .finally(() => {
+          if (scan === started) scan = null;
+        })
+        .catch(() => undefined);
+    }
+    const done = await Promise.race([scan, wait(waitMs).then(() => null)]);
+    return done ?? last?.data ?? read({ cachedOnly: true });
+  };
+}
+
+/** Worktrees change seldom: git is asked again after this. */
+const WORKTREES_FRESH_MS = 5 * 60_000;
+const worktreesSeen = new Map<string, { at: number; paths: string[] }>();
+
+async function worktreesOf(cwd: string): Promise<string[]> {
+  const known = worktreesSeen.get(cwd);
+  if (known && Date.now() - known.at < WORKTREES_FRESH_MS) return known.paths;
+  // Not a repository, or no git: the workspace's own folders say enough.
+  const paths = await gitWorktreeList(cwd).then(
+    (list) => list.map((tree) => tree.path),
+    () => [],
+  );
+  worktreesSeen.set(cwd, { at: Date.now(), paths });
+  return paths;
+}
+
+export const statsSources: StatsSources = {
+  usage: usageReader(usageStats),
+  worktrees: worktreesOf,
+  plan: () => planLimits,
+  now: () => Date.now(),
+};
+
+const MEASURES: readonly RemoteStatsMeasure[] = ["tokens", "cost"];
+
+function choice<T extends string>(value: unknown, options: readonly T[], fallback: T, name: string): T {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === "string" && options.includes(value as T)) return value as T;
+  throw new Error(`Unknown ${name} "${String(value)}". One of: ${options.join(", ")}.`);
+}
+
+const agentLabel = (agent: string) => AGENTS.find((entry) => entry.id === agent)?.label ?? agent;
+
+/**
+ * remote_stats: what the statistics page shows, summed up the page's way
+ * (lib/statsModel) over every project, for a phone to draw as it comes.
+ */
+async function remoteStats(deps: ControlDeps, args: Record<string, unknown>, sources: StatsSources): Promise<RemoteStats> {
+  const period = choice<RemoteStatsPeriod>(args.period, PERIODS, "30d", "period");
+  const measure: Measure = choice(args.measure, MEASURES, "tokens", "measure");
+  const { workspaces } = deps.snapshot();
+  const [data, worktrees] = await Promise.all([
+    sources.usage(),
+    Promise.all(
+      workspaces.map(async (ws) => [ws.id, await sources.worktrees(ws.cwd).catch(() => [])] as const),
+    ).then((pairs) => Object.fromEntries(pairs)),
+  ]);
+  const roots = workspaceRoots(workspaces, worktrees);
+  const summary = summarize(data, {
+    period,
+    project: null,
+    measure,
+    now: sources.now(),
+    projects: data.sessions.map((session) => projectFor(session.cwd, roots)),
+    agentLabel,
+    topSessions: 0,
+  });
+  return remoteStatsOf(summary, {
+    period,
+    measure,
+    readAt: data.generatedAt,
+    cachedOnly: data.scan.cachedOnly,
+    plan: sources.plan(),
+  });
+}
+
 /** Every op this module answers; any other is not its to answer. */
 export const isRemoteOp = (op: string) => op.startsWith("remote_");
 
@@ -641,6 +781,7 @@ export async function runRemote(
   deps: ControlDeps,
   history: ActivityHistory = activityHistory,
   chat: ChatReader = readTranscript,
+  stats: StatsSources = statsSources,
 ): Promise<unknown> {
   // The person asks: not the agents' switch (agentPaneControl) to refuse.
   const asPerson: ControlDeps = { ...deps, enabled: () => true };
@@ -663,6 +804,8 @@ export async function runRemote(
       return remoteAnswer(asPerson, args, chat);
     case "remote_wake":
       return remoteWake(asPerson, args);
+    case "remote_stats":
+      return remoteStats(asPerson, args, stats);
     default:
       throw new Error(`Unknown remote request "${op}".`);
   }
