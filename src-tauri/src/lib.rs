@@ -16,6 +16,7 @@ mod model;
 mod notify;
 mod orchestrator;
 mod path_env;
+mod preview;
 mod pricing;
 mod procs;
 mod pty;
@@ -53,8 +54,9 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .manage(discord::DiscordPresence::default())
         .manage(voice::VoiceManager::default())
-        // The 3D preview's models and textures, read from the folders the
-        // window allowed and nowhere else.
+        // The preview's files — models and their textures, images, video,
+        // text, pages — read from the folders the window allowed and nowhere
+        // else (model.rs, preview.rs).
         .register_asynchronous_uri_scheme_protocol(model::SCHEME, model::serve)
         .setup(|app| {
             // Warmed here rather than on the first detection call: asking the
@@ -157,6 +159,7 @@ pub fn run() {
             model::model_allow_roots,
             model::model_stat,
             model::model_save_png,
+            preview::preview_inspect,
             install::mcp_targets,
             install::mcp_install,
             install::mcp_manual_commands,
