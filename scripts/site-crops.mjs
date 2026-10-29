@@ -124,19 +124,31 @@ function resolveRect(spec, where) {
   return r;
 }
 
+// Whether a rectangle points into the index, and whether the index is at hand. Without it
+// (--html-only, or --sources naming another folder than the captures'), such a rectangle is
+// not measured: the page keeps the size and the outlines it already has for that image.
+function usesIndex(spec) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return false;
+  if (spec.ref) return true;
+  return Array.isArray(spec.union) && spec.union.some((part) => typeof part === "string" || usesIndex(part));
+}
+const hasIndex = Boolean(config.rects && sourcesDir && existsSync(resolve(sourcesDir, config.rects)));
+const measurable = (spec) => hasIndex || !usesIndex(spec);
+
 // Everything the page and the encoder need, per image.
 const plans = {};
 for (const [name, image] of Object.entries(images)) {
-  const rect = resolveRect(image.rect, name);
-  if (rect.w <= 0 || rect.h <= 0) fail(`${name}: empty rectangle`);
+  const rect = measurable(image.rect) ? resolveRect(image.rect, name) : null;
+  if (rect && (rect.w <= 0 || rect.h <= 0)) fail(`${name}: empty rectangle`);
   const widths = [...new Set(image.widths || [])].sort((a, b) => a - b);
   if (!widths.length) fail(`${name}: no "widths"`);
   const formats = {};
   for (const [fmt, opts] of Object.entries(image.formats || defaultFormats)) {
     formats[fmt] = { ...(defaultFormats[fmt] || {}), ...opts };
   }
-  const size = (w) => ({ w, h: Math.round((w * rect.h) / rect.w) });
+  const size = rect && ((w) => ({ w, h: Math.round((w * rect.h) / rect.w) }));
   const marks = (image.marks || []).map((m, i) => {
+    if (!rect || !measurable(m)) return null;
     const r = resolveRect(m, `${name} mark ${i + 1}`);
     const pct = (v) => `${+(v * 100).toFixed(2)}%`;
     return `--x:${pct((r.x - rect.x) / rect.w)};--y:${pct((r.y - rect.y) / rect.h)};--w:${pct(r.w / rect.w)};--h:${pct(r.h / rect.h)}`;
@@ -203,6 +215,7 @@ if (!args["html-only"]) {
     if (only && !only.has(plan.name)) continue;
     const src = isAbsolute(plan.image.src) ? plan.image.src : join(sourcesDir, plan.image.src);
     if (!existsSync(src)) fail(`${plan.name}: ${src} does not exist`);
+    if (!plan.rect) fail(`${plan.name}: its rectangle points into ${config.rects}, which is not in ${sourcesDir}`);
     const s = plan.scale;
     const { x, y, w, h } = plan.rect;
     const fadePx = {};
@@ -256,7 +269,6 @@ html = html.replace(TAG("source|img"), (tag, kind) => {
   const plan = plans[name];
   if (!plan) fail(`index.html: data-crop="${name}" is not in crops.json`);
   used.add(name);
-  const first = plan.size(plan.widths[0]);
   if (kind === "source") {
     const fmt = (/\btype="image\/([a-z]+)"/.exec(tag) || [])[1];
     if (!fmt || !plan.formats[fmt]) fail(`index.html: a <source> of "${name}" needs type="image/avif" or "image/webp"`);
@@ -269,6 +281,8 @@ html = html.replace(TAG("source|img"), (tag, kind) => {
     const fmt = plan.formats.webp ? "webp" : Object.keys(plan.formats)[0];
     tag = setAttr(tag, "src", `${href}${stamped(`${name}-${plan.widths[0]}.${fmt}`)}`);
   }
+  if (!plan.size) return tag;
+  const first = plan.size(plan.widths[0]);
   tag = setAttr(tag, "width", String(first.w));
   return setAttr(tag, "height", String(first.h));
 });
@@ -280,8 +294,8 @@ html = html.replace(TAG("span"), (tag) => {
   const plan = plans[name];
   if (!plan) fail(`index.html: data-of="${name}" is not in crops.json`);
   const i = (markCount[name] = (markCount[name] || 0) + 1) - 1;
-  if (!plan.marks[i]) fail(`index.html: ${name} has more outlines than crops.json lists under "marks"`);
-  return setAttr(tag, "style", plan.marks[i]);
+  if (i >= plan.marks.length) fail(`index.html: ${name} has more outlines than crops.json lists under "marks"`);
+  return plan.marks[i] ? setAttr(tag, "style", plan.marks[i]) : tag;
 });
 for (const [name, plan] of Object.entries(plans)) {
   if (plan.marks.length && plan.marks.length !== (markCount[name] || 0)) {
@@ -289,14 +303,15 @@ for (const [name, plan] of Object.entries(plans)) {
   }
   if (!used.has(name)) console.log(`note: ${name} is in crops.json but no tag in index.html uses it`);
 }
-// The page's own stylesheet, script and share image get the same stamp: the
-// site sends them with a four-hour browser cache, and a page fresh from the
-// server must never be drawn with the styles, script or images of the one
-// before it.
+// The page's own stylesheet, script and share image get the same stamp, and so
+// does whatever it loads from assets/: the site sends them with a four-hour
+// browser cache, and a page fresh from the server must never be drawn with the
+// styles, script or images of the one before it.
 const siteDir = dirname(pagePath);
 html = html
   .replace(/(href=")styles\.css(?:\?v=[0-9a-f]+)?(")/g, (_, a, b) => a + stampedIn(siteDir, "styles.css") + b)
   .replace(/(src=")main\.js(?:\?v=[0-9a-f]+)?(")/g, (_, a, b) => a + stampedIn(siteDir, "main.js") + b)
+  .replace(/((?:href|src)=")(assets\/[\w./-]+?)(?:\?v=[0-9a-f]+)?(")/g, (_, a, file, b) => a + stampedIn(siteDir, file) + b)
   .replace(/(https:\/\/hangar\.simnjs\.fr\/)og\.png(?:\?v=[0-9a-f]+)?/g, (_, a) => a + stampedIn(siteDir, "og.png"));
 writeFileSync(pagePath, html);
 console.log(`${pagePath.slice(root.length + 1)}: sizes and srcsets of ${used.size} images written`);

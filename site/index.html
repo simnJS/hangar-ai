@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hangar.AI: run a team of coding agents from one window</title>
-<meta name="description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side, with a shared board and memory. In 1.0, an orchestrator plans and delegates to workers in git worktrees. Free and open source.">
+<meta name="description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side, with a shared board and memory. An orchestrator plans and delegates to workers in git worktrees, and Hangar Mobile lets you follow and steer them from your phone. Free and open source.">
 <link rel="canonical" href="https://hangar.simnjs.fr/">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#202124">
@@ -17,7 +17,7 @@
 <meta property="og:site_name" content="Hangar.AI">
 <meta property="og:url" content="https://hangar.simnjs.fr/">
 <meta property="og:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
-<meta property="og:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and hands tasks to workers in their own git worktrees, and Hangar merges what passes a review. Free, open source, local.">
+<meta property="og:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and hands tasks to workers in their own git worktrees, and Hangar merges what passes a review. Follow and steer them from your phone. Free, open source, local.">
 <meta property="og:image" content="https://hangar.simnjs.fr/og.png?v=a686e71e4f">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -26,12 +26,13 @@
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Hangar.AI 1.0: a team of coding agents, in one window">
-<meta name="twitter:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and delegates to workers in git worktrees, and Hangar merges what passes. Free and open source.">
+<meta name="twitter:description" content="Run Claude Code, Codex, Gemini CLI and OpenCode side by side. Pin an orchestrator: it plans and delegates to workers in git worktrees, and Hangar merges what passes. Steer them from your phone. Free and open source.">
 <meta name="twitter:image" content="https://hangar.simnjs.fr/og.png?v=a686e71e4f">
 <meta name="twitter:image:alt" content="Hangar.AI with its orchestrator, Iris, and a worker, Zoe, side by side, under the title: a team of coding agents, in one window.">
 
 <link rel="preload" href="fonts/inter-latin-opsz.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css?v=d0b1d33aa7">
+<link rel="stylesheet" href="assets/mobile.css?v=b66e54c19b">
 <script>document.documentElement.classList.add('js');</script>
 
 <script type="application/ld+json">
@@ -69,6 +70,7 @@
 
     <nav class="seg" id="nav" aria-label="Sections">
       <a class="seg__btn" href="#orchestrator">Orchestrator</a>
+      <a class="seg__btn" href="#mobile">Mobile</a>
       <a class="seg__btn" href="#demo">Demo</a>
       <a class="seg__btn" href="#features">Features</a>
       <a class="seg__btn" href="#download">Download</a>
@@ -94,9 +96,9 @@
 <!-- Hero ─────────────────────────────────────────────────────────── -->
 <section class="hero" id="top" aria-labelledby="hero-title">
   <div class="wrap hero__copy">
-    <a class="release" href="https://github.com/simnJS/hangar-ai/releases/tag/v1.2.0">
+    <a class="release" href="#mobile">
       <span class="release__dot" aria-hidden="true"></span>
-      Version 1.0 is out, with the orchestrator
+      New: steer your agents from your phone
     </a>
 
     <h1 class="hero__title" id="hero-title">A team of coding agents, in&nbsp;one&nbsp;window.</h1>
@@ -106,7 +108,8 @@
       terminals</span>, with a<span class="wide-only"> task</span> board and a memory they share. Pin a Claude Code
       pane as orchestrator: it plans<span class="wide-only"> the work</span> and hands each task to a worker in its
       own git worktree<span class="wide-only">, and Hangar
-      merges each delivery once it passes a review, and your tests if you set them</span>.
+      merges each delivery once it passes a review, and your tests if you set them</span>. From your phone,
+      Hangar Mobile shows what waits for you and lets you answer.
     </p>
 
     <div class="hero__cta">
@@ -149,7 +152,7 @@
   <div class="wrap wide-only">
     <p class="works">
       Works with <b>Claude Code</b>, <b>Codex</b>, <b>Gemini CLI</b>, <b>OpenCode</b>
-      and any shell, on Windows, macOS and Linux.
+      and any shell, on Windows, macOS and Linux, with <b>Hangar Mobile</b> on an iPhone or an Android phone.
     </p>
   </div>
 </section>
@@ -351,6 +354,145 @@
   </div>
 </section>
 
+<!-- Hangar Mobile ────────────────────────────────────────────────── -->
+<section class="mobile" id="mobile" aria-labelledby="mobile-title">
+  <div class="wrap">
+    <header class="head">
+      <h2 class="head__title" id="mobile-title">Follow and steer your agents from your phone.</h2>
+      <p class="head__lede">
+        Hangar Mobile shows what waits for you in every project, and lets you answer, approve and chat
+        with your agents while Hangar keeps running on your PC.<span class="wide-only"> It comes with
+        Hangar: no app store, no account with us, no server of ours in between.</span>
+      </p>
+    </header>
+
+    <div class="phones">
+      <figure class="phones__item">
+        <div class="phone">
+          <picture class="phone__screen">
+            <source type="image/avif" data-crop="mobile-for-you" srcset="img/mobile-for-you-300.avif?v=c7aa8ad12e 300w, img/mobile-for-you-600.avif?v=4c7bd10a07 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <source type="image/webp" data-crop="mobile-for-you" srcset="img/mobile-for-you-300.webp?v=7dae349dd2 300w, img/mobile-for-you-600.webp?v=953d97a09d 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <img data-crop="mobile-for-you" src="img/mobile-for-you-300.webp?v=7dae349dd2" width="300" height="649" loading="lazy" decoding="async"
+              alt="Hangar Mobile's For you screen: four things wait. Waiting for your answer, Ben and Cora in hangar-ai, for 4 and 2 minutes, each with an Answer button. Questions for you: should Tailscale Funnel stay out of scope, or be offered as an option? Below, the tab bar: For you, Projects, Shared and Manager.">
+          </picture>
+        </div>
+        <figcaption><b>For you.</b> What waits for you, in every project.</figcaption>
+      </figure>
+      <figure class="phones__item">
+        <div class="phone">
+          <picture class="phone__screen">
+            <source type="image/avif" data-crop="mobile-question" srcset="img/mobile-question-300.avif?v=78e3fb1933 300w, img/mobile-question-600.avif?v=a4e07b05f4 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <source type="image/webp" data-crop="mobile-question" srcset="img/mobile-question-300.webp?v=18edcd872b 300w, img/mobile-question-600.webp?v=25b38555e7 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <img data-crop="mobile-question" src="img/mobile-question-300.webp?v=18edcd872b" width="300" height="649" loading="lazy" decoding="async"
+              alt="Cora's conversation, a Claude Code pane, waiting for your answer: her summary of the checks she ran, then a card, Cora asks you 3 questions. The first, shall I submit the delivery now, offers Submit now, Wait for the screenshots and Other as large buttons, with Next.">
+          </picture>
+        </div>
+        <figcaption><b>Claude asks.</b> Its questions as buttons, answered with a tap.</figcaption>
+      </figure>
+      <figure class="phones__item">
+        <div class="phone">
+          <picture class="phone__screen">
+            <source type="image/avif" data-crop="mobile-permission" srcset="img/mobile-permission-300.avif?v=eae4e0fa5d 300w, img/mobile-permission-600.avif?v=646770fa3e 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <source type="image/webp" data-crop="mobile-permission" srcset="img/mobile-permission-300.webp?v=b16dde836f 300w, img/mobile-permission-600.webp?v=09a5bc1adb 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <img data-crop="mobile-permission" src="img/mobile-permission-300.webp?v=b16dde836f" width="300" height="649" loading="lazy" decoding="async"
+              alt="Ben's conversation: the files he read and edited, one line each, then a card, Ben asks for your permission. Bash, run the window ops' tests, with the command pnpm vitest run src/lib/remoteControl.test.ts, and the buttons Deny and Allow.">
+          </picture>
+        </div>
+        <figcaption><b>A permission.</b> What it will run, with Allow and Deny.</figcaption>
+      </figure>
+      <figure class="phones__item">
+        <div class="phone">
+          <picture class="phone__screen">
+            <source type="image/avif" data-crop="mobile-shared" srcset="img/mobile-shared-300.avif?v=c655e95e88 300w, img/mobile-shared-600.avif?v=d9ffebbec0 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <source type="image/webp" data-crop="mobile-shared" srcset="img/mobile-shared-300.webp?v=9609310a19 300w, img/mobile-shared-600.webp?v=c8a5561c17 600w" sizes="(min-width: 1180px) 246px, (min-width: 960px) calc(25vw - 50px), (min-width: 600px) 246px, 214px" width="300" height="649">
+            <img data-crop="mobile-shared" src="img/mobile-shared-300.webp?v=9609310a19" width="300" height="649" loading="lazy" decoding="async"
+              alt="The Shared screen: a picture Cora shared from hangar-ai an hour ago, the For you screen in dark mode, with an Open button; under it, lighthouse.html, a Lighthouse report Mia shared from storefront.">
+          </picture>
+        </div>
+        <figcaption><b>Shared.</b> The images and files agents send you.</figcaption>
+      </figure>
+    </div>
+    <p class="phones__note">Hangar Mobile running on sample projects.</p>
+
+    <div class="mpoints">
+      <div class="mpoint">
+        <h3>Everything that waits for you</h3>
+        <p>
+          <b>For you</b> gathers, across every project, the agents asking for a permission or an answer,<span
+          class="wide-only"> the questions an orchestrator handed back to you,</span> and the deliveries ready to land.
+        </p>
+      </div>
+      <div class="mpoint">
+        <h3>Answer and approve</h3>
+        <p>
+          Read any pane's screen as it updates, answer an agent<span class="wide-only">, press <kbd>Esc</kbd>
+          or <kbd>Enter</kbd></span>, attach a photo or a file. A permission shows what it will do, the command
+          or the file, with Allow and Deny.
+        </p>
+      </div>
+      <div class="mpoint">
+        <h3>A real chat with Claude</h3>
+        <p>
+          A Claude Code pane opens as a conversation<span class="wide-only">: your messages, Claude's answers
+          with their formatting, one line per action</span>. Its questions come as large buttons, and your answer
+          reaches the session on the PC as if you had typed it there.<span class="wide-only"> Codex, Gemini CLI
+          and shells keep the terminal view.</span>
+        </p>
+      </div>
+      <div class="mpoint">
+        <h3>Files and notifications</h3>
+        <p>
+          Agents can send you images and files<span class="wide-only">, a screenshot or a report</span>, which
+          wait under <b>Shared</b>. Notifications reach the phone even with the app closed, sent by your PC itself.
+        </p>
+      </div>
+      <div class="mpoint">
+        <h3>A few days away</h3>
+        <p>
+          <b>Since your last visit</b> shows what happened while you were away, kept for 30 days. Hangar can keep
+          the PC from going to sleep, and start when you log in<span class="wide-only">, with your workspaces
+          and Hangar Mobile</span>.
+        </p>
+      </div>
+      <div class="mpoint">
+        <h3>One agent for every project</h3>
+        <p>
+          The project manager follows all your workspaces: ask it where they stand, or have it pass an
+          instruction to a project's orchestrator, waking a sleeping workspace.<span class="wide-only"> It speaks
+          up only for what waits for you, and never writes code.</span> Open it from the top of the sidebar, or
+          the phone's <b>Manager</b> tab.
+        </p>
+      </div>
+    </div>
+
+    <div class="reach">
+      <div class="reach__card">
+        <h3>Private, through Tailscale</h3>
+        <p>
+          Hangar serves Hangar Mobile itself, and you add it to the Home Screen of an iPhone or an Android
+          phone. It listens on <code>127.0.0.1</code> only: <a href="https://tailscale.com/">Tailscale</a>, a
+          free app that links your own devices over a private network, is the only way in, over HTTPS<span
+          class="wide-only"> and only from your devices</span>. Each phone pairs with a one-time code<span
+          class="wide-only">, and you can revoke it from the PC</span>.
+        </p>
+      </div>
+      <div class="reach__card">
+        <h3>Set it up once, in about a minute</h3>
+        <ol class="reach__steps">
+          <li>Install Tailscale on the PC and on the phone, signed in to the same account.</li>
+          <li>In Hangar, under <b>Settings → Mobile</b>, turn Hangar Mobile on, then HTTPS access.</li>
+          <li>Scan the QR code with the phone, and add Hangar to its Home Screen.</li>
+        </ol>
+        <a class="reach__more" href="https://github.com/simnJS/hangar-ai#hangar-mobile">Every step in the README</a>
+      </div>
+    </div>
+    <p class="reach__fine">
+      Your PC stays on, with Hangar open. On an iPhone, notifications need iOS 16.4 or later and the app
+      opened from the Home Screen. Merging a delivery is still done on the PC.
+    </p>
+  </div>
+</section>
+
 <!-- Demo ─────────────────────────────────────────────────────────── -->
 <section class="demo" id="demo" aria-labelledby="demo-title">
   <div class="wrap">
@@ -402,7 +544,7 @@
 <section class="features" id="features" aria-labelledby="features-title">
   <div class="wrap">
     <header class="head">
-      <h2 class="head__title" id="features-title">Everything else in 1.0</h2>
+      <h2 class="head__title" id="features-title">Everything else</h2>
       <p class="head__lede wide-only">
         Hangar.AI started as a way to tile agents in one window. Here is what it grew around them.
       </p>
@@ -625,7 +767,8 @@
           <p>
             Claude Code, Codex, Gemini CLI and OpenCode, plus any shell. The orchestrator and its
             workers need Claude Code. Hangar.AI runs on Windows (64-bit), macOS (Apple Silicon
-            and Intel) and Linux (x86-64).
+            and Intel) and Linux (x86-64), and <a href="#mobile">Hangar Mobile</a> on an iPhone or an
+            Android phone, from its Home Screen.
           </p>
         </div>
       </details>
@@ -656,10 +799,32 @@
             settings and statistics stay in the app's data folder.
           </p>
           <p>
-            Hangar goes online for three things: checking GitHub for updates, downloading the
-            dictation model from Hugging Face once if you turn local dictation on, and Groq, only if
-            you pick it for dictation or for the optional cleanup of a transcript. Your agents talk
-            to their providers exactly as they do outside Hangar.
+            Hangar goes online for four things: checking GitHub for updates, downloading the
+            dictation model from Hugging Face once if you turn local dictation on, Groq, only if
+            you pick it for dictation or for the optional cleanup of a transcript, and Hangar Mobile's
+            notifications, once you turn them on, through your phone's push service, encrypted for
+            that phone alone. Your agents talk to their providers exactly as they do outside Hangar.
+          </p>
+          <p>
+            Hangar Mobile is off until you turn it on. It listens on <code>127.0.0.1</code> only, and
+            only your own devices reach it, through Tailscale.
+          </p>
+        </div>
+      </details>
+
+      <details id="faq-mobile">
+        <summary>What does Hangar Mobile need?</summary>
+        <div class="qa__a">
+          <p>
+            Hangar open on your PC, which stays on, and Tailscale, a free app, on the PC and on the
+            phone, signed in to the same account. There is no app store, no account with us and no
+            server of ours in between: Hangar serves the app itself, and you add it to the phone's Home
+            Screen. On an iPhone, notifications need iOS 16.4 or later.
+          </p>
+          <p>
+            From the phone you answer, approve and chat; merging a delivery is still done on the PC.
+            The <a href="https://github.com/simnJS/hangar-ai#hangar-mobile">README</a> walks through
+            the set-up, which takes about a minute.
           </p>
         </div>
       </details>

@@ -6,7 +6,7 @@
 
 <p align="center">
   Run Claude Code, Codex, Gemini CLI and OpenCode side by side in one window,<br>
-  sharing a task board and a memory over MCP.
+  sharing a task board and a memory over MCP, and follow and steer them from your phone.
 </p>
 
 <p align="center">
@@ -18,6 +18,7 @@
 <p align="center">
   <a href="https://hangar.simnjs.fr">Website</a> ·
   <a href="https://hangar.simnjs.fr/demo/">Browser demo</a> ·
+  <a href="#hangar-mobile">Hangar Mobile</a> ·
   <a href="#install">Download</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://discord.gg/hangarai">Discord</a>
@@ -31,16 +32,31 @@ Hangar.AI is an open-source desktop app for Windows, macOS and Linux, built with
 and React. It runs the coding agents you already use, each in a real terminal, and gives
 them a shared place to coordinate.
 
+With **Hangar Mobile**, you follow and steer them from your phone while Hangar keeps running
+on your PC: see what waits for you in every project, answer an agent, allow or deny a
+permission, and reply to Claude's questions with a tap in a real chat. Hangar serves it
+itself, through your own Tailscale network: no app store, no account and no server of ours.
+[Set it up](#hangar-mobile) in about a minute.
+
+<p align="center">
+  <img src="assets/hangar-mobile.webp" width="820" alt="Hangar Mobile on three iPhone screens. For you: four things wait, Ben and Cora waiting for an answer, each with an Answer button, and a question for you from an orchestrator. A chat with Cora, a Claude Code agent, who asks three questions; the first, shall I submit the delivery now, offers Submit now, Wait for the screenshots and Other as large buttons. A chat with Ben, who asks permission to run pnpm vitest on a test file, with Deny and Allow buttons.">
+</p>
+
+<p align="center"><sub>Hangar Mobile on its sample projects.</sub></p>
+
 ## Why Hangar
 
 Running several coding agents at once usually means a pile of terminal windows. You lose
 track of which one is waiting for you, two of them edit the same file, and none of them
 knows what the others are doing.
 
-Hangar keeps them in one window:
+Hangar keeps them in one window, and on your phone:
 
 - **One window, many agents.** Up to 16 terminals per workspace. Each pane shows whether
   its agent is working, waiting for your answer, or done.
+- **On your phone (new in 1.1).** Hangar Mobile lists what waits for you in every project.
+  Answer an agent, allow a permission or reply to Claude's questions from the phone, while
+  the agents keep working on your PC.
 - **A shared board.** Agents read and write a kanban board per workspace over MCP. Claims
   are atomic, so two agents cannot take the same task.
 - **A shared memory.** Facts one agent records are there for the next session, in any
@@ -66,6 +82,27 @@ settings. It is not a model provider, and it has no online service of its own.
 - [License](#license)
 
 ## Features
+
+### On your phone: Hangar Mobile
+
+Follow and steer your projects from your phone while Hangar keeps running on your PC (new
+in 1.1, with a real chat since 1.2):
+
+- **For you** lists what waits for you in every project: an agent asking for a permission,
+  a question from an orchestrator, a delivery ready to land.
+- **A real chat.** A Claude Code pane, and the project manager, open as a conversation:
+  your messages, Claude's answers with their formatting, and one line per action that opens
+  its detail. Codex, Gemini CLI and shells keep the terminal view.
+- **Claude's questions as buttons**, several choices when it allows them, and "Other" with a
+  text field. Your answer reaches the session on the PC as if you had typed it there.
+- **Permissions** show the tool and what it will do (the command, the file), with Allow and
+  Deny.
+- **Files and notifications.** Agents share images and files with you through
+  `phone_share`, and notifications reach the phone even with the app closed.
+- **Since your last visit** shows what happened while you were away.
+
+It reaches your PC through Tailscale, from your own devices only. See
+[Hangar Mobile](#hangar-mobile) to set it up.
 
 ### Orchestrator mode
 
@@ -116,6 +153,25 @@ Claude Code.
     <td align="center"><sub>Orchestration settings of a workspace</sub></td>
   </tr>
 </table>
+
+### Project manager
+
+One agent to talk to instead of every project's agents (new in 1.0.3). Open it from the top
+of the sidebar or the command palette: Hangar creates an HQ workspace with its own folder and
+one Claude Code agent (Opus by default) that follows every workspace, with or without an
+orchestrator.
+
+- **Ask it where your projects stand:** agents, boards, what waits for you, deliveries ready
+  to land, each plan's status.
+- **Ask it to pass an instruction on.** It is queued for that project's orchestrator, and a
+  sleeping workspace wakes up.
+- **It speaks up only for what waits for you:** an agent waiting for an answer or a
+  permission, a task marked needs-you, a delivery ready to land, a board whose tasks are all
+  done.
+
+It keeps a tracker of what you want from each project, handed back after every compaction.
+It never writes code and never acts on its own. On your phone, Hangar Mobile opens it as a
+chat.
 
 ### An interface built like an IDE
 
@@ -239,6 +295,11 @@ images and files agents share with you, and see what happened since your last vi
 Notifications reach the phone even with the app closed. Merging a delivery is still done
 on the PC.
 
+A Claude Code pane, and the project manager, open as a conversation rather than a copy of
+the terminal: your messages, Claude's answers, one line per action. When Claude asks you
+something, each question shows with its options as large buttons, and a **Terminal** button
+still shows any pane's raw screen. Codex, Gemini CLI and shells keep the terminal view.
+
 It is a web app that Hangar itself serves, and that you add to the phone's Home Screen.
 There is no app store, no account and no server of ours in between.
 
@@ -305,6 +366,7 @@ keeps a backup the first time it writes a file. OpenCode is not in the panel yet
 | `worker_spawn`, `worker_list`, `worker_stop`, `delivery_submit`, `delivery_status` | Orchestration. The orchestrator starts, lists and stops workers. A worker hands in its branch for check, review and merge. |
 | `model_show`, `model_snapshot`, `model_close` | Open a 3D model in the preview panel, render it to an image to check it, and close it. |
 | `phone_share` | Send you a file on your phone through [Hangar Mobile](#hangar-mobile): a screenshot, a render, a report you asked to see. |
+| `project_list`, `project_status`, `project_send` | The [project manager](#project-manager) only: list every project, read where one stands, and queue an instruction for its orchestrator. |
 
 You can test the server by hand from a build:
 
