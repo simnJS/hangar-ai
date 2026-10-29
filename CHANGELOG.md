@@ -8,6 +8,23 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.5.0] - 2026-10-29
+
+- **See the app an agent is building, on the phone.** In Hangar Mobile, a project whose
+  worker runs a dev server shows **See the app**: it opens full screen, live, with hot
+  reload, and a button to open it in Safari. Workers' servers are found by themselves
+  on their own ports. Under **Settings → Mobile** you can add ports of your own for
+  each workspace, such as your own `pnpm dev`.
+  - Each app gets an HTTPS port of its own on your Tailscale address (8443 to 8448).
+    Only your paired phones get through, and the dev server never sees the phone's
+    session.
+  - The first time an app is opened, Hangar adds that port to Tailscale Serve, which
+    keeps it after a restart.
+- **Merge from the phone.** A delivery ready to merge opens on the phone with the files
+  it changes, their diff, the check's result and the review's verdict. **Merge** lands
+  it, or says what stands in the way. **Send back** gives the worker an instruction to
+  fix before it delivers again.
+
 ## [1.4.0] - 2026-10-29
 
 - **Stats on the phone.** Hangar Mobile has a **Stats** tab with your agents' usage. Your
