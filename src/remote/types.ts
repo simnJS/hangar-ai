@@ -78,7 +78,12 @@ export interface RemoteScreen {
   text: string;
 }
 
-/** remote_send: typed as the person; an asleep or closed workspace is opened first. */
+/**
+ * remote_send: typed as the person; an asleep or closed workspace is opened
+ * first. A Claude Code pane not up yet — asleep, or resuming after a wake —
+ * gets its text through the hangar-bridge queue, submitted once its session
+ * is ready (`queued`); keys, or text without Enter, are refused there.
+ */
 export interface RemoteSendArgs {
   pane: string;
   text?: string;
@@ -88,15 +93,35 @@ export interface RemoteSendArgs {
 }
 export interface RemoteSent {
   sent: true;
+  /** Held for a Claude Code session that is not up yet. */
+  queued?: true;
 }
 
-/** remote_permission: refused unless the pane is waiting. */
+/**
+ * remote_permission: refused unless the pane is waiting. Its project asleep,
+ * it is woken, and refused all the same: no dialog outlives a sleep.
+ */
 export interface RemotePermissionArgs {
   pane: string;
   allow: boolean;
 }
 export interface RemoteAnswered {
   answered: true;
+  /** remote_answer to a pane not up yet: the answers wait in the queue, as a message. */
+  queued?: true;
+}
+
+/**
+ * remote_wake: wakes a project asleep, as a click on the PC does — its
+ * agents resume their sessions. `waking` is false when it was not asleep;
+ * remote_state says when it is awake.
+ */
+export interface RemoteWakeArgs {
+  /** The project's id or name. */
+  workspace: string;
+}
+export interface RemoteWoken {
+  waking: boolean;
 }
 
 /** remote_manager: refused with "Open the project manager on the PC" without one. */

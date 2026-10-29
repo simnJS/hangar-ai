@@ -360,7 +360,8 @@ export function createClient(options: ClientOptions = {}) {
     state: () => call<RemoteState>("state", {}),
     screen: (pane: string, lines?: number) =>
       call<Screen>("screen", lines === undefined ? { pane } : { pane, lines }),
-    send: (args: SendArgs) => call<{ sent: boolean }>("send", args, { retries: 1 }),
+    /** `queued`: held for a Claude Code that is not up yet, its project asleep or waking. */
+    send: (args: SendArgs) => call<{ sent: boolean; queued?: boolean }>("send", args, { retries: 1 }),
     permission: (pane: string, allow: boolean) =>
       call<{ answered: boolean }>("permission", { pane, allow }, { retries: 1 }),
     manager: (text: string) => call<{ sent: boolean }>("manager", { text }, { retries: 1 }),
@@ -372,6 +373,8 @@ export function createClient(options: ClientOptions = {}) {
       call<{ answered: boolean }>("answer", { pane, toolUseId, answers }, { retries: 1 }),
     history: (since?: number) =>
       call<{ entries: HistoryEntry[] }>("history", since === undefined ? {} : { since }),
+    /** Wakes a project asleep; `waking` is false when it was not. The state says when it is awake. */
+    wake: (projectId: string) => call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1 }),
 
     shares: (since?: number) =>
       request(

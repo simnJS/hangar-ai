@@ -890,6 +890,25 @@ img {
   margin-left: auto;
 }
 
+/* A project asleep: the card's top leads to the project, its foot wakes it. */
+.project--asleep {
+  padding: 0;
+}
+
+.project--asleep:active {
+  background: var(--surface);
+}
+
+.project__link {
+  display: block;
+  padding: 16px 16px 12px;
+  border-radius: var(--r-card) var(--r-card) 0 0;
+}
+
+.project__link:active {
+  background: var(--raised);
+}
+
 .project__team {
   margin-top: 4px;
   color: var(--fg-2);
@@ -1003,6 +1022,63 @@ img {
 .asleep .icon {
   --icon: 20px;
   margin-top: 1px;
+}
+
+.asleep__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.asleep__title {
+  color: var(--fg-hi);
+  font-weight: 600;
+}
+
+.asleep__error {
+  color: var(--danger);
+  font-size: 14px;
+}
+
+/* Waking: a spinner where the moon was, until the PC shows it awake. */
+.asleep--waking .spinner {
+  margin-top: 3px;
+  color: var(--accent-text);
+}
+
+.asleep--waking .asleep__body {
+  gap: 4px;
+}
+
+/* The foot of a card in the list: the card says why, the foot only acts. */
+.asleep--compact {
+  justify-content: flex-end;
+  align-items: center;
+  margin: 0;
+  padding: 0 16px 16px;
+  border-radius: 0;
+  background: none;
+}
+
+.asleep--compact .asleep__body {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.asleep--compact.asleep--waking .asleep__body {
+  flex: none;
+}
+
+.asleep--compact .asleep__error {
+  flex: 1;
+}
+
+.asleep--compact.asleep--waking .spinner {
+  margin-top: 0;
 }
 
 .role {

@@ -1,6 +1,7 @@
 import { isClaude } from "../chat";
 import { EmptyState, PcChip } from "../components/Chrome";
 import { Icon } from "../components/Icon";
+import { WakeUp } from "../components/Wake";
 import { t } from "../i18n";
 import { locatePane } from "../model";
 import { useRemoteContext } from "../remote";
@@ -15,7 +16,7 @@ import { Console } from "./Console";
 
 /** A pane of a project, opened from the project or from a card. */
 export function PaneScreen({ id }: { id: string }) {
-  const { state, client } = useRemoteContext();
+  const { state, client, noteWaking } = useRemoteContext();
   const located = state ? locatePane(state, id) : null;
   const paneId = located?.pane.id ?? id;
   const name = located?.pane.name ?? id;
@@ -29,18 +30,16 @@ export function PaneScreen({ id }: { id: string }) {
       name={name}
       where={located?.project.name ?? ""}
       activity={located?.pane.activity ?? null}
-      send={(text) => client.send({ pane: paneId, text, submit: true })}
+      send={async (text) => {
+        const sent = await client.send({ pane: paneId, text, submit: true });
+        // Sending to a project asleep wakes it on the PC.
+        if (located?.project.asleep) noteWaking(located.project.id);
+        return sent;
+      }}
       placeholder={t("composer.placeholder", { name })}
       workspaceId={located?.project.id}
       back={located ? { name: "project", id: located.project.id } : { name: "projects" }}
-      notice={
-        located?.project.asleep ? (
-          <p className="asleep">
-            <Icon name="moon" />
-            {t("project.asleepHint")}
-          </p>
-        ) : undefined
-      }
+      notice={located ? <WakeUp project={located.project} /> : undefined}
     />
   );
 }

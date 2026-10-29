@@ -5,12 +5,14 @@ import { usePolling } from "./hooks";
 import { mergeShares } from "./model";
 import { keepMockApart, load, loadJson, loadNumber, save } from "./storage";
 import { parseVisit, touchVisit, type Visit } from "./visit";
+import { failWake, settleWakes, startWake, type Wakes } from "./wake";
 
 /**
  * The app's link to the PC: the client, whether this phone is paired, the
- * PC's state polled every 2 s, what agents shared, and since when the PC has
- * not answered. The last state and the time of the last answer are kept on
- * the phone, so the app opens on what it last knew even with the PC away.
+ * PC's state polled every 2 s, what agents shared, the projects being woken,
+ * and since when the PC has not answered. The last state and the time of the
+ * last answer are kept on the phone, so the app opens on what it last knew
+ * even with the PC away.
  */
 
 export interface Boot {
@@ -60,6 +62,12 @@ export interface Remote {
   connection: Connection;
   shares: Share[];
   visit: Visit;
+  /** Projects asked to wake, until the PC shows them awake (wake.ts). */
+  wakes: Wakes;
+  /** Wakes a project asleep; a failure lands in `wakes`. */
+  wake: (projectId: string) => Promise<void>;
+  /** Something sent to a project asleep wakes it on the PC: it says so here too. */
+  noteWaking: (projectId: string) => void;
   pair: (code: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -82,6 +90,7 @@ export function useRemote(boot: Boot): Remote {
   const [shares, setShares] = useState<Share[]>(() => loadJson<Share[]>("shares") ?? []);
   const [connection, setConnection] = useState<Connection>(() => client.connection());
   const [visit, setVisit] = useState<Visit>(() => touchVisit(parseVisit(load("visit")), Date.now()));
+  const [wakes, setWakes] = useState<Wakes>({});
   const sharesRef = useRef(shares);
   sharesRef.current = shares;
 
@@ -146,6 +155,7 @@ export function useRemote(boot: Boot): Remote {
     try {
       const next = await client.state();
       setState(next);
+      setWakes((current) => settleWakes(current, next.projects));
       if (Date.now() - lastKept.current >= 10_000) {
         lastKept.current = Date.now();
         save("state", JSON.stringify(next));
@@ -156,6 +166,25 @@ export function useRemote(boot: Boot): Remote {
   }, [client]);
 
   usePolling(refresh, 2_000, paired === true);
+
+  const noteWaking = useCallback((projectId: string) => {
+    setWakes((current) => startWake(current, projectId, Date.now()));
+  }, []);
+
+  const wake = useCallback(
+    async (projectId: string) => {
+      noteWaking(projectId);
+      try {
+        await client.wake(projectId);
+      } catch (error) {
+        setWakes((current) => failWake(current, projectId, error, Date.now()));
+        return;
+      }
+      // Awake on the PC within a render: the next state says so.
+      await refresh().catch(() => {});
+    },
+    [client, noteWaking, refresh],
+  );
 
   // The banner needs to know when the PC went quiet, polls or not.
   usePolling(
@@ -192,5 +221,5 @@ export function useRemote(boot: Boot): Remote {
     30_000,
   );
 
-  return { client, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, pair, refresh };
+  return { client, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, wakes, wake, noteWaking, pair, refresh };
 }

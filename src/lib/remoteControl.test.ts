@@ -71,6 +71,12 @@ interface Rig {
   screen: string[];
   /** Panes with a terminal; the others have none until their workspace opens. */
   live: Set<string>;
+  /** What went to the hangar-bridge queue, as `pane:text`. */
+  queued: string[];
+  /** Workspaces asleep; opening one wakes it, as the window does. */
+  asleep: Set<string>;
+  /** Workspaces used, as `touch` counts them. */
+  touched: string[];
 }
 
 function rig(workspaces: Workspace[], board: BoardTask[] = [], withManager = true): Rig {
@@ -80,38 +86,47 @@ function rig(workspaces: Workspace[], board: BoardTask[] = [], withManager = tru
   const state = { ...DEFAULT_SETTINGS, workspaces: all, settings: { ...DEFAULT_SETTINGS } } as unknown as AppState;
   const typed: string[] = [];
   const opened: string[] = [];
+  const queued: string[] = [];
+  const touched: string[] = [];
   const screen = ["one", "two", "three"];
   const live = new Set(all.flatMap((ws) => ws.panes.map((p) => p.id)));
+  const asleep = new Set(["asleepWs"]);
+  const open = new Set(all.map((ws) => ws.id).filter((id) => !asleep.has(id)));
   const projects: ProjectsDeps = {
     snapshot: () => state,
     loadBoard: async () => board,
     loadMemory: async () => [],
     isRepo: async () => true,
     activity: getPaneActivity,
-    asleep: (id) => id === "asleepWs",
-    isOpen: (id) => !opened.length && id !== "asleepWs",
+    asleep: (id) => asleep.has(id),
+    isOpen: (id) => open.has(id),
     journal: () => [],
   };
   const deps = {
     snapshot: () => state,
     enabled: () => false,
+    // Its terminals mount at once: the shells start, the agents come later.
     openWorkspace: (id: string) => {
       opened.push(id);
+      open.add(id);
+      asleep.delete(id);
       for (const ws of all) if (ws.id === id) for (const p of ws.panes) live.add(p.id);
     },
     isOpen: projects.isOpen,
     asleep: projects.asleep,
-    touch: () => undefined,
+    touch: (id: string) => void touched.push(id),
     terminal: async (id: string) =>
       live.has(id)
         ? { paste: (t: string) => void typed.push(`paste:${id}:${t}`), read: (n: number) => screen.slice(-n), applicationCursor: false }
         : null,
     write: async (id: string, data: string) => void typed.push(`write:${id}:${JSON.stringify(data)}`),
+    alive: async (id: string) => live.has(id),
+    enqueue: async (id: string, text: string, from?: string) => void queued.push(from ? `${id}:${text} (from ${from})` : `${id}:${text}`),
     sleep: async () => undefined,
     activity: getPaneActivity,
     projects,
   } as unknown as ControlDeps;
-  return { deps, typed, opened, screen, live };
+  return { deps, typed, opened, screen, live, queued, asleep, touched };
 }
 
 const shop = () =>
@@ -120,7 +135,7 @@ const shop = () =>
 beforeEach(() => {
   journals.manager = [];
   journals.orchestrators = {};
-  for (const id of ["orch", "w1", "sh", "pm", "a", "b"]) {
+  for (const id of ["orch", "w1", "sh", "pm", "a", "b", "noe", "logs"]) {
     clearPaneActivity(id);
     noteBridgeEvent(id, { kind: "end", reason: "test" });
   }
@@ -223,12 +238,12 @@ describe("remote_send", () => {
     expect(typed).toEqual([]);
   });
 
-  it("opens a closed workspace first", async () => {
+  it("opens a closed workspace first, and types into a shell once it runs", async () => {
     const { deps, typed, opened, live } = rig([shop()]);
-    live.delete("w1");
-    await runRemote("remote_send", { pane: "w1", text: "wake" }, deps);
+    live.delete("sh");
+    await runRemote("remote_send", { pane: "term", text: "ls" }, deps);
     expect(opened).toEqual(["shop"]);
-    expect(typed[0]).toBe("paste:w1:wake");
+    expect(typed).toEqual(["paste:sh:ls", 'write:sh:"\\r"']);
   });
 
   it("names an unknown pane", async () => {
@@ -556,6 +571,184 @@ describe("remote_chat", () => {
         ...openCall,
       });
     });
+  });
+});
+
+/** A project put to sleep: none of its panes has a terminal until it opens. */
+const billing = () =>
+  workspace("asleepWs", "billing-api", [
+    { ...pane("noe", "Noé", "orchestrator"), sessionId: "sess-noe" },
+    pane("logs", "logs", undefined, "shell"),
+  ]);
+
+function asleepRig() {
+  const asleep = rig([shop(), billing()]);
+  asleep.live.delete("noe");
+  asleep.live.delete("logs");
+  return asleep;
+}
+
+/** What a pane's Claude Code says once its session is up. */
+const hello = (paneId: string) =>
+  noteBridgeEvent(paneId, { kind: "hello", sessionId: "sess", model: "opus", version: "2.1.0" });
+
+describe("remote_wake", () => {
+  it("wakes a project asleep as a click on the PC does: opened, and counted as used", async () => {
+    const { deps, opened, touched, asleep } = asleepRig();
+    expect(await runRemote("remote_wake", { workspace: "asleepWs" }, deps)).toEqual({ waking: true });
+    expect(opened).toEqual(["asleepWs"]);
+    expect(touched).toContain("asleepWs");
+    expect(asleep.has("asleepWs")).toBe(false);
+  });
+
+  it("finds the project by its name too", async () => {
+    const { deps, opened } = asleepRig();
+    expect(await runRemote("remote_wake", { workspace: "Billing-API" }, deps)).toEqual({ waking: true });
+    expect(opened).toEqual(["asleepWs"]);
+  });
+
+  it("leaves a project that is awake alone", async () => {
+    const { deps, opened, touched } = asleepRig();
+    expect(await runRemote("remote_wake", { workspace: "shop" }, deps)).toEqual({ waking: false });
+    expect(opened).toEqual([]);
+    expect(touched).toEqual([]);
+  });
+
+  it("names an unknown project", async () => {
+    const { deps, opened } = asleepRig();
+    await expect(runRemote("remote_wake", { workspace: "ghost" }, deps)).rejects.toThrow('No project "ghost"');
+    await expect(runRemote("remote_wake", {}, deps)).rejects.toThrow("Name the project");
+    expect(opened).toEqual([]);
+  });
+});
+
+describe("sending to a project asleep", () => {
+  it("queues a message to a Claude Code pane for its session, never typing it into the shell", async () => {
+    const { deps, typed, queued, opened, touched } = asleepRig();
+    expect(await runRemote("remote_send", { pane: "Noé", text: "Ship the invoices" }, deps)).toEqual({
+      sent: true,
+      queued: true,
+    });
+    // As the person's own: no `from`, so the session reads it as typed by them.
+    expect(queued).toEqual(["noe:Ship the invoices"]);
+    expect(typed).toEqual([]);
+    expect(opened).toEqual(["asleepWs"]);
+    expect(touched).toContain("asleepWs");
+  });
+
+  it("keeps queueing while Claude Code resumes in its new terminal, and types once it is up", async () => {
+    const { deps, typed, queued } = asleepRig();
+    await runRemote("remote_wake", { workspace: "asleepWs" }, deps);
+    // The terminal is there, the shell runs, Claude Code has not said hello yet.
+    expect(await runRemote("remote_send", { pane: "Noé", text: "first" }, deps)).toEqual({ sent: true, queued: true });
+    expect(await runRemote("remote_manager", { text: "status?" }, deps)).toEqual({ sent: true });
+    expect(queued).toEqual(["noe:first"]);
+    expect(typed).toEqual(["paste:pm:status?", 'write:pm:"\\r"']);
+
+    hello("noe");
+    expect(await runRemote("remote_send", { pane: "Noé", text: "second" }, deps)).toEqual({ sent: true });
+    expect(queued).toEqual(["noe:first"]);
+    expect(typed.slice(2)).toEqual(["paste:noe:second", 'write:noe:"\\r"']);
+  });
+
+  it("types into a pane the mod reports up, hello or not", async () => {
+    const { deps, typed, queued } = asleepRig();
+    await runRemote("remote_wake", { workspace: "asleepWs" }, deps);
+    act("noe", "asleepWs", "idle");
+    await runRemote("remote_send", { pane: "Noé", text: "hi" }, deps);
+    expect(queued).toEqual([]);
+    expect(typed).toEqual(["paste:noe:hi", 'write:noe:"\\r"']);
+  });
+
+  it("types into a shell pane once its terminal and its shell are there", async () => {
+    const { deps, typed, opened, queued } = asleepRig();
+    let naps = 0;
+    const slow: ControlDeps = {
+      ...deps,
+      openWorkspace: (id) => void opened.push(id),
+      // Its terminal mounts a moment after the workspace opens, its shell a moment later still.
+      terminal: async (id) =>
+        naps >= 1
+          ? { paste: (text: string) => void typed.push(`paste:${id}:${text} after ${naps} naps`), read: () => [], applicationCursor: false }
+          : null,
+      alive: async () => naps >= 3,
+      sleep: async () => void naps++,
+    };
+    expect(await runRemote("remote_send", { pane: "logs", text: "tail app.log" }, slow)).toEqual({ sent: true });
+    expect(opened).toEqual(["asleepWs"]);
+    expect(queued).toEqual([]);
+    expect(typed).toEqual(["paste:logs:tail app.log after 3 naps", 'write:logs:"\\r"']);
+  });
+
+  it("refuses keys to a Claude Code pane not up yet, and wakes it", async () => {
+    const { deps, typed, queued, opened } = asleepRig();
+    await expect(runRemote("remote_send", { pane: "Noé", keys: ["escape"] }, deps)).rejects.toThrow("was asleep");
+    expect(opened).toEqual(["asleepWs"]);
+    await expect(runRemote("remote_send", { pane: "Noé", keys: ["enter"] }, deps)).rejects.toThrow(
+      '"Noé" is resuming its session',
+    );
+    await expect(runRemote("remote_send", { pane: "Noé", text: "draft", submit: false }, deps)).rejects.toThrow(
+      "Nothing was sent",
+    );
+    expect(typed).toEqual([]);
+    expect(queued).toEqual([]);
+  });
+
+  it("without the mod to hold it, wakes the project and asks to send again", async () => {
+    const { deps, typed, queued, opened } = asleepRig();
+    deps.snapshot().settings.claudeBridge = false;
+    await expect(runRemote("remote_send", { pane: "Noé", text: "hi" }, deps)).rejects.toThrow("was asleep");
+    expect(typed).toEqual([]);
+    expect(queued).toEqual([]);
+    expect(opened).toEqual(["asleepWs"]);
+  });
+
+  it("delivers a question's answers through the queue, as the person would write them", async () => {
+    const { deps, typed, queued, opened } = asleepRig();
+    const question = {
+      toolUseId: "toolu_q",
+      questions: [
+        { question: "Which currency?", header: "Currency", multiSelect: false, options: [{ label: "EUR", description: "" }] },
+        {
+          question: "Which colors?",
+          header: "Colors",
+          multiSelect: true,
+          options: [
+            { label: "Red", description: "" },
+            { label: "Blue", description: "" },
+          ],
+        },
+      ],
+    };
+    const read: ChatReader = async () => ({ items: [], older: false, cursor: null, question, openCall: null });
+    const answers = [{ selected: ["EUR"] }, { selected: ["Blue", "Red"], other: "and green" }];
+    expect(
+      await runRemote("remote_answer", { pane: "Noé", toolUseId: "toolu_q", answers }, deps, { read: async () => [] }, read),
+    ).toEqual({ answered: true, queued: true });
+    expect(queued).toEqual(["noe:Which currency?\n→ EUR\n\nWhich colors?\n→ Red, Blue, and green"]);
+    expect(typed).toEqual([]);
+    expect(opened).toEqual(["asleepWs"]);
+  });
+
+  it("wakes the project for a permission, and says nothing waits for one any more", async () => {
+    const { deps, typed, opened } = asleepRig();
+    await expect(runRemote("remote_permission", { pane: "Noé", allow: true }, deps)).rejects.toThrow("was asleep");
+    expect(typed).toEqual([]);
+    expect(opened).toEqual(["asleepWs"]);
+  });
+
+  it("shows a pane asleep with an empty screen, not as gone", async () => {
+    const { deps, opened } = asleepRig();
+    expect(await runRemote("remote_screen", { pane: "Noé" }, deps)).toEqual({
+      paneId: "noe",
+      pane: "Noé",
+      workspace: "billing-api",
+      agent: "claude",
+      activity: null,
+      text: "",
+    });
+    // Reading is not using it.
+    expect(opened).toEqual([]);
   });
 });
 

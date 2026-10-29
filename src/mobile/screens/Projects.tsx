@@ -1,6 +1,7 @@
 import type { Project } from "../api";
 import { AgentCounts, BackBar, EmptyState, Link, PcChip, StateLabel, useNavigation } from "../components/Chrome";
 import { Icon, Logo } from "../components/Icon";
+import { WakeUp } from "../components/Wake";
 import { t, tn } from "../i18n";
 import { fleetOf, orchestratorPane, workersOf } from "../model";
 import { useRemoteContext } from "../remote";
@@ -20,8 +21,14 @@ export function Projects() {
       ) : (
         <ul className="stack section">
           {state.projects.map((project) => (
-            <li key={project.id}>
-              <Link to={{ name: "project", id: project.id }} className="project" label={t("project.open", { name: project.name })}>
+            // Asleep, the card leads to the project and its foot wakes it: a
+            // button cannot sit inside the link.
+            <li key={project.id} className={project.asleep ? "project project--asleep" : undefined}>
+              <Link
+                to={{ name: "project", id: project.id }}
+                className={project.asleep ? "project__link" : "project"}
+                label={t("project.open", { name: project.name })}
+              >
                 <div className="project__head">
                   <span className="project__name">{project.name}</span>
                   <ProjectTag project={project} />
@@ -37,6 +44,7 @@ export function Projects() {
                   </p>
                 )}
               </Link>
+              {project.asleep && <WakeUp project={project} compact />}
             </li>
           ))}
         </ul>
@@ -119,12 +127,7 @@ export function ProjectScreen({ id }: { id: string }) {
       </div>
       <Team project={project} />
 
-      {project.asleep && (
-        <p className="asleep">
-          <Icon name="moon" />
-          {t("project.asleepHint")}
-        </p>
-      )}
+      <WakeUp project={project} />
 
       {project.needsYou.length > 0 && (
         <section className="section">

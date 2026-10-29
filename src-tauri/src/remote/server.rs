@@ -44,6 +44,7 @@ pub const CALLS: &[&str] = &[
     "history",
     "chat",
     "answer",
+    "wake",
 ];
 
 /// The largest call, `send`, carries a prompt; 64 KB is far past any typed
@@ -883,6 +884,7 @@ mod tests {
                 "remote_history",
                 "remote_chat",
                 "remote_answer",
+                "remote_wake",
                 "remote_state",
             ]
         );

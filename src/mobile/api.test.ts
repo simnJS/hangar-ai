@@ -56,6 +56,7 @@ describe("the client's requests", () => {
     await client.manager("where are we?");
     await client.history();
     await client.history(1_000);
+    await client.wake("ws-billing");
     expect(calls.map((call) => [call.path, JSON.parse(String(call.init.body))])).toEqual([
       ["/m/api/call/screen", { pane: "Ben" }],
       ["/m/api/call/screen", { pane: "p-ben", lines: 40 }],
@@ -65,6 +66,7 @@ describe("the client's requests", () => {
       ["/m/api/call/manager", { text: "where are we?" }],
       ["/m/api/call/history", {}],
       ["/m/api/call/history", { since: 1_000 }],
+      ["/m/api/call/wake", { workspace: "ws-billing" }],
     ]);
   });
 

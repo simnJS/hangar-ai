@@ -8,7 +8,7 @@ import { activityHistory, startActivityLog, textOf, type ActivityHistory } from 
 import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
 import { loadProjects, projectsDeps } from "./projects";
-import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers } from "./remoteAnswer";
+import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers, type Choice } from "./remoteAnswer";
 import { isMainWindow } from "./windows";
 import { systemLocale, translate, type TranslateKey, type TranslateParams } from "../i18n";
 import { askedQuestions, describeCall } from "../remote/calls";
@@ -24,8 +24,10 @@ import {
   type RemoteHistory,
   type RemoteKey,
   type RemoteScreen,
+  type RemoteSent,
   type RemoteState,
   type RemoteWaiting,
+  type RemoteWoken,
 } from "../remote/types";
 import type { AppState, Pane, Workspace } from "../types";
 
@@ -45,9 +47,15 @@ import type { AppState, Pane, Workspace } from "../types";
 
 const SCREEN_DEFAULT = 80;
 const NO_MANAGER = "Open the project manager on the PC";
-/** A closed or asleep workspace gets this long to start a terminal for a send. */
-const OPEN_WAIT_MS = 20_000;
-const OPEN_POLL_MS = 500;
+/**
+ * A closed or asleep workspace gets this long to start a pane's shell for a
+ * send: within the 10 s the mobile server gives the window, past which the
+ * phone tries the send again.
+ */
+const OPEN_WAIT_MS = 8_000;
+const OPEN_POLL_MS = 250;
+/** Past this, a Claude Code woken from the phone that never said hello is taken to run without the mod. */
+const RESUME_MS = 120_000;
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -66,6 +74,17 @@ function findPane(state: AppState, ref: unknown): { ws: Workspace; pane: Pane } 
     if (pane) return { ws, pane };
   }
   throw new Error(`No pane "${wanted}" in Hangar.`);
+}
+
+/** A project by id or by name. */
+function findWorkspace(state: AppState, ref: unknown): Workspace {
+  const wanted = typeof ref === "string" ? ref.trim() : "";
+  if (!wanted) throw new Error("Name the project, by id or by name.");
+  const ws =
+    state.workspaces.find((entry) => entry.id === wanted) ??
+    state.workspaces.find((entry) => same(entry.name, wanted));
+  if (!ws) throw new Error(`No project "${wanted}" in Hangar.`);
+  return ws;
 }
 
 /** Since when something waits, when the journals cannot say: the first time it was seen. */
@@ -174,34 +193,126 @@ async function remoteState(deps: ControlDeps): Promise<RemoteState> {
 async function remoteScreen(deps: ControlDeps, args: Record<string, unknown>): Promise<RemoteScreen> {
   const { ws, pane } = findPane(deps.snapshot(), args.pane);
   const lines = typeof args.lines === "number" ? args.lines : SCREEN_DEFAULT;
-  const read = (await runControl("pane_read", { workspace: ws.id, pane: pane.id, lines }, deps)) as {
-    text: string;
-  };
-  return {
+  const screen = {
     paneId: pane.id,
     pane: pane.name,
     workspace: ws.name,
     agent: pane.agent,
     activity: activityOf(pane.id),
-    text: read.text,
   };
+  try {
+    const read = (await runControl("pane_read", { workspace: ws.id, pane: pane.id, lines }, deps)) as {
+      text: string;
+    };
+    return { ...screen, text: read.text };
+  } catch (err) {
+    // Asleep or closed, it shows nothing yet: no reason for the phone to call it gone.
+    if (await deps.terminal(pane.id)) throw err;
+    return { ...screen, text: "" };
+  }
 }
 
 /**
- * Typed as the person: pane_send's path, without when_idle. A workspace that
- * is asleep or closed is opened first, and waited for.
+ * Claude Code panes of a workspace woken from the phone, by id, since when:
+ * their shells start at once and Claude Code resumes in them seconds later,
+ * so until the mod says hello, what is typed lands in the shell. Their
+ * hangar-bridge events take them off (noteBridgeEvent).
+ */
+const resuming = new Map<string, number>();
+
+/** The hangar-bridge queue drains only where the mod runs (Settings › Agents). */
+const queues = (deps: ControlDeps) => deps.snapshot().settings.claudeBridge !== false;
+
+/**
+ * Wakes a workspace asleep, or opens one closed, as a click on the PC does:
+ * its terminals mount, each Claude Code resuming its session, and it counts
+ * as used, so hibernation leaves it alone for its whole delay.
+ */
+function wake(deps: ControlDeps, ws: Workspace) {
+  const starting = deps.asleep(ws.id) || !deps.isOpen(ws.id);
+  deps.openWorkspace(ws.id);
+  deps.touch(ws.id);
+  if (!starting || !queues(deps)) return;
+  const at = Date.now();
+  for (const pane of ws.panes) {
+    if (pane.agent === "claude" && !resuming.has(pane.id) && !getPaneActivity(pane.id)?.bridged) {
+      resuming.set(pane.id, at);
+    }
+  }
+}
+
+/**
+ * A Claude Code pane not up yet: no terminal — its workspace asleep or
+ * closed — or one woken from the phone whose Claude Code has not said hello.
+ */
+async function resumes(deps: ControlDeps, pane: Pane): Promise<boolean> {
+  if (pane.agent !== "claude") return false;
+  if (!(await deps.terminal(pane.id))) return true;
+  const since = resuming.get(pane.id);
+  if (since === undefined) return false;
+  if (getPaneActivity(pane.id)?.bridged || Date.now() - since >= RESUME_MS) {
+    resuming.delete(pane.id);
+    return false;
+  }
+  return true;
+}
+
+/** Nothing was sent to a Claude Code not up yet, said before `wake` changes why. */
+function notUp(deps: ControlDeps, ws: Workspace, pane: Pane): Error {
+  const why = deps.asleep(ws.id)
+    ? `"${ws.name}" was asleep: it is waking up now, its agents resuming their sessions.`
+    : !deps.isOpen(ws.id)
+      ? `"${ws.name}" was not open: its panes are starting now.`
+      : `"${pane.name}" is resuming its session.`;
+  return new Error(`${why} Nothing was sent; send it again in a few seconds.`);
+}
+
+/**
+ * What the person sent a Claude Code not up yet, put in the hangar-bridge
+ * queue, which the session takes once it is ready, as their own words; the
+ * workspace is woken for it. Without text to queue, or without the mod to
+ * take it, nothing is sent.
+ */
+async function hold(deps: ControlDeps, ws: Workspace, pane: Pane, text: string | null): Promise<{ queued: true }> {
+  if (text === null || !queues(deps)) {
+    const error = notUp(deps, ws, pane);
+    wake(deps, ws);
+    throw error;
+  }
+  await deps.enqueue(pane.id, text);
+  wake(deps, ws);
+  return { queued: true };
+}
+
+/**
+ * Typed as the person: pane_send's path, without when_idle.
+ *
+ * A Claude Code pane that is not up — its workspace asleep or closed, or
+ * resuming after the phone woke it — has a shell first and Claude Code
+ * seconds later: typed then, the text runs in the shell, or reaches no
+ * process at all. It is held in the queue instead (`hold`); keys, or text
+ * left unsubmitted, cannot wait there. Any other pane is typed into once its
+ * terminal and its shell are up.
  */
 async function type(
   deps: ControlDeps,
   ws: Workspace,
   pane: Pane,
   input: { text?: string; keys?: string[]; submit?: boolean },
-) {
+): Promise<RemoteSent> {
+  if (await resumes(deps, pane)) {
+    const text = input.text ?? "";
+    const holdable = text.trim() !== "" && !input.keys?.length && input.submit !== false;
+    return { sent: true, ...(await hold(deps, ws, pane, holdable ? text : null)) };
+  }
   if (!(await deps.terminal(pane.id))) {
-    deps.openWorkspace(ws.id);
+    wake(deps, ws);
+    // A terminal mounts before its shell is spawned: what it takes until
+    // then reaches no process.
+    const up = async () => Boolean(await deps.terminal(pane.id)) && (await deps.alive(pane.id));
     for (let waited = 0; waited < OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
       await deps.sleep(OPEN_POLL_MS);
-      if (await deps.terminal(pane.id)) break;
+      if (await up()) break;
     }
   }
   await runControl(
@@ -209,38 +320,54 @@ async function type(
     { workspace: ws.id, pane: pane.id, text: input.text, keys: input.keys, submit: input.submit },
     deps,
   );
+  return { sent: true };
 }
 
-async function remoteSend(deps: ControlDeps, args: Record<string, unknown>): Promise<{ sent: true }> {
+async function remoteSend(deps: ControlDeps, args: Record<string, unknown>): Promise<RemoteSent> {
   const { ws, pane } = findPane(deps.snapshot(), args.pane);
   const keys = Array.isArray(args.keys) ? args.keys.map((key) => String(key).toLowerCase()) : [];
   const bad = keys.find((key) => !REMOTE_KEYS.includes(key as RemoteKey));
   if (bad) throw new Error(`Unknown key "${bad}". One of: ${REMOTE_KEYS.join(", ")}.`);
-  await type(deps, ws, pane, {
+  return type(deps, ws, pane, {
     text: typeof args.text === "string" ? args.text : undefined,
     keys,
     submit: args.submit === false ? false : undefined,
   });
-  return { sent: true };
 }
 
-async function remotePermission(deps: ControlDeps, args: Record<string, unknown>): Promise<{ answered: true }> {
+/** remote_wake: wakes a project asleep; one awake is left as it is. */
+async function remoteWake(deps: ControlDeps, args: Record<string, unknown>): Promise<RemoteWoken> {
+  const ws = findWorkspace(deps.snapshot(), args.workspace);
+  if (!deps.asleep(ws.id)) return { waking: false };
+  wake(deps, ws);
+  return { waking: true };
+}
+
+async function remotePermission(deps: ControlDeps, args: Record<string, unknown>): Promise<RemoteAnswered> {
   if (typeof args.allow !== "boolean") throw new Error('Say whether to allow: "allow" is true or false.');
   const { ws, pane } = findPane(deps.snapshot(), args.pane);
   if (activityOf(pane.id) !== "waiting") {
+    // A sleep stops the agents: no dialog outlives it, and Enter or Escape
+    // typed while it resumes would reach the shell.
+    if (deps.asleep(ws.id)) {
+      wake(deps, ws);
+      throw new Error(
+        `"${ws.name}" was asleep, so "${pane.name}" no longer waits for a permission. ` +
+          "It is waking up now; nothing was sent.",
+      );
+    }
     throw new Error(`"${pane.name}" is not waiting for a permission: nothing was sent.`);
   }
   await type(deps, ws, pane, { keys: [args.allow ? "enter" : "escape"] });
   return { answered: true };
 }
 
-async function remoteManager(deps: ControlDeps, args: Record<string, unknown>): Promise<{ sent: true }> {
+async function remoteManager(deps: ControlDeps, args: Record<string, unknown>): Promise<RemoteSent> {
   const text = typeof args.text === "string" ? args.text : "";
   if (!text.trim()) throw new Error("Nothing to send: give text.");
   const manager = managerOf(deps.snapshot());
   if (!manager) throw new Error(NO_MANAGER);
-  await type(deps, manager.ws, manager.pane, { text });
-  return { sent: true };
+  return type(deps, manager.ws, manager.pane, { text });
 }
 
 /**
@@ -310,6 +437,8 @@ const live = new Map<string, Live>();
 
 /** Keeps what a pane's mod reports of its calls and dialogs (bridge:event). */
 export function noteBridgeEvent(paneId: string, event: BridgeEvent, at = Date.now()) {
+  // Its Claude Code is up, or has quit: either way, no longer resuming.
+  resuming.delete(paneId);
   if (event.kind === "hello" || event.kind === "session" || event.kind === "turn" || event.kind === "end") {
     // A turn that starts or ends, a conversation that starts over: nothing
     // from before still runs or waits.
@@ -444,9 +573,24 @@ const answering = new Set<string>();
 const ANSWER_SCREEN = 120;
 
 /**
+ * The answers as the person would write them, for a session that resumed
+ * after a sleep: its dialog went with the agent the sleep stopped.
+ */
+function answerText(questions: ChatQuestion[], choices: Choice[]): string {
+  return questions
+    .map((question, index) => {
+      const { picked, other } = choices[index];
+      const said = [...picked.map((at) => question.options[at].label), ...(other ? [other] : [])];
+      return `${question.question}\n→ ${said.join(", ")}`;
+    })
+    .join("\n\n");
+}
+
+/**
  * Answers the question a Claude Code pane waits on, through its dialog on the
  * PC (lib/remoteAnswer): only the one its mod reports open, or its
  * transcript shows unanswered, so a phone showing an older one is refused.
+ * A pane not up yet — asleep, or resuming — gets the answers in the queue.
  */
 async function remoteAnswer(
   deps: ControlDeps,
@@ -465,6 +609,9 @@ async function remoteAnswer(
     const page = await read({ sessionId: pane.sessionId, cwd: pane.cwd || ws.cwd });
     const questions = pendingQuestions(liveQuestion(pane.id) ?? page?.question ?? null, page?.items ?? [], toolUseId);
     const choices = choicesOf(questions, args.answers);
+    if (await resumes(deps, pane)) {
+      return { answered: true, ...(await hold(deps, ws, pane, answerText(questions, choices))) };
+    }
     if (!(await deps.terminal(pane.id))) throw new Error(NOT_ON_SCREEN);
     const at = { workspace: ws.id, pane: pane.id };
     await typeAnswers(
@@ -514,6 +661,8 @@ export async function runRemote(
       return remoteChat(asPerson, args, chat);
     case "remote_answer":
       return remoteAnswer(asPerson, args, chat);
+    case "remote_wake":
+      return remoteWake(asPerson, args);
     default:
       throw new Error(`Unknown remote request "${op}".`);
   }

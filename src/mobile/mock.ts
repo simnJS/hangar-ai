@@ -24,8 +24,9 @@ import { chatPage, conversations, type FakeChat } from "./mockChat";
  *
  * Its projects live: a message gets an answer, a permission granted or a
  * question answered sets the agent back to work, and a few seconds later it
- * hands back. Its Claude Code panes have their conversations too
- * (mockChat.ts), which the chat reads page by page.
+ * hands back. billing-api is asleep: woken, or written to, it wakes a
+ * moment later, its message answered then. Its Claude Code panes have their
+ * conversations too (mockChat.ts), which the chat reads page by page.
  *
  * `?mock=<scenario>` shows a state that is hard to come by otherwise:
  * - empty: nothing waits for the person;
@@ -46,6 +47,9 @@ export function scenarioOf(value: string | null): Scenario {
 }
 
 const MIN = 60_000;
+
+/** How long the fake PC takes to wake a project: long enough to see « Réveil en cours… ». */
+export const WAKE_MS = 2_500;
 
 /**
  * The fake PC's VAPID key: a real P-256 point (RFC 8291's example browser
@@ -358,6 +362,30 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
 
   const manager = () => (scenario === "nomanager" ? undefined : world.panes.find((pane) => pane.role === "manager"));
 
+  /** What waits for each project waking up, run once it is awake. */
+  const wakers = new Map<string, (() => void)[]>();
+
+  /** Wakes a project asleep as the PC does, a moment later; false when it is not asleep. */
+  function wake(project: (typeof world.projects)[number], then?: () => void): boolean {
+    if (!project.asleep) return false;
+    const waiting = wakers.get(project.id);
+    if (waiting) {
+      if (then) waiting.push(then);
+      return true;
+    }
+    wakers.set(project.id, then ? [then] : []);
+    setTimeout(() => {
+      project.asleep = false;
+      project.open = true;
+      for (const pane of world.panes) {
+        if (pane.workspaceId === project.id && pane.agent !== "shell" && pane.activity === null) pane.activity = "idle";
+      }
+      for (const run of wakers.get(project.id) ?? []) run();
+      wakers.delete(project.id);
+    }, WAKE_MS);
+    return true;
+  }
+
   function state(): RemoteState {
     const projects: Project[] = world.projects.map((project) => {
       const panes = world.panes.filter((pane) => pane.workspaceId === project.id);
@@ -448,6 +476,20 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
   function send(args: SendArgs): Response {
     const pane = paneById(args.pane);
     if (!pane) return json(400, { error: `No pane named ${args.pane}` });
+    const project = world.projects.find((candidate) => candidate.id === pane.workspaceId);
+    // As the PC does: it wakes the project, and a message waits for its agent to be back; keys cannot.
+    if (project?.asleep) {
+      if (!args.text || !args.submit) {
+        wake(project);
+        return json(400, { error: `"${project.name}" was asleep: it is waking up now` });
+      }
+      const text = args.text;
+      wake(project, () => {
+        say(pane, { kind: "user", text, from: "person", images: 0 });
+        respond(pane, [`> ${text}`], ["⏺ Back. On it."]);
+      });
+      return json(200, { sent: true, queued: true });
+    }
     const interrupt = args.keys?.some((key) => key === "escape" || key === "ctrl+c");
     if (interrupt && pane.activity === "working") {
       clearTimeout(pane.timer);
@@ -608,6 +650,11 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       case "history": {
         const since = typeof args.since === "number" ? args.since : 0;
         return json(200, { entries: world.history.filter((entry) => entry.at > since) });
+      }
+      case "wake": {
+        const project = world.projects.find((candidate) => candidate.id === args.workspace || candidate.name === args.workspace);
+        if (!project) return json(400, { error: `No project "${String(args.workspace)}" in Hangar.` });
+        return json(200, { waking: wake(project) });
       }
       default:
         return json(404, { error: "unknown-op" });
