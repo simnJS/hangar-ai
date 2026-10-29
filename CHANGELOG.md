@@ -8,6 +8,15 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.4.0] - 2026-10-29
+
+- **Stats on the phone.** Hangar Mobile has a **Stats** tab with your agents' usage. Your
+  plan's limits come first, when Claude Code reports them: how much of the 5-hour and
+  weekly windows is used, and when each resets. Below them are the figures of the
+  desktop's statistics page, computed the same way: a period (7, 30 or 90 days, or all),
+  tokens or the API-equivalent cost, a chart per day, and rankings by project, agent and
+  model.
+
 ## [1.3.0] - 2026-10-29
 
 - **Preview any file.** The 3D panel becomes **Preview**: one tab per open file, whatever
