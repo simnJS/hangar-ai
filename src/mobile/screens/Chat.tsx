@@ -329,10 +329,13 @@ function ChatView(props: ChatViewProps) {
         {...props}
         activity={activity}
         aside={
-          <button type="button" className="head-action" onClick={props.openTerminal} aria-label={t("chat.terminalHint")}>
-            <Icon name="terminal" />
-            <span>{t("chat.terminal")}</span>
-          </button>
+          <>
+            {props.app}
+            <button type="button" className="head-action" onClick={props.openTerminal} aria-label={t("chat.terminalHint")}>
+              <Icon name="terminal" />
+              <span>{t("chat.terminal")}</span>
+            </button>
+          </>
         }
       />
 

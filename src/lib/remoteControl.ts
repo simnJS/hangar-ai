@@ -10,6 +10,7 @@ import { managerJournal, type ManagerEvent } from "./managerEvents";
 import { managerOf } from "./orchestration";
 import { loadProjects, projectsDeps } from "./projects";
 import { choicesOf, NOT_ON_SCREEN, pendingQuestions, typeAnswers, type Choice } from "./remoteAnswer";
+import { appsSources, isAppsOp, runApps, type AppsSources } from "./remoteApps";
 import { deliverySources, isDeliveryOp, runDelivery, type DeliverySources } from "./remoteDelivery";
 import { usageStats, type UsageStats } from "./stats";
 import { PERIODS, projectFor, summarize, workspaceRoots, type Measure } from "./statsModel";
@@ -796,12 +797,14 @@ export async function runRemote(
   chat: ChatReader = readTranscript,
   stats: StatsSources = statsSources,
   delivery: DeliverySources = deliverySources,
+  apps: AppsSources = appsSources,
 ): Promise<unknown> {
   // The person asks: not the agents' switch (agentPaneControl) to refuse.
   const asPerson: ControlDeps = { ...deps, enabled: () => true };
   if (isDeliveryOp(op)) {
     return runDelivery(op, args, asPerson, (ws, pane, text) => toWorker(asPerson, ws, pane, text), delivery);
   }
+  if (isAppsOp(op)) return runApps(op, args, asPerson, apps);
   switch (op) {
     case "remote_state":
       return remoteState(asPerson);

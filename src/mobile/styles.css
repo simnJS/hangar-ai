@@ -906,13 +906,47 @@ img {
   margin-left: auto;
 }
 
-/* A project asleep: the card's top leads to the project, its foot wakes it. */
-.project--asleep {
+/* A project asleep, or with an app running: the card's top leads to the
+   project, its foot wakes it or opens the app. */
+.project--split {
   padding: 0;
 }
 
-.project--asleep:active {
+.project--split:active {
   background: var(--surface);
+}
+
+.project__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 16px;
+}
+
+/* « Voir l'app »: the accent's tint, so it reads as the thing to tap without
+   competing with an answer waiting on the same card. */
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 120ms var(--ease);
+}
+
+.app-chip .icon {
+  --icon: 18px;
+}
+
+.app-chip:active {
+  transform: scale(0.98);
+  filter: brightness(0.94);
 }
 
 .project__link {
@@ -1461,6 +1495,31 @@ img {
 
 .head-action:active {
   background: var(--raised);
+}
+
+/* A worker's app: the thing to tap in its header, in the accent. */
+.head-action--app,
+.head-action--app .icon {
+  color: var(--accent-text);
+}
+
+/* Two actions leave the name less room: its project and its state take two
+   lines rather than the project being cut to a letter. */
+.console__head:has(.head-action--app) .console__where {
+  flex-wrap: wrap;
+  row-gap: 0;
+  font-size: 13px;
+}
+
+.console__head:has(.head-action--app) .console__where > span:first-child {
+  max-width: 100%;
+}
+
+/* On the narrowest phones, the state is cut rather than run under the actions. */
+.console__head:has(.head-action--app) .console__where .state {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
 }
 
 .chat__body {
@@ -3865,4 +3924,152 @@ button.share__image {
 
 .logo__active {
   fill: var(--accent);
+}
+
+/* ── An agent's app, full screen ───────────────────────────────── */
+
+/* The app takes the whole screen but a slim bar: back, who it is and on
+   which port, reload, and Safari. */
+.viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.viewer__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--safe-top) calc(4px + var(--safe-right)) 0 calc(4px + var(--safe-left));
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+.app--banner .viewer__bar {
+  padding-top: 0;
+}
+
+.viewer__button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--fg-hi);
+}
+
+.viewer__button .icon {
+  --icon: 22px;
+}
+
+.viewer__button:active {
+  background: var(--raised);
+}
+
+.viewer__button:disabled {
+  color: var(--fg-3);
+  background: transparent;
+}
+
+.viewer__who {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.viewer__name {
+  color: var(--fg-hi);
+  font-size: 16px;
+  font-weight: 620;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer__where {
+  color: var(--fg-3);
+  font-size: 13px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The app's own page: white until it paints, as a browser's would be. */
+.viewer__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.viewer__state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px calc(var(--gutter) + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(var(--gutter) + var(--safe-left));
+  text-align: center;
+  background: var(--bg);
+  color: var(--fg-2);
+}
+
+/* The page on its way: the frame shows through once it paints. */
+.viewer__state--over {
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.viewer__state .spinner {
+  width: 22px;
+  height: 22px;
+  color: var(--accent-text);
+}
+
+.viewer__state > .icon {
+  color: var(--fg-3);
+}
+
+.viewer__state--stopped > .icon {
+  color: var(--waiting);
+}
+
+.viewer__state--refused > .icon,
+.viewer__state--failed > .icon {
+  color: var(--danger);
+}
+
+.viewer__title {
+  color: var(--fg-hi);
+  font-size: 18px;
+  font-weight: 620;
+}
+
+.viewer__text {
+  max-width: 30em;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.viewer__state .btn {
+  margin-top: 8px;
 }

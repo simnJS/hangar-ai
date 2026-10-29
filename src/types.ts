@@ -163,6 +163,12 @@ export interface Workspace {
    * the projects it follows (lib/projects). Absent on every other workspace.
    */
   hq?: boolean;
+  /**
+   * Ports the person lets Hangar Mobile open for this workspace, besides its
+   * workers' port blocks: their own `pnpm dev`, say 5173 (Settings › Mobile,
+   * lib/remoteApps). Absent on every workspace without one.
+   */
+  mobilePorts?: number[];
 }
 
 export interface OrchestrationSettings {

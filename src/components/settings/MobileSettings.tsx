@@ -5,11 +5,15 @@ import { useLocale, useT, type Translator } from "../../i18n";
 import {
   REMOTE_CHANGED,
   TAILSCALE_DOWNLOAD_URL,
+  appPortsOf,
   canPair,
+  checkAppPort,
   formatCountdown,
   formatStamp,
+  hangarPorts,
   newDevices,
   remoteAddress,
+  remoteAppSlots,
   remoteDevices,
   remotePairStart,
   remoteRevoke,
@@ -20,18 +24,23 @@ import {
   secondsLeft,
   sortDevices,
   tailscaleStep,
+  withAppPort,
+  withoutAppPort,
+  type AppPortProblem,
+  type AppSlot,
   type PairStart,
   type RemoteDevice,
   type RemoteStatus,
   type TailscaleStatus,
 } from "../../lib/remote";
+import { useStore } from "../../store";
 import { mobileOptions, setAutostart, setKeepAwake, type MobileOptions } from "./mobileOptions";
 import "./MobileSettings.css";
 
 /**
  * The "Mobile" page: turn Hangar Mobile on, get Tailscale ready, pair a phone,
- * then see and revoke the phones. One step at a time: each block below only
- * appears once the one above it is done.
+ * then see and revoke the phones, and say which apps the phone may open. One
+ * step at a time: each block below only appears once the one above it is done.
  *
  * `MobileView` is the markup, from props alone, so every state can be drawn
  * without the PC's side; `MobileSettings` feeds it from the Tauri commands.
@@ -64,6 +73,24 @@ export interface MobileViewProps {
   onPairClose: () => void;
   onRevokeAsk: (id: string | null) => void;
   onRevoke: (id: string) => void;
+  /** The workspaces whose apps the phone may open, the HQ left out, with the ports the person added. */
+  appProjects: AppProject[];
+  /** Null until the PC has answered. */
+  slots: AppSlot[] | null;
+  /** What is typed in each workspace's port field, by workspace id. */
+  portDrafts: Record<string, string>;
+  /** Why the port tried last could not be added, by workspace id. */
+  portProblems: Record<string, AppPortProblem>;
+  onPortDraft: (workspaceId: string, text: string) => void;
+  onPortAdd: (workspaceId: string) => void;
+  onPortRemove: (workspaceId: string, port: number) => void;
+  onSlotsRefresh: () => void;
+}
+
+export interface AppProject {
+  id: string;
+  name: string;
+  ports: number[];
 }
 
 function Block({
@@ -288,6 +315,140 @@ function DevicesBlock({ props }: { props: MobileViewProps }) {
   );
 }
 
+const PROBLEM_KEY = {
+  invalid: "mobile.appPortInvalid",
+  range: "mobile.appPortRange",
+  hangar: "mobile.appPortHangar",
+  duplicate: "mobile.appPortDuplicate",
+} as const;
+
+/** A sentence with commands in it: each `{name}` becomes `<code>` around its value. */
+function withCode(text: string, values: Record<string, string>): ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, index) =>
+    index % 2 === 1 && part in values ? <code key={index}>{values[part]}</code> : part,
+  );
+}
+
+/**
+ * The ports the phone may open, per workspace: its workers' are found by
+ * themselves, the person adds their own. Only the lists change here; the
+ * window answers the phone from them (lib/remoteApps).
+ */
+function AppsBlock({ props }: { props: MobileViewProps }) {
+  const { t, appProjects, portDrafts, portProblems } = props;
+  return (
+    <Block title={t("mobile.apps")} hint={t("mobile.appsHint")}>
+      {appProjects.length === 0 && (
+        <div className="set-row">
+          <span className="set-row__hint">{t("mobile.appsNone")}</span>
+        </div>
+      )}
+      {appProjects.map((project) => {
+        const draft = portDrafts[project.id] ?? "";
+        const problem = portProblems[project.id];
+        return (
+          <div className="set-row set-row--block mob-app" key={project.id}>
+            <span className="set-row__label">{project.name}</span>
+            <div className="mob-ports">
+              {project.ports.length === 0 && <span className="set-row__hint">{t("mobile.appPortsNone")}</span>}
+              {project.ports.map((port) => (
+                <span className="mob-port" key={port}>
+                  <span className="mob-port__number">{port}</span>
+                  <button
+                    type="button"
+                    className="mob-port__remove"
+                    aria-label={t("mobile.appPortRemove", { port: String(port), name: project.name })}
+                    title={t("mobile.appPortRemove", { port: String(port), name: project.name })}
+                    onClick={() => props.onPortRemove(project.id, port)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <form
+              className="mob-port-add"
+              onSubmit={(event) => {
+                event.preventDefault();
+                props.onPortAdd(project.id);
+              }}
+            >
+              <input
+                className="set-input mob-port-input"
+                inputMode="numeric"
+                placeholder="5173"
+                aria-label={t("mobile.appPortLabel", { name: project.name })}
+                aria-invalid={problem ? true : undefined}
+                value={draft}
+                onChange={(event) => props.onPortDraft(project.id, event.target.value)}
+              />
+              <button type="submit" className="btn" disabled={!draft.trim()}>
+                {t("mobile.appPortAdd")}
+              </button>
+            </form>
+            {problem && (
+              <p className="mob-error mob-port-problem" role="alert">
+                {t(PROBLEM_KEY[problem], { port: draft.trim() })}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </Block>
+  );
+}
+
+/** The slots an app goes through, the apps they show, and what that changes in Tailscale. */
+function SlotsBlock({ props }: { props: MobileViewProps }) {
+  const { t, locale, now, slots } = props;
+  if (!slots) return null;
+  const shown = slots.filter((slot) => slot.app);
+  const taken = slots.filter((slot) => slot.mapping === "taken");
+  return (
+    <Block title={t("mobile.appSlots")} hint={t("mobile.appSlotsHint")}>
+      {shown.length === 0 && (
+        <div className="set-row">
+          <span className="set-row__hint">{t("mobile.appSlotsEmpty")}</span>
+        </div>
+      )}
+      {shown.map((slot) => (
+        <div className="set-row" key={slot.slot}>
+          <span className="set-row__text">
+            <span className="set-row__label">
+              {t("mobile.appSlot", { workspace: slot.app!.workspace, port: String(slot.app!.port) })}
+            </span>
+            <span className="set-row__hint">
+              {t("mobile.appSlotVia", {
+                https: String(slot.httpsPort),
+                date: formatStamp(slot.app!.lastUsed, locale, now),
+              })}
+            </span>
+          </span>
+        </div>
+      ))}
+      <div className="set-row set-row--block mob-step">
+        {taken.map((slot) => (
+          <p className="mob-note" key={slot.slot}>
+            {t("mobile.appSlotTaken", { https: String(slot.httpsPort) })}
+          </p>
+        ))}
+        <p className="mob-note">{t("mobile.appsTailscale")}</p>
+        <p className="mob-note">
+          {withCode(t("mobile.appsTailscaleRemove"), {
+            command: "tailscale serve --https=8443 off",
+            reset: "tailscale serve reset",
+          })}
+        </p>
+        <div className="mob-actions">
+          <button type="button" className="btn btn--ghost" onClick={props.onSlotsRefresh}>
+            {t("mobile.recheck")}
+          </button>
+        </div>
+      </div>
+    </Block>
+  );
+}
+
 function Switch({
   label,
   hint,
@@ -391,6 +552,8 @@ export function MobileView(props: MobileViewProps) {
           <TailscaleBlock props={props} />
           <PairBlock props={props} />
           <DevicesBlock props={props} />
+          <AppsBlock props={props} />
+          <SlotsBlock props={props} />
           <AwayBlock props={props} />
           <Block title={t("mobile.iphone")}>
             <div className="set-row set-row--block mob-step">
@@ -420,6 +583,13 @@ export function MobileSettings() {
   const [busy, setBusy] = useState({ toggle: false, serve: false, pair: false, options: false });
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const { state, updateWorkspace } = useStore();
+  const [slots, setSlots] = useState<AppSlot[] | null>(null);
+  const [portDrafts, setPortDrafts] = useState<Record<string, string>>({});
+  const [portProblems, setPortProblems] = useState<Record<string, AppPortProblem>>({});
+  const appProjects = state.workspaces
+    .filter((ws) => !ws.hq)
+    .map((ws) => ({ id: ws.id, name: ws.name, ports: appPortsOf(ws) }));
 
   // The refresh a pairing compares against: who was there when the code was drawn.
   const known = useRef<Set<string>>(new Set());
@@ -446,6 +616,31 @@ export function MobileSettings() {
     [],
   );
 
+  const refreshSlots = useCallback(() => remoteAppSlots().then(setSlots), []);
+
+  const setPortProblem = (workspaceId: string, problem: AppPortProblem | null) =>
+    setPortProblems(({ [workspaceId]: _was, ...rest }) => (problem ? { ...rest, [workspaceId]: problem } : rest));
+
+  const addPort = (workspaceId: string) => {
+    const project = appProjects.find((entry) => entry.id === workspaceId);
+    if (!project) return;
+    const checked = checkAppPort(portDrafts[workspaceId] ?? "", project.ports, hangarPorts(remote, slots));
+    if ("problem" in checked) {
+      setPortProblem(workspaceId, checked.problem);
+      return;
+    }
+    updateWorkspace(workspaceId, { mobilePorts: withAppPort(project.ports, checked.port) });
+    setPortDrafts(({ [workspaceId]: _typed, ...rest }) => rest);
+    setPortProblem(workspaceId, null);
+  };
+
+  const removePort = (workspaceId: string, port: number) => {
+    const project = appProjects.find((entry) => entry.id === workspaceId);
+    if (!project) return;
+    const left = withoutAppPort(project.ports, port);
+    updateWorkspace(workspaceId, { mobilePorts: left.length ? left : undefined });
+  };
+
   const guard = useCallback((work: () => Promise<unknown>) => {
     setError(null);
     return work().catch((err) => setError(message(err)));
@@ -458,8 +653,8 @@ export function MobileSettings() {
   // Tailscale and the list only matter while Hangar Mobile is on.
   useEffect(() => {
     if (!enabled) return;
-    void guard(() => Promise.all([refreshTailscale(), refreshDevices()]));
-  }, [enabled, guard, refreshTailscale, refreshDevices]);
+    void guard(() => Promise.all([refreshTailscale(), refreshDevices(), refreshSlots()]));
+  }, [enabled, guard, refreshTailscale, refreshDevices, refreshSlots]);
 
   // A phone paired or revoked: the PC says so, the list redraws.
   useEffect(() => {
@@ -542,6 +737,17 @@ export function MobileSettings() {
           await refreshDevices();
         })
       }
+      appProjects={appProjects}
+      slots={slots}
+      portDrafts={portDrafts}
+      portProblems={portProblems}
+      onPortDraft={(workspaceId, text) => {
+        setPortDrafts((drafts) => ({ ...drafts, [workspaceId]: text }));
+        setPortProblem(workspaceId, null);
+      }}
+      onPortAdd={addPort}
+      onPortRemove={removePort}
+      onSlotsRefresh={() => void guard(refreshSlots)}
     />
   );
 }

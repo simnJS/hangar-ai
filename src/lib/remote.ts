@@ -42,6 +42,27 @@ export interface TailscaleStatus {
   serving: boolean;
 }
 
+/**
+ * Mirrors `SlotView` (src-tauri/src/remote/apps.rs): one of the six ports an
+ * app shown on the phone goes through, HTTPS on the tailnet to a listener of
+ * Hangar's on 127.0.0.1.
+ */
+export interface AppSlot {
+  slot: number;
+  /** 8443 to 8448: `https://<pc>.<tailnet>.ts.net:<httpsPort>/`. */
+  httpsPort: number;
+  /** 47822 to 47827: Hangar's listener, which Tailscale Serve proxies to. */
+  localPort: number;
+  /**
+   * What Tailscale Serve does with `httpsPort`: mapped to the slot, free, or
+   * taken by something of the person's, which Hangar leaves alone. Null when
+   * Tailscale could not be asked.
+   */
+  mapping: "mapped" | "free" | "taken" | null;
+  /** The app it shows, while it does; freed 30 minutes after `lastUsed`. */
+  app: { workspaceId: string; workspace: string; port: number; lastUsed: number } | null;
+}
+
 /** The event the PC emits when a phone is paired or revoked. */
 export const REMOTE_CHANGED = "remote:changed";
 
@@ -56,6 +77,67 @@ export const remoteRevoke = (id: string) => invoke<void>("remote_revoke", { id }
 export const remoteTailscale = () => invoke<TailscaleStatus>("remote_tailscale");
 /** Runs `tailscale serve`: only ever from the person's click. */
 export const remoteTailscaleServe = () => invoke<TailscaleStatus>("remote_tailscale_serve");
+
+export const remoteAppSlots = () => invoke<AppSlot[]>("remote_app_slots");
+
+/* ── The apps the phone may open (lib/remoteApps) ───────────────── */
+
+/** Below 1024 a port is the system's, past 65535 there is none. */
+export const APP_PORT_MIN = 1024;
+export const APP_PORT_MAX = 65535;
+
+/**
+ * The slots' listeners, until the PC has listed them: beside the mobile
+ * server's 47821, as apps.rs fixes them.
+ */
+export const DEFAULT_SLOT_PORTS: readonly number[] = [47822, 47823, 47824, 47825, 47826, 47827];
+
+const isAppPort = (port: unknown): port is number =>
+  typeof port === "number" && Number.isInteger(port) && port >= APP_PORT_MIN && port <= APP_PORT_MAX;
+
+/**
+ * The ports the person added to a workspace, as saved: whole ports in range,
+ * each once, in order. Anything else in the file is left out.
+ */
+export function appPortsOf(ws: { mobilePorts?: unknown }): number[] {
+  const saved = Array.isArray(ws.mobilePorts) ? ws.mobilePorts : [];
+  return [...new Set(saved.filter(isAppPort))].sort((a, b) => a - b);
+}
+
+/**
+ * Hangar's own ports, which no app may be: the mobile server's, and each
+ * slot's listener (what Tailscale Serve proxies to), which the mobile server
+ * refuses to show anyway.
+ */
+export function hangarPorts(remote: RemoteStatus | null, slots: AppSlot[] | null): number[] {
+  const own = new Set(slots?.length ? slots.map((slot) => slot.localPort) : DEFAULT_SLOT_PORTS);
+  if (remote) own.add(remote.port);
+  return [...own].sort((a, b) => a - b);
+}
+
+/** Why a port cannot be added: not a number, out of range, Hangar's own, already there. */
+export type AppPortProblem = "invalid" | "range" | "hangar" | "duplicate";
+
+/** The port typed, if the person may add it to `list`; why not otherwise. */
+export function checkAppPort(
+  text: string,
+  list: readonly number[],
+  reserved: readonly number[],
+): { port: number } | { problem: AppPortProblem } {
+  const typed = text.trim();
+  if (!/^\d{1,6}$/.test(typed)) return { problem: "invalid" };
+  const port = Number(typed);
+  if (!isAppPort(port)) return { problem: "range" };
+  if (reserved.includes(port)) return { problem: "hangar" };
+  if (list.includes(port)) return { problem: "duplicate" };
+  return { port };
+}
+
+export const withAppPort = (list: readonly number[], port: number): number[] =>
+  [...new Set([...list, port])].sort((a, b) => a - b);
+
+export const withoutAppPort = (list: readonly number[], port: number): number[] =>
+  list.filter((entry) => entry !== port);
 
 /** Where the person is in setting Tailscale up, one step at a time. */
 export type TailscaleStep = "missing" | "stopped" | "unserved" | "ready";

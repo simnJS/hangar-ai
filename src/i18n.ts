@@ -320,7 +320,7 @@ const en = {
   "discord.statusWaitingHint": "Retrying every 15 s; the presence appears on its own",
 
   "settings.catMobile": "Mobile",
-  "mobile.keywords": "phone smartphone iphone android qr code tailscale pair pairing devices remote téléphone appairer appareils",
+  "mobile.keywords": "phone smartphone iphone android qr code tailscale pair pairing devices remote téléphone appairer appareils app apps port ports dev server serveur",
   "mobile.switch": "Hangar Mobile",
   "mobile.switchHint":
     "Follow your agents and answer them from your phone. Nothing is opened on the Internet: only your own devices, through Tailscale, can reach it.",
@@ -372,6 +372,29 @@ const en = {
   "mobile.autostart": "Start Hangar when I log in",
   "mobile.autostartHint":
     "Hangar opens with your session, your workspaces come back, and Hangar Mobile with them if it was on.",
+  "mobile.apps": "Apps on the phone",
+  "mobile.appsHint":
+    "Your phone opens the dev servers your workers start, by itself. Add the ports of your own here, per workspace: 5173 for pnpm dev, say.",
+  "mobile.appsNone": "No workspace yet.",
+  "mobile.appPortsNone": "Its workers' servers only.",
+  "mobile.appPortLabel": "Port to add to {name}",
+  "mobile.appPortAdd": "Add",
+  "mobile.appPortRemove": "Remove port {port} from {name}",
+  "mobile.appPortInvalid": "Type a port number.",
+  "mobile.appPortRange": "A port is a number from 1024 to 65535.",
+  "mobile.appPortHangar": "Port {port} is Hangar's own: Hangar Mobile listens on it.",
+  "mobile.appPortDuplicate": "Port {port} is already in the list.",
+  "mobile.appSlots": "Open on the phone",
+  "mobile.appSlotsHint":
+    "Each app opened gets one of six addresses of its own. One left unused for 30 minutes is freed.",
+  "mobile.appSlotsEmpty": "No app is open on the phone.",
+  "mobile.appSlot": "{workspace} · port {port}",
+  "mobile.appSlotVia": "At HTTPS port {https} · last used {date}",
+  "mobile.appSlotTaken": "Port {https} is used by something else in Tailscale Serve: Hangar leaves it alone.",
+  "mobile.appsTailscale":
+    "The first time an app is opened, Hangar asks Tailscale Serve to answer HTTPS on one more port of this PC's address (8443, then up to 8448), for your tailnet only, and to pass it to Hangar, which lets only your paired phones through. Tailscale keeps these rules after a restart.",
+  "mobile.appsTailscaleRemove":
+    "To remove one: {command} (8444 to 8448 alike). {reset} removes them all, Hangar Mobile's address included, which then has to be turned on again here.",
   "activity.appStarted": "Hangar started",
   "activity.appStopped": "Hangar stopped",
   "activity.landed": "Landed: {title}",
@@ -1799,7 +1822,7 @@ const fr: Record<Key, string> = {
     "Nouvelle tentative toutes les 15 s ; la présence apparaîtra d'elle-même",
 
   "settings.catMobile": "Mobile",
-  "mobile.keywords": "phone smartphone iphone android qr code tailscale pair pairing devices remote téléphone appairer appareils",
+  "mobile.keywords": "phone smartphone iphone android qr code tailscale pair pairing devices remote téléphone appairer appareils app apps port ports dev server serveur",
   "mobile.switch": "Hangar Mobile",
   "mobile.switchHint":
     "Suis tes agents et réponds-leur depuis ton téléphone. Rien n'est ouvert sur Internet : seuls tes propres appareils, via Tailscale, peuvent y accéder.",
@@ -1853,6 +1876,29 @@ const fr: Record<Key, string> = {
   "mobile.autostart": "Lancer Hangar à l'ouverture de ma session",
   "mobile.autostartHint":
     "Hangar s'ouvre avec votre session, vos espaces de travail reviennent, et Hangar Mobile avec eux s'il était activé.",
+  "mobile.apps": "Apps sur le téléphone",
+  "mobile.appsHint":
+    "Ton téléphone ouvre de lui-même les serveurs de dev que lancent tes workers. Ajoute ici les ports des tiens, par workspace : 5173 pour pnpm dev, par exemple.",
+  "mobile.appsNone": "Aucun workspace pour l'instant.",
+  "mobile.appPortsNone": "Les serveurs de ses workers seulement.",
+  "mobile.appPortLabel": "Port à ajouter à {name}",
+  "mobile.appPortAdd": "Ajouter",
+  "mobile.appPortRemove": "Retirer le port {port} de {name}",
+  "mobile.appPortInvalid": "Saisis un numéro de port.",
+  "mobile.appPortRange": "Un port est un nombre de 1024 à 65535.",
+  "mobile.appPortHangar": "Le port {port} est celui de Hangar : Hangar Mobile l'écoute.",
+  "mobile.appPortDuplicate": "Le port {port} est déjà dans la liste.",
+  "mobile.appSlots": "Ouvertes sur le téléphone",
+  "mobile.appSlotsHint":
+    "Chaque app ouverte prend l'une de six adresses à elle. Une adresse inutilisée pendant 30 minutes est libérée.",
+  "mobile.appSlotsEmpty": "Aucune app n'est ouverte sur le téléphone.",
+  "mobile.appSlot": "{workspace} · port {port}",
+  "mobile.appSlotVia": "Sur le port HTTPS {https} · utilisée {date}",
+  "mobile.appSlotTaken": "Le port {https} sert à autre chose dans Tailscale Serve : Hangar n'y touche pas.",
+  "mobile.appsTailscale":
+    "La première fois qu'une app est ouverte, Hangar demande à Tailscale Serve de répondre en HTTPS sur un port de plus de l'adresse de ce PC (8443, puis jusqu'à 8448), pour ton tailnet seulement, et de le passer à Hangar, qui ne laisse entrer que tes téléphones appairés. Tailscale garde ces règles après un redémarrage.",
+  "mobile.appsTailscaleRemove":
+    "Pour en retirer une : {command} (de même pour 8444 à 8448). {reset} les retire toutes, l'adresse de Hangar Mobile comprise, qu'il faudra alors réactiver ici.",
   "activity.appStarted": "Hangar a démarré",
   "activity.appStopped": "Hangar s'est arrêté",
   "activity.landed": "Intégrée : {title}",

@@ -118,6 +118,28 @@ const PATHS = {
   close: <path d="m4 4 8 8M12 4l-8 8" />,
   // Stats: columns on a baseline.
   chart: <path d="M2.25 13.75h11.5M4.5 11V8.25M8 11V3.75M11.5 11V6.25" />,
+  // An agent's app: a browser window.
+  app: (
+    <>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+      <path d="M1.9 5.9h12.2" />
+      <circle cx="4" cy="4.35" r=".35" fill="currentColor" />
+      <circle cx="5.6" cy="4.35" r=".35" fill="currentColor" />
+    </>
+  ),
+  reload: (
+    <>
+      <path d="M13.1 8a5.1 5.1 0 1 1-1.5-3.6" />
+      <path d="M11.9 1.9v2.7H9.2" />
+    </>
+  ),
+  // Out of the app, into the browser.
+  external: (
+    <>
+      <path d="M9.4 2.25h4.35V6.6M13.6 2.4 7.6 8.4" />
+      <path d="M12 9.6v2.9a1.25 1.25 0 0 1-1.25 1.25H3.5a1.25 1.25 0 0 1-1.25-1.25V5.25A1.25 1.25 0 0 1 3.5 4h2.9" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -398,6 +398,58 @@ export interface RemoteReworked {
   sent: true;
 }
 
+/* ── Apps: an agent's dev server, opened on the phone ─────────────── */
+
+/**
+ * Where an app the phone can open comes from: a worker's port block
+ * (HANGAR_PORT_BASE and the 19 after it), or a port the person added to the
+ * workspace in Settings › Mobile.
+ */
+export type RemoteAppSource = "worker" | "custom";
+
+/**
+ * remote_apps: the dev servers the phone may open, every project's (the HQ
+ * is not one), kept to the ports a server listens on right now. The mobile
+ * server asks it too, before it opens one (`/m/api/app/open`).
+ */
+export interface RemoteAppsArgs {
+  /** Only this project's, by id or name; refused when there is no such project. */
+  workspace?: string;
+}
+
+export interface RemoteApp {
+  workspaceId: string;
+  workspace: string;
+  port: number;
+  source: RemoteAppSource;
+  /** source "worker": its pane's name (names are unique across Hangar). */
+  pane?: string;
+  /** source "worker": its board task's title, when the board has it. */
+  task?: string;
+}
+
+export interface RemoteApps {
+  /** By project, as Hangar lists them; a worker's before the person's; by port. */
+  apps: RemoteApp[];
+}
+
+/**
+ * POST /m/api/app/open (not a call: the mobile server answers it, after
+ * asking remote_apps). Refused with `not-allowed` (403) when remote_apps does
+ * not list that port, `not-listening` (409) when nothing answers on it any
+ * more, `refused` (400) with the window's message, `tailscale` (503) with
+ * Tailscale's, `no-free-slot` or `pc-busy` (503).
+ */
+export interface RemoteAppOpenArgs {
+  workspaceId: string;
+  port: number;
+}
+export interface RemoteAppOpened {
+  /** `https://<pc>.<tailnet>.ts.net:<8443…8448>/`: the app at the root of an origin of its own. */
+  url: string;
+  slot: number;
+}
+
 /* ── remote_stats ─────────────────────────────────────────────────── */
 
 export type RemoteStatsPeriod = "7d" | "30d" | "90d" | "all";

@@ -1,4 +1,6 @@
+import { workerApps } from "../apps";
 import { isClaude } from "../chat";
+import { AppButton } from "../components/Apps";
 import { EmptyState, PcChip } from "../components/Chrome";
 import { Icon } from "../components/Icon";
 import { WakeUp } from "../components/Wake";
@@ -16,8 +18,10 @@ import { Console } from "./Console";
 
 /** A pane of a project, opened from the project or from a card. */
 export function PaneScreen({ id }: { id: string }) {
-  const { state, client, noteWaking } = useRemoteContext();
+  const { state, client, noteWaking, apps } = useRemoteContext();
   const located = state ? locatePane(state, id) : null;
+  // A worker's dev server, beside its name.
+  const running = located?.pane.role === "worker" ? workerApps(apps, located.project.id, located.pane.name) : [];
   const paneId = located?.pane.id ?? id;
   const name = located?.pane.name ?? id;
   // Claude Code gets its chat; another agent or a shell, its terminal. A pane
@@ -40,6 +44,7 @@ export function PaneScreen({ id }: { id: string }) {
       workspaceId={located?.project.id}
       back={located ? { name: "project", id: located.project.id } : { name: "projects" }}
       notice={located ? <WakeUp project={located.project} /> : undefined}
+      app={located && running.length > 0 ? <AppButton apps={running} projectId={located.project.id} variant="head" /> : undefined}
     />
   );
 }

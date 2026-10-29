@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ApiError, createClient, type Client, type Connection, type RemoteState, type Share } from "./api";
+import { ApiError, createClient, type App, type Client, type Connection, type RemoteState, type Share } from "./api";
 import { deviceName } from "./device";
 import { usePolling } from "./hooks";
 import { mergeShares } from "./model";
@@ -10,10 +10,13 @@ import { failWake, settleWakes, startWake, type Wakes } from "./wake";
 /**
  * The app's link to the PC: the client, whether this phone is paired, the
  * PC's state polled every 2 s, what agents shared, the projects being woken,
- * and since when the PC has not answered. The last state and the time of the
- * last answer are kept on the phone, so the app opens on what it last knew
- * even with the PC away.
+ * the apps the agents build while a screen shows them, and since when the PC
+ * has not answered. The last state and the time of the last answer are kept
+ * on the phone, so the app opens on what it last knew even with the PC away.
  */
+
+/** The apps listening on the PC are asked for this often: each asks it to knock on every worker's ports. */
+const APPS_POLL_MS = 10_000;
 
 export interface Boot {
   client: Client;
@@ -64,6 +67,11 @@ export interface Remote {
   visit: Visit;
   /** Projects asked to wake, until the PC shows them awake (wake.ts). */
   wakes: Wakes;
+  /**
+   * The dev servers the phone may open, read while a screen shows them;
+   * null before the PC has said, or when it cannot (an older Hangar).
+   */
+  apps: App[] | null;
   /** Wakes a project asleep; a failure lands in `wakes`. */
   wake: (projectId: string) => Promise<void>;
   /** Something sent to a project asleep wakes it on the PC: it says so here too. */
@@ -80,7 +88,8 @@ export function useRemoteContext(): Remote {
   return remote;
 }
 
-export function useRemote(boot: Boot): Remote {
+/** `watchApps`: a screen shows the apps the agents build, which are then read every 10 s. */
+export function useRemote(boot: Boot, { watchApps = false }: { watchApps?: boolean } = {}): Remote {
   const { client } = boot;
   const [paired, setPaired] = useState<boolean | null>(null);
   const [lostPairing, setLostPairing] = useState(false);
@@ -91,6 +100,7 @@ export function useRemote(boot: Boot): Remote {
   const [connection, setConnection] = useState<Connection>(() => client.connection());
   const [visit, setVisit] = useState<Visit>(() => touchVisit(parseVisit(load("visit")), Date.now()));
   const [wakes, setWakes] = useState<Wakes>({});
+  const [apps, setApps] = useState<App[] | null>(null);
   const sharesRef = useRef(shares);
   sharesRef.current = shares;
 
@@ -186,6 +196,19 @@ export function useRemote(boot: Boot): Remote {
     [client, noteWaking, refresh],
   );
 
+  // An older Hangar has no `apps`: nothing to offer, and nothing to say about it.
+  usePolling(
+    async () => {
+      try {
+        setApps((await client.apps()).apps);
+      } catch (error) {
+        if (error instanceof ApiError && error.kind === "refused") setApps(null);
+      }
+    },
+    APPS_POLL_MS,
+    paired === true && watchApps,
+  );
+
   // The banner needs to know when the PC went quiet, polls or not.
   usePolling(
     async () => {
@@ -221,5 +244,5 @@ export function useRemote(boot: Boot): Remote {
     30_000,
   );
 
-  return { client, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, wakes, wake, noteWaking, pair, refresh };
+  return { client, paired, lostPairing, codeRefused, pc, state, connection, shares, visit, wakes, apps, wake, noteWaking, pair, refresh };
 }

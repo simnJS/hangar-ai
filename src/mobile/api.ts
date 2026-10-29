@@ -1,4 +1,7 @@
 import type {
+  RemoteApp as App,
+  RemoteAppOpened as AppOpened,
+  RemoteAppSource as AppSource,
   RemoteDelivery as Delivery,
   RemoteDeliveryBlocking as DeliveryBlocking,
   RemoteDeliveryCheck as DeliveryCheck,
@@ -240,6 +243,10 @@ export type {
   Landed,
 };
 
+/* ── Apps: an agent's dev server, opened on the phone ──────────── */
+
+export type { App, AppOpened, AppSource };
+
 /* ── Errors ────────────────────────────────────────────────────── */
 
 /**
@@ -281,6 +288,11 @@ export function decodeHead(bytes: Uint8Array, partial: boolean): string {
 
 /** How long a call to the window may take: the server gives it 10 s. */
 export const CALL_TIMEOUT_MS = 12_000;
+/**
+ * Opening an app may wait on `tailscale serve`, which the PC gives 30 s the
+ * first time a slot is used.
+ */
+export const OPEN_APP_TIMEOUT_MS = 40_000;
 /** The upload route takes at most this much. */
 export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 /** Without an answer for this long, the PC counts as unreachable. */
@@ -370,7 +382,7 @@ export function createClient(options: ClientOptions = {}) {
         : undefined;
     if (response.status === 503) {
       failed();
-      throw new ApiError("busy", reason ?? "pc-busy", 503);
+      throw new ApiError("busy", reason ?? "pc-busy", 503, message);
     }
     answered();
     if (response.status === 401) {
@@ -450,6 +462,15 @@ export function createClient(options: ClientOptions = {}) {
     /** Sends it back to its worker with what to fix, as the person's own words. */
     rework: (task: string, text: string, merge: string | null) =>
       call<{ sent: boolean }>("rework", merge === null ? { task, text } : { task, text, merge }, { retries: 1 }),
+    /** The dev servers the phone may open, every project's or one's; those listening only. */
+    apps: (workspace?: string) => call<{ apps: App[] }>("apps", workspace === undefined ? {} : { workspace }),
+    /**
+     * Opens an app the PC lists on a slot of its own: where to show it. Not
+     * tried again: a 503 is as often Tailscale, or every slot taken, as the
+     * window being slow, and the viewer says which.
+     */
+    openApp: (workspaceId: string, port: number) =>
+      post("/m/api/app/open", { workspaceId, port }, { timeoutMs: OPEN_APP_TIMEOUT_MS }) as Promise<AppOpened>,
     /** Wakes a project asleep; `waking` is false when it was not. The state says when it is awake. */
     wake: (projectId: string) => call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1 }),
 

@@ -213,6 +213,36 @@ describe("the client's errors", () => {
     expect([error.kind, error.code]).toEqual(["busy", "pc-busy"]);
   });
 
+  it("lists the apps, every project's or one's, and opens one on the mobile server's own route", async () => {
+    const { fetch, calls } = fakeFetch(json(200, { apps: [] }), json(200, { apps: [] }), json(200, { url: "https://pc.ts.net:8443/", slot: 0 }));
+    const client = createClient({ fetch });
+    await client.apps();
+    await client.apps("ws-shop");
+    expect(await client.openApp("ws-shop", 5173)).toEqual({ url: "https://pc.ts.net:8443/", slot: 0 });
+    expect(calls.map((call) => [call.path, JSON.parse(String(call.init.body))])).toEqual([
+      ["/m/api/call/apps", {}],
+      ["/m/api/call/apps", { workspace: "ws-shop" }],
+      ["/m/api/app/open", { workspaceId: "ws-shop", port: 5173 }],
+    ]);
+    expect(calls[2].init.headers).toMatchObject({ "X-Hangar": "1" });
+  });
+
+  it("keeps why an app could not open, a 503 included: Tailscale's words, or every slot taken", async () => {
+    const { fetch, calls } = fakeFetch(
+      json(503, { error: "tailscale", message: "Tailscale is signed out" }),
+      json(503, { error: "no-free-slot" }),
+      json(409, { error: "not-listening" }),
+    );
+    const client = createClient({ fetch });
+    const tailscale = await failure(client.openApp("w", 5173));
+    expect([tailscale.kind, tailscale.code, tailscale.detail]).toEqual(["busy", "tailscale", "Tailscale is signed out"]);
+    expect((await failure(client.openApp("w", 5173))).code).toBe("no-free-slot");
+    const stopped = await failure(client.openApp("w", 5173));
+    expect([stopped.kind, stopped.code, stopped.status]).toEqual(["refused", "not-listening", 409]);
+    // Not tried again: each failure is said as it came.
+    expect(calls).toHaveLength(3);
+  });
+
   it("passes on the PC's reason for any other refusal", async () => {
     const { fetch } = fakeFetch(json(409, { error: "Open the project manager on the PC" }));
     const error = await failure(createClient({ fetch }).manager("hello"));

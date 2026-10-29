@@ -1,4 +1,6 @@
 import type { Project } from "../api";
+import { appsOf } from "../apps";
+import { AppButton, AppList } from "../components/Apps";
 import { AgentCounts, BackBar, EmptyState, Link, PcChip, StateLabel, useNavigation } from "../components/Chrome";
 import { Icon, Logo } from "../components/Icon";
 import { WakeUp } from "../components/Wake";
@@ -6,9 +8,9 @@ import { t, tn } from "../i18n";
 import { fleetOf, orchestratorPane, workersOf } from "../model";
 import { useRemoteContext } from "../remote";
 
-/** Projects: each one's needs, agents, board and plan at a glance. */
+/** Projects: each one's needs, agents, board and plan at a glance, and its app when one runs. */
 export function Projects() {
-  const { state, pc, connection } = useRemoteContext();
+  const { state, pc, connection, apps } = useRemoteContext();
   if (!state) return null;
   return (
     <div className="page">
@@ -20,33 +22,42 @@ export function Projects() {
         <EmptyState title={t("projects.empty")} text={t("projects.emptyHint")} mark={<Logo size={40} />} />
       ) : (
         <ul className="stack section">
-          {state.projects.map((project) => (
-            // Asleep, the card leads to the project and its foot wakes it: a
-            // button cannot sit inside the link.
-            <li key={project.id} className={project.asleep ? "project project--asleep" : undefined}>
-              <Link
-                to={{ name: "project", id: project.id }}
-                className={project.asleep ? "project__link" : "project"}
-                label={t("project.open", { name: project.name })}
-              >
-                <div className="project__head">
-                  <span className="project__name">{project.name}</span>
-                  <ProjectTag project={project} />
-                  <Icon name="chevronRight" className="chevron" />
-                </div>
-                <Attention project={project} />
-                <AgentCounts counts={fleetOf([project]).counts} />
-                {/* An empty board says nothing in the list; the project's own screen shows it. */}
-                {Object.values(project.board).some(Boolean) && <Board project={project} />}
-                {project.planStatus && (
-                  <p className="project__plan">
-                    <b>{t("project.plan")}</b> {project.planStatus}
-                  </p>
+          {state.projects.map((project) => {
+            const running = appsOf(apps, project.id);
+            // Asleep, or with an app running, the card leads to the project
+            // and its foot acts: a button cannot sit inside the link.
+            const split = project.asleep || running.length > 0;
+            return (
+              <li key={project.id} className={split ? "project project--split" : undefined}>
+                <Link
+                  to={{ name: "project", id: project.id }}
+                  className={split ? "project__link" : "project"}
+                  label={t("project.open", { name: project.name })}
+                >
+                  <div className="project__head">
+                    <span className="project__name">{project.name}</span>
+                    <ProjectTag project={project} />
+                    <Icon name="chevronRight" className="chevron" />
+                  </div>
+                  <Attention project={project} />
+                  <AgentCounts counts={fleetOf([project]).counts} />
+                  {/* An empty board says nothing in the list; the project's own screen shows it. */}
+                  {Object.values(project.board).some(Boolean) && <Board project={project} />}
+                  {project.planStatus && (
+                    <p className="project__plan">
+                      <b>{t("project.plan")}</b> {project.planStatus}
+                    </p>
+                  )}
+                </Link>
+                {running.length > 0 && (
+                  <div className="project__foot">
+                    <AppButton apps={running} projectId={project.id} variant="card" />
+                  </div>
                 )}
-              </Link>
-              {project.asleep && <WakeUp project={project} compact />}
-            </li>
-          ))}
+                {project.asleep && <WakeUp project={project} compact />}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -103,7 +114,7 @@ function Board({ project }: { project: Project }) {
 
 /** One project: what it asks of the person, its board, and its panes. */
 export function ProjectScreen({ id }: { id: string }) {
-  const { state } = useRemoteContext();
+  const { state, apps } = useRemoteContext();
   const { navigate } = useNavigation();
   const project = state?.projects.find((candidate) => candidate.id === id);
   if (!state) return null;
@@ -176,6 +187,8 @@ export function ProjectScreen({ id }: { id: string }) {
           </ul>
         </section>
       )}
+
+      <AppList apps={appsOf(apps, project.id)} />
 
       <section className="section">
         <div className="section__head">

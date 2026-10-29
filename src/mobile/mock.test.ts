@@ -23,6 +23,7 @@ describe("the fake PC", () => {
   it("knows its scenarios, and falls back to the usual one", () => {
     expect(scenarioOf("offline")).toBe("offline");
     expect(scenarioOf("blocked")).toBe("blocked");
+    expect(scenarioOf("appstopped")).toBe("appstopped");
     expect(scenarioOf("")).toBe("default");
     expect(scenarioOf(null)).toBe("default");
   });
@@ -331,5 +332,41 @@ describe("the fake PC's delivery ready to merge", () => {
 
   it("has nothing to merge when nothing waits", async () => {
     await expect(settle(fakePc("empty").delivery("t-settings"))).rejects.toMatchObject({ kind: "refused" });
+  });
+
+  it("runs two apps: a worker's, from its port block, and one the person added", async () => {
+    const client = fakePc();
+    const { apps } = await settle(client.apps());
+    expect(apps).toEqual([
+      expect.objectContaining({ workspaceId: "ws-iabench", port: 21040, source: "worker", pane: "Cora" }),
+      { workspaceId: "ws-storefront", workspace: "storefront", port: 4173, source: "custom" },
+    ]);
+    // Cora is a worker of IaBench, as the state says.
+    const state = await settle(client.state());
+    expect(state.projects[0].panes).toContainEqual(expect.objectContaining({ name: "Cora", role: "worker" }));
+    expect((await settle(client.apps("storefront"))).apps.map((app) => app.port)).toEqual([4173]);
+    await expect(settle(client.apps("nowhere"))).rejects.toMatchObject({ kind: "refused", detail: 'No project "nowhere" in Hangar.' });
+  });
+
+  it("opens an app on a page that stands in for it, the first time after a moment", async () => {
+    const client = fakePc();
+    const first = settle(client.openApp("ws-iabench", 21040), 400);
+    await vi.advanceTimersByTimeAsync(1_200);
+    const opened = await first;
+    expect(opened.slot).toBe(0);
+    expect(opened.url.startsWith("data:text/html")).toBe(true);
+    expect(decodeURIComponent(opened.url)).toContain("localhost:21040");
+    expect(decodeURIComponent(opened.url)).toContain("Cora");
+    // Opened again, it keeps its slot and comes at once.
+    expect((await settle(client.openApp("ws-iabench", 21040))).slot).toBe(0);
+  });
+
+  it("refuses an app it does not list, and says a stopped server stopped", async () => {
+    await expect(settle(fakePc().openApp("ws-iabench", 21041))).rejects.toMatchObject({ kind: "refused", code: "not-allowed", status: 403 });
+    await expect(settle(fakePc("appstopped").openApp("ws-storefront", 4173))).rejects.toMatchObject({
+      kind: "refused",
+      code: "not-listening",
+      status: 409,
+    });
   });
 });

@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SLOT_PORTS,
+  appPortsOf,
   canPair,
+  checkAppPort,
   formatCountdown,
   formatStamp,
+  hangarPorts,
   newDevices,
   remoteAddress,
   secondsLeft,
   sortDevices,
   tailscaleStep,
+  withAppPort,
+  withoutAppPort,
+  type AppSlot,
   type RemoteDevice,
   type RemoteStatus,
   type TailscaleStatus,
@@ -117,5 +124,66 @@ describe("devices", () => {
     const lastYear = formatStamp(new Date(2025, 9, 27, 20, 41).getTime(), "en", now);
     expect(thisYear).not.toContain("2026");
     expect(lastYear).toContain("2025");
+  });
+});
+
+describe("the ports the phone may open", () => {
+  const slot = (index: number, patch: Partial<AppSlot> = {}): AppSlot => ({
+    slot: index,
+    httpsPort: 8443 + index,
+    localPort: 47822 + index,
+    mapping: "free",
+    app: null,
+    ...patch,
+  });
+  const slots = [0, 1, 2, 3, 4, 5].map((index) => slot(index));
+
+  it("takes a whole port from 1024 to 65535, spaces around it or not", () => {
+    expect(checkAppPort("5173", [], [])).toEqual({ port: 5173 });
+    expect(checkAppPort(" 3000 ", [], [])).toEqual({ port: 3000 });
+    expect(checkAppPort("1024", [], [])).toEqual({ port: 1024 });
+    expect(checkAppPort("65535", [], [])).toEqual({ port: 65535 });
+  });
+
+  it("says what is wrong with anything else", () => {
+    for (const typed of ["", "  ", "abc", "51 73", "5173.5", "-80", "0x1F90", "1e4"]) {
+      expect(checkAppPort(typed, [], []), JSON.stringify(typed)).toEqual({ problem: "invalid" });
+    }
+    for (const typed of ["0", "80", "1023", "65536", "99999", "123456"]) {
+      expect(checkAppPort(typed, [], []), typed).toEqual({ problem: "range" });
+    }
+  });
+
+  it("never takes Hangar's own: the mobile server's port and the slots' listeners", () => {
+    const reserved = hangarPorts(remote({ port: 47821 }), slots);
+    expect(reserved).toEqual([47821, 47822, 47823, 47824, 47825, 47826, 47827]);
+    expect(checkAppPort("47821", [], reserved)).toEqual({ problem: "hangar" });
+    expect(checkAppPort("47824", [], reserved)).toEqual({ problem: "hangar" });
+    // The HTTPS ports are Tailscale's, on the tailnet: a dev server may use them on the PC.
+    expect(checkAppPort("8443", [], reserved)).toEqual({ port: 8443 });
+  });
+
+  it("keeps the slots' default ports out before the PC has listed them", () => {
+    expect(hangarPorts(null, null)).toEqual([...DEFAULT_SLOT_PORTS]);
+    expect(hangarPorts(remote({ port: 4000 }), [])).toEqual([4000, ...DEFAULT_SLOT_PORTS]);
+    expect(hangarPorts(remote({ port: 4000 }), [slot(0, { localPort: 50000 })])).toEqual([4000, 50000]);
+  });
+
+  it("does not add a port twice", () => {
+    expect(checkAppPort("5173", [3000, 5173], [])).toEqual({ problem: "duplicate" });
+  });
+
+  it("keeps a workspace's list in order, each port once", () => {
+    expect(withAppPort([3000, 8080], 5173)).toEqual([3000, 5173, 8080]);
+    expect(withAppPort([5173], 5173)).toEqual([5173]);
+    expect(withoutAppPort([3000, 5173, 8080], 5173)).toEqual([3000, 8080]);
+    expect(withoutAppPort([3000], 5173)).toEqual([3000]);
+  });
+
+  it("reads a workspace's ports as saved, leaving out what is not one", () => {
+    expect(appPortsOf({})).toEqual([]);
+    expect(appPortsOf({ mobilePorts: [8080, 3000, 8080] })).toEqual([3000, 8080]);
+    expect(appPortsOf({ mobilePorts: [80, 3000.5, 70000, "5173", null, 4000] })).toEqual([4000]);
+    expect(appPortsOf({ mobilePorts: "5173" })).toEqual([]);
   });
 });

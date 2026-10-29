@@ -38,6 +38,8 @@ export interface ConsoleProps {
   tabbed?: boolean;
   /** Shown above the screen: why it may be empty. */
   notice?: ReactNode;
+  /** Beside the name: a worker's app, to open on the phone. */
+  app?: ReactNode;
 }
 
 const KEYS: { key: Key; label: Word; hint: Word; arrow?: boolean }[] = [
@@ -122,7 +124,7 @@ export function Console(props: ConsoleProps) {
 
   return (
     <div className="console">
-      <PaneHeader {...props} activity={activity} />
+      <PaneHeader {...props} activity={activity} aside={props.app} />
 
       <ScreenText screen={screen} gone={gone} name={props.name} notice={props.notice} />
 

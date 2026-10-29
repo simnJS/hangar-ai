@@ -123,3 +123,84 @@
   font-size: calc(12px * var(--ui-scale));
   color: var(--fg);
 }
+
+/* Apps on the phone: a workspace's ports, each a chip with its × to remove,
+   and the field that adds one. */
+.mob-app {
+  gap: 8px;
+}
+
+.mob-ports {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mob-port {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 8px;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.mob-port__remove {
+  display: inline-grid;
+  place-items: center;
+  width: calc(20px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  padding: 0;
+  font-size: calc(14px * var(--ui-scale));
+  line-height: 1;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mob-port__remove:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.mob-port__remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.mob-port-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mob-port-add .mob-port-input {
+  width: calc(110px * var(--ui-scale));
+  font-family: var(--mono);
+}
+
+.mob-port-add .mob-port-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.mob-port-problem {
+  margin: 0;
+}
+
+.mob-note code {
+  padding: 1px 4px;
+  font-family: var(--mono);
+  font-size: 0.95em;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  user-select: text;
+}

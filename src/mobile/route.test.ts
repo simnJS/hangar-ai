@@ -10,6 +10,7 @@ describe("routes", () => {
     { name: "pane", id: "pane 7/b" },
     { name: "delivery", task: "51910bc0-ba75" },
     { name: "diff", task: "51910bc0-ba75", file: "src/mobile/screens/Delivery tab.tsx" },
+    { name: "app", workspace: "ws 1/a", port: 5173 },
     { name: "shares" },
     { name: "manager" },
     { name: "history" },
@@ -28,10 +29,20 @@ describe("routes", () => {
     expect(parseRoute("#/delivery/")).toEqual({ name: "forYou" });
   });
 
+  it("open an app's project when its port is not one", () => {
+    expect(parseRoute("#/app/ws-1/21040")).toEqual({ name: "app", workspace: "ws-1", port: 21040 });
+    expect(parseRoute("#/app/ws-1")).toEqual({ name: "project", id: "ws-1" });
+    expect(parseRoute("#/app/ws-1/dev")).toEqual({ name: "project", id: "ws-1" });
+    expect(parseRoute("#/app/ws-1/0")).toEqual({ name: "project", id: "ws-1" });
+    expect(parseRoute("#/app/ws-1/70000")).toEqual({ name: "project", id: "ws-1" });
+    expect(parseRoute("#/app/")).toEqual({ name: "projects" });
+  });
+
   it("light the tab each screen belongs to", () => {
     expect(tabOf({ name: "pane", id: "x" })).toBe("projects");
     expect(tabOf({ name: "project", id: "x" })).toBe("projects");
     expect(tabOf({ name: "diff", task: "t", file: "a.ts" })).toBe("projects");
+    expect(tabOf({ name: "app", workspace: "w", port: 5173 })).toBe("projects");
     expect(tabOf({ name: "history" })).toBe("forYou");
     expect(tabOf({ name: "manager" })).toBe("manager");
     expect(tabOf({ name: "stats" })).toBe("stats");

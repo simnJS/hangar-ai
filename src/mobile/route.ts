@@ -2,7 +2,7 @@
  * Where the app is, in the address's hash: the browser's back gesture works,
  * and a notification can open a screen (#/pane/<id>, #/shares, #/stats, #/).
  * A delivery waiting to land opens on #/delivery/<task>, one of its files on
- * #/diff/<task>/<path>.
+ * #/diff/<task>/<path>. An agent's app opens on #/app/<project>/<port>.
  */
 
 export type Route =
@@ -12,6 +12,7 @@ export type Route =
   | { name: "pane"; id: string }
   | { name: "delivery"; task: string }
   | { name: "diff"; task: string; file: string }
+  | { name: "app"; workspace: string; port: number }
   | { name: "shares" }
   | { name: "manager" }
   | { name: "history" }
@@ -33,6 +34,13 @@ export function parseRoute(hash: string): Route {
       // The task, then the file's path, each encoded whole.
       const [task, file] = rest.map(decodeURIComponent);
       return task && file ? { name: "diff", task, file } : task ? { name: "delivery", task } : { name: "forYou" };
+    }
+    case "app": {
+      // The project, then the port: a whole one, or the project it belongs to.
+      const [workspace, port] = rest.map(decodeURIComponent);
+      const number = /^\d{1,5}$/.test(port ?? "") ? Number(port) : 0;
+      if (workspace && number >= 1 && number <= 65535) return { name: "app", workspace, port: number };
+      return workspace ? { name: "project", id: workspace } : { name: "projects" };
     }
     case "shares":
       return { name: "shares" };
@@ -59,12 +67,14 @@ export function routeHash(route: Route): string {
       return `#/delivery/${encodeURIComponent(route.task)}`;
     case "diff":
       return `#/diff/${encodeURIComponent(route.task)}/${encodeURIComponent(route.file)}`;
+    case "app":
+      return `#/app/${encodeURIComponent(route.workspace)}/${route.port}`;
     default:
       return `#/${route.name}`;
   }
 }
 
-/** The tab a screen belongs to: a pane or a delivery is reached from a project or a card. */
+/** The tab a screen belongs to: a pane, a delivery or an app is reached from a project or a card. */
 export function tabOf(route: Route): Tab {
   switch (route.name) {
     case "projects":
@@ -72,6 +82,7 @@ export function tabOf(route: Route): Tab {
     case "pane":
     case "delivery":
     case "diff":
+    case "app":
       return "projects";
     case "history":
       return "forYou";

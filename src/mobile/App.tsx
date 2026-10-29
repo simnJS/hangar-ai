@@ -6,6 +6,7 @@ import { t } from "./i18n";
 import { unseenShares } from "./model";
 import { RemoteContext, useRemote, type Boot } from "./remote";
 import { routeHash, tabOf, type Route } from "./route";
+import { AppScreen } from "./screens/AppViewer";
 import { DeliveryScreen, DiffScreen } from "./screens/Delivery";
 import { ManagerScreen, PaneScreen } from "./screens/Pane";
 import { ForYou } from "./screens/ForYou";
@@ -17,8 +18,9 @@ import { Stats } from "./screens/Stats";
 import { loadNumber, save } from "./storage";
 
 export function App({ boot }: { boot: Boot }) {
-  const remote = useRemote(boot);
   const { route, navigate, back } = useRoute();
+  // The screens that offer the agents' apps: a project's card, its list, a worker's header.
+  const remote = useRemote(boot, { watchApps: route.name === "projects" || route.name === "project" || route.name === "pane" });
   const navigation = useMemo(() => ({ navigate, back }), [navigate, back]);
   const now = useNow();
   useVisibleViewport();
@@ -32,10 +34,13 @@ export function App({ boot }: { boot: Boot }) {
 
   const { paired, state, connection } = remote;
   const banner = connection.unreachable && paired !== null;
-  // A console scrolls its own text, under its header and over its composer.
-  const fixed = paired !== false && state !== null && (route.name === "pane" || (route.name === "manager" && state.manager !== null));
-  // A pane, a delivery and its diffs keep the bottom for their own actions.
-  const tabs = route.name !== "pane" && route.name !== "delivery" && route.name !== "diff";
+  // A console scrolls its own text, under its header and over its composer; an app fills the screen.
+  const fixed =
+    paired !== false &&
+    state !== null &&
+    (route.name === "pane" || route.name === "app" || (route.name === "manager" && state.manager !== null));
+  // A pane, a delivery and its diffs keep the bottom for their own actions; an app takes all of it.
+  const tabs = route.name !== "pane" && route.name !== "delivery" && route.name !== "diff" && route.name !== "app";
 
   return (
     <RemoteContext.Provider value={remote}>
@@ -83,6 +88,8 @@ function Screen({ route, now, onSharesSeen }: { route: Route; now: number; onSha
       return <DeliveryScreen task={route.task} />;
     case "diff":
       return <DiffScreen task={route.task} file={route.file} />;
+    case "app":
+      return <AppScreen workspace={route.workspace} port={route.port} />;
     case "shares":
       return <Shares now={now} onSeen={onSharesSeen} />;
     case "manager":

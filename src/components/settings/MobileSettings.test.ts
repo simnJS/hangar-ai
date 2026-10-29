@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { RemoteDevice, RemoteStatus, TailscaleStatus } from "../../lib/remote";
+import type { AppSlot, RemoteDevice, RemoteStatus, TailscaleStatus } from "../../lib/remote";
 
 // The view is drawn from props; the dictionaries need not the store, which talks to Tauri.
 vi.mock("../../store", () => ({ useStore: () => ({}) }));
@@ -56,9 +56,27 @@ function props(locale: "en" | "fr", patch: Partial<Props> = {}): Props {
     onPairClose: noop,
     onRevokeAsk: noop,
     onRevoke: noop,
+    appProjects: [],
+    slots: null,
+    portDrafts: {},
+    portProblems: {},
+    onPortDraft: noop,
+    onPortAdd: noop,
+    onPortRemove: noop,
+    onSlotsRefresh: noop,
     ...patch,
   };
 }
+
+const slot = (index: number, patch: Partial<AppSlot> = {}): AppSlot => ({
+  slot: index,
+  httpsPort: 8443 + index,
+  localPort: 47822 + index,
+  mapping: "free",
+  app: null,
+  ...patch,
+});
+const slots = [0, 1, 2, 3, 4, 5].map((index) => slot(index));
 
 const render = (locale: "en" | "fr", patch?: Partial<Props>) =>
   renderToStaticMarkup(createElement(MobileView, props(locale, patch)));
@@ -198,5 +216,77 @@ describe.each(["en", "fr"] as const)("Mobile settings (%s)", (locale) => {
     expect(render(locale, { remote: { ...on, running: false, error: "port 4000 taken" } })).toContain(
       "port 4000 taken",
     );
+  });
+
+  describe("apps on the phone", () => {
+    const projects = [
+      { id: "w1", name: "Shop", ports: [3000, 5173] },
+      { id: "w2", name: "Blog", ports: [] },
+    ];
+
+    it("lists each workspace's ports, each with its remove button, and a field to add one", () => {
+      const html = render(locale, { appProjects: projects });
+      expect(html).toContain(text("mobile.apps"));
+      expect(html).toContain(text("mobile.appsHint"));
+      expect(html).toContain("Shop");
+      expect(html).toContain(">5173<");
+      expect(html).toContain(text("mobile.appPortRemove", { port: "5173", name: "Shop" }));
+      expect(html).toContain(text("mobile.appPortRemove", { port: "3000", name: "Shop" }));
+      // Blog has none of its own: its workers' only.
+      expect(html).toContain(text("mobile.appPortsNone"));
+      expect(html.match(/inputMode="numeric"|inputmode="numeric"/g)).toHaveLength(2);
+      expect(html).toContain(text("mobile.appPortLabel", { name: "Blog" }));
+    });
+
+    it("cannot add from an empty field", () => {
+      const empty = render(locale, { appProjects: [projects[1]] });
+      expect(empty).toMatch(/<button type="submit" class="btn" disabled="">/);
+      const typed = render(locale, { appProjects: [projects[1]], portDrafts: { w2: "4321" } });
+      expect(typed).not.toMatch(/<button type="submit" class="btn" disabled="">/);
+      expect(typed).toContain('value="4321"');
+    });
+
+    it("says why a port was turned down, on its workspace only", () => {
+      const say = (problem: "invalid" | "range" | "hangar" | "duplicate", typed: string) =>
+        render(locale, { appProjects: projects, portDrafts: { w1: typed }, portProblems: { w1: problem } });
+      expect(say("invalid", "abc")).toContain(text("mobile.appPortInvalid"));
+      expect(say("range", "80")).toContain(text("mobile.appPortRange"));
+      expect(say("hangar", "47821")).toContain(text("mobile.appPortHangar", { port: "47821" }));
+      const duplicate = say("duplicate", "5173");
+      expect(duplicate).toContain(text("mobile.appPortDuplicate", { port: "5173" }));
+      expect(duplicate.match(/role="alert"/g)).toHaveLength(1);
+      expect(duplicate).toContain('aria-invalid="true"');
+    });
+
+    it("says so when there is no workspace", () => {
+      expect(render(locale)).toContain(text("mobile.appsNone"));
+    });
+
+    it("the slots: none open, then the apps they show, and what it changes in Tailscale", () => {
+      expect(render(locale)).not.toContain(text("mobile.appSlots") + "</h3>");
+      const none = render(locale, { slots });
+      expect(none).toContain(text("mobile.appSlotsEmpty"));
+      expect(none).toContain(text("mobile.appsTailscale"));
+      expect(none).toContain("<code>tailscale serve --https=8443 off</code>");
+      expect(none).toContain("<code>tailscale serve reset</code>");
+      const open = render(locale, {
+        slots: [slot(0, { mapping: "mapped", app: { workspaceId: "w1", workspace: "Shop", port: 5173, lastUsed: NOW - 60_000 } }), ...slots.slice(1)],
+      });
+      expect(open).toContain(text("mobile.appSlot", { workspace: "Shop", port: "5173" }));
+      expect(open).toContain("8443");
+      expect(open).not.toContain(text("mobile.appSlotsEmpty"));
+    });
+
+    it("names a slot's port Tailscale Serve uses for something else", () => {
+      const html = render(locale, { slots: [slot(0), slot(1, { mapping: "taken" })] });
+      expect(html).toContain(text("mobile.appSlotTaken", { https: "8444" }));
+      expect(html).not.toContain(text("mobile.appSlotTaken", { https: "8443" }));
+    });
+
+    it("is not drawn while Hangar Mobile is off", () => {
+      const html = render(locale, { remote: off, appProjects: projects, slots });
+      expect(html).not.toContain(text("mobile.apps"));
+      expect(html).not.toContain(text("mobile.appSlots"));
+    });
   });
 });

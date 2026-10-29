@@ -1,6 +1,7 @@
 import { typeset } from "../lib/typography";
 import type {
   Activity,
+  App,
   Chat,
   ChatAnswer,
   ChatItem,
@@ -40,7 +41,9 @@ import { MEASURES, PERIODS } from "./stats";
  * - nomanager: no project manager is open;
  * - nostats: no agent has worked on the PC yet, and no plan limit is known;
  * - blocked: the delivery ready to merge does not land, the person's own
- *   changes on the PC being in the way.
+ *   changes on the PC being in the way;
+ * - appstopped: the apps are listed, but their dev servers stop as they are
+ *   opened.
  *
  * Its delivery ready to merge (mockDelivery.ts) is Dana's: a few files, a
  * check that failed once then passed, a review with notes. Merged, it lands
@@ -50,13 +53,18 @@ import { MEASURES, PERIODS } from "./stats";
  * Its usage statistics are five months of hourly rows (mockStats.ts), summed
  * up per period as the PC does.
  *
+ * Two apps run on it: the phone app Cora builds, from her port block, and
+ * storefront's `pnpm preview`, a port the person added. Opened, either shows
+ * a page that stands in for it; the first opening of each takes the moment
+ * Tailscale Serve would.
+ *
  * Like the real PC, it writes its history in its own language, taken here to
  * be the phone's; task titles stay as they were written.
  */
 
-export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager" | "nostats" | "blocked";
+export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager" | "nostats" | "blocked" | "appstopped";
 
-const SCENARIOS: readonly Scenario[] = ["empty", "unpaired", "offline", "nomanager", "nostats", "blocked"];
+const SCENARIOS: readonly Scenario[] = ["empty", "unpaired", "offline", "nomanager", "nostats", "blocked", "appstopped"];
 
 export function scenarioOf(value: string | null): Scenario {
   return SCENARIOS.find((scenario) => scenario === value) ?? "default";
@@ -343,7 +351,41 @@ function scenery(now: number, locale: Locale) {
     shared("s-bundle", 2 * 24 * 60, "storefront", "Mia", "storefront-build.zip", "file", null, 18_432_000),
   ];
 
-  return { panes, projects, history, shares };
+  // A worker's dev server in its port block, and one the person added (Settings › Mobile).
+  const apps: App[] = [
+    {
+      workspaceId: "ws-iabench",
+      workspace: "IaBench",
+      port: 21040,
+      source: "worker",
+      pane: "Cora",
+      task: "Hangar Mobile — l'app sur le téléphone (PWA)",
+    },
+    { workspaceId: "ws-storefront", workspace: "storefront", port: 4173, source: "custom" },
+  ];
+
+  return { panes, projects, history, shares, apps };
+}
+
+/** What stands in for an app's page: who serves it, and what a real PC would show. */
+function placeholderPage(app: App, locale: Locale): string {
+  const words = {
+    en: { custom: "Your dev server", text: "With a real PC, the app this dev server serves shows here, live: hot reload included." },
+    fr: { custom: "Votre serveur de dev", text: "Avec un vrai PC, l'app que sert ce serveur de dev s'affiche ici, en direct, rechargement à chaud compris." },
+  }[locale];
+  const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const name = app.source === "worker" && app.pane ? app.pane : words.custom;
+  const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(name)}</title><style>
+:root{color-scheme:light dark;font-family:-apple-system,system-ui,sans-serif}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:#f4f4f5;color:#24272c}
+main{max-width:22em;text-align:center}
+.port{display:inline-block;padding:4px 10px;border-radius:999px;background:#e3ecfb;color:#155fcc;font:600 14px ui-monospace,Menlo,monospace}
+h1{margin:18px 0 6px;font-size:26px;color:#0f1114}
+h2{margin:0 0 16px;font-size:16px;font-weight:500;color:#55585e}
+p{margin:0;font-size:16px;line-height:1.5}
+@media (prefers-color-scheme:dark){body{background:#121316;color:#c8c9ce}.port{background:#17263f;color:#68a5ff}h1{color:#ecedf0}h2{color:#9c9da2}}
+</style><main><span class="port">localhost:${app.port}</span><h1>${escape(name)}</h1><h2>${escape(app.task ?? app.workspace)}</h2><p>${escape(words.text)}</p></main></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 /** The Content-Type each kind is served with, as src-tauri/src/remote/files.rs serves it. */
@@ -447,6 +489,26 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
     world.panes.find((pane) => pane.id === idOrName) ?? world.panes.find((pane) => pane.name === idOrName);
 
   const manager = () => (scenario === "nomanager" ? undefined : world.panes.find((pane) => pane.role === "manager"));
+
+  /** The apps opened once: the first opening waits for Tailscale Serve, the next ones reuse their slot. */
+  const opened: string[] = [];
+
+  /** As the mobile server opens an app: one the window lists, on a slot of its own. */
+  async function openApp(body: unknown): Promise<Response> {
+    const { workspaceId, port } = (body ?? {}) as { workspaceId?: unknown; port?: unknown };
+    if (typeof workspaceId !== "string" || !workspaceId || typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) {
+      return json(400, { error: "bad-request" });
+    }
+    const app = world.apps.find((candidate) => candidate.workspaceId === workspaceId && candidate.port === port);
+    if (!app) return json(403, { error: "not-allowed" });
+    if (scenario === "appstopped") return json(409, { error: "not-listening" });
+    const key = `${workspaceId}:${port}`;
+    if (!opened.includes(key)) {
+      await pause(1_200);
+      opened.push(key);
+    }
+    return json(200, { url: placeholderPage(app, locale), slot: opened.indexOf(key) });
+  }
 
   /** What waits for each project waking up, run once it is awake. */
   const wakers = new Map<string, (() => void)[]>();
@@ -674,6 +736,7 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       }
       return json(200, { subscribed: true });
     }
+    if (path === "/m/api/app/open" && method === "POST") return openApp(body);
     if (path.startsWith("/m/api/upload")) {
       const name = new URL(path, "http://pc").searchParams.get("name") ?? "file";
       const size = body instanceof Blob ? body.size : 0;
@@ -743,6 +806,12 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       case "history": {
         const since = typeof args.since === "number" ? args.since : 0;
         return json(200, { entries: world.history.filter((entry) => entry.at > since) });
+      }
+      case "apps": {
+        if (args.workspace === undefined) return json(200, { apps: world.apps });
+        const project = world.projects.find((candidate) => candidate.id === args.workspace || candidate.name === args.workspace);
+        if (!project) return json(400, { error: "refused", message: `No project "${String(args.workspace)}" in Hangar.` });
+        return json(200, { apps: world.apps.filter((app) => app.workspaceId === project.id) });
       }
       case "wake": {
         const project = world.projects.find((candidate) => candidate.id === args.workspace || candidate.name === args.workspace);
