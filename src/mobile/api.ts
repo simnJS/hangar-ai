@@ -185,6 +185,13 @@ export interface HistoryEntry {
   text: string;
 }
 
+/**
+ * What the phone shows a share as, as the PC's preview tells a file apart
+ * (src-tauri/src/remote/files.rs): `file` is anything it hands over to be
+ * opened or saved.
+ */
+export type ShareKind = "image" | "video" | "audio" | "text" | "markdown" | "pdf" | "html" | "file";
+
 /** A file an agent shared with the phone. */
 export interface Share {
   id: string;
@@ -192,7 +199,10 @@ export interface Share {
   workspace: string;
   pane: string;
   name: string;
+  /** The Content-Type its file is served with. */
   mime: string;
+  /** Absent from a share the phone kept from before the PC told kinds apart. */
+  kind?: ShareKind;
   size: number;
   caption: string | null;
 }
@@ -220,6 +230,18 @@ export class ApiError extends Error {
 }
 
 /* ── The client ────────────────────────────────────────────────── */
+
+/**
+ * UTF-8, as the PC serves text. A head may stop inside a character or a
+ * line: it is cut after its last whole line, or, in a text without one,
+ * before the character cut in two.
+ */
+export function decodeHead(bytes: Uint8Array, partial: boolean): string {
+  const text = new TextDecoder("utf-8").decode(bytes, { stream: partial });
+  if (!partial) return text;
+  const lastLine = text.lastIndexOf("\n");
+  return lastLine > 0 ? text.slice(0, lastLine + 1) : text;
+}
 
 /** How long a call to the window may take: the server gives it 10 s. */
 export const CALL_TIMEOUT_MS = 12_000;
@@ -398,6 +420,39 @@ export function createClient(options: ClientOptions = {}) {
       ) as Promise<{ path: string }>;
     },
     fileUrl: options.fileUrl ?? ((id: string) => `/m/files/${encodeURIComponent(id)}`),
+    /**
+     * A shared text: whole, or, when its `size` is over `maxBytes`, its first
+     * `maxBytes` asked for as a byte range. `partial` says which; a head ends
+     * on its last whole line.
+     */
+    fileText: async (id: string, size: number, maxBytes: number) => {
+      const partial = size > maxBytes;
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), CALL_TIMEOUT_MS);
+      let bytes: Uint8Array;
+      let response: Response;
+      try {
+        response = await doFetch(`/m/files/${encodeURIComponent(id)}`, {
+          method: "GET",
+          headers: partial ? { Range: `bytes=0-${maxBytes - 1}` } : {},
+          credentials: "same-origin",
+          signal: abort.signal,
+        });
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } catch {
+        failed();
+        throw new ApiError("offline", abort.signal.aborted ? "timeout" : "network");
+      } finally {
+        clearTimeout(timer);
+      }
+      answered();
+      if (response.status === 401) {
+        options.onUnpaired?.();
+        throw new ApiError("unpaired", "unpaired", 401);
+      }
+      if (!response.ok) throw new ApiError("refused", `http-${response.status}`, response.status);
+      return { text: decodeHead(bytes.subarray(0, maxBytes), partial), partial };
+    },
 
     /** The PC's public VAPID key, base64url: what the phone subscribes with. */
     pushKey: () => request("GET", "/m/api/push/key", undefined, {}, CALL_TIMEOUT_MS) as Promise<{ key: string }>,

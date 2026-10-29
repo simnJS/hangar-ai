@@ -4,7 +4,9 @@
 //! - The web app's files, at / and below, are open: a phone that is not
 //!   paired yet has to load the page that pairs it.
 //! - /m/api/health and /m/api/pair are open for the same reason.
-//! - Everything else under /m/ takes a paired phone's cookie, or 401.
+//! - Everything else under /m/ takes a paired phone's cookie, or 401, and
+//!   is refused to a page of another site, or a shared page in its sandbox,
+//!   whose browser says so (`Sec-Fetch-Site`), cookie or not.
 //!
 //! Every request that is not a GET or a HEAD also carries `X-Hangar: 1`, or
 //! 403 (`from_the_app`), and no answer carries a CORS header: a page on
@@ -113,11 +115,25 @@ async fn from_the_app(request: Request, next: Next) -> Response {
 }
 
 /// The phone whose cookie opens the route, handed to it as an extension.
+///
+/// A shared page in its sandbox has an origin of no one's, and whether the
+/// phone's cookie rides along with what it asks is each browser's call
+/// (Chromium sends none). Such a page can read no answer (no CORS) and send
+/// no call (no `X-Hangar` without a preflight); and a browser that says
+/// where a request comes from has it refused here, cookie or not — only the
+/// app's own pages, and the person's own navigations, open these routes.
 async fn paired_only(
     State(remote): State<Arc<Remote>>,
     mut request: Request,
     next: Next,
 ) -> Response {
+    let foreign = request
+        .headers()
+        .get("sec-fetch-site")
+        .is_some_and(|site| site != "same-origin" && site != "none");
+    if foreign {
+        return refuse(StatusCode::FORBIDDEN, "forbidden");
+    }
     let Some(device) = remote.device(request.headers()) else {
         return refuse(StatusCode::UNAUTHORIZED, "unpaired");
     };
@@ -126,15 +142,18 @@ async fn paired_only(
 }
 
 /// Answers kept out of every cache, the API's as much as the placeholder's,
-/// unless the file says otherwise; and a page no other site can frame, no
-/// browser second-guesses the type of, and no link out of tells where it was.
+/// unless the file says otherwise; and a page nothing can frame (but a
+/// shared page, which the app frames), no browser second-guesses the type
+/// of, and no link out of tells where it was.
 async fn harden(mut response: Response) -> Response {
     let headers = response.headers_mut();
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
-    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers
+        .entry(header::X_FRAME_OPTIONS)
+        .or_insert(HeaderValue::from_static("DENY"));
     headers.insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
@@ -255,54 +274,114 @@ async fn shares(State(remote): State<Arc<Remote>>, Query(query): Query<SinceQuer
     Json(json!({ "shares": remote.shares.list(query.since) })).into_response()
 }
 
-/// A shared file. Shown in place only if it is a picture the browser cannot
-/// be made to run; anything else is handed over to be saved, whatever it
-/// says it is.
-async fn shared_file(State(remote): State<Arc<Remote>>, Path(id): Path<String>) -> Response {
+/// A shared file, served as what it is (`files::Kind`): shown in place — a
+/// picture, a player, a text, a page in its sandbox — or, for any other kind,
+/// handed over to be saved, whatever it says it is.
+///
+/// A byte range is served alone, 206, which Safari needs before it plays a
+/// video at all; a range it cannot serve is 416.
+async fn shared_file(
+    State(remote): State<Arc<Remote>>,
+    Path(id): Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
     let Some((share, path)) = remote.shares.find(&id) else {
         return refuse(StatusCode::NOT_FOUND, "not-found");
     };
-    let Ok(Ok(bytes)) = tokio::task::spawn_blocking(move || std::fs::read(path)).await else {
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = method != Method::HEAD;
+    let Ok(Ok(part)) =
+        tokio::task::spawn_blocking(move || files::read_part(&path, range.as_deref(), body)).await
+    else {
         return refuse(StatusCode::NOT_FOUND, "not-found");
     };
-    let disposition = if files::inline_image(&share.mime) {
-        "inline".to_string()
-    } else {
-        let ascii: String = share
-            .name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_graphic() && !matches!(c, '"' | '\\') {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let encoded =
-            percent_encoding::utf8_percent_encode(&share.name, percent_encoding::NON_ALPHANUMERIC);
-        format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{encoded}")
+    // (status, bytes sent, Content-Range, body): a HEAD's body is empty, and
+    // its length still the one a GET would send.
+    let (status, count, range, bytes) = match part {
+        files::Part::Whole { len, body } => (StatusCode::OK, len, None, body),
+        files::Part::Range {
+            start,
+            end,
+            len,
+            body,
+        } => (
+            StatusCode::PARTIAL_CONTENT,
+            end - start + 1,
+            Some(format!("bytes {start}-{end}/{len}")),
+            body,
+        ),
+        files::Part::Unsatisfiable { len } => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            0,
+            Some(format!("bytes */{len}")),
+            Vec::new(),
+        ),
     };
+
     let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = status;
     let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(files::served_type(&share.mime)),
-    );
-    if let Ok(value) = HeaderValue::from_str(&disposition) {
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(count));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    if let Some(Ok(range)) = range.map(HeaderValue::try_from) {
+        headers.insert(header::CONTENT_RANGE, range);
+    }
+    if status == StatusCode::RANGE_NOT_SATISFIABLE {
+        return response;
+    }
+    let mime = HeaderValue::from_str(&share.mime)
+        .unwrap_or(HeaderValue::from_static("application/octet-stream"));
+    headers.insert(header::CONTENT_TYPE, mime);
+    if let Ok(value) = HeaderValue::from_str(&disposition(&share)) {
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
-    // Nothing in a file may load or run anything, even if it is opened.
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'none'; sandbox"),
-    );
+    if let Some(policy) = share.kind.policy() {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(policy),
+        );
+    }
+    // The app frames a page, in an iframe that is sandboxed too; no other
+    // site may.
+    if share.kind == files::Kind::Html {
+        headers.insert(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("SAMEORIGIN"),
+        );
+    }
     // A share never changes: the phone may keep it.
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, max-age=31536000, immutable"),
     );
     response
+}
+
+/// Shown in place with its name, for a phone that saves it; or handed over.
+fn disposition(share: &files::Share) -> String {
+    let ascii: String = share
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_graphic() && !matches!(c, '"' | '\\') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let encoded =
+        percent_encoding::utf8_percent_encode(&share.name, percent_encoding::NON_ALPHANUMERIC);
+    let how = if share.kind == files::Kind::File {
+        "attachment"
+    } else {
+        "inline"
+    };
+    format!("{how}; filename=\"{ascii}\"; filename*=UTF-8''{encoded}")
 }
 
 #[derive(Deserialize)]
@@ -1103,57 +1182,197 @@ mod tests {
             .collect();
         assert_eq!(ids, [second.id.as_str(), first.id.as_str()]);
         assert_eq!(answer.body["shares"][0]["name"], "b.txt");
-        assert_eq!(answer.body["shares"][0]["mime"], "text/plain");
+        assert_eq!(
+            answer.body["shares"][0]["mime"],
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(answer.body["shares"][0]["kind"], "text");
 
         let answer = ask(&remote, get_from("/m/api/shares?since=1000", Some(&token))).await;
         assert_eq!(answer.body["shares"].as_array().unwrap().len(), 1);
     }
 
+    fn ranged(token: &str, id: &str, range: &str) -> HttpRequest<Body> {
+        HttpRequest::get(format!("/m/files/{id}"))
+            .header(header::COOKIE, format!("{COOKIE}={token}"))
+            .header(header::RANGE, range)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    /// Each kind with its type, its policy and its way of being shown: in
+    /// place, a page framed by the app alone, or handed over.
     #[tokio::test]
-    async fn a_picture_is_served_in_place_with_its_type() {
+    async fn each_kind_goes_out_with_its_own_headers() {
         let remote = remote_with(Fake::echo(), no_app);
         let token = paired_phone(&remote).await;
-        let share = put_share(&remote, "shot.png", b"png bytes", 1);
+        for (name, bytes, kind, mime) in files::tests::SAMPLES {
+            let share = put_share(&remote, name, bytes, 1);
+            let answer = ask(&remote, file_of(&token, &share.id)).await;
+            let header = |name| {
+                answer
+                    .headers
+                    .get(name)
+                    .map_or("", |value| value.to_str().unwrap())
+            };
+            assert_eq!(answer.status, StatusCode::OK, "{name}");
+            assert_eq!(header(header::CONTENT_TYPE), *mime, "{name}");
+            assert_eq!(header(header::X_CONTENT_TYPE_OPTIONS), "nosniff", "{name}");
+            assert_eq!(header(header::ACCEPT_RANGES), "bytes", "{name}");
+            assert_eq!(
+                header(header::CONTENT_SECURITY_POLICY),
+                kind.policy().unwrap_or(""),
+                "{name}"
+            );
+            let (shown, framed) = match kind {
+                files::Kind::File => ("attachment; filename=\"", "DENY"),
+                files::Kind::Html => ("inline; filename=\"", "SAMEORIGIN"),
+                _ => ("inline; filename=\"", "DENY"),
+            };
+            assert!(
+                header(header::CONTENT_DISPOSITION).starts_with(shown),
+                "{name}: {}",
+                header(header::CONTENT_DISPOSITION)
+            );
+            assert_eq!(header(header::X_FRAME_OPTIONS), framed, "{name}");
+            // The record the phone reads says the same.
+            assert_eq!((share.kind, share.mime.as_str()), (*kind, *mime), "{name}");
+        }
+    }
+
+    /// A page runs its scripts in an origin of its own, never the app's: no
+    /// `allow-same-origin`, no forms, no popups, no way to the top.
+    #[tokio::test]
+    async fn a_page_is_sandboxed_to_its_scripts_alone() {
+        let remote = remote_with(Fake::echo(), no_app);
+        let token = paired_phone(&remote).await;
+        let share = put_share(&remote, "report.html", b"<!doctype html><p>hi</p>", 1);
         let answer = ask(&remote, file_of(&token, &share.id)).await;
         assert_eq!(answer.status, StatusCode::OK);
-        assert_eq!(answer.body, Value::String("png bytes".into()));
-        assert_eq!(answer.headers[header::CONTENT_TYPE], "image/png");
-        assert_eq!(answer.headers[header::CONTENT_DISPOSITION], "inline");
-        assert_eq!(answer.headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(
+            answer.headers[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            answer.headers[header::CONTENT_SECURITY_POLICY],
+            "sandbox allow-scripts"
+        );
+        assert_eq!(answer.headers[header::X_FRAME_OPTIONS], "SAMEORIGIN");
+        assert!(answer
+            .headers
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
     }
 
     #[tokio::test]
-    async fn anything_that_could_run_is_an_attachment() {
+    async fn a_share_is_served_a_range_at_a_time() {
         let remote = remote_with(Fake::echo(), no_app);
         let token = paired_phone(&remote).await;
-        for (name, served) in [
-            ("page.html", "application/octet-stream"),
-            ("drawing.svg", "application/octet-stream"),
-            ("data.xml", "application/octet-stream"),
-            ("notes.txt", "text/plain; charset=utf-8"),
-            ("report.pdf", "application/pdf"),
-            ("blob", "application/octet-stream"),
+        let mut clip = b"\0\0\0\x18ftypisom".to_vec();
+        clip.extend_from_slice(b"abcdefghij");
+        let len = clip.len();
+        let share = put_share(&remote, "clip.mp4", &clip, 1);
+
+        // What Safari asks first, before it plays anything.
+        let probe = ask(&remote, ranged(&token, &share.id, "bytes=0-1")).await;
+        assert_eq!(probe.status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            probe.headers[header::CONTENT_RANGE],
+            format!("bytes 0-1/{len}").as_str()
+        );
+        assert_eq!(probe.headers[header::CONTENT_LENGTH], "2");
+        assert_eq!(probe.headers[header::CONTENT_TYPE], "video/mp4");
+        assert_eq!(probe.headers[header::ACCEPT_RANGES], "bytes");
+
+        let rest = ask(&remote, ranged(&token, &share.id, "bytes=12-")).await;
+        assert_eq!(rest.status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(rest.body, Value::String("abcdefghij".into()));
+        assert_eq!(
+            rest.headers[header::CONTENT_RANGE],
+            format!("bytes 12-{}/{len}", len - 1).as_str()
+        );
+        let tail = ask(&remote, ranged(&token, &share.id, "bytes=-3")).await;
+        assert_eq!(tail.body, Value::String("hij".into()));
+
+        for invalid in [
+            format!("bytes={len}-"),
+            "bytes=5-2".to_string(),
+            "bytes=0-1,4-5".to_string(),
+            "bytes=x-".to_string(),
         ] {
-            let share = put_share(&remote, name, b"<script>alert(1)</script>", 1);
-            let answer = ask(&remote, file_of(&token, &share.id)).await;
-            assert_eq!(answer.status, StatusCode::OK, "{name}");
-            assert_eq!(answer.headers[header::CONTENT_TYPE], served, "{name}");
-            let disposition = answer.headers[header::CONTENT_DISPOSITION]
-                .to_str()
-                .unwrap();
-            assert!(
-                disposition.starts_with("attachment; filename=\""),
-                "{name}: {disposition}"
+            let refused = ask(&remote, ranged(&token, &share.id, &invalid)).await;
+            assert_eq!(
+                refused.status,
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "{invalid}"
             );
             assert_eq!(
-                answer.headers[header::X_CONTENT_TYPE_OPTIONS],
-                "nosniff",
-                "{name}"
+                refused.headers[header::CONTENT_RANGE],
+                format!("bytes */{len}").as_str(),
+                "{invalid}"
             );
-            assert!(answer.headers[header::CONTENT_SECURITY_POLICY]
-                .to_str()
-                .unwrap()
-                .contains("sandbox"));
+            assert_eq!(refused.body, Value::String(String::new()), "{invalid}");
+        }
+
+        // A text's head, as the phone reads a long one.
+        let log = put_share(&remote, "build.log", b"line one\nline two\n", 2);
+        let head = ask(&remote, ranged(&token, &log.id, "bytes=0-8")).await;
+        assert_eq!(head.status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(head.body, Value::String("line one\n".into()));
+        assert_eq!(
+            head.headers[header::CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+
+        // A HEAD says how long, and sends nothing.
+        let mut request = file_of(&token, &share.id);
+        *request.method_mut() = Method::HEAD;
+        let probed = ask(&remote, request).await;
+        assert_eq!(probed.status, StatusCode::OK);
+        assert_eq!(
+            probed.headers[header::CONTENT_LENGTH],
+            len.to_string().as_str()
+        );
+        assert_eq!(probed.body, Value::String(String::new()));
+    }
+
+    /// What a shared page sends from its sandbox — and any other site's page
+    /// — is refused, though the browser attached the phone's cookie to it.
+    #[tokio::test]
+    async fn a_request_from_another_site_or_a_sandboxed_page_is_refused() {
+        let window = Fake::echo();
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let share = put_share(&remote, "a.png", files::tests::PNG, 1);
+        let from = |site: &str, request: HttpRequest<Body>| {
+            let (mut parts, body) = request.into_parts();
+            parts
+                .headers
+                .insert("sec-fetch-site", HeaderValue::from_str(site).unwrap());
+            HttpRequest::from_parts(parts, body)
+        };
+        let requests = || {
+            [
+                file_of(&token, &share.id),
+                get_from("/m/api/shares", Some(&token)),
+                post_to("/m/api/call/state", Some(&token), true, "{}"),
+            ]
+        };
+        for site in ["cross-site", "same-site"] {
+            for request in requests() {
+                let path = request.uri().to_string();
+                let answer = ask(&remote, from(site, request)).await;
+                assert_eq!(answer.status, StatusCode::FORBIDDEN, "{site} {path}");
+            }
+        }
+        assert!(window.asked.lock().unwrap().is_empty());
+        // The app's own requests, and a link the person opened.
+        for site in ["same-origin", "none"] {
+            for request in requests() {
+                let path = request.uri().to_string();
+                let answer = ask(&remote, from(site, request)).await;
+                assert_eq!(answer.status, StatusCode::OK, "{site} {path}");
+            }
         }
     }
 
@@ -1355,6 +1574,17 @@ mod tests {
             let answer = ask(&remote, get_from(&path, None)).await;
             assert_eq!(answer.status, StatusCode::UNAUTHORIZED, "{path}");
         }
+        // Nor a part of a file, nor its length, nor with a stranger's cookie.
+        let range = ask(&remote, ranged("", &share.id, "bytes=0-0")).await;
+        assert_eq!(range.status, StatusCode::UNAUTHORIZED);
+        assert!(range.headers.get(header::CONTENT_RANGE).is_none());
+        let stranger = ask(&remote, ranged("not-a-token", &share.id, "bytes=0-0")).await;
+        assert_eq!(stranger.status, StatusCode::UNAUTHORIZED);
+        let mut head = get_from(&format!("/m/files/{}", share.id), None);
+        *head.method_mut() = Method::HEAD;
+        let head = ask(&remote, head).await;
+        assert_eq!(head.status, StatusCode::UNAUTHORIZED);
+        assert!(head.headers.get(header::CONTENT_RANGE).is_none());
     }
 
     fn delete_from(path: &str, cookie: Option<&str>, marked: bool) -> HttpRequest<Body> {

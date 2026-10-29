@@ -112,6 +112,8 @@ const PATHS = {
       <path d="M6.6 14.2h2.8" />
     </>
   ),
+  // Close a viewer.
+  close: <path d="m4 4 8 8M12 4l-8 8" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;
