@@ -217,17 +217,29 @@ img {
 }
 
 /* ── The frame ─────────────────────────────────────────────────────
-   Pinned to the part of the screen the keyboard leaves (hooks.ts), so the
-   composer rides above it on iOS too. */
+   The window itself at rest: inset 0, no viewport unit and nothing measured,
+   which iOS gets wrong in a Home Screen app (100vh counts the status bar,
+   visualViewport goes stale after the keyboard). The document never scrolls;
+   each screen scrolls inside it. */
 
 .app {
   position: fixed;
-  top: var(--app-top, 0px);
-  left: 0;
-  right: 0;
-  height: var(--app-height, 100dvh);
+  inset: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* The keyboard up: pinned to the part of the screen it leaves (viewport.ts),
+   so the composer rides above it on iOS too. The home indicator is behind
+   the keyboard then, so its safe area is not the app's to keep clear. */
+:root[data-keyboard] {
+  --safe-bottom: 0px;
+}
+
+:root[data-keyboard] .app {
+  top: var(--keyboard-top, 0px);
+  bottom: auto;
+  height: var(--keyboard-height, 100%);
 }
 
 .app__main {
