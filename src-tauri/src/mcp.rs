@@ -172,10 +172,10 @@ fn urlencode(value: &str) -> String {
 
 fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
-    if let (Some(all), Some(manager)) =
-        (tools.as_array_mut(), manager_tool_definitions().as_array())
-    {
-        all.extend(manager.iter().cloned());
+    if let Some(all) = tools.as_array_mut() {
+        for more in [preview_tool_definitions(), manager_tool_definitions()] {
+            all.extend(more.as_array().into_iter().flatten().cloned());
+        }
     }
     tools
 }
@@ -590,6 +590,35 @@ fn base_tool_definitions() -> Value {
     ])
 }
 
+/// The preview's tools for every kind of file, apart from the rest for the
+/// same reason as the project manager's.
+fn preview_tool_definitions() -> Value {
+    json!([
+        {
+            "name": "preview_show",
+            "description": "Show the person a file in Hangar's preview panel, beside the terminals: it is how you show them a render, a screenshot, a recording, a report or a page, instead of handing them a path. It shows images (.png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .avif, up to 64 MB), video (.mp4, .webm, .mov, .m4v) and audio (.mp3, .wav, .ogg, .m4a, .flac) of any length, PDF (up to 256 MB), Markdown (.md, .markdown), HTML pages (.html, .htm, up to 64 MB), text and source code in UTF-8 (.txt, .log, .json, .yaml, .csv, .ts, .rs, .py and the like, or any other UTF-8 file, up to 10 MB: a larger one is refused, so save the part worth reading to a file of its own), and 3D models as model_show opens them. The file must be in your workspace's folders or its git worktrees, and it opens in your workspace's preview. An HTML page runs its scripts in a sandbox with no access to Hangar: the images, video and audio beside it load, but not its own .js or .css files, nor anything it fetch()es, so inline its scripts and styles. Nothing is sent off the machine: Hangar reads the file where it is. The answer gives the file's kind, name and size. A file that is not what its extension says (a .jpg that is a saved error page, a binary .json) is refused with the reason, as is one over its limit. To see a 3D model yourself, call model_snapshot.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The file: absolute, or relative to your working directory." },
+                    "title": { "type": "string", "description": "Name for its tab. Defaults to the file name." }
+                },
+                "required": ["path"]
+            }
+        },
+        {
+            "name": "preview_close",
+            "description": "Close a file in your workspace's preview panel. Without a path it closes everything open there; other workspaces' previews are left as they are. Call it once you are done showing something, so it does not keep a part of the person's screen.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The file to close, as you gave it to preview_show. Omit it to close everything open in your workspace's preview." }
+                }
+            }
+        }
+    ])
+}
+
 /// The project manager's tools, apart from the rest: one `json!` this long
 /// would run out of the macro's recursion limit.
 fn manager_tool_definitions() -> Value {
@@ -829,7 +858,7 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
                 "paneName": env_var(&["HANGAR_PANE_NAME"]),
                 "cwd": workspace_cwd(),
             });
-            if op.starts_with("model_") {
+            if names_a_file(op) {
                 if let Ok(here) = std::env::current_dir() {
                     absolutize_path(&mut body, &here);
                 }
@@ -838,6 +867,12 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
         }
         other => Err(format!("unknown tool '{other}'")),
     }
+}
+
+/// The operations whose `path` is a file the window opens, and so is resolved
+/// here: see `absolutize_path`.
+fn names_a_file(op: &str) -> bool {
+    op.starts_with("model_") || op.starts_with("preview_")
 }
 
 fn respond(id: Option<&Value>, result: Value) -> Option<Value> {
@@ -1003,6 +1038,50 @@ mod tests {
         assert_eq!(snapshot["properties"]["height"]["maximum"], 2048);
         assert!(snapshot.get("required").is_none());
         assert!(tool("model_close")["inputSchema"].get("required").is_none());
+    }
+
+    #[test]
+    fn the_preview_tools_say_what_they_show_and_that_nothing_leaves() {
+        let show = tool("preview_show");
+        assert_eq!(show["inputSchema"]["required"], json!(["path"]));
+        assert_eq!(show["inputSchema"]["properties"]["title"]["type"], "string");
+        let description = show["description"].as_str().unwrap();
+        for format in [
+            ".png",
+            ".svg",
+            ".avif",
+            ".mp4",
+            ".mov",
+            ".mp3",
+            ".flac",
+            "PDF",
+            ".md",
+            ".html",
+            "UTF-8",
+            "model_show",
+        ] {
+            assert!(description.contains(format), "{format}");
+        }
+        assert!(description.contains("a render, a screenshot, a recording, a report or a page"));
+        assert!(description.contains("Nothing is sent off the machine"));
+        assert!(tool("preview_close")["inputSchema"]
+            .get("required")
+            .is_none());
+        // The model tools stay beside them, unchanged.
+        for name in ["model_show", "model_snapshot", "model_close"] {
+            assert_eq!(tool(name)["name"], name);
+        }
+    }
+
+    /// A preview's path is relative to where the agent works, like a model's.
+    #[test]
+    fn the_files_the_window_opens_are_resolved_here() {
+        for op in ["model_show", "model_close", "preview_show", "preview_close"] {
+            assert!(names_a_file(op), "{op}");
+        }
+        for op in ["pane_send", "worker_spawn", "delivery_submit"] {
+            assert!(!names_a_file(op), "{op}");
+        }
     }
 
     /// An orchestrator plans with these: files a task owns, the label that

@@ -1,6 +1,6 @@
 //! Agents driving the panes: listing, creating, closing, restarting them,
-//! typing into them and reading them back — and showing the user a 3D model
-//! in the window's preview, which lives in the same store.
+//! typing into them and reading them back — and showing the user a 3D model,
+//! or any other file, in the window's preview, which lives in the same store.
 //!
 //! The panes are not Rust's to touch. They live in the window's store — their
 //! names, their agents, the split tree, the sessions to resume — and a pane
@@ -34,6 +34,8 @@ pub const OPERATIONS: &[&str] = &[
     "model_show",
     "model_snapshot",
     "model_close",
+    "preview_show",
+    "preview_close",
     // orchestration: workers (lib/workerControl.ts)
     "worker_spawn",
     "worker_list",
@@ -57,7 +59,8 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 /// for that load first. The window stops waiting on the viewer before this —
 /// 45 s for a show, 40 s for a snapshot, in src/lib/control.ts — and answers
 /// with what it has, so this only runs out when the window itself has stopped
-/// answering.
+/// answering. preview_show opens a model as model_show does, and is given as
+/// long.
 const MODEL_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Starting a worker checks out a worktree of the whole repository, and
@@ -70,7 +73,7 @@ const WORKER_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
 const PROJECT_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn answer_timeout(op: &str) -> Duration {
-    if op.starts_with("model_") {
+    if op.starts_with("model_") || op.starts_with("preview_") {
         MODEL_ANSWER_TIMEOUT
     } else if op.starts_with("worker_") {
         WORKER_ANSWER_TIMEOUT
@@ -292,7 +295,13 @@ mod tests {
 
     #[test]
     fn the_preview_is_given_longer_than_the_panes() {
-        for op in ["model_show", "model_snapshot", "model_close"] {
+        for op in [
+            "model_show",
+            "model_snapshot",
+            "model_close",
+            "preview_show",
+            "preview_close",
+        ] {
             assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
             assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
         }

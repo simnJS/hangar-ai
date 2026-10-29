@@ -8,13 +8,14 @@
 //! hold a 200 MB model several times over in memory. So the app answers a
 //! scheme of its own, only for the folders the window allowed — an agent's
 //! workspace and its worktrees — and only for the file types a model is made
-//! of.
+//! of. The preview's other files — images, video, text, pages — come through
+//! the same scheme, from the same folders: see preview.rs.
 //!
 //! Every check is made on the file's canonical path. A `..`, a symlink and a
 //! drive letter typed in the other case all resolve before the folders are
 //! compared, so none of them can walk out of an allowed folder.
 
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
@@ -31,12 +32,13 @@ use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 pub const SCHEME: &str = "hangar-model";
 
 /// What the viewer opens, as `MODEL_FORMATS` in src/lib/modelFiles.ts.
-const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "stl", "ply", "fbx", "usdz"];
+pub(crate) const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "stl", "ply", "fbx", "usdz"];
 
-/// Every file type the scheme serves, with the Content-Type it goes out as:
-/// the models, the files they pull in beside them (a glTF's `.bin`, an OBJ's
-/// `.mtl`), and the textures either can reference. Anything else under an
-/// allowed folder — sources, `.env` files, keys — stays out of reach.
+/// Every file type the scheme serves for a model, with the Content-Type it
+/// goes out as: the models, the files they pull in beside them (a glTF's
+/// `.bin`, an OBJ's `.mtl`), and the textures either can reference. A file of
+/// any other type is the preview's (preview.rs), which shows sources and other
+/// text only as `text/plain` and refuses what it cannot show.
 const SERVED_TYPES: &[(&str, &str)] = &[
     ("glb", "model/gltf-binary"),
     ("gltf", "model/gltf+json"),
@@ -64,9 +66,9 @@ const SERVED_TYPES: &[(&str, &str)] = &[
 /// `MAX_MODEL_BYTES` in src/lib/modelFiles.ts. The scheme holds every file it
 /// serves to the same cap, textures included, because it reads each one whole
 /// (see `answer`): the cap is what bounds the memory one request can take.
-const MAX_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
-const MEGABYTE: u64 = 1024 * 1024;
+pub(crate) const MEGABYTE: u64 = 1024 * 1024;
 
 /// The folders the window last allowed, canonical: those of every workspace
 /// that has a model open, not only the workspace of the agent asking. Which
@@ -82,7 +84,7 @@ fn roots() -> &'static RwLock<Vec<PathBuf>> {
     ROOTS.get_or_init(Default::default)
 }
 
-fn allowed_roots() -> Vec<PathBuf> {
+pub(crate) fn allowed_roots() -> Vec<PathBuf> {
     roots().read().unwrap().clone()
 }
 
@@ -92,7 +94,7 @@ fn allowed_roots() -> Vec<PathBuf> {
 /// `C:\Users\me\chair.glb`, and so how an agent working in one of them often
 /// does. Read as Windows reads it, it would be `\c\Users\…` on the current
 /// drive, a file that does not exist.
-fn native_path(raw: &str) -> PathBuf {
+pub(crate) fn native_path(raw: &str) -> PathBuf {
     #[cfg(windows)]
     if let [b'/', drive, rest @ ..] = raw.as_bytes() {
         if drive.is_ascii_alphabetic() && rest.first().is_none_or(|&b| b == b'/') {
@@ -128,7 +130,7 @@ fn canonical_roots(roots: &[String]) -> Vec<PathBuf> {
 
 /// Which extensions a check accepts.
 #[derive(Clone, Copy)]
-enum Accept {
+pub(crate) enum Accept {
     /// A model the viewer opens: what `model_stat` is asked about.
     Model,
     /// Any file the scheme serves: a model, a file beside it, a texture.
@@ -136,7 +138,7 @@ enum Accept {
 }
 
 impl Accept {
-    fn allows(self, path: &Path) -> bool {
+    pub(crate) fn allows(self, path: &Path) -> bool {
         let Some(extension) = extension(path) else {
             return false;
         };
@@ -147,13 +149,13 @@ impl Accept {
     }
 }
 
-fn extension(path: &Path) -> Option<String> {
+pub(crate) fn extension(path: &Path) -> Option<String> {
     path.extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
 }
 
-fn content_type(extension: &str) -> Option<&'static str> {
+pub(crate) fn content_type(extension: &str) -> Option<&'static str> {
     SERVED_TYPES
         .iter()
         .find(|(known, _)| *known == extension)
@@ -162,15 +164,15 @@ fn content_type(extension: &str) -> Option<&'static str> {
 
 /// A file that passed every check.
 #[derive(Debug)]
-struct Checked {
+pub(crate) struct Checked {
     /// Canonical: symlinks followed, `..` resolved.
-    path: PathBuf,
-    size: u64,
-    modified_ms: u64,
+    pub(crate) path: PathBuf,
+    pub(crate) size: u64,
+    pub(crate) modified_ms: u64,
 }
 
 #[derive(Debug, PartialEq)]
-enum Refusal {
+pub(crate) enum Refusal {
     /// A path that does not say where it starts. The window resolves an
     /// agent's relative path before asking, so this is a caller's bug.
     Relative,
@@ -192,7 +194,7 @@ impl Refusal {
     /// What `model_stat` says. The window hands it on word for word as the
     /// answer to `model_show`, so each one is a sentence an agent can act on:
     /// what is wrong, then what to do about it.
-    fn explain(&self, path: &str) -> String {
+    pub(crate) fn explain(&self, path: &str) -> String {
         match self {
             Refusal::Relative => format!(
                 "{path} is not an absolute path: give the model's full path, or one relative to \
@@ -233,7 +235,7 @@ impl Refusal {
 
     /// What the scheme answers: a status, and a reason short enough for the
     /// viewer to show as it is.
-    fn status(&self) -> (StatusCode, String) {
+    pub(crate) fn status(&self) -> (StatusCode, String) {
         match self {
             Refusal::Relative => (StatusCode::BAD_REQUEST, "not an absolute path".into()),
             Refusal::Format => (StatusCode::FORBIDDEN, "this file type is not served".into()),
@@ -258,7 +260,7 @@ impl Refusal {
 /// format the viewer cannot read is the most useful thing to hear whether or
 /// not the file exists; and on the canonical path, because `chair.glb` may be
 /// a link to anything.
-fn inspect(
+pub(crate) fn inspect(
     requested: &Path,
     roots: &[PathBuf],
     accept: Accept,
@@ -294,16 +296,20 @@ fn inspect(
             cap: max_bytes,
         });
     }
-    let modified_ms = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_millis() as u64);
     Ok(Checked {
         path,
         size,
-        modified_ms,
+        modified_ms: modified_ms(&metadata),
     })
+}
+
+/// Epoch milliseconds, or 0 where the platform does not keep the time.
+pub(crate) fn modified_ms(metadata: &Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_millis() as u64)
 }
 
 /// Replaces the folders the preview may read from. The window calls it each
@@ -451,7 +457,7 @@ fn app_origins(config: &tauri::Config) -> Vec<String> {
 
 /// The part of a file a `Range` header asks for.
 #[derive(Debug, PartialEq)]
-enum Span {
+pub(crate) enum Span {
     Whole,
     /// Inclusive, as HTTP counts.
     Part {
@@ -466,50 +472,52 @@ enum Span {
 /// another unit, a malformed header — is answered with the whole file, which
 /// HTTP lets a server do.
 fn span(range: Option<&str>, len: u64) -> Span {
+    asked_span(range, len).unwrap_or(Span::Whole)
+}
+
+/// `span`, with `None` for a byte range this does not serve: several ranges,
+/// or one HTTP calls invalid. Whether that means the whole file or a refusal
+/// is the caller's choice, as HTTP leaves it; a header in another unit, which
+/// HTTP says must be ignored, is the whole file either way.
+pub(crate) fn asked_span(range: Option<&str>, len: u64) -> Option<Span> {
     let Some(spec) = range.and_then(|range| range.trim().strip_prefix("bytes=")) else {
-        return Span::Whole;
+        return Some(Span::Whole);
     };
     if spec.contains(',') {
-        return Span::Whole;
+        return None;
     }
-    let Some((first, last)) = spec.split_once('-') else {
-        return Span::Whole;
-    };
+    let (first, last) = spec.split_once('-')?;
     let (first, last) = (first.trim(), last.trim());
     if first.is_empty() {
         // `bytes=-500`: the last 500 bytes.
-        let Ok(suffix) = last.parse::<u64>() else {
-            return Span::Whole;
-        };
+        let suffix = last.parse::<u64>().ok()?;
         if suffix == 0 || len == 0 {
-            return Span::Unsatisfiable;
+            return Some(Span::Unsatisfiable);
         }
-        return Span::Part {
+        return Some(Span::Part {
             start: len.saturating_sub(suffix),
             end: len - 1,
-        };
+        });
     }
-    let Ok(start) = first.parse::<u64>() else {
-        return Span::Whole;
-    };
+    let start = first.parse::<u64>().ok()?;
     let end = if last.is_empty() {
         u64::MAX
     } else {
         match last.parse::<u64>() {
             Ok(end) if end >= start => end,
-            _ => return Span::Whole,
+            _ => return None,
         }
     };
     if start >= len {
-        return Span::Unsatisfiable;
+        return Some(Span::Unsatisfiable);
     }
-    Span::Part {
+    Some(Span::Part {
         start,
         end: end.min(len - 1),
-    }
+    })
 }
 
-fn read_span(path: &Path, start: u64, count: u64) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_span(path: &Path, start: u64, count: u64) -> std::io::Result<Vec<u8>> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(start))?;
     let mut body = Vec::with_capacity(count as usize);
@@ -521,7 +529,7 @@ fn read_span(path: &Path, start: u64, count: u64) -> std::io::Result<Vec<u8>> {
 /// value here is either a constant or was a valid header on the way in. A
 /// bare 500 still beats a panic on the blocking pool, which would leave the
 /// webview waiting for an answer that never comes.
-fn finish(builder: Builder, body: Vec<u8>) -> Response<Vec<u8>> {
+pub(crate) fn finish(builder: Builder, body: Vec<u8>) -> Response<Vec<u8>> {
     builder.body(body).unwrap_or_else(|_| {
         let mut response = Response::new(Vec::new());
         *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -536,7 +544,11 @@ fn finish(builder: Builder, body: Vec<u8>) -> Response<Vec<u8>> {
 /// metadata — never through base64 — and `serve` runs this off the webview's
 /// thread. The size cap bounds that buffer; a `Range` request reads only the
 /// part it asks for.
-fn answer(request: &Request<Vec<u8>>, roots: &[PathBuf], origins: &[String]) -> Response<Vec<u8>> {
+pub(crate) fn answer(
+    request: &Request<Vec<u8>>,
+    roots: &[PathBuf],
+    origins: &[String],
+) -> Response<Vec<u8>> {
     // The page and the scheme are different origins on every platform, so
     // `fetch` needs the scheme's leave to read. It is given to Hangar's own
     // pages only. A request without an Origin is not a cross-origin `fetch`,
@@ -607,6 +619,11 @@ fn answer(request: &Request<Vec<u8>>, roots: &[PathBuf], origins: &[String]) -> 
         Ok(path) => path,
         Err((status, reason)) => return refuse(status, reason),
     };
+    // Any other file is one the preview shows for itself, as what it is:
+    // preview.rs. From here on, this is the models' own way, as it was.
+    if !Accept::Asset.allows(&path) {
+        return crate::preview::answer(request, &path, roots, &base);
+    }
     let checked = match inspect(&path, roots, Accept::Asset, MAX_BYTES) {
         Ok(checked) => checked,
         Err(refusal) => {
@@ -688,7 +705,7 @@ pub fn serve<R: Runtime>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #[test]
     fn a_capture_must_be_a_png_named_png() {
         use base64::Engine;
@@ -708,7 +725,7 @@ mod tests {
     use super::*;
     use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 
-    fn temp_dir(tag: &str) -> PathBuf {
+    pub(crate) fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "hangar-model-{tag}-{}",
             uuid::Uuid::new_v4().simple()
@@ -717,7 +734,7 @@ mod tests {
         dir
     }
 
-    fn write(root: &Path, relative: &str, body: &[u8]) -> PathBuf {
+    pub(crate) fn write(root: &Path, relative: &str, body: &[u8]) -> PathBuf {
         let path = root.join(relative);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("parents");
@@ -726,7 +743,7 @@ mod tests {
         path
     }
 
-    fn roots_of(dirs: &[&Path]) -> Vec<PathBuf> {
+    pub(crate) fn roots_of(dirs: &[&Path]) -> Vec<PathBuf> {
         canonical_roots(
             &dirs
                 .iter()
@@ -753,7 +770,7 @@ mod tests {
         .remove(b')');
 
     /// `modelUrl` without the scheme and host: the path the handler sees.
-    fn url_path(path: &Path) -> String {
+    pub(crate) fn url_path(path: &Path) -> String {
         let plain = dunce::simplified(path).to_string_lossy().replace('\\', "/");
         let encoded: Vec<String> = plain
             .split('/')
@@ -764,7 +781,7 @@ mod tests {
         format!("/{}", encoded.join("/").trim_start_matches('/'))
     }
 
-    fn get(path: &str, origin: Option<&str>, range: Option<&str>) -> Request<Vec<u8>> {
+    pub(crate) fn get(path: &str, origin: Option<&str>, range: Option<&str>) -> Request<Vec<u8>> {
         let mut request = Request::builder().uri(format!("hangar-model://localhost{path}"));
         if let Some(origin) = origin {
             request = request.header(header::ORIGIN, origin);
@@ -775,11 +792,11 @@ mod tests {
         request.body(Vec::new()).expect("request")
     }
 
-    fn origins() -> Vec<String> {
+    pub(crate) fn origins() -> Vec<String> {
         vec!["http://tauri.localhost".to_string()]
     }
 
-    fn header_of(response: &Response<Vec<u8>>, name: header::HeaderName) -> &str {
+    pub(crate) fn header_of(response: &Response<Vec<u8>>, name: header::HeaderName) -> &str {
         response
             .headers()
             .get(name)
@@ -838,7 +855,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn link(target: &Path, link: &Path) -> bool {
+    pub(crate) fn link(target: &Path, link: &Path) -> bool {
         std::os::unix::fs::symlink(target, link).is_ok()
     }
 
@@ -846,7 +863,7 @@ mod tests {
     /// shell. Without either the symlink cases are skipped, not failed: the
     /// policy they exercise is the one the other tests already pin.
     #[cfg(windows)]
-    fn link(target: &Path, link: &Path) -> bool {
+    pub(crate) fn link(target: &Path, link: &Path) -> bool {
         let made = if target.is_dir() {
             std::os::windows::fs::symlink_dir(target, link)
         } else {
@@ -1050,13 +1067,16 @@ mod tests {
     }
 
     /// A glTF's textures and buffers come through the same door as the
-    /// model, by the relative URLs it names them with.
+    /// model, by the relative URLs it names them with. Anything else is the
+    /// preview's: a source as text it never runs, a binary it cannot show
+    /// not at all (preview.rs).
     #[test]
-    fn the_scheme_serves_textures_and_buffers_but_nothing_else() {
+    fn the_scheme_serves_textures_and_buffers_as_a_model_s_files() {
         let root = temp_dir("assets");
         let texture = write(&root, "textures/wood.JPG", b"jpeg");
         let buffer = write(&root, "chair.bin", b"buffer");
         let source = write(&root, "src/main.rs", b"fn main() {}");
+        let blend = write(&root, "chair.blend", b"BLENDER\0\x01\x02");
         let roots = roots_of(&[&root]);
         let serve = |path: &Path| {
             answer(
@@ -1074,7 +1094,13 @@ mod tests {
             "*"
         );
         assert_eq!(serve(&buffer).status(), StatusCode::OK);
-        assert_eq!(serve(&source).status(), StatusCode::FORBIDDEN);
+        let source = serve(&source);
+        assert_eq!(source.status(), StatusCode::OK);
+        assert_eq!(
+            header_of(&source, header::CONTENT_TYPE),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(serve(&blend).status(), StatusCode::FORBIDDEN);
         let _ = std::fs::remove_dir_all(&root);
     }
 

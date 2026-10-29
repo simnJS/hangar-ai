@@ -7,6 +7,10 @@
     "core:default",
     "core:window:allow-set-title",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**/*.pdf" }]
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "updater:default",
