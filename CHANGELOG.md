@@ -8,6 +8,21 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.2.0] - 2026-10-29
+
+- **A real chat on the phone.** In Hangar Mobile, a Claude Code pane (and the project
+  manager) now opens as a conversation instead of a copy of its terminal: your messages,
+  Claude's answers with their formatting, and between them one line per action ("Edited
+  src/a.ts", "Ran pnpm test") that opens its detail. Older messages load as you scroll up.
+  Codex, Gemini CLI and shells keep the terminal view, and a **Terminal** button still
+  shows any pane's raw screen.
+- **Claude's questions as buttons.** When Claude asks you something, the phone shows each
+  question with its options as large buttons, several choices when it allows them,
+  "Other" with a text field, and Next / Send across several questions. Your answer
+  reaches the session on the PC as if you had typed it there.
+- **Permissions say what they are for.** A permission shows the tool and what it will do
+  (the command, the file) with Allow and Deny.
+
 ## [1.1.0] - 2026-10-28
 
 - **Hangar Mobile.** Follow and steer your projects from your phone while Hangar keeps
