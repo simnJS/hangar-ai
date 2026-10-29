@@ -15,10 +15,13 @@
 //! - store.rs: what is kept on disk, in remote.json.
 //! - activity.rs: the history of what happened, a file a day for 30 days,
 //!   what the phone reads as "Since your last visit".
+//! - apps.rs: the apps the agents build, opened on the phone, each on a
+//!   slot of its own: a port of the tailnet address, 8443 to 8448.
 //! - awake.rs: keeping the PC from sleeping while Hangar Mobile is on.
 //! - files.rs: the files that go both ways, shared by an agent or uploaded
 //!   by the phone.
 //! - pairing.rs: the six-digit code and the QR code a phone pairs with.
+//! - proxy.rs: a slot's listener, relaying to the dev server it shows.
 //! - push.rs: the notifications the PC pushes to the phones, app closed.
 //! - server.rs: the listener, its routes and their doors.
 //! - assets.rs: the web app, compiled in from dist-mobile/.
@@ -36,10 +39,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::control::{self, ControlError, ControlRequest};
 
 mod activity;
+mod apps;
 mod assets;
 mod awake;
 mod files;
 mod pairing;
+mod proxy;
 mod push;
 mod server;
 mod store;
@@ -47,6 +52,7 @@ mod tailscale;
 
 use activity::ActivityLog;
 pub use activity::Entry as ActivityEntry;
+use apps::{Apps, SlotView};
 use awake::KeepAwake;
 use files::Shares;
 pub use files::{NewShare, Share};
@@ -131,6 +137,8 @@ pub struct Remote {
     push_agent: ureq::Agent,
     activity: ActivityLog,
     awake: Mutex<KeepAwake>,
+    /// The agents' apps open on the phone, each on its slot.
+    apps: Apps,
 }
 
 #[derive(Default)]
@@ -225,6 +233,7 @@ impl Remote {
             shares: Arc::new(shares),
             push_key: Mutex::new(None),
             push_agent: push::agent(),
+            apps: Apps::new(Box::new(apps::Cli), apps::default_ports()),
         }
     }
 
@@ -263,6 +272,8 @@ impl Remote {
         if let Some(running) = listening.running.take() {
             running.stop();
         }
+        // The apps open on the phone close with it.
+        self.apps.close().await;
         self.hold_awake(false);
         listening.error = None;
         *self.pairing.lock().unwrap() = None;
@@ -356,10 +367,8 @@ impl Remote {
         let tailscale = tailscale::status(self.store.read().port).await;
         match tailscale.dns_name {
             Some(dns_name) => self.begin_pairing(&dns_name),
-            None if tailscale.installed => {
-                Err("Tailscale is not connected on this PC: open it and sign in.".to_string())
-            }
-            None => Err("Tailscale is not installed on this PC.".to_string()),
+            None if tailscale.installed => Err(tailscale::NOT_CONNECTED.to_string()),
+            None => Err(tailscale::NOT_INSTALLED.to_string()),
         }
     }
 
@@ -716,6 +725,25 @@ pub fn remote_set_autostart(app: AppHandle, enabled: bool) -> Result<(), String>
 }
 
 // ---------------------------------------------------------------------------
+// The agents' apps, seen from the phone (apps.rs)
+// ---------------------------------------------------------------------------
+
+/// Which of these ports a server listens on, on this PC's loopback: the dev
+/// servers the window can offer the phone. Asked off the main thread, each
+/// port given half a second at most, all at once.
+#[tauri::command]
+pub async fn remote_ports_listening(ports: Vec<u16>) -> Vec<u16> {
+    apps::listening(&ports).await
+}
+
+/// For the settings: each slot, the app it shows and when it was last used,
+/// and what Tailscale Serve does with its port.
+#[tauri::command]
+pub async fn remote_app_slots(remote: State<'_, Arc<Remote>>) -> Result<Vec<SlotView>, String> {
+    Ok(remote.apps.slots().await)
+}
+
+// ---------------------------------------------------------------------------
 // The history (lib/activityLog)
 // ---------------------------------------------------------------------------
 
@@ -834,14 +862,31 @@ pub(super) mod tests {
     }
 
     /// A Remote of its own, saving to a folder no other test uses, with a
-    /// window that runs out of patience in 200 ms rather than 10 s.
+    /// window that runs out of patience in 200 ms rather than 10 s, and a
+    /// Tailscale that is not connected.
     pub fn remote_with(fake: Fake, assets: assets::Lookup) -> Arc<Remote> {
-        Arc::new(Remote::new(
+        remote_on(fake, assets, apps::tests::FakeTailnet::offline())
+    }
+
+    /// The same on a tailnet the tests play, with one slot for an app: 8443,
+    /// listening on the share's port 19 once it is used.
+    pub fn remote_on(
+        fake: Fake,
+        assets: assets::Lookup,
+        tailnet: apps::tests::FakeTailnet,
+    ) -> Arc<Remote> {
+        let mut remote = Remote::new(
             store::tests::scratch_file("remote"),
             fake.window(),
             Duration::from_millis(200),
             assets,
-        ))
+        );
+        let slot = apps::SlotPorts {
+            https: 8443,
+            local: test_port(19),
+        };
+        remote.apps = Apps::new(Box::new(tailnet), vec![slot]);
+        Arc::new(remote)
     }
 
     /// A port from the share Hangar hands a worker running beside others

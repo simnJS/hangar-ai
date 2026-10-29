@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
+use super::apps::{self, OpenError};
 use super::files;
 use super::pairing::PairError;
 use super::push;
@@ -48,6 +49,13 @@ pub const CALLS: &[&str] = &[
     "answer",
     "wake",
     "stats",
+    // The agents' apps the phone can open (`/m/api/app/open`).
+    "apps",
+    // A delivery, read and decided on from the phone.
+    "delivery",
+    "delivery_file",
+    "land",
+    "rework",
 ];
 
 /// The largest call, `send`, carries a prompt; 64 KB is far past any typed
@@ -57,8 +65,10 @@ const CALL_LIMIT: usize = 64 * 1024;
 const PAIR_LIMIT: usize = 4 * 1024;
 /// A push subscription is an address and two keys.
 const PUSH_LIMIT: usize = 8 * 1024;
+/// An app to open is a workspace's id and a port.
+const OPEN_LIMIT: usize = 4 * 1024;
 
-const COOKIE: &str = "hangar_device";
+pub(super) const COOKIE: &str = "hangar_device";
 const COOKIE_MAX_AGE: u64 = 365 * 24 * 60 * 60;
 
 fn refuse(status: StatusCode, error: &str) -> Response {
@@ -68,6 +78,7 @@ fn refuse(status: StatusCode, error: &str) -> Response {
 pub fn router(remote: Arc<Remote>) -> Router {
     let paired = Router::new()
         .route("/m/api/call/{op}", post(call))
+        .route("/m/api/app/open", post(open_app))
         .route("/m/api/shares", get(shares))
         .route("/m/files/{id}", get(shared_file))
         .route("/m/api/upload", post(upload))
@@ -261,6 +272,39 @@ async fn call(State(remote): State<Arc<Remote>>, Path(op): Path<String>, body: B
         )
             .into_response(),
         Err(ControlError::Unavailable(_)) => refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+    }
+}
+
+/// `{ workspaceId, port }`: an app the window lists, opened on a slot of its
+/// own — `{ url, slot }`, the address the phone opens it at.
+async fn open_app(State(remote): State<Arc<Remote>>, body: Body) -> Response {
+    let body = match read_json(body, OPEN_LIMIT).await {
+        Ok(body) => body,
+        Err((status, error)) => return refuse(status, error),
+    };
+    let workspace = body["workspaceId"].as_str().filter(|id| !id.is_empty());
+    let port = body["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|&port| port != 0);
+    let (Some(workspace), Some(port)) = (workspace, port) else {
+        return refuse(StatusCode::BAD_REQUEST, "bad-request");
+    };
+    let with_message = |status: StatusCode, error: &str, message: String| {
+        (status, Json(json!({ "error": error, "message": message }))).into_response()
+    };
+    match apps::open(&remote, workspace, port).await {
+        Ok(opened) => Json(opened).into_response(),
+        Err(OpenError::NotAllowed) => refuse(StatusCode::FORBIDDEN, "not-allowed"),
+        Err(OpenError::NotListening) => refuse(StatusCode::CONFLICT, "not-listening"),
+        Err(OpenError::Refused(message)) => {
+            with_message(StatusCode::BAD_REQUEST, "refused", message)
+        }
+        Err(OpenError::Busy) => refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+        Err(OpenError::Tailscale(message)) => {
+            with_message(StatusCode::SERVICE_UNAVAILABLE, "tailscale", message)
+        }
+        Err(OpenError::NoSlot) => refuse(StatusCode::SERVICE_UNAVAILABLE, "no-free-slot"),
     }
 }
 
@@ -563,8 +607,9 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
+    use super::super::apps::tests::{dev_server, on_ports, window_listing, FakeTailnet, PC};
     use super::super::assets::tests::{no_app, small_app};
-    use super::super::tests::{remote_with, test_port, Fake};
+    use super::super::tests::{remote_on, remote_with, test_port, Fake};
     use super::*;
 
     struct Answer {
@@ -966,6 +1011,11 @@ mod tests {
                 "remote_answer",
                 "remote_wake",
                 "remote_stats",
+                "remote_apps",
+                "remote_delivery",
+                "remote_delivery_file",
+                "remote_land",
+                "remote_rework",
                 "remote_state",
             ]
         );
@@ -1031,6 +1081,169 @@ mod tests {
             answer.body,
             json!({ "error": "refused", "message": "no pane named Zed" })
         );
+    }
+
+    fn open_body(workspace: &str, port: u16) -> String {
+        json!({ "workspaceId": workspace, "port": port }).to_string()
+    }
+
+    #[tokio::test]
+    async fn opening_an_app_takes_a_paired_phone_x_hangar_and_a_port() {
+        let window = window_listing(&[5173]);
+        let remote = remote_on(window.clone(), no_app, FakeTailnet::connected());
+        let token = paired_phone(&remote).await;
+        let body = open_body("w1", 5173);
+
+        let unpaired = ask(
+            &remote,
+            post_to("/m/api/app/open", None, true, body.clone()),
+        )
+        .await;
+        assert_eq!(unpaired.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(unpaired.body, json!({ "error": "unpaired" }));
+        let forged = ask(
+            &remote,
+            post_to("/m/api/app/open", Some("forged"), true, body.clone()),
+        )
+        .await;
+        assert_eq!(forged.status, StatusCode::UNAUTHORIZED);
+        let unmarked = ask(
+            &remote,
+            post_to("/m/api/app/open", Some(&token), false, body),
+        )
+        .await;
+        assert_eq!(unmarked.status, StatusCode::FORBIDDEN);
+        for bad in [
+            json!({ "port": 5173 }),
+            json!({ "workspaceId": "", "port": 5173 }),
+            json!({ "workspaceId": "w1" }),
+            json!({ "workspaceId": "w1", "port": 0 }),
+            json!({ "workspaceId": "w1", "port": 70000 }),
+            json!({ "workspaceId": "w1", "port": "5173" }),
+        ] {
+            let answer = ask(
+                &remote,
+                post_to("/m/api/app/open", Some(&token), true, bad.to_string()),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::BAD_REQUEST, "{bad}");
+            assert_eq!(answer.body, json!({ "error": "bad-request" }), "{bad}");
+        }
+        assert!(window.asked.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_app_the_window_does_not_list_is_not_allowed() {
+        let window = window_listing(&[5173]);
+        let tailnet = FakeTailnet::connected();
+        let remote = remote_on(window.clone(), no_app, tailnet.clone());
+        let token = paired_phone(&remote).await;
+        for (workspace, port) in [("w1", 3000), ("w2", 5173)] {
+            let answer = ask(
+                &remote,
+                post_to(
+                    "/m/api/app/open",
+                    Some(&token),
+                    true,
+                    open_body(workspace, port),
+                ),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::FORBIDDEN, "{workspace} {port}");
+            assert_eq!(answer.body, json!({ "error": "not-allowed" }));
+        }
+        assert_eq!(
+            *window.asked.lock().unwrap(),
+            ["remote_apps", "remote_apps"]
+        );
+        assert!(tailnet.published().is_empty());
+    }
+
+    #[test]
+    fn an_app_nothing_listens_on_is_refused() {
+        on_ports(|| async {
+            // A port of the share, just let go of: nobody listens on it.
+            let closed = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, test_port(9)))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let tailnet = FakeTailnet::connected();
+            let remote = remote_on(window_listing(&[closed]), no_app, tailnet.clone());
+            let token = paired_phone(&remote).await;
+            let answer = ask(
+                &remote,
+                post_to(
+                    "/m/api/app/open",
+                    Some(&token),
+                    true,
+                    open_body("w1", closed),
+                ),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::CONFLICT);
+            assert_eq!(answer.body, json!({ "error": "not-listening" }));
+            assert!(tailnet.published().is_empty());
+            assert_eq!(remote.apps.slots().await[0].app, None);
+        });
+    }
+
+    #[tokio::test]
+    async fn a_window_that_refuses_or_does_not_answer_opens_nothing() {
+        for (window, status, body) in [
+            (
+                Fake::refusing("Hangar Mobile cannot see that workspace"),
+                StatusCode::BAD_REQUEST,
+                json!({ "error": "refused", "message": "Hangar Mobile cannot see that workspace" }),
+            ),
+            (
+                Fake::silent(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "error": "pc-busy" }),
+            ),
+        ] {
+            let remote = remote_on(window, no_app, FakeTailnet::connected());
+            let token = paired_phone(&remote).await;
+            let answer = ask(
+                &remote,
+                post_to("/m/api/app/open", Some(&token), true, open_body("w1", 5173)),
+            )
+            .await;
+            assert_eq!((answer.status, answer.body), (status, body));
+        }
+    }
+
+    #[test]
+    fn an_app_opens_at_its_slot_s_address_once_tailscale_is_there() {
+        on_ports(|| async {
+            let (port, _dev) = dev_server(test_port(9)).await;
+            let offline = remote_on(window_listing(&[port]), no_app, FakeTailnet::offline());
+            let token = paired_phone(&offline).await;
+            let answer = ask(
+                &offline,
+                post_to("/m/api/app/open", Some(&token), true, open_body("w1", port)),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(answer.body["error"], "tailscale");
+            assert!(answer.body["message"]
+                .as_str()
+                .unwrap()
+                .contains("not connected"));
+
+            let remote = remote_on(window_listing(&[port]), no_app, FakeTailnet::connected());
+            let token = paired_phone(&remote).await;
+            let answer = ask(
+                &remote,
+                post_to("/m/api/app/open", Some(&token), true, open_body("w1", port)),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+            assert_eq!(
+                answer.body,
+                json!({ "url": format!("https://{PC}:8443/"), "slot": 0 })
+            );
+        });
     }
 
     #[tokio::test]

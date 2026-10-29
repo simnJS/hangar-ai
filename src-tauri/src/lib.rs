@@ -192,6 +192,8 @@ pub fn run() {
             remote::remote_options,
             remote::remote_set_keep_awake,
             remote::remote_set_autostart,
+            remote::remote_ports_listening,
+            remote::remote_app_slots,
             remote::activity_append,
             remote::activity_read,
         ])

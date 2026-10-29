@@ -129,6 +129,13 @@ subtle = "2.6"
 web-push-native = { version = "0.5", default-features = false }
 p256 = { version = "0.13", features = ["ecdsa"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# An agent's dev server seen from the phone — see remote/proxy.rs: each
+# request relayed to it over a connection of its own, and a hot-reload
+# WebSocket carried through once both sides have upgraded. Both are compiled
+# already, axum serving with them and the updater's HTTP client bringing
+# hyper's client half, so naming them adds no crate.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 # The mobile server's tests call its router directly, without a socket.
 # Already compiled for axum, with this feature.

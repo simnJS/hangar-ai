@@ -2006,6 +2006,8 @@ dependencies = [
  "discord-rich-presence",
  "dunce",
  "ece-native",
+ "hyper",
+ "hyper-util",
  "keyring",
  "libc",
  "num_cpus",
