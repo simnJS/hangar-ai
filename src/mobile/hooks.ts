@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startPolling } from "./poll";
 import { parseRoute, routeHash, type Route } from "./route";
+import { browserPage, watchViewport } from "./viewport";
 
 /** Runs `task` every `intervalMs` while the page is seen and `enabled`. */
 export function usePolling(task: () => Promise<unknown>, intervalMs: number, enabled = true): void {
@@ -89,26 +90,14 @@ export function useNotificationOpens(): void {
 }
 
 /**
- * The part of the screen above the on-screen keyboard: iOS keeps the layout
- * viewport when it opens and scrolls it instead, so a composer pinned to the
- * bottom would sit under the keyboard. Written to `--app-height` and
- * `--app-top` on the root, which the app's frame is pinned to.
+ * The app's frame: the window at rest, the part of the screen above the
+ * on-screen keyboard while it is up (viewport.ts). Written to the root as
+ * `data-keyboard`, `--keyboard-top` and `--keyboard-height`, which `.app`
+ * is pinned to.
  */
 export function useVisibleViewport(): void {
   useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const root = document.documentElement.style;
-    const update = () => {
-      root.setProperty("--app-height", `${viewport.height}px`);
-      root.setProperty("--app-top", `${viewport.offsetTop}px`);
-    };
-    update();
-    viewport.addEventListener("resize", update);
-    viewport.addEventListener("scroll", update);
-    return () => {
-      viewport.removeEventListener("resize", update);
-      viewport.removeEventListener("scroll", update);
-    };
+    const page = browserPage();
+    return page ? watchViewport(page) : undefined;
   }, []);
 }
