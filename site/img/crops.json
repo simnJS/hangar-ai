@@ -7,7 +7,9 @@
     "In a list of the index, a path step is a position or an entry's name: stills/en/hero/rects/workers/Zoe/box.",
     "widths: the files written, img/<name>-<width>.avif and .webp; the page's srcset follows them.",
     "fade: pixels over which an edge the crop cuts through fades to that edge's own colour.",
-    "Names ending in -m are the phone crops: one panel, drawn near its real size on a phone."
+    "Names ending in -m are the phone crops: one panel, drawn near its real size on a phone.",
+    "Names starting with mobile- are Hangar Mobile itself, in its mock mode (pnpm mobile:dev): whole screens,",
+    "390 x 844 at scale 2 with an iPhone's safe areas, the PC and the workspace renamed; the page draws the phone."
   ],
   "scale": 1,
   "rects": "../../index.json",
@@ -78,6 +80,11 @@
     },
     "orch-m": { "src": "orch.png", "rect": [820, 472, 940, 248], "widths": [400, 800] },
     "stats-m": { "src": "stats.png", "rect": [526, 196, 704, 572], "widths": [400, 704] },
-    "model-m": { "src": "alt/model-wide.png", "rect": [1283, 88, 685, 860], "widths": [400, 685] }
+    "model-m": { "src": "alt/model-wide.png", "rect": [1283, 88, 685, 860], "widths": [400, 685] },
+
+    "mobile-for-you": { "src": "mobile/for-you.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
+    "mobile-question": { "src": "mobile/question.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
+    "mobile-permission": { "src": "mobile/permission.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
+    "mobile-shared": { "src": "mobile/shared.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] }
   }
 }
