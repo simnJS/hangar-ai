@@ -1,7 +1,8 @@
 //! Tailscale, as Hangar Mobile needs it: is it installed, is it connected,
 //! what is this PC called on the tailnet, and does Tailscale Serve already
 //! publish the mobile server. And the one command that changes anything,
-//! `tailscale serve`, which only ever runs from the person's click.
+//! `tailscale serve`, which only ever runs from the person's click: in the
+//! settings for the mobile server, on the phone for an app's slot (apps.rs).
 //!
 //! A missing Tailscale is an answer — `installed: false` — never an error:
 //! the settings are there to say what to install.
@@ -11,8 +12,11 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+pub const NOT_INSTALLED: &str = "Tailscale is not installed on this PC.";
+pub const NOT_CONNECTED: &str = "Tailscale is not connected on this PC: open it and sign in.";
 
 /// Hides the console window Windows would otherwise flash for every call.
 #[cfg(windows)]
@@ -66,13 +70,20 @@ pub async fn status(port: u16) -> TailscaleStatus {
 /// HTTPS address for this PC, proxied to the mobile server, kept by the
 /// daemon across restarts.
 pub async fn serve(port: u16) -> Result<TailscaleStatus, String> {
-    let cli = locate()
-        .await
-        .ok_or_else(|| "Tailscale is not installed on this PC.".to_string())?;
+    publish(443, port).await?;
+    Ok(status(port).await)
+}
+
+/// `tailscale serve --bg --https=<https> http://127.0.0.1:<port>`: this PC's
+/// HTTPS address on that port proxied to the local one, kept by the daemon
+/// across restarts until `tailscale serve --https=<https> off`.
+pub async fn publish(https: u16, port: u16) -> Result<(), String> {
+    let cli = locate().await.ok_or_else(|| NOT_INSTALLED.to_string())?;
     let target = format!("http://127.0.0.1:{port}");
+    let https = format!("--https={https}");
     let ran = run(
         &cli,
-        &["serve", "--bg", "--https=443", &target],
+        &["serve", "--bg", &https, &target],
         SERVE_TIMEOUT,
         |line| consent_url(line).is_some(),
     )
@@ -97,7 +108,74 @@ pub async fn serve(port: u16) -> Result<TailscaleStatus, String> {
             format!("tailscale serve failed: {said}")
         });
     }
-    Ok(status(port).await)
+    Ok(())
+}
+
+/// The PC's name on the tailnet and what Tailscale Serve publishes on it
+/// (`serve status --json`), or why Tailscale cannot say.
+pub async fn serve_config() -> Result<(String, Value), String> {
+    let cli = locate().await.ok_or_else(|| NOT_INSTALLED.to_string())?;
+    let ran = run(&cli, &["status", "--json"], ASK_TIMEOUT, |_| false).await?;
+    let (running, dns_name) = parse_status(&ran.stdout);
+    let Some(dns_name) = dns_name.filter(|_| running) else {
+        return Err(NOT_CONNECTED.to_string());
+    };
+    let ran = run(&cli, &["serve", "status", "--json"], ASK_TIMEOUT, |_| false).await?;
+    let read = if ran.stdout.trim().is_empty() {
+        Ok(json!({}))
+    } else {
+        serde_json::from_str(&ran.stdout)
+    };
+    match read {
+        Ok(config) if ran.success => Ok((dns_name, config)),
+        _ => Err("Tailscale Serve did not say what it publishes.".to_string()),
+    }
+}
+
+/// What Tailscale Serve does with one of this PC's HTTPS ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Mapping {
+    /// Nothing: the port is Hangar's to map.
+    Free,
+    /// Its root proxied to the local port asked about.
+    Mapped,
+    /// Something else — the person's own, or opened to the internet by
+    /// Funnel — which Hangar never replaces.
+    Taken,
+}
+
+/// `serve status --json`: what `https` on this PC does, `local` being where
+/// Hangar would have it proxy to.
+pub fn mapping(config: &Value, dns_name: &str, https: u16, local: u16) -> Mapping {
+    let host = format!("{dns_name}:{https}");
+    let entry = |key: &str| {
+        config[key].as_object().and_then(|entries| {
+            entries
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&host))
+                .map(|(_, entry)| entry)
+        })
+    };
+    if entry("AllowFunnel").is_some_and(|funnel| funnel == &Value::Bool(true)) {
+        return Mapping::Taken;
+    }
+    let site = entry("Web");
+    let ours = site
+        .and_then(|site| site["Handlers"]["/"]["Proxy"].as_str())
+        .is_some_and(|proxy| proxies_to(proxy, local));
+    let tcp = &config["TCP"][https.to_string()];
+    let https_served = tcp["HTTPS"] == Value::Bool(true);
+    if ours && https_served {
+        Mapping::Mapped
+    } else if (!tcp.is_null() && !https_served) || (site.is_some() && !ours) {
+        // A TCP forward, or a site of the person's.
+        Mapping::Taken
+    } else {
+        // Nothing, or Hangar's own mapping half there: serving it again
+        // completes it.
+        Mapping::Free
+    }
 }
 
 /// The CLI, found off the async runtime: on macOS the first PATH lookup asks
@@ -373,6 +451,52 @@ mod tests {
         assert!(proxies_to("127.0.0.1:47821", 47821));
         assert!(!proxies_to("http://127.0.0.1:478210", 47821));
         assert!(!proxies_to("http://10.0.0.2:47821", 47821));
+    }
+
+    #[test]
+    fn an_app_s_port_is_hangar_s_free_or_someone_else_s() {
+        let config: Value = serde_json::from_str(
+            r#"{
+            "TCP": {
+                "443": { "HTTPS": true },
+                "8443": { "HTTPS": true },
+                "8444": { "HTTPS": true },
+                "8445": { "TCPForward": "127.0.0.1:22" },
+                "8447": { "HTTPS": true }
+            },
+            "Web": {
+                "atelier.tail1234.ts.net:443": {
+                    "Handlers": { "/": { "Proxy": "http://127.0.0.1:47821" } } },
+                "atelier.tail1234.ts.net:8443": {
+                    "Handlers": { "/": { "Proxy": "http://127.0.0.1:47822" } } },
+                "atelier.tail1234.ts.net:8444": {
+                    "Handlers": { "/": { "Proxy": "http://127.0.0.1:3000" } } },
+                "atelier.tail1234.ts.net:8446": {
+                    "Handlers": { "/": { "Proxy": "http://127.0.0.1:47825" } } },
+                "atelier.tail1234.ts.net:8447": {
+                    "Handlers": { "/": { "Proxy": "http://127.0.0.1:47826" } } }
+            },
+            "AllowFunnel": { "atelier.tail1234.ts.net:8447": true }
+        }"#,
+        )
+        .unwrap();
+        let name = "atelier.tail1234.ts.net";
+        assert_eq!(mapping(&config, name, 8443, 47822), Mapping::Mapped);
+        assert_eq!(
+            mapping(&config, "ATELIER.tail1234.ts.net", 8443, 47822),
+            Mapping::Mapped
+        );
+        // The person's own site, a TCP forward, a slot opened to the
+        // internet: never Hangar's to replace.
+        assert_eq!(mapping(&config, name, 8444, 47823), Mapping::Taken);
+        assert_eq!(mapping(&config, name, 8445, 47824), Mapping::Taken);
+        assert_eq!(mapping(&config, name, 8447, 47826), Mapping::Taken);
+        // Hangar's own, half written: served again.
+        assert_eq!(mapping(&config, name, 8446, 47825), Mapping::Free);
+        assert_eq!(mapping(&config, name, 8448, 47827), Mapping::Free);
+        assert_eq!(mapping(&json!({}), name, 8443, 47822), Mapping::Free);
+        // The mobile server's port is the person's as far as a slot goes.
+        assert_eq!(mapping(&config, name, 443, 47822), Mapping::Taken);
     }
 
     #[test]
