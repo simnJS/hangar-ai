@@ -9,6 +9,9 @@ import {
 } from "react";
 import { Icon, type IconName } from "./Icon";
 import { ToolbarMenu, type MenuCloseReason } from "./ToolbarMenu";
+import { FileView } from "./preview/FileView";
+import { Glyph } from "./preview/Glyph";
+import { Banner, StageMessage } from "./preview/parts";
 import { useLocale, useT, type Locale } from "../i18n";
 import { FORMAT_PLANS } from "../lib/model3d/formats";
 import type {
@@ -29,11 +32,13 @@ import { captureName, copyPng, savePng } from "../lib/modelCapture";
 import {
   activateModel,
   closeModel,
+  isModel,
   reloadModel,
   useAllModels,
   useModels,
   type ModelInfo,
   type OpenModel,
+  type OpenPreview,
 } from "../lib/modelStore";
 import { clampModelPanel, MODEL_MIN } from "../lib/sidePanels";
 import { getTerminal } from "../lib/terminalRegistry";
@@ -41,23 +46,29 @@ import { useDrawer, type DrawerCloseReason } from "../lib/useDrawer";
 import { DEFAULT_SETTINGS } from "../types";
 
 /**
- * The 3D preview: the models agents opened, one tab each, in a panel beside
- * the terminals — or a drawer over them when there is no room, or the whole
- * work area when expanded. lib/sidePanels decides which; App passes it in.
+ * The preview: the files agents opened, one tab each — a 3D model, an image,
+ * a video, a sound, a text or code file, Markdown, a PDF, a web page — in a
+ * panel beside the terminals, or a drawer over them when there is no room,
+ * or the whole work area when expanded. lib/sidePanels decides which; App
+ * passes it in.
  *
  * Each workspace has its own preview (lib/modelStore), and the panel draws
- * the one of the workspace on screen. There is one panel per window all the
- * same, and one viewer in it — one WebGL context, one three.js scene — which
- * holds the models of every workspace: a switch of workspace is a switch of
- * tab, and the engine's own budget (KEEP_LOADED) bounds the GPU memory
- * however many workspaces have models open.
+ * the one of the workspace on screen. The tab in front is drawn by its
+ * viewer: the 3D view below for a model, components/preview for the rest.
  *
- * It stays mounted, hidden, for as long as any workspace of the window has a
- * model open, even while another view or workspace is on screen: the loaded
- * models stay on the GPU so a switch is instant, and an agent's snapshot can
- * be rendered whatever the user is looking at. The engine itself
- * (lib/model3d/engine, three.js) arrives with the first panel, through a
- * dynamic import.
+ * There is one panel per window all the same, and one 3D view in it — one
+ * WebGL context, one three.js scene — which holds the models of every
+ * workspace: a switch of workspace is a switch of tab, and the engine's own
+ * budget (KEEP_LOADED) bounds the GPU memory however many workspaces have
+ * models open.
+ *
+ * The panel stays mounted, hidden, for as long as any workspace of the window
+ * has a file open, even while another view or workspace is on screen; the 3D
+ * view in it for as long as one has a model open, so the loaded models stay
+ * on the GPU, a switch is instant, and an agent's snapshot can be rendered
+ * whatever the user is looking at. The engine itself (lib/model3d/engine,
+ * three.js) arrives with the first model, through a dynamic import: a window
+ * that only ever shows images and documents never loads it.
  */
 
 /** In interface points, like the width itself. */
@@ -88,14 +99,131 @@ interface Props {
 
 export function ModelPanel(props: Props) {
   const { shown, drawer, expanded, paneId } = props;
-  const { models, activeId } = useModels(props.workspaceId);
+  const { models: entries, activeId } = useModels(props.workspaceId);
+  const windowModels = useAllModels().length > 0;
+  const t = useT();
+  const asideRef = useRef<HTMLElement>(null);
+  const panelId = useId();
+  const active = entries.find((entry) => entry.id === activeId) ?? null;
+  const file = active && !isModel(active) ? active : null;
+
+  // ---------------------------------------------------------------------------
+  // Focus: as a drawer the panel takes the keyboard and gives it back
+  // (lib/useDrawer); hidden with the focus inside, it hands it to the pane.
+  // ---------------------------------------------------------------------------
+
+  const closeDrawerRef = useRef<(reason: DrawerCloseReason) => void>(() => props.onClose());
+  const focusInside = useRef(false);
+  useLayoutEffect(() => {
+    if (shown || !focusInside.current) return;
+    focusInside.current = false;
+    getTerminal(paneId)?.focus();
+  }, [shown, paneId]);
+
+  const close = () => (drawer && !expanded ? closeDrawerRef.current("button") : props.onClose());
+
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+    // Expanded, Escape puts it back beside the terminals, like leaving a
+    // full-screen view; anything inside that handles Escape itself keeps it.
+    if (event.key === "Escape" && expanded && !event.defaultPrevented) {
+      event.preventDefault();
+      props.onToggleExpand();
+    }
+  }
+
+  return (
+    <aside
+      ref={asideRef}
+      className={[
+        "model-panel",
+        drawer && !expanded ? "model-panel--drawer" : "",
+        expanded ? "model-panel--expanded" : "",
+      ].join(" ")}
+      style={expanded ? undefined : { width: props.drawnWidth }}
+      hidden={!shown}
+      aria-label={t("model.panel")}
+      // Focused as a region — by F6, or as a drawer — like the board panel.
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      onFocus={() => (focusInside.current = true)}
+      onBlur={(event) => {
+        if (!asideRef.current?.contains(event.relatedTarget as Node | null)) focusInside.current = false;
+      }}
+    >
+      {shown && drawer && !expanded && (
+        <DrawerFocus panelRef={asideRef} paneId={paneId} onClose={props.onClose} closeRef={closeDrawerRef} />
+      )}
+      {!expanded && <Grip {...props} />}
+
+      <div className="model-panel__head">
+        <PreviewTabs entries={entries} activeId={activeId} panelId={panelId} />
+        <span className="model-panel__spacer" />
+        <button
+          type="button"
+          className="model-panel__tool"
+          onClick={props.onToggleExpand}
+          aria-pressed={expanded}
+          title={expanded ? t("model.collapse") : t("model.expand")}
+          aria-label={expanded ? t("model.collapse") : t("model.expand")}
+        >
+          <Icon name={expanded ? "collapse" : "expand"} size={12} />
+        </button>
+        <button
+          type="button"
+          className="model-panel__tool"
+          onClick={close}
+          title={t("model.hide")}
+          aria-label={t("model.hide")}
+        >
+          <Icon name="close" size={13} />
+        </button>
+      </div>
+
+      <div
+        className="preview-body"
+        id={`${panelId}-stage`}
+        role="tabpanel"
+        aria-labelledby={active ? `${panelId}-tab-${active.id}` : undefined}
+      >
+        {windowModels && (
+          <ModelView active={active && isModel(active) ? active : null} hidden={Boolean(file)} shown={shown} />
+        )}
+        {file ? (
+          <FileView entry={file} shown={shown} />
+        ) : (
+          !windowModels && (
+            <div className="model-panel__stage">
+              <StageMessage icon="cube" title={t("model.empty")} detail={t("model.emptyHint")} />
+            </div>
+          )
+        )}
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * The 3D view: its bar, its stage, its animation and its numbers, for the
+ * model in front — or for none, hidden, while another kind of file is in
+ * front, its models staying loaded. Mounted while any workspace of the
+ * window has a model open (see ModelPanel).
+ */
+function ModelView({
+  active,
+  hidden,
+  shown,
+}: {
+  active: OpenModel | null;
+  /** Another kind of file is in front. */
+  hidden: boolean;
+  /** The panel is on screen. */
+  shown: boolean;
+}) {
   const everyModel = useAllModels();
   const asleep = useAsleep();
   const t = useT();
   const locale = useLocale();
-  const asideRef = useRef<HTMLElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const panelId = useId();
 
   const [generation, setGeneration] = useState(0);
   const { viewer, status, ready } = useViewer(hostRef, generation);
@@ -103,8 +231,7 @@ export function ModelPanel(props: Props) {
   const { progress, ensure, forget } = useModelLoads(viewer);
   useSnapshotter(ready, ensure);
 
-  const active = models.find((model) => model.id === activeId) ?? null;
-  const missing = useModelWatch(active, shown);
+  const missing = useModelWatch(active, shown && !hidden);
 
   // Closed tabs let go of their models, and so does a workspace put to sleep:
   // its models stay listed, and load again once it is back on screen.
@@ -117,7 +244,7 @@ export function ModelPanel(props: Props) {
   // A model an agent opened in a workspace that is not on screen loads all
   // the same: the agent hears what the viewer found, and the user finds it
   // ready. The one in front is loaded below.
-  const pending = awake.filter((model) => model.status === "loading" && model.id !== activeId);
+  const pending = awake.filter((model) => model.status === "loading" && model.id !== active?.id);
   const pendingKey = pending.map((model) => `${model.id}:${model.revision}`).join(" ");
   useEffect(() => {
     if (!viewer) return;
@@ -173,30 +300,6 @@ export function ModelPanel(props: Props) {
     });
   }, [viewer, active?.id, shownRevision]);
 
-  // ---------------------------------------------------------------------------
-  // Focus: as a drawer the panel takes the keyboard and gives it back
-  // (lib/useDrawer); hidden with the focus inside, it hands it to the pane.
-  // ---------------------------------------------------------------------------
-
-  const closeDrawerRef = useRef<(reason: DrawerCloseReason) => void>(() => props.onClose());
-  const focusInside = useRef(false);
-  useLayoutEffect(() => {
-    if (shown || !focusInside.current) return;
-    focusInside.current = false;
-    getTerminal(paneId)?.focus();
-  }, [shown, paneId]);
-
-  const close = () => (drawer && !expanded ? closeDrawerRef.current("button") : props.onClose());
-
-  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
-    // Expanded, Escape puts it back beside the terminals, like leaving a
-    // full-screen view; anything inside that handles Escape itself keeps it.
-    if (event.key === "Escape" && expanded && !event.defaultPrevented) {
-      event.preventDefault();
-      props.onToggleExpand();
-    }
-  }
-
   const loading = active ? progress[active.id] : undefined;
   const hasContent = Boolean(active && viewer?.hasAny(active.id));
   // Loading with nothing to show yet: a first load, or a model dropped from
@@ -205,53 +308,7 @@ export function ModelPanel(props: Props) {
   const failedOutright = Boolean(active && active.status === "error" && !hasContent);
 
   return (
-    <aside
-      ref={asideRef}
-      className={[
-        "model-panel",
-        drawer && !expanded ? "model-panel--drawer" : "",
-        expanded ? "model-panel--expanded" : "",
-      ].join(" ")}
-      style={expanded ? undefined : { width: props.drawnWidth }}
-      hidden={!shown}
-      aria-label={t("model.panel")}
-      // Focused as a region — by F6, or as a drawer — like the board panel.
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-      onFocus={() => (focusInside.current = true)}
-      onBlur={(event) => {
-        if (!asideRef.current?.contains(event.relatedTarget as Node | null)) focusInside.current = false;
-      }}
-    >
-      {shown && drawer && !expanded && (
-        <DrawerFocus panelRef={asideRef} paneId={paneId} onClose={props.onClose} closeRef={closeDrawerRef} />
-      )}
-      {!expanded && <Grip {...props} />}
-
-      <div className="model-panel__head">
-        <ModelTabs models={models} activeId={activeId} panelId={panelId} />
-        <span className="model-panel__spacer" />
-        <button
-          type="button"
-          className="model-panel__tool"
-          onClick={props.onToggleExpand}
-          aria-pressed={expanded}
-          title={expanded ? t("model.collapse") : t("model.expand")}
-          aria-label={expanded ? t("model.collapse") : t("model.expand")}
-        >
-          <Icon name={expanded ? "collapse" : "expand"} size={12} />
-        </button>
-        <button
-          type="button"
-          className="model-panel__tool"
-          onClick={close}
-          title={t("model.hide")}
-          aria-label={t("model.hide")}
-        >
-          <Icon name="close" size={13} />
-        </button>
-      </div>
-
+    <div className="preview-model" hidden={hidden}>
       <ModelToolbar
         viewer={viewer}
         active={active}
@@ -261,12 +318,7 @@ export function ModelPanel(props: Props) {
         background={theme.background}
       />
 
-      <div
-        className="model-panel__stage"
-        id={`${panelId}-stage`}
-        role="tabpanel"
-        aria-labelledby={active ? `${panelId}-tab-${active.id}` : undefined}
-      >
+      <div className="model-panel__stage">
         <div
           className="model-view"
           ref={hostRef}
@@ -327,7 +379,7 @@ export function ModelPanel(props: Props) {
 
       {animation && hasContent && <AnimationBar viewer={viewer} state={animation} />}
       <InfoStrip model={active} info={hasContent ? (active?.info ?? null) : null} locale={locale} />
-    </aside>
+    </div>
   );
 }
 
@@ -423,12 +475,12 @@ function Grip({ width, drawnWidth, maxWidth, scale, onResize }: Props) {
 // Tabs
 // -----------------------------------------------------------------------------
 
-function ModelTabs({
-  models,
+function PreviewTabs({
+  entries,
   activeId,
   panelId,
 }: {
-  models: OpenModel[];
+  entries: OpenPreview[];
   activeId: string | null;
   panelId: string;
 }) {
@@ -440,22 +492,22 @@ function ModelTabs({
   useEffect(() => {
     const tab = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     tab?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeId, models.length]);
+  }, [activeId, entries.length]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const at = models.findIndex((model) => model.id === activeId);
+    const at = entries.findIndex((entry) => entry.id === activeId);
     let next = -1;
-    if (event.key === "ArrowRight") next = (at + 1) % models.length;
-    else if (event.key === "ArrowLeft") next = (at - 1 + models.length) % models.length;
+    if (event.key === "ArrowRight") next = (at + 1) % entries.length;
+    else if (event.key === "ArrowLeft") next = (at - 1 + entries.length) % entries.length;
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = models.length - 1;
+    else if (event.key === "End") next = entries.length - 1;
     else if (event.key === "Delete" && activeId) {
       event.preventDefault();
       closeModel(activeId);
       return;
     } else return;
     event.preventDefault();
-    const target = models[next];
+    const target = entries[next];
     if (!target) return;
     activateModel(target.id);
     // After the render that makes it the tab stop.
@@ -472,43 +524,45 @@ function ModelTabs({
       ref={listRef}
       onKeyDown={onKeyDown}
     >
-      {models.map((model) => {
-        const selected = model.id === activeId;
-        const by = model.openedBy ? t("model.openedBy", { name: model.openedBy }) : null;
+      {entries.map((entry) => {
+        const selected = entry.id === activeId;
+        const by = entry.openedBy ? t("model.openedBy", { name: entry.openedBy }) : null;
         return (
-          <div key={model.id} className={`model-tab ${selected ? "is-active" : ""}`}>
+          <div key={entry.id} className={`model-tab ${selected ? "is-active" : ""}`}>
             <button
               type="button"
               role="tab"
-              id={`${panelId}-tab-${model.id}`}
-              data-model={model.id}
+              id={`${panelId}-tab-${entry.id}`}
+              data-model={entry.id}
               className="model-tab__main"
               aria-selected={selected}
               aria-controls={`${panelId}-stage`}
               tabIndex={selected ? 0 : -1}
-              title={by ? `${model.path}\n${by}` : model.path}
-              onClick={() => activateModel(model.id)}
+              title={by ? `${entry.path}\n${by}` : entry.path}
+              onClick={() => activateModel(entry.id)}
             >
-              {model.status === "loading" ? (
+              {entry.status === "loading" ? (
                 <span className="model-tab__spinner" aria-hidden="true" />
-              ) : model.status === "error" ? (
+              ) : entry.status === "error" ? (
                 <Icon name="alert" size={12} className="model-tab__icon model-tab__icon--error" />
-              ) : (
+              ) : isModel(entry) ? (
                 <Icon name="cube" size={12} className="model-tab__icon" />
+              ) : (
+                <Glyph name={entry.kind} size={12} className="model-tab__icon" />
               )}
-              <span className="model-tab__title">{model.title}</span>
+              <span className="model-tab__title">{entry.title}</span>
               {/* Beside several tabs it would be cut to "ou…" in each: only
                   the one in front says who opened it, the others in their
                   tooltip. */}
-              {by && (selected || models.length === 1) && <span className="model-tab__by">{by}</span>}
+              {by && (selected || entries.length === 1) && <span className="model-tab__by">{by}</span>}
             </button>
             <button
               type="button"
               className="model-tab__close"
               tabIndex={selected ? 0 : -1}
-              onClick={() => closeModel(model.id)}
-              title={t("model.close", { title: model.title })}
-              aria-label={t("model.close", { title: model.title })}
+              onClick={() => closeModel(entry.id)}
+              title={t("model.close", { title: entry.title })}
+              aria-label={t("model.close", { title: entry.title })}
             >
               <Icon name="close" size={11} />
             </button>
@@ -837,66 +891,6 @@ function LoadingCard({
           {bytes && <span className="model-loading__bytes">{bytes}</span>}
         </span>
       </div>
-    </div>
-  );
-}
-
-function StageMessage({
-  icon,
-  tone,
-  title,
-  detail,
-  action,
-  onAction,
-}: {
-  icon: IconName;
-  tone?: "danger" | "warning";
-  title: string;
-  detail?: string;
-  action?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="model-stage__center" role={tone ? "alert" : "status"}>
-      <div className={`model-message ${tone ? `model-message--${tone}` : ""}`}>
-        <Icon name={icon} size={20} className="model-message__icon" />
-        <p className="model-message__title">{title}</p>
-        {detail && <p className="model-message__detail">{detail}</p>}
-        {action && (
-          <button type="button" className="btn" onClick={onAction}>
-            {action}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Banner({
-  tone,
-  text,
-  detail,
-  action,
-  onAction,
-}: {
-  tone: "danger" | "warning";
-  text: string;
-  detail?: string | null;
-  action?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className={`model-banner model-banner--${tone}`} role="alert">
-      <Icon name="alert" size={13} className="model-banner__icon" />
-      <span className="model-banner__text" title={detail ?? undefined}>
-        {text}
-        {detail && <span className="model-banner__detail">{detail}</span>}
-      </span>
-      {action && (
-        <button type="button" className="model-banner__action" onClick={onAction}>
-          {action}
-        </button>
-      )}
     </div>
   );
 }

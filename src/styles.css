@@ -7811,3 +7811,483 @@ select.task__input {
   outline: none;
   background: var(--accent);
 }
+
+/* ---------- The preview's viewers (components/preview) ---------- */
+
+/* Under the tabs: the 3D view, or the viewer of the file in front. Either
+   one fills it; the 3D view stays mounted, hidden, behind another kind. */
+.preview-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-model,
+.preview-file {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-model[hidden] {
+  display: none;
+}
+
+.preview-stage {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* ---- What a viewer's bar adds to the 3D view's tools ---- */
+
+.preview-chip {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg-muted);
+  font-size: calc(10.5px * var(--ui-scale));
+  white-space: nowrap;
+  cursor: default;
+}
+
+.preview-chip--quiet {
+  box-shadow: none;
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+}
+
+.preview-zoom {
+  flex: none;
+  min-width: 4.4em;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: calc(10.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.preview-one {
+  font-family: var(--mono);
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.preview-speed {
+  flex: none;
+  max-width: none;
+  margin-left: 4px;
+}
+
+/* A way out of the panel, in words: opening the file in the system's app. */
+.preview-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: calc(24px * var(--ui-scale));
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg);
+  font: inherit;
+  font-size: calc(11.5px * var(--ui-scale));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.preview-action:hover {
+  background: var(--surface-hover);
+}
+
+.preview-action:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* An HTML page runs isolated, and the bar says so in words. */
+.preview-isolated {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 8px 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-hi);
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* Only the start of a long file is drawn. */
+.preview-note {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--chrome));
+  box-shadow: inset 0 -1px 0 var(--line);
+  color: var(--fg-secondary);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+}
+
+/* What a kind of file cannot do, said once, without the tone of a warning. */
+.preview-note--quiet {
+  background: var(--chrome);
+  color: var(--fg-muted);
+}
+
+/* ---- Image ---- */
+
+.preview-image {
+  overflow: hidden;
+  background: var(--bg-sunken);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.preview-image:active {
+  cursor: grabbing;
+}
+
+.preview-image:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+
+/* A checkerboard behind what is transparent, in the theme's own tones. */
+.preview-image__img {
+  --checker: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  background-color: var(--bg);
+  background-image: conic-gradient(
+    var(--checker) 25%,
+    transparent 0 50%,
+    var(--checker) 0 75%,
+    transparent 0
+  );
+  background-size: 16px 16px;
+  box-shadow: 0 0 0 1px var(--line), 0 6px 24px var(--shadow);
+  pointer-events: none;
+}
+
+.preview-image__img.is-pixelated {
+  image-rendering: pixelated;
+}
+
+/* ---- Video and sound ---- */
+
+.preview-stage--video {
+  background: #000;
+}
+
+.preview-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+  outline: none;
+}
+
+.preview-audio {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(100% - 32px, calc(440px * var(--ui-scale)));
+  margin: auto;
+  padding: 24px 0;
+}
+
+.preview-audio__mark {
+  color: var(--fg-subtle);
+}
+
+.preview-audio__title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.preview-audio__player {
+  width: 100%;
+}
+
+/* ---- PDF and pages, in frames ---- */
+
+.preview-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--bg);
+}
+
+/* A page that sets no background of its own expects white, as a browser gives it. */
+.preview-frame--page {
+  background: #fff;
+}
+
+/* ---- Text and code: a row per line, its number beside it ---- */
+
+.preview-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.55;
+  tab-size: 4;
+  outline: none;
+}
+
+.preview-code:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+
+.preview-code__line {
+  display: flex;
+  min-width: max-content;
+}
+
+.preview-code.is-wrapped .preview-code__line {
+  min-width: 0;
+}
+
+/* Kept in view while the lines scroll sideways, and out of any selection. */
+.preview-code__no {
+  position: sticky;
+  left: 0;
+  flex: none;
+  width: calc(var(--digits, 2) * 1ch + 22px);
+  padding-right: 12px;
+  background: var(--bg);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.preview-code__text {
+  flex: 1;
+  padding-right: 16px;
+  background: none;
+  font: inherit;
+  white-space: pre;
+}
+
+.preview-code.is-wrapped .preview-code__text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Markdown, rendered ---- */
+
+.preview-markdown {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px clamp(16px, 5%, 44px) 44px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: calc(13.5px * var(--ui-scale));
+  line-height: 1.65;
+  overflow-wrap: break-word;
+  user-select: text;
+  outline: none;
+}
+
+.preview-markdown:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+
+.preview-markdown > :first-child {
+  margin-top: 0;
+}
+
+.preview-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.5em 0 0.55em;
+  color: var(--fg);
+  font-weight: 650;
+  line-height: 1.25;
+  scroll-margin-top: 12px;
+}
+
+.preview-markdown h1 {
+  padding-bottom: 0.3em;
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+  font-size: 1.75em;
+}
+
+.preview-markdown h2 {
+  padding-bottom: 0.25em;
+  box-shadow: inset 0 -1px 0 var(--line);
+  font-size: 1.4em;
+}
+
+.preview-markdown h3 {
+  font-size: 1.18em;
+}
+
+.preview-markdown h4 {
+  font-size: 1.05em;
+}
+
+.preview-markdown :is(h5, h6) {
+  color: var(--fg-muted);
+  font-size: 0.95em;
+}
+
+.preview-markdown :is(p, ul, ol, blockquote, table, pre) {
+  margin: 0 0 1em;
+}
+
+.preview-markdown :is(ul, ol) {
+  padding-left: 1.6em;
+}
+
+.preview-markdown li + li {
+  margin-top: 0.25em;
+}
+
+.preview-markdown li > :is(ul, ol) {
+  margin: 0.25em 0 0;
+}
+
+.preview-markdown a {
+  color: var(--accent-hi);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.preview-markdown code {
+  padding: 0.12em 0.35em;
+  border-radius: var(--radius-xs);
+  background: var(--surface-hover);
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+.preview-markdown pre {
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 0.86em;
+  line-height: 1.5;
+}
+
+.preview-markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.preview-markdown blockquote {
+  padding: 0 1em;
+  box-shadow: inset 3px 0 0 var(--line-strong);
+  color: var(--fg-muted);
+}
+
+.preview-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+
+.preview-markdown :is(th, td) {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+}
+
+.preview-markdown th {
+  background: var(--surface);
+  font-weight: 600;
+  text-align: left;
+}
+
+.preview-markdown tr:nth-child(2n) td {
+  background: var(--surface);
+}
+
+.preview-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+.preview-markdown hr {
+  height: 1px;
+  margin: 1.6em 0;
+  border: 0;
+  background: var(--line-strong);
+}
+
+/* ---- Syntax colours: highlight.js classes, in the theme's own text tones,
+   each held to 4.5:1 by the theme (themes.ts) ---- */
+
+:is(.preview-code, .preview-markdown) :is(.hljs-comment, .hljs-quote) {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+:is(.preview-code, .preview-markdown) :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag) {
+  color: var(--accent-hi);
+}
+
+:is(.preview-code, .preview-markdown) :is(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-tag) {
+  color: var(--success);
+}
+
+:is(.preview-code, .preview-markdown) :is(.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link) {
+  color: var(--warning);
+}
+
+:is(.preview-code, .preview-markdown)
+  :is(.hljs-title, .hljs-section, .hljs-name, .hljs-type, .hljs-built_in, .hljs-selector-id, .hljs-selector-class) {
+  color: var(--state-yours);
+}
+
+:is(.preview-code, .preview-markdown) :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-params) {
+  color: var(--fg-secondary);
+}
+
+:is(.preview-code, .preview-markdown) :is(.hljs-meta, .hljs-subst) {
+  color: var(--fg-muted);
+}
+
+:is(.preview-code, .preview-markdown) .hljs-deletion {
+  color: var(--danger);
+}
+
+:is(.preview-code, .preview-markdown) .hljs-emphasis {
+  font-style: italic;
+}
+
+:is(.preview-code, .preview-markdown) .hljs-strong {
+  font-weight: 600;
+}

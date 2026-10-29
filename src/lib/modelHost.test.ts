@@ -22,10 +22,11 @@ vi.stubGlobal("window", globalThis);
 const { listen } = await import("@tauri-apps/api/event");
 const { handBackModels, localModelHost, remoteModelHost, serveModelHandovers, serveModelHost } =
   await import("./modelHost");
-const { closeAllModels, modelScope, noteModelView, registerSnapshotter, settleModel, showModel } =
+const { closeAllModels, isModel, modelScope, noteModelView, registerSnapshotter, settleModel, showPreview } =
   await import("./modelStore");
 
 const chair = {
+  kind: "model" as const,
   path: "C:\\dev\\shop\\chair.glb",
   format: "glb" as const,
   openedBy: "Eve",
@@ -66,8 +67,30 @@ describe("a detached workspace's preview", () => {
     expect(modelScope("w2").models.map((model) => [model.id, model.openedBy])).toEqual([[id, "Eve"]]);
     const waiting = host!.whenSettled(id, 1000);
     settleModel(id, { info });
-    expect((await waiting)?.info).toEqual(info);
+    const settled = await waiting;
+    expect(settled && isModel(settled) ? settled.info : null).toEqual(info);
     expect((await host!.list()).activeId).toBe(id);
+  });
+
+  it("opens any kind of file there, ready at once beside the models", async () => {
+    const host = await remoteModelHost("w2");
+    const model = await host!.show(chair);
+    const page = await host!.show({
+      kind: "html",
+      path: "C:\\dev\\shop\\demo.html",
+      mime: "text/html",
+      size: 2048,
+      openedBy: "Eve",
+      modifiedMs: 1,
+    });
+    expect(modelScope("w2").models.map((entry) => [entry.kind, entry.status])).toEqual([
+      ["model", "loading"],
+      ["html", "ready"],
+    ]);
+    expect((await host!.whenSettled(page, 1000))?.title).toBe("demo.html");
+    expect((await host!.list()).activeId).toBe(page);
+    await host!.close([model, page]);
+    expect(modelScope("w2").models).toEqual([]);
   });
 
   it("carries the other window's errors back as they were", async () => {
@@ -163,7 +186,7 @@ describe("a workspace moving between windows", () => {
     const sent: { to: string; workspaceId: string; scope: { models: unknown[] } }[] = [];
     stops.push(await listen("model:handover", (event) => void sent.push(event.payload as never)));
     // The main window has a model open for w3 before w3 moves out.
-    const id = showModel({ ...chair, workspaceId: "w3" });
+    const id = showPreview({ ...chair, workspaceId: "w3" });
     stops.push(serveModelHandovers());
     await flush();
     // w3's window comes up and asks for what is its own.
