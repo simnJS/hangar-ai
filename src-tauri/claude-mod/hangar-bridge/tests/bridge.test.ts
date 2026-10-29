@@ -45,6 +45,9 @@ const start = ($: any, isInteractive = true) =>
 const events = (sent: Sent[]) =>
   sent.filter((s) => s.url.endsWith('/event') && s.body.kind !== 'hello').map((s) => s.body)
 
+/** The same, less the calls reported as they run. */
+const besideCalls = (sent: Sent[]) => events(sent).filter((event) => event.kind !== 'tool')
+
 test('outside a Hangar pane the mod reports nothing', async ($, on) => {
   const { sent } = setup(on, {})
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -134,9 +137,87 @@ test('a permission dialog is reported, and cleared by the tool result', async ($
   await $.classic.PostToolUse({ tool_name: 'Bash' })
 
   expect(events(sent)).toEqual([
-    { kind: 'permission', waiting: true, tool: 'Bash' },
+    { kind: 'permission', waiting: true, tool: 'Bash', input: { command: 'rm -rf build' } },
     { kind: 'permission', waiting: false },
   ])
+})
+
+test('a second dialog over the first is reported too: it is the one on screen', async ($, on) => {
+  const { sent } = setup(on)
+  on('classic.PermissionRequest', () => ({}))
+  on('classic.PermissionDenied', () => ({}))
+
+  await start($)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'pnpm test' } })
+  await $.classic.PermissionRequest({ tool_name: 'Write', tool_input: { file_path: '/repo/a.md', content: 'x'.repeat(5000) } })
+  await $.classic.PermissionDenied({ tool_name: 'Write', tool_input: {}, tool_use_id: 'u2', reason: 'no' })
+  await $.classic.PermissionDenied({ tool_name: 'Write', tool_input: {}, tool_use_id: 'u2', reason: 'no' })
+
+  expect(events(sent)).toEqual([
+    { kind: 'permission', waiting: true, tool: 'Bash', input: { command: 'pnpm test' } },
+    { kind: 'permission', waiting: true, tool: 'Write', input: { file_path: '/repo/a.md', content: 'x'.repeat(4096) + '…' } },
+    { kind: 'permission', waiting: false },
+  ])
+})
+
+test('a call of the main loop is reported as it starts, with its input, and as it ends', async ($, on) => {
+  const { sent } = setup(on)
+  let during: unknown[] = []
+  on('tool.call', () => {
+    during = events(sent)
+    return { result: 'ok' }
+  })
+
+  await start($)
+  const out = await $.tool.call({ tool: 'Bash', command: 'pnpm test', description: 'Run the tests' })
+
+  expect(out).toEqual({ result: 'ok' })
+  const started = {
+    kind: 'tool',
+    phase: 'start',
+    toolUseId: expect.any(String),
+    tool: 'Bash',
+    input: { command: 'pnpm test', description: 'Run the tests' },
+  }
+  expect(during).toEqual([started])
+  const [first, last] = events(sent)
+  expect(events(sent)).toEqual([started, { kind: 'tool', phase: 'end', toolUseId: first.toolUseId }])
+  expect(last.toolUseId).toBe(first.toolUseId)
+})
+
+test('a question is reported with what it asks while the person has it, and as it ends however it ends', async ($, on) => {
+  const { sent } = setup(on)
+  const questions = [
+    {
+      question: 'Which color?',
+      header: 'Color',
+      multiSelect: false,
+      options: [
+        { label: 'Red', description: 'Warm' },
+        { label: 'Blue', description: 'Cold' },
+      ],
+    },
+  ]
+  on('tool.call', () => ({ deny: 'The user dismissed the question' }))
+
+  await start($)
+  const out = await $.tool.call({ tool: 'AskUserQuestion', questions })
+
+  expect(out).toEqual({ deny: 'The user dismissed the question' })
+  expect(events(sent)).toEqual([
+    { kind: 'tool', phase: 'start', toolUseId: expect.any(String), tool: 'AskUserQuestion', input: { questions } },
+    { kind: 'tool', phase: 'end', toolUseId: expect.any(String) },
+  ])
+})
+
+test('outside a Hangar pane no call is reported', async ($, on) => {
+  const { sent } = setup(on, {})
+  on('tool.call', () => ({ result: 'ok' }))
+
+  await start($)
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+
+  expect(sent).toEqual([])
 })
 
 test('usage goes to Hangar without the breakdown', async ($, on) => {
@@ -170,7 +251,7 @@ test('an edit nobody else is on goes through and is reported', async ($, on) => 
 
   expect(out).toEqual({ result: 'edited' })
   expect(sent.some((s) => s.url === 'http://127.0.0.1:4000/api/bridge/pane-1/conflict?file=%2Frepo%2Fsrc%2FApp.tsx')).toBe(true)
-  expect(events(sent)).toEqual([{ kind: 'edit', file: '/repo/src/App.tsx', name: 'alice' }])
+  expect(besideCalls(sent)).toEqual([{ kind: 'edit', file: '/repo/src/App.tsx', name: 'alice' }])
 })
 
 test("an edit to a file another pane just changed goes through at once and tells the model", async ($, on) => {
@@ -190,7 +271,7 @@ test("an edit to a file another pane just changed goes through at once and tells
   expect(out.context).toHaveLength(1)
   expect(out.context?.[0]).toMatch(/pane "bob" also edited \/repo\/src\/App\.tsx 2 min ago/)
   expect(out.context?.[0]).toMatch(/Read the file again/)
-  expect(events(sent)).toEqual([
+  expect(besideCalls(sent)).toEqual([
     { kind: 'edit', file: '/repo/src/App.tsx', name: 'alice', overlap: 'bob', overlapPane: 'pane-2' },
   ])
 })
@@ -205,7 +286,7 @@ test("another pane's edit from long ago is not mentioned", async ($, on) => {
   const out = await $.tool.call({ tool: 'Edit', file_path: '/repo/x.ts', old_string: 'a', new_string: 'b' })
 
   expect(out).toEqual({ result: 'edited' })
-  expect(events(sent)).toEqual([{ kind: 'edit', file: '/repo/x.ts', name: 'alice' }])
+  expect(besideCalls(sent)).toEqual([{ kind: 'edit', file: '/repo/x.ts', name: 'alice' }])
 })
 
 test('a refused edit is neither reported nor annotated', async ($, on) => {
@@ -216,7 +297,7 @@ test('a refused edit is neither reported nor annotated', async ($, on) => {
   const out = await $.tool.call({ tool: 'Edit', file_path: '/repo/x.ts', old_string: 'a', new_string: 'b' })
 
   expect(out).toEqual({ deny: 'not allowed' })
-  expect(events(sent)).toEqual([])
+  expect(besideCalls(sent)).toEqual([])
 })
 
 /** A queue that hands out these lines once each, then nothing. */

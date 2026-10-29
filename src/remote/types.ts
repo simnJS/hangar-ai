@@ -206,3 +206,20 @@ export interface RemoteChat {
   pending: ChatPending | null;
   reason?: RemoteChatReason;
 }
+
+/**
+ * remote_answer: answers the question a Claude Code pane waits on, typed
+ * into its dialog as the person would. Refused, with nothing typed, unless
+ * `toolUseId` is the question the pane waits on and its dialog is on the
+ * PC's screen as Claude Code first drew it. Answers {answered: true}.
+ */
+export interface RemoteAnswerArgs {
+  pane: string;
+  /** The pending question's `toolUseId`, as remote_chat gave it. */
+  toolUseId: string;
+  /**
+   * One per question, in order: option labels exactly as given, and/or the
+   * person's own words. A single-select question takes one of the two.
+   */
+  answers: ChatAnswer[];
+}

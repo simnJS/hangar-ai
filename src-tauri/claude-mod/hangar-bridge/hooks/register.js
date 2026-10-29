@@ -89,10 +89,25 @@ async function send($, event) {
   }
 }
 
+/**
+ * A dialog that opens is always reported, with what it asks about, even over
+ * one already up: the second is on screen now. One that closes, only once.
+ */
 async function setWaiting($, value, detail) {
-  if (waiting === value) return
+  if (waiting === value && !detail) return
   waiting = value
   await send($, { kind: 'permission', waiting: value, ...detail })
+}
+
+/** Past this, a text in a call's input is cut: a whole written file has no business on a phone. */
+const INPUT_TEXT = 4096
+
+/** A call's input as reported: long texts cut, long lists shortened. */
+function clipped(value, depth = 0) {
+  if (typeof value === 'string') return value.length > INPUT_TEXT ? value.slice(0, INPUT_TEXT) + '…' : value
+  if (value === null || typeof value !== 'object' || depth > 4) return value
+  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => clipped(entry, depth + 1))
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, clipped(entry, depth + 1)]))
 }
 
 /** The first line of an answer is what a notification has room for. */
@@ -356,12 +371,27 @@ export function register(on) {
     return next(e)
   })
 
-  // The dialog is about to be shown. Nothing reports its answer, so the state
-  // clears on what follows it: the tool's result, a denial, the turn's end —
-  // and on the Hangar side, the user typing into the pane.
+  // The dialog is about to be shown, with what the call would do: the phone
+  // offers the same choice. Nothing reports its answer, so the state clears
+  // on what follows it: the tool's result, a denial, the turn's end — and on
+  // the Hangar side, the user typing into the pane.
   on('classic.PermissionRequest', async ($, e, next) => {
-    await setWaiting($, true, { tool: e.tool_name })
+    await setWaiting($, true, { tool: e.tool_name, input: clipped(e.tool_input) })
     return next(e)
+  })
+
+  // Each call of the main loop, while it runs. The transcript holds a call
+  // only once it has its result, so this is how Hangar shows one in progress,
+  // and the questions an AskUserQuestion puts to the person while they wait.
+  on('tool.call', async ($, e, next) => {
+    if (!bridge || e.agentId !== undefined || !e.tool_use_id) return next(e)
+    const { tool, tool_use_id: toolUseId, consent, agentId, requestMeta, ...input } = e
+    await send($, { kind: 'tool', phase: 'start', toolUseId, tool, input: clipped(input) })
+    try {
+      return await next(e)
+    } finally {
+      await send($, { kind: 'tool', phase: 'end', toolUseId })
+    }
   })
 
   on('classic.PostToolUse', async ($, e, next) => {

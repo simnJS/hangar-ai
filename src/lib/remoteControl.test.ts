@@ -4,7 +4,7 @@ import type { ControlDeps } from "./control";
 import type { ManagerJournalEntry } from "./managerEvents";
 import type { BoardTask, JournalEntry } from "./orchestratorEvents";
 import type { ProjectsDeps } from "./projects";
-import { answerRemote, runRemote, type ChatPage, type ChatReader } from "./remoteControl";
+import { answerRemote, noteBridgeEvent, runRemote, type ChatPage, type ChatReader } from "./remoteControl";
 import { answerInternal } from "./orchestratorBrief";
 import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState } from "../remote/types";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
@@ -120,7 +120,10 @@ const shop = () =>
 beforeEach(() => {
   journals.manager = [];
   journals.orchestrators = {};
-  for (const id of ["orch", "w1", "sh", "pm", "a", "b"]) clearPaneActivity(id);
+  for (const id of ["orch", "w1", "sh", "pm", "a", "b"]) {
+    clearPaneActivity(id);
+    noteBridgeEvent(id, { kind: "end", reason: "test" });
+  }
 });
 
 describe("remote_state", () => {
@@ -446,6 +449,113 @@ describe("remote_chat", () => {
     const { read } = reader(page());
     await expect(chat(deps, { pane: "Ben", before: 12 }, read)).rejects.toThrow("cursor");
     await expect(chat(deps, { pane: "ghost" }, read)).rejects.toThrow('No pane "ghost"');
+  });
+
+  describe("what the pane's mod reports before the transcript has it", () => {
+    const COLOR = {
+      question: "Which color?",
+      header: "Color",
+      multiSelect: false,
+      options: [
+        { label: "Red", description: "Warm" },
+        { label: "Blue", description: "Cold" },
+      ],
+    };
+    const started = (toolUseId: string, tool: string, input: Record<string, unknown>, at = 5000) =>
+      noteBridgeEvent("w1", { kind: "tool", phase: "start", toolUseId, tool, input }, at);
+    const ended = (toolUseId: string) => noteBridgeEvent("w1", { kind: "tool", phase: "end", toolUseId });
+    const dialog = (waiting: boolean, tool?: string, input?: unknown) =>
+      noteBridgeEvent("w1", { kind: "permission", waiting, ...(tool ? { tool, input } : {}) });
+
+    it("gives the question an AskUserQuestion call waits on, until the call ends", async () => {
+      const { deps } = rig([chatShop()]);
+      const shown = { ...COLOR, options: COLOR.options.map((option) => ({ ...option, preview: "<b>x</b>" })) };
+      started("toolu_q", "AskUserQuestion", { questions: [shown] });
+      dialog(true, "AskUserQuestion", { questions: [shown] });
+      act("w1", "shop", "waiting");
+      const asking = await chat(deps, { pane: "Ben" }, reader(page()).read);
+      expect(asking.pending).toEqual({ kind: "question", toolUseId: "toolu_q", questions: [COLOR] });
+      // The card shows it: no action line for it.
+      expect(asking.items).toEqual(items);
+
+      ended("toolu_q");
+      dialog(false);
+      act("w1", "shop", "working");
+      expect((await chat(deps, { pane: "Ben" }, reader(page()).read)).pending).toBeNull();
+    });
+
+    it("gives the permission a dialog asks, titled as it would run, and the call once it runs", async () => {
+      const { deps } = rig([chatShop()]);
+      const input = { command: "pnpm test --run\npnpm build", description: "Run the tests" };
+      started("toolu_b", "Bash", input);
+      dialog(true, "Bash", input);
+      act("w1", "shop", "waiting");
+      const asking = await chat(deps, { pane: "Ben" }, reader(page()).read);
+      expect(asking.pending).toEqual({
+        kind: "permission",
+        tool: "Bash",
+        title: "Run pnpm test --run",
+        detail: "pnpm test --run\npnpm build",
+      });
+      // Held by the dialog, it has not run yet.
+      expect(asking.items).toEqual(items);
+
+      dialog(false);
+      act("w1", "shop", "working");
+      const running = await chat(deps, { pane: "Ben" }, reader(page()).read);
+      expect(running.pending).toBeNull();
+      expect(running.items).toEqual([
+        ...items,
+        {
+          id: "toolu_b",
+          at: 5000,
+          kind: "action",
+          tool: "Bash",
+          title: "Ran pnpm test --run",
+          detail: "pnpm test --run\npnpm build",
+          state: "running",
+        },
+      ]);
+    });
+
+    it("names an edit's file in the session's folder, with its diff", async () => {
+      const { deps } = rig([chatShop()]);
+      dialog(true, "Edit", { file_path: "c:\\wt\\ben\\src\\cart.ts", old_string: "a\nb", new_string: "c" });
+      act("w1", "shop", "waiting");
+      const asking = await chat(deps, { pane: "Ben" }, reader(page()).read);
+      expect(asking.pending).toEqual({ kind: "permission", tool: "Edit", title: "Edit src/cart.ts", detail: "- a\n- b\n+ c" });
+    });
+
+    it("lists the calls running after the transcript's, on the newest page, each once", async () => {
+      const { deps } = rig([chatShop()]);
+      act("w1", "shop", "working");
+      started("t1", "Bash", { command: "pnpm test" }, 4000);
+      started("toolu_r", "Read", { file_path: "C:\\wt\\ben\\src\\x.ts" }, 6000);
+      started("toolu_m", "mcp__hangar__board_list_tasks", {}, 7000);
+      const newest = await chat(deps, { pane: "Ben" }, reader(page()).read);
+      expect(newest.items).toEqual([
+        ...items,
+        { id: "toolu_r", at: 6000, kind: "action", tool: "Read", title: "Read src/x.ts", state: "running" },
+        { id: "toolu_m", at: 7000, kind: "action", tool: "mcp__hangar__board_list_tasks", title: "Used board_list_tasks", state: "running" },
+      ]);
+      const older = await chat(deps, { pane: "Ben", before: "4096" }, reader(page()).read);
+      expect(older.items).toEqual(items);
+
+      ended("toolu_r");
+      noteBridgeEvent("w1", { kind: "turn", phase: "end", reason: "aborted", durationMs: 1, answer: "" });
+      expect((await chat(deps, { pane: "Ben" }, reader(page()).read)).items).toEqual(items);
+    });
+
+    it("leaves the transcript to speak when the mod reported nothing", async () => {
+      const { deps } = rig([chatShop()]);
+      act("w1", "shop", "waiting");
+      noteBridgeEvent("orch", { kind: "permission", waiting: true, tool: "Bash", input: { command: "ls" } });
+      const openCall = { tool: "Bash", title: "Ran pnpm test", detail: "pnpm test" };
+      expect((await chat(deps, { pane: "Ben" }, reader(page({ openCall })).read)).pending).toEqual({
+        kind: "permission",
+        ...openCall,
+      });
+    });
   });
 });
 
