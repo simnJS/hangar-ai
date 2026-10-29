@@ -16,6 +16,7 @@ import type {
 } from "./api";
 import { locale as appLocale, type Locale } from "./i18n";
 import { chatPage, conversations, type FakeChat } from "./mockChat";
+import { fakeDeliveries, Refusal } from "./mockDelivery";
 import { fakeFile, fakeFileUrl, fileResponse } from "./mockFiles";
 import { mockStats } from "./mockStats";
 import { MEASURES, PERIODS } from "./stats";
@@ -37,7 +38,14 @@ import { MEASURES, PERIODS } from "./stats";
  * - unpaired: the phone has to pair (any code but 000000 works);
  * - offline: the PC stopped answering 47 min ago;
  * - nomanager: no project manager is open;
- * - nostats: no agent has worked on the PC yet, and no plan limit is known.
+ * - nostats: no agent has worked on the PC yet, and no plan limit is known;
+ * - blocked: the delivery ready to merge does not land, the person's own
+ *   changes on the PC being in the way.
+ *
+ * Its delivery ready to merge (mockDelivery.ts) is Dana's: a few files, a
+ * check that failed once then passed, a review with notes. Merged, it lands
+ * after a few seconds of checking, and its task is done; sent back, Dana
+ * gets to work on it.
  *
  * Its usage statistics are five months of hourly rows (mockStats.ts), summed
  * up per period as the PC does.
@@ -46,9 +54,9 @@ import { MEASURES, PERIODS } from "./stats";
  * be the phone's; task titles stay as they were written.
  */
 
-export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager" | "nostats";
+export type Scenario = "default" | "empty" | "unpaired" | "offline" | "nomanager" | "nostats" | "blocked";
 
-const SCENARIOS: readonly Scenario[] = ["empty", "unpaired", "offline", "nomanager", "nostats"];
+const SCENARIOS: readonly Scenario[] = ["empty", "unpaired", "offline", "nomanager", "nostats", "blocked"];
 
 export function scenarioOf(value: string | null): Scenario {
   return SCENARIOS.find((scenario) => scenario === value) ?? "default";
@@ -196,6 +204,15 @@ function scenery(now: number, locale: Locale) {
       "  3. Type something.",
       "",
       "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ]),
+    pane("ws-iabench", "p-dana", "Dana", "worker", "idle", [
+      "⏺ hangar - delivery_submit (MCP)(summary: \"Settings › Mobile pairs a phone by QR code\")",
+      "  ⎿  Hangar merges hangar/mobile-settings-qr-3e1f0a onto main in a separate worktree…",
+      "",
+      "⏺ [Hangar] hangar/mobile-settings-qr-3e1f0a passed its check and its review. Automatic",
+      "  landing is off in this workspace, so it waits for the person to land it on main.",
+      "",
+      "⏺ Done: the delivery waits for you to merge it.",
     ]),
     pane("ws-storefront", "p-mia", "Mia", "orchestrator", "yours", [
       "⏺ All twelve tasks are done and landed on main. The storefront passes",
@@ -394,6 +411,37 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       project.readyToLand = [];
     }
   }
+
+  const deliveries = fakeDeliveries(now, {
+    blocked: scenario === "blocked",
+    // Landed, as on the PC: the task is done, its worker and its branch go.
+    onLanded: (task) => {
+      const project = world.projects.find((candidate) => candidate.readyToLand.some((entry) => entry.id === task));
+      if (!project) return;
+      const title = project.readyToLand.find((entry) => entry.id === task)!.title;
+      project.readyToLand = project.readyToLand.filter((entry) => entry.id !== task);
+      project.board = { ...project.board, review: Math.max(0, project.board.review - 1), done: project.board.done + 1 };
+      world.panes = world.panes.filter((pane) => pane.id !== "p-dana");
+      world.history.unshift({
+        at: Date.now(),
+        workspace: project.name,
+        kind: "landed",
+        text: typeset(LINES[locale].landed, locale).replace("{title}", title),
+      });
+    },
+    onRework: (_task, text) => {
+      const dana = paneById("p-dana");
+      if (dana) respond(dana, [`> ${text}`], ["⏺ Got it. I fix it on my branch, run the check, then deliver again."], "working");
+    },
+  });
+  /** The project's delivery that waits, as the board says. */
+  const waitsToLand = (task: unknown) =>
+    typeof task === "string" && world.projects.some((project) => project.readyToLand.some((entry) => entry.id === task));
+  const refused = (error: unknown) => {
+    if (!(error instanceof Refusal)) throw error;
+    return json(400, { error: "refused", message: error.message });
+  };
+  const GONE = "Nothing of this task waits to land any more: the board shows where it is now.";
 
   const paneById = (idOrName: string) =>
     world.panes.find((pane) => pane.id === idOrName) ?? world.panes.find((pane) => pane.name === idOrName);
@@ -701,6 +749,29 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
         if (!project) return json(400, { error: `No project "${String(args.workspace)}" in Hangar.` });
         return json(200, { waking: wake(project) });
       }
+      case "delivery": {
+        const delivery = waitsToLand(args.task) ? deliveries.delivery(String(args.task)) : null;
+        return delivery ? json(200, delivery) : refused(new Refusal(GONE));
+      }
+      case "delivery_file": {
+        if (!waitsToLand(args.task)) return refused(new Refusal(GONE));
+        const patch = deliveries.file(String(args.task), String(args.file));
+        return patch ? json(200, patch) : refused(new Refusal(`"${String(args.file)}" is not one of the files this delivery changes.`));
+      }
+      case "land":
+        try {
+          if (!waitsToLand(args.task)) throw new Refusal(GONE);
+          return json(200, deliveries.land(String(args.task), typeof args.merge === "string" ? args.merge : undefined, Date.now()));
+        } catch (error) {
+          return refused(error);
+        }
+      case "rework":
+        try {
+          if (!waitsToLand(args.task)) throw new Refusal(GONE);
+          return json(200, deliveries.rework(String(args.task), String(args.text ?? ""), typeof args.merge === "string" ? args.merge : undefined));
+        } catch (error) {
+          return refused(error);
+        }
       case "stats": {
         // Refused as the PC refuses them: an answer, not a crash.
         const period = args.period ?? "30d";

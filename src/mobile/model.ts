@@ -31,22 +31,26 @@ export function waitingKey(item: Waiting): string {
   return [item.kind, item.workspaceId, item.paneId ?? item.pane ?? "", item.taskId ?? ""].join("/");
 }
 
-export type Destination = { to: "pane"; pane: string } | { to: "project"; projectId: string };
+export type Destination =
+  | { to: "pane"; pane: string }
+  | { to: "delivery"; task: string }
+  | { to: "project"; projectId: string };
 
 /**
  * Where a card's one action leads. A waiting pane opens that pane; a question
  * opens the pane to answer it in, the orchestrator's unless the PC names
- * another. A delivery ready to merge opens its project: merging is done from
- * the PC.
+ * another. A delivery ready to merge opens what it brings, to merge it or
+ * send it back.
  */
 export function destinationOf(item: Waiting, state: RemoteState): Destination {
-  const pane = item.paneId ?? item.pane;
-  if (item.kind !== "readyToLand") {
-    if (pane) return { to: "pane", pane };
-    const project = state.projects.find((candidate) => candidate.id === item.workspaceId);
-    const orchestrator = project && orchestratorPane(project);
-    if (orchestrator) return { to: "pane", pane: orchestrator.id };
+  if (item.kind === "readyToLand") {
+    return item.taskId ? { to: "delivery", task: item.taskId } : { to: "project", projectId: item.workspaceId };
   }
+  const pane = item.paneId ?? item.pane;
+  if (pane) return { to: "pane", pane };
+  const project = state.projects.find((candidate) => candidate.id === item.workspaceId);
+  const orchestrator = project && orchestratorPane(project);
+  if (orchestrator) return { to: "pane", pane: orchestrator.id };
   return { to: "project", projectId: item.workspaceId };
 }
 

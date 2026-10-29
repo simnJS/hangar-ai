@@ -219,6 +219,12 @@ describe("the client's errors", () => {
     expect([error.kind, error.code, error.status]).toEqual(["refused", "Open the project manager on the PC", 409]);
   });
 
+  it("keeps the PC's own words for a refusal, as its mobile server relays the window's", async () => {
+    const { fetch } = fakeFetch(json(400, { error: "refused", message: "Local changes in main's checkout are in the way." }));
+    const error = await failure(createClient({ fetch }).land("t1", "4f9c2ab"));
+    expect([error.kind, error.code, error.detail]).toEqual(["refused", "refused", "Local changes in main's checkout are in the way."]);
+  });
+
   it("copes with an answer that is not JSON", async () => {
     const { fetch } = fakeFetch(new Response("<html>Bad gateway</html>", { status: 502 }));
     const error = await failure(createClient({ fetch }).state());

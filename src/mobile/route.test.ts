@@ -8,6 +8,8 @@ describe("routes", () => {
     { name: "projects" },
     { name: "project", id: "ws-1" },
     { name: "pane", id: "pane 7/b" },
+    { name: "delivery", task: "51910bc0-ba75" },
+    { name: "diff", task: "51910bc0-ba75", file: "src/mobile/screens/Delivery tab.tsx" },
     { name: "shares" },
     { name: "manager" },
     { name: "history" },
@@ -22,11 +24,14 @@ describe("routes", () => {
     expect(parseRoute("")).toEqual({ name: "forYou" });
     expect(parseRoute("#/nowhere")).toEqual({ name: "forYou" });
     expect(parseRoute("#/pane/")).toEqual({ name: "projects" });
+    expect(parseRoute("#/diff/t1")).toEqual({ name: "delivery", task: "t1" });
+    expect(parseRoute("#/delivery/")).toEqual({ name: "forYou" });
   });
 
   it("light the tab each screen belongs to", () => {
     expect(tabOf({ name: "pane", id: "x" })).toBe("projects");
     expect(tabOf({ name: "project", id: "x" })).toBe("projects");
+    expect(tabOf({ name: "diff", task: "t", file: "a.ts" })).toBe("projects");
     expect(tabOf({ name: "history" })).toBe("forYou");
     expect(tabOf({ name: "manager" })).toBe("manager");
     expect(tabOf({ name: "stats" })).toBe("stats");

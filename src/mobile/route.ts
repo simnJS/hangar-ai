@@ -1,6 +1,8 @@
 /**
  * Where the app is, in the address's hash: the browser's back gesture works,
  * and a notification can open a screen (#/pane/<id>, #/shares, #/stats, #/).
+ * A delivery waiting to land opens on #/delivery/<task>, one of its files on
+ * #/diff/<task>/<path>.
  */
 
 export type Route =
@@ -8,6 +10,8 @@ export type Route =
   | { name: "projects" }
   | { name: "project"; id: string }
   | { name: "pane"; id: string }
+  | { name: "delivery"; task: string }
+  | { name: "diff"; task: string; file: string }
   | { name: "shares" }
   | { name: "manager" }
   | { name: "history" }
@@ -23,6 +27,13 @@ export function parseRoute(hash: string): Route {
       return id ? { name: "project", id } : { name: "projects" };
     case "pane":
       return id ? { name: "pane", id } : { name: "projects" };
+    case "delivery":
+      return id ? { name: "delivery", task: id } : { name: "forYou" };
+    case "diff": {
+      // The task, then the file's path, each encoded whole.
+      const [task, file] = rest.map(decodeURIComponent);
+      return task && file ? { name: "diff", task, file } : task ? { name: "delivery", task } : { name: "forYou" };
+    }
     case "shares":
       return { name: "shares" };
     case "manager":
@@ -44,17 +55,23 @@ export function routeHash(route: Route): string {
       return `#/projects/${encodeURIComponent(route.id)}`;
     case "pane":
       return `#/pane/${encodeURIComponent(route.id)}`;
+    case "delivery":
+      return `#/delivery/${encodeURIComponent(route.task)}`;
+    case "diff":
+      return `#/diff/${encodeURIComponent(route.task)}/${encodeURIComponent(route.file)}`;
     default:
       return `#/${route.name}`;
   }
 }
 
-/** The tab a screen belongs to: a pane is reached from a project or a card. */
+/** The tab a screen belongs to: a pane or a delivery is reached from a project or a card. */
 export function tabOf(route: Route): Tab {
   switch (route.name) {
     case "projects":
     case "project":
     case "pane":
+    case "delivery":
+    case "diff":
       return "projects";
     case "history":
       return "forYou";

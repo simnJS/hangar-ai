@@ -12,6 +12,6 @@ export function errorText(error: unknown): string {
     case "unpaired":
       return t("pair.again");
     case "refused":
-      return error.code === "too-big" ? t("error.tooBig") : t("error.refused", { reason: error.code });
+      return error.code === "too-big" ? t("error.tooBig") : t("error.refused", { reason: error.detail ?? error.code });
   }
 }

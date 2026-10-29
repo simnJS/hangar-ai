@@ -102,9 +102,13 @@ describe("where a card leads", () => {
     expect(destinationOf(other, state)).toEqual({ to: "pane", pane: "p4" });
   });
 
-  it("opens the project when there is no pane to answer in, or a merge to do on the PC", () => {
+  it("opens the project when there is no pane to answer in", () => {
     expect(destinationOf(waiting("needsYou", 0, { workspaceId: "c", taskId: "t" }), state)).toEqual({ to: "project", projectId: "c" });
-    expect(destinationOf(waiting("readyToLand", 0, { taskId: "t", paneId: "p1" }), state)).toEqual({ to: "project", projectId: "a" });
+  });
+
+  it("opens a delivery ready to merge, to merge it or send it back", () => {
+    expect(destinationOf(waiting("readyToLand", 0, { taskId: "t", paneId: "p1" }), state)).toEqual({ to: "delivery", task: "t" });
+    expect(destinationOf(waiting("readyToLand", 0), state)).toEqual({ to: "project", projectId: "a" });
   });
 });
 

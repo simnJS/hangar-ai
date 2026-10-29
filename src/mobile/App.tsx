@@ -6,6 +6,7 @@ import { t } from "./i18n";
 import { unseenShares } from "./model";
 import { RemoteContext, useRemote, type Boot } from "./remote";
 import { routeHash, tabOf, type Route } from "./route";
+import { DeliveryScreen, DiffScreen } from "./screens/Delivery";
 import { ManagerScreen, PaneScreen } from "./screens/Pane";
 import { ForYou } from "./screens/ForYou";
 import { History } from "./screens/History";
@@ -33,6 +34,8 @@ export function App({ boot }: { boot: Boot }) {
   const banner = connection.unreachable && paired !== null;
   // A console scrolls its own text, under its header and over its composer.
   const fixed = paired !== false && state !== null && (route.name === "pane" || (route.name === "manager" && state.manager !== null));
+  // A pane, a delivery and its diffs keep the bottom for their own actions.
+  const tabs = route.name !== "pane" && route.name !== "delivery" && route.name !== "diff";
 
   return (
     <RemoteContext.Provider value={remote}>
@@ -51,7 +54,7 @@ export function App({ boot }: { boot: Boot }) {
               <Screen route={route} now={now} onSharesSeen={onSharesSeen} />
             )}
           </main>
-          {paired !== false && state !== null && route.name !== "pane" && (
+          {paired !== false && state !== null && tabs && (
             <TabBar
               current={tabOf(route)}
               badges={{
@@ -76,6 +79,10 @@ function Screen({ route, now, onSharesSeen }: { route: Route; now: number; onSha
       return <ProjectScreen id={route.id} />;
     case "pane":
       return <PaneScreen id={route.id} />;
+    case "delivery":
+      return <DeliveryScreen task={route.task} />;
+    case "diff":
+      return <DiffScreen task={route.task} file={route.file} />;
     case "shares":
       return <Shares now={now} onSeen={onSharesSeen} />;
     case "manager":

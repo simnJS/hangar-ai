@@ -64,7 +64,7 @@ export function ForYou({ now }: { now: number }) {
               <h2 className="section__title">{t(HEADINGS[group.kind])}</h2>
               <span className="section__count">{group.items.length}</span>
             </div>
-            {group.kind === "readyToLand" && <p className="section__hint">{t("forYou.landOnPc")}</p>}
+            {group.kind === "readyToLand" && <p className="section__hint">{t("forYou.landHint")}</p>}
             <ul className="stack">
               {group.items.map((item) => (
                 <WaitingCard key={waitingKey(item)} item={item} state={state} now={now} />
@@ -102,7 +102,13 @@ function WaitingCard({ item, state, now }: { item: Waiting; state: RemoteState; 
   const { navigate } = useNavigation();
   const destination = destinationOf(item, state);
   const go = () =>
-    navigate(destination.to === "pane" ? { name: "pane", id: destination.pane } : { name: "project", id: destination.projectId });
+    navigate(
+      destination.to === "pane"
+        ? { name: "pane", id: destination.pane }
+        : destination.to === "delivery"
+          ? { name: "delivery", task: destination.task }
+          : { name: "project", id: destination.projectId },
+    );
   // A pane's card is headed by its name: its section says what it waits for.
   const title = item.kind === "pane" ? (item.pane ?? "") : (item.title ?? "");
   const tone = item.kind === "readyToLand" ? "is-yours" : "is-waiting";
@@ -115,13 +121,13 @@ function WaitingCard({ item, state, now }: { item: Waiting; state: RemoteState; 
         <span className="card__since">{t("forYou.since", { duration: duration(now - item.since, locale) })}</span>
         <button
           type="button"
-          className={`btn ${destination.to === "pane" ? "btn--primary" : ""}`}
+          className={`btn ${destination.to === "project" ? "" : "btn--primary"}`}
           onClick={(event) => {
             event.stopPropagation();
             go();
           }}
         >
-          {destination.to === "pane" ? t("forYou.answer") : t("forYou.seeProject")}
+          {destination.to === "pane" ? t("forYou.answer") : destination.to === "delivery" ? t("forYou.seeDelivery") : t("forYou.seeProject")}
         </button>
       </div>
     </li>

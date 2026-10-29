@@ -22,6 +22,7 @@ describe("the fake PC", () => {
 
   it("knows its scenarios, and falls back to the usual one", () => {
     expect(scenarioOf("offline")).toBe("offline");
+    expect(scenarioOf("blocked")).toBe("blocked");
     expect(scenarioOf("")).toBe("default");
     expect(scenarioOf(null)).toBe("default");
   });
@@ -257,5 +258,78 @@ describe("the fake PC's statistics", () => {
   it("refuses a period it does not know, as the PC does", async () => {
     const client = fakePc();
     await expect(settle(client.stats("1y" as never, "tokens"), 600)).rejects.toMatchObject({ kind: "refused" });
+  });
+});
+
+describe("the fake PC's delivery ready to merge", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("says what it brings: a few files, a check that failed once then passed, a review with notes", async () => {
+    const client = fakePc();
+    const state = await settle(client.state());
+    const card = state.waiting.find((item) => item.kind === "readyToLand")!;
+    const delivery = await settle(client.delivery(card.taskId!));
+    expect(delivery).toMatchObject({ worker: "Dana", target: "main", waiting: true, merge: "4f9c2ab", check: { passed: true } });
+    expect(delivery.review?.notes).toContain("Not blocking");
+    expect(delivery.earlier.map((attempt) => attempt.outcome)).toEqual(["checkFailed"]);
+    expect(delivery.files.length).toBeGreaterThanOrEqual(5);
+    expect(delivery.files.some((file) => file.binary)).toBe(true);
+    // Its worker's pane is still there, with its worktree.
+    expect(state.projects[0].panes.some((pane) => pane.name === "Dana" && pane.role === "worker")).toBe(true);
+
+    const qr = await settle(client.deliveryFile(card.taskId!, "src/lib/qr.ts"));
+    expect(qr).toMatchObject({ binary: false, truncated: false });
+    const added = qr.patch.split("\n").filter((line) => line.startsWith("+")).length;
+    expect(delivery.files.find((file) => file.path === "src/lib/qr.ts")?.additions).toBe(added);
+    const big = await settle(client.deliveryFile(card.taskId!, "src/lib/qr-tables.ts"));
+    expect(big.truncated).toBe(true);
+    expect(big.patch.length).toBeLessThanOrEqual(200 * 1024);
+    await expect(settle(client.deliveryFile(card.taskId!, "nowhere.ts"))).rejects.toMatchObject({ kind: "refused" });
+  });
+
+  it("lands it after a few seconds of checking, and the task is done", async () => {
+    const client = fakePc();
+    expect(await settle(client.land("t-settings", "4f9c2ab"))).toEqual({ landed: false, stage: "checking" });
+    expect(await settle(client.delivery("t-settings"))).toMatchObject({ waiting: false, stage: "checking" });
+    await vi.advanceTimersByTimeAsync(2_400);
+    expect(await settle(client.land("t-settings", "4f9c2ab"))).toEqual({ landed: false, stage: "landing" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await settle(client.land("t-settings", "4f9c2ab"))).toEqual({ landed: true, target: "main" });
+
+    const state = await settle(client.state());
+    expect(state.waiting.some((item) => item.kind === "readyToLand")).toBe(false);
+    expect(state.projects[0].panes.some((pane) => pane.name === "Dana")).toBe(false);
+    await expect(settle(client.delivery("t-settings"))).rejects.toMatchObject({ kind: "refused", detail: expect.stringContaining("waits to land") });
+  });
+
+  it("refuses a delivery other than the one shown, and says why one does not land", async () => {
+    const client = fakePc("blocked");
+    await expect(settle(client.land("t-settings", "0000000"))).rejects.toMatchObject({
+      kind: "refused",
+      detail: expect.stringContaining("delivered again since you opened it"),
+    });
+    await settle(client.land("t-settings", "4f9c2ab"));
+    await vi.advanceTimersByTimeAsync(4_500);
+    await expect(settle(client.land("t-settings", "4f9c2ab"))).rejects.toMatchObject({
+      kind: "refused",
+      detail: expect.stringContaining("Local changes in main's checkout are in the way"),
+    });
+    // It still waits, and says what stood in the way.
+    expect(await settle(client.delivery("t-settings"))).toMatchObject({ waiting: true, inTheWay: ["src/i18n.ts"] });
+  });
+
+  it("sends it back to Dana with what to fix, and it still waits until she delivers again", async () => {
+    const client = fakePc();
+    await expect(settle(client.rework("t-settings", "  ", "4f9c2ab"))).rejects.toMatchObject({ kind: "refused" });
+    expect(await settle(client.rework("t-settings", "The QR code is too small on an iPhone SE.", "4f9c2ab"))).toEqual({ sent: true });
+    const screen = await settle(client.screen("Dana"));
+    expect(screen.activity).toBe("working");
+    expect(screen.text).toContain("> The QR code is too small on an iPhone SE.");
+    expect(await settle(client.delivery("t-settings"))).toMatchObject({ waiting: true });
+  });
+
+  it("has nothing to merge when nothing waits", async () => {
+    await expect(settle(fakePc("empty").delivery("t-settings"))).rejects.toMatchObject({ kind: "refused" });
   });
 });

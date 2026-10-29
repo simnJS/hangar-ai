@@ -58,6 +58,8 @@ const PATHS = {
   chevronLeft: <path d="M10 3.5 5.5 8l4.5 4.5" />,
   arrowDown: <path d="M8 3v10M4 9l4 4 4-4" />,
   arrowUp: <path d="M8 13V3M4 7l4-4 4 4" />,
+  // A branch landing on another.
+  arrowRight: <path d="M3 8h10M9 4l4 4-4 4" />,
   paperclip: (
     <path d="m13.2 7.6-5.4 5.4a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3l-5.5 5.5a1 1 0 0 1-1.5-1.5l5-5" />
   ),

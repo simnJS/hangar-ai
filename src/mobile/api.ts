@@ -1,4 +1,17 @@
-import type { RemoteStats as Stats, RemoteStatsMeasure as StatsMeasure, RemoteStatsPeriod as StatsPeriod } from "../remote/types";
+import type {
+  RemoteDelivery as Delivery,
+  RemoteDeliveryBlocking as DeliveryBlocking,
+  RemoteDeliveryCheck as DeliveryCheck,
+  RemoteDeliveryEarlier as DeliveryEarlier,
+  RemoteDeliveryFile as DeliveryFile,
+  RemoteDeliveryPatch as DeliveryPatch,
+  RemoteDeliveryReview as DeliveryReview,
+  RemoteDeliveryStage as DeliveryStage,
+  RemoteLanded as Landed,
+  RemoteStats as Stats,
+  RemoteStatsMeasure as StatsMeasure,
+  RemoteStatsPeriod as StatsPeriod,
+} from "../remote/types";
 
 /**
  * The phone's side of the contract with the PC's mobile server: the shapes it
@@ -213,13 +226,28 @@ export interface Share {
 
 export type { Stats, StatsMeasure, StatsPeriod };
 
+/* ── Deliveries waiting to land: the shared contract's own shapes ──── */
+
+export type {
+  Delivery,
+  DeliveryBlocking,
+  DeliveryCheck,
+  DeliveryEarlier,
+  DeliveryFile,
+  DeliveryPatch,
+  DeliveryReview,
+  DeliveryStage,
+  Landed,
+};
+
 /* ── Errors ────────────────────────────────────────────────────── */
 
 /**
  * - unpaired: the PC does not know this phone (any 401): pair again.
  * - busy: the PC answered, its window did not in time (503): try again.
  * - offline: no answer at all, or none in time.
- * - refused: the PC answered no, with its reason in `code`.
+ * - refused: the PC answered no, with its reason in `code`, and the PC's
+ *   own words for it in `detail` when it gave them.
  */
 export type ApiErrorKind = "unpaired" | "busy" | "offline" | "refused";
 
@@ -229,6 +257,8 @@ export class ApiError extends Error {
     /** The server's `error`, or `timeout`, `network`, `too-big`. */
     readonly code: string,
     readonly status?: number,
+    /** The PC's `message`: why it refused, in its words (English). */
+    readonly detail?: string,
   ) {
     super(code);
     this.name = "ApiError";
@@ -334,6 +364,10 @@ export function createClient(options: ClientOptions = {}) {
     const payload: unknown = await response.json().catch(() => null);
     const reason =
       payload && typeof payload === "object" && "error" in payload ? String(payload.error) : null;
+    const message =
+      payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string"
+        ? payload.message
+        : undefined;
     if (response.status === 503) {
       failed();
       throw new ApiError("busy", reason ?? "pc-busy", 503);
@@ -343,7 +377,7 @@ export function createClient(options: ClientOptions = {}) {
       if (!pairing) options.onUnpaired?.();
       throw new ApiError("unpaired", reason ?? "unpaired", 401);
     }
-    if (!response.ok) throw new ApiError("refused", reason ?? `http-${response.status}`, response.status);
+    if (!response.ok) throw new ApiError("refused", reason ?? `http-${response.status}`, response.status, message);
     return payload;
   }
 
@@ -403,6 +437,19 @@ export function createClient(options: ClientOptions = {}) {
       call<{ entries: HistoryEntry[] }>("history", since === undefined ? {} : { since }),
     /** The agents' usage over a period, summed up on the PC, and the plan's limits when known. */
     stats: (period: StatsPeriod, measure: StatsMeasure) => call<Stats>("stats", { period, measure }, { retries: 1 }),
+    /** A delivery that waits to land: what it brings, and what its check and its review said. */
+    delivery: (task: string) => call<Delivery>("delivery", { task }),
+    /** One file's patch, of a delivery's `files`. */
+    deliveryFile: (task: string, file: string) => call<DeliveryPatch>("delivery_file", { task, file }, { retries: 1 }),
+    /**
+     * Lands it; while a landing tested again runs, `landed` is false with its
+     * stage, and the same call made again waits for that landing.
+     */
+    land: (task: string, merge: string | null) =>
+      call<Landed>("land", merge === null ? { task } : { task, merge }, { retries: 1 }),
+    /** Sends it back to its worker with what to fix, as the person's own words. */
+    rework: (task: string, text: string, merge: string | null) =>
+      call<{ sent: boolean }>("rework", merge === null ? { task, text } : { task, text, merge }, { retries: 1 }),
     /** Wakes a project asleep; `waking` is false when it was not. The state says when it is awake. */
     wake: (projectId: string) => call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1 }),
 

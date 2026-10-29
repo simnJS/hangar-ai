@@ -158,13 +158,21 @@ export function ProjectScreen({ id }: { id: string }) {
             <h2 className="section__title">{t("forYou.lands")}</h2>
             <span className="section__count">{project.readyToLand.length}</span>
           </div>
-          <p className="section__hint">{t("forYou.landOnPc")}</p>
+          <p className="section__hint">{t("forYou.landHint")}</p>
           <ul className="stack">
-            {project.readyToLand.map((task) => (
-              <li key={task.id} className="card is-yours">
-                <p className="card__title">{task.title}</p>
-              </li>
-            ))}
+            {project.readyToLand.map((task) => {
+              const open = () => navigate({ name: "delivery", task: task.id });
+              return (
+                <li key={task.id} className="card is-yours" onClick={open}>
+                  <p className="card__title">{task.title}</p>
+                  <div className="card__foot">
+                    <button type="button" className="btn btn--primary" onClick={(event) => (event.stopPropagation(), open())}>
+                      {t("forYou.seeDelivery")}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
