@@ -8,6 +8,29 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.3.0] - 2026-10-29
+
+- **Preview any file.** The 3D panel becomes **Preview**: one tab per open file, whatever
+  its kind. Agents show you a render, a screenshot, a recording, a report or a page with
+  the new `preview_show` and `preview_close` MCP tools.
+  - Images zoom and pan, and video and audio play with loop and speed.
+  - Code and text get syntax highlighting, Markdown is rendered with a source view, and
+    PDFs open in the panel or in your default app.
+  - HTML pages run in an isolated sandbox that reaches neither Hangar nor your other files.
+    Their scripts and styles must be inline.
+  - 3D models work as before.
+- **Shares open in place on the phone.** In Hangar Mobile, a file an agent shares opens
+  right in **Shared**, whatever its kind: video and audio play, text and code are
+  highlighted, Markdown renders, a PDF opens in the phone's viewer, and an HTML page
+  renders isolated. Images open in a zoomable view.
+- **Wake a sleeping project from the phone.** An asleep project has a **Wake up** button.
+  A message, an answer or a permission sent to one of its agents now waits until that
+  agent's session has resumed, instead of being lost while it started.
+- **The phone layout holds on iPhone.** The app no longer shifts down, under the Dynamic
+  Island, and pushes its bottom bar and composer off screen after the keyboard or a
+  return to the app.
+- Agents' instructions now mention `preview_show` and `phone_share`.
+
 ## [1.2.0] - 2026-10-29
 
 - **A real chat on the phone.** In Hangar Mobile, a Claude Code pane (and the project
