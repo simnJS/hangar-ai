@@ -1,0 +1,1 @@
+{ "name": "services", "version": "0.1.0", "description": "Tells agents to look at Hangar's Services tab for the ports and containers on this computer, and who they belong to, before they start or stop a server." }

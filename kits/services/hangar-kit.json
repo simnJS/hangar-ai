@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "services",
+  "name": "Services",
+  "version": "0.1.0",
+  "description": "What is running on this computer, on which port, and whose it is: listening ports and Docker containers, tied to the worker whose port block they sit in, without a terminal.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/services",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Runs three read-only commands (a small Node script that lists listening ports, docker ps and docker logs), reads the workspace's panels to name a port's worker, and sends a message to a panel only when you ask an agent to stop something. It stops nothing itself.",
+    "tags": ["ports", "docker", "workers", "tab"]
+  },
+  "commands": {
+    "ports": {
+      "description": "The TCP ports something is listening on, with the program, its pid and its start time. Reads only.",
+      "run": ["node", "{kitDir}/tools/ports.js"],
+      "timeoutSeconds": 30
+    },
+    "docker-list": {
+      "description": "Every Docker container, running or stopped. Reads only.",
+      "run": ["docker", "ps", "-a", "--format", "json"],
+      "timeoutSeconds": 20
+    },
+    "docker-logs": {
+      "description": "The last 200 lines a Docker container wrote. Reads only.",
+      "run": ["docker", "logs", "--tail", "200", "{id}"],
+      "args": { "id": { "pattern": "[0-9a-f]{12,64}", "description": "The container's id, as docker ps prints it" } },
+      "timeoutSeconds": 20
+    }
+  },
+  "tabs": [
+    {
+      "id": "services",
+      "title": "Services",
+      "entry": "tabs/services/index.html",
+      "icon": "icon.svg",
+      "permissions": ["command:ports", "command:docker-list", "command:docker-logs", "panes.read", "panes.send"],
+      "singleton": true
+    }
+  ]
+}
