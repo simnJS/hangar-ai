@@ -16,8 +16,8 @@ about that domain. A kit can bring:
 Its plugin may also start things by itself, [hooks](#hooks) and
 [more](#what-runs-by-itself): the person sees all of it before enabling the kit.
 
-Kits come from a local folder (linked, read live) or from a GitHub link
-(cloned). There is no catalog.
+Kits come from a local folder (linked, read live), from a GitHub link (cloned),
+or from [the library](#the-library), which lists public kits pinned to a tag.
 
 This page is the contract. The code lives in `src-tauri/src/kits.rs` and
 `src-tauri/src/kits/`, with the typed wrappers in `src/lib/kits.ts`; a tab's
@@ -1261,6 +1261,13 @@ touches the installed app's kits. Its `index.json`:
       "dir": "C:\\Users\\me\\.hangar\\kits\\roblox\\roblox",
       "installedVersion": "1.0.0",
       "addedAt": 1793460795999
+    },
+    {
+      "id": "ci-status",
+      "source": { "kind": "git", "url": "https://github.com/hangar-ai/ci-status", "ref": "refs/tags/v0.2.0" },
+      "dir": "C:\\Users\\me\\.hangar\\kits\\ci-status",
+      "installedVersion": "0.2.0",
+      "addedAt": 1793460796500
     }
   ]
 }
@@ -1281,9 +1288,11 @@ out of the index; the folder stays as it is.
 - `https://github.com/<owner>/<repo>` (with or without `.git`, trailing `/`,
   `?query` or `#fragment`): the default branch, the kit at the top;
 - `https://github.com/<owner>/<repo>/tree/<ref>/<folder…>`: that branch, tag or
-  commit, the kit in that folder. A branch can hold slashes: the longest
-  leading part of the path that names one of the remote's branches or tags is
-  the ref, the rest the folder.
+  commit, the kit in that folder, or at the top with no folder. A branch can hold
+  slashes: the longest leading part of the path that names one of the remote's
+  branches or tags is the ref, the rest the folder. A **tag** pins the kit: its
+  `ref` is recorded as `refs/tags/<tag>`, which git reads as that tag and no
+  branch of the same name.
 
 Links with credentials, other hosts, `http://`, `ssh`, `git@` and `file://`
 are refused before anything runs. The repository is cloned with the git CLI,
@@ -1299,72 +1308,108 @@ kit has nothing to check (`null`). `kit_update(id)` moves a git kit's clone to
 the fetched commit — files the repository does not track, like what a setup
 step installed there, stay — and records the new version; for a folder kit it
 records the version the folder's manifest declares now. A remote whose manifest
-now names another kit id is refused as an update.
+now names another kit id is refused as an update. A kit
+[pinned to a tag](#pinning) does not follow its ref: it follows the catalog.
 
 ## The library
 
-Settings › Kits has a **Library**: the public kits of this repository, one click
-to install. No server of ours stands behind it — the list is a static file of the
-repository, `kits/index.json`:
+Settings › Kits has a **Library**: the public kits of the
+[`hangar-ai`](https://github.com/hangar-ai) organization on GitHub, one repository
+per kit, one click to install. No server of ours stands behind it — the list is a
+static file of the repository `hangar-ai/catalog`, `index.json`:
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "kits": [
     {
       "id": "ci-status",
       "name": "CI status",
       "description": "A tab that follows a GitHub Actions run.",
-      "path": "kits/ci-status",
-      "version": "0.1.0",
+      "repo": "hangar-ai/ci-status",
+      "tag": "v0.2.0",
+      "version": "0.2.0",
       "permissionsSummary": "Runs gh to read CI runs, shows a tab, sends notifications.",
-      "tags": ["ci", "github"]
+      "tags": ["ci", "github"],
+      "verified": true
     }
   ]
 }
 ```
 
-`id`, `name` and `version` are those of the kit's `hangar-kit.json`; `path` is
-`kits/<id>`; `permissionsSummary` is one sentence for the card, never what the
-activation shows (that is read from the kit itself). A Rust test fails when the
-index lists a folder that does not exist, or when an id, name or version differs;
-a kit folder that is not in the index yet does not fail it.
+`id`, `name` and `version` are those of the `hangar-kit.json` at that tag. `repo`
+is `owner/name`, the kit at the top of it. `tag` is a tag of that repository, not a
+branch: a branch's name there installs a kit that follows that branch.
+`permissionsSummary` is one sentence for the card, never what the activation shows
+(that is read from the kit itself).
 
-**How a kit gets listed.** A kit never edits `kits/index.json` (several kits are
-written in parallel, and they would all touch that one file). It carries its own
-card in its `hangar-kit.json`, in a `gallery` block that Hangar's manifest reader
-ignores, like any key it does not know:
+**How a kit gets listed.** By a pull request to
+[`hangar-ai/catalog`](https://github.com/hangar-ai/catalog) adding its entry; a new
+version is a pull request changing `tag` and `version`. Nothing in this repository
+lists a kit.
 
-```json
-"gallery": {
-  "permissionsSummary": "Runs gh to read CI runs, shows a tab, sends notifications.",
-  "tags": ["ci", "github"]
-}
-```
-
-`node scripts/kits-index.mjs` rebuilds `kits/index.json` from the `hangar-kit.json`
-of every folder of `kits/` (`id`, `name`, `description`, `version`, plus that
-block), and `node scripts/kits-index.mjs --check` exits non-zero when the file
-differs. **The index is rebuilt at release**, before the tag, and committed with
-it: until then a new kit is on the branch but not in the library. The release runs
-`--check` to be sure nothing is left out.
-
-`kit_gallery_list` reads `https://raw.githubusercontent.com/simnJS/hangar-ai/main/kits/index.json`
+`kit_gallery_list` reads `https://raw.githubusercontent.com/hangar-ai/catalog/main/index.json`
 over https: no redirect, 256 KB at most, ten seconds at most. It is the only thing
-the library fetches — no icon, no manifest. An entry that is not well formed (an
-id outside `[a-z0-9-]`, a `path` other than `kits/<id>`, a version that is not
-semver, a repeated id) is dropped and the others stay. The last good list is kept
-in `gallery-cache.json` beside the store; when GitHub cannot be reached, that
-copy is shown and the page says so (`origin: "cached"`), and with none yet it
-says the library cannot be reached (`"unavailable"`). Nothing is logged for it.
+the library fetches — no icon, no manifest. Another `schema` than 2 lists nothing.
+An entry that is not well formed (an id outside `[a-z0-9-]`, a `repo` that is not
+exactly `owner/name` in GitHub's characters, a `tag` git could misread, a version
+that is not semver, a repeated id) is dropped and the others stay. The last good
+list is kept in `gallery-cache.json` beside the store; when the catalog cannot be
+read, that copy is shown and the page says so (`origin: "cached"`), and with none
+yet it says the library cannot be reached (`"unavailable"`). A 404, the answer
+while the catalog is not public, is not a failure: with no copy kept, the list is
+empty and the page says no kit is listed yet (`"live"`). Nothing is logged for any
+of it.
 
-A card shows the name, description, tags and what the kit will ask; whether it is
-installed and at which version; an update when the index has a newer version than
-a git kit's `installedVersion` (a linked folder is yours: no update offered).
-**Install** is `kit_add_git` on `https://github.com/simnJS/hangar-ai/tree/main/kits/<id>`
-— nothing runs and nothing is enabled by it. The person sees what the kit does,
-and accepts it, in the activation, as for any kit. There is one source in this
-version, and no way to add another.
+A card shows the name, description, repository, tag and tags, what the kit will
+ask, whether it was reviewed; whether it is installed, at which version and what it
+is pinned to; an update when the catalog names a new tag with a newer version.
+**Install** is `kit_add_git` on `https://github.com/<repo>/tree/<tag>` — nothing
+runs and nothing is enabled by it. The person sees what the kit does, and accepts
+it, in the activation, as for any kit. There is one source in this version, and no
+way to add another.
+
+### Pinning
+
+A kit installed from a tag stays on that tag. Its branch moving changes nothing,
+and neither does a new tag of its repository: **a new version appears only when the
+catalog names a new tag**, so it reaches people once a pull request to the catalog
+was reviewed.
+
+- `kit_check_update` and `kit_update` of a pinned kit read the catalog, or the kept
+  copy when it cannot be read, for the entry of that `id` and of the repository the
+  kit was cloned from. On another tag, they fetch that one, shallow, and go by the
+  version its manifest declares. Otherwise nothing is fetched and the kit is up to
+  date.
+- `kit_update` then moves the clone to that tag and records it as the new `ref`,
+  through [consent on change](#consent-on-change) and the permissions' diff like any
+  update.
+- A kit is never taken back to an older version: a tag whose manifest is not later
+  than `installedVersion` is not offered, and updating to it is refused.
+- The same `id` in another repository says nothing of an installed kit, which stays
+  where it is: to change repository, remove it and install it again. The catalog has
+  no say either on a linked folder, or on a kit added by a link to a repository or
+  a branch, which follows its branch as ever.
+- A tag link pasted by hand pins the same way. If its kit is not in the catalog, it
+  stays on that tag.
+
+Settings › Kits shows the version and what the kit is pinned to, on its row and on
+its card.
+
+**A tag is not a commit.** The catalog names a tag, and whoever owns the repository
+can move it. A kit already installed is not affected, as nothing is fetched for the
+tag it is on, but someone installing after that gets what the tag holds then, which
+is not what was reviewed.
+
+### Verified
+
+`verified` is shown as a badge when **the catalog says `true` and the repository's
+owner is exactly `hangar-ai`**. Hangar checks that itself, on the fetched list and on
+the copy it kept, whatever the file says. Anything else is a community kit, and the
+card says in one sentence that Hangar did not review it.
+
+It says who looked at the kit, and changes nothing else: installing and activation
+are the same for both, and the person is shown and accepts the same things.
 
 ## Workspaces
 
@@ -1404,8 +1449,8 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 | `kit_add_git(url)`           | `kitAddGit(url)`             | `KitInfo`. `url` a GitHub link as above.                                                   |
 | `kit_gallery_list`           | `kitGalleryList()`           | `{ origin: "live" \| "cached" \| "unavailable", kits, fetchedAt }`: the library, see [The library](#the-library). Never refuses.  |
 | `kit_remove(id)`             | `kitRemove(id)`              | Nothing. Deletes only a clone Hangar made.                                                 |
-| `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit.                  |
-| `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`.                                                                                 |
+| `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit. A pinned kit goes by [the catalog's tag](#pinning). |
+| `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`. A pinned kit goes by [the catalog's tag](#pinning).                             |
 | `kit_inspect(id)`            | `kitInspect(id)`             | What it brings: `plugin` (`{ name, dir }`), `skills`, `commands`, `agents`, `mcpServers` (the plugin's names, unprefixed), `hooks` (`[{ event, matcher, command }]`), `running` ([what else it starts by itself](#what-runs-by-itself), never an env value or a header), `hooksPermission`, `tabs`, `setup` (this OS's steps, with `command`), `declaredCommands` (`[{ name, description, argv, args, timeoutSeconds }]`, this OS's, verbatim; `commands` is the plugin's slash commands), `commandsPermission`. |
 | `kit_setup_status(id)`       | `kitSetupStatus(id)`         | `[{ id, title, description?, command, sha256, done }]`.                                   |
 | `kit_setup_mark(id, stepId)` | `kitSetupMark(id, stepId)`   | The same list, after recording the step.                                                  |

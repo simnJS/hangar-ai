@@ -195,11 +195,23 @@ export interface KitManifest {
 
 export type KitSource =
   | { kind: "folder"; path: string }
+  /** `ref` is `refs/tags/<tag>` for a kit pinned to a tag: `kitPinnedTag`. */
   | { kind: "git"; url: string; ref?: string; subdir?: string };
+
+const TAG_REF = "refs/tags/";
+
+/**
+ * The tag a git kit is pinned to, null for any other kit. Such a kit moves only
+ * when the catalog names another tag (kits/source.rs).
+ */
+export function kitPinnedTag(source: KitSource): string | null {
+  if (source.kind !== "git" || !source.ref?.startsWith(TAG_REF)) return null;
+  return source.ref.slice(TAG_REF.length);
+}
 
 export interface KitUpdate {
   current: string;
-  /** The version the manifest declares at the remote ref. */
+  /** The version the manifest declares at the remote ref, or at the tag the catalog names for a pinned kit. */
   latest: string;
   available: boolean;
   checkedAt: number;

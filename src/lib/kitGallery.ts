@@ -1,29 +1,34 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { KitInfo } from "./kits";
+import { kitPinnedTag, type KitInfo } from "./kits";
 
 /**
- * The kit gallery: the public kits of the Hangar repository, listed by a static
- * file (`kits/index.json`) that Rust reads. No server of ours, and one source.
- * Installing is the existing `kit_add_git`, on the kit's folder.
+ * The kit gallery: the public kits of the `hangar-ai` organization, listed by a
+ * static file of its catalog repository that Rust reads and checks. No server of
+ * ours, and one source. Each kit is pinned to a tag of its own repository, and
+ * installing is the existing `kit_add_git`, on the link to that tag.
  */
-
-/** The repository's kits folder: the one place a gallery kit is installed from. */
-export const GALLERY_KITS_URL = "https://github.com/simnJS/hangar-ai/tree/main/kits";
 
 export interface GalleryKit {
   id: string;
   name: string;
   description: string;
-  /** The kit's folder in the repository, like `kits/ci-status`. */
-  path: string;
+  /** The kit's repository on GitHub, `owner/name`. */
+  repo: string;
+  /** The tag of that repository the catalog pins it to. */
+  tag: string;
   version: string;
   /** What it will ask to run, in a sentence; the activation shows the truth. */
   permissionsSummary: string;
   tags: string[];
+  /** Checked by Rust: the catalog says so and the owner is `hangar-ai`. Otherwise a community kit. */
+  verified: boolean;
 }
 
 export interface Gallery {
-  /** `live`: just fetched. `cached`: the last good copy, offline. `unavailable`: neither. */
+  /**
+   * `live`: just read, a catalog that is not published being an empty list.
+   * `cached`: the last good copy, the catalog could not be read. `unavailable`: neither.
+   */
   origin: "live" | "cached" | "unavailable";
   kits: GalleryKit[];
   /** ms since the epoch; null when unavailable. */
@@ -33,13 +38,14 @@ export interface Gallery {
 export const kitGalleryList = () => invoke<Gallery>("kit_gallery_list");
 
 /** The link `kit_add_git` is given for a gallery kit. */
-export const galleryInstallUrl = (id: string) => `${GALLERY_KITS_URL}/${id}`;
+export const galleryInstallUrl = (kit: Pick<GalleryKit, "repo" | "tag">) =>
+  `https://github.com/${kit.repo}/tree/${kit.tag}`;
 
-/** What a gallery card says of a kit on this machine. */
+/** What a gallery card says of a kit on this machine; `pinned` is the tag it is pinned to. */
 export type GalleryStatus =
   | { kind: "new" }
-  | { kind: "installed"; version: string }
-  | { kind: "update"; version: string; latest: string };
+  | { kind: "installed"; version: string; pinned: string | null }
+  | { kind: "update"; version: string; latest: string; pinned: string };
 
 /** `1.2.3-rc.1` as numbers and whether it is a pre-release; null when it is not semver. */
 function parse(version: string): { nums: [number, number, number]; pre: string | null } | null {
@@ -62,14 +68,20 @@ export function isNewer(a: string, b: string): boolean {
   return left.pre > right.pre;
 }
 
+const fromRepo = (kit: KitInfo, repo: string) =>
+  kit.source.kind === "git" && kit.source.url.toLowerCase() === `https://github.com/${repo}`.toLowerCase();
+
 export function galleryStatus(entry: GalleryKit, installed: readonly KitInfo[]): GalleryStatus {
   const kit = installed.find((item) => item.id === entry.id);
   if (!kit) return { kind: "new" };
-  // A linked folder is the person's own copy: the index has no say on it.
-  if (kit.source.kind === "folder") return { kind: "installed", version: kit.installedVersion };
-  return isNewer(entry.version, kit.installedVersion)
-    ? { kind: "update", version: kit.installedVersion, latest: entry.version }
-    : { kind: "installed", version: kit.installedVersion };
+  const version = kit.installedVersion;
+  const pinned = kitPinnedTag(kit.source);
+  // As Rust goes by (kits/gallery.rs, `tag_for`): the catalog only has a say on a
+  // kit pinned from this very repository. A linked folder is the person's own copy,
+  // a kit on a branch follows its branch, and another repository is another kit.
+  return pinned !== null && pinned !== entry.tag && fromRepo(kit, entry.repo) && isNewer(entry.version, version)
+    ? { kind: "update", version, latest: entry.version, pinned }
+    : { kind: "installed", version, pinned };
 }
 
 /** The kits whose name, description or a tag holds every word of the query. */

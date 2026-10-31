@@ -6,6 +6,10 @@
 //! checked out with symlinks as plain files, so nothing in it runs and nothing
 //! in it points outside the clone: no hook comes with a fetch, and Hangar runs
 //! nothing from the folder afterwards.
+//!
+//! A link to a tag pins the kit to it: its ref is recorded by its full name,
+//! `refs/tags/<tag>`, which git reads as that tag and no branch of the same
+//! name. It moves only when the catalog names another tag (`update_target`).
 
 use std::path::Path;
 use std::process::Command;
@@ -18,12 +22,16 @@ use super::manifest;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// A ref under this names a tag, and only that.
+const TAG_REF: &str = "refs/tags/";
+
 /// What a git kit is cloned from, as the index records it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitSource {
     /// `https://github.com/<owner>/<repo>`: what git fetches from.
     pub url: String,
-    /// A branch, a tag or a commit; the remote's default branch when absent.
+    /// A branch or a commit, or `refs/tags/<tag>` for a kit pinned to a tag; the
+    /// remote's default branch when absent.
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub git_ref: Option<String>,
     /// The kit's root inside the repository, when it is not the top.
@@ -118,6 +126,43 @@ pub fn split_tree(
     Ok((Some(git_ref), subdir))
 }
 
+/// What a link means on its remote. A tag is recorded by its full name, which is
+/// what pins the kit to it; a link to the repository asks the remote nothing.
+pub fn source_of(link: Link, refs: &RemoteRefs) -> Result<GitSource, String> {
+    let (git_ref, subdir) = split_tree(&link.tree, &refs.names())?;
+    Ok(GitSource {
+        url: link.url,
+        git_ref: git_ref.map(|name| {
+            if refs.tags.contains(&name) {
+                format!("{TAG_REF}{name}")
+            } else {
+                name
+            }
+        }),
+        subdir,
+    })
+}
+
+/// The tag a kit is pinned to, when it is.
+pub fn pinned_tag(source: &GitSource) -> Option<&str> {
+    source.git_ref.as_deref()?.strip_prefix(TAG_REF)
+}
+
+/// What an update of `source` fetches. A kit on a branch fetches its branch, and
+/// the catalog has no say. A kit pinned to a tag moves only to another tag the
+/// catalog names: `None` otherwise, as there is nothing to fetch, and a tag its
+/// owner moved reaches nobody.
+pub fn update_target(source: &GitSource, catalog_tag: Option<&str>) -> Option<GitSource> {
+    let Some(pinned) = pinned_tag(source) else {
+        return Some(source.clone());
+    };
+    let tag = catalog_tag.filter(|tag| *tag != pinned)?;
+    Some(GitSource {
+        git_ref: Some(format!("{TAG_REF}{tag}")),
+        ..source.clone()
+    })
+}
+
 /// What git would read as a ref and nothing else: never an option, never a
 /// range or a revision expression.
 pub fn check_ref(git_ref: &str) -> Result<(), String> {
@@ -187,18 +232,41 @@ pub fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// The remote's branch and tag names.
-pub fn remote_refs(url: &str) -> Result<Vec<String>, String> {
-    let listing = git(None, &["ls-remote", "--heads", "--tags", "--", url])?;
-    Ok(listing
+/// The branches and tags of a remote, by name.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RemoteRefs {
+    pub heads: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+impl RemoteRefs {
+    fn names(&self) -> Vec<String> {
+        self.heads.iter().chain(&self.tags).cloned().collect()
+    }
+}
+
+/// What `git ls-remote` lists. An annotated tag comes twice, once peeled (`^{}`).
+fn read_refs(listing: &str) -> RemoteRefs {
+    let mut refs = RemoteRefs::default();
+    for name in listing
         .lines()
         .filter_map(|line| line.split_whitespace().nth(1))
-        .filter_map(|name| {
-            name.strip_prefix("refs/heads/")
-                .or_else(|| name.strip_prefix("refs/tags/"))
-        })
-        .map(|name| name.trim_end_matches("^{}").to_string())
-        .collect())
+    {
+        if let Some(branch) = name.strip_prefix("refs/heads/") {
+            refs.heads.push(branch.to_string());
+        } else if let Some(tag) = name.strip_prefix(TAG_REF) {
+            let tag = tag.trim_end_matches("^{}");
+            if !refs.tags.iter().any(|seen| seen == tag) {
+                refs.tags.push(tag.to_string());
+            }
+        }
+    }
+    refs
+}
+
+/// The remote's branch and tag names.
+pub fn remote_refs(url: &str) -> Result<RemoteRefs, String> {
+    git(None, &["ls-remote", "--heads", "--tags", "--", url]).map(|listing| read_refs(&listing))
 }
 
 /// A fresh shallow clone of `source` in `dir`, which must not exist yet.
@@ -337,6 +405,92 @@ mod tests {
         assert_eq!(split_tree(&[], &refs).unwrap(), (None, None));
         assert!(split_tree(&["main".into(), "..".into()], &refs).is_err());
         assert!(split_tree(&["-c".into()], &refs).is_err());
+    }
+
+    fn remote(heads: &[&str], tags: &[&str]) -> RemoteRefs {
+        RemoteRefs {
+            heads: heads.iter().map(|name| name.to_string()).collect(),
+            tags: tags.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn the_listing_of_a_remote_tells_tags_from_branches() {
+        let listing = "1\trefs/heads/main\n\
+                       2\trefs/heads/feature/x\n\
+                       3\trefs/tags/v1.0.0\n\
+                       4\trefs/tags/v2.0.0\n\
+                       5\trefs/tags/v2.0.0^{}\n\
+                       6\trefs/pull/1/head\n";
+        assert_eq!(
+            read_refs(listing),
+            remote(&["main", "feature/x"], &["v1.0.0", "v2.0.0"])
+        );
+    }
+
+    #[test]
+    fn a_link_of_the_catalog_is_a_tag_with_no_folder_and_pins_the_kit() {
+        let parsed = link("https://github.com/hangar-ai/ci-status/tree/v0.2.0");
+        let refs = remote(&["main"], &["v0.1.0", "v0.2.0"]);
+        let source = source_of(parsed, &refs).unwrap();
+        assert_eq!(
+            source,
+            GitSource {
+                url: "https://github.com/hangar-ai/ci-status".into(),
+                git_ref: Some("refs/tags/v0.2.0".into()),
+                subdir: None,
+            }
+        );
+        assert_eq!(pinned_tag(&source), Some("v0.2.0"));
+        assert!(check_ref(source.git_ref.as_deref().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn a_tag_link_can_name_a_folder_and_wins_over_a_branch_of_its_name() {
+        let parsed = link("https://github.com/o/r/tree/v1/kits/roblox");
+        let source = source_of(parsed, &remote(&["v1"], &["v1"])).unwrap();
+        assert_eq!(pinned_tag(&source), Some("v1"));
+        assert_eq!(source.subdir.as_deref(), Some("kits/roblox"));
+    }
+
+    #[test]
+    fn a_link_to_a_repository_a_branch_or_a_commit_pins_nothing() {
+        let refs = remote(&["main", "feature/x"], &["v1"]);
+        for (input, wanted) in [
+            ("https://github.com/o/r", None),
+            ("https://github.com/o/r/tree/main", Some("main")),
+            (
+                "https://github.com/o/r/tree/feature/x/kit",
+                Some("feature/x"),
+            ),
+            ("https://github.com/o/r/tree/4b62471", Some("4b62471")),
+        ] {
+            let source = source_of(link(input), &refs).unwrap();
+            assert_eq!(source.git_ref.as_deref(), wanted, "{input}");
+            assert_eq!(pinned_tag(&source), None, "{input}");
+        }
+    }
+
+    #[test]
+    fn a_pinned_kit_only_moves_to_another_tag_the_catalog_names() {
+        let source = |git_ref: Option<&str>| GitSource {
+            url: "https://github.com/o/r".into(),
+            git_ref: git_ref.map(str::to_string),
+            subdir: Some("kit".into()),
+        };
+        let pinned = source(Some("refs/tags/v1"));
+        assert_eq!(update_target(&pinned, None), None);
+        assert_eq!(update_target(&pinned, Some("v1")), None);
+        assert_eq!(
+            update_target(&pinned, Some("v2")),
+            Some(source(Some("refs/tags/v2")))
+        );
+
+        // A kit on a branch fetches its branch, whatever the catalog says.
+        for branch in [source(None), source(Some("main"))] {
+            assert_eq!(update_target(&branch, None).as_ref(), Some(&branch));
+            assert_eq!(update_target(&branch, Some("v2")).as_ref(), Some(&branch));
+        }
     }
 
     #[test]
