@@ -1,0 +1,1 @@
+{ "name": "ci-status", "version": "0.1.0", "description": "Opens the CI status tab after a git push, and tells agents how to follow a run." }
