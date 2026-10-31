@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "guard",
+  "name": "Guardrails",
+  "version": "0.1.0",
+  "description": "Refuses dangerous commands and the reading of secrets before they run. You let one through once, in a click, from its tab.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/guard",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "tabs": [
+    {
+      "id": "guard",
+      "title": "Garde-fous",
+      "entry": "tabs/guard/index.html",
+      "icon": "icon.svg",
+      "permissions": ["data.read", "data.write"]
+    }
+  ]
+}
