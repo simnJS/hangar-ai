@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop, ModalHead } from "./Backdrop";
 import { Icon } from "./Icon";
@@ -42,8 +42,8 @@ interface Props {
  * running a kit's setup commands in a pane of it, and restarting its Claude
  * Code panes. Changes are saved as they are accepted.
  *
- * Nothing mounts this yet: opening it from a workspace's menu is App.tsx's, not
- * this file's, and needs `workspace` to be the live one from the store.
+ * Opened from Settings › Kits, "Kits per workspace" (KitsSettings), with the
+ * live workspace from the store.
  */
 export function WorkspaceKitsDialog({
   workspace,
@@ -54,8 +54,19 @@ export function WorkspaceKitsDialog({
 }) {
   const { updateWorkspace } = useStore();
   const t = useT();
+  // Opened over the Settings, which steer Escape themselves: close this one
+  // only, unless an activation view is open above it (it closes first).
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape" || document.getElementById("kit-act-title")) return;
+      event.stopImmediatePropagation();
+      onClose();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
   return (
-    <Backdrop onClose={onClose}>
+    <Backdrop onClose={onClose} escape={false}>
       <div className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="ws-kits-title">
         <ModalHead
           id="ws-kits-title"

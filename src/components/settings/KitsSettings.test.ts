@@ -70,6 +70,8 @@ function viewProps(locale: "en" | "fr", patch: Partial<ViewProps> = {}): ViewPro
     onUpdate: noop,
     onAskRemove: noop,
     onRemove: noop,
+    workspaces: [{ id: "w1", name: "Studio", kits: 2 }],
+    onManageWorkspace: noop,
     ...patch,
   };
 }
@@ -118,6 +120,14 @@ describe("Settings › Kits", () => {
     expect(out).toContain("no hangar-kit.json");
     expect(out).toContain("not a GitHub link");
     expect(out).toContain('aria-invalid="true"');
+  });
+
+  it("lists the workspaces to manage their kits from", () => {
+    const out = html(viewProps("en"));
+    expect(out).toContain("Kits per workspace");
+    expect(out).toContain("Studio");
+    expect(out).toContain("2 kits enabled");
+    expect(out).toContain("Manage kits");
   });
 
   it("speaks French, with accents", () => {

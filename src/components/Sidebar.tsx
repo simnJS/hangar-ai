@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { useLocale, useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
+import { WorkspaceKitsDialog } from "./WorkspaceDialog";
 import { Icon } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
 import { NavigatorMenu, type NavigatorMenuEntry } from "./NavigatorMenu";
@@ -118,6 +119,8 @@ export function Sidebar({
   const [draft, setDraft] = useState("");
   /** Workspace whose worktrees are on screen; it may be deleted under us. */
   const [worktreesFor, setWorktreesFor] = useState<string | null>(null);
+  /** Workspace whose kits are on screen. */
+  const [kitsFor, setKitsFor] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [drag, setDrag] = useState<{ item: DragItem; target: DropTarget | null } | null>(
     null,
@@ -186,6 +189,7 @@ export function Sidebar({
         : (tree.rows[0]?.key ?? null);
 
   const worktreesWs = state.workspaces.find((ws) => ws.id === worktreesFor) ?? null;
+  const kitsWs = state.workspaces.find((ws) => ws.id === kitsFor) ?? null;
   const filtered = tree.filtering;
 
   function focusRow(key: string | null | undefined) {
@@ -817,6 +821,13 @@ export function Sidebar({
       },
       {
         kind: "item",
+        label: t("kitsManage.menu"),
+        icon: "plug",
+        takesFocus: true,
+        onSelect: () => setKitsFor(ws.id),
+      },
+      {
+        kind: "item",
         label: t("orch.settingsMenu"),
         icon: "orchestrator",
         takesFocus: true,
@@ -1072,6 +1083,23 @@ export function Sidebar({
             // Opened from the row's menu, which is gone: the dialog's own
             // restore has nowhere to go, so the row takes the keyboard back —
             // unless whatever closed the panel already put it somewhere.
+            requestAnimationFrame(() => {
+              const at = document.activeElement;
+              if (at && at !== document.body) return;
+              const row = treeRef.current?.querySelector(`[data-key="${CSS.escape(key)}"]`);
+              focusRow(row ? key : tabKey);
+            });
+          }}
+        />
+      )}
+
+      {kitsWs && (
+        <WorkspaceKitsDialog
+          workspace={kitsWs}
+          onClose={() => {
+            const key = rowKey("ws", kitsWs.id);
+            setKitsFor(null);
+            // Opened from the row's menu, which is gone: the row takes the keyboard back.
             requestAnimationFrame(() => {
               const at = document.activeElement;
               if (at && at !== document.body) return;

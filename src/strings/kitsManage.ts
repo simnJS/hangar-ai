@@ -55,6 +55,14 @@ export const en = {
   "kitsManage.cancel": "Cancel",
   "kitsManage.errorPrefix": "Error: {detail}",
 
+  "kitsManage.byWorkspace": "Kits per workspace",
+  "kitsManage.byWorkspaceHint":
+    "Enable kits on a workspace that exists: run their setup commands in it and restart its Claude Code panes.",
+  "kitsManage.enabledCount_one": "{n} kit enabled",
+  "kitsManage.enabledCount_other": "{n} kits enabled",
+  "kitsManage.manage": "Manage kits",
+  "kitsManage.menu": "Kits…",
+
   "kitsManage.sectionTitle": "Kits",
   "kitsManage.sectionHint":
     "Enable the kits this workspace uses. Their skills, commands, agents and MCP servers load in its Claude Code panes.",
@@ -67,7 +75,7 @@ export const en = {
   "kitsManage.review": "Review",
   "kitsManage.details": "Details",
   "kitsManage.pendingNote":
-    "Enabled once the workspace is created. Setup commands can be run from the workspace's Kits afterwards.",
+    "Enabled once the workspace is created. Setup commands run afterwards, from the workspace's \"Kits…\" menu.",
   "kitsManage.editTitle": "Kits of {name}",
   "kitsManage.editDone": "Done",
 
@@ -174,6 +182,14 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.cancel": "Annuler",
   "kitsManage.errorPrefix": "Erreur : {detail}",
 
+  "kitsManage.byWorkspace": "Kits par workspace",
+  "kitsManage.byWorkspaceHint":
+    "Activez des kits sur un workspace existant : lancez-y leurs commandes d'installation et redémarrez ses panes Claude Code.",
+  "kitsManage.enabledCount_one": "{n} kit activé",
+  "kitsManage.enabledCount_other": "{n} kits activés",
+  "kitsManage.manage": "Gérer les kits",
+  "kitsManage.menu": "Kits…",
+
   "kitsManage.sectionTitle": "Kits",
   "kitsManage.sectionHint":
     "Activez les kits que ce workspace utilise. Leurs skills, commandes, agents et serveurs MCP se chargent dans ses panes Claude Code.",
@@ -186,7 +202,7 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.review": "Examiner",
   "kitsManage.details": "Détails",
   "kitsManage.pendingNote":
-    "Activé à la création du workspace. Les commandes d'installation se lancent ensuite depuis les kits du workspace.",
+    "Activé à la création du workspace. Les commandes d'installation se lancent ensuite depuis le menu « Kits… » du workspace.",
   "kitsManage.editTitle": "Kits de {name}",
   "kitsManage.editDone": "Terminé",
 

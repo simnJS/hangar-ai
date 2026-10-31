@@ -13,6 +13,9 @@ import {
   type KitInfo,
 } from "../../lib/kits";
 import { Icon } from "../Icon";
+import { WorkspaceKitsDialog } from "../WorkspaceDialog";
+import { useStore } from "../../store";
+import { workspaceKits } from "../../lib/kits";
 import "./KitsSettings.css";
 
 /**
@@ -59,6 +62,9 @@ export interface KitsViewProps {
   onUpdate: (kit: KitInfo) => void;
   onAskRemove: (id: string | null) => void;
   onRemove: (kit: KitInfo) => void;
+  /** The workspaces a kit can be enabled on, with how many kits each has. */
+  workspaces: { id: string; name: string; kits: number }[];
+  onManageWorkspace: (id: string) => void;
 }
 
 function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -171,7 +177,7 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
       ) : (
         <div className="kit-row__actions">
           {isFolder ? (
-            <button type="button" className="btn" disabled={working || !!kit.error && !manifest} onClick={() => props.onUpdate(kit)}>
+            <button type="button" className="btn" disabled={working || (!!kit.error && !manifest)} onClick={() => props.onUpdate(kit)}>
               {t("kitsManage.reload")}
             </button>
           ) : available ? (
@@ -218,6 +224,22 @@ export function KitsView(props: KitsViewProps) {
           kits.map((kit) => <KitRow key={kit.id} kit={kit} props={props} />)
         )}
       </Block>
+
+      {props.workspaces.length > 0 && (
+        <Block title={t("kitsManage.byWorkspace")} hint={t("kitsManage.byWorkspaceHint")}>
+          {props.workspaces.map((ws) => (
+            <div key={ws.id} className="set-row">
+              <span className="set-row__text">
+                <span className="set-row__label">{ws.name}</span>
+                <span className="set-row__hint">{t("kitsManage.enabledCount", { n: ws.kits })}</span>
+              </span>
+              <button type="button" className="btn" onClick={() => props.onManageWorkspace(ws.id)}>
+                {t("kitsManage.manage")}
+              </button>
+            </div>
+          ))}
+        </Block>
+      )}
 
       <Block title={t("kitsManage.add")}>
         <div className="set-row set-row--block kit-add">
@@ -296,6 +318,10 @@ export function KitsSettings() {
   const [folderError, setFolderError] = useState<string | null>(null);
   const [gitUrl, setGitUrl] = useState("");
   const [gitError, setGitError] = useState<string | null>(null);
+  const { state } = useStore();
+  const [managing, setManaging] = useState<string | null>(null);
+  // Read live from the store, so the dialog sees the grants it just saved.
+  const managed = state.workspaces.find((ws) => ws.id === managing) ?? null;
   const live = useRef(true);
   const kitsRef = useRef<KitInfo[] | null>(null);
   kitsRef.current = kits;
@@ -406,7 +432,12 @@ export function KitsSettings() {
   }
 
   return (
+    <>
     <KitsView
+      workspaces={state.workspaces
+        .filter((ws) => !ws.hq)
+        .map((ws) => ({ id: ws.id, name: ws.name, kits: workspaceKits(ws).length }))}
+      onManageWorkspace={setManaging}
       t={t}
       kits={kits}
       error={error}
@@ -428,5 +459,7 @@ export function KitsSettings() {
       onAskRemove={setRemoving}
       onRemove={(kit) => void remove(kit)}
     />
+    {managed && <WorkspaceKitsDialog workspace={managed} onClose={() => setManaging(null)} />}
+    </>
   );
 }
