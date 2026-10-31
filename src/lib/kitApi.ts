@@ -1,8 +1,15 @@
 import type { PaneActivity } from "./agentState";
 import {
+  isKitLoopbackPort,
+  kitLoopbackPort,
   kitMayCall,
+  KIT_DATA_MAX_BYTES,
   KIT_DENIED,
   KIT_EVENTS,
+  KIT_LOOPBACK_MAX_BODY_BYTES,
+  KIT_LOOPBACK_MAX_TIMEOUT_MS,
+  KIT_LOOPBACK_PATTERN,
+  KIT_LOOPBACK_TIMEOUT_MS,
   KIT_METHODS,
   type KitEventName,
   type KitMethod,
@@ -33,12 +40,14 @@ export const KIT_ERRORS = {
   invalid: "invalid",
   /** No such method. */
   unknown: "unknown",
-  /** No such pane, or no such file. */
+  /** No such pane, or no such file of the kit's data. */
   notFound: "not_found",
   /** Too many calls of this kind lately, or at once. */
   rateLimited: "rate_limited",
   /** Hangar cannot do it now: the pane's agent cannot take a message, the workspace is gone. */
   unavailable: "unavailable",
+  /** Nothing answers on that local port, or not in time: an ordinary state for a tab. */
+  unreachable: "unreachable",
   /** It was tried, and failed. */
   failed: "failed",
 } as const;
@@ -60,10 +69,15 @@ export const KIT_SEND_WINDOW_MS = 60_000;
 /** At most this many `notify` in any `KIT_NOTIFY_WINDOW_MS`. */
 export const KIT_NOTIFY_MAX = 5;
 export const KIT_NOTIFY_WINDOW_MS = 60_000;
+/** At most this many `data.write` in any `KIT_DATA_WRITE_WINDOW_MS`: `panes.send`'s limit. */
+export const KIT_DATA_WRITE_MAX = KIT_SEND_MAX;
+export const KIT_DATA_WRITE_WINDOW_MS = KIT_SEND_WINDOW_MS;
 /** Calls of a tab still waiting for their answer, at most. */
 export const KIT_MAX_PENDING = 16;
 /** The longest path a tab may give. */
 export const KIT_PATH_MAX_CHARS = 1024;
+/** The longest URL path `loopback.fetch` takes (kits/loopback.rs). */
+export const KIT_LOOPBACK_PATH_MAX_CHARS = 2048;
 const TITLE_MAX = 120;
 const BODY_MAX = 1000;
 const ID_MAX = 128;
@@ -105,7 +119,27 @@ export interface KitHostDeps {
   enqueue: (paneId: string, text: string, from: string) => Promise<unknown>;
   activity: (paneId: string) => PaneActivity | undefined;
   notify: (title: string, body: string) => Promise<void>;
+  /** `kit_data_read`: a text of the kit's own data. Rejects with `{ code, message }`. */
+  readData: (kitId: string, path: string) => Promise<string>;
+  /** `kit_data_write`: atomic. Rejects with `{ code, message }`. */
+  writeData: (kitId: string, path: string, text: string) => Promise<void>;
+  /** `kit_loopback_fetch`, made by Rust. Rejects with `{ code, message }`. */
+  loopbackFetch: (call: KitLoopbackCall) => Promise<KitLoopbackAnswer>;
   now: () => number;
+}
+
+/** A `loopback.fetch` once checked: nothing else of the page's reaches Rust. */
+export interface KitLoopbackCall {
+  port: number;
+  path: string;
+  method: "GET" | "POST";
+  body: string | null;
+  timeoutMs: number;
+}
+
+export interface KitLoopbackAnswer {
+  status: number;
+  text: string;
 }
 
 export interface KitHost {
@@ -151,28 +185,76 @@ export function kitPanes(
   });
 }
 
+/** A path a tab gave, relative to `folder`, with `/`. */
+function relativePath(raw: unknown, folder: string, hidden: boolean): string {
+  const bad = (why: string) => new KitError(KIT_ERRORS.invalid, `path ${why}`);
+  if (typeof raw !== "string" || !raw.trim()) throw bad("must be a non-empty string");
+  if (raw.length > KIT_PATH_MAX_CHARS) throw bad(`must be at most ${KIT_PATH_MAX_CHARS} characters`);
+  if (raw.includes("\0")) throw bad("must not hold a NUL character");
+  if (/^[\\/]/.test(raw)) throw bad(`must be relative to ${folder}`);
+  const parts: string[] = [];
+  for (const part of raw.split(/[\\/]/)) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") throw bad("must not climb out with ..");
+    if (part.includes(":")) throw bad(`must be relative to ${folder}`);
+    if (!hidden && part.startsWith(".")) throw bad("must not name a hidden file or folder");
+    if (/[. ]$/.test(part)) throw bad("parts must not end with a dot or a space");
+    parts.push(part);
+  }
+  if (!parts.length) throw bad(`must name a file inside ${folder}`);
+  return parts.join("/");
+}
+
 /**
  * A path a tab gave, as a path relative to the workspace folder: either
  * slash, no `..`, no drive or stream (`:`), no hidden file or folder — the
  * same rules `kit_file_read` holds on disk. Returns it with `/`.
  */
-export function workspaceRelativePath(raw: unknown): string {
-  const bad = (why: string) => new KitError(KIT_ERRORS.invalid, `path ${why}`);
-  if (typeof raw !== "string" || !raw.trim()) throw bad("must be a non-empty string");
-  if (raw.length > KIT_PATH_MAX_CHARS) throw bad(`must be at most ${KIT_PATH_MAX_CHARS} characters`);
-  if (raw.includes("\0")) throw bad("must not hold a NUL character");
-  if (/^[\\/]/.test(raw)) throw bad("must be relative to the workspace folder");
-  const parts: string[] = [];
-  for (const part of raw.split(/[\\/]/)) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") throw bad("must not climb out with ..");
-    if (part.includes(":")) throw bad("must be relative to the workspace folder");
-    if (part.startsWith(".")) throw bad("must not name a hidden file or folder");
-    if (/[. ]$/.test(part)) throw bad("parts must not end with a dot or a space");
-    parts.push(part);
+export const workspaceRelativePath = (raw: unknown): string => relativePath(raw, "the workspace folder", false);
+
+/**
+ * A path a tab gave, as a path relative to its kit's data folder: the same
+ * rules, the same `kit_data_read` and `kit_data_write` hold on disk, except that
+ * a hidden name is the kit's own business there.
+ */
+export const dataRelativePath = (raw: unknown): string => relativePath(raw, "the kit's data folder", true);
+
+/** How many bytes `text` takes in UTF-8, without encoding one that is plainly too long. */
+function overBytes(text: string, max: number): boolean {
+  return text.length > max || new TextEncoder().encode(text).length > max;
+}
+
+/**
+ * The parts of a `loopback.fetch` Rust takes, checked: a URL path that starts
+ * with one `/`, URL-encoded (no space, backslash, `#` or character beyond
+ * ASCII), so it cannot name another host.
+ */
+function loopbackCall(params: Record<string, unknown>): KitLoopbackCall {
+  const bad = (why: string) => new KitError(KIT_ERRORS.invalid, why);
+  const { port, path, method = "GET", body, timeoutMs = KIT_LOOPBACK_TIMEOUT_MS } = params;
+  if (!isKitLoopbackPort(port)) throw bad("port must be a whole number from 1024 to 65535");
+  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) {
+    throw bad("path must start with one /");
   }
-  if (!parts.length) throw bad("must name a file inside the workspace folder");
-  return parts.join("/");
+  if (path.length > KIT_LOOPBACK_PATH_MAX_CHARS) {
+    throw bad(`path must be at most ${KIT_LOOPBACK_PATH_MAX_CHARS} characters`);
+  }
+  if (!/^[\x21-\x7e]*$/.test(path) || /[\\#]/.test(path)) {
+    throw bad("path must be URL-encoded: no space, backslash, # or character beyond ASCII");
+  }
+  if (method !== "GET" && method !== "POST") throw bad("method must be GET or POST");
+  if (body !== undefined && typeof body !== "string") throw bad("body must be a string");
+  if (body !== undefined && method === "GET") throw bad("a GET carries no body");
+  if (body !== undefined && overBytes(body, KIT_LOOPBACK_MAX_BODY_BYTES)) throw bad("body is larger than 2 MB");
+  if (
+    typeof timeoutMs !== "number" ||
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > KIT_LOOPBACK_MAX_TIMEOUT_MS
+  ) {
+    throw bad(`timeoutMs must be a whole number from 1 to ${KIT_LOOPBACK_MAX_TIMEOUT_MS}`);
+  }
+  return { port, path, method, body: body ?? null, timeoutMs };
 }
 
 /** At most `max` takes in any `windowMs`. */
@@ -210,6 +292,14 @@ const validId = (id: unknown): id is string | number =>
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A refusal from Rust keeps its code, which is what the page tells apart. */
+function tabErrorOf(error: unknown): KitError {
+  if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
+    return new KitError(error.code, error.message);
+  }
+  return new KitError(KIT_ERRORS.failed, messageOf(error));
+}
+
 export function createKitHost(
   frame: () => KitFrame | null,
   context: KitHostContext,
@@ -217,9 +307,9 @@ export function createKitHost(
 ): KitHost {
   let closed = false;
   let pending = 0;
-  const mayCall = (method: string) => kitMayCall(method, context.permissions());
   const sendAllowed = rateLimiter(KIT_SEND_MAX, KIT_SEND_WINDOW_MS, deps.now);
   const notifyAllowed = rateLimiter(KIT_NOTIFY_MAX, KIT_NOTIFY_WINDOW_MS, deps.now);
+  const dataWriteAllowed = rateLimiter(KIT_DATA_WRITE_MAX, KIT_DATA_WRITE_WINDOW_MS, deps.now);
 
   const post = (target: KitFrame, message: unknown) => {
     if (closed) return;
@@ -298,6 +388,46 @@ export function createKitHost(
       return { opened: true, path };
     },
 
+    // The kit is the host's own record of the tab, whatever the message says.
+    "data.read": async (raw) => {
+      const path = dataRelativePath(paramsOf(raw).path);
+      try {
+        return { text: await deps.readData(context.kitId, path) };
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+    },
+
+    "data.write": async (raw) => {
+      const params = paramsOf(raw);
+      const path = dataRelativePath(params.path);
+      if (typeof params.text !== "string") throw new KitError(KIT_ERRORS.invalid, "text must be a string");
+      if (overBytes(params.text, KIT_DATA_MAX_BYTES)) {
+        throw new KitError(KIT_ERRORS.invalid, "text is larger than 1 MB");
+      }
+      if (!dataWriteAllowed()) {
+        throw new KitError(
+          KIT_ERRORS.rateLimited,
+          `at most ${KIT_DATA_WRITE_MAX} data.write a minute; try again later`,
+        );
+      }
+      try {
+        await deps.writeData(context.kitId, path, params.text);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+      return {};
+    },
+
+    "loopback.fetch": async (raw) => {
+      const call = loopbackCall(paramsOf(raw));
+      try {
+        return await deps.loopbackFetch(call);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+    },
+
     notify: async (raw) => {
       const params = paramsOf(raw);
       const title = stringParam(params, "title", TITLE_MAX).trim();
@@ -315,13 +445,25 @@ export function createKitHost(
     if (!Object.prototype.hasOwnProperty.call(KIT_METHODS, method)) {
       throw new KitError(KIT_ERRORS.unknown, `no method ${JSON.stringify(method)}`);
     }
-    if (!mayCall(method)) {
-      throw new KitError(
-        KIT_ERRORS.denied,
-        `this tab was not granted ${KIT_METHODS[method as KitMethod]}`,
-      );
-    }
+    const permissions = context.permissions();
+    if (!kitMayCall(method, permissions, params)) throw refusal(method, params, permissions);
     return handlers[method as KitMethod](params);
+  }
+
+  /** Why a call was not let through. */
+  function refusal(method: string, params: unknown, permissions: readonly string[]): KitError {
+    const needs = KIT_METHODS[method as KitMethod];
+    if (needs !== KIT_LOOPBACK_PATTERN) {
+      return new KitError(KIT_ERRORS.denied, `this tab was not granted ${needs}`);
+    }
+    const port = isRecord(params) ? params.port : undefined;
+    if (isKitLoopbackPort(port)) {
+      return new KitError(KIT_ERRORS.denied, `this tab was not granted loopback:${port}`);
+    }
+    // No port it could have been granted. A tab with none is told only that.
+    return permissions.some((permission) => kitLoopbackPort(permission) !== null)
+      ? new KitError(KIT_ERRORS.invalid, "port must be a whole number from 1024 to 65535")
+      : new KitError(KIT_ERRORS.denied, `this tab was not granted ${KIT_LOOPBACK_PATTERN}`);
   }
 
   return {

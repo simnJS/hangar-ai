@@ -251,12 +251,20 @@ fn apply_mcp_config(cmd: &mut CommandBuilder, path: Option<&str>) {
 /// depend on the bridge, and come with it off too. A machine whose policy
 /// forbids sideloading gets neither (bridge.rs); the kits it kept out are
 /// reported, and the pane starts all the same.
+///
+/// A pane with kits also learns where their data lives, for a hook to find
+/// `$HANGAR_KITS_DATA/<kit id>`; any other pane starts without the variable,
+/// even under a Hangar launched from inside a pane.
 fn apply_plugins(
     cmd: &mut CommandBuilder,
     bridge_dir: Option<&std::path::Path>,
     kits: crate::kits::Launch,
     forbidden: bool,
 ) -> Vec<crate::kits::LaunchIssue> {
+    match &kits.data_root {
+        Some(root) => cmd.env(crate::kits::data::ENV_VAR, root),
+        None => cmd.env_remove(crate::kits::data::ENV_VAR),
+    }
     let mut issues = kits.issues;
     let mut ours: Vec<&std::path::Path> = bridge_dir.into_iter().collect();
     for (id, dir) in &kits.plugins {
@@ -836,8 +844,60 @@ mod tests {
                 .iter()
                 .map(|(id, dir)| (id.to_string(), std::path::PathBuf::from(dir)))
                 .collect(),
-            issues: Vec::new(),
+            ..crate::kits::Launch::default()
         }
+    }
+
+    fn kits_data(cmd: &CommandBuilder) -> Option<String> {
+        cmd.get_env(crate::kits::data::ENV_VAR)
+            .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_pane_with_kits_finds_their_data_with_the_bridge_or_without_it() {
+        let root = std::path::PathBuf::from("/home/me/.hangar/kit-data");
+        let bridge = std::path::Path::new("/hangar/mods/hangar-bridge");
+        let with_root = || crate::kits::Launch {
+            data_root: Some(root.clone()),
+            ..kits(&[("studio", "/kits/studio")])
+        };
+        let mut with_bridge = CommandBuilder::new("pwsh");
+        apply_plugins(&mut with_bridge, Some(bridge), with_root(), false);
+        assert_eq!(kits_data(&with_bridge).as_deref(), root.to_str());
+
+        let mut without = CommandBuilder::new("pwsh");
+        apply_plugins(&mut without, None, with_root(), false);
+        assert_eq!(kits_data(&without).as_deref(), root.to_str());
+
+        // A kit with tabs alone, or one a policy kept out: the pane has kits.
+        let mut tabs_only = CommandBuilder::new("pwsh");
+        let launch = crate::kits::Launch {
+            data_root: Some(root.clone()),
+            ..kits(&[])
+        };
+        apply_plugins(&mut tabs_only, None, launch, false);
+        assert_eq!(kits_data(&tabs_only).as_deref(), root.to_str());
+        let mut forbidden = CommandBuilder::new("pwsh");
+        apply_plugins(&mut forbidden, None, with_root(), true);
+        assert_eq!(kits_data(&forbidden).as_deref(), root.to_str());
+    }
+
+    #[test]
+    fn a_pane_without_kits_has_no_data_root_even_one_it_would_inherit() {
+        let mut bare = CommandBuilder::new("pwsh");
+        apply_plugins(&mut bare, None, crate::kits::launch(&[]), false);
+        assert_eq!(kits_data(&bare), None);
+
+        let mut inherited = CommandBuilder::new("pwsh");
+        inherited.env(crate::kits::data::ENV_VAR, "/somewhere/else");
+        let bridge = std::path::Path::new("/hangar/mods/hangar-bridge");
+        apply_plugins(
+            &mut inherited,
+            Some(bridge),
+            crate::kits::launch(&[]),
+            false,
+        );
+        assert_eq!(kits_data(&inherited), None);
     }
 
     #[test]

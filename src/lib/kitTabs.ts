@@ -2,10 +2,10 @@ import { useEffect, useSyncExternalStore } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   isKitPermission,
+  kitPermissionsIn,
   kitsList,
   onKitsChanged,
   workspaceKits,
-  KIT_PERMISSIONS,
   type KitInfo,
   type KitPermission,
   type KitTab,
@@ -47,7 +47,7 @@ export function effectivePermissions(
   asked: readonly string[],
   granted: readonly string[],
 ): KitPermission[] {
-  return KIT_PERMISSIONS.filter((permission) => asked.includes(permission) && granted.includes(permission));
+  return kitPermissionsIn(asked.filter((permission) => granted.includes(permission)));
 }
 
 /** A tab the workspace can open: its kit enabled there, installed and usable. */

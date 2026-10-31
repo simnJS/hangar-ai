@@ -14,6 +14,9 @@
 //!
 //! The contract the other parts build on is written out in docs/kits.md.
 
+pub mod data;
+mod hooks;
+pub mod loopback;
 mod manifest;
 mod plugin;
 mod setup;
@@ -32,6 +35,37 @@ use tauri::{AppHandle, Emitter};
 
 pub use manifest::Manifest;
 use store::{Entry, Loaded, Source, Store, UpdateInfo};
+
+/// A call of a tab's that failed, as the page is told: `code` is the protocol's
+/// (docs/kits.md), which the page tells apart. `src/lib/kitApi.ts` passes it on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TabError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl TabError {
+    pub const INVALID: &'static str = "invalid";
+    pub const NOT_FOUND: &'static str = "not_found";
+    pub const UNREACHABLE: &'static str = "unreachable";
+    pub const FAILED: &'static str = "failed";
+
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        TabError {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+/// Runs a tab's call away from the webview's thread.
+async fn off_thread<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, TabError> + Send + 'static,
+) -> Result<T, TabError> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|err| TabError::new(TabError::FAILED, err.to_string()))?
+}
 
 /// What a manifest's `hangar` requirement is checked against.
 pub const HANGAR_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -134,11 +168,14 @@ fn usable(store: &Store, ids: &[String]) -> (Vec<Loaded>, Vec<LaunchIssue>) {
     (kits, issues)
 }
 
-/// The kits' plugin folders for a pane, by kit id, and what kept any kit out.
+/// The kits' plugin folders for a pane, by kit id, what kept any kit out, and
+/// where its kits' data lives when it has kits.
 #[derive(Debug, Default)]
 pub struct Launch {
     pub plugins: Vec<(String, PathBuf)>,
     pub issues: Vec<LaunchIssue>,
+    /// `HANGAR_KITS_DATA` in the pane's environment.
+    pub data_root: Option<PathBuf>,
 }
 
 fn launch_from(store: &Store, ids: &[String]) -> Launch {
@@ -161,25 +198,42 @@ fn launch_from(store: &Store, ids: &[String]) -> Launch {
         }
         plugins.push((kit.entry.id, dir));
     }
-    Launch { plugins, issues }
+    Launch {
+        plugins,
+        issues,
+        data_root: None,
+    }
 }
 
-/// What the kits `ids` add to a pane's Claude Code. Never fails: whatever is
-/// wrong with a kit is an issue, and the pane starts without that kit.
+/// A pane with kits gets the root of their data, and the folder of each kit
+/// whose plugin comes along exists already, for a hook to write in.
+fn with_data_root(mut launch: Launch, root: Option<PathBuf>) -> Launch {
+    if let Some(root) = &root {
+        for (id, _) in &launch.plugins {
+            let _ = std::fs::create_dir_all(root.join(id));
+        }
+    }
+    launch.data_root = root;
+    launch
+}
+
+/// What the kits `ids` add to a pane. Never fails: whatever is wrong with a kit
+/// is an issue, and the pane starts without that kit. No kit, nothing at all.
 pub fn launch(ids: &[String]) -> Launch {
     if ids.is_empty() {
         return Launch::default();
     }
-    match open() {
+    let launch = match open() {
         Ok(store) => launch_from(&store, ids),
         Err(why) => Launch {
-            plugins: Vec::new(),
             issues: ids
                 .iter()
                 .map(|id| LaunchIssue::new(id, IssueReason::Broken, Some(why.clone())))
                 .collect(),
+            ..Launch::default()
         },
-    }
+    };
+    with_data_root(launch, data::root())
 }
 
 /// The MCP servers of the kits `ids`, named and written out for a
@@ -215,17 +269,25 @@ pub struct KitInfo {
     pub error: Option<String>,
     /// The last update check, while the app runs; null before any.
     pub update: Option<UpdateInfo>,
+    /// `hooks:<hash>` of what its plugin runs by itself; null without hooks, or
+    /// when the kit cannot be used.
+    pub hooks_permission: Option<String>,
+    /// Whether a workspace has to have accepted those hooks (store.rs).
+    pub hooks_consent: bool,
 }
 
 fn info(store: &Store, entry: Entry) -> KitInfo {
-    let (manifest, error) = match store.loaded(&entry) {
-        Ok(kit) => (Some(kit.manifest), None),
+    let (manifest, error, hooks_permission) = match store.loaded(&entry) {
+        Ok(kit) => {
+            let hooks_permission = kit.hooks_permission();
+            (Some(kit.manifest), None, hooks_permission)
+        }
         Err(why) => {
             // Read on its own, to say what it is even when it cannot be used.
             let manifest = manifest::read(Path::new(&entry.dir))
                 .ok()
                 .filter(|m| m.id == entry.id);
-            (manifest, Some(why))
+            (manifest, Some(why), None)
         }
     };
     KitInfo {
@@ -237,6 +299,8 @@ fn info(store: &Store, entry: Entry) -> KitInfo {
         added_at: entry.added_at,
         manifest,
         error,
+        hooks_permission,
+        hooks_consent: entry.hooks_consent,
     }
 }
 
@@ -436,6 +500,62 @@ mod tests {
         // Another workspace, no kit: nothing.
         let other = launch_from(&store, &[]);
         assert!(other.plugins.is_empty() && other.issues.is_empty());
+    }
+
+    #[test]
+    fn a_pane_with_kits_gets_the_data_root_and_its_plugin_kits_their_folder() {
+        let home = Folder::new("launch-data");
+        let store = Store::at(home.root.join("kits"));
+        let studio = Folder::new("launch-data-studio");
+        let studio_dir = studio.kit(".", "studio", "1.0.0");
+        let tabs = Folder::new("launch-data-tabs");
+        tabs.manifest(".", "tabs-only", "1.0.0");
+        store.add_folder(&studio_dir.to_string_lossy(), 1).unwrap();
+        store.add_folder(&tabs.root.to_string_lossy(), 1).unwrap();
+        let root = home.root.join("kit-data");
+
+        let launch = with_data_root(
+            launch_from(&store, &ids(&["studio", "tabs-only", "gone"])),
+            Some(root.clone()),
+        );
+        assert_eq!(launch.data_root.as_deref(), Some(root.as_path()));
+        assert!(root.join("studio").is_dir(), "a hook finds its folder");
+        assert!(!root.join("tabs-only").exists(), "made by its first write");
+        assert!(!root.join("gone").exists());
+
+        // No kit: nothing to set, nothing on disk.
+        assert_eq!(launch_from(&store, &[]).data_root, None);
+        assert_eq!(super::launch(&[]).data_root, None);
+    }
+
+    #[test]
+    fn the_list_says_what_a_workspace_would_accept_for_a_kits_hooks() {
+        let home = Folder::new("list-hooks");
+        let store = Store::at(home.root.join("kits"));
+        let quiet = Folder::new("list-hooks-quiet");
+        quiet.kit(".", "quiet", "1.0.0");
+        let hooked = Folder::new("list-hooks-hooked");
+        hooked.kit(".", "hooked", "1.0.0");
+        hooked.file(
+            "hooks/hooks.json",
+            &serde_json::json!({ "hooks": { "Stop": [{ "hooks": [{ "command": "x.sh" }] }] } })
+                .to_string(),
+        );
+        store.add_folder(&quiet.root.to_string_lossy(), 1).unwrap();
+        store.add_folder(&hooked.root.to_string_lossy(), 1).unwrap();
+
+        let listed = list(&store).unwrap();
+        let of = |id: &str| listed.iter().find(|kit| kit.id == id).unwrap();
+        assert_eq!(of("quiet").hooks_permission, None);
+        assert!(of("hooked")
+            .hooks_permission
+            .as_deref()
+            .unwrap()
+            .starts_with("hooks:"));
+        assert!(!of("hooked").hooks_consent, "a linked folder is not asked");
+        let sent = serde_json::to_value(of("hooked")).unwrap();
+        assert!(sent["hooksPermission"].is_string());
+        assert_eq!(sent["hooksConsent"], false);
     }
 
     #[test]

@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Translator } from "../i18n";
 import { ptyAlive, ptyWrite } from "../lib/ipc";
 import {
-  PERMISSION_LABEL,
+  acceptedGrants,
   disableKit,
   enableKit,
+  hooksToAccept,
   kitName,
   kitRequested,
   kitState,
   panesToRestart,
   permissionDiff,
+  permissionLabel,
   requestedPermissions,
   type KitState,
 } from "../lib/kitActivation";
@@ -17,11 +19,13 @@ import { kitIconUrl } from "../lib/kitIcon";
 import { useAsleep } from "../lib/hibernateStore";
 import { currentOs, runSetupCommand, showWorkspace, type KitOs } from "../lib/kitSetup";
 import {
+  kitHooksGrant,
   kitInspect,
   kitSetupMark,
   kitSetupStatus,
   kitsList,
   onKitsChanged,
+  type KitGrant,
   type KitInfo,
   type KitInspection,
   type KitSetupStatus,
@@ -34,8 +38,9 @@ import "./KitActivation.css";
 
 /**
  * Enabling a kit on a workspace: the list of kits with a switch each, and the
- * activation view that says what a kit brings, what its tabs ask for and which
- * commands it wants run, before anything is stored. Refusing changes nothing.
+ * activation view that says what a kit brings, what its tabs ask for, which
+ * commands it wants run and which its plugin runs by itself, before anything is
+ * stored. Refusing changes nothing.
  *
  * The view is drawn from props (`KitActivationView`); `KitActivation` reads the
  * kit from Rust; `WorkspaceKitsSection` is the list the workspace dialog shows.
@@ -123,6 +128,8 @@ export function KitActivationView(props: KitActivationViewProps) {
   const requested = kitRequested(kit);
   const diff = permissionDiff(requested ?? [], entry?.granted ?? []);
   const needsAccept = !entry || diff.added.length > 0;
+  const hooksNew = hooksToAccept(diff);
+  const hooks = inspection?.hooks ?? [];
   const brings =
     inspection &&
     inspection.skills.length +
@@ -183,7 +190,7 @@ export function KitActivationView(props: KitActivationViewProps) {
                     const isNew = diff.added.includes(permission);
                     return (
                       <li key={permission} className="kit-act__perm">
-                        <span>{t(PERMISSION_LABEL[permission])}</span>
+                        <span>{permissionLabel(t, permission)}</span>
                         {entry &&
                           (isNew ? (
                             <span className="kit-act__tag kit-act__tag--new">
@@ -261,6 +268,46 @@ export function KitActivationView(props: KitActivationViewProps) {
         )}
       </section>
 
+      <section className="kit-act__block" aria-labelledby="kit-act-hooks">
+        <h3 className="kit-act__heading" id="kit-act-hooks">
+          {t("kitsManage.actHooks")}
+        </h3>
+        {inspection === null ? (
+          <p className="kit-act__note">{t("kitsManage.loading")}</p>
+        ) : hooks.length === 0 ? (
+          <p className="kit-act__note">{t("kitsManage.actNoHooks")}</p>
+        ) : (
+          <>
+            <p className="kit-act__note">{t("kitsManage.actHooksHint")}</p>
+            {hooksNew && entry && <p className="kit-act__note">{t("kitsManage.actHooksChanged")}</p>}
+            {kit.source.kind === "folder" && <p className="kit-act__note">{t("kitsManage.actHooksLive")}</p>}
+            {hooks.map((hook) => (
+              <div key={`${hook.event}\n${hook.matcher}\n${hook.command}`} className="kit-step">
+                <div className="kit-step__head">
+                  <span className="kit-step__title">
+                    {hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event}
+                  </span>
+                  {entry &&
+                    kitHooksGrant(kit) &&
+                    (hooksNew ? (
+                      <span className="kit-act__tag kit-act__tag--new">{t("kitsManage.actPermsNew")}</span>
+                    ) : (
+                      <span className="kit-act__tag">{t("kitsManage.actPermsGranted")}</span>
+                    ))}
+                </div>
+                <pre
+                  className="kit-step__cmd"
+                  tabIndex={0}
+                  aria-label={t("kitsManage.actHookCommand", { event: hook.event })}
+                >
+                  {hook.command}
+                </pre>
+              </div>
+            ))}
+          </>
+        )}
+      </section>
+
       {error && (
         <p className="notice notice--error" role="alert">
           <span className="notice__text">{error}</span>
@@ -279,7 +326,11 @@ export function KitActivationView(props: KitActivationViewProps) {
               disabled={!requested || inspection === null}
               onClick={props.onAccept}
             >
-              {entry ? t("kitsManage.actAcceptPerms") : t("kitsManage.actAccept")}
+              {!entry
+                ? t("kitsManage.actAccept")
+                : hooksNew
+                  ? t("kitsManage.actAcceptChanged")
+                  : t("kitsManage.actAcceptPerms")}
             </button>
           </>
         ) : (
@@ -297,8 +348,8 @@ interface ActivationProps {
   entry: WorkspaceKit | undefined;
   /** The workspace the kit is enabled on, when it exists. */
   workspace: Workspace | null;
-  /** Called with the permissions the person accepted. */
-  onAccept: (granted: ReturnType<typeof requestedPermissions>) => void;
+  /** Called with what the person accepted. */
+  onAccept: (granted: KitGrant[]) => void;
   onClose: () => void;
 }
 
@@ -328,7 +379,8 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
     kitSetupStatus(kit.id)
       .then((found) => alive.current && setSteps(found))
       .catch(() => alive.current && setSteps([]));
-  }, [kit.id, t]);
+    // Read again when its hooks change, so what is shown is what is accepted.
+  }, [kit.id, kit.hooksPermission, t]);
 
   /**
    * Run: opens a shell pane in the kit's folder and types the command shown,
@@ -427,7 +479,7 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
             running={running}
             ran={ran}
             error={error}
-            onAccept={() => onAccept(requestedPermissions(inspection?.tabs ?? []))}
+            onAccept={() => onAccept(acceptedGrants(kit, inspection))}
             onClose={onClose}
             onRun={run}
             onConfirm={confirm}
@@ -524,9 +576,11 @@ export function WorkspaceKitsSection({ value, onChange, workspace = null }: Kits
       <ul className="kit-sec__list">
         {(kits ?? []).map((kit) => {
           const entry = value.find((item) => item.id === kit.id);
-          const state = kit.error || !kit.manifest ? (entry ? "broken" : "off") : kitState(entry, kitRequested(kit));
+          const requested = kitRequested(kit);
+          const state = kit.error || !kit.manifest ? (entry ? "broken" : "off") : kitState(entry, requested);
           const usable = !kit.error && !!kit.manifest;
           const name = kitName(kit);
+          const held = state === "review" && hooksToAccept(permissionDiff(requested ?? [], entry?.granted ?? []));
           return (
             <li key={kit.id} className="kit-sec__row">
               <label className="kit-sec__main">
@@ -554,7 +608,7 @@ export function WorkspaceKitsSection({ value, onChange, workspace = null }: Kits
                 </span>
               </label>
               <span className={`kit-act__tag ${state === "review" ? "kit-act__tag--new" : state === "on" ? "kit-act__tag--ok" : ""}`}>
-                {t(STATE_KEY[state])}
+                {held ? t("kitsManage.statusReviewHooks") : t(STATE_KEY[state])}
               </span>
               {usable && (state === "review" || state === "on") && (
                 <button type="button" className="btn btn--tiny" onClick={() => setOpened(kit.id)}>

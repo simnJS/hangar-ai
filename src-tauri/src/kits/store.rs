@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::hooks;
 use super::manifest::{self, Manifest};
 use super::source::{self, GitSource};
 use super::HANGAR_VERSION;
@@ -42,6 +43,14 @@ pub struct Entry {
     pub installed_version: String,
     /// Milliseconds since the epoch.
     pub added_at: u64,
+    /// Whether a workspace has to have accepted this kit's hooks for them to
+    /// reach its panes. Set on every git kit added since that is asked, and on
+    /// an older one as soon as an update changes its hooks; a git kit installed
+    /// before, with its hooks as they were, keeps working as it did on the
+    /// workspaces that enabled it (docs/kits.md). A linked folder is never
+    /// asked: every edit would ask again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hooks_consent: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -76,6 +85,11 @@ impl Loaded {
     pub fn plugin_dir(&self) -> Option<PathBuf> {
         let plugin = self.manifest.plugin.as_deref()?;
         manifest::inside(&self.root, plugin).ok()
+    }
+
+    /// `hooks:<hash>` of what its plugin runs by itself; `None` without hooks.
+    pub fn hooks_permission(&self) -> Option<String> {
+        hooks::grant(&hooks::read(&self.plugin_dir()?))
     }
 }
 
@@ -219,6 +233,7 @@ impl Store {
             dir,
             installed_version: manifest.version,
             added_at: now,
+            hooks_consent: false,
         };
         index.kits.push(entry.clone());
         self.save(&index)?;
@@ -293,6 +308,7 @@ impl Store {
             dir: dir.to_string_lossy().into_owned(),
             installed_version: manifest.version,
             added_at: now,
+            hooks_consent: true,
         };
         index.kits.push(entry.clone());
         self.save(&index)?;
@@ -369,7 +385,18 @@ impl Store {
             Source::Folder { .. } => manifest::read(Path::new(&entry.dir))?.version,
             Source::Git(source) => {
                 let latest = self.fetch_version(&entry, source)?;
+                let hooks_before = self
+                    .loaded(&entry)
+                    .ok()
+                    .and_then(|kit| kit.hooks_permission());
                 source::checkout_fetched(&self.clone_dir(id))?;
+                let hooks_now = self
+                    .loaded(&entry)
+                    .ok()
+                    .and_then(|kit| kit.hooks_permission());
+                if hooks_now != hooks_before {
+                    index.kits[at].hooks_consent = true;
+                }
                 latest
             }
         };
@@ -642,6 +669,116 @@ mod tests {
         assert!(!clone.exists(), "the clone is Hangar's to delete");
         assert!(store.entries().unwrap().is_empty());
         assert!(store.remove("studio").unwrap_err().contains("no kit"));
+    }
+
+    fn with_hooks(remote: &Remote, command: &str) {
+        remote.folder.file(
+            "work/hooks/hooks.json",
+            &json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": command }] }] } })
+                .to_string(),
+        );
+    }
+
+    /// As `index.json` held a git kit before hooks were asked about.
+    fn forget_consent(store: &Store, id: &str) {
+        let mut index = store.load().unwrap();
+        for entry in &mut index.kits {
+            if entry.id == id {
+                entry.hooks_consent = false;
+            }
+        }
+        store.save(&index).unwrap();
+        let text = fs::read_to_string(store.index_path()).unwrap();
+        assert!(!text.contains("hooksConsent"), "{text}");
+    }
+
+    fn cloned(store: &Store, remote: &Remote) -> Entry {
+        store
+            .add_git_source(
+                GitSource {
+                    url: remote.url(),
+                    git_ref: None,
+                    subdir: None,
+                },
+                1,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_git_kit_added_now_is_asked_about_its_hooks_a_linked_folder_never() {
+        let (_home, store) = store("consent-new");
+        let remote = Remote::new("consent-new-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        with_hooks(&remote, "one.sh");
+        remote.push("first");
+        let entry = cloned(&store, &remote);
+        assert!(entry.hooks_consent);
+        assert!(store.load().unwrap().kits[0].hooks_consent, "it is on disk");
+        assert!(store.loaded(&entry).unwrap().hooks_permission().is_some());
+
+        let source = Folder::new("consent-new-folder");
+        source.kit(".", "linked", "1.0.0");
+        let linked = store.add_folder(&source.root.to_string_lossy(), 1).unwrap();
+        assert!(!linked.hooks_consent);
+        store.update("linked").unwrap();
+        assert!(!store.entry("linked").unwrap().hooks_consent);
+    }
+
+    #[test]
+    fn an_older_git_kit_is_asked_once_an_update_changes_its_hooks() {
+        let (_home, store) = store("consent-old");
+        let remote = Remote::new("consent-old-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        with_hooks(&remote, "one.sh");
+        remote.push("first");
+        cloned(&store, &remote);
+        forget_consent(&store, "studio");
+        assert!(!store.entry("studio").unwrap().hooks_consent);
+        let before = store
+            .loaded(&store.entry("studio").unwrap())
+            .unwrap()
+            .hooks_permission()
+            .unwrap();
+
+        // Another version with the same hooks: as it was.
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.push("same hooks");
+        let same = store.update("studio").unwrap();
+        assert!(!same.hooks_consent);
+        assert_eq!(same.installed_version, "1.1.0");
+        assert_eq!(
+            store.loaded(&same).unwrap().hooks_permission().unwrap(),
+            before
+        );
+
+        with_hooks(&remote, "two.sh");
+        remote.folder.manifest("work", "studio", "1.2.0");
+        remote.push("other hooks");
+        let changed = store.update("studio").unwrap();
+        assert!(changed.hooks_consent);
+        assert_ne!(
+            store.loaded(&changed).unwrap().hooks_permission().unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn an_update_that_brings_hooks_to_a_kit_without_any_is_a_change() {
+        let (_home, store) = store("consent-gained");
+        let remote = Remote::new("consent-gained-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        let entry = cloned(&store, &remote);
+        assert_eq!(store.loaded(&entry).unwrap().hooks_permission(), None);
+        forget_consent(&store, "studio");
+
+        with_hooks(&remote, "new.sh");
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.push("hooks now");
+        let updated = store.update("studio").unwrap();
+        assert!(updated.hooks_consent);
+        assert!(store.loaded(&updated).unwrap().hooks_permission().is_some());
     }
 
     #[test]

@@ -83,7 +83,7 @@ import {
   watchForSession,
 } from "../lib/agents";
 import { mcpConfigArg, mcpScopeWrite, shellFamily, workspaceMcp } from "../lib/mcpScope";
-import { kitIssueNotes, workspaceKitIds } from "../lib/kits";
+import { kitIssueNotes, loadPaneKits, type KitLaunchIssue } from "../lib/kits";
 import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
@@ -842,7 +842,10 @@ export function TerminalPane({
           const login = pane.agent === "claude" && pane.login === true;
           // The workspace's kits as they are now, for every pane of it — a
           // `claude` typed into a shell pane loads them too, like the bridge.
-          const kits = login ? [] : workspaceKitIds(workspace);
+          // A GitHub kit whose hooks changed stays out until they are accepted
+          // again on the workspace (lib/kits › paneKits).
+          const { ids: kits, held: heldKits } = await loadPaneKits(login ? null : workspace);
+          if (disposed) return;
           const launchNotes: string[] = [];
           // The Claude account it runs on, as chosen right now: the pane's
           // own, its workspace's, then the default (lib/accounts). Only
@@ -880,7 +883,8 @@ export function TerminalPane({
           });
           // Said where Claude Code runs; a shell pane has no use for it.
           if (pane.agent === "claude") {
-            launchNotes.push(...kitIssueNotes(spawned?.kitIssues ?? [], tRef.current));
+            const held = heldKits.map((id): KitLaunchIssue => ({ id, reason: "hooks" }));
+            launchNotes.push(...kitIssueNotes([...held, ...(spawned?.kitIssues ?? [])], tRef.current));
             noteLaunchedAccount(pane.id, spawned?.account ?? account?.id ?? MAIN_ACCOUNT);
             if (spawned?.accountIssues?.length) {
               console.warn(`[accounts] pane ${pane.id}: profile not fully shared`, spawned.accountIssues);

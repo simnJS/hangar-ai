@@ -2,11 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { StageMessage, Tool } from "./parts";
-import { useT } from "../../i18n";
+import { useT, type Translator } from "../../i18n";
 import { getPaneActivity, useAgentsIn } from "../../lib/agentState";
 import { modelRoots } from "../../lib/control";
 import { gitWorktreeList } from "../../lib/git";
-import { createKitHost, kitPanes, type KitHost, type KitHostDeps } from "../../lib/kitApi";
+import { createKitHost, kitPanes, type KitHost, type KitHostDeps, type KitLoopbackAnswer } from "../../lib/kitApi";
 import { askRootGrant, kitTabState, useInstalledKits } from "../../lib/kitTabs";
 import { MAX_MODEL_BYTES, modelFormatOf } from "../../lib/modelFiles";
 import { grantModelRoots } from "../../lib/modelHost";
@@ -16,8 +16,18 @@ import { checkPreviewFile, previewInspect } from "../../lib/preview";
 import { bridgeEnqueue } from "../../lib/ipc";
 import { isMainWindow } from "../../lib/windows";
 import { useStore } from "../../store";
-import type { KitPermission } from "../../lib/kits";
+import { kitLoopbackPort, type KitNamedPermission, type KitPermission } from "../../lib/kits";
 import type { Workspace } from "../../types";
+
+/** What a tab was granted, for its bar's hint. */
+function permissionSaid(t: Translator, permission: KitPermission): string {
+  const port = kitLoopbackPort(permission);
+  // As text: `t` writes a number the way the language does, and a port has no
+  // thousands.
+  return port === null
+    ? t(`kitsTab.permission.${permission as KitNamedPermission}`)
+    : t("kitsTab.permission.loopback", { port: String(port) });
+}
 
 /**
  * A kit's tab (docs/kits.md): a page of the kit, served by the `hangar-kit`
@@ -42,7 +52,7 @@ export function KitTabView({ entry, shown }: { entry: OpenKitTab; shown: boolean
   const tab = kitTabState(ws, installed, entry.kitId, entry.tabId);
   const kitName = tab.kind === "ready" ? tab.choice.kitName : entry.kitId;
   const permissions = tab.kind === "ready" ? tab.choice.permissions : [];
-  const said = permissions.map((permission) => t(`kitsTab.permission.${permission}`)).join(", ");
+  const said = permissions.map((permission) => permissionSaid(t, permission)).join(", ");
 
   return (
     <div
@@ -150,6 +160,9 @@ function liveDeps(workspaces: () => Workspace[]): KitHostDeps {
     enqueue: bridgeEnqueue,
     activity: getPaneActivity,
     notify: (title, body) => notify(title, body),
+    readData: (kit, path) => invoke<string>("kit_data_read", { kit, path }),
+    writeData: (kit, path, text) => invoke<void>("kit_data_write", { kit, path, text }),
+    loopbackFetch: (call) => invoke<KitLoopbackAnswer>("kit_loopback_fetch", { ...call }),
     now: () => Date.now(),
   };
 }

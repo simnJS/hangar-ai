@@ -16,6 +16,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use super::hooks::{self, Hook};
 use super::manifest::{self, Tab};
 use super::store::Loaded;
 
@@ -30,6 +31,11 @@ pub struct Inspection {
     pub agents: Vec<String>,
     /// Their names in the plugin's configuration, not prefixed.
     pub mcp_servers: Vec<String>,
+    /// What the plugin runs by itself, as it writes it.
+    pub hooks: Vec<Hook>,
+    /// `hooks:<hash>` of that list, null without hooks: what accepting these
+    /// very hooks stores on a workspace.
+    pub hooks_permission: Option<String>,
     pub tabs: Vec<Tab>,
     /// The steps that have a command for this OS.
     pub setup: Vec<SetupCommand>,
@@ -62,21 +68,25 @@ pub fn inspect(kit: &Loaded, os: &str) -> Inspection {
         name: plugin_name(dir).unwrap_or_else(|| kit.manifest.id.clone()),
         dir: dir.to_string_lossy().into_owned(),
     });
-    let (skills, commands, agents, mcp_servers) = match plugin_dir.as_deref() {
+    let (skills, commands, agents, mcp_servers, hooks) = match plugin_dir.as_deref() {
         Some(dir) => (
             skills(dir),
             markdown_names(&dir.join("commands")),
             markdown_names(&dir.join("agents")),
             servers(dir).into_iter().map(|(name, _)| name).collect(),
+            hooks::read(dir),
         ),
         None => Default::default(),
     };
+    let hooks_permission = hooks::grant(&hooks);
     Inspection {
         plugin,
         skills,
         commands,
         agents,
         mcp_servers,
+        hooks,
+        hooks_permission,
         tabs: kit.manifest.tabs.clone(),
         setup: kit
             .manifest
@@ -291,6 +301,39 @@ mod tests {
         assert_eq!(found.tabs[0].id, "explorer");
         assert_eq!(found.setup.len(), 1);
         assert_eq!(found.setup[0].command, "a.cmd");
+        assert!(found.hooks.is_empty());
+        assert_eq!(found.hooks_permission, None);
+    }
+
+    #[test]
+    fn an_inspection_lists_the_plugins_hooks_and_what_accepting_them_stores() {
+        let home = Folder::new("inspect-hooks");
+        let store = Store::at(home.root.join("kits"));
+        let kit = Folder::new("inspect-hooks-src");
+        kit.kit(".", "studio", "1.0.0");
+        kit.file(
+            "hooks/hooks.json",
+            &json!({ "hooks": { "PostToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{ "type": "command", "command": "echo ran >> \"$HANGAR_KITS_DATA/studio/log\"" }]
+            }] } })
+            .to_string(),
+        );
+        let found = inspect(&loaded(&kit, &store), "linux");
+        assert_eq!(found.hooks.len(), 1);
+        assert_eq!(found.hooks[0].event, "PostToolUse");
+        assert_eq!(found.hooks[0].matcher, "Bash");
+        assert_eq!(
+            found.hooks[0].command,
+            "echo ran >> \"$HANGAR_KITS_DATA/studio/log\""
+        );
+        assert_eq!(found.hooks_permission, hooks::grant(&found.hooks));
+        let sent = serde_json::to_value(&found).unwrap();
+        assert_eq!(sent["hooks"][0]["matcher"], "Bash");
+        assert_eq!(
+            sent["hooksPermission"],
+            json!(found.hooks_permission.unwrap())
+        );
     }
 
     #[test]

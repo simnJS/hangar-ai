@@ -63,6 +63,24 @@ describe("effectivePermissions", () => {
     expect(effectivePermissions([], ["panes.read"])).toEqual([]);
     expect(effectivePermissions(["files.write", "notify"], ["files.write", "notify"])).toEqual(["notify"]);
   });
+
+  it("keeps a local server's port as declared and granted, that very port", () => {
+    expect(effectivePermissions(["loopback:8765", "data.read"], ["loopback:8765", "data.read"])).toEqual([
+      "data.read",
+      "loopback:8765",
+    ]);
+    expect(effectivePermissions(["loopback:8765"], ["loopback:9000"])).toEqual([]);
+    expect(effectivePermissions(["loopback:9000", "loopback:8765"], ["loopback:8765", "loopback:9000"])).toEqual([
+      "loopback:8765",
+      "loopback:9000",
+    ]);
+    expect(effectivePermissions(["loopback:80"], ["loopback:80"])).toEqual([]);
+  });
+
+  it("never hands a tab the pseudo permission of accepted hooks", () => {
+    const hooks = "hooks:0123456789abcdef";
+    expect(effectivePermissions([hooks, "notify"], [hooks, "notify"])).toEqual(["notify"]);
+  });
 });
 
 describe("workspaceKitTabs", () => {

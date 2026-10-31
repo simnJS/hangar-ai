@@ -22,15 +22,30 @@ pub const FILE: &str = "hangar-kit.json";
 pub const SCHEMA: u64 = 1;
 
 /// What a kit's tab may ask Hangar for, accepted by the person when the kit
-/// is enabled on a workspace. Closed: any other name is a manifest error.
+/// is enabled on a workspace. Closed: beside these, only `loopback:<port>`
+/// (`loopback_port`), and any other name is a manifest error.
 pub const PERMISSIONS: &[&str] = &[
     "workspace.read",
     "panes.read",
     "panes.send",
     "files.read",
+    "data.read",
+    "data.write",
     "preview.show",
     "notify",
 ];
+
+/// The port of a `loopback:<port>` permission: written plainly, without a sign
+/// or a leading zero, from 1024 to 65535. `kitLoopbackPort` in src/lib/kits.ts
+/// holds the same rule.
+pub fn loopback_port(permission: &str) -> Option<u16> {
+    let digits = permission.strip_prefix("loopback:")?;
+    if digits.starts_with('0') || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let port: u16 = digits.parse().ok()?;
+    (port >= super::loopback::MIN_PORT).then_some(port)
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -495,10 +510,14 @@ impl Check<'_> {
         let mut ok = true;
         for item in items {
             match item.as_str() {
-                Some(name) if PERMISSIONS.contains(&name) => {
+                Some(name) if PERMISSIONS.contains(&name) || loopback_port(name).is_some() => {
                     if !permissions.iter().any(|known| known == name) {
                         permissions.push(name.to_string());
                     }
+                }
+                Some(name) if name.starts_with("loopback:") => {
+                    self.problem(&at, format!("{name:?} must name a port from 1024 to 65535"));
+                    ok = false;
                 }
                 Some(name) => {
                     self.problem(&at, format!("unknown permission {name:?}"));
@@ -730,6 +749,76 @@ mod tests {
         for permission in PERMISSIONS {
             assert!(kit.parse(&tab(json!([permission]))).is_ok(), "{permission}");
         }
+    }
+
+    #[test]
+    fn data_and_a_local_server_can_be_asked_for() {
+        let kit = Folder::new("perms-new");
+        kit.file("tab.html", "");
+        let tab = |permissions: Value| {
+            with(
+                minimal(),
+                json!({ "tabs": [{ "id": "t", "title": "T", "entry": "tab.html", "permissions": permissions }] }),
+            )
+        };
+        let manifest = kit
+            .parse(&tab(json!([
+                "data.read",
+                "data.write",
+                "loopback:8765",
+                "loopback:1024",
+                "loopback:65535",
+                "loopback:8765"
+            ])))
+            .unwrap();
+        assert_eq!(
+            manifest.tabs[0].permissions,
+            [
+                "data.read",
+                "data.write",
+                "loopback:8765",
+                "loopback:1024",
+                "loopback:65535"
+            ],
+            "listed once each"
+        );
+        for bad in [
+            "loopback:80",
+            "loopback:1023",
+            "loopback:0",
+            "loopback:abc",
+            "loopback:65536",
+            "loopback:99999",
+            "loopback:",
+            "loopback:08765",
+            "loopback:+8765",
+            "loopback:-8765",
+            "loopback: 8765",
+            "loopback:8765 ",
+            "loopback:8765:1",
+        ] {
+            let why = problems(kit.parse(&tab(json!([bad]))));
+            assert!(why.contains("port from 1024 to 65535"), "{bad}: {why}");
+        }
+        // Not to be declared: a workspace stores it, a tab never holds it.
+        for bad in [
+            "hooks:0123456789abcdef",
+            "loopback",
+            "Loopback:8765",
+            "data",
+        ] {
+            let why = problems(kit.parse(&tab(json!([bad]))));
+            assert!(why.contains("unknown permission"), "{bad}: {why}");
+        }
+    }
+
+    #[test]
+    fn a_loopback_permission_names_its_port() {
+        assert_eq!(loopback_port("loopback:8765"), Some(8765));
+        assert_eq!(loopback_port("loopback:1024"), Some(1024));
+        assert_eq!(loopback_port("loopback:65535"), Some(65535));
+        assert_eq!(loopback_port("loopback:1023"), None);
+        assert_eq!(loopback_port("notify"), None);
     }
 
     #[test]
