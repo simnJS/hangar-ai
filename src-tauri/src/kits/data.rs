@@ -242,7 +242,7 @@ fn write_whole(dir: &Path, target: &Path, body: &[u8], raw: &str) -> Result<(), 
     })
 }
 
-fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(super) fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut tries = RENAME_TRIES;
     loop {
         match fs::rename(from, to) {
@@ -256,7 +256,7 @@ fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// UTF-8 text of `MAX_BYTES` at most, a BOM dropped: what `files.read` takes.
-fn read_text(path: &Path, raw: &str) -> Result<String, TabError> {
+pub(super) fn read_text(path: &Path, raw: &str) -> Result<String, TabError> {
     let too_big = || failed(format!("{raw} is larger than 1 MB"));
     let cannot = |err: std::io::Error| failed(format!("{raw} cannot be read: {err}"));
     let len = fs::metadata(path).map_err(cannot)?.len();
@@ -304,7 +304,7 @@ pub async fn kit_data_write(kit: String, path: String, text: String) -> Result<(
 mod tests {
     use super::*;
     use crate::kits::store::Store;
-    use crate::kits::testing::Folder;
+    use crate::kits::testing::{link_folder, Folder};
     use crate::model::tests::link;
 
     fn data(tag: &str) -> (Folder, Data) {
@@ -440,24 +440,6 @@ mod tests {
             code(data.read("alpha", "only-beta.txt")),
             TabError::NOT_FOUND
         );
-    }
-
-    /// `link` needs Developer Mode on Windows, so the same cases run through a
-    /// junction there too (a folder only), which any user can make.
-    fn link_folder(target: &Path, at: &Path) -> bool {
-        #[cfg(windows)]
-        {
-            std::process::Command::new("cmd")
-                .args(["/C", "mklink", "/J"])
-                .arg(at)
-                .arg(target)
-                .output()
-                .is_ok_and(|output| output.status.success())
-        }
-        #[cfg(not(windows))]
-        {
-            link(target, at)
-        }
     }
 
     #[test]

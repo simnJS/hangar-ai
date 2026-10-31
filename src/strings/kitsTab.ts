@@ -40,12 +40,17 @@ export const en = {
   "kitsTab.permission.panes.read": "see the panes",
   "kitsTab.permission.panes.send": "write to the Claude Code agents",
   "kitsTab.permission.files.read": "read the workspace's text files",
+  "kitsTab.permission.files.write": "change the workspace's text files, hidden ones included",
   "kitsTab.permission.data.read": "read this kit's own data",
   "kitsTab.permission.data.write": "write this kit's own data",
   "kitsTab.permission.loopback": "talk to the local server on port {port}",
   "kitsTab.permission.command": "run the command {name}",
   "kitsTab.permission.preview.show": "open files in the preview",
   "kitsTab.permission.notify": "raise notifications",
+  // The activation view: what a tab can do to the project's files.
+  "kitsTab.permFilesWrite": "change text files in your project, hidden ones like .env included",
+  "kitsTab.filesSecrets":
+    "This tab can both read and change your project's files, so it can also read hidden files such as .env, and the secrets they hold. Its page has no network of its own, but the kit's code can pass them on: to an agent with panes.send, and to whatever else the tab holds.",
   // The activation view: what a kit's tabs may run on the computer.
   "kitsTab.permCommand": "run the command {name} on your computer, with your logins",
   "kitsTab.commands": "Commands its tabs can run",
@@ -58,6 +63,8 @@ export const en = {
     "A tab of this kit can run this command on your computer whenever it wants, with your logins, for instance your gh login; only the parts in braces change, and they must match their rule.",
   "kitsTab.commandHintFixed":
     "A tab of this kit can run this command on your computer whenever it wants, with your logins, for instance your gh login; nothing in it changes.",
+  "kitsTab.commandKitDir":
+    "{kitDir} is this kit's own folder, which Hangar fills in: this command runs a script of the kit. You see its name here, not what it does, and an update can change that without asking again.",
   "kitsTab.everywhereReviewCommands":
     "Changed commands to accept: this kit's tabs run none of them until then.",
   "kitsTab.commandLabel": "Command {name}",
@@ -100,12 +107,16 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsTab.permission.panes.read": "voir les panneaux",
   "kitsTab.permission.panes.send": "écrire aux agents Claude Code",
   "kitsTab.permission.files.read": "lire les fichiers texte du workspace",
+  "kitsTab.permission.files.write": "modifier les fichiers texte du workspace, y compris les fichiers cachés",
   "kitsTab.permission.data.read": "lire les données propres à ce kit",
   "kitsTab.permission.data.write": "écrire les données propres à ce kit",
   "kitsTab.permission.loopback": "parler au serveur local sur le port {port}",
   "kitsTab.permission.command": "lancer la commande {name}",
   "kitsTab.permission.preview.show": "ouvrir des fichiers dans l'aperçu",
   "kitsTab.permission.notify": "envoyer des notifications",
+  "kitsTab.permFilesWrite": "modifier les fichiers texte de votre projet, y compris les fichiers cachés comme .env",
+  "kitsTab.filesSecrets":
+    "Cet onglet peut à la fois lire et modifier les fichiers de votre projet : il peut donc aussi lire les fichiers cachés comme .env, et les secrets qu'ils contiennent. Sa page n'a pas de réseau, mais le code du kit peut les transmettre : à un agent avec panes.send, et à tout ce que l'onglet détient d'autre.",
   "kitsTab.permCommand": "lancer la commande {name} sur votre ordinateur, avec vos identifiants",
   "kitsTab.commands": "Commandes que ses onglets peuvent lancer",
   "kitsTab.commandsNone": "Aucune commande : ses onglets ne lancent rien sur votre ordinateur.",
@@ -117,6 +128,8 @@ export const fr: Record<keyof typeof en, string> = {
     "Un onglet de ce kit peut lancer cette commande sur votre ordinateur quand il le veut, avec vos identifiants, par exemple votre connexion gh ; seules les parties entre accolades changent, et elles doivent respecter leur règle.",
   "kitsTab.commandHintFixed":
     "Un onglet de ce kit peut lancer cette commande sur votre ordinateur quand il le veut, avec vos identifiants, par exemple votre connexion gh ; rien n'y change.",
+  "kitsTab.commandKitDir":
+    "{kitDir} est le dossier de ce kit, que Hangar remplit lui-même : cette commande lance un script du kit. Vous voyez ici son nom, pas ce qu'il fait, et une mise à jour peut le changer sans nouvelle question.",
   "kitsTab.everywhereReviewCommands":
     "Commandes modifiées à accepter : les onglets de ce kit n'en lancent aucune d'ici là.",
   "kitsTab.commandLabel": "Commande {name}",

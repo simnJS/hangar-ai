@@ -177,7 +177,7 @@ junctions are followed. Either slash separates, on every OS.
 by the path of its field, joined by `; `:
 
 ```
-id: must be 2 to 40 characters among a-z, 0-9 and -; tabs[0].permissions: unknown permission "files.write"
+id: must be 2 to 40 characters among a-z, 0-9 and -; tabs[0].permissions: unknown permission "files.delete"
 ```
 
 ## The plugin, in the panes
@@ -378,7 +378,8 @@ A closed set. A permission not in it is a manifest error.
 | `workspace.read`  | read the workspace it is shown in (`workspace.info`).                                              |
 | `panes.read`      | list the workspace's panes, and hear when they change.                                             |
 | `panes.send`      | send text to a pane's agent.                                                                       |
-| `files.read`      | read a text file inside the workspace folder.                                                      |
+| `files.read`      | read a text file inside the workspace folder, read an image or a PDF there, and list its files.    |
+| `files.write`     | change text files in the project, hidden ones like `.env` included. Held with `files.read`, it [reads hidden files too](#hidden-files-and-secrets). |
 | `data.read`       | read a text file of the kit's own data (`data.read`).                                              |
 | `data.write`      | write a text file of the kit's own data (`data.write`).                                            |
 | `loopback:<port>` | talk to the local server on that port (`loopback.fetch`), and make it do whatever that server allows. |
@@ -476,6 +477,22 @@ none, bring it forward holding what it holds.
 
 Params are what a caller said, and a page handles them as it would anything typed into a form:
 `command.run` holds them to its own rules whatever the tab declares.
+
+### Who asked
+
+`tab.params` also says who the tab can answer: `caller` is `{ pane }`, the name of the pane that
+opened it through `kit_tab_open` or the hooks' route, and `null` when the person opened it.
+
+The name comes from **Hangar's own record of the request**: the pane the agent's MCP process was
+started in, or the running pane a hook's route was given, looked up among the workspace's panes.
+Nothing a request's body says of itself is read, and a name that is no pane of the workspace is no
+caller.
+
+**Asked for again, a tab's caller becomes the latest to ask**, and its page hears the
+[`tab.params` event](#the-tab-message-protocol), singleton or not, even from the same pane: it may
+be waiting for another answer. The person bringing the tab forward from the palette changes neither,
+so the agent that asked is still the one to answer. The page answers with `panes.send`, as ever, which
+holds it to its own rules; the pane may be gone by then, which answers `not_found`.
 
 ### Opening a tab
 
@@ -682,13 +699,16 @@ Methods:
 | `panes.list`     | —                   | `panes.read`     | `[{ name, agent, role, state, canSend }]`, in the workspace's order (below). |
 | `panes.send`     | `{ pane, text }`    | `panes.send`     | `{ queued: true, pane }`: `text` waits for that pane's agent to be free. |
 | `files.read`     | `{ path }`          | `files.read`     | The file's text, a string.                                               |
+| `files.readBinary` | `{ path }`        | `files.read`     | `{ base64, mime }`: an image or a PDF.                                   |
+| `files.list`     | `{ path?, pattern? }` | `files.read`   | `{ files: [{ path, size, modified }], truncated }`: the files under that folder. |
+| `files.write`    | `{ path, text, expected? }` | `files.write` | `{}`: written whole, its folders made.                                 |
 | `data.read`      | `{ path }`          | `data.read`      | `{ text }`, or the error `not_found` when it is absent.                  |
 | `data.write`     | `{ path, text }`    | `data.write`     | `{}`: written whole, its folders made.                                   |
 | `loopback.fetch` | `{ port, path, method?, body?, timeoutMs? }` | `loopback:<port>` for that exact port | `{ status, text }`: the local server's answer, whatever its status. |
 | `command.run`    | `{ name, args? }`   | `command:<name>` for that exact name | `{ exitCode, stdout, stderr, timedOut, truncated }`: see [declared commands](#declared-commands). |
 | `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens in the workspace's preview, in front. |
 | `notify`         | `{ title, body? }`  | `notify`         | `null`: a desktop notification, titled `<kit name> · <title>`.          |
-| `tab.params`     | —                   | —                | `{ params }`: what this tab holds, `{}` for none.                        |
+| `tab.params`     | —                   | —                | `{ params, caller }`: what this tab holds, `{}` for none, and [who asked](#who-asked), `{ pane }` or `null`. |
 | `tab.setTitle`   | `{ title }`         | —                | `{}`: its name in the tab strip.                                         |
 | `tab.setBadge`   | `{ state, text? }`  | —                | `{}`: its state in the tab strip.                                        |
 
@@ -723,7 +743,47 @@ done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
   or folder, 1 024 characters at most. Hangar checks it again on disk, where
   links must not lead out of the folder. `files.read` reads a UTF-8 text file
   of **1 MB at most** (a BOM is dropped); `preview.show` opens any file the
-  preview shows, under the kit's name.
+  preview shows, under the kit's name. A tab holding `files.write` as well has
+  `files.read` follow the rules below, with no hidden file refused:
+  [hidden files](#hidden-files-and-secrets). `preview.show` stays as it is.
+- **`files.write`, `files.readBinary` and `files.list`** take a path relative to the
+  workspace folder as well: either slash, no `..`, no drive, no `:`, no device name on
+  Windows, 1 024 characters at most. On disk, no link may lead out of the folder.
+  **Nothing under `.git` is ever reached**, at any depth, whatever its case, whether a
+  folder or the file a worktree has there, and through a link or not: its hooks are
+  programs. `.gitignore` and `.github/` are files like any other.
+- **`files.write`** writes UTF-8 text of **1 MB at most**, whole: a temp file in the same
+  folder, then a rename, so a reader finds the whole of the old text or the whole of the
+  new. It makes the missing folders. What it replaces has to be a text file `files.read`
+  could read, and not a read-only one, and keeps its permissions. A link that stays inside
+  stays a link, and the file it leads to is what changes. The page sends what it wants:
+  line endings and a BOM are its business. At most **10 a minute**, apart from `data.write`'s.
+  - `expected`, optional, is the text the page last read. If the file holds anything else,
+    or is gone, the call answers `conflict`, and nothing is written or made, so an agent's
+    edit is never overwritten blindly. It is looked at before writing and again right
+    before the rename; a program writing in that very instant is not held off, as nothing
+    can do so without its help.
+  - A write is not shown in the workspace's activity: an agent's edits are listed by its
+    pane, and a tab has none. It shows where any change does, in what git says of the folder.
+- **`files.readBinary`** reads a file of **10 MB at most** whose extension is `.png`, `.jpg`,
+  `.jpeg`, `.gif`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg` or `.pdf`, whatever its case. Its
+  contents are not looked at. Anything else answers `unsupported`, a link named like an
+  image included when what it leads to is not. A hidden file is held to the same rule as
+  in `files.read`. A page shows an image from a `data:` URL, which its policy allows.
+- **`files.list`** gives the files under `path`, the workspace folder without one, all the
+  way down. `path` is relative to the workspace folder with `/`, what the other calls
+  take; `size` is in bytes and `modified` in milliseconds since the epoch.
+  - **Dotfiles are listed**, for whoever holds `files.read`: `.env` is what this is for.
+    Reading one is another matter.
+  - The walk does not go into `.git`, `node_modules`, `target` or `dist`. A folder asked for
+    by name is listed all the same, `.git` aside. A link is neither followed nor listed.
+  - **2 000 files at most**, the nearest first, then in path order; `truncated` says there
+    were more, or that 200 000 entries were looked at before it found them all.
+  - `pattern`, 256 characters at most, is a simple glob: `*` is any characters but a slash,
+    `?` one such character, `**` any characters at all, and `**/` any folders, none
+    included. Nothing else is special, and case counts. Without a slash it is held to a
+    file's name, at any depth (`.env*`); with one, to its path from the folder listed
+    (`config/**/*.json`).
 - **`data.read`** and **`data.write`** take a path **relative to that kit's
   data folder**: either slash, no absolute path, no `..`, no drive, no `:`, 1 024
   characters at most. A hidden name is allowed: the folder is the kit's own. Hangar
@@ -748,9 +808,9 @@ done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
   - `timeoutMs` is 1 to 15 000, **5 000** by default.
   - A refused or timed-out connection answers the error `unreachable`: an ordinary
     state for a tab (the editor is closed), logged nowhere.
-- **Polling.** There is no file watcher: a tab polls. `data.read`,
-  `loopback.fetch` and `command.run` have no limit of their own, so one call a
-  second is fine; a tab that is not visible may slow itself down.
+- **Polling.** There is no file watcher: a tab polls. `data.read`, `files.read`,
+  `files.list`, `loopback.fetch` and `command.run` have no limit of their own, so one call
+  a second is fine; a tab that is not visible may slow itself down.
 - **`notify`** takes a `title` of 1 to 120 characters and a `body` of 1 000
   at most. At most **5 a minute**.
 - A tab has at most **16 calls** waiting for their answer at once.
@@ -762,7 +822,9 @@ Errors:
 | `denied`       | The tab may not call the method, a port or a command it does not hold included; or `panes.send` to a pane that is not a Claude Code agent; or `command.run` on a GitHub kit whose commands were not accepted as they are now. |
 | `invalid`      | The params are not what the method takes.                             |
 | `unknown`      | No such method.                                                       |
-| `not_found`    | No pane of that name in the workspace; no such file in the kit's data; `command.run`: the program is not installed, or the command has no argv for this OS. |
+| `not_found`    | No pane of that name in the workspace; no such file in the kit's data; `files.readBinary`, `files.list`, and `files.read` for a tab that holds `files.write`: no such file or folder; `command.run`: the program is not installed, or the command has no argv for this OS. |
+| `conflict`     | `files.write`: the file changed since the page read it. Nothing was written. |
+| `unsupported`  | `files.readBinary`: not an image or a PDF, by its extension.          |
 | `rate_limited` | Over a limit above; try again later.                                  |
 | `unavailable`  | Hangar cannot do it now: the agent's session does not run the bridge, the workspace or its folder is gone, the kit cannot be used. |
 | `unreachable`  | `loopback.fetch`: nothing answers on that port, or not in time.       |
@@ -775,10 +837,11 @@ Events:
 | Event           | Needs        | Sent when                                                            |
 | --------------- | ------------ | -------------------------------------------------------------------- |
 | `panes.changed` | `panes.read` | The workspace's panes change: one added, closed, renamed, or changing state. `data` is `{}`: call `panes.list`. |
-| `tab.params`    | —            | A [singleton](#a-tab-with-params) got new params. `data` is `{ params }`. |
+| `tab.params`    | —            | A [singleton](#a-tab-with-params) got new params, or an agent or a hook [asked for this tab again](#who-asked). `data` is `{ params, caller }`. |
 
-A page that takes params reads them when it starts, and a singleton's listens as well. Reading them
-once it is ready is enough: an event sent before it listens changes what `tab.params` answers.
+A page that takes params reads them when it starts, and a singleton's, or one that answers who asked,
+listens as well. Reading them once it is ready is enough: an event sent before it listens changes what
+`tab.params` answers.
 
 ```js
 async function show({ params }) {
@@ -789,6 +852,49 @@ async function show({ params }) {
 }
 window.hangar.on("tab.params", show);
 window.hangar.call("tab.params").then(show);
+```
+
+### Hidden files and secrets
+
+`files.read` alone refuses a hidden file or folder, and always has. **A tab that holds both
+`files.read` and `files.write` reads them too**, `.git` aside, with `files.read` and
+`files.readBinary`: without that, a kit that opens the `.env` so the person can fill it in
+would have nothing to show them, and no `expected` to send.
+
+Both have to be on the same tab: two tabs holding one each read nothing hidden. The activation
+view says it in so many words for such a tab, naming `.env` and secrets, and that is what the person
+is agreeing to. A kit whose update adds either reads « to review », and the tab holds the new one
+only once accepted. A grant of `files.read` given before `files.write` existed reaches no further than
+it did.
+
+**What this means.** Such a page can read your secrets. It has no network of its own, but it
+can pass them on if its kit is written to: to an agent through `panes.send`, to a local server
+through `loopback.fetch`, to a command through `command.run`. And `files.write` on its own is more than
+it sounds: changing `package.json`'s scripts or `.claude/settings.json` changes what runs next, which
+is why `.git` is out of reach and the rest is what the person accepts.
+
+Grants are by kit, read for each tab. So a kit that already holds both, on two tabs, can bring them
+together on one with an update, which asks nothing new; such a kit could already change what runs.
+
+```js
+// Fills in a variable an agent could not set, and tells it so.
+const path = ".env";
+const { caller } = await window.hangar.call("tab.params");
+let lastRead = await window.hangar.call("files.read", { path }).catch((error) => {
+  if (error.code === "not_found") return null;
+  throw error;
+});
+
+async function save(text) {
+  try {
+    await window.hangar.call("files.write", lastRead === null ? { path, text } : { path, text, expected: lastRead });
+    lastRead = text;
+    if (caller) await window.hangar.call("panes.send", { pane: caller.pane, text: `${path} is filled in.` });
+  } catch (error) {
+    if (error.code === "conflict") return showItChanged();
+    throw error;
+  }
+}
 ```
 
 ### The SDK
@@ -878,12 +984,15 @@ more. A tab showing a local server's queue and keeping a note, asking for
 
 `src/lib/kits.ts` exports the protocol's constants: `KIT_METHODS` (method →
 permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`,
-`KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`, `KIT_COMMAND_PATTERN`, `KIT_DENIED`, the
-message types and `kitMayCall`. The window's side is `src/lib/kitApi.ts` (its
+`KIT_BINARY_MAX_BYTES`, `KIT_LIST_*`, `KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`,
+`KIT_COMMAND_PATTERN`, `KIT_DENIED`, the message types, `kitMayCall` and
+`kitReadsHiddenFiles`. The window's side is `src/lib/kitApi.ts` (its
 limits and error codes, the `tab.*` methods, which need no permission, among
 them), the tab itself `src/components/preview/KitTabView.tsx`,
 and the paths `files.read` and `preview.show` take are checked on disk by
-`kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`); the
+`kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`), and
+those `files.write`, `files.readBinary` and `files.list` take, and what a tab holding
+`files.write` reads, by `src-tauri/src/kits/files.rs`; the
 data folder is `src-tauri/src/kits/data.rs`, `loopback.fetch`
 `src-tauri/src/kits/loopback.rs` and `command.run` `src-tauri/src/kits/commands.rs`.
 
@@ -929,7 +1038,7 @@ text, so `docker ps --format {{.Names}}` needs nothing special.
 
 These are manifest errors: a placeholder not declared in `args`, an arg without a
 `pattern`, a `pattern` that is not a regular expression, a placeholder or any brace
-in the program, a `run` written as a string.
+in the program, a `run` written as a string, an arg named `kitDir`.
 
 **The program** is a name found on the PATH: not a path, nor a name ending in a dot
 or a space. It is found on the PATH Hangar computes for everything it starts
@@ -941,6 +1050,36 @@ is ever run from the project's folder for being there. Absent, the call answers
 arguments to a batch file are parsed by cmd.exe, which would bring a shell back. That
 includes what npm installs (`npm`, `pnpm`, and the tools they install), which are `.cmd`
 files there.
+
+### A script of the kit's own: `{kitDir}`
+
+`{kitDir}` is a reserved placeholder: Hangar fills it in with the kit's root folder, in any item of
+the argv except the program.
+
+```json
+{
+  "commands": {
+    "audit": {
+      "description": "Audits a package.",
+      "run": ["node", "{kitDir}/tools/audit.js", "{id}"],
+      "args": { "id": { "pattern": "[0-9]+" } }
+    }
+  }
+}
+```
+
+- It needs no `args` entry and no `pattern`. A kit may not declare an arg named `kitDir`, and a tab
+  that passes one answers `bad_args`: the folder is Hangar's to say.
+- It stays inside the item it is written in, so a kit folder with spaces is still one argument, and it
+  is an argument however it is filled in: a program never comes from it.
+- This is how a kit reaches what cannot be run directly: `pnpm`, `npm` and `npx` are `.cmd` files
+  on Windows, which are refused. A kit runs `node` on a script of its own, and what the script calls
+  is its own business.
+
+**What the person accepts is the script's name, not its content.** The activation view shows the argv
+as written, `{kitDir}` included, and the hash covers that: an update that changes what
+`{kitDir}/tools/audit.js` does, under the same name, asks nothing, exactly as for
+[hooks](#consent-on-change). The script runs with the person's logins, like any command.
 
 ### Running one
 
@@ -993,8 +1132,8 @@ its permissions.
 
 `kit_inspect` lists them as `declaredCommands`: `[{ name, description, argv, args,
 timeoutSeconds }]` for this OS, the argv verbatim, placeholders included, and `args` the
-rules of the placeholders of that argv. A command with no argv for this OS is left out
-there, and answers `not_found`.
+rules of the placeholders of that argv, `{kitDir}` having none. A command with no argv for
+this OS is left out there, and answers `not_found`.
 
 For a GitHub-installed kit, what a workspace accepted is stored in its `kits[].granted`
 as the pseudo permission `commands:<hash>`, exactly like `hooks:<hash>`: the first 16 hex
@@ -1017,7 +1156,8 @@ Three limits to know. **A kit can declare a shell**: `["sh", "-c", "{x}"]` with 
 `.*` is a valid manifest, and so is `node -e`. Hangar does not keep a list of such
 programs, which could never be whole: the person reads the argv before accepting, and that
 is what the view is for. The hash covers **the list, not the programs it names**: a `gh`
-that changes on the machine asks nothing. And the hash is **for this OS**: a kit whose
+that changes on the machine asks nothing, and neither does a [script of the kit's](#a-script-of-the-kits-own-kitdir)
+that changes under the same name. And the hash is **for this OS**: a kit whose
 argv changed only for another system asks nothing here.
 
 ## A kit's data folder
@@ -1139,9 +1279,10 @@ panes load such a kit, and its tabs open and hold what was accepted, the pseudo
 permissions included. The workspace's Kits dialog shows it on, its switch locked, and
 says it is managed in Settings › Kits.
 
-Nothing is ever written into a workspace's project folder: kits live in
+Hangar writes nothing of a kit's into a workspace's project folder: kits live in
 `~/.hangar/kits/` or where they were linked from, their data in
-`~/.hangar/kit-data/`, and the `--mcp-config` file in Hangar's app data.
+`~/.hangar/kit-data/`, and the `--mcp-config` file in Hangar's app data. What changes
+a project's file is a tab granted `files.write`, saying what, or a kit's own code.
 
 ## Commands and events
 
@@ -1160,6 +1301,10 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 | `kit_setup_mark(id, stepId)` | `kitSetupMark(id, stepId)`   | The same list, after recording the step.                                                  |
 | `kit_data_read(kit, path)`   | through `KitTabView`         | The file's text. Refuses with `{ code, message }`.                                        |
 | `kit_data_write(kit, path, text)` | through `KitTabView`    | Nothing. Refuses with `{ code, message }`.                                                |
+| `kit_files_read(root, path)` | through `KitTabView`         | The file's text, hidden or not. Refuses with `{ code, message }`.                         |
+| `kit_files_read_binary(root, path, hidden)` | through `KitTabView` | `{ base64, mime }`. Refuses with `{ code, message }`.                            |
+| `kit_files_list(root, path?, pattern?)` | through `KitTabView` | `{ files, truncated }`. Refuses with `{ code, message }`.                                 |
+| `kit_files_write(root, path, text, expected?)` | through `KitTabView` | Nothing. Refuses with `{ code, message }`.                                         |
 | `kit_loopback_fetch(port, path, method?, body?, timeoutMs?)` | through `KitTabView` | `{ status, text }`. Refuses with `{ code, message }`.                        |
 | `kit_command_run(kit, name, args, cwd, accepted)` | through `KitTabView` | `{ exitCode, stdout, stderr, timedOut, truncated }`. Refuses with `{ code, message }`. |
 
@@ -1167,7 +1312,7 @@ Skills are listed from `skills/<name>/SKILL.md`, commands and agents from the
 `.md` files under `commands/` and `agents/` (a subfolder joins with `:`), in the
 plugin's folder.
 
-Errors are English strings, except those four's, whose `code` a tab tells apart.
+Errors are English strings, except those eight's, whose `code` a tab tells apart.
 `kits:changed` (`onKitsChanged(fn)`) is sent, with
 no payload, whenever `kits_list` may answer something new: a kit added,
 updated, removed or checked, or the index or an installed kit's manifest

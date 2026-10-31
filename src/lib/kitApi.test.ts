@@ -6,9 +6,12 @@ import {
   kitMayCallEvent,
   kitPanes,
   kitSender,
+  projectRelativePath,
   workspaceRelativePath,
   KIT_DATA_WRITE_MAX,
   KIT_DATA_WRITE_WINDOW_MS,
+  KIT_FILES_WRITE_MAX,
+  KIT_FILES_WRITE_WINDOW_MS,
   KIT_LOOPBACK_PATH_MAX_CHARS,
   KIT_MAX_PENDING,
   KIT_NOTIFY_MAX,
@@ -27,6 +30,8 @@ import {
 import {
   KIT_COMMAND_PATTERN,
   KIT_DATA_MAX_BYTES,
+  KIT_FILE_MAX_BYTES,
+  KIT_LIST_PATTERN_MAX_CHARS,
   KIT_LOOPBACK_MAX_BODY_BYTES,
   KIT_LOOPBACK_MAX_TIMEOUT_MS,
   KIT_LOOPBACK_PATTERN,
@@ -96,20 +101,30 @@ const settle = async () => {
   for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
+/** Everything a tab can hold, but what makes `files.read` reach hidden files: below, that is said. */
+const READING_ONLY = KIT_PERMISSIONS.filter((permission) => permission !== "files.write");
+
 let clock = 1_000_000;
-let granted: string[] = [...KIT_PERMISSIONS];
+let granted: string[] = [...READING_ONLY];
 let current: Workspace | null = workspace;
 let commandsAccepted: string | null = null;
 let tabParams: Record<string, string> = {};
+let tabCaller: { pane: string } | null = null;
 /** What the tab's calls changed of the tab itself. */
 let tabChanges: unknown[] = [];
 
 const COMMAND_ANSWER = { exitCode: 0, stdout: "{}", stderr: "", timedOut: false, truncated: false };
+const BINARY_ANSWER = { base64: "iVBORw==", mime: "image/png" };
+const LIST_ANSWER = { files: [{ path: "src/a.rs", size: 3, modified: 1793478269409 }], truncated: false };
 
 function makeDeps(overrides: Partial<KitHostDeps> = {}): KitHostDeps {
   return {
     readFile: vi.fn(async (_root: string, path: string) => `text of ${path}`),
     resolveFile: vi.fn(async (root: string, path: string) => `${root}/${path}`),
+    readHiddenFile: vi.fn(async (_root: string, path: string) => `hidden text of ${path}`),
+    readBinaryFile: vi.fn(async () => BINARY_ANSWER),
+    listFiles: vi.fn(async () => LIST_ANSWER),
+    writeFile: vi.fn(async () => undefined),
     showFile: vi.fn(async () => undefined),
     enqueue: vi.fn(async () => ({ id: "q-1" })),
     activity: (paneId: string) => activities[paneId],
@@ -135,6 +150,7 @@ function setup(overrides: Partial<KitHostDeps> = {}) {
       permissions: () => granted,
       commandsAccepted: () => commandsAccepted,
       params: () => tabParams,
+      caller: () => tabCaller,
       setTitle: (title) => tabChanges.push({ title }),
       setBadge: (badge) => tabChanges.push({ badge }),
     },
@@ -155,10 +171,11 @@ const errorOf = (answer: Sent | undefined) => answer?.error?.code;
 
 beforeEach(() => {
   clock = 1_000_000;
-  granted = [...KIT_PERMISSIONS];
+  granted = [...READING_ONLY];
   current = workspace;
   commandsAccepted = null;
   tabParams = {};
+  tabCaller = null;
   tabChanges = [];
 });
 
@@ -169,9 +186,19 @@ describe("what a tab may ask about itself, with no permission", () => {
 
   it("tab.params answers what it was opened with, and nothing without any", async () => {
     const { call } = setup();
-    expect((await call("tab.params"))?.result).toEqual({ params: {} });
+    expect((await call("tab.params"))?.result).toEqual({ params: {}, caller: null });
     tabParams = { run: "4567" };
-    expect((await call("tab.params", {}))?.result).toEqual({ params: { run: "4567" } });
+    expect((await call("tab.params", {}))?.result).toEqual({ params: { run: "4567" }, caller: null });
+  });
+
+  it("tab.params says who asked, from Hangar's record and never from the message", async () => {
+    const { call } = setup();
+    tabCaller = { pane: "Ava" };
+    expect((await call("tab.params"))?.result).toEqual({ params: {}, caller: { pane: "Ava" } });
+    const claimed = await call("tab.params", { caller: { pane: "Boss" }, pane: "Boss" });
+    expect(claimed?.result).toEqual({ params: {}, caller: { pane: "Ava" } });
+    tabCaller = null;
+    expect((await call("tab.params"))?.result).toEqual({ params: {}, caller: null });
   });
 
   it("the tab.params event reaches its page whatever it was granted", () => {
@@ -312,6 +339,9 @@ const CALLS: Record<KitMethod, { params?: unknown; result: unknown }> = {
   "panes.list": { result: kitPanes(workspace, (id) => activities[id]) },
   "panes.send": { params: { pane: "Ava", text: "Build the place" }, result: { queued: true, pane: "Ava" } },
   "files.read": { params: { path: "src/main.luau" }, result: "text of src/main.luau" },
+  "files.readBinary": { params: { path: "shots/a.png" }, result: BINARY_ANSWER },
+  "files.list": { params: { path: "src", pattern: "*.rs" }, result: LIST_ANSWER },
+  "files.write": { params: { path: ".env", text: "A=1" }, result: {} },
   "preview.show": { params: { path: "docs/plan.md" }, result: { opened: true, path: "docs/plan.md" } },
   "data.read": { params: { path: "queue/state.json" }, result: { text: "data of queue/state.json" } },
   "data.write": { params: { path: "queue/state.json", text: "{}" }, result: {} },
@@ -346,6 +376,10 @@ describe("each permission, granted and refused", () => {
       const answer = await call(method, params);
       expect(answer?.error).toEqual({ code: "denied", message: `this tab was not granted ${permission}` });
       expect(deps.readFile).not.toHaveBeenCalled();
+      expect(deps.readHiddenFile).not.toHaveBeenCalled();
+      expect(deps.readBinaryFile).not.toHaveBeenCalled();
+      expect(deps.listFiles).not.toHaveBeenCalled();
+      expect(deps.writeFile).not.toHaveBeenCalled();
       expect(deps.resolveFile).not.toHaveBeenCalled();
       expect(deps.showFile).not.toHaveBeenCalled();
       expect(deps.enqueue).not.toHaveBeenCalled();
@@ -366,7 +400,7 @@ describe("each permission, granted and refused", () => {
 
   it("answers an unknown method as such, whatever is granted", async () => {
     const { call } = setup();
-    const answer = await call("files.write", { path: "x.txt", text: "x" });
+    const answer = await call("files.delete", { path: "x.txt", text: "x" });
     expect(errorOf(answer)).toBe("unknown");
     expect(errorOf(await call("constructor"))).toBe("unknown");
     expect(errorOf(await call("__proto__"))).toBe("unknown");
@@ -541,6 +575,298 @@ describe("params are checked before anything is done", () => {
     expect(errorOf(await call("notify", { title: "Hi", body: 5 }))).toBe("invalid");
     expect((await call("notify", { title: "Build done" }))?.result).toBeNull();
     expect(deps.notify).toHaveBeenCalledWith("Hello kit · Build done", "");
+  });
+});
+
+describe("hidden files", () => {
+  const HIDDEN = [".env", ".env.local", ".github/workflows/ci.yml", "src/.secrets/key.txt"];
+  const GIT = [".git", ".git/config", ".GIT/config", "sub/.git/hooks/pre-commit", ".git\\config", "./.git/config"];
+
+  describe("with files.read alone", () => {
+    beforeEach(() => {
+      granted = ["files.read"];
+    });
+
+    it("refuses them, as it always has", async () => {
+      const { call, deps } = setup();
+      for (const path of HIDDEN) {
+        expect(errorOf(await call("files.read", { path })), path).toBe("invalid");
+        expect(errorOf(await call("files.readBinary", { path: `${path}.png` })), path).toBe("invalid");
+      }
+      expect(deps.readFile).not.toHaveBeenCalled();
+      expect(deps.readHiddenFile).not.toHaveBeenCalled();
+      expect(deps.readBinaryFile).not.toHaveBeenCalled();
+    });
+
+    it("reads what it reads through the same door, and tells Rust hidden files stay out", async () => {
+      const { call, deps } = setup();
+      expect((await call("files.read", { path: "README.md" }))?.result).toBe("text of README.md");
+      expect(deps.readFile).toHaveBeenCalledWith("C:/projects/game", "README.md");
+      expect(deps.readHiddenFile).not.toHaveBeenCalled();
+      await call("files.readBinary", { path: "shots\\a.png" });
+      expect(deps.readBinaryFile).toHaveBeenCalledWith("C:/projects/game", "shots/a.png", false);
+    });
+
+    it("still lists them: their names and sizes are what a kit starts from", async () => {
+      const { call, deps } = setup();
+      expect((await call("files.list", { path: ".github" }))?.result).toEqual(LIST_ANSWER);
+      expect(deps.listFiles).toHaveBeenCalledWith("C:/projects/game", ".github", null);
+    });
+  });
+
+  describe("with files.read and files.write together", () => {
+    beforeEach(() => {
+      granted = ["files.read", "files.write"];
+    });
+
+    it("reads them through the door that may", async () => {
+      const { call, deps } = setup();
+      for (const path of HIDDEN) {
+        expect((await call("files.read", { path }))?.result, path).toBe(`hidden text of ${path}`);
+        expect(deps.readHiddenFile).toHaveBeenLastCalledWith("C:/projects/game", path);
+      }
+      expect(deps.readFile).not.toHaveBeenCalled();
+      await call("files.readBinary", { path: ".shots/a.png" });
+      expect(deps.readBinaryFile).toHaveBeenCalledWith("C:/projects/game", ".shots/a.png", true);
+    });
+
+    it("never reaches .git, whatever else it may", async () => {
+      const { call, deps } = setup();
+      for (const path of GIT) {
+        expect(errorOf(await call("files.read", { path })), path).toBe("invalid");
+        expect(errorOf(await call("files.readBinary", { path: `${path}/a.png` })), path).toBe("invalid");
+        expect(errorOf(await call("files.write", { path, text: "x" })), path).toBe("invalid");
+        expect(errorOf(await call("files.list", { path })), path).toBe("invalid");
+      }
+      expect(deps.readHiddenFile).not.toHaveBeenCalled();
+      expect(deps.readBinaryFile).not.toHaveBeenCalled();
+      expect(deps.writeFile).not.toHaveBeenCalled();
+      expect(deps.listFiles).not.toHaveBeenCalled();
+    });
+
+    it("hands on what Rust says of a missing file, which a page tells apart", async () => {
+      const { call } = setup({
+        readHiddenFile: vi.fn(async () => {
+          throw { code: "not_found", message: ".env was not found in the workspace folder" };
+        }),
+      });
+      expect((await call("files.read", { path: ".env" }))?.error).toEqual({
+        code: "not_found",
+        message: ".env was not found in the workspace folder",
+      });
+    });
+
+    it("stops the next call a grant is taken back", async () => {
+      const { call, deps } = setup();
+      expect((await call("files.read", { path: ".env" }))?.result).toBe("hidden text of .env");
+      granted = ["files.read"];
+      expect(errorOf(await call("files.read", { path: ".env" }))).toBe("invalid");
+      expect(deps.readHiddenFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not change what preview.show opens", async () => {
+      granted = ["files.read", "files.write", "preview.show"];
+      const { call, deps } = setup();
+      expect(errorOf(await call("preview.show", { path: ".env" }))).toBe("invalid");
+      expect(deps.showFile).not.toHaveBeenCalled();
+    });
+  });
+
+  it("files.write alone reads nothing", async () => {
+    granted = ["files.write"];
+    const { call, deps } = setup();
+    expect(errorOf(await call("files.read", { path: ".env" }))).toBe("denied");
+    expect(errorOf(await call("files.readBinary", { path: "a.png" }))).toBe("denied");
+    expect(errorOf(await call("files.list"))).toBe("denied");
+    expect(deps.readHiddenFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("files.write", () => {
+  beforeEach(() => {
+    granted = ["files.write"];
+  });
+
+  it("hands Rust the normalized path, the text, and what the page last read", async () => {
+    const { call, deps } = setup();
+    expect((await call("files.write", { path: "config\\./app.toml", text: "a=1\r\n" }))?.result).toEqual({});
+    expect(deps.writeFile).toHaveBeenLastCalledWith("C:/projects/game", "config/app.toml", "a=1\r\n", null);
+    await call("files.write", { path: ".env", text: "", expected: "A=1\n" });
+    expect(deps.writeFile).toHaveBeenLastCalledWith("C:/projects/game", ".env", "", "A=1\n");
+    // An empty text is what the page may have read.
+    await call("files.write", { path: ".env", text: "x", expected: "" });
+    expect(deps.writeFile).toHaveBeenLastCalledWith("C:/projects/game", ".env", "x", "");
+  });
+
+  it("refuses what leaves the folder before anything is done", async () => {
+    const { call, deps } = setup();
+    for (const path of [
+      "",
+      "   ",
+      42,
+      undefined,
+      "/etc/passwd",
+      "\\\\server\\share\\x.txt",
+      "C:/Windows/win.ini",
+      "C:\\Windows\\win.ini",
+      "../secret.txt",
+      "src/../../secret.txt",
+      "src\\..\\..\\secret.txt",
+      "README.md:stream",
+      "README.md.",
+      "a\0b",
+      ".",
+      "x/".repeat(600),
+    ]) {
+      expect(errorOf(await call("files.write", { path, text: "x" })), String(path)).toBe("invalid");
+    }
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("takes a text of a megabyte at most, and what was read the same", async () => {
+    const { call, deps } = setup();
+    const atCap = "a".repeat(KIT_FILE_MAX_BYTES);
+    expect(errorOf(await call("files.write", { path: "a.txt", text: atCap }))).toBeUndefined();
+    expect(errorOf(await call("files.write", { path: "a.txt", text: `${atCap}a` }))).toBe("invalid");
+    // In bytes, not in characters.
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "é".repeat(KIT_FILE_MAX_BYTES / 2 + 1) }))).toBe(
+      "invalid",
+    );
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "x", expected: `${atCap}a` }))).toBe("invalid");
+    expect(deps.writeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs a text, and an expected that is one", async () => {
+    const { call, deps } = setup();
+    for (const params of [
+      { path: "a.txt" },
+      { path: "a.txt", text: 3 },
+      { path: "a.txt", text: null },
+      { path: "a.txt", text: "x", expected: 3 },
+      { path: "a.txt", text: "x", expected: null },
+    ]) {
+      expect(errorOf(await call("files.write", params)), JSON.stringify(params)).toBe("invalid");
+    }
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("says so when the file changed since, and it is the page's to tell apart", async () => {
+    const { call } = setup({
+      writeFile: vi.fn(async () => {
+        throw { code: "conflict", message: ".env changed since it was read: nothing was written" };
+      }),
+    });
+    expect((await call("files.write", { path: ".env", text: "x", expected: "y" }))?.error).toEqual({
+      code: "conflict",
+      message: ".env changed since it was read: nothing was written",
+    });
+  });
+
+  it(`writes at most ${KIT_FILES_WRITE_MAX} a minute, apart from data.write's`, async () => {
+    granted = ["files.write", "data.write"];
+    const { call, deps } = setup();
+    for (let i = 0; i < KIT_FILES_WRITE_MAX; i += 1) {
+      expect(errorOf(await call("files.write", { path: "a.txt", text: `${i}` }))).toBeUndefined();
+    }
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "over" }))).toBe("rate_limited");
+    expect(deps.writeFile).toHaveBeenCalledTimes(KIT_FILES_WRITE_MAX);
+    expect(errorOf(await call("data.write", { path: "a.txt", text: "x" }))).toBeUndefined();
+    clock += KIT_FILES_WRITE_WINDOW_MS;
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "later" }))).toBeUndefined();
+  });
+
+  it("does not spend the quota on calls that fail their checks", async () => {
+    const { call } = setup();
+    for (let i = 0; i < KIT_FILES_WRITE_MAX * 2; i += 1) await call("files.write", { path: "../x", text: "x" });
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "x" }))).toBeUndefined();
+  });
+
+  it("answers unavailable once the workspace is gone", async () => {
+    const { call, deps } = setup();
+    current = null;
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "x" }))).toBe("unavailable");
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("holds its paths to the rule the window and Rust share", () => {
+    expect(projectRelativePath("./a//b\\.env")).toBe("a/b/.env");
+    expect(projectRelativePath(".gitignore")).toBe(".gitignore");
+    expect(projectRelativePath(".github/ci.yml")).toBe(".github/ci.yml");
+    expect(() => projectRelativePath(".git/config")).toThrow("under .git");
+    expect(() => projectRelativePath("a/.GIT")).toThrow("under .git");
+  });
+});
+
+describe("files.readBinary", () => {
+  beforeEach(() => {
+    granted = ["files.read"];
+  });
+
+  it("answers what Rust read", async () => {
+    const { call, deps } = setup();
+    expect((await call("files.readBinary", { path: "shots/a.png" }))?.result).toEqual(BINARY_ANSWER);
+    expect(deps.readBinaryFile).toHaveBeenCalledWith("C:/projects/game", "shots/a.png", false);
+  });
+
+  it("refuses a path that leaves the folder", async () => {
+    const { call, deps } = setup();
+    for (const path of ["", 42, undefined, "/x.png", "C:/x.png", "../x.png", "a/../../x.png", "x.png:s", ".hidden.png"]) {
+      expect(errorOf(await call("files.readBinary", { path })), String(path)).toBe("invalid");
+    }
+    expect(errorOf(await call("files.readBinary"))).toBe("invalid");
+    expect(deps.readBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("hands on a type Rust does not read, by its code", async () => {
+    const { call } = setup({
+      readBinaryFile: vi.fn(async () => {
+        throw { code: "unsupported", message: "a.txt is not an image or a PDF" };
+      }),
+    });
+    expect((await call("files.readBinary", { path: "a.txt" }))?.error).toEqual({
+      code: "unsupported",
+      message: "a.txt is not an image or a PDF",
+    });
+  });
+});
+
+describe("files.list", () => {
+  beforeEach(() => {
+    granted = ["files.read"];
+  });
+
+  it("lists the workspace folder when given no folder", async () => {
+    const { call, deps } = setup();
+    for (const params of [undefined, {}, { path: "." }, { path: "./" }, { path: ".\\" }]) {
+      expect((await call("files.list", params))?.result, JSON.stringify(params)).toEqual(LIST_ANSWER);
+      expect(deps.listFiles).toHaveBeenLastCalledWith("C:/projects/game", null, null);
+    }
+  });
+
+  it("hands Rust a normalized folder and the pattern", async () => {
+    const { call, deps } = setup();
+    await call("files.list", { path: "config\\deep/", pattern: "*.json" });
+    expect(deps.listFiles).toHaveBeenLastCalledWith("C:/projects/game", "config/deep", "*.json");
+    await call("files.list", { pattern: ".env*" });
+    expect(deps.listFiles).toHaveBeenLastCalledWith("C:/projects/game", null, ".env*");
+  });
+
+  it("refuses a folder that leaves the workspace, and a pattern that is not one", async () => {
+    const { call, deps } = setup();
+    for (const path of ["", "   ", 42, null, "/etc", "C:/Windows", "..", "../x", "./..", "a/../..", "a:b"]) {
+      expect(errorOf(await call("files.list", { path })), String(path)).toBe("invalid");
+    }
+    for (const pattern of ["", "   ", 42, null, "*".repeat(KIT_LIST_PATTERN_MAX_CHARS + 1)]) {
+      expect(errorOf(await call("files.list", { pattern })), String(pattern)).toBe("invalid");
+    }
+    expect(errorOf(await call("files.list", "src"))).toBe("invalid");
+    expect(deps.listFiles).not.toHaveBeenCalled();
+  });
+
+  it("answers unavailable once the workspace is gone", async () => {
+    const { call } = setup();
+    current = null;
+    expect(errorOf(await call("files.list"))).toBe("unavailable");
   });
 });
 

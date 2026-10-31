@@ -168,11 +168,13 @@ fn check_value(name: &str, value: &str, arg: &CommandArg) -> Result<(), TabError
 
 /// The arguments the program gets: every value given checked, and each
 /// placeholder of the argv filled in once, so a value holding `{other}` stays
-/// that text.
+/// that text. `{kitDir}` is the kit's folder, in the item it is written in, so a
+/// folder with spaces stays one argument.
 fn expand(
     argv: &[String],
     declared: &BTreeMap<String, CommandArg>,
     given: &HashMap<String, String>,
+    kit_dir: &str,
 ) -> Result<Vec<String>, TabError> {
     for (name, value) in given {
         let arg = declared
@@ -187,6 +189,7 @@ fn expand(
             for part in manifest::arg_parts(item) {
                 match part {
                     ArgPart::Text(text) => out.push_str(text),
+                    ArgPart::Value(manifest::KIT_DIR) => out.push_str(kit_dir),
                     ArgPart::Value(name) => out.push_str(
                         given
                             .get(name)
@@ -542,7 +545,7 @@ pub fn run(kit: &Loaded, call: &Call, os: &str, search: &Search) -> Result<Outpu
             format!("the command {} has no form for this system", call.name),
         )
     })?;
-    let args = expand(argv, &command.args, &call.args)?;
+    let args = expand(argv, &command.args, &call.args, &kit.root.to_string_lossy())?;
     let cwd = Path::new(&call.cwd);
     if !cwd.is_dir() {
         return Err(TabError::new(
@@ -695,8 +698,13 @@ mod tests {
 
     impl Kit {
         fn new(id: &str, commands: Value) -> Kit {
+            Kit::in_folder(id, &format!("cmd-{id}"), commands)
+        }
+
+        /// The same, in a folder of the kit's named after `folder`.
+        fn in_folder(id: &str, folder: &str, commands: Value) -> Kit {
             let home = Folder::new(&format!("cmd-home-{id}"));
-            let folder = Folder::new(&format!("cmd-{id}"));
+            let folder = Folder::new(folder);
             let store = Store::at(home.root.join("kits"));
             folder.file(
                 manifest::FILE,
@@ -880,6 +888,73 @@ mod tests {
         let argv: Vec<String> =
             serde_json::from_str(said(&own.run("echo", &[("r", "x")]).unwrap())).unwrap();
         assert_eq!(argv, ["--json", "--repo=x"]);
+    }
+
+    #[test]
+    fn kit_dir_is_the_kits_folder_and_stays_one_argument() {
+        let kit = Kit::in_folder(
+            "cmd-kit-dir",
+            "a kit folder with spaces",
+            echo(
+                &[
+                    "{kitDir}/tools/audit.js",
+                    "--root={kitDir}",
+                    "{kitDir}",
+                    "{id}",
+                ],
+                json!({ "id": { "pattern": "[0-9]+" } }),
+            ),
+        );
+        let dir = kit.loaded.root.to_string_lossy().into_owned();
+        assert!(dir.contains("a kit folder with spaces"), "{dir}");
+        let output = kit.run("echo", &[("id", "42")]).unwrap();
+        let argv: Vec<String> = serde_json::from_str(said(&output)).unwrap();
+        assert_eq!(
+            argv,
+            [
+                format!("{dir}/tools/audit.js"),
+                format!("--root={dir}"),
+                dir.clone(),
+                "42".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn kit_dir_is_not_a_tabs_to_give() {
+        let kit = Kit::new(
+            "cmd-kit-dir-given",
+            echo(
+                &["{kitDir}", "{value}"],
+                json!({ "value": { "pattern": "(?s).*" } }),
+            ),
+        );
+        let err = kit
+            .run("echo", &[("value", "x"), ("kitDir", "/elsewhere")])
+            .unwrap_err();
+        assert_eq!(err.code, TabError::BAD_ARGS, "{}", err.message);
+        // A value holding it stays that text: a value is filled in once.
+        let output = kit.run("echo", &[("value", "{kitDir}")]).unwrap();
+        let argv: Vec<String> = serde_json::from_str(said(&output)).unwrap();
+        assert_eq!(argv[1], "{kitDir}");
+    }
+
+    #[test]
+    fn kit_dir_is_shown_as_written_with_no_rule_and_hashed_as_written() {
+        let commands = json!({ "audit": {
+            "description": "d",
+            "run": ["node", "{kitDir}/tools/audit.js", "{id}"],
+            "args": { "id": { "pattern": "[0-9]+" } }
+        } });
+        let found = for_os(&manifest_of(commands.clone()), "linux");
+        assert_eq!(found[0].argv, ["node", "{kitDir}/tools/audit.js", "{id}"]);
+        assert_eq!(found[0].args.keys().collect::<Vec<_>>(), ["id"]);
+        // The folder a kit lives in asks nothing: the hash is of what it wrote.
+        let canonical = r#"[{"name":"audit","run":["node","{kitDir}/tools/audit.js","{id}"],"args":{"id":"[0-9]+"}}]"#;
+        assert_eq!(
+            hash(commands, "linux").unwrap(),
+            format!("commands:{}", &sha256_hex(canonical)[..16])
+        );
     }
 
     #[test]

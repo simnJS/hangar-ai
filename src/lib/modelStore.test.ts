@@ -12,6 +12,7 @@ import {
   isModel,
   isPreviewFile,
   kitParamsKey,
+  kitTabCaller,
   kitTabParams,
   kitTabPath,
   markModelsSeen,
@@ -442,6 +443,84 @@ describe("kit tabs beside the files", () => {
       closeAllModels();
       run("1", { openedBy: "Ava" });
       expect(modelScope("ws").unseen).toBe(true);
+    });
+  });
+
+  describe("who asked", () => {
+    const run = (patch: Partial<KitTabToOpen> = {}) =>
+      openKitTab({ workspaceId: "ws", kitId: "ci", tabId: "run", title: "Run", params: { run: "1" }, ...patch });
+
+    it("is nobody when the person opened it, and the pane when an agent or a hook did", () => {
+      expect(kitTabCaller(run())).toBeNull();
+      closeAllModels();
+      expect(kitTabCaller(run({ openedBy: "Ava" }))).toEqual({ pane: "Ava" });
+    });
+
+    it("is nobody once the tab is closed", () => {
+      const id = run({ openedBy: "Ava" });
+      closeAllModels();
+      expect(kitTabCaller(id)).toBeNull();
+      expect(kitTabCaller("no-such-tab")).toBeNull();
+    });
+
+    it("is the latest to ask, and the page of a tab with params hears of it", () => {
+      const id = run({ openedBy: "Ava" });
+      const heard: unknown[] = [];
+      const stop = watchKitTabParams(id, (params, caller) => heard.push({ params, caller }));
+
+      expect(run({ openedBy: "Max" })).toBe(id);
+      expect(kitTabCaller(id)).toEqual({ pane: "Max" });
+      expect(heard).toEqual([{ params: { run: "1" }, caller: { pane: "Max" } }]);
+
+      // Asked again by the same pane: it may be waiting for another answer.
+      run({ openedBy: "Max" });
+      expect(heard).toHaveLength(2);
+
+      stop();
+      run({ openedBy: "Ava" });
+      expect(heard).toHaveLength(2);
+      expect(kitTabCaller(id)).toEqual({ pane: "Ava" });
+    });
+
+    it("stays who the page answers when the person brings the tab forward", () => {
+      const id = run({ openedBy: "Ava" });
+      const heard: unknown[] = [];
+      watchKitTabParams(id, (params, caller) => heard.push({ params, caller }));
+      expect(run()).toBe(id);
+      expect(kitTabCaller(id)).toEqual({ pane: "Ava" });
+      expect(heard).toEqual([]);
+    });
+
+    it("tells only the page of that very tab", () => {
+      const mine = run({ openedBy: "Ava" });
+      const other = run({ params: { run: "2" }, openedBy: "Ava" });
+      const heard: string[] = [];
+      watchKitTabParams(other, () => heard.push("other"));
+      run({ openedBy: "Max" });
+      expect(heard).toEqual([]);
+      expect(kitTabCaller(mine)).toEqual({ pane: "Max" });
+      expect(kitTabCaller(other)).toEqual({ pane: "Ava" });
+    });
+
+    it("comes along with what a singleton takes, and when it takes nothing new", () => {
+      const board = (params: Record<string, string> | undefined, openedBy?: string) =>
+        openKitTab({ workspaceId: "ws", kitId: "ci", tabId: "board", title: "Board", singleton: true, params, openedBy });
+      const id = board({ view: "a" }, "Ava");
+      const heard: unknown[] = [];
+      watchKitTabParams(id, (params, caller) => heard.push({ params, caller }));
+      board({ view: "b" }, "Max");
+      board(undefined, "Ava");
+      expect(heard).toEqual([
+        { params: { view: "b" }, caller: { pane: "Max" } },
+        { params: { view: "b" }, caller: { pane: "Ava" } },
+      ]);
+    });
+
+    it("comes back with the tab after a restart", () => {
+      const id = run({ openedBy: "Ava" });
+      const scope = takeModelScope("ws")!;
+      adoptModelScope("ws", scope);
+      expect(kitTabCaller(id)).toEqual({ pane: "Ava" });
     });
   });
 

@@ -69,7 +69,7 @@ describe("effectivePermissions", () => {
     expect(effectivePermissions(["panes.read", "notify"], ["notify", "files.read"])).toEqual(["notify"]);
     expect(effectivePermissions(["panes.read"], [])).toEqual([]);
     expect(effectivePermissions([], ["panes.read"])).toEqual([]);
-    expect(effectivePermissions(["files.write", "notify"], ["files.write", "notify"])).toEqual(["notify"]);
+    expect(effectivePermissions(["files.delete", "notify"], ["files.delete", "notify"])).toEqual(["notify"]);
   });
 
   it("keeps a local server's port as declared and granted, that very port", () => {

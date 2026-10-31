@@ -2,7 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { translate } from "../i18n";
-import { KIT_PERMISSIONS, type KitInfo, type KitInspection, type KitRunning, type KitTab } from "./kits";
+import {
+  KIT_PERMISSIONS,
+  kitReadsHiddenFiles,
+  type KitDeclaredCommand,
+  type KitInfo,
+  type KitInspection,
+  type KitRunning,
+  type KitTab,
+} from "./kits";
+import { workspaceKitTabs } from "./kitTabs";
 import {
   PERMISSION_LABEL,
   RUNNING_LABEL,
@@ -96,6 +105,17 @@ describe("permissions", () => {
     expect(permissionLabel(say("en"), "panes.send")).toBe("send messages to your agents");
   });
 
+  it("says what changing files means, hidden ones named, in both languages", () => {
+    const say = (locale: "en" | "fr") => (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
+      translate(locale, key, params);
+    expect(permissionLabel(say("en"), "files.write")).toBe(
+      "change text files in your project, hidden ones like .env included",
+    );
+    expect(permissionLabel(say("fr"), "files.write")).toBe(
+      "modifier les fichiers texte de votre projet, y compris les fichiers cachés comme .env",
+    );
+  });
+
   it("splits what is asked by what was accepted", () => {
     expect(permissionDiff(["panes.read", "panes.send"], ["panes.read", "notify"])).toEqual({
       kept: ["panes.read"],
@@ -112,6 +132,27 @@ describe("permissions", () => {
     expect(translate("fr", PERMISSION_LABEL["panes.send"])).toBe(
       "envoyer des messages à vos agents",
     );
+  });
+});
+
+describe("an update that adds files.write", () => {
+  const entry = { id: "hello-kit", granted: ["files.read", "notify"] };
+
+  it("reads « to review » until it is accepted", () => {
+    expect(kitState(entry, kitRequested(kit("1.0.0", [tab(["files.read", "notify"])])))).toBe("on");
+    const updated = kit("1.1.0", [tab(["files.read", "files.write", "notify"])]);
+    expect(kitState(entry, kitRequested(updated))).toBe("review");
+    expect(permissionDiff(kitRequested(updated)!, entry.granted).added).toEqual(["files.write"]);
+    expect(kitState({ ...entry, granted: [...entry.granted, "files.write"] }, kitRequested(updated))).toBe("on");
+  });
+
+  it("gives the tab nothing until then: it stays out of what it may call", () => {
+    const updated = kit("1.1.0", [tab(["files.read", "files.write", "notify"])]);
+    const [choice] = workspaceKitTabs({ kits: [entry] }, [updated]);
+    expect(choice.permissions).toEqual(["files.read", "notify"]);
+    expect(kitReadsHiddenFiles(choice.permissions)).toBe(false);
+    const [accepted] = workspaceKitTabs({ kits: [{ ...entry, granted: [...entry.granted, "files.write"] }] }, [updated]);
+    expect(kitReadsHiddenFiles(accepted.permissions)).toBe(true);
   });
 });
 
@@ -407,6 +448,78 @@ describe("the activation view", () => {
     expect(out).toContain("echo &quot;edited&quot; &gt;&gt; &quot;$HANGAR_KITS_DATA/hello-kit/log&quot;</pre>");
     expect(out).toContain(">node ${CLAUDE_PLUGIN_ROOT}/start.js</pre>");
     expect(out.match(/<pre class="kit-step__cmd"/g)).toHaveLength(2);
+  });
+
+  describe("files.write", () => {
+    const shown = (tabs: KitTab[]): KitInspection => ({ ...inspection, hooks: [], tabs });
+    const SECRETS = "so it can also read hidden files such as .env, and the secrets they hold";
+
+    it("says in plain words that a tab can change the project's files", async () => {
+      const out = await draw("en", kit("1.0.0", []), { shown: shown([tab(["files.write"])]) });
+      expect(out).toContain("change text files in your project, hidden ones like .env included");
+      expect(out).not.toContain(SECRETS);
+    });
+
+    it("names .env and secrets for a tab that holds both, with what could carry them off", async () => {
+      const both = shown([tab(["files.read", "files.write"])]);
+      const en = await draw("en", kit("1.0.0", []), { shown: both });
+      expect(en).toContain(SECRETS);
+      expect(en).toContain("panes.send");
+      const fr = plainSpaces(await draw("fr", kit("1.0.0", []), { shown: both }));
+      expect(fr).toContain("les fichiers cachés comme .env, et les secrets qu&#x27;ils contiennent");
+      expect(fr).toContain("panes.send");
+    });
+
+    it("says nothing of secrets for a tab that only reads, or across two tabs", async () => {
+      const reads = await draw("en", kit("1.0.0", []), { shown: shown([tab(["files.read"])]) });
+      expect(reads).not.toContain(SECRETS);
+      const apart = await draw("en", kit("1.0.0", []), {
+        shown: shown([tab(["files.read"]), { ...tab(["files.write"]), id: "other" }]),
+      });
+      expect(apart).not.toContain(SECRETS);
+    });
+
+    it("shows what an update added as new, and what asks for it to be accepted", async () => {
+      const updated = kit("1.1.0", [tab(["files.read", "files.write"])]);
+      const out = await draw("en", updated, {
+        shown: shown([tab(["files.read", "files.write"])]),
+        entry: { id: "hello-kit", granted: ["files.read"] },
+      });
+      expect(out).toContain("kit-act__tag--new");
+      expect(out).toContain(SECRETS);
+      expect(out).toContain("btn--primary");
+    });
+  });
+
+  describe("{kitDir}", () => {
+    const audit: KitDeclaredCommand = {
+      name: "audit",
+      description: "Runs the kit's audit.",
+      argv: ["node", "{kitDir}/tools/audit.js", "{id}"],
+      args: { id: { pattern: "[0-9]+" } },
+      timeoutSeconds: 30,
+    };
+    const shown = (commands: KitDeclaredCommand[]): KitInspection => ({
+      ...inspection,
+      hooks: [],
+      declaredCommands: commands,
+    });
+
+    it("is shown as written, with no rule of its own, and said to be the kit's folder", async () => {
+      const out = await draw("en", kit("1.0.0", []), { shown: shown([audit]) });
+      expect(out).toContain(">node {kitDir}/tools/audit.js {id}</pre>");
+      expect(out).toContain("<code>{id}</code>");
+      expect(out).not.toContain("<code>{kitDir}</code>");
+      expect(out).toContain("{kitDir} is this kit&#x27;s own folder");
+      const fr = plainSpaces(await draw("fr", kit("1.0.0", []), { shown: shown([audit]) }));
+      expect(fr).toContain("{kitDir} est le dossier de ce kit");
+    });
+
+    it("is not spoken of for a command that does not use it", async () => {
+      const gh = { ...audit, argv: ["gh", "run", "view", "{id}"] };
+      const out = await draw("en", kit("1.0.0", []), { shown: shown([gh]) });
+      expect(out).not.toContain("{kitDir}");
+    });
   });
 
   it("says it in French, with accents", async () => {

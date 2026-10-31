@@ -5,10 +5,13 @@ import {
   kitCommandName,
   kitLoopbackPort,
   kitMayCall,
+  kitReadsHiddenFiles,
   KIT_COMMAND_PATTERN,
   KIT_DATA_MAX_BYTES,
   KIT_DENIED,
   KIT_EVENTS,
+  KIT_FILE_MAX_BYTES,
+  KIT_LIST_PATTERN_MAX_CHARS,
   KIT_LOOPBACK_MAX_BODY_BYTES,
   KIT_LOOPBACK_MAX_TIMEOUT_MS,
   KIT_LOOPBACK_PATTERN,
@@ -17,7 +20,13 @@ import {
   type KitEventName,
   type KitMethod,
 } from "./kits";
-import { KIT_BADGE_STATES, type KitBadgeState, type KitTabBadge, type KitTabParams } from "./modelStore";
+import {
+  KIT_BADGE_STATES,
+  type KitBadgeState,
+  type KitTabBadge,
+  type KitTabCaller,
+  type KitTabParams,
+} from "./modelStore";
 import type { Pane, Workspace } from "../types";
 
 /**
@@ -56,6 +65,10 @@ export const KIT_ERRORS = {
   badArgs: "bad_args",
   /** Too many of the kit's commands are running. */
   busy: "busy",
+  /** `files.write`: the file changed since the page read it, and nothing was written. */
+  conflict: "conflict",
+  /** `files.readBinary`: not an image or a PDF. */
+  unsupported: "unsupported",
   /** It was tried, and failed. */
   failed: "failed",
 } as const;
@@ -80,6 +93,9 @@ export const KIT_NOTIFY_WINDOW_MS = 60_000;
 /** At most this many `data.write` in any `KIT_DATA_WRITE_WINDOW_MS`: `panes.send`'s limit. */
 export const KIT_DATA_WRITE_MAX = KIT_SEND_MAX;
 export const KIT_DATA_WRITE_WINDOW_MS = KIT_SEND_WINDOW_MS;
+/** At most this many `files.write` in any `KIT_FILES_WRITE_WINDOW_MS`: `data.write`'s limit. */
+export const KIT_FILES_WRITE_MAX = KIT_DATA_WRITE_MAX;
+export const KIT_FILES_WRITE_WINDOW_MS = KIT_DATA_WRITE_WINDOW_MS;
 /** Calls of a tab still waiting for their answer, at most. */
 export const KIT_MAX_PENDING = 16;
 /** The longest path a tab may give. */
@@ -96,7 +112,10 @@ export const KIT_TAB_BADGE_TEXT_MAX = 12;
  */
 export const KIT_TAB_CHANGE_MAX = 120;
 export const KIT_TAB_CHANGE_WINDOW_MS = 60_000;
-/** The event a singleton's page hears when it gets new params. No permission: it is about itself. */
+/**
+ * The event a page hears when a singleton gets new params, or an agent or a hook
+ * asks for the tab again. No permission: it is about itself.
+ */
 export const KIT_TAB_PARAMS_EVENT = "tab.params";
 const TITLE_MAX = 120;
 const BODY_MAX = 1000;
@@ -129,6 +148,8 @@ export interface KitHostContext {
   commandsAccepted: () => string | null;
   /** What this very tab was opened with, as it is now. */
   params: () => KitTabParams;
+  /** Who last asked for this very tab, from Hangar's record; null when only the person did. */
+  caller: () => KitTabCaller | null;
   /** Names this very tab in the tab strip. */
   setTitle: (title: string) => void;
   /** Sets this very tab's state in the tab strip; null takes it away. */
@@ -141,6 +162,14 @@ export interface KitHostDeps {
   readFile: (root: string, path: string) => Promise<string>;
   /** `kit_workspace_path`: the canonical path of a file inside `root`. */
   resolveFile: (root: string, path: string) => Promise<string>;
+  /** `kit_files_read`: a text file inside `root`, hidden or not. Rejects with `{ code, message }`. */
+  readHiddenFile: (root: string, path: string) => Promise<string>;
+  /** `kit_files_read_binary`: an image or a PDF. Rejects with `{ code, message }`. */
+  readBinaryFile: (root: string, path: string, hidden: boolean) => Promise<KitBinaryFile>;
+  /** `kit_files_list`: the files under a folder of `root`. Rejects with `{ code, message }`. */
+  listFiles: (root: string, path: string | null, pattern: string | null) => Promise<KitFileListing>;
+  /** `kit_files_write`: atomic. Rejects with `{ code, message }`. */
+  writeFile: (root: string, path: string, text: string, expected: string | null) => Promise<void>;
   /** Opens the file in the workspace's preview, as opened by `openedBy`. */
   showFile: (ws: Workspace, path: string, openedBy: string) => Promise<void>;
   /** The hangar-bridge queue: submitted once the agent is free. */
@@ -156,6 +185,20 @@ export interface KitHostDeps {
   /** `kit_command_run`, made by Rust. Rejects with `{ code, message }`. */
   runCommand: (call: KitCommandCall) => Promise<KitCommandAnswer>;
   now: () => number;
+}
+
+/** What `files.readBinary` answers. */
+export interface KitBinaryFile {
+  base64: string;
+  mime: string;
+}
+
+/** What `files.list` answers. */
+export interface KitFileListing {
+  /** `path` is relative to the workspace folder, `size` in bytes, `modified` in milliseconds. */
+  files: { path: string; size: number; modified: number }[];
+  /** Whether more files were there than it gives. */
+  truncated: boolean;
 }
 
 /** A `loopback.fetch` once checked: nothing else of the page's reaches Rust. */
@@ -271,6 +314,24 @@ export const workspaceRelativePath = (raw: unknown): string => relativePath(raw,
  * a hidden name is the kit's own business there.
  */
 export const dataRelativePath = (raw: unknown): string => relativePath(raw, "the kit's data folder", true);
+
+/**
+ * A path a tab gave for what `files.write` reaches, and what a tab holding it reads:
+ * the same rules, a hidden name being what this is for, except `.git`, which holds
+ * programs: never at any depth, whether a folder or the file a worktree has there.
+ * `kits/files.rs` holds the same on disk, where a link can lead there.
+ */
+export function projectRelativePath(raw: unknown): string {
+  const path = relativePath(raw, "the workspace folder", true);
+  if (path.split("/").some((part) => part.toLowerCase() === ".git")) {
+    throw new KitError(KIT_ERRORS.invalid, "path must not name anything under .git");
+  }
+  return path;
+}
+
+/** Whether a path a tab gave is the folder it starts from: `.`, `./`. */
+const namesItsFolder = (raw: unknown): boolean =>
+  typeof raw === "string" && raw.trim() !== "" && raw.split(/[\\/]/).every((part) => part === "" || part === ".");
 
 /** How many bytes `text` takes in UTF-8, without encoding one that is plainly too long. */
 function overBytes(text: string, max: number): boolean {
@@ -405,12 +466,13 @@ export function createKitHost(
   const sendAllowed = rateLimiter(KIT_SEND_MAX, KIT_SEND_WINDOW_MS, deps.now);
   const notifyAllowed = rateLimiter(KIT_NOTIFY_MAX, KIT_NOTIFY_WINDOW_MS, deps.now);
   const dataWriteAllowed = rateLimiter(KIT_DATA_WRITE_MAX, KIT_DATA_WRITE_WINDOW_MS, deps.now);
+  const filesWriteAllowed = rateLimiter(KIT_FILES_WRITE_MAX, KIT_FILES_WRITE_WINDOW_MS, deps.now);
   const titleAllowed = rateLimiter(KIT_TAB_CHANGE_MAX, KIT_TAB_CHANGE_WINDOW_MS, deps.now);
   const badgeAllowed = rateLimiter(KIT_TAB_CHANGE_MAX, KIT_TAB_CHANGE_WINDOW_MS, deps.now);
 
   /** What a tab may do with no permission: only about itself. */
   const ownTab: Record<string, (params: unknown) => unknown> = {
-    "tab.params": () => ({ params: context.params() }),
+    "tab.params": () => ({ params: context.params(), caller: context.caller() }),
 
     "tab.setTitle": (raw) => {
       const title = shownText(paramsOf(raw).title, "title", KIT_TAB_TITLE_MAX);
@@ -486,14 +548,81 @@ export function createKitHost(
       return { queued: true, pane: pane.name };
     },
 
+    // A tab holding `files.write` as well reads hidden files, which the person
+    // accepted in those words; `files.read` alone keeps the rules it always had.
     "files.read": async (raw) => {
-      const path = workspaceRelativePath(paramsOf(raw).path);
+      const given = paramsOf(raw).path;
+      if (kitReadsHiddenFiles(context.permissions())) {
+        const path = projectRelativePath(given);
+        const ws = workspaceNow();
+        try {
+          return await deps.readHiddenFile(ws.cwd, path);
+        } catch (error) {
+          throw tabErrorOf(error);
+        }
+      }
+      const path = workspaceRelativePath(given);
       const ws = workspaceNow();
       try {
         return await deps.readFile(ws.cwd, path);
       } catch (error) {
         throw new KitError(KIT_ERRORS.failed, messageOf(error));
       }
+    },
+
+    "files.readBinary": async (raw) => {
+      const given = paramsOf(raw).path;
+      const hidden = kitReadsHiddenFiles(context.permissions());
+      const path = hidden ? projectRelativePath(given) : workspaceRelativePath(given);
+      const ws = workspaceNow();
+      try {
+        return await deps.readBinaryFile(ws.cwd, path, hidden);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+    },
+
+    // Names and sizes, dotfiles among them, for whoever holds `files.read`. Reading
+    // one is another matter, above.
+    "files.list": async (raw) => {
+      const params = raw === undefined ? {} : paramsOf(raw);
+      const given = params.path;
+      const path = given === undefined || namesItsFolder(given) ? null : projectRelativePath(given);
+      const pattern =
+        params.pattern === undefined ? null : stringParam(params, "pattern", KIT_LIST_PATTERN_MAX_CHARS);
+      const ws = workspaceNow();
+      try {
+        return await deps.listFiles(ws.cwd, path, pattern);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+    },
+
+    "files.write": async (raw) => {
+      const params = paramsOf(raw);
+      const path = projectRelativePath(params.path);
+      const { text, expected } = params;
+      if (typeof text !== "string") throw new KitError(KIT_ERRORS.invalid, "text must be a string");
+      if (overBytes(text, KIT_FILE_MAX_BYTES)) throw new KitError(KIT_ERRORS.invalid, "text is larger than 1 MB");
+      if (expected !== undefined && typeof expected !== "string") {
+        throw new KitError(KIT_ERRORS.invalid, "expected must be a string: the text the page last read");
+      }
+      if (expected !== undefined && overBytes(expected, KIT_FILE_MAX_BYTES)) {
+        throw new KitError(KIT_ERRORS.invalid, "expected is larger than 1 MB");
+      }
+      const ws = workspaceNow();
+      if (!filesWriteAllowed()) {
+        throw new KitError(
+          KIT_ERRORS.rateLimited,
+          `at most ${KIT_FILES_WRITE_MAX} files.write a minute; try again later`,
+        );
+      }
+      try {
+        await deps.writeFile(ws.cwd, path, text, expected ?? null);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+      return {};
     },
 
     "preview.show": async (raw) => {

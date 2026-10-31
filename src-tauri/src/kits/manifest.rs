@@ -30,6 +30,7 @@ pub const PERMISSIONS: &[&str] = &[
     "panes.read",
     "panes.send",
     "files.read",
+    "files.write",
     "data.read",
     "data.write",
     "preview.show",
@@ -61,6 +62,11 @@ pub fn valid_command_name(name: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
+
+/// The placeholder Hangar fills in itself, with the kit's root folder: it has no
+/// `args` entry and no rule, and a kit cannot declare an arg by this name. It lets
+/// a kit run a script of its own: `["node", "{kitDir}/tools/audit.js"]`.
+pub const KIT_DIR: &str = "kitDir";
 
 /// One piece of an argv item: text as written, or the place of a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -901,6 +907,14 @@ impl Check<'_> {
                 );
                 ok = false;
             }
+            if name == KIT_DIR {
+                self.problem(
+                    &at,
+                    "is reserved: Hangar fills {kitDir} in with the kit's folder",
+                );
+                ok = false;
+                continue;
+            }
             let Value::Object(arg) = value else {
                 self.problem(&at, "must be an object with a pattern");
                 ok = false;
@@ -1017,7 +1031,7 @@ impl Check<'_> {
             let Some(args) = args else { continue };
             for part in arg_parts(item) {
                 if let ArgPart::Value(name) = part {
-                    if !args.contains_key(name) {
+                    if name != KIT_DIR && !args.contains_key(name) {
                         self.problem(
                             &at,
                             format!("the placeholder {{{name}}} is not declared in args"),
@@ -1350,10 +1364,10 @@ mod tests {
                 json!({ "tabs": [{ "id": "t", "title": "T", "entry": "tab.html", "permissions": permissions }] }),
             )
         };
-        let why = problems(kit.parse(&tab(json!(["panes.read", "files.write"]))));
+        let why = problems(kit.parse(&tab(json!(["panes.read", "files.delete"]))));
         assert_eq!(
             why,
-            "tabs[0].permissions: unknown permission \"files.write\""
+            "tabs[0].permissions: unknown permission \"files.delete\""
         );
         assert!(problems(kit.parse(&tab(Value::Null))).contains("permissions"));
         assert!(kit.parse(&tab(json!([]))).unwrap().tabs[0]
@@ -1561,6 +1575,68 @@ mod tests {
         assert!(
             bad_name.contains("commands.view.args.a b: must be named"),
             "{bad_name}"
+        );
+    }
+
+    #[test]
+    fn kit_dir_is_filled_in_by_hangar_and_needs_no_arg() {
+        let kit = Folder::new("cmd-kit-dir");
+        let manifest = kit
+            .parse(&with_commands(json!({
+                "audit": { "description": "d", "run": ["node", "{kitDir}/tools/audit.js", "--root={kitDir}", "{id}"],
+                           "args": { "id": { "pattern": "[0-9]+" } } },
+                "plain": { "description": "d", "run": { "windows": ["node", "{kitDir}\\x.js"], "linux": ["node", "{kitDir}/x.js"] } }
+            })))
+            .unwrap();
+        assert_eq!(
+            manifest.commands["audit"].run.for_os("linux").unwrap(),
+            ["node", "{kitDir}/tools/audit.js", "--root={kitDir}", "{id}"],
+            "kept as written"
+        );
+        assert_eq!(
+            manifest.commands["audit"].args.keys().collect::<Vec<_>>(),
+            ["id"],
+            "and it is no arg"
+        );
+    }
+
+    #[test]
+    fn kit_dir_is_never_the_program() {
+        let kit = Folder::new("cmd-kit-dir-program");
+        for program in ["{kitDir}", "{kitDir}/tools/audit.exe", "x{kitDir}"] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": [program, "x"] }
+            }))));
+            assert_eq!(
+                why, "commands.view.run[0]: must not hold a placeholder: the program is fixed",
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
+    fn kit_dir_cannot_be_declared_as_an_arg() {
+        let kit = Folder::new("cmd-kit-dir-arg");
+        for arg in [
+            json!({ "pattern": ".*" }),
+            json!({ "pattern": "x", "description": "d" }),
+            json!("x"),
+        ] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": ["node", "{kitDir}/x.js"], "args": { "kitDir": arg } }
+            }))));
+            assert_eq!(
+                why,
+                "commands.view.args.kitDir: is reserved: Hangar fills {kitDir} in with the kit's folder"
+            );
+        }
+        // Another spelling is any other name, held to the same rules.
+        let why = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["node", "{kitdir}/x.js"] }
+        }))));
+        assert_eq!(
+            why,
+            "commands.view.run[1]: the placeholder {kitdir} is not declared in args"
         );
     }
 

@@ -812,7 +812,9 @@ async function previewClose(
  * workspace comes from the caller's pane, or its folder as preview_show finds it,
  * and never from the request: what is passed as `workspace` or `pane` is not read.
  * The caller comes from its pane's environment (mcp.rs), or from the pane a hook
- * says it runs in, which Rust checked is running (server.rs).
+ * says it runs in, which Rust checked is running (server.rs). The name a tab's page
+ * is told is the workspace's own for that pane: whatever a request calls itself,
+ * only a pane of this workspace can be answered.
  */
 async function kitTabControl(op: string, args: Record<string, unknown>, caller: Caller, deps: ControlDeps): Promise<unknown> {
   const state = deps.snapshot();
@@ -824,7 +826,10 @@ async function kitTabControl(op: string, args: Record<string, unknown>, caller: 
         : "Could not tell which workspace you are in, so there is nowhere to open a tab.",
     );
   }
-  const by = caller.paneName ?? ws.panes.find((pane) => pane.id === caller.paneId)?.name ?? null;
+  const pane =
+    ws.panes.find((entry) => entry.id === caller.paneId) ??
+    (caller.paneName ? ws.panes.find((entry) => same(entry.name, caller.paneName as string)) : undefined);
+  const by = pane?.name ?? null;
   if (op === "kit_tab_list") {
     return {
       workspace: ws.name,

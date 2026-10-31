@@ -13,9 +13,12 @@ import { createRootGrants, localModelHost, type ModelHost } from "./modelHost";
 import {
   closeAllModels,
   isKitTab,
+  kitTabCaller,
   modelScope,
   noteModelView,
+  openKitTab,
   setModelPanel,
+  watchKitTabParams,
   type ModelInfo,
   type OpenFile,
   type OpenKitTab,
@@ -1312,6 +1315,68 @@ describe("a kit's tabs", () => {
       const hook = { caller: { paneId: "p2" }, kit: "ci-kit", tab: "run", params: { run: "9" } };
       expect(((await runControl("kit_tab_open", hook, deps)) as any).outcome).toBe("opened");
       expect(tabs("w1")[0].openedBy).toBe("Max");
+    });
+
+    describe("who asked, as the tab's page is told", () => {
+      const callerOf = () => kitTabCaller(tabs()[0].id);
+
+      it("is the agent's pane through kit_tab_open", async () => {
+        const { deps } = kitSetup();
+        await open(deps, { params: { run: "1" } });
+        expect(callerOf()).toEqual({ pane: "Ava" });
+      });
+
+      it("is the hook's pane through its route, which gives only the pane's id", async () => {
+        const { deps } = kitSetup();
+        await runControl("kit_tab_open", { caller: { paneId: "p2" }, kit: "ci-kit", tab: "run" }, deps);
+        expect(callerOf()).toEqual({ pane: "Max" });
+      });
+
+      it("is nobody when the person opens it from the palette", () => {
+        const id = openKitTab({ workspaceId: "w1", kitId: "ci-kit", tabId: "run", title: "CI run" });
+        expect(kitTabCaller(id)).toBeNull();
+      });
+
+      it("is what Hangar knows of the pane, whatever a request claims", async () => {
+        const { deps } = kitSetup();
+        await runControl(
+          "kit_tab_open",
+          {
+            caller: { paneId: "p2", paneName: "Boss", pane: "Boss" },
+            pane: "Ava",
+            paneName: "Ava",
+            openedBy: "Ava",
+            by: "Ava",
+            kit: "ci-kit",
+            tab: "run",
+          },
+          deps,
+        );
+        expect(callerOf()).toEqual({ pane: "Max" });
+      });
+
+      it("is nobody when the request names no pane of the workspace", async () => {
+        const { deps } = kitSetup();
+        await runControl(
+          "kit_tab_open",
+          { caller: { paneId: "p-gone", paneName: "Boss", cwd: "C:\\dev\\hangar" }, kit: "ci-kit", tab: "run" },
+          deps,
+        );
+        expect(tabs()).toHaveLength(1);
+        expect(callerOf()).toBeNull();
+      });
+
+      it("becomes the latest to ask, and the page hears of it when an agent opens the same tab again", async () => {
+        const { deps } = kitSetup();
+        await open(deps, { params: { run: "1" } });
+        const heard: unknown[] = [];
+        watchKitTabParams(tabs()[0].id, (params, caller) => heard.push({ params, caller }));
+
+        const hook = { caller: { paneId: "p2" }, kit: "ci-kit", tab: "run", params: { run: "1" } };
+        expect(((await runControl("kit_tab_open", hook, deps)) as any).outcome).toBe("focused");
+        expect(callerOf()).toEqual({ pane: "Max" });
+        expect(heard).toEqual([{ params: { run: "1" }, caller: { pane: "Max" } }]);
+      });
     });
 
     it("refuses a pane no workspace has, without guessing one", async () => {

@@ -24,6 +24,7 @@ export const KIT_PERMISSIONS = [
   "panes.read",
   "panes.send",
   "files.read",
+  "files.write",
   "data.read",
   "data.write",
   "preview.show",
@@ -92,6 +93,22 @@ export const isKitPermission = (name: unknown): name is KitPermission =>
   (typeof name === "string" && (KIT_PERMISSIONS as readonly string[]).includes(name)) ||
   kitLoopbackPort(name) !== null ||
   kitCommandName(name) !== null;
+
+/**
+ * Whether a tab holding `permissions` reads hidden files, `.env` and its secrets
+ * included: it asked for both `files.read` and `files.write` on the same tab, which
+ * is what the person sees and accepts at activation. `files.read` alone never does,
+ * so no grant given before `files.write` existed reaches further than it did.
+ */
+export const kitReadsHiddenFiles = (permissions: readonly string[]): boolean =>
+  permissions.includes("files.read") && permissions.includes("files.write");
+
+/** The placeholder of a declared command that Hangar fills in with the kit's folder. */
+export const KIT_DIR_PLACEHOLDER = "{kitDir}";
+
+/** Whether an argv runs something of the kit's own, which the person is shown by name only. */
+export const kitArgvUsesKitDir = (argv: readonly string[]): boolean =>
+  argv.slice(1).some((item) => item.includes(KIT_DIR_PLACEHOLDER));
 
 export const isKitHooksGrant = (name: unknown): name is KitHooksGrant =>
   typeof name === "string" && /^hooks:[0-9a-f]{16}$/.test(name);
@@ -503,6 +520,9 @@ export const KIT_METHODS = {
   "panes.list": "panes.read",
   "panes.send": "panes.send",
   "files.read": "files.read",
+  "files.readBinary": "files.read",
+  "files.list": "files.read",
+  "files.write": "files.write",
   "data.read": "data.read",
   "data.write": "data.write",
   "loopback.fetch": KIT_LOOPBACK_PATTERN,
@@ -525,6 +545,15 @@ export const KIT_SDK_PATH = "/_hangar/kit.js";
 
 /** The most `files.read` returns, in bytes. */
 export const KIT_FILE_MAX_BYTES = 1024 * 1024;
+
+/** The most `files.readBinary` reads, in bytes (kits/files.rs). */
+export const KIT_BINARY_MAX_BYTES = 10 * 1024 * 1024;
+
+/** The most files `files.list` gives (kits/files.rs). */
+export const KIT_LIST_MAX_FILES = 2000;
+
+/** The longest glob `files.list` takes (kits/files.rs). */
+export const KIT_LIST_PATTERN_MAX_CHARS = 256;
 
 /** The most `data.read` returns and `data.write` takes, in bytes. */
 export const KIT_DATA_MAX_BYTES = 1024 * 1024;
