@@ -8,9 +8,13 @@
 //!   so a kit's document has an opaque origin wherever it is opened — the
 //!   tab's iframe (sandboxed too, by the window), a window of its own. Tauri
 //!   counts this scheme among the app's own origins, so a page served
-//!   without it would stand where Hangar's own page stands; with it, its IPC
-//!   requests carry `Origin: null`, which Tauri refuses, and it has no
-//!   storage of its own nor any way to Hangar's;
+//!   without it would stand where Hangar's own page stands; with it, it has
+//!   no storage of its own nor any way to Hangar's, and no way to Hangar's
+//!   commands: Tauri's script is injected in the frame too, but its IPC
+//!   request is refused by the policy below (`ipc.localhost` is not the
+//!   kit's), and the webview's message channel does not carry a frame's
+//!   messages — checked on Windows with a tab invoking `model_save_png` and
+//!   `pty_write`: no answer, no file, nothing typed;
 //! - the same policy allows the kit's own files and the SDK and nothing
 //!   else: no network, no frames, no workers, no forms, no plugins. Inline
 //!   scripts and styles run, since that is how a small tab is written;
@@ -25,7 +29,7 @@
 //!
 //! URLs are `<base>/<kit id>/<path in the kit>`, the base being
 //! `http://hangar-kit.localhost` on Windows and `hangar-kit://localhost`
-//! elsewhere (`kitTabUrl` in src/lib/kitTabs.ts builds both).
+//! elsewhere (`kitFileUrl` in src/lib/kitTabs.ts builds both).
 
 pub mod files;
 
