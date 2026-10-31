@@ -184,6 +184,7 @@ pub fn run() {
             kits::kits_list,
             kits::kit_add_folder,
             kits::kit_add_git,
+            kits::gallery::kit_gallery_list,
             kits::kit_remove,
             kits::kit_check_update,
             kits::kit_update,

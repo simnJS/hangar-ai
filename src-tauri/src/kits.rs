@@ -17,6 +17,7 @@
 pub mod commands;
 pub mod data;
 pub mod files;
+pub mod gallery;
 mod hooks;
 pub mod loopback;
 mod manifest;

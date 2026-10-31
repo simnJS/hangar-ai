@@ -25,7 +25,9 @@ import {
   onKitsChanged,
   type KitInfo,
 } from "../../lib/kits";
+import { galleryInstallUrl, kitGalleryList, type Gallery } from "../../lib/kitGallery";
 import { KitActivation, KitIcon } from "../KitActivation";
+import { KitsGalleryView, type KitsGalleryProps } from "./KitsGallery";
 import { WorkspaceKitsDialog } from "../WorkspaceDialog";
 import { useStore } from "../../store";
 import { everywhereKits, workspaceKits, type KitGrant } from "../../lib/kits";
@@ -55,6 +57,8 @@ export type UpdateNote =
 
 export interface KitsViewProps {
   t: Translator;
+  /** The library; left out, the page has none (the views drawn without Rust). */
+  gallery?: Omit<KitsGalleryProps, "t" | "installed">;
   /** Null until Rust has answered. */
   kits: KitInfo[] | null;
   error: string | null;
@@ -308,6 +312,8 @@ export function KitsView(props: KitsViewProps) {
         </div>
       )}
 
+      {props.gallery && <KitsGalleryView t={t} installed={kits} {...props.gallery} />}
+
       <Block title={t("kitsManage.installed")}>
         {kits === null ? (
           <div className="set-row">
@@ -415,6 +421,12 @@ export function KitsSettings() {
   const [folderError, setFolderError] = useState<string | null>(null);
   const [gitUrl, setGitUrl] = useState("");
   const [gitError, setGitError] = useState<string | null>(null);
+  const [gallery, setGallery] = useState<Gallery | null>(null);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [galleryRefreshing, setGalleryRefreshing] = useState(false);
+  const [galleryQuery, setGalleryQuery] = useState("");
+  const [galleryBusy, setGalleryBusy] = useState<string | null>(null);
+  const [galleryFailure, setGalleryFailure] = useState<{ id: string; name: string; detail: string } | null>(null);
   const { state, updateSettings } = useStore();
   const [managing, setManaging] = useState<string | null>(null);
   const [activating, setActivating] = useState<string | null>(null);
@@ -440,16 +452,31 @@ export function KitsSettings() {
     }
   }, []);
 
+  const loadGallery = useCallback(async () => {
+    setGalleryRefreshing(true);
+    try {
+      const list = await kitGalleryList();
+      if (!live.current) return;
+      setGallery(list);
+      setGalleryError(null);
+    } catch (err) {
+      if (live.current) setGalleryError(message(err));
+    } finally {
+      if (live.current) setGalleryRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
     live.current = true;
     void refresh();
+    void loadGallery();
     // The store changed — here, in another window, or a linked folder edited.
     const stop = onKitsChanged(() => void refresh());
     return () => {
       live.current = false;
       void stop.then((off) => off()).catch(() => undefined);
     };
-  }, [refresh]);
+  }, [refresh, loadGallery]);
 
   const setNote = (id: string, note: UpdateNote | null) =>
     setNotes(({ [id]: _was, ...rest }) => (note ? { ...rest, [id]: note } : rest));
@@ -490,6 +517,33 @@ export function KitsSettings() {
       setGitError(message(err));
     } finally {
       setAdding(null);
+    }
+  }
+
+  async function installFromGallery(id: string) {
+    const entry = gallery?.kits.find((item) => item.id === id);
+    if (!entry) return;
+    setGalleryFailure(null);
+    setFlash(null);
+    setGalleryBusy(id);
+    try {
+      const added = await kitAddGit(galleryInstallUrl(id));
+      setFlash(t("kitsManage.galleryInstalledFlash", { name: kitName(added) }));
+      await refresh();
+    } catch (err) {
+      setGalleryFailure({ id, name: entry.name, detail: message(err) });
+    } finally {
+      setGalleryBusy(null);
+    }
+  }
+
+  async function updateFromGallery(kit: KitInfo) {
+    setGalleryFailure(null);
+    setGalleryBusy(kit.id);
+    try {
+      await update(kit);
+    } finally {
+      setGalleryBusy(null);
     }
   }
 
@@ -568,6 +622,18 @@ export function KitsSettings() {
         .map((ws) => ({ id: ws.id, name: ws.name, kits: workspaceKits(ws).length }))}
       onManageWorkspace={setManaging}
       t={t}
+      gallery={{
+        gallery,
+        error: galleryError,
+        refreshing: galleryRefreshing,
+        busy: galleryBusy,
+        failure: galleryFailure,
+        query: galleryQuery,
+        onQuery: setGalleryQuery,
+        onRefresh: () => void loadGallery(),
+        onInstall: (id) => void installFromGallery(id),
+        onUpdate: (kit) => void updateFromGallery(kit),
+      }}
       kits={kits}
       error={error}
       flash={flash}

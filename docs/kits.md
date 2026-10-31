@@ -1257,6 +1257,71 @@ step installed there, stay — and records the new version; for a folder kit it
 records the version the folder's manifest declares now. A remote whose manifest
 now names another kit id is refused as an update.
 
+## The library
+
+Settings › Kits has a **Library**: the public kits of this repository, one click
+to install. No server of ours stands behind it — the list is a static file of the
+repository, `kits/index.json`:
+
+```json
+{
+  "schema": 1,
+  "kits": [
+    {
+      "id": "ci-status",
+      "name": "CI status",
+      "description": "A tab that follows a GitHub Actions run.",
+      "path": "kits/ci-status",
+      "version": "0.1.0",
+      "permissionsSummary": "Runs gh to read CI runs, shows a tab, sends notifications.",
+      "tags": ["ci", "github"]
+    }
+  ]
+}
+```
+
+`id`, `name` and `version` are those of the kit's `hangar-kit.json`; `path` is
+`kits/<id>`; `permissionsSummary` is one sentence for the card, never what the
+activation shows (that is read from the kit itself). A Rust test fails when the
+index lists a folder that does not exist, or when an id, name or version differs;
+a kit folder that is not in the index yet does not fail it.
+
+**How a kit gets listed.** A kit never edits `kits/index.json` (several kits are
+written in parallel, and they would all touch that one file). It carries its own
+card in its `hangar-kit.json`, in a `gallery` block that Hangar's manifest reader
+ignores, like any key it does not know:
+
+```json
+"gallery": {
+  "permissionsSummary": "Runs gh to read CI runs, shows a tab, sends notifications.",
+  "tags": ["ci", "github"]
+}
+```
+
+`node scripts/kits-index.mjs` rebuilds `kits/index.json` from the `hangar-kit.json`
+of every folder of `kits/` (`id`, `name`, `description`, `version`, plus that
+block), and `node scripts/kits-index.mjs --check` exits non-zero when the file
+differs. **The index is rebuilt at release**, before the tag, and committed with
+it: until then a new kit is on the branch but not in the library. The release runs
+`--check` to be sure nothing is left out.
+
+`kit_gallery_list` reads `https://raw.githubusercontent.com/simnJS/hangar-ai/main/kits/index.json`
+over https: no redirect, 256 KB at most, ten seconds at most. It is the only thing
+the library fetches — no icon, no manifest. An entry that is not well formed (an
+id outside `[a-z0-9-]`, a `path` other than `kits/<id>`, a version that is not
+semver, a repeated id) is dropped and the others stay. The last good list is kept
+in `gallery-cache.json` beside the store; when GitHub cannot be reached, that
+copy is shown and the page says so (`origin: "cached"`), and with none yet it
+says the library cannot be reached (`"unavailable"`). Nothing is logged for it.
+
+A card shows the name, description, tags and what the kit will ask; whether it is
+installed and at which version; an update when the index has a newer version than
+a git kit's `installedVersion` (a linked folder is yours: no update offered).
+**Install** is `kit_add_git` on `https://github.com/simnJS/hangar-ai/tree/main/kits/<id>`
+— nothing runs and nothing is enabled by it. The person sees what the kit does,
+and accepts it, in the activation, as for any kit. There is one source in this
+version, and no way to add another.
+
 ## Workspaces
 
 A workspace in `state.json` lists the kits enabled on it:
@@ -1293,6 +1358,7 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 | `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>` of what its plugin runs by itself, null when it runs nothing), `hooksConsent`, `commandsPermission` (`commands:<hash>` for this OS, null without commands). |
 | `kit_add_folder(path)`       | `kitAddFolder(path)`         | `KitInfo`. `path` absolute, holding a valid kit.                                           |
 | `kit_add_git(url)`           | `kitAddGit(url)`             | `KitInfo`. `url` a GitHub link as above.                                                   |
+| `kit_gallery_list`           | `kitGalleryList()`           | `{ origin: "live" \| "cached" \| "unavailable", kits, fetchedAt }`: the library, see [The library](#the-library). Never refuses.  |
 | `kit_remove(id)`             | `kitRemove(id)`              | Nothing. Deletes only a clone Hangar made.                                                 |
 | `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit.                  |
 | `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`.                                                                                 |

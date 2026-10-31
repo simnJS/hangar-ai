@@ -1,0 +1,1604 @@
+/*
+ * Hangar UI: what makes a kit's tab look like a part of Hangar (docs/kit-ui.md).
+ * Served at /_hangar/kit.css. No dependency; its one other file is the font.
+ *
+ * The first part is generated from Hangar's own sources, and a test fails when
+ * it no longer matches. Everything after it is written by hand, on those tokens
+ * only, so a change of colour, radius or size in Hangar reaches every component.
+ */
+
+/* hangar-ui:generated:start, by scripts/gen-hangar-ui.mjs: do not edit by hand */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(inter.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+:root {
+  --kit-scale: 1;
+  --kit-font: "Inter Variable", -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --kit-mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  --kit-radius-xs: 4px;
+  --kit-radius-sm: 5px;
+  --kit-radius: 6px;
+  --kit-radius-lg: 8px;
+  --kit-radius-xl: 10px;
+  --kit-dur: 140ms;
+  --kit-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --kit-h-control: calc(26px * var(--kit-scale));
+  --kit-h-small: calc(22px * var(--kit-scale));
+  --kit-h-row: calc(28px * var(--kit-scale));
+  --kit-h-rich-row: calc(42px * var(--kit-scale));
+  --kit-h-search: calc(28px * var(--kit-scale));
+  --kit-h-filter: calc(24px * var(--kit-scale));
+  --kit-h-head: calc(48px * var(--kit-scale));
+  --kit-h-bar: calc(32px * var(--kit-scale));
+  --kit-h-menu-item: calc(26px * var(--kit-scale));
+  --kit-h-notice: calc(30px * var(--kit-scale));
+  --kit-h-tabs: calc(26px * var(--kit-scale));
+  --kit-fs-title: calc(15px * var(--kit-scale));
+  --kit-fs-body: calc(13px * var(--kit-scale));
+  --kit-fs-row: calc(12.5px * var(--kit-scale));
+  --kit-fs-control: calc(12px * var(--kit-scale));
+  --kit-fs-small: calc(11.5px * var(--kit-scale));
+  --kit-fs-meta: calc(11px * var(--kit-scale));
+  --kit-fs-label: calc(10.5px * var(--kit-scale));
+  --kit-fs-chip: calc(10px * var(--kit-scale));
+  --kit-fs-code: calc(11.5px * var(--kit-scale));
+  --kit-title-tracking: -0.01em;
+  --kit-caps-tracking: 0.06em;
+  --kit-font-features: "cv11", "ss01";
+  --kit-switch-w: calc(30px * var(--kit-scale));
+  --kit-switch-h: calc(18px * var(--kit-scale));
+  --kit-switch-knob: calc(14px * var(--kit-scale));
+  --kit-dot: calc(8px * var(--kit-scale));
+  --kit-glyph: calc(10px * var(--kit-scale));
+  --kit-progress-h: 3px;
+  --kit-scrollbar: 9px;
+  --kit-space-2: 2px;
+  --kit-space-4: 4px;
+  --kit-space-6: 6px;
+  --kit-space-8: 8px;
+  --kit-space-10: 10px;
+  --kit-space-12: 12px;
+  --kit-space-16: 16px;
+  --kit-space-20: 20px;
+  --kit-space-24: 24px;
+  --kit-icon-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7.1 2.9a1 1 0 0 1 1.8 0l5.3 9.4a1 1 0 0 1-.9 1.5H2.7a1 1 0 0 1-.9-1.5z'/%3E%3Cpath d='M8 6.4v3'/%3E%3Ccircle cx='8' cy='11.5' r='.35' fill='currentColor'/%3E%3C/svg%3E");
+  --kit-icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.4 2.9 2.9 6.1-6.6'/%3E%3C/svg%3E");
+  --kit-icon-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 6 8 10.5 12.5 6'/%3E%3C/svg%3E");
+  --kit-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 4.5 7 7m0-7-7 7'/%3E%3C/svg%3E");
+  --kit-icon-copy: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5.4' y='5.4' width='8.2' height='8.2' rx='1.6'/%3E%3Cpath d='M10.6 5.4V3.9a1.5 1.5 0 0 0-1.5-1.5H3.9a1.5 1.5 0 0 0-1.5 1.5v5.2a1.5 1.5 0 0 0 1.5 1.5h1.5'/%3E%3C/svg%3E");
+  --kit-icon-info: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 11V7.33M8 5h.01'/%3E%3C/svg%3E");
+  --kit-icon-lock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.67' y='7.33' width='10.67' height='7.33' rx='1.33'/%3E%3Cpath d='M5.33 7.33V4.67a2.67 2.67 0 0 1 5.34 0v2.66'/%3E%3C/svg%3E");
+  --kit-icon-more: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='3.6' cy='8' r='.9' fill='currentColor' stroke='none'/%3E%3Ccircle cx='8' cy='8' r='.9' fill='currentColor' stroke='none'/%3E%3Ccircle cx='12.4' cy='8' r='.9' fill='currentColor' stroke='none'/%3E%3C/svg%3E");
+  --kit-icon-plus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3.25v9.5M3.25 8h9.5'/%3E%3C/svg%3E");
+  --kit-icon-restart: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 8.2A5 5 0 1 1 11.3 4.4'/%3E%3Cpath d='M11.6 1.9v2.8H8.8'/%3E%3C/svg%3E");
+  --kit-icon-search: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.4'/%3E%3Cpath d='m10.3 10.3 3.3 3.3'/%3E%3C/svg%3E");
+  --kit-icon-updown: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.2 8 3.2l3 3M5 9.8l3 3 3-3'/%3E%3C/svg%3E");
+}
+:root,
+:root[data-kit-scheme="light"] {
+  color-scheme: light;
+  --kit-bg: #f5f5f5;
+  --kit-surface: #ffffff;
+  --kit-raised: #ededed;
+  --kit-float: #f0f0f0;
+  --kit-field: #ffffff;
+  --kit-well: #ffffff;
+  --kit-hover: #ebebeb;
+  --kit-selected: #dedede;
+  --kit-seg-track: #dedede;
+  --kit-seg-thumb: #ffffff;
+  --kit-text: #24292f;
+  --kit-text-dim: #595c61;
+  --kit-text-muted: #686c71;
+  --kit-text-faint: #696c71;
+  --kit-line: rgba(0, 0, 0, 0.08);
+  --kit-border: rgba(0, 0, 0, 0.14);
+  --kit-border-hover: #cccccc;
+  --kit-sep: #dbdbdb;
+  --kit-accent: #0969da;
+  --kit-accent-text: #085cc0;
+  --kit-accent-soft: rgba(9, 105, 218, 0.14);
+  --kit-accent-ring: rgba(9, 105, 218, 0.45);
+  --kit-on-accent: #ffffff;
+  --kit-focus: #085cc0;
+  --kit-ok: #116329;
+  --kit-ok-fill: #116329;
+  --kit-warn: #9b4708;
+  --kit-warn-fill: #b45309;
+  --kit-danger: #ba1f29;
+  --kit-danger-soft: rgba(186, 31, 41, 0.14);
+  --kit-neutral: #5c6065;
+  --kit-neutral-fill: #797b7d;
+  --kit-shadow: rgba(0,0,0,0.12);
+  --kit-float-ring: rgba(0,0,0,0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-kit-scheme]) {
+    color-scheme: dark;
+    --kit-bg: #1b1c1f;
+    --kit-surface: #232426;
+    --kit-raised: #232426;
+    --kit-float: #202124;
+    --kit-field: #121316;
+    --kit-well: #0c0c0e;
+    --kit-hover: #252629;
+    --kit-selected: #313234;
+    --kit-seg-track: #121316;
+    --kit-seg-thumb: #3d3e41;
+    --kit-text: #c8c9ce;
+    --kit-text-dim: #9c9da2;
+    --kit-text-muted: #8c8d91;
+    --kit-text-faint: #898a8e;
+    --kit-line: rgba(255, 255, 255, 0.07);
+    --kit-border: rgba(255, 255, 255, 0.12);
+    --kit-border-hover: #414245;
+    --kit-sep: #090a0b;
+    --kit-accent: #3e8bff;
+    --kit-accent-text: #68a5ff;
+    --kit-accent-soft: rgba(62, 139, 255, 0.14);
+    --kit-accent-ring: rgba(62, 139, 255, 0.45);
+    --kit-on-accent: #0b192e;
+    --kit-focus: #68a5ff;
+    --kit-ok: #5fd27f;
+    --kit-ok-fill: #5fd27f;
+    --kit-warn: #e7c06b;
+    --kit-warn-fill: #e7c06b;
+    --kit-danger: #ff7b72;
+    --kit-danger-soft: rgba(255, 123, 114, 0.14);
+    --kit-neutral: #999a9f;
+    --kit-neutral-fill: #7b7c80;
+    --kit-shadow: rgba(0,0,0,0.45);
+    --kit-float-ring: rgba(0,0,0,0.55);
+  }
+}
+:root[data-kit-scheme="dark"] {
+  color-scheme: dark;
+  --kit-bg: #1b1c1f;
+  --kit-surface: #232426;
+  --kit-raised: #232426;
+  --kit-float: #202124;
+  --kit-field: #121316;
+  --kit-well: #0c0c0e;
+  --kit-hover: #252629;
+  --kit-selected: #313234;
+  --kit-seg-track: #121316;
+  --kit-seg-thumb: #3d3e41;
+  --kit-text: #c8c9ce;
+  --kit-text-dim: #9c9da2;
+  --kit-text-muted: #8c8d91;
+  --kit-text-faint: #898a8e;
+  --kit-line: rgba(255, 255, 255, 0.07);
+  --kit-border: rgba(255, 255, 255, 0.12);
+  --kit-border-hover: #414245;
+  --kit-sep: #090a0b;
+  --kit-accent: #3e8bff;
+  --kit-accent-text: #68a5ff;
+  --kit-accent-soft: rgba(62, 139, 255, 0.14);
+  --kit-accent-ring: rgba(62, 139, 255, 0.45);
+  --kit-on-accent: #0b192e;
+  --kit-focus: #68a5ff;
+  --kit-ok: #5fd27f;
+  --kit-ok-fill: #5fd27f;
+  --kit-warn: #e7c06b;
+  --kit-warn-fill: #e7c06b;
+  --kit-danger: #ff7b72;
+  --kit-danger-soft: rgba(255, 123, 114, 0.14);
+  --kit-neutral: #999a9f;
+  --kit-neutral-fill: #7b7c80;
+  --kit-shadow: rgba(0,0,0,0.45);
+  --kit-float-ring: rgba(0,0,0,0.55);
+}
+/* hangar-ui:generated:end */
+
+:root {
+  /* How tall a code or log block grows before it scrolls inside itself. */
+  --kit-log-height: 320px;
+}
+
+/* ---------- Base ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Whatever a component's own `display` says. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--kit-bg);
+  color: var(--kit-text);
+  font-family: var(--kit-font);
+  font-optical-sizing: auto;
+  font-feature-settings: var(--kit-font-features);
+  font-size: var(--kit-fs-body);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--kit-accent-soft);
+}
+
+::-webkit-scrollbar {
+  width: var(--kit-scrollbar);
+  height: var(--kit-scrollbar);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--kit-border-hover);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--kit-text-faint);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* The focus ring, on everything that has the keyboard. Hangar's own ring is the
+   accent at 45 %; a kit's page is held to 3:1, so this one is the opaque accent. */
+:focus-visible {
+  outline: 2px solid var(--kit-focus);
+  outline-offset: 1px;
+}
+
+/* Underlined before it is pointed at, so it is never taken for a state word. */
+a {
+  color: var(--kit-accent-text);
+  text-decoration: underline;
+  text-decoration-color: var(--kit-accent-soft);
+  text-underline-offset: 2px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ---------- Layout ---------- */
+
+.kit-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: var(--kit-space-16);
+  padding: var(--kit-space-12);
+}
+
+/* A page that does not scroll as a whole: a head, and one part that does. */
+.kit-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.kit-grow {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.kit-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kit-space-8);
+}
+
+/* A line of controls that wraps rather than overflows. */
+.kit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-6);
+  min-width: 0;
+}
+
+/* The toolbar under a head, or the status line at the foot of a page. */
+.kit-bar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-4) var(--kit-space-6);
+  min-height: var(--kit-h-bar);
+  padding: var(--kit-space-4) var(--kit-space-12);
+  border-bottom: 1px solid var(--kit-line);
+}
+.kit-bar--foot {
+  border-top: 1px solid var(--kit-line);
+  border-bottom: 0;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+}
+
+/* ---------- Text ---------- */
+
+.kit-dim {
+  color: var(--kit-text-dim);
+}
+.kit-muted {
+  color: var(--kit-text-muted);
+}
+.kit-small {
+  font-size: var(--kit-fs-small);
+}
+.kit-mono {
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-code);
+  font-variant-ligatures: none;
+}
+/* A number: right-aligned, each digit as wide as the others. */
+.kit-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* One line and an ellipsis; the element's `title` holds the whole value. */
+.kit-truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kit-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.kit-code {
+  padding: 0 var(--kit-space-4);
+  border-radius: var(--kit-radius-xs);
+  background: var(--kit-line);
+  font-family: var(--kit-mono);
+  font-size: 0.92em;
+  font-variant-ligatures: none;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Page header ---------- */
+
+.kit-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-6) var(--kit-space-12);
+  min-height: var(--kit-h-head);
+  padding: var(--kit-space-8) var(--kit-space-12);
+  border-bottom: 1px solid var(--kit-line);
+}
+.kit-header__main {
+  display: grid;
+  flex: 1 1 calc(140px * var(--kit-scale));
+  gap: 1px;
+  min-width: 0;
+}
+.kit-header__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--kit-fs-title);
+  font-weight: 600;
+  letter-spacing: var(--kit-title-tracking);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-header__state {
+  margin: 0;
+  overflow: hidden;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-6);
+  max-width: 100%;
+}
+
+/* ---------- Section ---------- */
+
+.kit-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kit-space-4);
+}
+.kit-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kit-space-6);
+  min-height: var(--kit-h-small);
+  padding: 0 var(--kit-space-8);
+}
+.kit-section__title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--kit-text-muted);
+  font-size: var(--kit-fs-label);
+  font-weight: 600;
+  letter-spacing: var(--kit-caps-tracking);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.kit-section__count {
+  flex: none;
+  color: var(--kit-text-muted);
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-label);
+  font-variant-numeric: tabular-nums;
+}
+.kit-section__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--kit-space-4);
+  margin-left: auto;
+}
+
+/* ---------- Row list ---------- */
+
+.kit-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The navigator's row: a glyph, what it is, and what ends the line. */
+.kit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kit-space-8);
+  width: 100%;
+  min-height: var(--kit-h-row);
+  padding: 5px var(--kit-space-8);
+  border: 0;
+  border-radius: var(--kit-radius);
+  background: transparent;
+  color: var(--kit-text);
+  font-size: var(--kit-fs-row);
+  line-height: 1.4;
+  text-align: left;
+  text-decoration: none;
+  transition: background var(--kit-dur) var(--kit-ease);
+}
+a.kit-row,
+button.kit-row {
+  cursor: pointer;
+}
+a.kit-row:hover,
+button.kit-row:hover,
+.kit-row[tabindex]:hover {
+  background: var(--kit-hover);
+}
+.kit-row:focus-visible {
+  outline-offset: -2px;
+}
+.kit-row.is-selected,
+.kit-row[aria-selected="true"],
+.kit-row[aria-current]:not([aria-current="false"]) {
+  background: var(--kit-selected);
+}
+.kit-row.is-selected .kit-row__title,
+.kit-row[aria-selected="true"] .kit-row__title,
+.kit-row[aria-current]:not([aria-current="false"]) .kit-row__title {
+  font-weight: 600;
+}
+/* As tall as the title's line, so a glyph stays beside it on a two-line row. */
+.kit-row__lead {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: var(--kit-space-16);
+  height: 1.4em;
+  color: var(--kit-text-muted);
+}
+.kit-row__main {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+.kit-row__title {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-row__sub {
+  overflow: hidden;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-row__end {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+  line-height: calc(1.4em * 12.5 / 11);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What is too long to lose: the title and the line under it wrap. */
+.kit-row--wrap .kit-row__title,
+.kit-row--wrap .kit-row__sub {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* The settings' grouped box: rows on a surface, split by inset hairlines. */
+.kit-rows--group {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--kit-line);
+  border-radius: var(--kit-radius-lg);
+  background: var(--kit-surface);
+}
+.kit-rows--group .kit-row {
+  position: relative;
+  min-height: var(--kit-h-rich-row);
+  padding: var(--kit-space-8) var(--kit-space-12);
+  border-radius: 0;
+}
+.kit-rows--group > li + li > .kit-row::before,
+.kit-rows--group > .kit-row + .kit-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: var(--kit-space-12);
+  left: var(--kit-space-12);
+  height: 1px;
+  background: var(--kit-line);
+}
+
+/* ---------- Button ---------- */
+
+.kit-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kit-space-6);
+  max-width: 100%;
+  min-height: var(--kit-h-control);
+  padding: var(--kit-space-4) 11px;
+  border: 1px solid var(--kit-border);
+  border-radius: var(--kit-radius);
+  background: var(--kit-raised);
+  color: var(--kit-text);
+  font-size: var(--kit-fs-control);
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--kit-dur), border-color var(--kit-dur), opacity var(--kit-dur);
+}
+.kit-btn:hover:not(:disabled) {
+  border-color: var(--kit-border-hover);
+  background: var(--kit-hover);
+}
+.kit-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.kit-btn--primary {
+  border-color: transparent;
+  background: var(--kit-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: var(--kit-on-accent);
+  font-weight: 600;
+}
+.kit-btn--primary:hover:not(:disabled) {
+  border-color: var(--kit-accent);
+  background: var(--kit-accent);
+  filter: brightness(1.08);
+}
+
+.kit-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.kit-btn--ghost:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+/* Destructive: the colour in the text and the outline, a tint under the pointer. */
+.kit-btn--danger {
+  border-color: color-mix(in srgb, var(--kit-danger) 40%, transparent);
+  color: var(--kit-danger);
+}
+.kit-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--kit-danger) 60%, transparent);
+  background: color-mix(in srgb, var(--kit-danger) 8%, var(--kit-raised));
+  color: var(--kit-text);
+}
+
+.kit-btn--small {
+  min-height: var(--kit-h-small);
+  padding: 2px 9px;
+  font-size: var(--kit-fs-small);
+}
+
+/* A square button holding one icon: its label is its `title` and `aria-label`. */
+.kit-btn--icon {
+  width: var(--kit-h-control);
+  padding: 0;
+  color: var(--kit-text-dim);
+}
+.kit-btn--icon.kit-btn--small {
+  width: var(--kit-h-small);
+}
+.kit-btn--icon:hover:not(:disabled) {
+  color: var(--kit-text);
+}
+
+/* ---------- Icon ---------- */
+
+.kit-icon {
+  display: block;
+  flex: none;
+  width: calc(14px * var(--kit-scale));
+  height: calc(14px * var(--kit-scale));
+  background: currentColor;
+  -webkit-mask: var(--kit-icon) center / contain no-repeat;
+  mask: var(--kit-icon) center / contain no-repeat;
+}
+.kit-icon--alert { --kit-icon: var(--kit-icon-alert); }
+.kit-icon--check { --kit-icon: var(--kit-icon-check); }
+.kit-icon--chevron-down { --kit-icon: var(--kit-icon-chevron-down); }
+.kit-icon--close { --kit-icon: var(--kit-icon-close); }
+.kit-icon--copy { --kit-icon: var(--kit-icon-copy); }
+.kit-icon--info { --kit-icon: var(--kit-icon-info); }
+.kit-icon--lock { --kit-icon: var(--kit-icon-lock); }
+.kit-icon--more { --kit-icon: var(--kit-icon-more); }
+.kit-icon--plus { --kit-icon: var(--kit-icon-plus); }
+.kit-icon--restart { --kit-icon: var(--kit-icon-restart); }
+.kit-icon--search { --kit-icon: var(--kit-icon-search); }
+
+/* ---------- Fields ---------- */
+
+.kit-input,
+.kit-select select {
+  width: 100%;
+  min-height: var(--kit-h-control);
+  padding: 3px var(--kit-space-8);
+  border: 1px solid var(--kit-border);
+  border-radius: var(--kit-radius-sm);
+  outline: none;
+  background: var(--kit-field);
+  color: var(--kit-text);
+  font-size: var(--kit-fs-control);
+  line-height: 1.4;
+  transition: border-color var(--kit-dur), box-shadow var(--kit-dur);
+}
+.kit-input:focus,
+.kit-select select:focus-visible {
+  border-color: var(--kit-focus);
+  box-shadow: 0 0 0 3px var(--kit-accent-soft);
+}
+.kit-input::placeholder,
+.kit-search input::placeholder {
+  color: var(--kit-text-faint);
+}
+.kit-input:disabled,
+.kit-select select:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.kit-input[aria-invalid="true"] {
+  border-color: var(--kit-danger);
+}
+textarea.kit-input {
+  display: block;
+  min-height: calc(64px * var(--kit-scale));
+  resize: vertical;
+}
+
+/* The chevrons are the wrapper's: a native arrow cannot be recoloured. */
+.kit-select {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+}
+.kit-select select {
+  padding-right: calc(24px * var(--kit-scale));
+  appearance: none;
+  -webkit-appearance: none;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.kit-select select option {
+  background: var(--kit-float);
+  color: var(--kit-text);
+}
+.kit-select::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: calc(10px * var(--kit-scale));
+  height: calc(10px * var(--kit-scale));
+  transform: translateY(-50%);
+  background: var(--kit-text-muted);
+  -webkit-mask: var(--kit-icon-updown) center / contain no-repeat;
+  mask: var(--kit-icon-updown) center / contain no-repeat;
+  pointer-events: none;
+}
+
+/* A label, its control, and what it needs saying under it. */
+.kit-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kit-space-4);
+}
+.kit-field__label {
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+  font-weight: 500;
+}
+.kit-field__hint {
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+}
+.kit-field__error {
+  color: var(--kit-danger);
+  font-size: var(--kit-fs-meta);
+}
+
+.kit-search {
+  display: flex;
+  flex: 1 1 calc(140px * var(--kit-scale));
+  align-items: center;
+  gap: var(--kit-space-6);
+  min-width: 0;
+  height: var(--kit-h-search);
+  padding: 0 var(--kit-space-4) 0 var(--kit-space-8);
+  border: 1px solid var(--kit-border);
+  border-radius: var(--kit-radius);
+  background: var(--kit-field);
+  transition: border-color var(--kit-dur), box-shadow var(--kit-dur);
+}
+.kit-search:focus-within {
+  border-color: var(--kit-focus);
+  box-shadow: 0 0 0 3px var(--kit-accent-soft);
+}
+.kit-search::before {
+  content: "";
+  flex: none;
+  width: calc(14px * var(--kit-scale));
+  height: calc(14px * var(--kit-scale));
+  background: var(--kit-text-muted);
+  -webkit-mask: var(--kit-icon-search) center / contain no-repeat;
+  mask: var(--kit-icon-search) center / contain no-repeat;
+}
+.kit-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--kit-fs-control);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.kit-search input::-webkit-search-cancel-button {
+  display: none;
+}
+/* Round, inside the field: the system's own clear button. */
+.kit-search__clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(18px * var(--kit-scale));
+  height: calc(18px * var(--kit-scale));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--kit-selected);
+  color: var(--kit-text-muted);
+  cursor: pointer;
+  transition: background var(--kit-dur), color var(--kit-dur);
+}
+.kit-search__clear:hover {
+  background: var(--kit-border-hover);
+  color: var(--kit-text);
+}
+.kit-search__clear::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: var(--kit-icon-close) center / contain no-repeat;
+  mask: var(--kit-icon-close) center / contain no-repeat;
+}
+
+/* The checkbox covers the whole label, so all of it is the hit area. */
+.kit-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kit-space-8);
+  min-width: 0;
+  font-size: var(--kit-fs-control);
+  cursor: pointer;
+}
+.kit-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: inherit;
+  opacity: 0;
+}
+.kit-switch__track {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: var(--kit-switch-w);
+  height: var(--kit-switch-h);
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--kit-border-hover);
+  transition: background var(--kit-dur);
+}
+/* White in every theme: a physical part of the control, not a colour with a meaning. */
+.kit-switch__track::after {
+  content: "";
+  width: var(--kit-switch-knob);
+  height: var(--kit-switch-knob);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  transition: transform var(--kit-dur) var(--kit-ease);
+}
+.kit-switch input:checked + .kit-switch__track {
+  background: var(--kit-accent);
+}
+.kit-switch input:checked + .kit-switch__track::after {
+  transform: translateX(calc(var(--kit-switch-w) - var(--kit-switch-h)));
+}
+.kit-switch input:focus-visible + .kit-switch__track {
+  outline: 2px solid var(--kit-focus);
+  outline-offset: 1px;
+}
+.kit-switch input:disabled + .kit-switch__track {
+  opacity: 0.45;
+}
+.kit-switch:has(input:disabled) {
+  cursor: default;
+}
+
+/* ---------- Chips ---------- */
+
+.kit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-4);
+  min-width: 0;
+}
+
+/* A short word something is filed under. */
+.kit-chip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 var(--kit-space-6);
+  border-radius: var(--kit-radius-xs);
+  background: var(--kit-line);
+  color: var(--kit-text-dim);
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-chip);
+  font-weight: 500;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A filter left on hides things, so it is drawn to be seen. */
+.kit-filter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--kit-space-6);
+  max-width: 100%;
+  height: var(--kit-h-filter);
+  padding: 0 var(--kit-space-8);
+  border: 0;
+  border-radius: var(--kit-radius);
+  background: var(--kit-line);
+  box-shadow: inset 0 0 0 1px var(--kit-line);
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-control);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--kit-dur), box-shadow var(--kit-dur), color var(--kit-dur);
+}
+/* Under the pointer its outline comes forward: a lighter fill would thin the label. */
+.kit-filter:hover {
+  box-shadow: inset 0 0 0 1px var(--kit-border-hover);
+  color: var(--kit-text);
+}
+.kit-filter[aria-pressed="true"] {
+  background: var(--kit-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--kit-accent-ring);
+  color: var(--kit-text);
+  font-weight: 500;
+}
+.kit-filter__count {
+  color: var(--kit-text-dim);
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-label);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.kit-filter[aria-pressed="true"] .kit-filter__count {
+  color: inherit;
+}
+.kit-filter__count--danger,
+.kit-filter[aria-pressed="true"] .kit-filter__count--danger {
+  color: var(--kit-danger);
+}
+
+/* ---------- State: dot, glyph, word ---------- */
+
+/* Shape and colour both say the state, so it reads for anyone who cannot tell
+   green from amber. A dot goes where a glyph would crowd, as on a navigator row. */
+.kit-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--kit-dot);
+  height: var(--kit-dot);
+  border-radius: 50%;
+  background: var(--kit-neutral-fill);
+}
+.kit-dot--running,
+.kit-dot--success {
+  background: var(--kit-ok-fill);
+}
+/* A ring that grows and fades: something is happening, quietly. */
+.kit-dot--running::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1.5px solid var(--kit-ok-fill);
+  border-radius: 50%;
+  opacity: 0;
+  animation: kit-pulse 2.4s var(--kit-ease) infinite;
+}
+.kit-dot--failure {
+  border-radius: 1.5px;
+  background: var(--kit-danger);
+}
+.kit-dot--waiting {
+  border-radius: 1.5px;
+  background: var(--kit-warn-fill);
+  transform: rotate(45deg) scale(0.86);
+}
+.kit-dot--neutral {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--kit-neutral-fill);
+}
+
+/* The glyph a state is shown by, the same as on the tab in Hangar's strip. Alone
+   it takes `role="img"` and an `aria-label`; `.kit-state` draws it before its word. */
+.kit-glyph,
+.kit-state::before {
+  display: inline-block;
+  flex: none;
+  width: calc(var(--kit-glyph) + 2px);
+  height: calc(var(--kit-glyph) + 2px);
+}
+.kit-glyph--success,
+.kit-state--success::before {
+  background: var(--kit-ok);
+  -webkit-mask: var(--kit-icon-check) center / contain no-repeat;
+  mask: var(--kit-icon-check) center / contain no-repeat;
+}
+.kit-glyph--failure,
+.kit-state--failure::before {
+  background: var(--kit-danger);
+  -webkit-mask: var(--kit-icon-alert) center / contain no-repeat;
+  mask: var(--kit-icon-alert) center / contain no-repeat;
+}
+.kit-glyph--running,
+.kit-state--running::before {
+  width: var(--kit-glyph);
+  height: var(--kit-glyph);
+  margin: 1px;
+  border: 1.5px solid var(--kit-border);
+  border-top-color: var(--kit-text-muted);
+  border-radius: 50%;
+  animation: kit-spin 0.8s linear infinite;
+}
+/* The one state that wants something: a diamond, not a dot. */
+.kit-glyph--waiting,
+.kit-state--waiting::before {
+  width: calc(var(--kit-glyph) - 2px);
+  height: calc(var(--kit-glyph) - 2px);
+  margin: 2px;
+  border-radius: 1.5px;
+  background: var(--kit-warn-fill);
+  transform: rotate(45deg) scale(0.86);
+}
+.kit-glyph--neutral,
+.kit-state--neutral::before {
+  width: calc(var(--kit-glyph) - 4px);
+  height: calc(var(--kit-glyph) - 4px);
+  margin: 3px;
+  border-radius: 50%;
+  background: var(--kit-neutral-fill);
+}
+
+/* A glyph and a word: how a kit says a state, never with a coloured page. */
+.kit-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kit-space-4);
+  max-width: 100%;
+  vertical-align: bottom;
+  font-weight: 500;
+}
+.kit-state::before {
+  content: "";
+}
+.kit-state--success {
+  color: var(--kit-ok);
+}
+.kit-state--failure {
+  color: var(--kit-danger);
+}
+.kit-state--running {
+  color: var(--kit-text-dim);
+}
+.kit-state--waiting {
+  color: var(--kit-warn);
+}
+.kit-state--neutral {
+  color: var(--kit-neutral);
+}
+
+@keyframes kit-pulse {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.6);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+@keyframes kit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Progress ---------- */
+
+/* `role="progressbar"`, with its `aria-valuenow` while it has a value. */
+.kit-progress {
+  position: relative;
+  width: 100%;
+  height: var(--kit-progress-h);
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--kit-border);
+}
+.kit-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--kit-accent);
+  transition: width 120ms linear;
+}
+.kit-progress--success .kit-progress__fill {
+  background: var(--kit-ok-fill);
+}
+.kit-progress--failure .kit-progress__fill {
+  background: var(--kit-danger);
+}
+/* Without a size to measure against: a bar that travels instead of fills. */
+.kit-progress--indeterminate .kit-progress__fill {
+  width: 34%;
+  animation: kit-travel 1.1s var(--kit-ease) infinite;
+}
+/* What it last knew, broken into dashes: it may no longer be true. */
+.kit-progress--stale {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--kit-line);
+}
+.kit-progress--stale .kit-progress__fill {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--kit-neutral-fill) 0 4px,
+    transparent 4px 7px
+  );
+  transition: none;
+}
+@keyframes kit-travel {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* ---------- Banner ---------- */
+
+/* A line in the flow of the page, a state's word in a hairline: the text stays the
+   page's own colour, so a long message reads as easily as anything else on it. */
+.kit-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-4) var(--kit-space-8);
+  min-height: var(--kit-h-notice);
+  margin: 0;
+  padding: var(--kit-space-4) var(--kit-space-6) var(--kit-space-4) var(--kit-space-10);
+  border: 1px solid var(--kit-line);
+  border-radius: var(--kit-radius);
+  background: var(--kit-surface);
+  font-size: var(--kit-fs-control);
+}
+.kit-banner::before {
+  content: "";
+  flex: none;
+  width: calc(14px * var(--kit-scale));
+  height: calc(14px * var(--kit-scale));
+  background: var(--kit-text-muted);
+  -webkit-mask: var(--kit-icon-info) center / contain no-repeat;
+  mask: var(--kit-icon-info) center / contain no-repeat;
+}
+.kit-banner__text {
+  flex: 1 1 calc(160px * var(--kit-scale));
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kit-banner__action {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--kit-space-4);
+  margin-left: auto;
+}
+.kit-banner--warning {
+  border-color: color-mix(in srgb, var(--kit-warn-fill) 45%, transparent);
+  background: color-mix(in srgb, var(--kit-warn-fill) 8%, var(--kit-bg));
+}
+.kit-banner--warning::before {
+  background: var(--kit-warn);
+  -webkit-mask: var(--kit-icon-alert) center / contain no-repeat;
+  mask: var(--kit-icon-alert) center / contain no-repeat;
+}
+.kit-banner--error {
+  border-color: color-mix(in srgb, var(--kit-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--kit-danger) 8%, var(--kit-bg));
+}
+.kit-banner--error::before {
+  background: var(--kit-danger);
+  -webkit-mask: var(--kit-icon-alert) center / contain no-repeat;
+  mask: var(--kit-icon-alert) center / contain no-repeat;
+}
+
+/* ---------- Empty, loading, error, denied ---------- */
+
+/* What a part of a page shows when it has nothing else: says why, and what to do. */
+.kit-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: var(--kit-space-6);
+  padding: var(--kit-space-24) var(--kit-space-16);
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-control);
+  line-height: 1.5;
+  text-align: center;
+}
+.kit-empty__icon {
+  color: var(--kit-text-muted);
+}
+.kit-empty__title {
+  margin: 0;
+  color: var(--kit-text);
+  font-size: var(--kit-fs-body);
+  font-weight: 600;
+}
+.kit-empty__text {
+  max-width: 44ch;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.kit-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--kit-space-6);
+  margin-top: var(--kit-space-4);
+}
+
+/* ---------- Code and log ---------- */
+
+/* Mono, wrapped, and scrolling inside itself: give it `tabindex="0"` for the keyboard. */
+.kit-pre,
+.kit-log {
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--kit-line);
+  border-radius: var(--kit-radius);
+  background: var(--kit-well);
+  color: var(--kit-text);
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-code);
+  font-variant-ligatures: none;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.kit-pre {
+  max-height: var(--kit-log-height);
+  padding: var(--kit-space-8) var(--kit-space-10);
+  white-space: pre-wrap;
+}
+.kit-log {
+  max-height: var(--kit-log-height);
+  padding: var(--kit-space-6) 0;
+  overflow-anchor: none;
+}
+.kit-log__line {
+  display: flex;
+  gap: var(--kit-space-8);
+  padding: 0 var(--kit-space-10);
+}
+.kit-log__num {
+  flex: none;
+  min-width: 3ch;
+  color: var(--kit-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+.kit-log__text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.kit-log__line--head {
+  color: var(--kit-text-dim);
+  font-weight: 600;
+}
+.kit-log__line--warning {
+  background: color-mix(in srgb, var(--kit-warn-fill) 10%, var(--kit-well));
+  box-shadow: inset 2px 0 0 var(--kit-warn-fill);
+}
+.kit-log__line--error {
+  background: color-mix(in srgb, var(--kit-danger) 11%, var(--kit-well));
+  box-shadow: inset 2px 0 0 var(--kit-danger);
+}
+/* On a tint the number takes a step up, to stay readable. */
+.kit-log__line--warning .kit-log__num,
+.kit-log__line--error .kit-log__num {
+  color: var(--kit-text-dim);
+}
+/* The error the page was opened on, or moved to. */
+.kit-log__line.is-current {
+  outline: 1px solid var(--kit-danger);
+  outline-offset: -1px;
+}
+.kit-list__chunk {
+  min-height: 1px;
+}
+
+/* What `hangar.ui.log` builds: the log, and a line saying how many errors it holds. */
+.kit-logbox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kit-space-4);
+  min-width: 0;
+}
+.kit-logbox__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-4) var(--kit-space-6);
+  min-height: var(--kit-h-small);
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+}
+.kit-logbox__count {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ---------- Key/value list ---------- */
+
+.kit-kv {
+  display: grid;
+  grid-template-columns: minmax(auto, 40%) minmax(0, 1fr);
+  gap: var(--kit-space-4) var(--kit-space-10);
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--kit-fs-small);
+}
+.kit-kv dt {
+  min-width: 0;
+  color: var(--kit-text-muted);
+  text-align: right;
+}
+.kit-kv dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Tabs ---------- */
+
+/* Hangar's segmented control: a recessed track, the chosen one lifted out of it.
+   More tabs than fit scroll inside the track, never the page. */
+.kit-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  max-width: 100%;
+  min-height: var(--kit-h-tabs);
+  overflow-x: auto;
+  padding: 2px;
+  border-radius: var(--kit-radius);
+  background: var(--kit-seg-track);
+  box-shadow: inset 0 0 0 1px var(--kit-border);
+  scrollbar-width: none;
+  vertical-align: bottom;
+}
+.kit-tabs::-webkit-scrollbar {
+  display: none;
+}
+.kit-tab {
+  flex: none;
+  min-width: 0;
+  padding: 0 var(--kit-space-10);
+  border: 0;
+  border-radius: var(--kit-radius-xs);
+  background: transparent;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-control);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--kit-dur), color var(--kit-dur);
+}
+.kit-tab:hover {
+  color: var(--kit-text);
+}
+.kit-tab[aria-selected="true"] {
+  background: var(--kit-seg-thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--kit-border);
+  color: var(--kit-text);
+}
+.kit-tab:focus-visible {
+  outline-offset: -2px;
+}
+.kit-tabpanel {
+  min-width: 0;
+}
+
+/* ---------- Inline confirmation ---------- */
+
+.kit-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kit-space-4) var(--kit-space-6);
+  max-width: 100%;
+}
+.kit-confirm__text {
+  color: var(--kit-text);
+  font-size: var(--kit-fs-small);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Menu ---------- */
+
+.kit-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: calc(160px * var(--kit-scale));
+  max-width: min(calc(280px * var(--kit-scale)), calc(100vw - 16px));
+  max-height: min(340px, 60vh);
+  overflow-y: auto;
+  padding: var(--kit-space-4);
+  border-radius: var(--kit-radius-lg);
+  background: var(--kit-float);
+  box-shadow:
+    inset 0 0 0 1px var(--kit-border),
+    0 0 0 1px var(--kit-sep),
+    0 14px 34px -10px var(--kit-shadow);
+}
+.kit-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--kit-space-6);
+  width: 100%;
+  min-height: var(--kit-h-menu-item);
+  padding: 2px var(--kit-space-10) 2px var(--kit-space-4);
+  border: 0;
+  border-radius: var(--kit-radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--kit-text);
+  font-size: var(--kit-fs-control);
+  text-align: left;
+  cursor: pointer;
+}
+.kit-menu__item:hover,
+.kit-menu__item:focus {
+  background: var(--kit-hover);
+}
+.kit-menu__item:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--kit-focus);
+}
+.kit-menu__item:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.kit-menu__item--danger {
+  color: var(--kit-danger);
+}
+.kit-menu__check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(16px * var(--kit-scale));
+  color: var(--kit-accent-text);
+}
+.kit-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-menu__hint {
+  flex: none;
+  color: var(--kit-text-dim);
+  font-size: var(--kit-fs-meta);
+}
+.kit-menu__sep {
+  height: 1px;
+  margin: var(--kit-space-4);
+  background: var(--kit-line);
+}
+
+/* ---------- Toast ---------- */
+
+.kit-toasts {
+  position: fixed;
+  right: var(--kit-space-8);
+  bottom: var(--kit-space-8);
+  left: var(--kit-space-8);
+  z-index: 50;
+  display: grid;
+  justify-items: center;
+  gap: var(--kit-space-6);
+  pointer-events: none;
+}
+.kit-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--kit-space-6);
+  max-width: min(100%, 44ch);
+  min-height: var(--kit-h-notice);
+  padding: var(--kit-space-4) var(--kit-space-4) var(--kit-space-4) var(--kit-space-10);
+  border-radius: var(--kit-radius-lg);
+  background: var(--kit-float);
+  box-shadow:
+    inset 0 0 0 1px var(--kit-border),
+    0 0 0 1px var(--kit-float-ring),
+    0 10px 28px -10px var(--kit-shadow);
+  font-size: var(--kit-fs-control);
+  pointer-events: auto;
+  animation: kit-toast-in var(--kit-dur) var(--kit-ease);
+}
+.kit-toast::before {
+  content: "";
+  flex: none;
+  width: calc(14px * var(--kit-scale));
+  height: calc(14px * var(--kit-scale));
+  background: var(--kit-text-muted);
+  -webkit-mask: var(--kit-icon-info) center / contain no-repeat;
+  mask: var(--kit-icon-info) center / contain no-repeat;
+}
+.kit-toast--success::before {
+  background: var(--kit-ok);
+  -webkit-mask: var(--kit-icon-check) center / contain no-repeat;
+  mask: var(--kit-icon-check) center / contain no-repeat;
+}
+.kit-toast--warning::before {
+  background: var(--kit-warn);
+  -webkit-mask: var(--kit-icon-alert) center / contain no-repeat;
+  mask: var(--kit-icon-alert) center / contain no-repeat;
+}
+.kit-toast--error::before {
+  background: var(--kit-danger);
+  -webkit-mask: var(--kit-icon-alert) center / contain no-repeat;
+  mask: var(--kit-icon-alert) center / contain no-repeat;
+}
+.kit-toast__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@keyframes kit-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---------- Without movement ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .kit-dot--running::after,
+  .kit-glyph--running,
+  .kit-state--running::before,
+  .kit-toast {
+    animation: none;
+  }
+  .kit-dot--running::after {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+  .kit-progress--indeterminate .kit-progress__fill {
+    width: 100%;
+    animation: none;
+    opacity: 0.45;
+  }
+  * {
+    transition: none !important;
+  }
+}
