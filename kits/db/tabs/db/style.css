@@ -1,0 +1,139 @@
+/* Only what Hangar UI has no component for: the grid of rows. Tokens only, no colour of its own. */
+.db-scroll {
+  max-width: 100%;
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--kit-line);
+  border-radius: var(--kit-radius);
+  background: var(--kit-surface);
+}
+
+.db-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-code);
+  color: var(--kit-text);
+}
+
+.db-table th,
+.db-table td {
+  padding: var(--kit-space-4) var(--kit-space-8);
+  border-bottom: 1px solid var(--kit-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.db-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--kit-surface);
+  border-bottom-color: var(--kit-sep);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.db-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.db-cell {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-cell--open {
+  max-width: 60ch;
+  white-space: normal;
+}
+
+.db-cell--open .db-cell__text {
+  display: block;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.db-table td.db-cell--num,
+.db-table th.db-th--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.db-cell--dim {
+  color: var(--kit-text-muted);
+  font-style: italic;
+}
+
+.db-cell .db-more {
+  display: flex;
+  width: max-content;
+  margin: 0 0 var(--kit-space-2) calc(-1 * var(--kit-space-6));
+  font-family: var(--kit-font);
+}
+
+.db-cell--open .db-more {
+  position: sticky;
+  left: 0;
+}
+
+.db-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kit-space-4);
+  max-width: 24ch;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.db-sort__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-sort__arrow {
+  flex: none;
+}
+
+.db-sort__arrow--up {
+  transform: rotate(180deg);
+}
+
+.db-handover {
+  display: flex;
+  margin-top: var(--kit-space-8);
+  flex-direction: column;
+  gap: var(--kit-space-8);
+  margin-bottom: var(--kit-space-8);
+}
+
+.kit-section + .kit-section,
+.kit-banner + .kit-section,
+.kit-field + .kit-banner,
+.kit-field + .kit-empty {
+  margin-top: var(--kit-space-12);
+}
+
+.db-name {
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-body);
+  font-weight: 600;
+  color: var(--kit-text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.db-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kit-space-8);
+  margin-top: var(--kit-space-8);
+}
