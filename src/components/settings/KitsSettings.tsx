@@ -532,6 +532,8 @@ export function KitsSettings() {
   function toggleEverywhere(kit: KitInfo, on: boolean) {
     setFlash(null);
     if (on) {
+      // The switch is disabled for a kit that cannot be used; keep it true here too.
+      if (kit.error || !kit.manifest) return;
       setActivating(kit.id);
       return;
     }
