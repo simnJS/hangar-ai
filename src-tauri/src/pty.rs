@@ -19,6 +19,9 @@ struct PtySession {
     live: Arc<AtomicBool>,
     /// What the pane printed last, for a window that takes it over.
     history: Arc<Mutex<History>>,
+    /// The Claude account its Claude Code was started on (accounts.rs);
+    /// `None` for a pane that is not Claude Code.
+    account: Option<String>,
 }
 
 /// How much of a pane's output is kept for a window that takes the pane over
@@ -60,6 +63,10 @@ impl History {
 pub struct PtyHistory {
     data: String,
     end: u64,
+    /// The Claude account the pane's Claude Code was started on, for a window
+    /// taking it over; absent for a pane that is not Claude Code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
 }
 
 /// Everything the manager tracks, behind one lock: an id is live, being reaped,
@@ -267,12 +274,40 @@ fn apply_plugins(
     issues
 }
 
+/// A Claude Code pane on a profile runs with `CLAUDE_CONFIG_DIR` naming the
+/// profile's folder; every other pane, and one on the main account, keeps
+/// the environment Hangar has (accounts.rs).
+fn apply_account(cmd: &mut CommandBuilder, agent: Option<&str>, dir: Option<&std::path::Path>) {
+    for (name, value) in crate::accounts::env_for(agent, dir) {
+        match value {
+            Some(value) => cmd.env(name, value),
+            None => cmd.env_remove(name),
+        }
+    }
+}
+
 /// What a spawn tells the pane besides succeeding.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Spawned {
     /// Kits the pane was given that stay out of it, and why.
     kit_issues: Vec<crate::kits::LaunchIssue>,
+    /// The Claude account the pane's Claude Code runs on: the one asked for,
+    /// or main when it is gone. Absent for a pane that is not Claude Code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
+    /// What the account's profile could not take from the main account.
+    account_issues: Vec<crate::accounts::Issue>,
+}
+
+/// How many live panes were started on `account`.
+pub fn panes_on(manager: &PtyManager, account: &str) -> usize {
+    manager
+        .lock()
+        .sessions
+        .values()
+        .filter(|session| session.account.as_deref() == Some(account))
+        .count()
 }
 
 // The arguments are the command's IPC fields, named as the frontend sends them.
@@ -291,6 +326,8 @@ pub fn pty_spawn(
     port_base: Option<u16>,
     mcp_config: Option<String>,
     kits: Option<Vec<String>>,
+    agent: Option<String>,
+    claude_account: Option<String>,
 ) -> Result<Spawned, String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
@@ -376,6 +413,18 @@ pub fn pty_spawn(
     );
     apply_ports(&mut cmd, port_base);
     apply_mcp_config(&mut cmd, mcp_config.as_deref());
+    // The account's profile is brought level with the main account before
+    // its Claude Code starts on it.
+    let launch = crate::accounts::for_launch(agent.as_deref(), claude_account.as_deref());
+    apply_account(
+        &mut cmd,
+        agent.as_deref(),
+        launch.as_ref().and_then(|launch| launch.dir.as_deref()),
+    );
+    let (account, account_issues) = match launch {
+        Some(launch) => (Some(launch.id), launch.issues),
+        None => (None, Vec::new()),
+    };
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -394,6 +443,7 @@ pub fn pty_spawn(
             child,
             live: live.clone(),
             history: history.clone(),
+            account: account.clone(),
         },
     );
 
@@ -447,7 +497,11 @@ pub fn pty_spawn(
         }
     });
 
-    Ok(Spawned { kit_issues })
+    Ok(Spawned {
+        kit_issues,
+        account,
+        account_issues,
+    })
 }
 
 #[tauri::command]
@@ -583,6 +637,7 @@ pub fn pty_history(manager: State<'_, PtyManager>, id: String) -> Result<PtyHist
     Ok(PtyHistory {
         data: history.text.clone(),
         end: history.end,
+        account: session.account.clone(),
     })
 }
 
@@ -734,6 +789,39 @@ mod tests {
             other.env("HANGAR_MCP_CONFIG", "/elsewhere.json");
             apply_mcp_config(&mut other, none);
             assert_eq!(other.get_env("HANGAR_MCP_CONFIG"), None);
+        }
+    }
+
+    #[test]
+    fn only_a_claude_code_pane_on_a_profile_gets_its_config_dir() {
+        let profile = std::path::Path::new("/home/me/.hangar/accounts/work");
+        let inherited = "/home/me/custom-claude";
+
+        let mut claude = CommandBuilder::new("pwsh");
+        claude.env("CLAUDE_CONFIG_DIR", inherited);
+        claude.env("CLAUDE_SECURESTORAGE_CONFIG_DIR", inherited);
+        apply_account(&mut claude, Some("claude"), Some(profile));
+        assert_eq!(
+            claude.get_env("CLAUDE_CONFIG_DIR"),
+            Some(profile.as_os_str())
+        );
+        assert_eq!(claude.get_env("CLAUDE_SECURESTORAGE_CONFIG_DIR"), None);
+
+        // The main account, and every other agent, keep what Hangar has.
+        for (agent, dir) in [
+            (Some("claude"), None),
+            (Some("codex"), Some(profile)),
+            (Some("shell"), Some(profile)),
+            (None, Some(profile)),
+        ] {
+            let mut other = CommandBuilder::new("pwsh");
+            other.env("CLAUDE_CONFIG_DIR", inherited);
+            apply_account(&mut other, agent, dir);
+            assert_eq!(
+                other.get_env("CLAUDE_CONFIG_DIR"),
+                Some(std::ffi::OsStr::new(inherited)),
+                "{agent:?}"
+            );
         }
     }
 

@@ -1,3 +1,4 @@
+mod accounts;
 mod board;
 mod bridge;
 mod chat;
@@ -74,6 +75,8 @@ pub fn run() {
             });
             // `kits:changed` when a linked kit's manifest is edited on disk.
             kits::watch(app.handle().clone());
+            // `accounts:changed` when a Claude account logs in or out.
+            accounts::watch(app.handle().clone());
 
             let handle = app.handle().clone();
             let token = endpoint::generate_token();
@@ -111,6 +114,11 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_alive,
             pty::pty_has_children,
+            accounts::accounts_list,
+            accounts::account_add,
+            accounts::account_rename,
+            accounts::account_remove,
+            accounts::accounts_support,
             bridge::bridge_enqueue,
             bridge::bridge_cancel,
             bridge::bridge_queue,

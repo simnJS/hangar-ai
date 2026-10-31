@@ -54,7 +54,10 @@ pub struct Roots {
 
 impl Roots {
     /// The agents' own defaults, and the variables each one reads to move
-    /// them.
+    /// them. Claude Code's are the main account's `projects/`, which every
+    /// Claude account's profile shares, so a turn made on any account is
+    /// counted once — plus the folder of a profile that could not share it
+    /// (accounts.rs).
     pub fn from_env() -> Self {
         let home = dirs::home_dir().unwrap_or_default();
         let under = |var: &str, fallback: &str| {
@@ -63,10 +66,13 @@ impl Roots {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(fallback))
         };
-        let claude = under("CLAUDE_CONFIG_DIR", ".claude");
+        let mut claude = crate::accounts::projects_dirs();
+        if claude.is_empty() {
+            claude.push(under("CLAUDE_CONFIG_DIR", ".claude").join("projects"));
+        }
         let codex = under("CODEX_HOME", ".codex");
         Self {
-            claude: vec![claude.join("projects")],
+            claude,
             codex: vec![codex.join("sessions"), codex.join("archived_sessions")],
         }
     }
