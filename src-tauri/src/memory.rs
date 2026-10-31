@@ -923,7 +923,7 @@ mod tests {
                 title: "Linux quirk".into(),
                 content: "paths are fine".into(),
                 tags: vec!["linux".into()],
-                workspace: "/home/simnjs/other".into(),
+                workspace: "/home/me/other".into(),
                 ..NewMemory::default()
             },
         )

@@ -22,11 +22,11 @@ const DAYS = 150;
 const HOME = "C:\\Users\\me\\Documents";
 
 const ROOTS: ProjectRoot[] = [
-  { workspaceId: "ws-iabench", name: "IaBench", path: "c:/users/simnjs/documents/iabench" },
-  { workspaceId: "ws-iabench", name: "IaBench", path: "c:/users/simnjs/documents/iabench-worktrees" },
-  { workspaceId: "ws-storefront", name: "storefront", path: "c:/users/simnjs/documents/storefront" },
-  { workspaceId: "ws-billing", name: "billing-api", path: "c:/users/simnjs/documents/billing-api" },
-  { workspaceId: "ws-recipes", name: "recipes-app", path: "c:/users/simnjs/documents/recipes-app" },
+  { workspaceId: "ws-iabench", name: "IaBench", path: "c:/users/me/documents/iabench" },
+  { workspaceId: "ws-iabench", name: "IaBench", path: "c:/users/me/documents/iabench-worktrees" },
+  { workspaceId: "ws-storefront", name: "storefront", path: "c:/users/me/documents/storefront" },
+  { workspaceId: "ws-billing", name: "billing-api", path: "c:/users/me/documents/billing-api" },
+  { workspaceId: "ws-recipes", name: "recipes-app", path: "c:/users/me/documents/recipes-app" },
 ];
 
 /** Dollars per million tokens: input, output, cache write, cache read. */
