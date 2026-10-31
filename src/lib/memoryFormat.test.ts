@@ -7,7 +7,7 @@ describe("compactPath", () => {
   });
 
   it("keeps the end of a long Windows path", () => {
-    expect(compactPath("C:\\Users\\simnJS\\Documents\\IaBench", 22)).toBe("…\\Documents\\IaBench");
+    expect(compactPath("C:\\Users\\me\\Documents\\IaBench", 20)).toBe("…\\Documents\\IaBench");
   });
 
   it("keeps the end of a long POSIX path", () => {

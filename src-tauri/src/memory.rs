@@ -912,7 +912,7 @@ mod tests {
                 title: "Windows quirk".into(),
                 content: "paths are backslashed".into(),
                 tags: vec!["Windows".into()],
-                workspace: "C:/Users/simnJS/Documents/Hangar".into(),
+                workspace: "C:/Users/me/Documents/Hangar".into(),
                 ..NewMemory::default()
             },
         )
@@ -923,7 +923,7 @@ mod tests {
                 title: "Linux quirk".into(),
                 content: "paths are fine".into(),
                 tags: vec!["linux".into()],
-                workspace: "/home/simnjs/other".into(),
+                workspace: "/home/me/other".into(),
                 ..NewMemory::default()
             },
         )

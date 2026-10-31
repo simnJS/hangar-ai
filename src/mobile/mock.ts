@@ -229,7 +229,7 @@ function scenery(now: number, locale: Locale) {
       "  Anything else for this sprint?",
     ]),
     pane("ws-storefront", "p-shell", "shell", null, null, [
-      "PS C:\\Users\\simnJS\\Documents\\storefront> pnpm preview",
+      "PS C:\\Users\\me\\Documents\\storefront> pnpm preview",
       "",
       "  ➜  Local:   http://localhost:4173/",
       "  ➜  Network: use --host to expose",
@@ -742,7 +742,7 @@ export function createMock(scenario: Scenario, now = Date.now(), locale: Locale 
       const size = body instanceof Blob ? body.size : 0;
       await pause(Math.min(4000, 400 + size / 2000));
       const stamp = new Date().toISOString().slice(0, 19).replace("T", "-").replace(/:/g, "");
-      return json(200, { path: `C:\\Users\\simnJS\\Documents\\IaBench\\.hangar\\uploads\\${stamp}-${name}` });
+      return json(200, { path: `C:\\Users\\me\\Documents\\IaBench\\.hangar\\uploads\\${stamp}-${name}` });
     }
 
     const op = /^\/m\/api\/call\/(\w+)$/.exec(path)?.[1];
