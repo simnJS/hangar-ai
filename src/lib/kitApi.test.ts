@@ -3,6 +3,7 @@ import type { PaneActivity } from "./agentState";
 import {
   createKitHost,
   dataRelativePath,
+  kitMayCallEvent,
   kitPanes,
   kitSender,
   workspaceRelativePath,
@@ -14,6 +15,11 @@ import {
   KIT_SEND_MAX,
   KIT_SEND_MAX_CHARS,
   KIT_SEND_WINDOW_MS,
+  KIT_TAB_BADGE_TEXT_MAX,
+  KIT_TAB_CHANGE_MAX,
+  KIT_TAB_CHANGE_WINDOW_MS,
+  KIT_TAB_PARAMS_EVENT,
+  KIT_TAB_TITLE_MAX,
   type KitFrame,
   type KitHost,
   type KitHostDeps,
@@ -94,6 +100,9 @@ let clock = 1_000_000;
 let granted: string[] = [...KIT_PERMISSIONS];
 let current: Workspace | null = workspace;
 let commandsAccepted: string | null = null;
+let tabParams: Record<string, string> = {};
+/** What the tab's calls changed of the tab itself. */
+let tabChanges: unknown[] = [];
 
 const COMMAND_ANSWER = { exitCode: 0, stdout: "{}", stderr: "", timedOut: false, truncated: false };
 
@@ -125,6 +134,9 @@ function setup(overrides: Partial<KitHostDeps> = {}) {
       workspace: () => current,
       permissions: () => granted,
       commandsAccepted: () => commandsAccepted,
+      params: () => tabParams,
+      setTitle: (title) => tabChanges.push({ title }),
+      setBadge: (badge) => tabChanges.push({ badge }),
     },
     deps,
   );
@@ -146,6 +158,152 @@ beforeEach(() => {
   granted = [...KIT_PERMISSIONS];
   current = workspace;
   commandsAccepted = null;
+  tabParams = {};
+  tabChanges = [];
+});
+
+describe("what a tab may ask about itself, with no permission", () => {
+  beforeEach(() => {
+    granted = [];
+  });
+
+  it("tab.params answers what it was opened with, and nothing without any", async () => {
+    const { call } = setup();
+    expect((await call("tab.params"))?.result).toEqual({ params: {} });
+    tabParams = { run: "4567" };
+    expect((await call("tab.params", {}))?.result).toEqual({ params: { run: "4567" } });
+  });
+
+  it("the tab.params event reaches its page whatever it was granted", () => {
+    const { host, sent } = setup();
+    host.emit(KIT_TAB_PARAMS_EVENT, { params: { view: "b" } });
+    expect(sent).toEqual([{ hangar: 1, event: "tab.params", data: { params: { view: "b" } } }]);
+    // The others still take their permission.
+    host.emit("panes.changed", {});
+    expect(sent).toHaveLength(1);
+    expect(kitMayCallEvent("tab.params", [])).toBe(true);
+    expect(kitMayCallEvent("panes.changed", [])).toBe(false);
+  });
+
+  it("tab.setTitle takes a short plain text, trimmed", async () => {
+    const { call } = setup();
+    const title = "x".repeat(KIT_TAB_TITLE_MAX);
+    expect((await call("tab.setTitle", { title }))?.result).toEqual({});
+    await call("tab.setTitle", { title: "  Run #4567 " });
+    expect(tabChanges).toEqual([{ title }, { title: "Run #4567" }]);
+    expect(KIT_TAB_TITLE_MAX).toBe(40);
+  });
+
+  it("tab.setTitle counts what a person sees, and keeps markup as text", async () => {
+    const { call } = setup();
+    const emoji = "🚀".repeat(KIT_TAB_TITLE_MAX);
+    expect(errorOf(await call("tab.setTitle", { title: emoji }))).toBeUndefined();
+    expect(errorOf(await call("tab.setTitle", { title: "<b>Run</b>" }))).toBeUndefined();
+    expect(tabChanges).toEqual([{ title: emoji }, { title: "<b>Run</b>" }]);
+  });
+
+  it("tab.setTitle refuses what is too long, empty, or not plain text on one line", async () => {
+    const { call } = setup();
+    for (const title of [
+      "x".repeat(KIT_TAB_TITLE_MAX + 1),
+      "",
+      "   ",
+      "two\nlines",
+      "a\tb",
+      "‮reversed",
+      "zero​width",
+      42,
+      null,
+      undefined,
+    ]) {
+      const answer = await call("tab.setTitle", { title });
+      expect(answer?.error?.code, String(title)).toBe("invalid");
+      expect(answer?.error?.message.startsWith("title "), String(title)).toBe(true);
+    }
+    expect(errorOf(await call("tab.setTitle"))).toBe("invalid");
+    expect(tabChanges).toEqual([]);
+  });
+
+  it("tab.setBadge takes each state, with a short text or none", async () => {
+    const { call } = setup();
+    for (const state of ["running", "success", "failure", "neutral"]) {
+      expect((await call("tab.setBadge", { state }))?.result).toEqual({});
+    }
+    await call("tab.setBadge", { state: "running", text: "x".repeat(KIT_TAB_BADGE_TEXT_MAX) });
+    await call("tab.setBadge", { state: "neutral", text: null });
+    await call("tab.setBadge", { state: null });
+    expect(tabChanges).toEqual([
+      { badge: { state: "running", text: null } },
+      { badge: { state: "success", text: null } },
+      { badge: { state: "failure", text: null } },
+      { badge: { state: "neutral", text: null } },
+      { badge: { state: "running", text: "x".repeat(12) } },
+      { badge: { state: "neutral", text: null } },
+      { badge: null },
+    ]);
+    expect(KIT_TAB_BADGE_TEXT_MAX).toBe(12);
+  });
+
+  it("tab.setBadge refuses a state it does not know, and a text past its limit", async () => {
+    const { call } = setup();
+    for (const params of [
+      {},
+      { state: "pending" },
+      { state: "constructor" },
+      { state: 1 },
+      { state: "running", text: "x".repeat(KIT_TAB_BADGE_TEXT_MAX + 1) },
+      { state: "running", text: "" },
+      { state: "running", text: "a\nb" },
+      { state: "running", text: 12 },
+      "running",
+    ]) {
+      expect(errorOf(await call("tab.setBadge", params)), JSON.stringify(params)).toBe("invalid");
+    }
+    expect(tabChanges).toEqual([]);
+  });
+
+  it("limits how often each may redraw the strip, and lets go after a minute", async () => {
+    const { call } = setup();
+    for (let i = 0; i < KIT_TAB_CHANGE_MAX; i += 1) {
+      expect(errorOf(await call("tab.setBadge", { state: "running" }))).toBeUndefined();
+    }
+    expect(errorOf(await call("tab.setBadge", { state: "running" }))).toBe("rate_limited");
+    // Each its own: a badge counting does not stop the title.
+    expect(errorOf(await call("tab.setTitle", { title: "Run" }))).toBeUndefined();
+    clock += KIT_TAB_CHANGE_WINDOW_MS;
+    expect(errorOf(await call("tab.setBadge", { state: "running" }))).toBeUndefined();
+  }, 30_000);
+
+  it("is not on the list of methods a permission gives, and an unknown name stays unknown", async () => {
+    for (const method of ["tab.params", "tab.setTitle", "tab.setBadge"]) {
+      expect(Object.keys(KIT_METHODS)).not.toContain(method);
+    }
+    const { call } = setup();
+    expect(errorOf(await call("tab.close"))).toBe("unknown");
+    expect(errorOf(await call("constructor"))).toBe("unknown");
+    expect(errorOf(await call("__proto__"))).toBe("unknown");
+  });
+
+  it("answers nothing from another frame, about this tab or any", async () => {
+    const { host, sent } = setup();
+    const stranger = makeFrame();
+    host.receive({ source: stranger.frame, origin: "null", data: { hangar: 1, id: "x", method: "tab.params" } });
+    host.receive({ source: stranger.frame, origin: "null", data: { hangar: 1, id: "y", method: "tab.setTitle", params: { title: "Mine" } } });
+    await settle();
+    expect(sent).toEqual([]);
+    expect(stranger.sent).toEqual([]);
+    expect(tabChanges).toEqual([]);
+  });
+
+  it("does nothing once the tab is closed", async () => {
+    const { host, frame, sent } = setup();
+    host.close();
+    host.receive({ source: frame, origin: "null", data: { hangar: 1, id: "x", method: "tab.setTitle", params: { title: "Late" } } });
+    host.emit(KIT_TAB_PARAMS_EVENT, { params: {} });
+    await settle();
+    expect(sent).toEqual([]);
+    expect(tabChanges).toEqual([]);
+  });
 });
 
 /** Each method, with params it accepts and what its fake deps answer. */

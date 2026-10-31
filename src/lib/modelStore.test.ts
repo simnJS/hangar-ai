@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { modelFormatOf, modelUrl } from "./modelFiles";
 import {
   activateModel,
@@ -11,6 +11,8 @@ import {
   isKitTab,
   isModel,
   isPreviewFile,
+  kitParamsKey,
+  kitTabParams,
   kitTabPath,
   markModelsSeen,
   modelScope,
@@ -18,11 +20,16 @@ import {
   pruneModels,
   reloadKitTab,
   reloadModel,
+  setKitTabBadge,
+  setKitTabTitle,
   setModelPanel,
   settleModel,
   showPreview,
   takeModelScope,
+  watchKitTabParams,
   whenSettled,
+  type KitTabToOpen,
+  type OpenKitTab,
   type OpenPreview,
 } from "./modelStore";
 
@@ -378,6 +385,388 @@ describe("kit tabs beside the files", () => {
     expect(modelScope("ws").models.map((entry) => entry.kind)).toEqual(["kit"]);
     closeModels([status]);
     expect(modelScope("ws")).toMatchObject({ models: [], panelOpen: false });
+  });
+
+  describe("with params", () => {
+    const run = (run: string, patch: Partial<KitTabToOpen> = {}) =>
+      openKitTab({ workspaceId: "ws", kitId: "ci", tabId: "run", title: "Run", params: { run }, ...patch });
+
+    it("knows a set of params whichever order its names came in", () => {
+      expect(kitParamsKey({ a: "1", b: "2" })).toBe(kitParamsKey({ b: "2", a: "1" }));
+      expect(kitParamsKey({ a: "1" })).not.toBe(kitParamsKey({ a: "2" }));
+      expect(kitTabPath("ci", "run")).toBe("kit:ci/run");
+      expect(kitTabPath("ci", "run", {})).toBe("kit:ci/run");
+      expect(kitTabPath("ci", "run", { b: "2", a: "1" })).toBe(kitTabPath("ci", "run", { a: "1", b: "2" }));
+      expect(kitTabPath("ci", "run", { a: "1" })).not.toBe(kitTabPath("ci", "run"));
+    });
+
+    it("holds a tab per set of params, and brings the one asked for forward", () => {
+      const one = run("1");
+      const two = run("2");
+      expect(two).not.toBe(one);
+      expect(modelScope("ws").models).toHaveLength(2);
+      expect(kitTabParams(one)).toEqual({ run: "1" });
+      expect(run("1")).toBe(one);
+      expect(modelScope("ws").activeId).toBe(one);
+      expect(modelScope("ws").models).toHaveLength(2);
+    });
+
+    it("follows its workspace to another window, and is not opened twice there", () => {
+      const one = run("1");
+      const scope = takeModelScope("ws")!;
+      expect(kitTabParams(one)).toEqual({});
+      adoptModelScope("ws", scope);
+      expect(kitTabParams(one)).toEqual({ run: "1" });
+      adoptModelScope("ws", { ...scope, models: scope.models.map((entry) => ({ ...entry, id: "again" })) });
+      expect(modelScope("ws").models).toHaveLength(1);
+    });
+
+    it("the same request opens through a workspace's host as through the store", () => {
+      const id = showPreview({
+        kind: "kit",
+        path: kitTabPath("ci", "run", { run: "1" }),
+        workspaceId: "ws",
+        kitId: "ci",
+        tabId: "run",
+        title: "Run",
+        params: { run: "1" },
+        openedBy: "Ava",
+      });
+      expect(run("1")).toBe(id);
+      expect(modelScope("ws").models[0]).toMatchObject({ kind: "kit", openedBy: "Ava" });
+    });
+
+    it("is news when an agent opens it, not when the person does", () => {
+      run("1");
+      expect(modelScope("ws").unseen).toBe(false);
+      closeAllModels();
+      run("1", { openedBy: "Ava" });
+      expect(modelScope("ws").unseen).toBe(true);
+    });
+  });
+
+  describe("a singleton", () => {
+    const board = (params?: Record<string, string>, patch: Partial<KitTabToOpen> = {}) =>
+      openKitTab({ workspaceId: "ws", kitId: "ci", tabId: "board", title: "Board", singleton: true, params, ...patch });
+
+    it("is one tab, and its page hears of new params without reloading", () => {
+      const id = board({ view: "a" });
+      const heard: unknown[] = [];
+      const stop = watchKitTabParams(id, (params) => heard.push(params));
+
+      expect(board({ view: "b" })).toBe(id);
+      expect(modelScope("ws").models).toHaveLength(1);
+      expect(kitTabParams(id)).toEqual({ view: "b" });
+      expect(modelScope("ws").models[0]).toMatchObject({ revision: 0, path: kitTabPath("ci", "board") });
+      expect(heard).toEqual([{ view: "b" }]);
+
+      // Nothing new: nothing to hear, and it keeps what it holds.
+      board({ view: "b" });
+      board();
+      board({});
+      expect(heard).toEqual([{ view: "b" }]);
+      expect(kitTabParams(id)).toEqual({ view: "b" });
+
+      stop();
+      board({ view: "c" });
+      expect(heard).toEqual([{ view: "b" }]);
+    });
+
+    it("tells only its own page", () => {
+      const mine = board({ view: "a" });
+      const other = openKitTab({
+        workspaceId: "ws",
+        kitId: "ci",
+        tabId: "other",
+        title: "Other",
+        singleton: true,
+        params: { view: "a" },
+      });
+      const heard: string[] = [];
+      watchKitTabParams(other, () => heard.push("other"));
+      board({ view: "b" });
+      expect(mine).not.toBe(other);
+      expect(heard).toEqual([]);
+      expect(kitTabParams(other)).toEqual({ view: "a" });
+    });
+  });
+
+  describe("reveal", () => {
+    const tab = (reveal?: boolean, tabId = "run") =>
+      openKitTab({ workspaceId: "ws", kitId: "ci", tabId, title: tabId, openedBy: "Ava", reveal });
+
+    it("opens the panel by default, the tab in front", () => {
+      const first = tab();
+      expect(modelScope("ws")).toMatchObject({ panelOpen: true, activeId: first });
+      setModelPanel("ws", { open: false });
+      const second = tab(true, "other");
+      expect(modelScope("ws")).toMatchObject({ panelOpen: true, activeId: second });
+    });
+
+    it("false adds the tab without opening the panel, and says it is there", () => {
+      const id = tab(false);
+      expect(modelScope("ws")).toMatchObject({ panelOpen: false, activeId: id, unseen: true });
+      expect(getModels().kits.map((entry) => entry.id)).toEqual([id]);
+    });
+
+    it("false leaves what is in front, and an open panel, as they are", () => {
+      const first = tab();
+      markModelsSeen("ws");
+      tab(false, "other");
+      expect(modelScope("ws")).toMatchObject({ panelOpen: true, activeId: first });
+      // Brought forward by nobody, and nothing changed: no news either.
+      const again = tab(false, "other");
+      expect(modelScope("ws").activeId).toBe(first);
+      expect(again).not.toBe(first);
+    });
+
+    it("false asks nothing of a tab already there", () => {
+      tab();
+      setModelPanel("ws", { open: false });
+      markModelsSeen("ws");
+      tab(false);
+      expect(modelScope("ws")).toMatchObject({ panelOpen: false, unseen: false });
+    });
+  });
+
+  describe("what a page says of itself", () => {
+    const opened = () => openKitTab({ workspaceId: "ws", kitId: "ci", tabId: "run", title: "Run" });
+
+    it("names its tab, which asking for it again leaves as it is", () => {
+      const id = opened();
+      setKitTabTitle(id, "Run #4567");
+      expect(modelScope("ws").models[0]).toMatchObject({ title: "Run #4567", titled: true });
+      opened();
+      expect(modelScope("ws").models[0].title).toBe("Run #4567");
+    });
+
+    it("sets its state in the strip, until it is taken away or the page reloads", () => {
+      const id = opened();
+      const entry = () => modelScope("ws").models[0] as OpenKitTab;
+      expect(entry().badge).toBeNull();
+      setKitTabBadge(id, { state: "running", text: "2/5" });
+      expect(entry().badge).toEqual({ state: "running", text: "2/5" });
+      setKitTabBadge(id, null);
+      expect(entry().badge).toBeNull();
+      setKitTabBadge(id, { state: "failure", text: null });
+      reloadKitTab(id);
+      expect(entry().badge).toBeNull();
+    });
+
+    it("redraws nothing when nothing changes", () => {
+      const id = opened();
+      setKitTabBadge(id, { state: "success", text: "ok" });
+      setKitTabTitle(id, "Run");
+      const before = getModels().kits;
+      setKitTabBadge(id, { state: "success", text: "ok" });
+      setKitTabTitle(id, "Run");
+      expect(getModels().kits).toBe(before);
+    });
+
+    it("reaches no other kind of tab", () => {
+      const shot = show("C:/m/chair.glb");
+      const before = getModels().entries;
+      setKitTabTitle(shot, "Nope");
+      setKitTabBadge(shot, { state: "failure", text: null });
+      expect(getModels().entries).toBe(before);
+    });
+  });
+});
+
+describe("a kit's tabs across a restart", () => {
+  /** A window's storage, which outlives the store: one fresh import per start. */
+  let saved: Map<string, string>;
+  const start = async () => {
+    vi.resetModules();
+    return import("./modelStore");
+  };
+
+  beforeEach(() => {
+    saved = new Map();
+    vi.stubGlobal("localStorage", {
+      get length() {
+        return saved.size;
+      },
+      key: (at: number) => [...saved.keys()][at] ?? null,
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const CI = { workspaceId: "ws", kitId: "ci", tabId: "run", title: "Run" };
+
+  it("keeps a tab's params, and its own title, behind a closed panel", async () => {
+    const before = await start();
+    const id = before.openKitTab({ ...CI, params: { run: "4567" }, openedBy: "Ava" });
+    before.setKitTabTitle(id, "Run #4567");
+    before.setKitTabBadge(id, { state: "running", text: null });
+
+    const after = await start();
+    expect(after.modelScope("ws").models).toEqual([]);
+    after.restoreKitTabs("ws");
+    const scope = after.modelScope("ws");
+    expect(scope.models).toHaveLength(1);
+    expect(scope.models[0]).toMatchObject({
+      kind: "kit",
+      kitId: "ci",
+      tabId: "run",
+      params: { run: "4567" },
+      title: "Run #4567",
+      titled: true,
+      openedBy: "Ava",
+      // The page says it again once it runs.
+      badge: null,
+      path: before.kitTabPath("ci", "run", { run: "4567" }),
+    });
+    expect(scope).toMatchObject({ panelOpen: false, unseen: false, activeId: scope.models[0].id });
+    expect(after.kitTabParams(scope.models[0].id)).toEqual({ run: "4567" });
+  });
+
+  it("the same params land on the restored tab, and a singleton still takes new ones", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+    before.openKitTab({ ...CI, tabId: "board", singleton: true, params: { view: "a" } });
+
+    const after = await start();
+    after.restoreKitTabs("ws");
+    const [run, board] = after.modelScope("ws").models;
+    expect(after.openKitTab({ ...CI, params: { run: "1" } })).toBe(run.id);
+    expect(after.openKitTab({ ...CI, tabId: "board", singleton: true, params: { view: "b" } })).toBe(board.id);
+    expect(after.kitTabParams(board.id)).toEqual({ view: "b" });
+
+    const again = await start();
+    again.restoreKitTabs("ws");
+    expect(again.modelScope("ws").models.map((entry) => (entry as OpenKitTab).params)).toEqual([
+      { run: "1" },
+      { view: "b" },
+    ]);
+  });
+
+  it("forgets a tab that was closed", async () => {
+    const before = await start();
+    const one = before.openKitTab({ ...CI, params: { run: "1" } });
+    before.openKitTab({ ...CI, params: { run: "2" } });
+    before.closeModel(one);
+
+    const after = await start();
+    after.restoreKitTabs("ws");
+    expect(after.modelScope("ws").models.map((entry) => (entry as OpenKitTab).params)).toEqual([{ run: "2" }]);
+    after.closeWorkspaceModels("ws");
+    expect(saved.size).toBe(0);
+  });
+
+  it("brings no file back, and a file opened first does not lose what was saved", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+
+    const after = await start();
+    after.showPreview({ kind: "model", path: "C:/m/a.glb", format: "glb", workspaceId: "ws", openedBy: "Ava", modifiedMs: 1 });
+    after.restoreKitTabs("ws");
+    expect(after.modelScope("ws").models.map((entry) => entry.kind)).toEqual(["model", "kit"]);
+
+    const again = await start();
+    again.restoreKitTabs("ws");
+    expect(again.modelScope("ws").models.map((entry) => entry.kind)).toEqual(["kit"]);
+  });
+
+  it("opening a tab first still brings the others back, and each workspace has its own", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+    before.openKitTab({ ...CI, workspaceId: "other", params: { run: "9" } });
+
+    const after = await start();
+    after.openKitTab({ ...CI, params: { run: "2" } });
+    expect(after.modelScope("ws").models.map((entry) => (entry as OpenKitTab).params)).toEqual([
+      { run: "1" },
+      { run: "2" },
+    ]);
+    expect(after.modelScope("other").models).toEqual([]);
+    after.restoreKitTabs("other");
+    expect(after.modelScope("other").models.map((entry) => (entry as OpenKitTab).params)).toEqual([{ run: "9" }]);
+  });
+
+  it("restores once, and what is open already is not opened twice", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+
+    const after = await start();
+    after.restoreKitTabs("ws");
+    after.restoreKitTabs("ws");
+    expect(after.modelScope("ws").models).toHaveLength(1);
+    const scope = after.takeModelScope("ws")!;
+    after.adoptModelScope("ws", scope);
+    expect(after.modelScope("ws").models).toHaveLength(1);
+  });
+
+  it("keeps a workspace's tabs saved as it moves to a window of its own, whichever acts first", async () => {
+    // Each window has a store of its own, and they share the storage.
+    const main = await start();
+    main.openKitTab({ ...CI, params: { run: "1" } });
+
+    // Its window restored them before the main window handed them over.
+    const own = await start();
+    own.restoreKitTabs("ws");
+    own.adoptModelScope("ws", main.takeModelScope("ws")!);
+    expect(own.modelScope("ws").models).toHaveLength(1);
+    let next = await start();
+    next.restoreKitTabs("ws");
+    expect(next.modelScope("ws").models.map((entry) => (entry as OpenKitTab).params)).toEqual([{ run: "1" }]);
+
+    // And back: the main window takes them in, its own record gone with them.
+    main.adoptModelScope("ws", own.takeModelScope("ws")!);
+    expect(main.modelScope("ws").models).toHaveLength(1);
+    next = await start();
+    next.restoreKitTabs("ws");
+    expect(next.modelScope("ws").models).toHaveLength(1);
+  });
+
+  it("reads the storage with care: what is not a tab is no tab", async () => {
+    const before = await start();
+    const keyOf = (workspaceId: string) => {
+      before.openKitTab({ ...CI, workspaceId });
+      return [...saved.keys()].find((key) => key.endsWith(workspaceId))!;
+    };
+    const key = keyOf("ws");
+    for (const raw of [
+      "not json",
+      '{"a":1}',
+      '[1,null,{"kitId":"ci"}]',
+      '[{"kitId":"ci","tabId":"run","path":"elsewhere","title":"x","params":{}}]',
+      '[{"kitId":"ci","tabId":"run","path":"kit:ci/run","title":"x","params":{"a":1}}]',
+      '[{"kitId":"ci","tabId":"run","path":"kit:ci/run","title":"x","params":["a"]}]',
+    ]) {
+      saved.set(key, raw);
+      const after = await start();
+      after.restoreKitTabs("ws");
+      expect(after.modelScope("ws").models, raw).toEqual([]);
+    }
+  });
+
+  it("forgets what deleted workspaces saved, and nothing else in the storage", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, workspaceId: "kept", params: { run: "1" } });
+    before.openKitTab({ ...CI, workspaceId: "deleted", params: { run: "2" } });
+    saved.set("somebody.else", "x");
+    before.forgetSavedKitTabs(["kept"]);
+    expect(saved.has("somebody.else")).toBe(true);
+
+    const after = await start();
+    after.restoreKitTabs("kept");
+    after.restoreKitTabs("deleted");
+    expect(after.modelScope("kept").models).toHaveLength(1);
+    expect(after.modelScope("deleted").models).toEqual([]);
+  });
+
+  it("works without any storage, as under test or when it is refused", async () => {
+    vi.stubGlobal("localStorage", undefined);
+    const store = await start();
+    const id = store.openKitTab({ ...CI, params: { run: "1" } });
+    expect(store.kitTabParams(id)).toEqual({ run: "1" });
+    store.restoreKitTabs("other");
+    expect(store.modelScope("other").models).toEqual([]);
+    store.forgetSavedKitTabs([]);
   });
 });
 

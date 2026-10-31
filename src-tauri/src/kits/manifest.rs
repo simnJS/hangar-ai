@@ -150,6 +150,42 @@ pub struct Tab {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub permissions: Vec<String>,
+    /// What a caller may pass it, by name: listed for agents, and held to at
+    /// `kit_tab_open`.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, TabParam>,
+    /// One tab whatever its params, which new ones replace.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub singleton: bool,
+}
+
+/// What a caller may pass a tab under one name.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TabParam {
+    pub description: String,
+    /// As written; matched against whole values (`whole_value_rule`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+}
+
+impl Tab {
+    /// The first value of `params` its rule refuses, said for the caller.
+    /// Asked before the window hears of a `kit_tab_open`: this is where a rule
+    /// runs in linear time, whatever the kit wrote, and the window must not
+    /// hang on one that backtracks for ever. Everything else about the call is
+    /// the window's to refuse (src/lib/kitTabs.ts), which says it in the same
+    /// words.
+    pub fn param_refusal(&self, params: &Value) -> Option<String> {
+        params.as_object()?.iter().find_map(|(name, value)| {
+            let pattern = self.params.get(name)?.pattern.as_deref()?;
+            let value = value.as_str()?;
+            let rule = whole_value_rule(pattern).ok()?;
+            (!rule.is_match(value)).then(|| {
+                let shown: String = value.chars().take(60).collect();
+                format!("Param {name:?} must match its rule {pattern}, and {shown:?} does not.")
+            })
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -603,17 +639,93 @@ impl Check<'_> {
                 .optional(tab, "icon", &at)
                 .and_then(|raw| self.file(&raw, &field(&at, "icon"), &[".svg", ".png"]));
             let permissions = self.permissions(tab, &at);
-            if let (Some(title), Some(entry), Some(permissions)) = (title, entry, permissions) {
+            let params = self.tab_params(tab, &at);
+            let singleton = self.tab_singleton(tab, &at);
+            if let (Some(title), Some(entry), Some(permissions), Some(params)) =
+                (title, entry, permissions, params)
+            {
                 tabs.push(Tab {
                     id,
                     title,
                     entry,
                     icon,
                     permissions,
+                    params,
+                    singleton,
                 });
             }
         }
         tabs
+    }
+
+    /// `params`: what a caller may pass a tab, by name. `None` when one is wrong.
+    fn tab_params(
+        &mut self,
+        tab: &Map<String, Value>,
+        at: &str,
+    ) -> Option<BTreeMap<String, TabParam>> {
+        let at = field(at, "params");
+        let declared = match tab.get("params") {
+            None | Some(Value::Null) => return Some(BTreeMap::new()),
+            Some(Value::Object(declared)) => declared,
+            Some(_) => {
+                self.problem(&at, "must be an object of params by name");
+                return None;
+            }
+        };
+        let mut params = BTreeMap::new();
+        let mut ok = true;
+        for (name, value) in declared {
+            let at = field(&at, name);
+            if !valid_arg_name(name) {
+                self.problem(
+                    &at,
+                    "must be named with a letter or _ first, then letters, digits, _ and -",
+                );
+                ok = false;
+            }
+            let Value::Object(param) = value else {
+                self.problem(&at, "must be an object with a description");
+                ok = false;
+                continue;
+            };
+            let Some(description) = self.required_text(param, "description", &at) else {
+                ok = false;
+                continue;
+            };
+            let pattern = self.optional(param, "pattern", &at);
+            if let Some(pattern) = &pattern {
+                let invalid = if pattern.trim().is_empty() {
+                    Some("is empty".to_string())
+                } else {
+                    whole_value_rule(pattern).err()
+                };
+                if let Some(why) = invalid {
+                    self.problem(&field(&at, "pattern"), why);
+                    ok = false;
+                    continue;
+                }
+            }
+            params.insert(
+                name.clone(),
+                TabParam {
+                    description,
+                    pattern,
+                },
+            );
+        }
+        ok.then_some(params)
+    }
+
+    fn tab_singleton(&mut self, tab: &Map<String, Value>, at: &str) -> bool {
+        match tab.get("singleton") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(singleton)) => *singleton,
+            Some(_) => {
+                self.problem(&field(at, "singleton"), "must be true or false");
+                false
+            }
+        }
     }
 
     fn permissions(&mut self, tab: &Map<String, Value>, at: &str) -> Option<Vec<String>> {
@@ -994,6 +1106,133 @@ mod tests {
 
     fn problems(result: Result<Manifest, String>) -> String {
         result.expect_err("the manifest should have been refused")
+    }
+
+    fn tab_with(patch: Value) -> Value {
+        let mut tab =
+            json!({ "id": "run", "title": "CI run", "entry": "tab.html", "permissions": [] });
+        for (key, value) in patch.as_object().unwrap() {
+            tab[key] = value.clone();
+        }
+        with(minimal(), json!({ "tabs": [tab] }))
+    }
+
+    #[test]
+    fn a_tab_declares_its_params_and_whether_it_is_one_tab() {
+        let kit = Folder::new("tab-params");
+        kit.file("tab.html", "<!doctype html>");
+        let manifest = kit
+            .parse(&tab_with(json!({
+                "singleton": true,
+                "params": {
+                    "run": { "description": "The run's number", "pattern": "[0-9]+" },
+                    "repo": { "description": "owner/name" }
+                }
+            })))
+            .unwrap();
+        let tab = &manifest.tabs[0];
+        assert!(tab.singleton);
+        assert_eq!(tab.params["run"].description, "The run's number");
+        assert_eq!(tab.params["run"].pattern.as_deref(), Some("[0-9]+"));
+        assert_eq!(tab.params["repo"].pattern, None);
+
+        // As the window reads it: nothing there when nothing was written.
+        let bare = kit.parse(&tab_with(json!({}))).unwrap();
+        assert!(!bare.tabs[0].singleton);
+        assert!(bare.tabs[0].params.is_empty());
+        let written = serde_json::to_value(&bare.tabs[0]).unwrap();
+        assert!(written.get("params").is_none());
+        assert!(written.get("singleton").is_none());
+        let written = serde_json::to_value(tab).unwrap();
+        assert_eq!(written["singleton"], true);
+        assert_eq!(written["params"]["run"]["pattern"], "[0-9]+");
+    }
+
+    #[test]
+    fn a_tab_s_params_are_checked_with_the_rest_of_the_manifest() {
+        let kit = Folder::new("tab-params-bad");
+        kit.file("tab.html", "<!doctype html>");
+        let refused = |patch: Value| problems(kit.parse(&tab_with(patch)));
+
+        assert_eq!(
+            refused(json!({ "params": ["run"] })),
+            "tabs[0].params: must be an object of params by name"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "1run": { "description": "x" } } })),
+            "tabs[0].params.1run: must be named with a letter or _ first, then letters, digits, _ and -"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "run": "x" } })),
+            "tabs[0].params.run: must be an object with a description"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "run": { "pattern": "[0-9]+" } } })),
+            "tabs[0].params.run.description: is missing"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "run": { "description": "  " } } })),
+            "tabs[0].params.run.description: is empty"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "run": { "description": "x", "pattern": "[" } } })),
+            "tabs[0].params.run.pattern: is not a valid regular expression"
+        );
+        assert_eq!(
+            refused(json!({ "params": { "run": { "description": "x", "pattern": " " } } })),
+            "tabs[0].params.run.pattern: is empty"
+        );
+        assert_eq!(
+            refused(json!({ "singleton": "yes" })),
+            "tabs[0].singleton: must be true or false"
+        );
+    }
+
+    #[test]
+    fn a_param_is_held_to_its_rule_whole() {
+        let kit = Folder::new("tab-params-rule");
+        kit.file("tab.html", "<!doctype html>");
+        let manifest = kit
+            .parse(&tab_with(json!({
+                "params": {
+                    "run": { "description": "x", "pattern": "[0-9]+" },
+                    "note": { "description": "x" }
+                }
+            })))
+            .unwrap();
+        let tab = &manifest.tabs[0];
+
+        assert_eq!(
+            tab.param_refusal(&json!({ "run": "abc" })).as_deref(),
+            Some(r#"Param "run" must match its rule [0-9]+, and "abc" does not."#)
+        );
+        // Anchored: a value is not a match for holding one.
+        assert!(tab.param_refusal(&json!({ "run": "12a" })).is_some());
+        assert!(tab.param_refusal(&json!({ "run": "12\n" })).is_some());
+        assert_eq!(tab.param_refusal(&json!({ "run": "4567" })), None);
+        // No rule, nothing to hold it to.
+        assert_eq!(tab.param_refusal(&json!({ "note": "anything" })), None);
+        // Undeclared, not a string, or no params at all: the window's to say.
+        assert_eq!(tab.param_refusal(&json!({ "other": "x" })), None);
+        assert_eq!(tab.param_refusal(&json!({ "run": 4567 })), None);
+        assert_eq!(tab.param_refusal(&Value::Null), None);
+    }
+
+    /// The reason the rule runs here: the same value in a backtracking engine
+    /// would take longer than anyone waits, in the window that draws every pane.
+    #[test]
+    fn a_rule_that_would_backtrack_for_ever_answers_at_once() {
+        let kit = Folder::new("tab-params-backtrack");
+        kit.file("tab.html", "<!doctype html>");
+        let manifest = kit
+            .parse(&tab_with(json!({
+                "params": { "x": { "description": "x", "pattern": "(a+)+b" } }
+            })))
+            .unwrap();
+        let value = "a".repeat(4000);
+        assert!(manifest.tabs[0]
+            .param_refusal(&json!({ "x": value }))
+            .is_some());
     }
 
     #[test]

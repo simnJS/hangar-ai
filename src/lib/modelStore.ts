@@ -16,7 +16,8 @@ import type { FileKind } from "./preview";
  *
  * Entries are ids across the whole window: the one 3D viewer the window has
  * (ModelPanel) holds the models of every workspace, whichever it belongs to.
- * Nothing here is saved; a reload starts every preview empty.
+ * Files are not saved, and a reload starts without them. A kit's tabs are, with
+ * their params: they come back with their workspace (`restoreKitTabs`).
  */
 
 export interface ModelInfo {
@@ -69,12 +70,30 @@ export interface OpenFile extends OpenEntry {
  * (components/preview/KitTabView). Which page, and what it may ask, is read
  * from the installed kit and the workspace each time it is drawn, never
  * kept here: a kit updated or taken off the workspace changes it at once.
- * `path` is `kit:<kit id>/<tab id>`, which no file's path can be.
+ * `path` is `kit:<kit id>/<tab id>`, and the params that tell it apart from its
+ * siblings (`kitTabPath`), which no file's path can be.
  */
 export interface OpenKitTab extends OpenEntry {
   kind: "kit";
   kitId: string;
   tabId: string;
+  /** What it was opened with, which its page reads (`tab.params`). */
+  params: KitTabParams;
+  /** Its state in the tab strip (`tab.setBadge`), until the page next loads. */
+  badge: KitTabBadge | null;
+  /** The page named it (`tab.setTitle`): asking for it again leaves that name. */
+  titled: boolean;
+}
+
+/** What a caller passes a kit's tab, by the names its manifest declares. */
+export type KitTabParams = Readonly<Record<string, string>>;
+
+export const KIT_BADGE_STATES = ["running", "success", "failure", "neutral"] as const;
+export type KitBadgeState = (typeof KIT_BADGE_STATES)[number];
+
+export interface KitTabBadge {
+  state: KitBadgeState;
+  text: string | null;
 }
 
 /** A tab of the preview. */
@@ -88,11 +107,36 @@ export const isKitTab = (entry: OpenPreview): entry is OpenKitTab => entry.kind 
 export const isPreviewFile = (entry: OpenPreview): entry is OpenFile =>
   entry.kind !== "model" && entry.kind !== "kit";
 
-/** What stands for a kit's tab where a file has its path. */
-export const kitTabPath = (kitId: string, tabId: string) => `kit:${kitId}/${tabId}`;
+/** A set of params, the same whichever order its names came in. */
+export const kitParamsKey = (params: KitTabParams) =>
+  JSON.stringify(Object.entries(params).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
+const hasParams = (params: KitTabParams) => Object.keys(params).length > 0;
+
+/**
+ * What stands for a kit's tab where a file has its path: one per tab, or, given
+ * params, one per set of them. A singleton's stays the same whatever it holds.
+ */
+export const kitTabPath = (kitId: string, tabId: string, params: KitTabParams = {}) =>
+  hasParams(params) ? `kit:${kitId}/${tabId}?${kitParamsKey(params)}` : `kit:${kitId}/${tabId}`;
+
+/** What opening a kit's tab takes. */
+export interface KitTabToOpen {
+  workspaceId: string;
+  kitId: string;
+  tabId: string;
+  title: string;
+  params?: KitTabParams;
+  /** One tab whatever its params: new ones replace the old. */
+  singleton?: boolean;
+  /** The pane of the agent or hook that asks; null when the person does. */
+  openedBy?: string | null;
+  /** Opens the panel, the tab in front. False adds it without either. Default true. */
+  reveal?: boolean;
+}
 
 /** What opening a file takes, its id and workspace aside. */
-export type PreviewToShow =
+type FileToShow =
   | { kind: "model"; path: string; title?: string; format: ModelFormat; openedBy: string | null; modifiedMs: number }
   | {
       kind: FileKind;
@@ -103,6 +147,15 @@ export type PreviewToShow =
       openedBy: string | null;
       modifiedMs: number;
     };
+
+/** And a kit's tab, so the preview of a workspace in another window can open one too. */
+export type KitTabToShow = Omit<KitTabToOpen, "workspaceId" | "openedBy"> & {
+  kind: "kit";
+  path: string;
+  openedBy: string | null;
+};
+
+export type PreviewToShow = FileToShow | KitTabToShow;
 
 export type SnapshotAngle = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
 
@@ -174,6 +227,7 @@ function set(patch: Record<string, ModelScope | null>) {
       ? state.kits
       : tabs;
   state = { scopes, entries, all, kits };
+  for (const workspaceId of Object.keys(patch)) saveKitTabs(workspaceId);
   for (const listener of listeners) listener();
   for (const entry of state.entries) {
     if (entry.status === "loading") continue;
@@ -211,7 +265,7 @@ const withEntry = (scope: ModelScope, id: string, change: (entry: OpenPreview) =
  * The fields that depend on the kind, as the file is now. A model waits for
  * the 3D viewer; any other kind is ready, its viewer reading it on screen.
  */
-const kindFields = (file: PreviewToShow) =>
+const kindFields = (file: FileToShow) =>
   file.kind === "model"
     ? ({ kind: "model", format: file.format, modifiedMs: file.modifiedMs, info: null, status: "loading" } as const)
     : ({ kind: file.kind, mime: file.mime, size: file.size, modifiedMs: file.modifiedMs, status: "ready" } as const);
@@ -223,6 +277,7 @@ const kindFields = (file: PreviewToShow) =>
  * that one. Returns the entry's id.
  */
 export function showPreview(file: PreviewToShow & { workspaceId: string }): string {
+  if (file.kind === "kit") return openKitTab(file);
   const scope = modelScope(file.workspaceId);
   const existing = scope.models.find((entry) => entry.path === file.path);
   const title = file.title?.trim() || file.path.replace(/\\/g, "/").split("/").pop() || file.path;
@@ -279,49 +334,99 @@ export function showPreview(file: PreviewToShow & { workspaceId: string }): stri
 }
 
 /**
+ * The open tab a request lands on: a singleton's one tab whatever it holds, or
+ * the tab holding this very set of params.
+ */
+export function findKitTab(
+  models: readonly OpenPreview[],
+  tab: Pick<KitTabToOpen, "kitId" | "tabId" | "params" | "singleton">,
+): OpenKitTab | undefined {
+  const key = kitParamsKey(tab.params ?? {});
+  return models
+    .filter(isKitTab)
+    .find(
+      (entry) =>
+        entry.kitId === tab.kitId &&
+        entry.tabId === tab.tabId &&
+        (tab.singleton || kitParamsKey(entry.params) === key),
+    );
+}
+
+/**
  * Opens a kit's tab in its workspace's preview, or brings it forward when it
  * is open already — as it is: a page someone is working in is not reloaded
- * for being asked for again. The person opens it, so it is not news to them.
- * Opens that workspace's panel. Returns the entry's id.
+ * for being asked for again. A singleton given other params takes them, and its
+ * page hears of it (`watchKitTabParams`); none given leaves what it holds.
+ *
+ * With `reveal`, the default, it opens that workspace's panel with the tab in
+ * front; without, it is only added, the panel and what is in front as they were.
+ * Neither ever moves the keyboard. What an agent or a hook opens is news to the
+ * person, which the toolbar's button says; what they open themselves is not.
+ * Returns the entry's id.
  */
-export function openKitTab(tab: { workspaceId: string; kitId: string; tabId: string; title: string }): string {
+export function openKitTab(tab: KitTabToOpen): string {
+  restoreKitTabs(tab.workspaceId);
   const scope = modelScope(tab.workspaceId);
-  const path = kitTabPath(tab.kitId, tab.tabId);
+  const params = tab.params ?? {};
+  const openedBy = tab.openedBy ?? null;
+  const reveal = tab.reveal !== false;
   const title = tab.title.trim() || tab.tabId;
-  const existing = scope.models.find((entry) => entry.path === path);
+  const existing = findKitTab(scope.models, tab);
   if (existing) {
+    const replaced = hasParams(params) && kitParamsKey(params) !== kitParamsKey(existing.params);
     set({
       [tab.workspaceId]: {
-        ...withEntry(scope, existing.id, (entry) => ({ ...entry, title })),
-        activeId: existing.id,
-        panelOpen: true,
+        ...withEntry(scope, existing.id, (entry) => ({
+          ...entry,
+          ...(existing.titled ? {} : { title }),
+          openedBy: openedBy ?? entry.openedBy,
+          ...(replaced ? { params } : {}),
+        })),
+        ...(reveal ? { activeId: existing.id, panelOpen: true } : {}),
+        unseen: scope.unseen || (openedBy !== null && (reveal || replaced)),
       },
     });
+    if (replaced) for (const watcher of paramWatchers.get(existing.id) ?? []) watcher(params);
     return existing.id;
   }
   const id = newId();
-  const entry: OpenKitTab = {
+  const entry = kitTabEntry({
     id,
-    kind: "kit",
+    workspaceId: tab.workspaceId,
     kitId: tab.kitId,
     tabId: tab.tabId,
-    path,
+    path: kitTabPath(tab.kitId, tab.tabId, tab.singleton ? {} : params),
     title,
-    workspaceId: tab.workspaceId,
-    openedBy: null,
-    openedAt: Date.now(),
-    modifiedMs: 0,
-    revision: 0,
-    status: "ready",
-    error: null,
-  };
+    titled: false,
+    params,
+    openedBy,
+  });
   set({
-    [tab.workspaceId]: { ...scope, models: [...scope.models, entry], activeId: id, panelOpen: true },
+    [tab.workspaceId]: {
+      ...scope,
+      models: [...scope.models, entry],
+      activeId: reveal || !scope.activeId ? id : scope.activeId,
+      panelOpen: reveal || scope.panelOpen,
+      unseen: scope.unseen || openedBy !== null,
+    },
   });
   return id;
 }
 
-/** Loads a kit tab's page afresh: its reload button. */
+const kitTabEntry = (
+  tab: Pick<OpenKitTab, "id" | "workspaceId" | "kitId" | "tabId" | "path" | "title" | "titled" | "params" | "openedBy">,
+): OpenKitTab => ({
+  ...tab,
+  kind: "kit",
+  badge: null,
+  openedAt: Date.now(),
+  modifiedMs: 0,
+  revision: 0,
+  status: "ready",
+  error: null,
+});
+
+/** Loads a kit tab's page afresh: its reload button. What the last page said of its state goes with it. */
 export function reloadKitTab(id: string) {
   const entry = find(id);
   if (!entry || !isKitTab(entry)) return;
@@ -329,8 +434,165 @@ export function reloadKitTab(id: string) {
     [entry.workspaceId]: withEntry(modelScope(entry.workspaceId), id, (e) => ({
       ...e,
       revision: e.revision + 1,
+      badge: null,
     })),
   });
+}
+
+/** What a kit's tab holds now; none once it is closed. */
+export function kitTabParams(id: string): KitTabParams {
+  const entry = find(id);
+  return entry && isKitTab(entry) ? entry.params : {};
+}
+
+const paramWatchers = new Map<string, Set<(params: KitTabParams) => void>>();
+
+/** Hears a singleton's tab taking new params. Returns the unsubscribe. */
+export function watchKitTabParams(id: string, watcher: (params: KitTabParams) => void): () => void {
+  const watchers = paramWatchers.get(id) ?? new Set();
+  watchers.add(watcher);
+  paramWatchers.set(id, watchers);
+  return () => {
+    watchers.delete(watcher);
+    if (!watchers.size) paramWatchers.delete(id);
+  };
+}
+
+/** A kit tab's own name for itself (`tab.setTitle`), checked by lib/kitApi. */
+export function setKitTabTitle(id: string, title: string) {
+  const entry = find(id);
+  if (!entry || !isKitTab(entry) || (entry.titled && entry.title === title)) return;
+  set({
+    [entry.workspaceId]: withEntry(modelScope(entry.workspaceId), id, (e) => ({ ...e, title, titled: true })),
+  });
+}
+
+/** A kit tab's state in the tab strip (`tab.setBadge`), checked by lib/kitApi; null takes it away. */
+export function setKitTabBadge(id: string, badge: KitTabBadge | null) {
+  const entry = find(id);
+  if (!entry || !isKitTab(entry)) return;
+  if (entry.badge?.state === badge?.state && entry.badge?.text === badge?.text) return;
+  set({
+    [entry.workspaceId]: withEntry(modelScope(entry.workspaceId), id, (e) => ({ ...e, badge })),
+  });
+}
+
+/* ── a kit's tabs, across a restart ───────────────────────────── */
+
+/**
+ * One key per workspace, in the window's storage, written by the window that
+ * draws it: a workspace in a window of its own is that window's alone, and two
+ * windows cannot overwrite each other's. Only what a page cannot say again is
+ * kept: its badge starts over with the page.
+ */
+const SAVED_PREFIX = "hangar.kitTabs.";
+
+type SavedKitTab = Pick<OpenKitTab, "kitId" | "tabId" | "path" | "title" | "titled" | "params" | "openedBy">;
+
+/** The storage, or null where there is none (under test, or refused). */
+function savedTabs(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The workspaces whose saved tabs this window has read: until then, saving would lose them. */
+const restored = new Set<string>();
+
+function saveKitTabs(workspaceId: string) {
+  if (!restored.has(workspaceId)) return;
+  const tabs = (state.scopes[workspaceId]?.models ?? []).filter(isKitTab);
+  try {
+    if (tabs.length) {
+      const saved = tabs.map(
+        ({ kitId, tabId, path, title, titled, params, openedBy }): SavedKitTab => ({
+          kitId,
+          tabId,
+          path,
+          title,
+          titled,
+          params,
+          openedBy,
+        }),
+      );
+      savedTabs()?.setItem(SAVED_PREFIX + workspaceId, JSON.stringify(saved));
+    } else {
+      savedTabs()?.removeItem(SAVED_PREFIX + workspaceId);
+    }
+  } catch {
+    /* Storage full or refused: the tabs stay open, and only a restart loses them. */
+  }
+}
+
+/** A saved tab, read with care: the storage can hold anything. */
+function readSavedTab(raw: unknown): SavedKitTab | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { kitId, tabId, path, title, titled, params, openedBy } = raw as Record<string, unknown>;
+  if (typeof kitId !== "string" || typeof tabId !== "string") return null;
+  if (typeof path !== "string" || !path.startsWith(kitTabPath(kitId, tabId))) return null;
+  if (typeof title !== "string" || typeof params !== "object" || params === null || Array.isArray(params)) return null;
+  const values = Object.entries(params);
+  if (!values.every(([, value]) => typeof value === "string")) return null;
+  return {
+    kitId,
+    tabId,
+    path,
+    title,
+    titled: titled === true,
+    params: Object.fromEntries(values) as KitTabParams,
+    openedBy: typeof openedBy === "string" ? openedBy : null,
+  };
+}
+
+function readSavedTabs(workspaceId: string): SavedKitTab[] {
+  try {
+    const raw: unknown = JSON.parse(savedTabs()?.getItem(SAVED_PREFIX + workspaceId) ?? "[]");
+    return Array.isArray(raw) ? raw.map(readSavedTab).filter((tab): tab is SavedKitTab => tab !== null) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Brings back the kit tabs a workspace had open when the app last closed, with
+ * their params, once for this window. Called when the window first mounts the
+ * workspace, so no page runs for a workspace nobody opened. They come back behind
+ * a closed panel: a restart does not put anything in front of anyone, and is not
+ * news. What is open already stays, and is not opened twice.
+ */
+export function restoreKitTabs(workspaceId: string) {
+  if (restored.has(workspaceId)) return;
+  restored.add(workspaceId);
+  const scope = modelScope(workspaceId);
+  const paths = new Set(scope.models.map((entry) => entry.path));
+  const arriving = readSavedTabs(workspaceId)
+    .filter((tab) => !paths.has(tab.path))
+    .map((tab) => kitTabEntry({ ...tab, id: newId(), workspaceId }));
+  if (!arriving.length) return saveKitTabs(workspaceId);
+  set({
+    [workspaceId]: {
+      ...scope,
+      models: [...scope.models, ...arriving],
+      activeId: scope.activeId ?? arriving[arriving.length - 1].id,
+    },
+  });
+}
+
+/** Forgets what the workspaces that are not in `live` saved: deleted since. */
+export function forgetSavedKitTabs(live: Iterable<string>) {
+  const storage = savedTabs();
+  if (!storage) return;
+  const keep = new Set([...live].map((id) => SAVED_PREFIX + id));
+  try {
+    const gone = Array.from({ length: storage.length }, (_, at) => storage.key(at)).filter(
+      (key): key is string => key !== null && key.startsWith(SAVED_PREFIX) && !keep.has(key),
+    );
+    for (const key of gone) storage.removeItem(key);
+  } catch {
+    /* Nothing depends on it: a stale key only takes a little room. */
+  }
 }
 
 /**
@@ -458,7 +720,9 @@ export function adoptModelScope(workspaceId: string, scope: ModelScope) {
   const arriving = scope.models
     .filter((entry) => !known.has(entry.id) && !paths.has(entry.path))
     .map((entry) => ({ ...entry, workspaceId }));
-  if (!arriving.length) return;
+  // Nothing new, as this window restored them itself: the window they came from
+  // has just forgotten them, though, so they are saved again from here.
+  if (!arriving.length) return saveKitTabs(workspaceId);
   set({
     [workspaceId]: here
       ? { ...here, models: [...here.models, ...arriving], unseen: here.unseen || scope.unseen }

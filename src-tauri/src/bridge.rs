@@ -91,6 +91,11 @@ pub fn set_endpoint(port: u16, token: &str) {
     let _ = ENDPOINT.set((port, token.to_string()));
 }
 
+/// The loopback API's port and token, once it is listening.
+pub fn endpoint() -> Option<(u16, &'static str)> {
+    ENDPOINT.get().map(|(port, token)| (*port, token.as_str()))
+}
+
 /// Everything a pane's environment needs for its Claude Code to find its way
 /// back here, and the mod's folder, which `apply_plugin_dirs` then puts on
 /// `CLAUDE_CODE_PLUGIN_DIRS` beside the workspace's kits. Nothing is set, and

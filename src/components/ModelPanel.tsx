@@ -40,7 +40,9 @@ import {
   useAllModels,
   useModels,
   useWindowKitTabs,
+  type KitTabBadge,
   type ModelInfo,
+  type OpenKitTab,
   type OpenModel,
   type OpenPreview,
 } from "../lib/modelStore";
@@ -52,8 +54,8 @@ import { DEFAULT_SETTINGS } from "../types";
 /**
  * The preview: the files agents opened, one tab each — a 3D model, an image,
  * a video, a sound, a text or code file, Markdown, a PDF, a web page — and
- * the tabs of the workspace's kits the person opened, in a panel beside the
- * terminals, or a drawer over them when there is no room,
+ * the tabs of the workspace's kits, opened by the person, an agent or a kit's
+ * hook, in a panel beside the terminals, or a drawer over them when there is no room,
  * or the whole work area when expanded. lib/sidePanels decides which; App
  * passes it in.
  *
@@ -494,6 +496,55 @@ function Grip({ width, drawnWidth, maxWidth, scale, onResize }: Props) {
 // Tabs
 // -----------------------------------------------------------------------------
 
+/**
+ * The state a kit's page gave its tab (`tab.setBadge`): a small glyph where the
+ * tab's icon goes, which says it aloud too. Colour never says it alone: each
+ * state has its own shape.
+ */
+function KitBadgeGlyph({ badge }: { badge: KitTabBadge }) {
+  const t = useT();
+  const label = t(`kitsTab.badge.${badge.state}`);
+  return (
+    <span role="img" aria-label={label} title={label} style={{ display: "inline-flex", flex: "none" }}>
+      {badge.state === "running" ? (
+        <span className="model-tab__spinner" />
+      ) : badge.state === "failure" ? (
+        <Icon name="alert" size={12} className="model-tab__icon model-tab__icon--error" />
+      ) : badge.state === "success" ? (
+        <span style={{ display: "inline-flex", color: "var(--success)" }}>
+          <Icon name="check" size={12} />
+        </span>
+      ) : (
+        <span
+          style={{
+            width: "calc(6px * var(--ui-scale))",
+            height: "calc(6px * var(--ui-scale))",
+            margin: "0 3px",
+            borderRadius: "50%",
+            background: "var(--fg-subtle)",
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
+/** What a kit's tab says on hover: which kit, and what tells it from its siblings. */
+function kitTabHint(t: ReturnType<typeof useT>, entry: OpenKitTab): string {
+  const params = Object.entries(entry.params)
+    .map(([name, value]) => `${name}=${value}`)
+    .join(", ");
+  return [
+    t("kitsTab.tabHint", { title: entry.title, kit: entry.kitId }),
+    // Beside several tabs, the strip may have cut it.
+    entry.badge?.text,
+    params ? t("kitsTab.tabParams", { params }) : null,
+    entry.openedBy ? t("model.openedBy", { name: entry.openedBy }) : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function PreviewTabs({
   entries,
   activeId,
@@ -559,7 +610,7 @@ function PreviewTabs({
               tabIndex={selected ? 0 : -1}
               title={
                 isKitTab(entry)
-                  ? t("kitsTab.tabHint", { title: entry.title, kit: entry.kitId })
+                  ? kitTabHint(t, entry)
                   : by
                     ? `${entry.path}\n${by}`
                     : entry.path
@@ -573,15 +624,28 @@ function PreviewTabs({
               ) : isModel(entry) ? (
                 <Icon name="cube" size={12} className="model-tab__icon" />
               ) : isKitTab(entry) ? (
-                <Icon name="window" size={12} className="model-tab__icon" />
+                entry.badge ? (
+                  <KitBadgeGlyph badge={entry.badge} />
+                ) : (
+                  <Icon name="window" size={12} className="model-tab__icon" />
+                )
               ) : (
                 <Glyph name={entry.kind} size={12} className="model-tab__icon" />
               )}
               <span className="model-tab__title">{entry.title}</span>
               {/* Beside several tabs it would be cut to "ou…" in each: only
                   the one in front says who opened it, the others in their
-                  tooltip. */}
-              {by && (selected || entries.length === 1) && <span className="model-tab__by">{by}</span>}
+                  tooltip. A kit's tab says its state there instead, in any
+                  tab, sharing the room with its title rather than giving way:
+                  who opened it stays in its tooltip, as a tab per run needs
+                  every letter of its title. */}
+              {isKitTab(entry)
+                ? entry.badge?.text && (
+                    <span className="model-tab__by" style={{ flexShrink: 1 }}>
+                      {entry.badge.text}
+                    </span>
+                  )
+                : by && (selected || entries.length === 1) && <span className="model-tab__by">{by}</span>}
             </button>
             <button
               type="button"

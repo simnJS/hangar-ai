@@ -103,10 +103,12 @@ import { getTerminal, openFinder } from "./lib/terminalRegistry";
 import { placeSidePanels } from "./lib/sidePanels";
 import {
   closeWorkspaceModels,
+  forgetSavedKitTabs,
   markModelsSeen,
   noteModelView,
   openKitTab,
   pruneModels,
+  restoreKitTabs,
   setModelPanel,
   useAnyModels,
   useModels,
@@ -589,10 +591,17 @@ export default function App() {
       kitId: choice.kitId,
       tabId: choice.tab.id,
       title: choice.tab.title,
+      singleton: choice.tab.singleton,
     });
     setView("terminals");
     setKitOpened((n) => n + 1);
   };
+  // A workspace's kit tabs come back the first time this window mounts it, with
+  // their params, so no page runs for a workspace nobody opened.
+  const mountedKey = openWorkspaces.map((ws) => ws.id).join(" ");
+  useEffect(() => {
+    for (const id of mountedKey ? mountedKey.split(" ") : []) restoreKitTabs(id);
+  }, [mountedKey]);
   // The person asked for the tab: without room beside the terminals, the
   // preview comes over them as a drawer, which an agent's file never does.
   useEffect(() => {
@@ -641,7 +650,9 @@ export default function App() {
   const workspaceIds = state.workspaces.map((ws) => ws.id).join(" ");
   useEffect(() => {
     pruneModels(workspaceIds ? workspaceIds.split(" ") : []);
-  }, [workspaceIds]);
+    // Once the workspaces are known: before that, they would all look deleted.
+    if (hydrated && isMainWindow) forgetSavedKitTabs(workspaceIds ? workspaceIds.split(" ") : []);
+  }, [workspaceIds, hydrated]);
 
   const toggleNavigator = () =>
     updateSettings({ navigatorOpen: !state.settings.navigatorOpen });

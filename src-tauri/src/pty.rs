@@ -282,6 +282,30 @@ fn apply_plugins(
     issues
 }
 
+/// What a hook of a kit, which has no MCP, needs to reach Hangar from its pane
+/// (docs/kits.md): the loopback API's URL and token, beside the `HANGAR_PANE_ID`
+/// every pane has. A pane with kits gets them whether or not the bridge mod comes
+/// along; any other starts without them, even under a Hangar launched from inside
+/// a pane, whose token would be that Hangar's.
+fn apply_kit_api(cmd: &mut CommandBuilder, has_kits: bool, endpoint: Option<(u16, &str)>) {
+    match endpoint.filter(|_| has_kits) {
+        Some((port, token)) => {
+            cmd.env("HANGAR_API_URL", format!("http://127.0.0.1:{port}"));
+            cmd.env("HANGAR_API_TOKEN", token);
+        }
+        None => {
+            cmd.env_remove("HANGAR_API_URL");
+            cmd.env_remove("HANGAR_API_TOKEN");
+        }
+    }
+}
+
+/// Whether a pane's shell is running here, whatever the windows make of it: the
+/// one thing a caller who says it is that pane can be held to.
+pub fn pane_alive(manager: &PtyManager, id: &str) -> bool {
+    manager.lock().sessions.contains_key(id)
+}
+
 /// A Claude Code pane on a profile runs with `CLAUDE_CONFIG_DIR` naming the
 /// profile's folder; every other pane, and one on the main account, keeps
 /// the environment Hangar has (accounts.rs).
@@ -413,10 +437,12 @@ pub fn pty_spawn(
     } else {
         None
     };
+    let kits = kits.unwrap_or_default();
+    apply_kit_api(&mut cmd, !kits.is_empty(), crate::bridge::endpoint());
     let kit_issues = apply_plugins(
         &mut cmd,
         bridge_dir,
-        crate::kits::launch(&kits.unwrap_or_default()),
+        crate::kits::launch(&kits),
         crate::bridge::sideloading_forbidden(),
     );
     apply_ports(&mut cmd, port_base);
@@ -851,6 +877,51 @@ mod tests {
     fn kits_data(cmd: &CommandBuilder) -> Option<String> {
         cmd.get_env(crate::kits::data::ENV_VAR)
             .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    fn env_of(cmd: &CommandBuilder, name: &str) -> Option<String> {
+        cmd.get_env(name)
+            .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_pane_with_kits_can_reach_the_api_with_the_bridge_on_or_off() {
+        let mut cmd = CommandBuilder::new("sh");
+        // The bridge off for this pane: none of its variables. Nothing here reads them.
+        cmd.env_remove("HANGAR_BRIDGE_URL");
+        cmd.env_remove("HANGAR_BRIDGE_TOKEN");
+        apply_kit_api(&mut cmd, true, Some((4242, "secret")));
+        assert_eq!(
+            env_of(&cmd, "HANGAR_API_URL").as_deref(),
+            Some("http://127.0.0.1:4242")
+        );
+        assert_eq!(env_of(&cmd, "HANGAR_API_TOKEN").as_deref(), Some("secret"));
+        assert_eq!(env_of(&cmd, "HANGAR_BRIDGE_URL"), None);
+        assert_eq!(env_of(&cmd, "HANGAR_BRIDGE_TOKEN"), None);
+    }
+
+    #[test]
+    fn a_pane_without_kits_gets_no_token_even_one_it_would_inherit() {
+        let mut bare = CommandBuilder::new("sh");
+        apply_kit_api(&mut bare, false, Some((4242, "secret")));
+        assert_eq!(env_of(&bare, "HANGAR_API_URL"), None);
+        assert_eq!(env_of(&bare, "HANGAR_API_TOKEN"), None);
+
+        // A Hangar started inside a pane of another: that one's are not this one's.
+        for (has_kits, endpoint) in [(false, Some((4242, "secret"))), (true, None)] {
+            let mut inherited = CommandBuilder::new("sh");
+            inherited.env("HANGAR_API_URL", "http://127.0.0.1:1");
+            inherited.env("HANGAR_API_TOKEN", "the other one");
+            apply_kit_api(&mut inherited, has_kits, endpoint);
+            assert_eq!(env_of(&inherited, "HANGAR_API_URL"), None);
+            assert_eq!(env_of(&inherited, "HANGAR_API_TOKEN"), None);
+        }
+    }
+
+    #[test]
+    fn a_pane_nobody_started_is_not_alive() {
+        assert!(!pane_alive(&PtyManager::default(), "p-unknown"));
+        assert!(!pane_alive(&PtyManager::default(), ""));
     }
 
     #[test]

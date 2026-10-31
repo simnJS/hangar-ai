@@ -17,6 +17,7 @@ import {
   type KitEventName,
   type KitMethod,
 } from "./kits";
+import { KIT_BADGE_STATES, type KitBadgeState, type KitTabBadge, type KitTabParams } from "./modelStore";
 import type { Pane, Workspace } from "../types";
 
 /**
@@ -85,6 +86,18 @@ export const KIT_MAX_PENDING = 16;
 export const KIT_PATH_MAX_CHARS = 1024;
 /** The longest URL path `loopback.fetch` takes (kits/loopback.rs). */
 export const KIT_LOOPBACK_PATH_MAX_CHARS = 2048;
+/** The longest title `tab.setTitle` takes, in characters. */
+export const KIT_TAB_TITLE_MAX = 40;
+/** The longest text `tab.setBadge` takes, in characters. */
+export const KIT_TAB_BADGE_TEXT_MAX = 12;
+/**
+ * At most this many of each in any window: enough to count seconds on a badge,
+ * and each one redraws the tab strip, so a page in a loop must not freeze Hangar.
+ */
+export const KIT_TAB_CHANGE_MAX = 120;
+export const KIT_TAB_CHANGE_WINDOW_MS = 60_000;
+/** The event a singleton's page hears when it gets new params. No permission: it is about itself. */
+export const KIT_TAB_PARAMS_EVENT = "tab.params";
 const TITLE_MAX = 120;
 const BODY_MAX = 1000;
 const ID_MAX = 128;
@@ -114,6 +127,12 @@ export interface KitHostContext {
   permissions: () => readonly string[];
   /** The `commands:<hash>` the tab's commands run under now (lib/kitTabs); null when not asked. */
   commandsAccepted: () => string | null;
+  /** What this very tab was opened with, as it is now. */
+  params: () => KitTabParams;
+  /** Names this very tab in the tab strip. */
+  setTitle: (title: string) => void;
+  /** Sets this very tab's state in the tab strip; null takes it away. */
+  setBadge: (badge: KitTabBadge | null) => void;
 }
 
 /** What the API reaches of the app. */
@@ -180,7 +199,7 @@ export interface KitHost {
   /** A `message` event of the window: answered when it is a request of this tab's frame. */
   receive: (event: KitMessageEvent) => void;
   /** Tells the tab about an event, when it may hear it. */
-  emit: (name: KitEventName, data: unknown) => void;
+  emit: (name: KitEventName | typeof KIT_TAB_PARAMS_EVENT, data: unknown) => void;
   /** The tab closed, or left its page: nothing is answered any more. */
   close: () => void;
 }
@@ -334,6 +353,34 @@ function stringParam(params: Record<string, unknown>, key: string, max: number, 
   return value;
 }
 
+/**
+ * Text shown in the tab strip: plain, on one line, what would not show or would
+ * turn the line around refused. React writes it as text, so markup stays markup
+ * to read. Counted in characters a person sees, an emoji being one.
+ */
+function shownText(value: unknown, key: string, max: number): string {
+  const bad = (why: string) => new KitError(KIT_ERRORS.invalid, `${key} ${why}`);
+  if (typeof value !== "string") throw bad("must be a string");
+  const text = value.trim();
+  if (!text) throw bad("must not be empty");
+  if ([...text].length > max) throw bad(`must be at most ${max} characters`);
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(text)) throw bad("must be plain text on one line");
+  return text;
+}
+
+/** The badge a `tab.setBadge` asks for. */
+function badgeOf(params: Record<string, unknown>): KitTabBadge | null {
+  const { state, text } = params;
+  if (state === null) return null;
+  if (!KIT_BADGE_STATES.includes(state as KitBadgeState)) {
+    throw new KitError(KIT_ERRORS.invalid, `state must be null or one of ${KIT_BADGE_STATES.join(", ")}`);
+  }
+  return {
+    state: state as KitBadgeState,
+    text: text === undefined || text === null ? null : shownText(text, "text", KIT_TAB_BADGE_TEXT_MAX),
+  };
+}
+
 const validId = (id: unknown): id is string | number =>
   (typeof id === "string" && id.length > 0 && id.length <= ID_MAX) ||
   (typeof id === "number" && Number.isFinite(id));
@@ -358,6 +405,31 @@ export function createKitHost(
   const sendAllowed = rateLimiter(KIT_SEND_MAX, KIT_SEND_WINDOW_MS, deps.now);
   const notifyAllowed = rateLimiter(KIT_NOTIFY_MAX, KIT_NOTIFY_WINDOW_MS, deps.now);
   const dataWriteAllowed = rateLimiter(KIT_DATA_WRITE_MAX, KIT_DATA_WRITE_WINDOW_MS, deps.now);
+  const titleAllowed = rateLimiter(KIT_TAB_CHANGE_MAX, KIT_TAB_CHANGE_WINDOW_MS, deps.now);
+  const badgeAllowed = rateLimiter(KIT_TAB_CHANGE_MAX, KIT_TAB_CHANGE_WINDOW_MS, deps.now);
+
+  /** What a tab may do with no permission: only about itself. */
+  const ownTab: Record<string, (params: unknown) => unknown> = {
+    "tab.params": () => ({ params: context.params() }),
+
+    "tab.setTitle": (raw) => {
+      const title = shownText(paramsOf(raw).title, "title", KIT_TAB_TITLE_MAX);
+      if (!titleAllowed()) {
+        throw new KitError(KIT_ERRORS.rateLimited, `at most ${KIT_TAB_CHANGE_MAX} tab.setTitle a minute; try again later`);
+      }
+      context.setTitle(title);
+      return {};
+    },
+
+    "tab.setBadge": (raw) => {
+      const badge = badgeOf(paramsOf(raw));
+      if (!badgeAllowed()) {
+        throw new KitError(KIT_ERRORS.rateLimited, `at most ${KIT_TAB_CHANGE_MAX} tab.setBadge a minute; try again later`);
+      }
+      context.setBadge(badge);
+      return {};
+    },
+  };
 
   const post = (target: KitFrame, message: unknown) => {
     if (closed) return;
@@ -509,6 +581,7 @@ export function createKitHost(
   };
 
   async function run(method: string, params: unknown): Promise<unknown> {
+    if (Object.prototype.hasOwnProperty.call(ownTab, method)) return ownTab[method](params);
     if (!Object.prototype.hasOwnProperty.call(KIT_METHODS, method)) {
       throw new KitError(KIT_ERRORS.unknown, `no method ${JSON.stringify(method)}`);
     }
@@ -597,6 +670,7 @@ export function createKitHost(
 
 /** Whether a tab granted `granted` may hear `event`. */
 export function kitMayCallEvent(event: string, granted: readonly string[]): boolean {
+  if (event === KIT_TAB_PARAMS_EVENT) return true;
   if (!Object.prototype.hasOwnProperty.call(KIT_EVENTS, event)) return false;
   return granted.includes(KIT_EVENTS[event as KitEventName]);
 }

@@ -173,7 +173,11 @@ fn urlencode(value: &str) -> String {
 fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     if let Some(all) = tools.as_array_mut() {
-        for more in [preview_tool_definitions(), manager_tool_definitions()] {
+        for more in [
+            preview_tool_definitions(),
+            kit_tool_definitions(),
+            manager_tool_definitions(),
+        ] {
             all.extend(more.as_array().into_iter().flatten().cloned());
         }
     }
@@ -614,6 +618,59 @@ fn preview_tool_definitions() -> Value {
                 "properties": {
                     "path": { "type": "string", "description": "The file to close, as you gave it to preview_show. Omit it to close everything open in your workspace's preview." }
                 }
+            }
+        }
+    ])
+}
+
+/// The tabs of the workspace's kits (docs/kits.md). The workspace is always the
+/// caller's, so no tool takes one.
+fn kit_tool_definitions() -> Value {
+    let kit_arg =
+        json!({ "type": "string", "description": "The kit's id, as kit_tab_list shows it." });
+    let tab_arg = json!({ "type": "string", "description": "The tab's id within that kit, as kit_tab_list shows it." });
+    json!([
+        {
+            "name": "kit_tab_list",
+            "description": "List the tabs of the kits enabled on your workspace: small pages a kit brings, which you can open in Hangar's side panel beside the terminals. Each comes with its kit, its title, the kit's description, whether it is a single tab (singleton), the params it takes with their description and rule, and toReview when the person has changes to accept before any of that kit's tabs can be opened.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "kit_tab_open",
+            "description": "Open a kit's tab in your workspace's side panel, with params when it takes some: for instance the tab showing a CI run, with the run's id. Call kit_tab_list to learn what there is. The same params bring the tab already open forward; other params open another one, except for a singleton, whose one tab takes the new params. It never takes the keyboard from a terminal. Refused, saying why, when the kit is not enabled on your workspace or has changes to review, when it has no such tab, and when a param is not declared or does not match its rule. The answer says what happened (opened, focused or replaced) and whether the person can see it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kit": kit_arg,
+                    "tab": tab_arg,
+                    "params": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "What to pass the tab, by the names it declares: strings, each matching its rule whole."
+                    },
+                    "reveal": {
+                        "type": "boolean",
+                        "description": "Open the side panel if it is closed. Default true; false adds the tab without opening the panel."
+                    }
+                },
+                "required": ["kit", "tab"]
+            }
+        },
+        {
+            "name": "kit_tab_close",
+            "description": "Close a kit's tab in your workspace's side panel. With params, the tab holding those very params; without, every tab of it open there. Call it once you are done showing something, so it does not keep a part of the person's screen.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kit": kit_arg,
+                    "tab": tab_arg,
+                    "params": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "The params it was opened with."
+                    }
+                },
+                "required": ["kit", "tab"]
             }
         }
     ])
@@ -1070,6 +1127,39 @@ mod tests {
         // The model tools stay beside them, unchanged.
         for name in ["model_show", "model_snapshot", "model_close"] {
             assert_eq!(tool(name)["name"], name);
+        }
+    }
+
+    #[test]
+    fn the_kit_tab_tools_ask_for_what_the_window_reads() {
+        let open = &tool("kit_tab_open")["inputSchema"];
+        assert_eq!(open["required"], json!(["kit", "tab"]));
+        assert_eq!(open["properties"]["params"]["type"], "object");
+        assert_eq!(
+            open["properties"]["params"]["additionalProperties"]["type"],
+            "string"
+        );
+        assert_eq!(open["properties"]["reveal"]["type"], "boolean");
+
+        let close = &tool("kit_tab_close")["inputSchema"];
+        assert_eq!(close["required"], json!(["kit", "tab"]));
+        assert_eq!(close["properties"]["params"]["type"], "object");
+        assert!(close["properties"].get("reveal").is_none());
+
+        let list = &tool("kit_tab_list")["inputSchema"];
+        assert_eq!(list["properties"], json!({}));
+        assert!(list.get("required").is_none());
+    }
+
+    /// The workspace is the caller's, never the request's.
+    #[test]
+    fn no_kit_tab_tool_takes_a_workspace() {
+        for name in ["kit_tab_list", "kit_tab_open", "kit_tab_close"] {
+            let schema = &tool(name)["inputSchema"];
+            for key in ["workspace", "pane", "caller"] {
+                assert!(schema["properties"].get(key).is_none(), "{name}: {key}");
+            }
+            assert!(!names_a_file(name), "{name}");
         }
     }
 
