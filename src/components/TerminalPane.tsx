@@ -21,6 +21,7 @@ import {
 import { isHandingOver } from "../lib/windows";
 import { launchAccount, LOGIN_COMMAND, MAIN_ACCOUNT, noteLaunchedAccount } from "../lib/accounts";
 import { useAccountsT } from "./accounts/strings";
+import { PaneAccountBadge } from "./accounts/PaneAccountBadge";
 import { sessionName } from "../lib/paneNames";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
@@ -1444,6 +1445,7 @@ export function TerminalPane({
         </span>
 
         <OrchestrationBadge pane={pane} cwd={cwd} />
+        <PaneAccountBadge workspaceId={workspaceId} paneId={pane.id} />
 
         {/* The native select stays, laid transparently over its label: the
             keyboard, the screen reader and the platform's own list all keep
@@ -1704,6 +1706,7 @@ export function TerminalPane({
           label={t("pane.menu", { name: pane.name })}
           anchorRef={moreRef}
           items={menuItems}
+          accountFor={{ workspaceId, paneId: pane.id }}
           onClose={closeMore}
         />
       )}

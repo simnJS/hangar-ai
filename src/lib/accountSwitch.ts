@@ -154,10 +154,7 @@ export function mergeUsage(
   return result;
 }
 
-/**
- * The account ids to forget when `removed` is gone: a choice naming it falls
- * back to the level above (the resolver skips it anyway; this cleans the file).
- */
+/** True when a hand-edited `claudeAccount` choice names account `id`. */
 export function namesAccount(x: { claudeAccount?: unknown } | undefined, id: AccountId): boolean {
   return readAccountChoice(x?.claudeAccount) === id;
 }
