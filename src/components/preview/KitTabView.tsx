@@ -172,6 +172,7 @@ function liveDeps(workspaces: () => Workspace[]): KitHostDeps {
     readBinaryFile: (root, path, hidden) => invoke<KitBinaryFile>("kit_files_read_binary", { root, path, hidden }),
     listFiles: (root, path, pattern) => invoke<KitFileListing>("kit_files_list", { root, path, pattern }),
     writeFile: (root, path, text, expected) => invoke<void>("kit_files_write", { root, path, text, expected }),
+    writeBinaryFile: (root, path, base64) => invoke<void>("kit_files_write_binary", { root, path, base64 }),
     showFile: async (ws, path, openedBy) => {
       await grantRoots(ws, workspaces);
       const file = checkPreviewFile(await previewInspect(path));

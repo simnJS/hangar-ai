@@ -195,6 +195,7 @@ pub fn run() {
             kits::data::kit_data_write,
             kits::files::kit_files_read,
             kits::files::kit_files_write,
+            kits::files::kit_files_write_binary,
             kits::files::kit_files_read_binary,
             kits::files::kit_files_list,
             kits::loopback::kit_loopback_fetch,

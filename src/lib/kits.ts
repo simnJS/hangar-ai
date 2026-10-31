@@ -523,6 +523,7 @@ export const KIT_METHODS = {
   "files.readBinary": "files.read",
   "files.list": "files.read",
   "files.write": "files.write",
+  "files.writeBinary": "files.write",
   "data.read": "data.read",
   "data.write": "data.write",
   "loopback.fetch": KIT_LOOPBACK_PATTERN,
@@ -546,7 +547,7 @@ export const KIT_SDK_PATH = "/_hangar/kit.js";
 /** The most `files.read` returns, in bytes. */
 export const KIT_FILE_MAX_BYTES = 1024 * 1024;
 
-/** The most `files.readBinary` reads, in bytes (kits/files.rs). */
+/** The most `files.readBinary` reads and `files.writeBinary` takes, in bytes (kits/files.rs). */
 export const KIT_BINARY_MAX_BYTES = 10 * 1024 * 1024;
 
 /** The most files `files.list` gives (kits/files.rs). */

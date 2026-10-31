@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "annotate",
+  "name": "Annoter",
+  "version": "0.1.0",
+  "description": "Circle what is wrong on a capture, write a word beside it, and the agent that asked receives the annotated image and your notes.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/annotate",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Reads an image of the workspace, writes the annotated PNG and a JSON of the notes to .hangar/annotations/, and tells the agent that asked where they are.",
+    "tags": ["screenshot", "feedback", "tab"]
+  },
+  "tabs": [
+    {
+      "id": "annotate",
+      "title": "Annoter",
+      "entry": "tabs/annotate/index.html",
+      "icon": "icon.svg",
+      "permissions": ["files.read", "files.write", "panes.send"],
+      "params": {
+        "path": {
+          "description": "The image to annotate, relative to the workspace folder: .hangar/capture.png. A PNG, JPEG, WebP or GIF. Without it the tab waits for the person to paste (Ctrl+V), drop or choose one.",
+          "pattern": "[^:\\r\\n]+"
+        }
+      }
+    }
+  ]
+}

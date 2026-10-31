@@ -10,6 +10,7 @@ import {
   KIT_DATA_MAX_BYTES,
   KIT_DENIED,
   KIT_EVENTS,
+  KIT_BINARY_MAX_BYTES,
   KIT_FILE_MAX_BYTES,
   KIT_LIST_PATTERN_MAX_CHARS,
   KIT_LOOPBACK_MAX_BODY_BYTES,
@@ -65,7 +66,7 @@ export const KIT_ERRORS = {
   badArgs: "bad_args",
   /** Too many of the kit's commands are running. */
   busy: "busy",
-  /** `files.write`: the file changed since the page read it, and nothing was written. */
+  /** `files.write`: the file changed since the page read it; `files.writeBinary`: the file exists. Nothing was written. */
   conflict: "conflict",
   /** `files.readBinary`: not an image or a PDF. */
   unsupported: "unsupported",
@@ -170,6 +171,8 @@ export interface KitHostDeps {
   listFiles: (root: string, path: string | null, pattern: string | null) => Promise<KitFileListing>;
   /** `kit_files_write`: atomic. Rejects with `{ code, message }`. */
   writeFile: (root: string, path: string, text: string, expected: string | null) => Promise<void>;
+  /** `kit_files_write_binary`: a new image, never over a file. Rejects with `{ code, message }`. */
+  writeBinaryFile: (root: string, path: string, base64: string) => Promise<void>;
   /** Opens the file in the workspace's preview, as opened by `openedBy`. */
   showFile: (ws: Workspace, path: string, openedBy: string) => Promise<void>;
   /** The hangar-bridge queue: submitted once the agent is free. */
@@ -619,6 +622,31 @@ export function createKitHost(
       }
       try {
         await deps.writeFile(ws.cwd, path, text, expected ?? null);
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+      return {};
+    },
+
+    // A new raster image, never over a file. Rust checks the extension against the
+    // first bytes; here only the shape and the size of what was sent.
+    "files.writeBinary": async (raw) => {
+      const params = paramsOf(raw);
+      const path = projectRelativePath(params.path);
+      const { base64 } = params;
+      if (typeof base64 !== "string") throw new KitError(KIT_ERRORS.invalid, "base64 must be a string");
+      if (base64.length > Math.ceil(KIT_BINARY_MAX_BYTES / 3) * 4) {
+        throw new KitError(KIT_ERRORS.invalid, "the image is larger than 10 MB");
+      }
+      const ws = workspaceNow();
+      if (!filesWriteAllowed()) {
+        throw new KitError(
+          KIT_ERRORS.rateLimited,
+          `at most ${KIT_FILES_WRITE_MAX} files.write a minute; try again later`,
+        );
+      }
+      try {
+        await deps.writeBinaryFile(ws.cwd, path, base64);
       } catch (error) {
         throw tabErrorOf(error);
       }
