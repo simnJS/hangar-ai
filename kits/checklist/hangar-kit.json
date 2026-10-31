@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "checklist",
+  "name": "Recette",
+  "version": "0.1.0",
+  "description": "A tab where a person works through a list of manual checks an agent wrote, and the agent gets the result back to fix what failed.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/checklist",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Reads the checklist file an agent wrote in the workspace, keeps your answers in the kit's own data folder, and sends the agent that asked a plain summary of the results. Changes no project file.",
+    "tags": ["testing", "review", "tab"]
+  },
+  "tabs": [
+    {
+      "id": "checklist",
+      "title": "Recette",
+      "entry": "tabs/checklist/index.html",
+      "icon": "icon.svg",
+      "permissions": ["files.read", "data.read", "data.write", "panes.send", "notify"],
+      "params": {
+        "path": {
+          "description": "The checklist, a JSON file the agent wrote in the workspace, relative to its folder and not hidden: recette/login.json. It holds { \"title\": \"...\", \"steps\": [ { \"text\": \"what to do\", \"expect\": \"what the person should see\" } ] }. One tab per path.",
+          "pattern": "[^:\r\n]+"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{ "name": "checklist", "version": "0.1.0", "description": "Tells agents to hand the person a checklist in a Hangar tab for what only a human can check, and to wait for the answer." }
