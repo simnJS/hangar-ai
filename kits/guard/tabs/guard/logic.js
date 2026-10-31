@@ -96,6 +96,7 @@
       "why.git-clean/any": "git clean --force supprime les fichiers non suivis, que git ne peut pas rendre.",
       "why.drop-database/any": "Il supprime une base de données entière.",
       "why.download-to-shell/any": "Il exécute du code tout droit sorti d’un téléchargement, sans que personne ne l’ait lu.",
+      "why.encoded-command/any": "Il passe à PowerShell une commande en base64 (-EncodedCommand), que personne ne peut lire avant qu’elle ne s’exécute.",
       "why.secret-file/read": "Il lit ou affiche {subject}, un fichier secret.",
       "why.secret-file/copy": "Il copie {subject}, un fichier secret, là où il n’est plus traité comme tel.",
       "why.secret-file/write": "Il écrase {subject}, un fichier secret.",

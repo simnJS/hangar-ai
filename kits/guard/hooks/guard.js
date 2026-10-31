@@ -1,7 +1,8 @@
 "use strict";
-// PreToolUse hook on Bash, Read, Edit, Write and Grep. It answers on stdout with
-// Claude Code's documented deny, or says nothing, and always exits 0. Anything that
-// goes wrong in here lets the call through and is logged in the kit's data folder.
+// PreToolUse hook on the tools hooks.json lists: those that run a command or touch a
+// file. It answers on stdout with Claude Code's deny, or says nothing, and always exits
+// 0. Anything that goes wrong in here lets the call through and is logged in the kit's
+// data folder.
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 

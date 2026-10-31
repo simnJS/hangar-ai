@@ -4,7 +4,8 @@
 // Nothing here writes anything, and everything it reads of the machine comes from
 // `ctx`, so a test can hold any machine in a table.
 
-const { flatten, shellScript, UNKNOWN, SHELLS } = require("./commands.js");
+const { flatten, shellScript, powershellScript, UNKNOWN, SHELLS } = require("./commands.js");
+const { VALUE, bind } = require("./cmdlets.js");
 const paths = require("./paths.js");
 
 const WHY = {
@@ -17,6 +18,7 @@ const WHY = {
   "git-clean/any": "git clean --force deletes untracked files, which git cannot bring back",
   "drop-database/any": "it drops a whole database",
   "download-to-shell/any": "it runs code straight from a download, without anyone reading it",
+  "encoded-command/any": "it hands PowerShell a command in base64 (-EncodedCommand), which nobody can read before it runs",
   "secret-file/read": "it reads or prints {subject}, a secret file",
   "secret-file/copy": "it copies {subject}, a secret file, out to where it is no longer treated as one",
   "secret-file/write": "it overwrites {subject}, a secret file",
@@ -74,6 +76,8 @@ function deleteSpec(c) {
 function classifyTarget(text, glob, cwd, ctx) {
   if (text === "") return { where: "inside" }; // `rm -rf ""` deletes nothing
   if (text.startsWith(UNKNOWN)) return { where: "unreadable" };
+  // `HKCU:\x`, `Env:\x`: a PowerShell provider's, which no project holds.
+  if (ctx.platform === "win32" && /^[a-zA-Z]{2,}:/.test(text)) return { where: "outside", path: text };
   const slashed = ctx.platform === "win32" ? text.replace(/\\/g, "/") : text;
   const kept = [];
   for (const segment of slashed.split("/")) {
@@ -102,10 +106,11 @@ function classifyTarget(text, glob, cwd, ctx) {
   return { where: "outside", path };
 }
 
-function targetRefusal(arg, cwd, ctx) {
+/** `narrowed`: it only takes what a filter picks, so naming the project's folder is no harm. */
+function targetRefusal(arg, cwd, ctx, narrowed = false) {
   for (const text of arg.texts) {
     const { where, path } = classifyTarget(text, arg.glob, cwd, ctx);
-    if (where === "inside") continue;
+    if (where === "inside" || (where === "project" && narrowed)) continue;
     return refusal("recursive-delete", where, where === "unreadable" ? arg.raw : path);
   }
   return null;
@@ -123,16 +128,100 @@ function findRefusal(find, ctx) {
   if (!starts.length) starts.push({ text: ".", texts: ["."], raw: ".", glob: false });
   const narrowed = find.args.some((arg) => FIND_NARROWS.has(arg.text));
   for (const arg of starts) {
-    for (const text of arg.texts) {
-      const { where, path } = classifyTarget(text, arg.glob, find.cwd, ctx);
-      if (where === "inside" || (where === "project" && narrowed)) continue;
-      return refusal("recursive-delete", where, where === "unreadable" ? arg.raw : path);
+    const refused = targetRefusal(arg, find.cwd, ctx, narrowed);
+    if (refused) return refused;
+  }
+  return null;
+}
+
+// What leaves the pipeline's items as they were, or only some of them.
+const PASS_ALONG = new Set(["foreach-object", "where-object", "select-object", "sort-object", "write-host", "tee-object"]);
+const NARROWING = new Set(["where-object", "select-object"]);
+const HERE = { text: ".", texts: ["."], raw: ".", glob: false, exact: true };
+
+/** What stands before a command in its pipeline, nearest first, going out of the blocks it is in. */
+function upstreamOf(c, all) {
+  const found = [];
+  for (let level = c; level; level = level.owner) {
+    const peers = all.filter((other) => other.pipeline === level.pipeline && other.seq < level.seq && other.owner === level.owner);
+    found.push(...peers.reverse());
+    if (level.owner) found.push(level.owner);
+  }
+  return found;
+}
+
+/** What comes down the pipeline into a PowerShell command, or null when nothing does. */
+function pipelineFeed(c, all) {
+  let narrowed = false;
+  for (const other of upstreamOf(c, all)) {
+    if (PASS_ALONG.has(other.cmdlet)) {
+      narrowed = narrowed || NARROWING.has(other.cmdlet);
+    } else if (other.program === VALUE) {
+      return { kind: "values", args: other.args, narrowed };
+    } else if (other.cmdlet === "get-childitem" || other.cmdlet === "get-item") {
+      const bound = bind(other);
+      // Get-ChildItem's second plain word is its filter.
+      const starts = [...bound.named("path"), ...bound.named("literalpath"), ...bound.named("pspath"), ...bound.named("lp"), ...bound.plain.slice(0, 1)];
+      const filters = [...bound.named("filter"), ...bound.named("include"), ...bound.plain.slice(1, 2)];
+      return { kind: "files", starts, filters, cwd: other.cwd, recurse: bound.on("recurse"), narrowed: narrowed || filters.length > 0 };
+    } else {
+      return { kind: "unknown" };
     }
   }
   return null;
 }
 
+const isPipedItem = (arg) => /^\$(_|psitem)\b/i.test(arg.raw);
+
+function powershellDelete(c, all, ctx) {
+  const bound = bind(c);
+  if (bound.on("whatif")) return null; // it only says what it would do
+  const flagged = c.args.some((arg) => /^\/s$/i.test(arg.text) || (c.program === "rm" && /^-[fvdiI]*[rR][rRfvdiI]*$/.test(arg.text)));
+  const recursive = bound.on("recurse") || flagged;
+  const splat = c.args.find((arg) => /^@[A-Za-z_]/.test(arg.raw));
+  if (splat) return refusal("recursive-delete", "unreadable", splat.raw); // `@p` can hold -Recurse and any path
+  const targets = bound.files.filter((arg) => !/^\/[a-z]$/i.test(arg.text));
+  const named = targets.filter((arg) => !isPipedItem(arg));
+  const narrowed = bound.has("filter") || bound.has("include");
+  if (recursive) {
+    for (const arg of named) {
+      const refused = targetRefusal(arg, c.cwd, ctx, narrowed);
+      if (refused) return refused;
+    }
+  }
+  if (named.length && named.length === targets.length) return null;
+  // The list comes from the pipeline: what feeds it says what it can reach.
+  const feed = pipelineFeed(c, all);
+  if (!feed) return recursive && targets.length ? refusal("recursive-delete", "unreadable", targets[0].raw) : null;
+  if (feed.kind === "files") {
+    if (!recursive && !feed.recurse) return null;
+    for (const arg of feed.starts.length ? feed.starts : [HERE]) {
+      const refused = targetRefusal(arg, feed.cwd, ctx, feed.narrowed || narrowed);
+      if (refused) return refused;
+    }
+    return null;
+  }
+  if (!recursive) return null;
+  if (feed.kind === "values") {
+    for (const arg of feed.args) {
+      const refused = targetRefusal(arg, c.cwd, ctx, feed.narrowed || narrowed);
+      if (refused) return refused;
+    }
+    return null;
+  }
+  return refusal("recursive-delete", "unreadable", "what the pipeline feeds it");
+}
+
 function recursiveDelete(c, all, ctx) {
+  if (c.cmdlet === "remove-item") return powershellDelete(c, all, ctx);
+  if (c.program === "[directory]::delete") {
+    const [target, flag] = c.args;
+    return target && flag && flag.text !== "$false" ? targetRefusal(target, c.cwd, ctx) : null;
+  }
+  // `(Get-Item x).Delete($true)`: nothing on the line says what it is called on.
+  if (c.program === ".delete" && c.powershell && c.args[0] && c.args[0].text === "$true") {
+    return refusal("recursive-delete", "unreadable", "what .Delete($true) is called on");
+  }
   if (c.program === "find" && c.args.some((arg) => arg.text === "-delete")) return findRefusal(c, ctx);
   const spec = deleteSpec(c);
   if (!spec || !spec.recursive) return null;
@@ -295,7 +384,7 @@ function dropDatabase(c, all, ctx) {
   const sql = ctx.sqlPattern;
   if (c.args.some((arg) => arg.texts.some((text) => sql.test(text)))) return refusal("drop-database", "any");
   if (c.stdin !== null && sql.test(c.stdin)) return refusal("drop-database", "any");
-  const feeds = all.filter((other) => other.pipeline === c.pipeline && other.seq < c.seq && ["echo", "printf", "cat"].includes(other.program));
+  const feeds = all.filter((other) => other.pipeline === c.pipeline && other.seq < c.seq && (["echo", "printf", "cat", VALUE].includes(other.program) || other.cmdlet === "write-output"));
   for (const feed of feeds) {
     if (feed.stdin !== null && sql.test(feed.stdin)) return refusal("drop-database", "any");
     if (feed.program !== "cat" && feed.args.some((arg) => sql.test(arg.text))) return refusal("drop-database", "any");
@@ -309,8 +398,13 @@ function dropDatabase(c, all, ctx) {
 
 const INLINE_CODE = /^-(c|e|m|p|r|E)$|^--(eval|print)$/;
 
+const POWERSHELLS = new Set(["powershell", "pwsh"]);
+// What runs the text or file it is given, in PowerShell.
+const POWERSHELL_RUNNERS = new Set(["iex", "invoke-expression", "[scriptblock]::create", ".invokescript"]);
+
 function readsCodeFromStdin(c, rule) {
   if (SHELLS.has(c.program)) return Boolean(shellScript(c.args).stdin);
+  if (POWERSHELLS.has(c.program)) return Boolean(powershellScript(c.args).stdin);
   if (c.program === "iex" || c.program === "invoke-expression") return true;
   if (!rule.interpreters.includes(c.program)) return false;
   for (const { text } of c.args) {
@@ -333,7 +427,10 @@ function downloadedFiles(c, ctx) {
     if (arg.text === "-o" || arg.text === "--output" || (c.program === "wget" && arg.text === "-O")) add(c.args[i + 1]);
     const long = /^--(output|output-document)=(.+)$/.exec(arg.text);
     if (long) add({ ...arg, text: long[2] });
+    const saved = c.powershell ? /^-(?:o|ou|out|outf|outfi|outfil|outfile|d|de|des|dest|desti|destin|destina|destinat|destinati|destinatio|destination)(:.+)?$/i.exec(arg.text) : null;
+    if (saved) add(saved[1] ? { ...arg, text: saved[1].slice(1) } : c.args[i + 1]);
   });
+  if (c.program === ".downloadfile") add(c.args[1]);
   for (const redirect of c.redirects) if (redirect.op === ">" || redirect.op === ">>") add(redirect.target);
   return files;
 }
@@ -341,14 +438,15 @@ function downloadedFiles(c, ctx) {
 function downloadToShell(c, all, downloads, ctx) {
   const rule = ctx.rules.downloadToShell;
   const isDownload = (other) => rule.downloaders.includes(other.program);
-  const runsCode = SHELLS.has(c.program) || rule.interpreters.includes(c.program) || ["eval", "source", ".", "iex", "invoke-expression"].includes(c.program);
+  const runsCode = SHELLS.has(c.program) || POWERSHELLS.has(c.program) || rule.interpreters.includes(c.program) || POWERSHELL_RUNNERS.has(c.program) || ["eval", "source", "."].includes(c.program);
 
   if (readsCodeFromStdin(c, rule) && all.some((other) => other.pipeline === c.pipeline && other.seq < c.seq && isDownload(other))) {
     return refusal("download-to-shell", "any");
   }
   if (runsCode && c.args.some((arg) => arg.commands.some(isDownload))) return refusal("download-to-shell", "any");
-  // PowerShell's `iex (irm …)`: the download sits beside it, in the same text.
-  if (c.windows && (c.program === "iex" || c.program === "invoke-expression") && all.some(isDownload)) {
+  // PowerShell's `iex (irm …)` or `$s = irm …; iex $s`: the download sits beside it, in the same
+  // text. `iex '1+1'` says what it runs, and that was read on its own.
+  if (c.windows && POWERSHELL_RUNNERS.has(c.program) && !c.args.some((arg) => arg.exact && !arg.text.startsWith("-")) && all.some(isDownload)) {
     return refusal("download-to-shell", "any");
   }
 
@@ -360,6 +458,9 @@ function downloadToShell(c, all, downloads, ctx) {
   if (c.path && /[/\\]/.test(c.path) && isSaved(c.path)) return refusal("download-to-shell", "any");
   if (SHELLS.has(c.program)) {
     const { file } = shellScript(c.args);
+    if (file && isSaved(file.text)) return refusal("download-to-shell", "any");
+  } else if (POWERSHELLS.has(c.program)) {
+    const { file } = powershellScript(c.args);
     if (file && isSaved(file.text)) return refusal("download-to-shell", "any");
   } else if (runsCode && c.program !== "eval") {
     const first = c.args.find((arg) => !arg.text.startsWith("-"));
@@ -405,6 +506,52 @@ function secretArg(arg, cwd, ctx) {
 }
 
 const withText = (arg, text) => ({ ...arg, text, texts: [text] });
+
+// Those that open a file object piped to them. `gci .env | sort` only sorts the objects.
+const READS_PIPED_FILES = new Set(["get-content", "select-string", "format-hex", "compress-archive"]);
+
+/** What a PowerShell reader gets from its pipeline, as paths to look at. */
+function pipedFiles(c, all) {
+  if (!READS_PIPED_FILES.has(c.cmdlet)) return [];
+  const feed = pipelineFeed(c, all);
+  if (!feed) return [];
+  // Only Get-Content takes a piped text for a path: to Select-String it is what to search.
+  if (feed.kind === "values") return c.cmdlet === "get-content" ? feed.args : [];
+  if (feed.kind !== "files") return [];
+  const found = [];
+  for (const start of feed.starts) {
+    for (const filter of feed.filters.length ? feed.filters : [null]) {
+      // A folder is read for what is in it: `gci ~/.ssh | gc` reads the keys there.
+      found.push(withText(start, `${start.text.replace(/[\\/]+$/, "")}/${filter ? filter.text : "local"}`));
+    }
+    if (!feed.filters.length) found.push(start);
+  }
+  if (!feed.starts.length) found.push(...feed.filters);
+  return found;
+}
+
+/** The files a PowerShell reader reads. */
+function powershellReads(c, all) {
+  const { files } = bind(c);
+  const named = files.filter((arg) => !isPipedItem(arg));
+  return named.length === files.length && named.length ? named : [...named, ...pipedFiles(c, all)];
+}
+
+/** The files a PowerShell writer overwrites: appending leaves what is there, as `>>` does. */
+function powershellWrites(c) {
+  if (!c.cmdlet) return c.args.slice(0, 1); // [IO.File]::WriteAllText(path, …)
+  const bound = bind(c);
+  if (bound.on("append")) return [];
+  if (c.cmdlet === "new-item") return bound.on("force") ? [...bound.files, ...bound.named("name")] : [];
+  return bound.files;
+}
+
+/** Where a PowerShell copy comes from and goes. */
+function powershellCopy(c) {
+  const bound = bind(c);
+  const to = bound.named("destination")[0] || bound.named("newname")[0] || (bound.named("path").length || bound.named("literalpath").length ? bound.plain[0] : bound.plain[1]);
+  return { from: bound.files, to };
+}
 
 // Programs whose first plain argument is a pattern or a script, not a file. And the
 // options of each that take a value, so that value is not read as that argument.
@@ -509,7 +656,7 @@ function inlineStrings(c) {
 
 const COPIER_VALUE_OPTIONS = new Set(["--exclude", "--include", "--exclude-from", "--include-from", "--filter", "-f", "-e", "--rsh", "-m", "-o", "-g"]);
 
-function secretFile(c, ctx) {
+function secretFile(c, all, ctx) {
   const rule = ctx.rules.secrets;
   for (const { op, target } of c.redirects) {
     if (!target) continue;
@@ -522,12 +669,26 @@ function secretFile(c, ctx) {
     }
   }
   if (rule.readers.includes(c.program)) {
-    for (const arg of readTargets(c)) {
+    for (const arg of c.cmdlet ? powershellReads(c, all) : readTargets(c)) {
       const found = secretArg(arg, c.cwd, ctx);
       if (found) return refusal("secret-file", "read", found);
     }
   }
-  if (rule.copiers.includes(c.program)) {
+  if (c.powershell && rule.writers.includes(c.program)) {
+    for (const arg of powershellWrites(c)) {
+      const found = secretArg(arg, c.cwd, ctx);
+      if (found) return refusal("secret-file", "write", found);
+    }
+  }
+  if (c.cmdlet && rule.copiers.includes(c.program)) {
+    const { from, to } = powershellCopy(c);
+    if (to && !secretArg(to, c.cwd, ctx)) {
+      for (const arg of from) {
+        const found = secretArg(arg, c.cwd, ctx);
+        if (found) return refusal("secret-file", "copy", found);
+      }
+    }
+  } else if (rule.copiers.includes(c.program)) {
     const plain = [];
     for (let i = 0; i < c.args.length; i++) {
       const arg = c.args[i];
@@ -547,6 +708,11 @@ function secretFile(c, ctx) {
       const found = secretArg(arg, c.cwd, ctx);
       if (found) return refusal("secret-file", "read", found);
     }
+  }
+  if (c.powershell && ctx.rules.downloadToShell.downloaders.includes(c.program)) {
+    const inFile = c.args.findIndex((arg) => /^-inf(i(le?)?)?$/i.test(arg.text));
+    const found = inFile >= 0 && c.args[inFile + 1] ? secretArg(c.args[inFile + 1], c.cwd, ctx) : null;
+    if (found) return refusal("secret-file", "read", found);
   }
   const git = gitCommand(c, ctx);
   if (git && ["show", "diff", "blame", "cat-file"].includes(git.sub) || (git && git.sub === "log" && git.args.some((arg) => arg.text === "-p" || arg.text === "--patch" || arg.text === "-u"))) {
@@ -582,9 +748,12 @@ function guardFiles(c, ctx) {
     if (text && isGuarded(text, c.cwd, ctx)) return refusal("guard-files", "any", text);
   }
   if (!c.program || ctx.rules.guardFiles.readers.includes(c.program)) return null;
+  // A value is no change, and of .NET's calls only the file system's touch a file.
+  if (c.powershell && /^[.[(]/.test(c.program) && !/^\[(file|directory)\]::/.test(c.program)) return null;
+  const binds = c.powershell ? ":" : "=";
   for (const arg of c.args) {
     for (const text of arg.texts) {
-      const value = text.startsWith("-") && text.includes("=") ? text.slice(text.indexOf("=") + 1) : text;
+      const value = text.startsWith("-") && text.includes(binds) ? text.slice(text.indexOf(binds) + 1) : text;
       if (value && !value.startsWith("-") && isGuarded(value, c.cwd, ctx)) return refusal("guard-files", "any", arg.raw);
     }
   }
@@ -595,22 +764,36 @@ function guardFiles(c, ctx) {
 // Every tool
 // ---------------------------------------------------------------------------
 
-function checkBash(command, ctx) {
+function encodedCommand(c) {
+  return POWERSHELLS.has(c.program) && powershellScript(c.args).encoded !== undefined ? refusal("encoded-command", "any") : null;
+}
+
+/** `irm x | Out-File i.ps1`: saved by what the download is piped into. */
+function savedFromPipe(c, all, ctx) {
+  if (!["out-file", "set-content", "tee-object"].includes(c.cmdlet)) return [];
+  const downloaded = all.some((other) => other.pipeline === c.pipeline && other.seq < c.seq && ctx.rules.downloadToShell.downloaders.includes(other.program));
+  if (!downloaded) return [];
+  return bind(c).files.filter((arg) => arg.exact).map((arg) => paths.normalize(arg.text, c.cwd, ctx.platform)).filter(Boolean);
+}
+
+function checkCommand(command, ctx, dialect) {
   const { rules } = ctx;
-  const all = flatten(command, ctx);
+  const all = flatten(command, ctx, dialect);
   const downloads = [];
   for (const c of all) {
     const refused =
+      (on(rules.encodedCommand) && encodedCommand(c)) ||
       (on(rules.recursiveDelete) && recursiveDelete(c, all, ctx)) ||
       (on(rules.forcePush) && forcePush(c, ctx)) ||
       (on(rules.gitResetHard) && gitResetHard(c, ctx)) ||
       (on(rules.gitClean) && gitClean(c, ctx)) ||
       (on(rules.dropDatabase) && dropDatabase(c, all, ctx)) ||
       (on(rules.downloadToShell) && downloadToShell(c, all, downloads, ctx)) ||
-      (on(rules.secrets) && secretFile(c, ctx)) ||
+      (on(rules.secrets) && secretFile(c, all, ctx)) ||
       (on(rules.guardFiles) && guardFiles(c, ctx));
     if (refused) return refused;
     if (on(rules.downloadToShell) && rules.downloadToShell.downloaders.includes(c.program)) downloads.push(...downloadedFiles(c, ctx));
+    if (on(rules.downloadToShell)) downloads.push(...savedFromPipe(c, all, ctx));
   }
   return null;
 }
@@ -643,21 +826,62 @@ function checkGrep(input, ctx) {
   return null;
 }
 
+// The tools that send a local file somewhere, and the file each names.
+const texts = (...values) => values.flat().filter((value) => typeof value === "string" && value);
+const list = (value) => (Array.isArray(value) ? value : []);
+
+function artifactSources(files) {
+  if (Array.isArray(files)) return files.map((entry) => entry && entry.path);
+  if (files === null || typeof files !== "object") return [];
+  return Object.values(files).map((entry) => (typeof entry === "string" ? entry : entry && entry.from));
+}
+
+const SENDERS = {
+  Artifact: (input) => texts(input.file_path, list(input.file_paths), artifactSources(input.files)),
+  ArtifactData: (input) => texts(input.file_path, list(input.writes).map((write) => write && write.file_path)),
+  DesignSync: (input) => texts(list(input.files).map((entry) => entry && entry.localPath)),
+};
+
+// Where each tool names the file it opens or changes.
+const FILE_FIELDS = { Read: "file_path", Edit: "file_path", Write: "file_path", NotebookEdit: "notebook_path", LSP: "filePath" };
+
+/** The local files this call names, for the tools working on files. */
+function filesOfCall(tool, input) {
+  if (FILE_FIELDS[tool]) return texts(input[FILE_FIELDS[tool]]);
+  return SENDERS[tool] ? SENDERS[tool](input) : [];
+}
+
 /** The refusal for this PreToolUse event, or null. */
 function check(event, ctx) {
   const input = event.tool_input || {};
-  switch (event.tool_name) {
+  const tool = event.tool_name;
+  switch (tool) {
     case "Bash":
-      return typeof input.command === "string" ? checkBash(input.command, ctx) : null;
-    case "Read":
-    case "Edit":
-    case "Write":
-      return checkFileTool(event.tool_name, input.file_path, ctx);
+    case "Monitor": // its command runs in the Bash tool's shell, Git Bash on Windows
+      return typeof input.command === "string" ? checkCommand(input.command, ctx, "sh") : null;
+    case "PowerShell":
+      return typeof input.command === "string" ? checkCommand(input.command, ctx, "powershell") : null;
     case "Grep":
       return checkGrep(input, ctx);
+    case "Read":
+    case "LSP":
+    case "Edit":
+    case "Write":
+    case "NotebookEdit":
+    case "Artifact":
+    case "ArtifactData":
+    case "DesignSync": {
+      // An LSP call or an upload reads the file, like Read. A notebook edit changes it, like Write.
+      const as = tool === "NotebookEdit" ? "Write" : tool === "Edit" || tool === "Write" ? tool : "Read";
+      for (const file of filesOfCall(tool, input)) {
+        const refused = checkFileTool(as, file, ctx);
+        if (refused) return refused;
+      }
+      return null;
+    }
     default:
       return null;
   }
 }
 
-module.exports = { check, WHY };
+module.exports = { check, filesOfCall, WHY };

@@ -5,10 +5,13 @@
 
 const crypto = require("node:crypto");
 const { createContext, dataFolder } = require("./context.js");
-const { check } = require("./rules.js");
+const { check, filesOfCall } = require("./rules.js");
 const store = require("./store.js");
 
-const TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep"]);
+const COMMAND_TOOLS = new Set(["Bash", "PowerShell", "Monitor"]);
+const FILE_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit", "LSP"]);
+const SENDING_TOOLS = new Set(["Artifact", "ArtifactData", "DesignSync"]);
+const TOOLS = new Set([...COMMAND_TOOLS, ...FILE_TOOLS, ...SENDING_TOOLS, "Grep"]);
 
 /** Who is asking. A subagent is not the agent that started it. */
 function whoIs(event, env) {
@@ -23,12 +26,13 @@ function whoIs(event, env) {
 /** The exact thing a pass is for, and how to show it to the person. */
 function subjectOf(event) {
   const input = event.tool_input || {};
-  if (event.tool_name === "Bash") return { subject: input.command, shown: input.command };
+  if (COMMAND_TOOLS.has(event.tool_name)) return { subject: input.command, shown: `${event.tool_name === "Bash" ? "" : `${event.tool_name}: `}${input.command}` };
   if (event.tool_name === "Grep") {
     const where = input.path || input.glob || ".";
     return { subject: JSON.stringify([input.pattern, input.path, input.glob]), shown: `Grep ${input.pattern} in ${where}` };
   }
-  return { subject: input.file_path, shown: `${event.tool_name} ${input.file_path}` };
+  const files = filesOfCall(event.tool_name, input);
+  return { subject: files.join("\n"), shown: `${event.tool_name} ${files.join(", ")}` };
 }
 
 function denyAnswer(why) {
@@ -40,7 +44,7 @@ function denyAnswer(why) {
         `The guard refused this: ${why}. Do not look for another way to do it. ` +
         "Tell the person what you were trying to do and why you need this. " +
         "They can let this exact command through once, for 2 minutes, from the Guardrails (Garde-fous) tab; " +
-        "retry the same command, unchanged, only after they tell you to.",
+        "retry the same command, unchanged and with the same tool, only after they tell you to.",
     },
   };
 }

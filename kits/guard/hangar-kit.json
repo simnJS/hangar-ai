@@ -9,7 +9,7 @@
   "icon": "icon.svg",
   "hangar": ">=1.9.0",
   "gallery": {
-    "permissionsSummary": "Runs a hook before each Bash, Read, Edit, Write and Grep call that can refuse it, shows a tab listing the refusals, and keeps them with its one-time passes in the kit's own data folder.",
+    "permissionsSummary": "Runs a hook before each call of a tool that runs a command or touches a file (Bash, PowerShell, Monitor, Read, Edit, Write, Grep and the others its README lists) that can refuse it, shows a tab listing the refusals, and keeps them with its one-time passes in the kit's own data folder.",
     "tags": ["safety", "hooks", "tab"]
   },
   "tabs": [

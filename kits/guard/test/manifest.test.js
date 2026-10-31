@@ -122,7 +122,7 @@ test("every class the view draws is one of Hangar UI's, when the library is arou
 
 test("rules.json reads: each rule says what it does, and can be turned off", () => {
   const rules = JSON.parse(read("rules.json"));
-  assert.deepEqual(Object.keys(rules).sort(), ["downloadToShell", "dropDatabase", "forcePush", "gitClean", "gitResetHard", "guardFiles", "recursiveDelete", "secrets"]);
+  assert.deepEqual(Object.keys(rules).sort(), ["downloadToShell", "dropDatabase", "encodedCommand", "forcePush", "gitClean", "gitResetHard", "guardFiles", "recursiveDelete", "secrets"]);
   for (const [name, rule] of Object.entries(rules)) {
     assert.equal(rule.enabled, true, name);
     assert.ok(rule.what.trim(), name);
@@ -139,6 +139,19 @@ test("the README says what it does, what it touches, what it does not protect ag
   assert.match(readme, /It is no sandbox/);
   assert.match(readme, /A script can do anything once started/);
   assert.ok(readme.includes("https://github.com/simnJS/hangar-ai/tree/main/kits/guard"));
+});
+
+test("the proof in a real Claude Code is on record, and nothing in it failed", () => {
+  const result = read("proof", "RESULT.md");
+  assert.match(result, /^# The guard in a real Claude Code/);
+  assert.match(result, /Claude Code \d+\.\d+\.\d+/);
+  for (const title of ["Refused, through Bash", "Refused, through PowerShell", "Refused, through Monitor", "Allowed, through PowerShell", "A one-time pass, on PowerShell"]) {
+    assert.ok(result.includes(`## ${title}`), title);
+  }
+  assert.ok(result.includes("- [x] "));
+  assert.equal(result.includes("FAILED"), false);
+  // In the kit's test folder, an older Node's `node --test` would run it, and pay for it.
+  assert.equal(fs.existsSync(path.join(KIT, "test", "prove.js")), false);
 });
 
 test("the skill tells an agent to explain, not to go around", () => {
