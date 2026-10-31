@@ -19,7 +19,7 @@ import type { RemoteStats } from "../remote/types";
 
 const HOUR = 3_600_000;
 const DAYS = 150;
-const HOME = "C:\\Users\\simnJS\\Documents";
+const HOME = "C:\\Users\\me\\Documents";
 
 const ROOTS: ProjectRoot[] = [
   { workspaceId: "ws-iabench", name: "IaBench", path: "c:/users/simnjs/documents/iabench" },
@@ -63,10 +63,10 @@ const WORK: Work[] = [
   { cwd: `${HOME}\\billing-api`, agent: "claude", model: 0, sessions: 1, from: 90, to: 1, odds: 0.35, reads: 1.2 },
   { cwd: `${HOME}\\recipes-app`, agent: "codex", model: 3, sessions: 1, from: 21, to: 0, odds: 0.8, reads: 1.1 },
   { cwd: `${HOME}\\recipes-app`, agent: "codex", model: 4, sessions: 1, from: 16, to: 14, odds: 1, reads: 0.4 },
-  { cwd: "C:\\Users\\simnJS\\Desktop\\scratch", agent: "claude", model: 2, sessions: 1, from: DAYS, to: 2, odds: 0.15, weekends: true, reads: 0.3 },
-  { cwd: "C:\\Users\\simnJS\\dotfiles", agent: "claude", model: 1, sessions: 1, from: 140, to: 40, odds: 0.08, weekends: true, reads: 0.5 },
-  { cwd: "C:\\Users\\simnJS\\blog", agent: "claude", model: 1, sessions: 1, from: 75, to: 30, odds: 0.1, weekends: true, reads: 0.6 },
-  { cwd: "C:\\Users\\simnJS\\advent-of-code", agent: "codex", model: 3, sessions: 1, from: 60, to: 35, odds: 0.12, weekends: true, reads: 0.4 },
+  { cwd: "C:\\Users\\me\\Desktop\\scratch", agent: "claude", model: 2, sessions: 1, from: DAYS, to: 2, odds: 0.15, weekends: true, reads: 0.3 },
+  { cwd: "C:\\Users\\me\\dotfiles", agent: "claude", model: 1, sessions: 1, from: 140, to: 40, odds: 0.08, weekends: true, reads: 0.5 },
+  { cwd: "C:\\Users\\me\\blog", agent: "claude", model: 1, sessions: 1, from: 75, to: 30, odds: 0.1, weekends: true, reads: 0.6 },
+  { cwd: "C:\\Users\\me\\advent-of-code", agent: "codex", model: 3, sessions: 1, from: 60, to: 35, odds: 0.12, weekends: true, reads: 0.4 },
 ];
 
 /** mulberry32: a small generator, seeded. */

@@ -912,7 +912,7 @@ mod tests {
                 title: "Windows quirk".into(),
                 content: "paths are backslashed".into(),
                 tags: vec!["Windows".into()],
-                workspace: "C:/Users/simnJS/Documents/Hangar".into(),
+                workspace: "C:/Users/me/Documents/Hangar".into(),
                 ..NewMemory::default()
             },
         )
