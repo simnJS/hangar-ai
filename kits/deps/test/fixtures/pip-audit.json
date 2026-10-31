@@ -1,0 +1,26 @@
+{
+  "dependencies": [
+    {
+      "name": "flask",
+      "version": "0.5",
+      "vulns": [
+        {
+          "id": "PYSEC-2018-66",
+          "fix_versions": [
+            "0.12.3"
+          ],
+          "aliases": [
+            "CVE-2018-1000656"
+          ],
+          "description": "The Pallets Project flask version Before 0.12.3 contains a CWE-20: Improper Input Validation vulnerability in flask that can result in Large amount of memory usage possibly leading to denial of service."
+        }
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.32.3",
+      "vulns": []
+    }
+  ],
+  "fixes": []
+}
