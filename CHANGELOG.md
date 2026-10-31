@@ -8,6 +8,28 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.7.0] - 2026-10-31
+
+- **Claude accounts.** Use several Claude subscriptions from one Hangar — say a work Max
+  and a personal one — and give each workspace its own.
+  - **Settings → Claude accounts** adds an account: name it, and a pane opens for you to
+    log in through your browser. Rename, remove, and pick the default account there.
+  - Each workspace can have its own account, from its right-click menu in the sidebar
+    or when you create it. A workspace that is not on the default shows a small badge
+    with the account's name.
+  - The toolbar's account menu shows the account of the workspace on screen and each
+    account's 5-hour and weekly usage. One click moves this workspace to another
+    account, or every workspace that follows the default. Hangar then offers to
+    restart the workspace's agents now, with their conversations kept, or at their
+    next launch.
+  - A single pane can run on another account too, from its menu.
+  - Every account has the same setup: conversations, settings, skills, plugins and MCP
+    servers come from your main Claude Code configuration. Only the login differs.
+    Change the setup from a pane on the main account: the other accounts copy it again
+    at each launch.
+  - Hangar never switches account by itself, not even when a limit is reached.
+  - On macOS, each account keeps its own login in the Keychain.
+
 ## [1.6.0] - 2026-10-31
 
 - **Kits.** A kit brings a domain — a game engine, a framework, a studio's own tools —
