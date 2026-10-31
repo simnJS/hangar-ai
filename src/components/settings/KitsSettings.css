@@ -1,0 +1,93 @@
+/* The Kits page: the rows, sections, inputs and buttons are the settings' own;
+   this is only what they have no class for — a kit's row and the add forms. */
+
+.kits {
+  display: grid;
+  gap: 20px;
+}
+
+.kits__intro {
+  margin: 0;
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.5;
+  color: var(--fg-secondary);
+}
+
+.kit-row {
+  gap: 10px;
+}
+
+.kit-row__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.kit-row__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--fg-secondary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kit-row__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kit-row__ver {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+  font-weight: 400;
+  color: var(--fg-secondary);
+}
+
+.kit-row__source {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--fg-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kit-row__note {
+  margin: 0;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+.kit-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kit-row__confirm {
+  display: grid;
+  gap: 8px;
+}
+
+.kit-add {
+  gap: 8px;
+}
+
+.kit-add__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.kit-add__url {
+  flex: 1 1 260px;
+  min-width: 0;
+}

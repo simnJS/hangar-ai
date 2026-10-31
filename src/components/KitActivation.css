@@ -1,0 +1,249 @@
+/* The activation view of a kit and the Kits section of the workspace dialog.
+   Buttons, switches, notices and the modal are the app's own; this is only
+   what they have no class for. */
+
+.kit-act {
+  display: grid;
+  gap: 18px;
+}
+
+.kit-act__ws,
+.kit-act__desc {
+  margin: 0;
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.kit-act__ver {
+  color: var(--fg-secondary);
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.kit-act__block {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.kit-act__heading {
+  margin: 0;
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.kit-act__group {
+  display: grid;
+  gap: 6px;
+}
+
+.kit-act__label {
+  margin: 0;
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.kit-act__count {
+  color: var(--fg-secondary);
+  font-weight: 400;
+}
+
+.kit-act__note {
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
+}
+
+.kit-act__chips,
+.kit-act__perms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kit-act__perms {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.kit-act__chip {
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kit-act__perm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--fg);
+}
+
+.kit-act__tag {
+  flex: none;
+  padding: 1px 7px;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-secondary);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.kit-act__tag--ok {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+.kit-act__tag--new {
+  color: var(--warning, var(--accent));
+  border-color: color-mix(in srgb, var(--warning, var(--accent)) 50%, transparent);
+}
+
+.kit-act__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.kit-act__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.kit-step {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-elevated, var(--bg-sunken));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kit-step__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kit-step__title {
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 500;
+  color: var(--fg);
+}
+
+/* The command exactly as it will be typed: never wrapped into something else. */
+.kit-step__cmd {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--ui-scale));
+  line-height: 1.45;
+  white-space: pre;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  user-select: text;
+}
+
+.kit-step__cmd:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.kit-step__ask {
+  display: grid;
+  gap: 8px;
+}
+
+/* A setup command is running: the dialog moves to a corner, the pane behind it
+   stays visible and usable. (From Settings, the page still covers the pane:
+   the message says where it is.) */
+.modal-backdrop.kit-act-peek {
+  align-items: flex-end;
+  justify-content: flex-end;
+  background: transparent;
+  pointer-events: none;
+}
+
+.kit-act-peek .modal {
+  max-width: 460px;
+  max-height: 45vh;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+/* The workspace dialog's Kits section. */
+
+.kit-sec {
+  display: grid;
+  gap: 8px;
+}
+
+.kit-sec__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kit-sec__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kit-sec__main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.kit-sec__text {
+  display: grid;
+  min-width: 0;
+}
+
+.kit-sec__name {
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--fg);
+}
+
+.kit-sec__meta {
+  overflow: hidden;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--fg-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kit-sec__restart {
+  flex-wrap: wrap;
+}
