@@ -8,6 +8,10 @@
   "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/ci-status",
   "icon": "icon.svg",
   "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Runs the GitHub CLI (gh run list, gh run view) to read CI runs, shows a tab and sends notifications, and runs a hook after git push to open that tab.",
+    "tags": ["ci", "github", "tab"]
+  },
   "commands": {
     "ci-run": {
       "description": "The state of one GitHub Actions run: status, conclusion, jobs and their steps.",

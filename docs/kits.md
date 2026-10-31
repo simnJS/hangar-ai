@@ -1282,10 +1282,28 @@ repository, `kits/index.json`:
 
 `id`, `name` and `version` are those of the kit's `hangar-kit.json`; `path` is
 `kits/<id>`; `permissionsSummary` is one sentence for the card, never what the
-activation shows (that is read from the kit itself). A Rust test fails when a
-folder of `kits/` is missing from the index, when the index lists a folder that
-does not exist, or when an id, name or version differs. **Adding a kit to the
-library is adding its entry to `kits/index.json`** in the same change.
+activation shows (that is read from the kit itself). A Rust test fails when the
+index lists a folder that does not exist, or when an id, name or version differs;
+a kit folder that is not in the index yet does not fail it.
+
+**How a kit gets listed.** A kit never edits `kits/index.json` (several kits are
+written in parallel, and they would all touch that one file). It carries its own
+card in its `hangar-kit.json`, in a `gallery` block that Hangar's manifest reader
+ignores, like any key it does not know:
+
+```json
+"gallery": {
+  "permissionsSummary": "Runs gh to read CI runs, shows a tab, sends notifications.",
+  "tags": ["ci", "github"]
+}
+```
+
+`node scripts/kits-index.mjs` rebuilds `kits/index.json` from the `hangar-kit.json`
+of every folder of `kits/` (`id`, `name`, `description`, `version`, plus that
+block), and `node scripts/kits-index.mjs --check` exits non-zero when the file
+differs. **The index is rebuilt at release**, before the tag, and committed with
+it: until then a new kit is on the branch but not in the library. The release runs
+`--check` to be sure nothing is left out.
 
 `kit_gallery_list` reads `https://raw.githubusercontent.com/simnJS/hangar-ai/main/kits/index.json`
 over https: no redirect, 256 KB at most, ten seconds at most. It is the only thing

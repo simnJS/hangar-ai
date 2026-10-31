@@ -338,55 +338,113 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// `kits/index.json` of this repository lists every kit folder, with the
-    /// id, name and version of its `hangar-kit.json`.
-    #[test]
-    fn the_index_of_the_repository_follows_the_kits() {
-        let kits_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("kits");
-        let index_text = fs::read_to_string(kits_dir.join("index.json")).unwrap();
-        let listed = parse(&index_text).expect("kits/index.json is an index");
-        let raw: Value = serde_json::from_str(&index_text).unwrap();
+    /// Checks an index against the kit folders of `kits_dir`: every entry has a
+    /// folder, with the id, name and version of its `hangar-kit.json`. A kit
+    /// folder that is not in the index yet is fine: `scripts/kits-index.mjs`
+    /// lists it when the index is rebuilt, at release.
+    fn check_index(kits_dir: &Path, index_text: &str) {
+        let listed = parse(index_text).expect("kits/index.json is an index");
+        let raw: Value = serde_json::from_str(index_text).unwrap();
         assert_eq!(
             raw["kits"].as_array().unwrap().len(),
             listed.len(),
             "every entry of kits/index.json is well formed, with an id used once"
         );
 
-        let mut folders = Vec::new();
-        for dir in fs::read_dir(&kits_dir).unwrap().flatten() {
-            let manifest = dir.path().join("hangar-kit.json");
-            if !manifest.is_file() {
-                continue;
-            }
-            let value: Value = serde_json::from_str(&fs::read_to_string(&manifest).unwrap())
-                .unwrap_or_else(|_| panic!("{} is JSON", manifest.display()));
-            let folder = dir.file_name().to_string_lossy().into_owned();
-            let id = value["id"].as_str().unwrap().to_string();
-            assert_eq!(id, folder, "a kit's folder is named after its id");
-            let item = listed
-                .iter()
-                .find(|kit| kit.id == id)
-                .unwrap_or_else(|| panic!("kit {id} is missing from kits/index.json"));
-            assert_eq!(
-                Some(item.name.as_str()),
-                value["name"].as_str(),
-                "name of {id}"
-            );
-            assert_eq!(
-                Some(item.version.as_str()),
-                value["version"].as_str(),
-                "version of {id}"
-            );
-            folders.push(id);
-        }
         for kit in &listed {
-            assert!(
-                folders.contains(&kit.id),
-                "kits/index.json lists {}, which has no folder",
+            let manifest = kits_dir.join(&kit.id).join("hangar-kit.json");
+            let text = fs::read_to_string(&manifest).unwrap_or_else(|_| {
+                panic!("kits/index.json lists {}, which has no folder", kit.id)
+            });
+            let value: Value = serde_json::from_str(&text)
+                .unwrap_or_else(|_| panic!("{} is JSON", manifest.display()));
+            assert_eq!(
+                value["id"].as_str(),
+                Some(kit.id.as_str()),
+                "id of {}",
+                kit.id
+            );
+            assert_eq!(
+                value["name"].as_str(),
+                Some(kit.name.as_str()),
+                "name of {}",
+                kit.id
+            );
+            assert_eq!(
+                value["version"].as_str(),
+                Some(kit.version.as_str()),
+                "version of {}",
                 kit.id
             );
         }
+    }
+
+    fn kit_folder(dir: &Path, id: &str, version: &str) {
+        let folder = dir.join(id);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("hangar-kit.json"),
+            format!(r#"{{"schema":1,"id":"{id}","name":"Kit {id}","version":"{version}"}}"#),
+        )
+        .unwrap();
+    }
+
+    /// `kits/index.json` of this repository only lists kits that exist, with the
+    /// id, name and version of their `hangar-kit.json`.
+    #[test]
+    fn the_index_of_the_repository_follows_the_kits() {
+        let kits_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("kits");
+        let index_text = fs::read_to_string(kits_dir.join("index.json")).unwrap();
+        check_index(&kits_dir, &index_text);
+    }
+
+    #[test]
+    fn a_kit_folder_absent_from_the_index_passes() {
+        let dir = scratch();
+        kit_folder(&dir, "listed", "1.0.0");
+        kit_folder(&dir, "new-kit", "0.1.0");
+        check_index(&dir, &index(&[entry_json("listed", "1.0.0")]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[should_panic(expected = "which has no folder")]
+    fn an_entry_without_a_folder_fails() {
+        let dir = scratch();
+        check_index(&dir, &index(&[entry_json("ghost", "1.0.0")]));
+    }
+
+    #[test]
+    #[should_panic(expected = "version of listed")]
+    fn an_entry_with_another_version_fails() {
+        let dir = scratch();
+        kit_folder(&dir, "listed", "1.1.0");
+        check_index(&dir, &index(&[entry_json("listed", "1.0.0")]));
+    }
+
+    #[test]
+    #[should_panic(expected = "name of listed")]
+    fn an_entry_with_another_name_fails() {
+        let dir = scratch();
+        kit_folder(&dir, "listed", "1.0.0");
+        let renamed = entry_json("listed", "1.0.0").replace("Kit listed", "Other");
+        check_index(&dir, &index(&[renamed]));
+    }
+
+    #[test]
+    #[should_panic(expected = "id of listed")]
+    fn an_entry_with_another_id_in_the_manifest_fails() {
+        let dir = scratch();
+        kit_folder(&dir, "listed", "1.0.0");
+        let manifest = dir.join("listed").join("hangar-kit.json");
+        let text = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            &manifest,
+            text.replace(r#""id":"listed""#, r#""id":"other""#),
+        )
+        .unwrap();
+        check_index(&dir, &index(&[entry_json("listed", "1.0.0")]));
     }
 }
