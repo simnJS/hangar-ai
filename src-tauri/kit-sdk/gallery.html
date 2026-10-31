@@ -1,0 +1,856 @@
+<!doctype html>
+<!--
+  Every component and state of Hangar UI, for reviewing by eye. Open this file in a
+  browser: it frames itself four times, in both themes, at the panel's 320 px and
+  wide. Not served to kits. `?only=dark-320` shows one of them, for a capture;
+  `?locale=en` changes what the library itself says.
+-->
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hangar UI</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* The gallery's own frame: nothing here is part of the library. */
+      .g-overview {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 24px;
+        padding: 16px;
+        background: #000;
+      }
+      .g-overview iframe {
+        display: block;
+        border: 1px solid #555;
+      }
+      .g-sheet {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 28px;
+        padding: 12px;
+      }
+      @media (min-width: 720px) {
+        .g-sheet {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          align-items: start;
+        }
+      }
+      .g-group {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        min-width: 0;
+      }
+      .g-group > h2 {
+        margin: 0;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--kit-line);
+        font-size: var(--kit-fs-body);
+        font-weight: 600;
+      }
+      .g-note {
+        margin: 0;
+        color: var(--kit-text-dim);
+        font-size: var(--kit-fs-meta);
+      }
+      /* A page of a kit, inside its own hairline. */
+      .g-tab {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--kit-border);
+        border-radius: var(--kit-radius-lg);
+        background: var(--kit-bg);
+      }
+      .g-tab > .kit-page {
+        padding: 10px 12px 12px;
+      }
+      /* States a capture cannot point at. */
+      .g-hover.kit-row {
+        background: var(--kit-hover);
+      }
+      .g-hover.kit-btn {
+        border-color: var(--kit-border-hover);
+        background: var(--kit-hover);
+      }
+      .g-hover.kit-btn--ghost {
+        border-color: transparent;
+      }
+      .g-hover.kit-btn--danger {
+        border-color: color-mix(in srgb, var(--kit-danger) 60%, transparent);
+        background: color-mix(in srgb, var(--kit-danger) 8%, var(--kit-raised));
+        color: var(--kit-text);
+      }
+      .g-hover.kit-btn--primary {
+        filter: brightness(1.08);
+        border-color: var(--kit-accent);
+        background: var(--kit-accent);
+      }
+      .g-hover.kit-filter {
+        box-shadow: inset 0 0 0 1px var(--kit-border-hover);
+        color: var(--kit-text);
+      }
+      .g-focus {
+        outline: 2px solid var(--kit-focus);
+        outline-offset: 1px;
+      }
+      .g-focus-field {
+        border-color: var(--kit-focus);
+        box-shadow: 0 0 0 3px var(--kit-accent-soft);
+      }
+      .g-static .kit-menu,
+      .g-static.kit-toasts {
+        position: static;
+      }
+      .g-static.kit-toasts {
+        justify-items: stretch;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overview" class="g-overview" hidden></div>
+    <main id="sheet" class="g-sheet" hidden>
+      <!-- ---------- Two pages, whole ---------- -->
+      <section class="g-group">
+        <h2>Une page : état de la CI</h2>
+        <div class="g-tab">
+          <header class="kit-header">
+            <div class="kit-header__main">
+              <h1 class="kit-header__title">Release 1.7.0</h1>
+              <p class="kit-header__state"><span class="kit-state kit-state--failure">Échouée</span> en 4 min 16 s, il y a 3 h</p>
+            </div>
+            <div class="kit-header__actions">
+              <button class="kit-btn kit-btn--small kit-btn--primary" type="button">Relancer</button>
+              <button class="kit-btn kit-btn--small kit-btn--icon" type="button" title="Plus d'actions" aria-label="Plus d'actions"><span class="kit-icon kit-icon--more"></span></button>
+            </div>
+          </header>
+          <div class="kit-page">
+            <dl class="kit-kv">
+              <dt>Branche</dt>
+              <dd>main</dd>
+              <dt>Commit</dt>
+              <dd class="kit-mono">a4f90c1</dd>
+              <dt>Lancée par</dt>
+              <dd>simnJS, sur un push</dd>
+            </dl>
+            <section class="kit-section">
+              <div class="kit-section__head">
+                <h2 class="kit-section__title">Jobs</h2>
+                <span class="kit-section__count">4</span>
+              </div>
+              <ul class="kit-rows">
+                <li>
+                  <button class="kit-row" type="button">
+                    <span class="kit-row__lead"><span class="kit-glyph kit-glyph--success" role="img" aria-label="Réussi"></span></span>
+                    <span class="kit-row__main"><span class="kit-row__title">rust (ubuntu-22.04)</span></span>
+                    <span class="kit-row__end">3 min 02 s</span>
+                  </button>
+                </li>
+                <li>
+                  <button class="kit-row is-selected" type="button">
+                    <span class="kit-row__lead"><span class="kit-glyph kit-glyph--failure" role="img" aria-label="Échoué"></span></span>
+                    <span class="kit-row__main">
+                      <span class="kit-row__title">rust (macos-latest)</span>
+                      <span class="kit-row__sub">Échec à l'étape Tests</span>
+                    </span>
+                    <span class="kit-row__end">4 min 16 s</span>
+                  </button>
+                </li>
+                <li>
+                  <button class="kit-row" type="button">
+                    <span class="kit-row__lead"><span class="kit-glyph kit-glyph--running" role="img" aria-label="En cours"></span></span>
+                    <span class="kit-row__main">
+                      <span class="kit-row__title">rust (windows-latest)</span>
+                      <span class="kit-row__sub">Étape 9 sur 13</span>
+                    </span>
+                    <span class="kit-row__end">2 min 41 s</span>
+                  </button>
+                </li>
+                <li>
+                  <button class="kit-row" type="button">
+                    <span class="kit-row__lead"><span class="kit-glyph kit-glyph--waiting" role="img" aria-label="En attente"></span></span>
+                    <span class="kit-row__main"><span class="kit-row__title">frontend</span></span>
+                    <span class="kit-row__end">En file</span>
+                  </button>
+                </li>
+              </ul>
+            </section>
+            <section class="kit-section">
+              <div class="kit-section__head">
+                <h2 class="kit-section__title">Journal de l'étape</h2>
+                <div class="kit-section__actions">
+                  <button id="copy-log" class="kit-btn kit-btn--small kit-btn--ghost kit-btn--icon" type="button" title="Copier le journal" aria-label="Copier le journal"><span class="kit-icon kit-icon--copy"></span></button>
+                </div>
+              </div>
+              <div id="ci-log"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="g-group">
+        <h2>Une page : file de l'éditeur</h2>
+        <div class="g-tab">
+          <header class="kit-header">
+            <div class="kit-header__main">
+              <h1 class="kit-header__title">UEFN</h1>
+              <p class="kit-header__state"><span class="kit-state kit-state--waiting">Ne répond plus depuis 46 s</span></p>
+            </div>
+            <div class="kit-header__actions">
+              <button class="kit-btn kit-btn--small" type="button">Je prends l'éditeur</button>
+            </div>
+          </header>
+          <div class="kit-page">
+            <p class="kit-banner kit-banner--warning">
+              <span class="kit-banner__text">Une fenêtre modale l'a sans doute bloqué, regardez UEFN.</span>
+            </p>
+            <section class="kit-section">
+              <div class="kit-section__head">
+                <h2 class="kit-section__title">En cours</h2>
+              </div>
+              <div class="kit-row">
+                <span class="kit-row__lead"><span class="kit-glyph kit-glyph--waiting" role="img" aria-label="Bloqué"></span></span>
+                <span class="kit-row__main">
+                  <span class="kit-row__title">ana, save_asset</span>
+                  <span class="kit-row__sub">49 s de plus que d'habitude (environ 0,9 s)</span>
+                  <span class="kit-progress kit-progress--stale" role="progressbar" aria-label="Durée" style="display: block; margin-top: 4px"><span class="kit-progress__fill" style="width: 100%"></span></span>
+                </span>
+                <span class="kit-row__end">50 s</span>
+              </div>
+            </section>
+            <section class="kit-section">
+              <div class="kit-section__head">
+                <h2 class="kit-section__title">En attente</h2>
+                <span class="kit-section__count">2</span>
+              </div>
+              <ol class="kit-rows">
+                <li class="kit-row">
+                  <span class="kit-row__lead"><span class="kit-dot kit-dot--neutral"></span></span>
+                  <span class="kit-row__main">
+                    <span class="kit-row__title">ben, save_asset</span>
+                    <span class="kit-row__sub">Refusé dans 12 s</span>
+                  </span>
+                  <span class="kit-row__end">3 min 48 s</span>
+                </li>
+                <li class="kit-row">
+                  <span class="kit-row__lead"><span class="kit-dot kit-dot--neutral"></span></span>
+                  <span class="kit-row__main">
+                    <span class="kit-row__title">cleo, VerseToolset.BuildAll</span>
+                    <span class="kit-row__sub">Impossible à estimer, l'éditeur est bloqué</span>
+                  </span>
+                  <span class="kit-row__end">2 min 57 s</span>
+                </li>
+              </ol>
+            </section>
+            <section class="kit-section">
+              <div class="kit-section__head">
+                <h2 class="kit-section__title">Historique</h2>
+                <span class="kit-section__count">50</span>
+                <div class="kit-section__actions">
+                  <button class="kit-filter" type="button" aria-pressed="false">Lectures <span class="kit-filter__count">14</span></button>
+                </div>
+              </div>
+              <ul class="kit-rows">
+                <li class="kit-row">
+                  <span class="kit-row__lead"><span class="kit-glyph kit-glyph--success" role="img" aria-label="Fini"></span></span>
+                  <span class="kit-row__main"><span class="kit-row__title">ben, VerseToolset.BuildAll</span></span>
+                  <span class="kit-row__end">2,3 s</span>
+                </li>
+                <li class="kit-row">
+                  <span class="kit-row__lead"><span class="kit-glyph kit-glyph--failure" role="img" aria-label="Refusé"></span></span>
+                  <span class="kit-row__main">
+                    <span class="kit-row__title">ben, save_asset</span>
+                    <span class="kit-row__sub">Attendu 240&nbsp;s&nbsp;: ana tient l'éditeur (réservation, 12 min).</span>
+                  </span>
+                  <span class="kit-row__end">Refusé</span>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- Header ---------- -->
+      <section class="g-group">
+        <h2>En-tête de page</h2>
+        <div class="g-tab">
+          <header class="kit-header">
+            <div class="kit-header__main">
+              <h1 class="kit-header__title">Exécutions récentes</h1>
+              <p class="kit-header__state">12 sur 30, à jour il y a 2 min</p>
+            </div>
+            <div class="kit-header__actions">
+              <button class="kit-btn kit-btn--small" type="button">Actualiser</button>
+            </div>
+          </header>
+        </div>
+        <div class="g-tab">
+          <header class="kit-header">
+            <div class="kit-header__main">
+              <h1 class="kit-header__title" title="Comptes Claude : sur macOS, la connexion du compte principal est son .claude.json">Comptes Claude : sur macOS, la connexion du compte principal est son .claude.json</h1>
+              <p class="kit-header__state" title="Un état qui dépasse la ligne se coupe, et sa valeur entière reste au survol">Un état qui dépasse la ligne se coupe, et sa valeur entière reste au survol</p>
+            </div>
+            <div class="kit-header__actions">
+              <button class="kit-btn kit-btn--small kit-btn--ghost" type="button">Annuler la demande</button>
+              <button class="kit-btn kit-btn--small kit-btn--primary" type="button">Relancer l'exécution</button>
+            </div>
+          </header>
+        </div>
+        <div class="g-tab">
+          <div class="kit-bar">
+            <label class="kit-search">
+              <span class="kit-sr">Chercher</span>
+              <input type="search" placeholder="Chercher…" />
+            </label>
+            <button class="kit-btn kit-btn--small" type="button">Pause</button>
+            <button class="kit-btn kit-btn--small kit-btn--ghost" type="button">Aller en bas</button>
+          </div>
+          <div class="kit-page" style="min-height: 28px"></div>
+          <div class="kit-bar kit-bar--foot"><span class="kit-mono">UnrealEditorFortnite.log</span><span class="kit-num">15 Ko</span><span class="kit-num">122 lignes</span></div>
+        </div>
+        <p class="g-note">Une page qui ne défile pas en entier : seule la partie du milieu défile.</p>
+        <div class="g-tab kit-fill" style="height: 150px">
+          <div class="kit-bar"><span class="kit-state kit-state--running">Lecture du journal…</span></div>
+          <div class="kit-grow" tabindex="0">
+            <ul class="kit-rows" style="padding: 4px">
+              <li class="kit-row"><span class="kit-row__main"><span class="kit-row__title">Une ligne</span></span></li>
+              <li class="kit-row"><span class="kit-row__main"><span class="kit-row__title">Une autre</span></span></li>
+              <li class="kit-row"><span class="kit-row__main"><span class="kit-row__title">Encore une</span></span></li>
+              <li class="kit-row"><span class="kit-row__main"><span class="kit-row__title">Et une dernière</span></span></li>
+            </ul>
+          </div>
+          <div class="kit-bar kit-bar--foot"><span class="kit-num">4 lignes</span></div>
+        </div>
+      </section>
+
+      <!-- ---------- Rows ---------- -->
+      <section class="g-group">
+        <h2>Section et lignes</h2>
+        <section class="kit-section">
+          <div class="kit-section__head">
+            <h3 class="kit-section__title">Une ligne</h3>
+            <span class="kit-section__count">5</span>
+            <div class="kit-section__actions">
+              <button class="kit-btn kit-btn--small kit-btn--ghost kit-btn--icon" type="button" title="Ajouter" aria-label="Ajouter"><span class="kit-icon kit-icon--plus"></span></button>
+            </div>
+          </div>
+          <ul class="kit-rows">
+            <li><button class="kit-row" type="button"><span class="kit-row__lead"><span class="kit-dot kit-dot--success"></span></span><span class="kit-row__main"><span class="kit-row__title">Au repos</span></span><span class="kit-row__end">1,3 s</span></button></li>
+            <li><button class="kit-row g-hover" type="button"><span class="kit-row__lead"><span class="kit-dot kit-dot--running"></span></span><span class="kit-row__main"><span class="kit-row__title">Survolée</span></span><span class="kit-row__end">128 ms</span></button></li>
+            <li><button class="kit-row" aria-current="true" type="button"><span class="kit-row__lead"><span class="kit-dot kit-dot--waiting"></span></span><span class="kit-row__main"><span class="kit-row__title">Sélectionnée</span></span><span class="kit-row__end">2 min 05 s</span></button></li>
+            <li><button class="kit-row g-focus" style="outline-offset: -2px" type="button"><span class="kit-row__lead"><span class="kit-dot kit-dot--failure"></span></span><span class="kit-row__main"><span class="kit-row__title">Au clavier</span></span><span class="kit-row__end">38</span></button></li>
+            <li><button class="kit-row" type="button"><span class="kit-row__lead"><span class="kit-dot kit-dot--neutral"></span></span><span class="kit-row__main"><span class="kit-row__title" title="Un titre trop long pour la largeur du panneau se coupe, et son texte entier reste au survol">Un titre trop long pour la largeur du panneau se coupe, et son texte entier reste au survol</span></span><span class="kit-row__end">1 204,5 Ko</span></button></li>
+          </ul>
+        </section>
+        <section class="kit-section">
+          <div class="kit-section__head">
+            <h3 class="kit-section__title">Deux lignes, qui se replient</h3>
+          </div>
+          <ul class="kit-rows">
+            <li class="kit-row kit-row--wrap">
+              <span class="kit-row__lead"><span class="kit-glyph kit-glyph--failure" role="img" aria-label="Échec"></span></span>
+              <span class="kit-row__main">
+                <span class="kit-row__title">save_asset</span>
+                <span class="kit-row__sub">Waited 240 s: ana holds the editor (reservation, 12 min). Keep working on what does not need the editor, then try again.</span>
+              </span>
+              <span class="kit-row__end">Refused</span>
+            </li>
+            <li class="kit-row kit-row--wrap">
+              <span class="kit-row__lead"><span class="kit-glyph kit-glyph--failure" role="img" aria-label="Échec"></span></span>
+              <span class="kit-row__main">
+                <span class="kit-row__title">save_asset</span>
+                <span class="kit-row__sub">C:\Users\simnJS\Documents\IaBench-worktrees\hangar-kits-un-style-commun-hangar-kit-3a6ed0\src-tauri\kit-sdk\kit.css</span>
+              </span>
+              <span class="kit-row__end">Refusé</span>
+            </li>
+          </ul>
+        </section>
+        <section class="kit-section">
+          <div class="kit-section__head">
+            <h3 class="kit-section__title">En groupe, comme les réglages</h3>
+          </div>
+          <ul class="kit-rows kit-rows--group">
+            <li class="kit-row">
+              <span class="kit-row__main"><span class="kit-row__title">hangar-ai</span><span class="kit-row__sub">0 kit activé</span></span>
+              <button class="kit-btn kit-btn--small" type="button">Gérer les kits</button>
+            </li>
+            <li class="kit-row">
+              <span class="kit-row__main"><span class="kit-row__title">marketing-site-redesign</span><span class="kit-row__sub">2 kits activés</span></span>
+              <button class="kit-btn kit-btn--small" type="button">Gérer les kits</button>
+            </li>
+          </ul>
+        </section>
+      </section>
+
+      <!-- ---------- Buttons ---------- -->
+      <section class="g-group">
+        <h2>Boutons</h2>
+        <div class="kit-actions">
+          <button class="kit-btn" type="button">Par défaut</button>
+          <button class="kit-btn g-hover" type="button">Survolé</button>
+          <button class="kit-btn g-focus" type="button">Au clavier</button>
+          <button class="kit-btn" type="button" disabled>Inactif</button>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--primary" type="button">Principal</button>
+          <button class="kit-btn kit-btn--primary g-hover" type="button">Survolé</button>
+          <button class="kit-btn kit-btn--primary" type="button" disabled>Inactif</button>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--danger" type="button">Supprimer</button>
+          <button class="kit-btn kit-btn--danger g-hover" type="button">Survolé</button>
+          <button class="kit-btn kit-btn--danger" type="button" disabled>Inactif</button>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--ghost" type="button">Discret</button>
+          <button class="kit-btn kit-btn--ghost g-hover" type="button">Survolé</button>
+          <button class="kit-btn kit-btn--ghost" type="button" disabled>Inactif</button>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--small" type="button">Petit</button>
+          <button class="kit-btn kit-btn--small kit-btn--primary" type="button">Principal</button>
+          <button class="kit-btn kit-btn--small kit-btn--danger" type="button">Danger</button>
+          <button class="kit-btn kit-btn--small kit-btn--ghost" type="button">Discret</button>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--icon" type="button" title="Relancer" aria-label="Relancer"><span class="kit-icon kit-icon--restart"></span></button>
+          <button class="kit-btn kit-btn--icon kit-btn--small" type="button" title="Copier" aria-label="Copier"><span class="kit-icon kit-icon--copy"></span></button>
+          <button class="kit-btn kit-btn--icon kit-btn--ghost" type="button" title="Plus" aria-label="Plus"><span class="kit-icon kit-icon--more"></span></button>
+          <button class="kit-btn" type="button"><span class="kit-icon kit-icon--plus"></span>Ajouter</button>
+        </div>
+        <div class="kit-actions" role="img" aria-label="Les icônes">
+          <span class="kit-icon kit-icon--alert"></span>
+          <span class="kit-icon kit-icon--check"></span>
+          <span class="kit-icon kit-icon--chevron-down"></span>
+          <span class="kit-icon kit-icon--close"></span>
+          <span class="kit-icon kit-icon--copy"></span>
+          <span class="kit-icon kit-icon--info"></span>
+          <span class="kit-icon kit-icon--lock"></span>
+          <span class="kit-icon kit-icon--more"></span>
+          <span class="kit-icon kit-icon--plus"></span>
+          <span class="kit-icon kit-icon--restart"></span>
+          <span class="kit-icon kit-icon--search"></span>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn" type="button">Un libellé français bien plus long que sa largeur prévue, qui revient à la ligne plutôt que de sortir du panneau</button>
+        </div>
+      </section>
+
+      <!-- ---------- Fields ---------- -->
+      <section class="g-group">
+        <h2>Champs</h2>
+        <label class="kit-field">
+          <span class="kit-field__label">Nom du dépôt</span>
+          <input class="kit-input" type="text" value="simnJS/hangar-ai" />
+          <span class="kit-field__hint">owner/name, celui de l'espace de travail s'il est vide.</span>
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Vide</span>
+          <input class="kit-input" type="text" placeholder="Numéro de l'exécution" />
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Au clavier</span>
+          <input class="kit-input g-focus-field" type="text" value="4122" />
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Refusé</span>
+          <input class="kit-input" type="text" value="41 22" aria-invalid="true" />
+          <span class="kit-field__error">Un numéro, sans espace.</span>
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Inactif</span>
+          <input class="kit-input" type="text" value="Géré par Réglages › Kits" disabled />
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Note</span>
+          <textarea class="kit-input" rows="2">Un texte sur plusieurs lignes.</textarea>
+        </label>
+        <label class="kit-field">
+          <span class="kit-field__label">Branche</span>
+          <span class="kit-select">
+            <select>
+              <option>main</option>
+              <option>hangar/kits-un-style-commun-hangar-kit-3a6ed0</option>
+            </select>
+          </span>
+        </label>
+        <label class="kit-search">
+          <span class="kit-sr">Chercher un job</span>
+          <input type="search" placeholder="Chercher un job…" />
+        </label>
+        <div class="kit-search">
+          <label class="kit-sr" for="search-filled">Chercher</label>
+          <input id="search-filled" type="search" value="macos" />
+          <button class="kit-search__clear" type="button" title="Effacer" aria-label="Effacer"></button>
+        </div>
+        <div class="kit-stack">
+          <label class="kit-switch"><input type="checkbox" role="switch" checked /><span class="kit-switch__track"></span>Suivre la fin du journal</label>
+          <label class="kit-switch"><input type="checkbox" role="switch" /><span class="kit-switch__track"></span>Afficher les lectures</label>
+          <label class="kit-switch"><input type="checkbox" role="switch" checked disabled /><span class="kit-switch__track"></span>Inactif</label>
+        </div>
+      </section>
+
+      <!-- ---------- Chips ---------- -->
+      <section class="g-group">
+        <h2>Étiquettes et filtres</h2>
+        <div class="kit-chips">
+          <span class="kit-chip">rust</span>
+          <span class="kit-chip">tests</span>
+          <span class="kit-chip">macos-latest</span>
+          <span class="kit-chip" title="hangar/kits-un-style-commun-hangar-kit-3a6ed0-et-une-branche-au-nom-vraiment-long">hangar/kits-un-style-commun-hangar-kit-3a6ed0-et-une-branche-au-nom-vraiment-long</span>
+        </div>
+        <div class="kit-chips" role="group" aria-label="Filtres">
+          <button class="kit-filter" type="button" aria-pressed="true">Prints Verse <span class="kit-filter__count">61</span></button>
+          <button class="kit-filter" type="button" aria-pressed="false">Erreurs <span class="kit-filter__count kit-filter__count--danger">10</span></button>
+          <button class="kit-filter" type="button" aria-pressed="true">Erreurs <span class="kit-filter__count kit-filter__count--danger">10</span></button>
+          <button class="kit-filter g-hover" type="button" aria-pressed="false">UEFNValidation <span class="kit-filter__count">4</span></button>
+          <button class="kit-filter g-focus" type="button" aria-pressed="false">Signes de crash <span class="kit-filter__count">8</span></button>
+        </div>
+      </section>
+
+      <!-- ---------- State ---------- -->
+      <section class="g-group">
+        <h2>États</h2>
+        <p class="g-note">Une forme et une couleur, et le mot : jamais une page colorée.</p>
+        <div class="kit-stack">
+          <span><span class="kit-state kit-state--running">En cours</span></span>
+          <span><span class="kit-state kit-state--success">Réussie</span></span>
+          <span><span class="kit-state kit-state--failure">Échouée</span></span>
+          <span><span class="kit-state kit-state--waiting">En attente</span></span>
+          <span><span class="kit-state kit-state--neutral">Annulée</span></span>
+        </div>
+        <div class="kit-actions">
+          <span class="kit-glyph kit-glyph--running" role="img" aria-label="En cours" title="En cours"></span>
+          <span class="kit-glyph kit-glyph--success" role="img" aria-label="Réussie" title="Réussie"></span>
+          <span class="kit-glyph kit-glyph--failure" role="img" aria-label="Échouée" title="Échouée"></span>
+          <span class="kit-glyph kit-glyph--waiting" role="img" aria-label="En attente" title="En attente"></span>
+          <span class="kit-glyph kit-glyph--neutral" role="img" aria-label="Annulée" title="Annulée"></span>
+        </div>
+        <div class="kit-actions" style="gap: 14px">
+          <span class="kit-dot kit-dot--running" role="img" aria-label="En cours" title="En cours"></span>
+          <span class="kit-dot kit-dot--success" role="img" aria-label="Réussie" title="Réussie"></span>
+          <span class="kit-dot kit-dot--failure" role="img" aria-label="Échouée" title="Échouée"></span>
+          <span class="kit-dot kit-dot--waiting" role="img" aria-label="En attente" title="En attente"></span>
+          <span class="kit-dot kit-dot--neutral" role="img" aria-label="Annulée" title="Annulée"></span>
+          <span class="kit-dot" role="img" aria-label="Sans état" title="Sans état"></span>
+        </div>
+      </section>
+
+      <!-- ---------- Progress ---------- -->
+      <section class="g-group">
+        <h2>Progression</h2>
+        <div class="kit-stack">
+          <span class="g-note">En cours, 40 %</span>
+          <div class="kit-progress" role="progressbar" aria-label="Étapes" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100"><div class="kit-progress__fill" style="width: 40%"></div></div>
+          <span class="g-note">Sans mesure</span>
+          <div class="kit-progress kit-progress--indeterminate" role="progressbar" aria-label="Chargement"><div class="kit-progress__fill"></div></div>
+          <span class="g-note">Plus de nouvelles depuis 46 s</span>
+          <div class="kit-progress kit-progress--stale" role="progressbar" aria-label="Dernière valeur connue" aria-valuenow="70" aria-valuemin="0" aria-valuemax="100"><div class="kit-progress__fill" style="width: 70%"></div></div>
+          <span class="g-note">Réussie, échouée</span>
+          <div class="kit-progress kit-progress--success" role="progressbar" aria-label="Étapes" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100"><div class="kit-progress__fill" style="width: 100%"></div></div>
+          <div class="kit-progress kit-progress--failure" role="progressbar" aria-label="Étapes" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100"><div class="kit-progress__fill" style="width: 62%"></div></div>
+        </div>
+      </section>
+
+      <!-- ---------- Banner ---------- -->
+      <section class="g-group">
+        <h2>Bandeaux</h2>
+        <p class="kit-banner"><span class="kit-banner__text">Actualisé toutes les 30 secondes tant que l'onglet est visible.</span></p>
+        <p class="kit-banner kit-banner--warning">
+          <span class="kit-banner__text">Le résultat est tronqué : 2&nbsp;000 lignes sur 8&nbsp;412.</span>
+          <span class="kit-banner__action"><button class="kit-btn kit-btn--small kit-btn--ghost" type="button">Tout charger</button></span>
+        </p>
+        <p class="kit-banner kit-banner--error" role="alert">
+          <span class="kit-banner__text">gh n'a pas répondu en 20 secondes. Vérifiez votre connexion, puis réessayez.</span>
+          <span class="kit-banner__action"><button class="kit-btn kit-btn--small" type="button">Réessayer</button></span>
+        </p>
+      </section>
+
+      <!-- ---------- Empty ---------- -->
+      <section class="g-group">
+        <h2>Vide, chargement, erreur, refus</h2>
+        <div class="g-tab">
+          <div class="kit-empty">
+            <p class="kit-empty__title">Aucune exécution pour l'instant</p>
+            <p class="kit-empty__text">Un push sur ce dépôt en lancera une, et elle s'affichera ici.</p>
+          </div>
+        </div>
+        <div class="g-tab">
+          <div class="kit-empty">
+            <span class="kit-state kit-state--running">Lecture des exécutions…</span>
+          </div>
+        </div>
+        <div class="g-tab">
+          <div class="kit-empty">
+            <span class="kit-icon kit-icon--alert kit-empty__icon"></span>
+            <p class="kit-empty__title">gh n'est pas installé</p>
+            <p class="kit-empty__text">Cet onglet lit la CI avec GitHub CLI. Installez-le, connectez-vous avec <span class="kit-code">gh auth login</span>, puis réessayez.</p>
+            <div class="kit-empty__actions"><button class="kit-btn kit-btn--small kit-btn--primary" type="button">Réessayer</button></div>
+          </div>
+        </div>
+        <div class="g-tab">
+          <div class="kit-empty">
+            <span class="kit-icon kit-icon--lock kit-empty__icon"></span>
+            <p class="kit-empty__title">Cet onglet n'a pas l'autorisation de lire la CI</p>
+            <p class="kit-empty__text">Acceptez la commande <span class="kit-code">ci-run</span> dans Réglages › Kits pour que l'onglet puisse la lancer.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- Code and log ---------- -->
+      <section class="g-group">
+        <h2>Code et journal</h2>
+        <p style="margin: 0">Dans une phrase : <span class="kit-code">pnpm test</span>, et un chemin <span class="kit-code">src-tauri/kit-sdk/kit.css</span>.</p>
+        <pre class="kit-pre" tabindex="0">$ gh run view 41222364482 --repo=simnJS/hangar-ai --json status,conclusion,jobs
+{ "status": "completed", "conclusion": "failure" }</pre>
+        <div class="kit-log" tabindex="0" style="--kit-log-height: 148px">
+          <div class="kit-log__line kit-log__line--head"><span class="kit-log__text">rust (macos-latest) › Tests</span></div>
+          <div class="kit-log__line"><span class="kit-log__num">1</span><span class="kit-log__text">test voice::key::tests::a_stored_key_leaves_the_state ... ok</span></div>
+          <div class="kit-log__line kit-log__line--warning"><span class="kit-log__num">2</span><span class="kit-log__text">warning: unused variable `span` in voice/wav.rs:41</span></div>
+          <div class="kit-log__line kit-log__line--error is-current"><span class="kit-log__num">3</span><span class="kit-log__text">test voice::local::tests::transcribes_real_audio ... FAILED</span></div>
+          <div class="kit-log__line kit-log__line--error"><span class="kit-log__num">4</span><span class="kit-log__text">error: test failed, to rerun pass `--lib`, and a line far too long for the panel wraps rather than spreading the page</span></div>
+          <div class="kit-log__line"><span class="kit-log__num">5</span><span class="kit-log__text">test workspace_file::tests::plain_json_is_untouched ... ok</span></div>
+          <div class="kit-log__line"><span class="kit-log__num">6</span><span class="kit-log__text">test windows::tests::only_frontend_ids_become_labels ... ok</span></div>
+        </div>
+      </section>
+
+      <!-- ---------- Key/value ---------- -->
+      <section class="g-group">
+        <h2>Clés et valeurs</h2>
+        <dl class="kit-kv">
+          <dt>Branche</dt>
+          <dd>main</dd>
+          <dt>Durée</dt>
+          <dd class="kit-num" style="text-align: left">4 min 16 s</dd>
+          <dt>Adresse</dt>
+          <dd><a href="#" title="https://github.com/simnJS/hangar-ai/actions/runs/41222364482">https://github.com/simnJS/hangar-ai/actions/runs/41222364482</a></dd>
+          <dt>Une clé bien plus longue que les autres</dt>
+          <dd>Sa valeur</dd>
+        </dl>
+      </section>
+
+      <!-- ---------- Text ---------- -->
+      <section class="g-group">
+        <h2>Texte</h2>
+        <div class="kit-stack">
+          <span>Le texte de la page <span class="kit-dim">et ce qui passe après</span> <span class="kit-muted">et les détails</span>.</span>
+          <span class="kit-small">Petit, comme une aide sous un champ.</span>
+          <span class="kit-mono">main 41222364482</span>
+          <span class="kit-truncate" title="Une valeur trop longue se coupe avec des points de suspension, et son texte entier reste dans le title au survol">Une valeur trop longue se coupe avec des points de suspension, et son texte entier reste dans le title au survol</span>
+          <span class="kit-wrap">https://github.com/simnJS/hangar-ai/actions/runs/41222364482/job/123456789012345678901234567890</span>
+          <span>Le tiroir se ferme, <a href="#">ce lien</a> reste souligné. <span class="kit-sr">Lu à voix haute seulement.</span></span>
+        </div>
+        <div class="kit-rows kit-rows--group" style="grid-template-columns: minmax(0, 1fr)">
+          <div class="kit-row"><span class="kit-row__main"><span class="kit-row__title">English: Waiting for an answer</span></span><span class="kit-row__end">2 min 5 s</span></div>
+          <div class="kit-row"><span class="kit-row__main"><span class="kit-row__title">Français : En attente d'une réponse de votre part</span></span><span class="kit-row__end">2 min 05 s</span></div>
+        </div>
+      </section>
+
+      <!-- ---------- Behaviours ---------- -->
+      <section class="g-group">
+        <h2>Onglets</h2>
+        <div class="kit-tabs" id="tabs" role="tablist" aria-label="Vue">
+          <button class="kit-tab" id="tab-jobs" role="tab" type="button" aria-selected="true" aria-controls="panel-jobs">Jobs</button>
+          <button class="kit-tab" id="tab-log" role="tab" type="button" aria-selected="false" aria-controls="panel-log">Journal</button>
+          <button class="kit-tab" id="tab-files" role="tab" type="button" aria-selected="false" aria-controls="panel-files">Fichiers</button>
+          <button class="kit-tab" id="tab-env" role="tab" type="button" aria-selected="false" aria-controls="panel-env">Environnement</button>
+          <button class="kit-tab" id="tab-more" role="tab" type="button" aria-selected="false" aria-controls="panel-more">Et d'autres encore</button>
+        </div>
+        <div class="kit-tabpanel" id="panel-jobs" role="tabpanel" aria-labelledby="tab-jobs">Le contenu de Jobs.</div>
+        <div class="kit-tabpanel" id="panel-log" role="tabpanel" aria-labelledby="tab-log">Le contenu de Journal.</div>
+        <div class="kit-tabpanel" id="panel-files" role="tabpanel" aria-labelledby="tab-files">Le contenu de Fichiers.</div>
+        <div class="kit-tabpanel" id="panel-env" role="tabpanel" aria-labelledby="tab-env">Le contenu d'Environnement.</div>
+        <div class="kit-tabpanel" id="panel-more" role="tabpanel" aria-labelledby="tab-more">Le reste.</div>
+      </section>
+
+      <section class="g-group">
+        <h2>Confirmation, menu, toast, copier</h2>
+        <div class="kit-actions">
+          <button class="kit-btn kit-btn--danger" id="do-confirm" type="button">Supprimer l'exécution</button>
+        </div>
+        <div class="kit-actions">
+          <span class="kit-confirm" role="group"><span class="kit-confirm__text">Supprimer l'exécution ?</span><button class="kit-btn kit-btn--small" type="button">Annuler</button><button class="kit-btn kit-btn--small kit-btn--danger" type="button">Supprimer</button></span>
+        </div>
+        <div class="kit-actions">
+          <button class="kit-btn" id="do-menu" type="button"><span class="kit-icon kit-icon--chevron-down"></span>Menu</button>
+          <button class="kit-btn" id="do-toast" type="button">Un toast</button>
+          <button class="kit-btn" id="do-toast-error" type="button">Une erreur</button>
+          <button class="kit-btn" id="do-copy" type="button">Copier le numéro</button>
+        </div>
+        <div class="g-static">
+          <div class="kit-menu" role="menu" aria-label="Exemple" style="display: inline-block">
+            <button class="kit-menu__item" type="button" role="menuitemcheckbox" aria-checked="true" tabindex="-1"><span class="kit-menu__check"><span class="kit-icon kit-icon--check"></span></span><span class="kit-menu__label">Afficher les lectures</span><span class="kit-menu__hint">14</span></button>
+            <button class="kit-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="kit-menu__check"></span><span class="kit-menu__label">Suivre la fin</span></button>
+            <button class="kit-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1" disabled><span class="kit-menu__check"></span><span class="kit-menu__label">Inactif</span></button>
+            <div class="kit-menu__sep" role="separator"></div>
+            <button class="kit-menu__item kit-menu__item--danger" type="button" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="kit-menu__check"></span><span class="kit-menu__label">Vider le journal</span></button>
+          </div>
+        </div>
+        <div class="kit-toasts g-static">
+          <div class="kit-toast"><span class="kit-toast__text">Actualisé.</span></div>
+          <div class="kit-toast kit-toast--success"><span class="kit-toast__text">Réservation libérée.</span><button class="kit-btn kit-btn--small kit-btn--ghost" type="button">Annuler</button><button class="kit-btn kit-btn--small kit-btn--ghost kit-btn--icon" type="button" title="Fermer" aria-label="Fermer"><span class="kit-icon kit-icon--close"></span></button></div>
+          <div class="kit-toast kit-toast--warning"><span class="kit-toast__text">Encore 2 envois cette minute.</span></div>
+          <div class="kit-toast kit-toast--error"><span class="kit-toast__text">Pas envoyé : la session de cet agent n'a pas le pont de Hangar.</span><button class="kit-btn kit-btn--small kit-btn--ghost kit-btn--icon" type="button" title="Fermer" aria-label="Fermer"><span class="kit-icon kit-icon--close"></span></button></div>
+        </div>
+      </section>
+
+      <section class="g-group">
+        <h2>Journal long, ouvert sur la première erreur</h2>
+        <p class="g-note">20&nbsp;000 lignes, dont quelques centaines seulement dans la page à la fois.</p>
+        <div id="long-log" style="--kit-log-height: 200px"></div>
+        <p class="g-note">Sans erreur, il s'ouvre à la fin.</p>
+        <div id="calm-log" style="--kit-log-height: 90px"></div>
+      </section>
+
+      <section class="g-group">
+        <h2>Formats</h2>
+        <dl class="kit-kv" id="formats"></dl>
+      </section>
+    </main>
+
+    <script src="kit.js"></script>
+    <script src="kit-ui.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const scheme = params.get("scheme");
+      if (!scheme) {
+        // The page that frames itself, in each theme and at each width.
+        const only = params.get("only");
+        const locale = params.get("locale") ?? "fr";
+        const overview = document.getElementById("overview");
+        overview.hidden = false;
+        document.documentElement.setAttribute("data-kit-scheme", "dark");
+        const frames = new Map();
+        for (const [name, frameScheme, width] of [
+          ["dark-320", "dark", 320],
+          ["light-320", "light", 320],
+          ["dark-wide", "dark", 980],
+          ["light-wide", "light", 980],
+        ]) {
+          if (only && only !== name) continue;
+          const frame = document.createElement("iframe");
+          frame.title = name;
+          frame.width = width;
+          frame.height = 800;
+          frame.src = `?scheme=${frameScheme}&locale=${locale}`;
+          overview.append(frame);
+          frames.set(frame.contentWindow, frame);
+        }
+        addEventListener("message", (event) => {
+          const frame = frames.get(event.source);
+          if (frame && typeof event.data?.galleryHeight === "number") frame.height = event.data.galleryHeight;
+        });
+      } else {
+        const root = document.documentElement;
+        root.setAttribute("data-kit-scheme", scheme);
+        root.setAttribute("data-kit-locale", params.get("locale") ?? "fr");
+        document.getElementById("sheet").hidden = false;
+        const ui = window.hangar.ui;
+
+        ui.tabs(document.getElementById("tabs"));
+
+        document.getElementById("do-confirm").addEventListener("click", async (event) => {
+          const yes = await ui.confirm(event.currentTarget, {
+            message: "Supprimer l'exécution ?",
+            confirm: "Supprimer",
+          });
+          ui.toast(yes ? "Exécution supprimée." : "Rien n'a été supprimé.", { kind: yes ? "success" : "info" });
+        });
+        document.getElementById("do-menu").addEventListener("click", (event) => {
+          ui.menu(event.currentTarget, [
+            { label: "Relancer", onSelect: () => ui.toast("Relancée.", { kind: "success" }) },
+            { label: "Copier le lien", hint: "Ctrl+C", onSelect: () => ui.toast("Lien copié.") },
+            { label: "Indisponible ici", disabled: true },
+            "-",
+            { label: "Supprimer", danger: true, onSelect: () => ui.toast("Supprimée.") },
+          ]);
+        });
+        document.getElementById("do-toast").addEventListener("click", () => {
+          ui.toast("Réservation libérée.", {
+            kind: "success",
+            action: { label: "Annuler", onClick: () => ui.toast("Réservation reprise.") },
+          });
+        });
+        document.getElementById("do-toast-error").addEventListener("click", () => {
+          ui.toast("Pas envoyé : la session de cet agent n'a pas le pont de Hangar.", { kind: "error" });
+        });
+        ui.copyButton(document.getElementById("do-copy"), "41222364482");
+
+        const failing = [
+          "rust (macos-latest) › Tests",
+          "test voice::key::tests::a_stored_key_leaves_the_state ... ok",
+          "test voice::key::tests::round_trip_through_the_real_keychain ... ignored",
+          "test voice::local::tests::audio_ctx_shrinks_with_the_clip ... ok",
+          "test voice::local::tests::threads_is_at_least_one ... ok",
+          "warning: unused variable `span`",
+          "test voice::local::tests::transcribes_real_audio ... FAILED",
+          "error: test failed, to rerun pass `--lib`",
+          "test voice::wav::tests::the_header_describes_the_data ... ok",
+          "test windows::tests::only_frontend_ids_become_labels ... ok",
+          "test workspace_file::tests::plain_json_is_untouched ... ok",
+          "test result: FAILED. 412 passed; 1 failed; 3 ignored",
+        ].map((text, index) =>
+          index === 0
+            ? { text, kind: "head" }
+            : text.startsWith("warning")
+              ? { text, kind: "warning" }
+              : { text, kind: /FAILED|^error/.test(text) ? "error" : undefined },
+        );
+        ui.log(document.getElementById("ci-log"), {
+          lines: failing,
+          label: "Journal de l'étape",
+          isError: () => false,
+        });
+        const copyLog = document.getElementById("copy-log");
+        ui.copyButton(copyLog, () => failing.map((line) => line.text).join("\n"));
+
+        const many = Array.from({ length: 20000 }, (_, index) => {
+          if (index === 14230) return "error[E0599]: no method named `frobnicate` found for struct `Pane` in the current scope, and here is a long line that has to wrap at the panel's width";
+          if (index === 14231) return "   --> src-tauri/src/kits.rs:1423:18";
+          if (index === 18003) return "error: could not compile `hangar-ai` (lib) due to 1 previous error";
+          return `   Compiling crate-${index} v0.${index % 9}.${index % 17}`;
+        });
+        ui.log(document.getElementById("long-log"), { lines: many, label: "Compilation", isError: (text) => /^error/.test(text) });
+        ui.log(document.getElementById("calm-log"), {
+          lines: Array.from({ length: 40 }, (_, index) => `Frame ${index + 112}`),
+          label: "Sans erreur",
+        });
+
+        const now = new Date(2026, 9, 31, 21, 38).getTime();
+        const f = ui.format;
+        const facts = [
+          ["900 ms", f.duration(900)],
+          ["2,3 s", f.duration(2300)],
+          ["1 min 28", f.duration(88000)],
+          ["2 h 5", f.duration(7500000)],
+          ["3 j 4 h", f.duration(273600000)],
+          ["Horloge", f.clock(now, { seconds: true })],
+          ["Date", f.date(now, now)],
+          ["L'an dernier", f.date(new Date(2025, 2, 4, 9, 5), now)],
+          ["À l'instant", f.since(now - 5000, now)],
+          ["5 min", f.since(now - 300000, now)],
+          ["Aujourd'hui", f.since(now - 7200000, now)],
+          ["Hier", f.since(now - 86400000, now)],
+          ["Avant", f.since(now - 400000000, now)],
+          ["Taille", f.bytes(15360)],
+          ["Nombre", f.number(1204.5)],
+        ];
+        const list = document.getElementById("formats");
+        for (const [name, value] of facts) {
+          const term = document.createElement("dt");
+          term.textContent = name;
+          const definition = document.createElement("dd");
+          definition.className = "kit-num";
+          definition.style.textAlign = "left";
+          definition.textContent = value;
+          list.append(term, definition);
+        }
+
+        const report = () => parent.postMessage({ galleryHeight: root.scrollHeight }, "*");
+        new ResizeObserver(report).observe(document.getElementById("sheet"));
+        report();
+      }
+    </script>
+  </body>
+</html>

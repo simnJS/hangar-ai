@@ -9,6 +9,10 @@
  * `{ hangar: 1, id, result }` or `{ hangar: 1, id, error: { code, message } }`;
  * events arrive as `{ hangar: 1, event, data }`. A call fails with an Error
  * carrying the protocol's `code` ("denied", "invalid", ...).
+ *
+ * It also keeps the page in Hangar's theme: the `theme` event sets the tokens of
+ * /_hangar/kit.css on the root element (docs/kit-ui.md). Without that event the
+ * sheet's own values apply, and prefers-color-scheme decides between them.
  */
 (function () {
   "use strict";
@@ -23,6 +27,32 @@
   var listeners = new Map();
   var next = 0;
 
+  /** The tokens the last `theme` event set, so that the next can take back what it leaves out. */
+  var themed = [];
+
+  function applyTheme(data) {
+    if (!data || typeof data !== "object") return;
+    var root = document.documentElement;
+    var tokens = data.tokens && typeof data.tokens === "object" ? data.tokens : {};
+    var names = Object.keys(tokens).filter(function (name) {
+      return /^--kit-[a-z0-9-]+$/.test(name) && typeof tokens[name] === "string";
+    });
+    themed.forEach(function (name) {
+      if (names.indexOf(name) < 0) root.style.removeProperty(name);
+    });
+    names.forEach(function (name) {
+      root.style.setProperty(name, tokens[name]);
+    });
+    themed = names;
+    if (data.scheme === "dark" || data.scheme === "light") {
+      root.setAttribute("data-kit-scheme", data.scheme);
+      root.style.colorScheme = data.scheme;
+    }
+    if (typeof data.locale === "string" && /^[A-Za-z]{2,3}(-[A-Za-z0-9-]+)*$/.test(data.locale)) {
+      root.setAttribute("data-kit-locale", data.locale);
+    }
+  }
+
   function failure(code, message) {
     var error = new Error(message);
     error.code = code;
@@ -35,6 +65,7 @@
     var message = event.data;
     if (!message || typeof message !== "object" || message.hangar !== 1) return;
     if (typeof message.event === "string") {
+      if (message.event === "theme") applyTheme(message.data);
       var handlers = listeners.get(message.event);
       if (!handlers) return;
       Array.from(handlers).forEach(function (handler) {
@@ -104,8 +135,20 @@
     };
   }
 
+  var sdk = { version: 1, call: call, on: on };
+  // Filled by /_hangar/kit-ui.js, once: the rest of the object stays frozen.
+  var ui;
+  Object.defineProperty(sdk, "ui", {
+    enumerable: true,
+    get: function () {
+      return ui;
+    },
+    set: function (value) {
+      if (ui === undefined) ui = value;
+    },
+  });
   Object.defineProperty(window, "hangar", {
-    value: Object.freeze({ version: 1, call: call, on: on }),
+    value: Object.freeze(sdk),
     enumerable: true,
   });
 })();
