@@ -60,6 +60,25 @@ export interface CommandPaletteProps {
   onActivateWorkspace: (workspaceId: string) => void;
   /** « Ouvrir le chef de projet »: the same action as the navigator's button. */
   onOpenManager: () => void;
+  /**
+   * Entries the app adds for what is not a command of its own — the tabs of
+   * the active workspace's kits — listed after the view commands.
+   */
+  extraEntries?: PaletteExtraEntry[];
+}
+
+/** An entry the app hands the palette, its words already translated. */
+export interface PaletteExtraEntry {
+  /** Unique among the extra entries. */
+  key: string;
+  /** Its heading. */
+  group: string;
+  label: string;
+  detail?: string;
+  /** More words it is found by. */
+  keywords?: string[];
+  icon?: IconName;
+  run: () => void;
 }
 
 interface Entry extends PaletteEntry {
@@ -214,6 +233,7 @@ export function CommandPalette({
   onFocusPane,
   onActivateWorkspace,
   onOpenManager,
+  extraEntries = [],
 }: CommandPaletteProps) {
   const t = useT();
   const locale = useLocale();
@@ -395,6 +415,21 @@ export function CommandPalette({
           run,
           ownsFocus: OWNS_FOCUS.has(command.id),
         });
+      }
+
+      if (section === "view") {
+        for (const extra of extraEntries) {
+          list.push({
+            key: `extra:${extra.key}`,
+            group: extra.group,
+            label: extra.label,
+            keywords: [...(extra.keywords ?? []), extra.group],
+            icon: <Icon name={extra.icon ?? "window"} size={13} />,
+            detail: extra.detail,
+            keys: "",
+            run: extra.run,
+          });
+        }
       }
     }
     return list;
