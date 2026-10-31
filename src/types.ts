@@ -154,6 +154,13 @@ export interface Workspace {
    */
   mcp?: WorkspaceMcp;
   /**
+   * The kits enabled on it (lib/kits, docs/kits.md): every Claude Code pane
+   * of the workspace, workers' included, loads their plugins. Read through
+   * `workspaceKits`, which takes anything malformed as no kit. Absent on
+   * every workspace without one.
+   */
+  kits?: WorkspaceKit[];
+  /**
    * How its orchestrator works (lib/orchestration). Absent reads as the
    * defaults there; a workspace without an orchestrator ignores it.
    */
@@ -206,6 +213,18 @@ export interface WorkspaceMcp {
   mode: "inherit" | "custom";
   /** Server names, as Claude Code's configuration spells them. */
   enabled: string[];
+}
+
+/** A kit enabled on a workspace. */
+export interface WorkspaceKit {
+  /** The kit's id, as its `hangar-kit.json` gives it. */
+  id: string;
+  /**
+   * The tab permissions the person accepted when enabling it
+   * (`KIT_PERMISSIONS` in lib/kits). A tab asking for one not listed here
+   * is answered `denied`.
+   */
+  granted: string[];
 }
 
 export interface WindowBounds {

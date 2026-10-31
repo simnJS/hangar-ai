@@ -26,6 +26,11 @@
 //! A name defined more than once takes its whole entry from local, then an
 //! approved project entry, then user. A name in the project's
 //! `disabledMcpServers` (the `/mcp` toggle) is defined but not started.
+//!
+//! `--strict-mcp-config` also drops the servers of the plugins the session
+//! loads, kits' included (checked with Claude Code 2.1.316). The servers of
+//! the workspace's kits are therefore written into the file too, under the
+//! names Claude Code gives them as a plugin's (kits/plugin.rs).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -670,6 +675,27 @@ struct ScopedConfig {
     missing: Vec<String>,
 }
 
+/// The kits' servers, after the chosen ones: a name already taken keeps its
+/// entry. Returns the names added.
+fn add_kit_servers(config: &mut ScopedConfig, kit_servers: Vec<(String, Value)>) -> Vec<String> {
+    let mut added = Vec::new();
+    let Some(servers) = config
+        .body
+        .get_mut("mcpServers")
+        .and_then(Value::as_object_mut)
+    else {
+        return added;
+    };
+    for (name, definition) in kit_servers {
+        if servers.contains_key(&name) {
+            continue;
+        }
+        servers.insert(name.clone(), definition);
+        added.push(name);
+    }
+    added
+}
+
 #[derive(Debug, Serialize)]
 pub struct ScopeFile {
     /// What `--mcp-config` is given.
@@ -678,6 +704,10 @@ pub struct ScopeFile {
     pub servers: Vec<String>,
     /// Enabled names nothing defines any more.
     pub missing: Vec<String>,
+    /// The servers of the workspace's kits added to it, which `servers`
+    /// leaves out: they come with the kit, not with the choice.
+    #[serde(rename = "kitServers")]
+    pub kit_servers: Vec<String>,
 }
 
 /// A workspace id as a file name. Ids are UUIDs; anything else is kept to
@@ -783,6 +813,11 @@ pub fn mcp_servers(cwd: String) -> Discovery {
 /// `workspace_cwd` is what Hangar's own server is told its workspace is — the
 /// board it reads — and `cwd` is where the pane runs, which decides the
 /// servers it would otherwise have.
+///
+/// `kits` are the workspace's kits, given only for a file loaded with
+/// `--strict-mcp-config`: without it, the kits' plugins start their servers
+/// themselves, and a copy here would run each one twice. A machine that
+/// forbids sideloading keeps the kits out entirely, servers included.
 #[tauri::command]
 pub fn mcp_scope_write(
     app: AppHandle,
@@ -790,10 +825,17 @@ pub fn mcp_scope_write(
     workspace_cwd: String,
     cwd: String,
     enabled: Vec<String>,
+    kits: Option<Vec<String>>,
 ) -> Result<ScopeFile, String> {
     let files = ClaudeFiles::locate().ok_or("no home directory")?;
     let (resolved, _) = resolve(&files, Path::new(&cwd));
-    let config = scoped_config(&resolved, &enabled, server_entry(&workspace_cwd)?);
+    let mut config = scoped_config(&resolved, &enabled, server_entry(&workspace_cwd)?);
+    let kit_servers = match kits {
+        Some(kits) if !crate::bridge::sideloading_forbidden() => {
+            add_kit_servers(&mut config, crate::kits::mcp_servers(&kits))
+        }
+        _ => Vec::new(),
+    };
     let path = scope_dir(&app)?.join(file_name(&workspace_id, &workspace_cwd, &cwd));
     let body = serde_json::to_string_pretty(&config.body).map_err(|e| e.to_string())?;
     write_if_changed(&path, &body)?;
@@ -801,6 +843,7 @@ pub fn mcp_scope_write(
         path: path.to_string_lossy().into_owned(),
         servers: config.names,
         missing: config.missing,
+        kit_servers,
     })
 }
 
@@ -1179,6 +1222,29 @@ mod tests {
         assert_eq!(
             config.names,
             vec!["hangar".to_string(), "roblox".to_string()]
+        );
+    }
+
+    /// A kit's servers join the chosen ones, and never replace one of them.
+    #[test]
+    fn kit_servers_are_added_after_the_choice() {
+        let mut config = scoped_config(&[], &[], json!({ "command": "h" }));
+        let studio = json!({ "command": "node", "args": ["C:/kits/studio/server.js"] });
+        let added = add_kit_servers(
+            &mut config,
+            vec![
+                ("plugin:studio:studio".into(), studio.clone()),
+                ("hangar".into(), json!({ "command": "impostor" })),
+            ],
+        );
+        assert_eq!(added, vec!["plugin:studio:studio".to_string()]);
+        let servers = config.body["mcpServers"].as_object().unwrap();
+        assert_eq!(servers["plugin:studio:studio"], studio);
+        assert_eq!(servers["hangar"], json!({ "command": "h" }));
+        assert_eq!(
+            config.names,
+            vec!["hangar".to_string()],
+            "the choice as it was"
         );
     }
 

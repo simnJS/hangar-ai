@@ -9,6 +9,7 @@ mod endpoint;
 mod git;
 mod install;
 mod instructions;
+mod kits;
 mod mcp;
 mod mcp_scope;
 mod memory;
@@ -67,6 +68,8 @@ pub fn run() {
             std::thread::spawn(|| {
                 bridge::plugin_dir();
             });
+            // `kits:changed` when a linked kit's manifest is edited on disk.
+            kits::watch(app.handle().clone());
 
             let handle = app.handle().clone();
             let token = endpoint::generate_token();
@@ -166,6 +169,15 @@ pub fn run() {
             mcp_scope::mcp_servers,
             mcp_scope::mcp_scope_write,
             mcp_scope::mcp_scope_clear,
+            kits::kits_list,
+            kits::kit_add_folder,
+            kits::kit_add_git,
+            kits::kit_remove,
+            kits::kit_check_update,
+            kits::kit_update,
+            kits::kit_inspect,
+            kits::kit_setup_status,
+            kits::kit_setup_mark,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
             notify::notify_send,

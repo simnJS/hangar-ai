@@ -13,6 +13,10 @@ import type { ShellInfo, Workspace, WorkspaceMcp } from "../types";
  * --strict-mcp-config`, the file being written by the Rust side at each
  * launch from Claude Code's own configuration. The command typed names the
  * file through the shell's HANGAR_MCP_CONFIG (`mcpConfigArg`).
+ *
+ * `--strict-mcp-config` also drops the servers of the plugins the session
+ * loads, so the file holds the workspace's kits' servers too (`kits`, and
+ * `kitServers` in the answer; docs/kits.md).
  */
 
 export type McpScopeName = "user" | "local" | "project";
@@ -46,6 +50,12 @@ export interface McpScopeFile {
   servers: string[];
   /** Enabled names nothing defines any more. */
   missing: string[];
+  /**
+   * The servers of the workspace's kits it holds too, as
+   * `plugin:<plugin>:<server>`: they come with the kit, not with the choice,
+   * so `servers` leaves them out. Absent from the demo's backend.
+   */
+  kitServers?: string[];
 }
 
 export const mcpServers = (cwd: string) => invoke<McpDiscovery>("mcp_servers", { cwd });
@@ -57,6 +67,13 @@ export const mcpScopeWrite = (args: {
   /** Where the pane runs, which decides what it would otherwise load. */
   cwd: string;
   enabled: string[];
+  /**
+   * The workspace's kits, for a file loaded with `--strict-mcp-config` only:
+   * that flag drops the servers of the plugins the session loads, so theirs
+   * are written into the file. Without it the kits' plugins start them, and
+   * a copy here would run each twice.
+   */
+  kits?: string[];
 }) => invoke<McpScopeFile>("mcp_scope_write", args);
 
 export const mcpScopeClear = (workspaceId: string) =>

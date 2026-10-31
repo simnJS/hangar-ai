@@ -1,9 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ContextUsage } from "./context";
 import type { DiscordPresence, DiscordStatus } from "./discord";
+import type { KitLaunchIssue } from "./kits";
 import type { VoiceConfig, VoiceModel } from "./voice";
 import type { AgentSession, AppState, ShellInfo, WorkspaceRoot } from "../types";
 
+/** What a spawn reports besides having worked. */
+export interface PtySpawned {
+  /** Kits the pane was given that stay out of it, and why. */
+  kitIssues: KitLaunchIssue[];
+}
+
+/**
+ * Resolves `undefined` from a backend that predates kits — the demo's — so
+ * read the answer with `?.`.
+ */
 export const ptySpawn = (args: {
   id: string;
   cwd: string;
@@ -18,7 +29,12 @@ export const ptySpawn = (args: {
   portBase?: number | null;
   /** The pane's `--mcp-config` file: HANGAR_MCP_CONFIG in its shell (lib/mcpScope). */
   mcpConfig?: string | null;
-}) => invoke<void>("pty_spawn", args);
+  /**
+   * Its workspace's kits, by id (lib/kits `workspaceKitIds`): their plugins
+   * join CLAUDE_CODE_PLUGIN_DIRS, with the bridge or without it.
+   */
+  kits?: string[];
+}) => invoke<PtySpawned | undefined>("pty_spawn", args);
 
 export const ptyWrite = (id: string, data: string) =>
   invoke<void>("pty_write", { id, data });

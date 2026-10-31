@@ -116,6 +116,10 @@ rust-embed = "8.13"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 sha2 = "0.11"
 subtle = "2.6"
+# Kits — see kits/manifest.rs: a kit's version, and the Hangar versions it
+# works with (`"hangar": ">=1.6.0"`). Already compiled for tauri at this
+# version, so naming it adds no crate.
+semver = "1"
 # Push notifications to the paired phones, sent by the PC itself (Web Push:
 # RFC 8291 encryption, RFC 8292 VAPID) — see remote/push.rs. web-push-native
 # encrypts, in pure Rust on the RustCrypto crates (p256, hkdf, aes-gcm), where

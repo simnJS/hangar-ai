@@ -239,6 +239,42 @@ fn apply_mcp_config(cmd: &mut CommandBuilder, path: Option<&str>) {
     }
 }
 
+/// What a pane's Claude Code loads as plugins: the hangar-bridge mod when it
+/// comes along, then the plugins of the workspace's kits — which do not
+/// depend on the bridge, and come with it off too. A machine whose policy
+/// forbids sideloading gets neither (bridge.rs); the kits it kept out are
+/// reported, and the pane starts all the same.
+fn apply_plugins(
+    cmd: &mut CommandBuilder,
+    bridge_dir: Option<&std::path::Path>,
+    kits: crate::kits::Launch,
+    forbidden: bool,
+) -> Vec<crate::kits::LaunchIssue> {
+    let mut issues = kits.issues;
+    let mut ours: Vec<&std::path::Path> = bridge_dir.into_iter().collect();
+    for (id, dir) in &kits.plugins {
+        if forbidden {
+            issues.push(crate::kits::LaunchIssue::new(
+                id,
+                crate::kits::IssueReason::Forbidden,
+                None,
+            ));
+        } else {
+            ours.push(dir);
+        }
+    }
+    crate::bridge::apply_plugin_dirs(cmd, &ours);
+    issues
+}
+
+/// What a spawn tells the pane besides succeeding.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Spawned {
+    /// Kits the pane was given that stay out of it, and why.
+    kit_issues: Vec<crate::kits::LaunchIssue>,
+}
+
 // The arguments are the command's IPC fields, named as the frontend sends them.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -254,7 +290,8 @@ pub fn pty_spawn(
     bridge: Option<bool>,
     port_base: Option<u16>,
     mcp_config: Option<String>,
-) -> Result<(), String> {
+    kits: Option<Vec<String>>,
+) -> Result<Spawned, String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
     // that id. A live session is a caller mistake and fails, but a dying one is
@@ -324,10 +361,19 @@ pub fn pty_spawn(
         Some(name) => cmd.env("HANGAR_PANE_NAME", name),
         None => cmd.env_remove("HANGAR_PANE_NAME"),
     }
-    // Lets a Claude Code started in this pane load the hangar-bridge mod.
-    if bridge != Some(false) {
-        crate::bridge::apply_env(&mut cmd, &id, name.as_deref());
-    }
+    // Lets a Claude Code started in this pane load the hangar-bridge mod, and
+    // the plugins of its workspace's kits.
+    let bridge_dir = if bridge != Some(false) {
+        crate::bridge::apply_env(&mut cmd, &id, name.as_deref())
+    } else {
+        None
+    };
+    let kit_issues = apply_plugins(
+        &mut cmd,
+        bridge_dir,
+        crate::kits::launch(&kits.unwrap_or_default()),
+        crate::bridge::sideloading_forbidden(),
+    );
     apply_ports(&mut cmd, port_base);
     apply_mcp_config(&mut cmd, mcp_config.as_deref());
 
@@ -401,7 +447,7 @@ pub fn pty_spawn(
         }
     });
 
-    Ok(())
+    Ok(Spawned { kit_issues })
 }
 
 #[tauri::command]
@@ -689,6 +735,104 @@ mod tests {
             apply_mcp_config(&mut other, none);
             assert_eq!(other.get_env("HANGAR_MCP_CONFIG"), None);
         }
+    }
+
+    fn plugin_dirs(cmd: &CommandBuilder) -> Option<String> {
+        cmd.get_env(crate::bridge::PLUGIN_DIRS_VAR)
+            .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    fn kits(plugins: &[(&str, &str)]) -> crate::kits::Launch {
+        crate::kits::Launch {
+            plugins: plugins
+                .iter()
+                .map(|(id, dir)| (id.to_string(), std::path::PathBuf::from(dir)))
+                .collect(),
+            issues: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_kit_reaches_claude_code_with_the_bridge_or_without_it() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let bridge = std::path::Path::new("/hangar/mods/hangar-bridge");
+
+        let mut with_bridge = CommandBuilder::new("pwsh");
+        with_bridge.env_remove(crate::bridge::PLUGIN_DIRS_VAR);
+        let issues = apply_plugins(
+            &mut with_bridge,
+            Some(bridge),
+            kits(&[("studio", "/kits/studio")]),
+            false,
+        );
+        assert!(issues.is_empty());
+        assert_eq!(
+            plugin_dirs(&with_bridge),
+            Some(format!("{}{sep}/kits/studio", bridge.display()))
+        );
+
+        // The bridge off, or the pane started with bridge=false: the kit still
+        // comes, and the folders the user loads this way stay behind it.
+        let mut without = CommandBuilder::new("pwsh");
+        without.env(crate::bridge::PLUGIN_DIRS_VAR, "/mine");
+        apply_plugins(
+            &mut without,
+            None,
+            kits(&[("studio", "/kits/studio")]),
+            false,
+        );
+        assert_eq!(
+            plugin_dirs(&without),
+            Some(format!("/kits/studio{sep}/mine"))
+        );
+    }
+
+    #[test]
+    fn a_pane_of_a_workspace_without_kits_loads_none() {
+        let mut other = CommandBuilder::new("pwsh");
+        other.env_remove(crate::bridge::PLUGIN_DIRS_VAR);
+        assert!(apply_plugins(&mut other, None, kits(&[]), false).is_empty());
+        assert_eq!(plugin_dirs(&other), None);
+
+        let mut inherited = CommandBuilder::new("pwsh");
+        inherited.env(crate::bridge::PLUGIN_DIRS_VAR, "/mine");
+        apply_plugins(&mut inherited, None, kits(&[]), false);
+        assert_eq!(
+            plugin_dirs(&inherited),
+            Some("/mine".to_string()),
+            "left as it was"
+        );
+    }
+
+    #[test]
+    fn a_policy_forbidding_sideloading_keeps_kits_out_and_says_so() {
+        let mut pane = CommandBuilder::new("pwsh");
+        pane.env_remove(crate::bridge::PLUGIN_DIRS_VAR);
+        let mut launch = kits(&[("studio", "/kits/studio"), ("docs", "/kits/docs")]);
+        launch.issues.push(crate::kits::LaunchIssue::new(
+            "gone",
+            crate::kits::IssueReason::Missing,
+            None,
+        ));
+        // The bridge never hands its folder back under that policy.
+        let issues = apply_plugins(&mut pane, None, launch, true);
+        assert_eq!(
+            plugin_dirs(&pane),
+            None,
+            "Claude Code would refuse to start"
+        );
+        let reasons: Vec<(&str, crate::kits::IssueReason)> = issues
+            .iter()
+            .map(|issue| (issue.id.as_str(), issue.reason))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                ("gone", crate::kits::IssueReason::Missing),
+                ("studio", crate::kits::IssueReason::Forbidden),
+                ("docs", crate::kits::IssueReason::Forbidden),
+            ]
+        );
     }
 
     #[test]

@@ -80,10 +80,11 @@ import {
   watchForSession,
 } from "../lib/agents";
 import { mcpConfigArg, mcpScopeWrite, shellFamily, workspaceMcp } from "../lib/mcpScope";
+import { kitIssueNotes, workspaceKitIds } from "../lib/kits";
 import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
 import { useT } from "../i18n";
 import type { CommandId } from "../lib/shortcuts";
-import type { CommandScope } from "../store";
+import { useStore, type CommandScope } from "../store";
 import type { TerminalTheme } from "../themes";
 import {
   AGENTS,
@@ -276,6 +277,13 @@ export function TerminalPane({
   sessionIdRef.current = pane.sessionId;
   const workspaceNameRef = useRef(workspaceName);
   workspaceNameRef.current = workspaceName;
+  /**
+   * The store as it stands, for what a launch reads off the workspace at
+   * that moment rather than from a prop: the kits enabled on it.
+   */
+  const { snapshot } = useStore();
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
 
   const jumpKeys = index < 9 ? shortcut(`pane.focus${index + 1}` as CommandId) : "";
 
@@ -531,9 +539,14 @@ export function TerminalPane({
      * then: the board, `worker_*` and `delivery_submit` are its work, and a
      * worker's worktree sits outside the folder whose `.mcp.json` would give
      * it the server.
+     *
+     * In `custom` mode the file also holds the servers of the workspace's
+     * `kits`: `--strict-mcp-config` drops a plugin's own. Nowhere else — the
+     * plugins start them themselves, and a copy would run each one twice.
      */
     async function mcpLaunchConfig(
       notes: string[],
+      kits: string[],
     ): Promise<{ path: string; arg: string; strict: boolean } | undefined> {
       const scope = workspaceMcp({ mcp: mcpRef.current });
       const family = shellFamily(shellRef.current);
@@ -560,6 +573,7 @@ export function TerminalPane({
           workspaceCwd: cwd,
           cwd: paneCwd,
           enabled: scope.enabled,
+          kits,
         });
         const arg = mcpConfigArg(file.path, family);
         if (!arg) throw new Error(tRef.current("mcpScope.warnQuote"));
@@ -806,11 +820,17 @@ export function TerminalPane({
         if (disposed) return;
 
         if (!adopted) {
+          // The workspace's kits as they are now, for every pane of it — a
+          // `claude` typed into a shell pane loads them too, like the bridge.
+          const kits = workspaceKitIds(
+            snapshotRef.current().workspaces.find((ws) => ws.id === workspaceId),
+          );
           // Before the shell, which is handed the file's path.
-          const mcpNotes: string[] = [];
-          const mcpConfig = pane.agent === "claude" ? await mcpLaunchConfig(mcpNotes) : undefined;
+          const launchNotes: string[] = [];
+          const mcpConfig =
+            pane.agent === "claude" ? await mcpLaunchConfig(launchNotes, kits) : undefined;
           if (disposed) return;
-          await ptySpawn({
+          const spawned = await ptySpawn({
             id: pane.id,
             cwd: paneCwd,
             shell: shellRef.current,
@@ -820,7 +840,12 @@ export function TerminalPane({
             bridge: settingsRef.current.claudeBridge,
             portBase: pane.portBase ?? null,
             mcpConfig: mcpConfig?.path ?? null,
+            kits,
           });
+          // Said where Claude Code runs; a shell pane has no use for it.
+          if (pane.agent === "claude") {
+            launchNotes.push(...kitIssueNotes(spawned?.kitIssues ?? [], tRef.current));
+          }
           // Same race as the subscription above: a cleanup that ran during the
           // spawn killed an id the backend did not know yet, so the shell it
           // just registered would outlive the pane. Killing again is free when
@@ -859,7 +884,7 @@ export function TerminalPane({
             resumeId = null;
             onSessionCaptured(null);
           }
-          for (const note of mcpNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
+          for (const note of launchNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,

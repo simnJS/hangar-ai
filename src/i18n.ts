@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 import { useStore } from "./store";
 import { typeset } from "./lib/typography";
+import * as kitsManage from "./strings/kitsManage";
+import * as kitsTab from "./strings/kitsTab";
 
 /**
  * Minimal typed i18n. `en` is the reference: `fr` is declared as
@@ -1271,6 +1273,11 @@ const en = {
   "mcpScope.warnQuote": "the file's path cannot be typed safely in this shell",
   "mcpScope.warnMissing": "MCP servers no longer defined anywhere: {names}",
 
+  "kits.warnMissing": "Kit “{id}” is not installed on this machine: the pane starts without it.",
+  "kits.warnBroken": "Kit “{id}” cannot be loaded ({detail}): the pane starts without it.",
+  "kits.warnForbidden":
+    "Kits: this machine's Claude Code policy forbids plugin folders, so {ids} stay out of this pane.",
+
   "worktrees.title": "Git worktrees",
   "worktrees.action": "Git worktrees",
   "worktrees.loading": "Reading the repository…",
@@ -1483,6 +1490,11 @@ const en = {
   "needsYou.notifyTitle": "Needs you · {workspace}",
   "needsYou.notifyQuestion": "Question: {title}",
   "needsYou.notifyLand": "Ready to merge: {title}",
+
+  // Dictionaries of their own, each filled without touching this file
+  // (src/strings/): a French key missing there fails the build there.
+  ...kitsManage.en,
+  ...kitsTab.en,
 } as const;
 
 type Key = keyof typeof en;
@@ -2780,6 +2792,11 @@ const fr: Record<Key, string> = {
   "mcpScope.warnQuote": "le chemin du fichier ne peut pas être tapé sans risque dans ce shell",
   "mcpScope.warnMissing": "Serveurs MCP qui ne sont plus définis nulle part : {names}",
 
+  "kits.warnMissing": "Le kit « {id} » n'est pas installé sur cette machine : le panneau démarre sans lui.",
+  "kits.warnBroken": "Le kit « {id} » ne peut pas être chargé ({detail}) : le panneau démarre sans lui.",
+  "kits.warnForbidden":
+    "Kits : la politique de Claude Code sur cette machine interdit les dossiers de plugins, {ids} restent donc hors de ce panneau.",
+
   "worktrees.title": "Worktrees git",
   "worktrees.action": "Worktrees git",
   "worktrees.loading": "Lecture du dépôt…",
@@ -2994,6 +3011,9 @@ const fr: Record<Key, string> = {
   "needsYou.notifyTitle": "Besoin de toi · {workspace}",
   "needsYou.notifyQuestion": "Question : {title}",
   "needsYou.notifyLand": "Prête à fusionner : {title}",
+
+  ...kitsManage.fr,
+  ...kitsTab.fr,
 };
 
 const typesetAll = (dict: Record<Key, string>, locale: Locale) =>

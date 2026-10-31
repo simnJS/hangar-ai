@@ -91,31 +91,59 @@ pub fn set_endpoint(port: u16, token: &str) {
     let _ = ENDPOINT.set((port, token.to_string()));
 }
 
-/// Everything a pane's environment needs for its Claude Code to load the mod
-/// and find its way back here. Nothing is set when either half is missing: a
-/// mod with no URL would only make requests that fail.
-pub fn apply_env(cmd: &mut CommandBuilder, pane_id: &str, pane_name: Option<&str>) {
+/// Everything a pane's environment needs for its Claude Code to find its way
+/// back here, and the mod's folder, which `apply_plugin_dirs` then puts on
+/// `CLAUDE_CODE_PLUGIN_DIRS` beside the workspace's kits. Nothing is set, and
+/// no folder handed back, when either half is missing — a mod with no URL
+/// would only make requests that fail — or when the machine forbids
+/// sideloading.
+pub fn apply_env(
+    cmd: &mut CommandBuilder,
+    pane_id: &str,
+    pane_name: Option<&str>,
+) -> Option<&'static Path> {
     let (Some(dir), Some((port, token))) = (plugin_dir(), ENDPOINT.get()) else {
-        return;
+        return None;
     };
     if sideloading_forbidden() {
-        return;
+        return None;
     }
-    let separator = if cfg!(windows) { ";" } else { ":" };
-    // Directories the user loads this way already stay loaded.
-    let dirs = match std::env::var("CLAUDE_CODE_PLUGIN_DIRS") {
-        Ok(existing) if !existing.trim().is_empty() => {
-            format!("{}{separator}{existing}", dir.display())
-        }
-        _ => dir.display().to_string(),
-    };
-    cmd.env("CLAUDE_CODE_PLUGIN_DIRS", dirs);
     cmd.env("HANGAR_PANE_ID", pane_id);
     if let Some(name) = pane_name.filter(|name| !name.trim().is_empty()) {
         cmd.env("HANGAR_PANE_NAME", name);
     }
     cmd.env("HANGAR_BRIDGE_URL", format!("http://127.0.0.1:{port}"));
     cmd.env("HANGAR_BRIDGE_TOKEN", token);
+    Some(dir)
+}
+
+pub const PLUGIN_DIRS_VAR: &str = "CLAUDE_CODE_PLUGIN_DIRS";
+
+/// The value of `CLAUDE_CODE_PLUGIN_DIRS` that loads `ours` — the mod, the
+/// kits — ahead of the folders the user already loads this way, which stay
+/// loaded. None when Hangar has nothing to add: the variable is then left as
+/// the pane inherits it.
+pub fn plugin_dirs_value(ours: &[&Path], inherited: Option<&str>) -> Option<String> {
+    if ours.is_empty() {
+        return None;
+    }
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let mut parts: Vec<String> = ours.iter().map(|dir| dir.display().to_string()).collect();
+    if let Some(existing) = inherited.filter(|existing| !existing.trim().is_empty()) {
+        parts.push(existing.to_string());
+    }
+    Some(parts.join(separator))
+}
+
+/// Puts `ours` on the pane's `CLAUDE_CODE_PLUGIN_DIRS`. The caller has
+/// already left everything out when sideloading is forbidden.
+pub fn apply_plugin_dirs(cmd: &mut CommandBuilder, ours: &[&Path]) {
+    let inherited = cmd
+        .get_env(PLUGIN_DIRS_VAR)
+        .map(|value| value.to_string_lossy().into_owned());
+    if let Some(value) = plugin_dirs_value(ours, inherited.as_deref()) {
+        cmd.env(PLUGIN_DIRS_VAR, value);
+    }
 }
 
 /// Where an administrator puts Claude Code's managed settings on this OS.
@@ -147,8 +175,8 @@ fn forbids_sideloading(settings: &str) -> bool {
 }
 
 /// Read once: a policy change reaches Claude Code at its next start anyway,
-/// and so it reaches Hangar at its own.
-fn sideloading_forbidden() -> bool {
+/// and so it reaches Hangar at its own. Keeps the kits out too (kits.rs).
+pub fn sideloading_forbidden() -> bool {
     static FORBIDDEN: OnceLock<bool> = OnceLock::new();
     *FORBIDDEN.get_or_init(|| {
         managed_settings_paths()
@@ -467,6 +495,25 @@ mod tests {
         assert!(!forbids_sideloading(r#"{ "disableSideloadFlags": false }"#));
         assert!(!forbids_sideloading(r#"{ "permissions": {} }"#));
         assert!(!forbids_sideloading("not json"));
+    }
+
+    #[test]
+    fn our_plugin_folders_go_first_and_the_users_stay() {
+        let (bridge, kit) = (Path::new("/m/hangar-bridge"), Path::new("/k/studio"));
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        assert_eq!(
+            plugin_dirs_value(&[bridge, kit], Some("/mine")),
+            Some(format!(
+                "{}{sep}{}{sep}/mine",
+                bridge.display(),
+                kit.display()
+            ))
+        );
+        assert_eq!(
+            plugin_dirs_value(&[kit], Some("  ")),
+            Some(kit.display().to_string())
+        );
+        assert_eq!(plugin_dirs_value(&[], Some("/mine")), None);
     }
 
     #[test]
