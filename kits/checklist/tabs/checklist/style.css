@@ -1,0 +1,22 @@
+/* What Hangar UI has no component for: the shape of a step. Layout and tokens only:
+   every colour is one of /_hangar/kit.css's. */
+#app { display: contents; }
+
+.chk-column { display: flex; flex-direction: column; overflow: hidden; }
+.chk-progress { padding: 0 var(--kit-space-12) var(--kit-space-6); }
+.chk-notes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--kit-space-6); margin-bottom: var(--kit-space-8); }
+.chk-notes:empty { display: none; }
+
+.chk-step { align-items: flex-start; }
+.chk-step .kit-row__lead { margin-top: var(--kit-space-2); }
+.chk-main { display: flex; flex-direction: column; flex: 1; gap: var(--kit-space-4); min-width: 0; padding-block: var(--kit-space-2); }
+.chk-main .kit-row__title { white-space: normal; overflow-wrap: anywhere; }
+.chk-main .kit-row__sub { white-space: normal; overflow-wrap: anywhere; }
+.chk-redo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--kit-space-6); }
+.chk-choices { display: flex; flex-wrap: wrap; gap: var(--kit-space-4); margin-top: var(--kit-space-2); }
+.chk-note { margin-top: var(--kit-space-2); }
+.chk-note textarea { min-height: calc(56px * var(--kit-scale)); resize: vertical; }
+
+.chk-foot { flex-wrap: wrap; justify-content: space-between; gap: var(--kit-space-4) var(--kit-space-8); }
+.chk-foot__hint { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.chk-foot__actions { display: flex; flex-wrap: wrap; gap: var(--kit-space-4); margin-inline-start: auto; }
