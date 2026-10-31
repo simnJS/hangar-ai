@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Icon, type IconName } from "./Icon";
+import { PaneAccountItems } from "./accounts/PaneAccountItems";
 
 /**
  * The "…" menu of a pane header: what a pane can do that is not worth a
@@ -33,9 +34,15 @@ interface Props {
   anchorRef: RefObject<HTMLButtonElement | null>;
   items: PaneMenuItem[];
   onClose: () => void;
+  /**
+   * The pane this menu is for. Given, the menu ends with the Claude account
+   * choice of that pane (Comptes Claude); a pane that does not run Claude
+   * Code, or a menu without it, shows none.
+   */
+  accountFor?: { workspaceId: string; paneId: string };
 }
 
-export function PaneMenu({ id, label, anchorRef, items, onClose }: Props) {
+export function PaneMenu({ id, label, anchorRef, items, onClose, accountFor }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
 
@@ -57,14 +64,14 @@ export function PaneMenu({ id, label, anchorRef, items, onClose }: Props) {
         ? below
         : Math.max(MARGIN, button.top - GAP - height);
     setAt({ left, top });
-  }, [anchorRef, items.length]);
+  }, [anchorRef, items.length, accountFor]);
 
   // The keyboard lands on the first entry, so the arrows work straight away.
   // A mouse that opened the menu sees no ring: the focus is programmatic and
   // follows a pointer press, which :focus-visible leaves alone.
   useEffect(() => {
     if (!at) return;
-    menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    menuRef.current?.querySelector<HTMLButtonElement>("[role^=menuitem]")?.focus();
   }, [at]);
 
   useEffect(() => {
@@ -86,7 +93,7 @@ export function PaneMenu({ id, label, anchorRef, items, onClose }: Props) {
 
   function onKeyDown(event: React.KeyboardEvent) {
     const entries = [
-      ...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? []),
+      ...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role^=menuitem]") ?? []),
     ];
     const at = entries.indexOf(document.activeElement as HTMLButtonElement);
     const go = (index: number) => entries[(index + entries.length) % entries.length]?.focus();
@@ -148,6 +155,7 @@ export function PaneMenu({ id, label, anchorRef, items, onClose }: Props) {
           </button>
         </div>
       ))}
+      {accountFor && <PaneAccountItems {...accountFor} onDone={onClose} />}
     </div>
   );
 }

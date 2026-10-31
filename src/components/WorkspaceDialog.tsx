@@ -1,3 +1,6 @@
+import { WorkspaceAccountPicker } from "./accounts/WorkspaceAccountPicker";
+import { useAccountsT } from "./accounts/strings";
+import { useAccounts } from "./accounts/useAccounts";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop, ModalHead } from "./Backdrop";
@@ -93,6 +96,9 @@ export function WorkspaceKitsDialog({
 export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
   const { addWorkspace, state } = useStore();
   const [kits, setKits] = useState<WorkspaceKit[]>([]);
+  const [claudeAccount, setClaudeAccount] = useState<string | null>(null);
+  const { accounts } = useAccounts();
+  const accountsT = useAccountsT();
 
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
@@ -226,6 +232,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
       agents: assignments,
       shellId,
       kits,
+      claudeAccount,
     };
     addWorkspace(draft);
     onClose();
@@ -484,6 +491,23 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
               </div>
               <span className="form-hint">{t("create.layoutHint")}</span>
             </div>
+
+            {accounts && accounts.length > 0 && (
+              <>
+                <label className="form-grid__label" htmlFor="ws-account">
+                  {accountsT("picker.label")}
+                </label>
+                <div className="form-grid__field">
+                  <WorkspaceAccountPicker
+                    id="ws-account"
+                    accounts={accounts}
+                    settings={state.settings}
+                    value={claudeAccount}
+                    onChange={setClaudeAccount}
+                  />
+                </div>
+              </>
+            )}
 
             <span className="form-grid__label">{t("kitsManage.sectionTitle")}</span>
             <div className="form-grid__field">

@@ -1,3 +1,4 @@
+import { ConnectedAccountSwitcher } from "./accounts/ConnectedAccountSwitcher";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { StateGlyph } from "./StateGlyph";
@@ -325,6 +326,8 @@ export function Toolbar({
 
       <div className="toolbar__trail">
         {needsYou}
+        {/* Claude account of this workspace: one click switches it (Comptes Claude). */}
+        <ConnectedAccountSwitcher workspaceId={workspace.id} />
         {terminals && (
           <>
             <div className="segmented segmented--icons" role="group" aria-label={t("topbar.layout")}>

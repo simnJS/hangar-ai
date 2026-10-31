@@ -3,6 +3,8 @@ import type { ClaudeAccount } from "./accounts";
 import {
   accountName,
   defaultLabel,
+  mergeUsage,
+  namesAccount,
   panesToRestartOnDefaultChange,
   panesToRestartOnWorkspaceChange,
   runningCount,
@@ -103,5 +105,30 @@ describe("labels", () => {
   });
   it("lists the workspaces on an account", () => {
     expect(ids(workspacesUsing(workspaces, "perso"))).toEqual(["w2"]);
+  });
+});
+
+describe("mergeUsage and namesAccount", () => {
+  const w = (percentUsed: number, at: number) => ({ percentUsed, resetsAt: null, at });
+
+  it("keeps the newer measure per account and window, and leaves the inputs alone", () => {
+    const known = { perso: { fiveHour: w(10, 100), weekly: w(40, 100) } };
+    const fresh = { perso: { fiveHour: w(20, 200) }, main: { weekly: w(5, 50) } };
+    const merged = mergeUsage(known, fresh);
+    expect(merged.perso.fiveHour?.percentUsed).toBe(20);
+    expect(merged.perso.weekly?.percentUsed).toBe(40);
+    expect(merged.main.weekly?.percentUsed).toBe(5);
+    expect(known.perso.fiveHour?.percentUsed).toBe(10);
+  });
+
+  it("ignores an older measure", () => {
+    const merged = mergeUsage({ perso: { fiveHour: w(30, 300) } }, { perso: { fiveHour: w(1, 100) } });
+    expect(merged.perso.fiveHour?.percentUsed).toBe(30);
+  });
+
+  it("namesAccount reads a hand-edited choice defensively", () => {
+    expect(namesAccount({ claudeAccount: " perso " }, "perso")).toBe(true);
+    expect(namesAccount({ claudeAccount: 3 }, "perso")).toBe(false);
+    expect(namesAccount(undefined, "perso")).toBe(false);
   });
 });

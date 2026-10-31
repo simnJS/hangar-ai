@@ -1,3 +1,4 @@
+import { readAccountChoice } from "./lib/accounts";
 import {
   createContext,
   useCallback,
@@ -65,6 +66,8 @@ export interface WorkspaceDraft {
   folderId?: string | null;
   /** The kits enabled while it is being created, each with the permissions accepted. */
   kits?: WorkspaceKit[];
+  /** Its own Claude account (lib/accounts); left out, it follows the default. */
+  claudeAccount?: string | null;
 }
 
 /** `taken` holds the pane names the other workspaces already use. */
@@ -87,6 +90,8 @@ export const makeWorkspace = (draft: WorkspaceDraft, taken: Iterable<string> = [
     folderId: draft.folderId ?? null,
     // Absent rather than empty when none, as in every workspace saved before kits.
     ...(draft.kits && draft.kits.length > 0 ? { kits: draft.kits } : {}),
+    // Same: absent when it follows the default account.
+    ...(readAccountChoice(draft.claudeAccount) ? { claudeAccount: readAccountChoice(draft.claudeAccount) } : {}),
   };
 };
 

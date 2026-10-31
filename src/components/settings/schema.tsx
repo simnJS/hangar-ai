@@ -7,6 +7,8 @@ import { isMac } from "../../lib/keys";
 import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
 import { KitsSettings } from "./KitsSettings";
+import { ConnectedAccountsSettings } from "../accounts/ConnectedAccountsSettings";
+import { translateAccounts } from "../accounts/strings";
 import { MobileSettings } from "./MobileSettings";
 import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
@@ -761,6 +763,28 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               hint: t("kitsManage.intro"),
               keywords: t("kitsManage.keywords"),
               render: () => <KitsSettings />,
+            },
+          ],
+        },
+      ],
+    },
+
+    {
+      id: "accounts",
+      label: translateAccounts(locale, "settings.title"),
+      icon: "bolt",
+      sections: [
+        {
+          id: "accounts",
+          title: translateAccounts(locale, "settings.title"),
+          items: [
+            {
+              id: "accounts",
+              kind: "custom",
+              bare: true,
+              hint: translateAccounts(locale, "settings.intro"),
+              keywords: "claude account accounts compte comptes abonnement subscription login",
+              render: () => <ConnectedAccountsSettings />,
             },
           ],
         },

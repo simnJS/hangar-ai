@@ -132,3 +132,32 @@ export function defaultLabel(
 export function workspacesUsing(workspaces: SwitchWorkspace[], id: AccountId): SwitchWorkspace[] {
   return workspaces.filter((w) => readAccountChoice(w.claudeAccount) === id);
 }
+
+/**
+ * `known` with `fresh` laid over it: per account and window, the more recent
+ * measure wins. Neither argument is modified.
+ */
+export function mergeUsage(
+  known: Record<AccountId, AccountUsage>,
+  fresh: Record<AccountId, AccountUsage>,
+): Record<AccountId, AccountUsage> {
+  const result: Record<AccountId, AccountUsage> = { ...known };
+  for (const [account, usage] of Object.entries(fresh)) {
+    const merged: AccountUsage = { ...result[account] };
+    for (const slot of ["fiveHour", "weekly"] as const) {
+      const next = usage[slot];
+      const old = merged[slot];
+      if (next && (!old || next.at >= old.at)) merged[slot] = next;
+    }
+    result[account] = merged;
+  }
+  return result;
+}
+
+/**
+ * The account ids to forget when `removed` is gone: a choice naming it falls
+ * back to the level above (the resolver skips it anyway; this cleans the file).
+ */
+export function namesAccount(x: { claudeAccount?: unknown } | undefined, id: AccountId): boolean {
+  return readAccountChoice(x?.claudeAccount) === id;
+}

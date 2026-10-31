@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useStore } from "../store";
+import { AccountBadge } from "./accounts/AccountBadge";
+import { accountMenuItems } from "./accounts/accountMenuItems";
+import { useAccountsT } from "./accounts/strings";
+import { useAccounts } from "./accounts/useAccounts";
+import { useAccountSwitching } from "./accounts/useAccountSwitching";
+import { resolveAccount } from "../lib/accounts";
 import { useLocale, useT } from "../i18n";
 import { Logo } from "./Logo";
 import { WorktreePanel } from "./WorktreePanel";
@@ -114,6 +120,9 @@ export function Sidebar({
     moveWorkspace,
     updateSettings,
   } = useStore();
+  const accountsT = useAccountsT();
+  const { accounts } = useAccounts();
+  const { setWorkspaceAccount } = useAccountSwitching();
   /** Id of the workspace or folder being renamed — ids never collide. */
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -531,6 +540,14 @@ export function Sidebar({
         : t("orch.navMark", { name: orchestrator.name })
       : "";
 
+    function accountBadge(workspace: Workspace) {
+      if (!accounts) return null;
+      const own = resolveAccount(accounts, state.settings, workspace);
+      // Only a workspace on an account other than the default is worth a label.
+      if (own.source !== "workspace" || own.id === resolveAccount(accounts, state.settings).id) return null;
+      return <AccountBadge accounts={accounts} id={own.id} />;
+    }
+
     return (
       <div
         key={ws.id}
@@ -581,6 +598,7 @@ export function Sidebar({
               )}
             </span>
             <span className="nav-end">
+              {accountBadge(ws)}
               {orchestrator && (
                 <span
                   className="nav-mark nav-mark--orch"
@@ -833,6 +851,27 @@ export function Sidebar({
         takesFocus: true,
         onSelect: () => onOpenOrchestration(ws.id),
       },
+      ...(accounts
+        ? [
+            { kind: "separator" } satisfies NavigatorMenuEntry,
+            { kind: "heading", label: accountsT("menu.title") } satisfies NavigatorMenuEntry,
+            ...accountMenuItems({
+              accounts,
+              settings: state.settings,
+              value: ws.claudeAccount,
+              // The same as the toolbar's click: this workspace's own account.
+              onSelect: (id) => setWorkspaceAccount(ws, id, false),
+              t: accountsT,
+            }).map(
+              (item): NavigatorMenuEntry => ({
+                kind: "item",
+                label: item.label,
+                checked: item.checked,
+                onSelect: item.onSelect,
+              }),
+            ),
+          ]
+        : []),
       { kind: "separator" },
       // Dragging does the same, but a menu is the one way to find out
       // folders exist.

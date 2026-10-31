@@ -46,6 +46,9 @@ export const en = {
   "settings.unsupportedTitle": "Logins are not kept apart on this computer",
   "settings.unsupportedBody":
     "Logging in to one account here may log another one out. You may have to log in again after switching.",
+  "settings.noPane":
+    "No room for the login pane. Close a pane in the open workspace, then choose “Log in” on the account.",
+  "settings.failed": "Could not do that: {detail}",
   // Account switcher
   "switcher.button": "Claude account: {name}",
   "switcher.menu": "Claude accounts",
@@ -74,6 +77,8 @@ export const en = {
   "picker.missing": "The account “{id}” no longer exists: the default applies.",
   "badge.title": "Claude account: {name}",
   "menu.title": "Claude account",
+  "pane.badgeTitle": "This agent runs on the “{name}” account, not its workspace’s",
+  "pane.menuHeading": "Claude account for this pane",
 } as const;
 
 export type AccountsKey = keyof typeof en;
@@ -111,6 +116,9 @@ export const fr: Record<AccountsKey, string> = {
   "settings.unsupportedTitle": "Les connexions ne sont pas séparées sur cet ordinateur",
   "settings.unsupportedBody":
     "Se connecter à un compte ici peut en déconnecter un autre. Tu devras peut-être te reconnecter après un changement.",
+  "settings.noPane":
+    "Pas de place pour le volet de connexion. Ferme un volet du workspace ouvert, puis choisis « Se connecter » sur le compte.",
+  "settings.failed": "Impossible : {detail}",
   "switcher.button": "Compte Claude : {name}",
   "switcher.menu": "Comptes Claude",
   "switcher.heading": "Ce workspace utilise",
@@ -138,6 +146,8 @@ export const fr: Record<AccountsKey, string> = {
   "picker.missing": "Le compte « {id} » n’existe plus : le compte par défaut s’applique.",
   "badge.title": "Compte Claude : {name}",
   "menu.title": "Compte Claude",
+  "pane.badgeTitle": "Cet agent tourne sur le compte « {name} », pas celui de son workspace",
+  "pane.menuHeading": "Compte Claude de ce volet",
 };
 
 function typesetAll(dict: Record<AccountsKey, string>, locale: Locale): Record<AccountsKey, string> {

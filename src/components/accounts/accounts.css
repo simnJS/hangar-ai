@@ -274,3 +274,11 @@
   line-height: 1.4;
   color: var(--fg-secondary);
 }
+
+/* Heading of the account group at the end of a pane's "…" menu. */
+.pane-menu__heading {
+  margin: 0;
+  padding: 4px 10px 2px;
+  font-size: calc(11px * var(--ui-scale));
+  opacity: 0.65;
+}
