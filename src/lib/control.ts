@@ -4,9 +4,21 @@ import { listen } from "@tauri-apps/api/event";
 import type { PaneActivity } from "./agentState";
 import type { Worktree } from "./git";
 import { leafIds, MAX_PANES, normalizeTree } from "./layout";
+import { kitsList, withEffectiveKits, type KitInfo } from "./kits";
+import { kitTabListing, kitTabToOpen, readKitTabParams } from "./kitTabs";
 import { MAX_MODEL_BYTES, MODEL_FORMATS, modelFormatOf, type ModelFileInfo } from "./modelFiles";
 import type { ModelHost } from "./modelHost";
-import { isModel, type OpenModel, type OpenPreview, type SnapshotAngle } from "./modelStore";
+import {
+  findKitTab,
+  isKitTab,
+  isModel,
+  kitParamsKey,
+  kitTabPath,
+  type KitTabParams,
+  type OpenModel,
+  type OpenPreview,
+  type SnapshotAngle,
+} from "./modelStore";
 import { checkPreviewFile, previewInspect, type PreviewFile } from "./preview";
 import { AGENTS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
 import { isMainWindow, type PaneTerminal } from "./windows";
@@ -107,6 +119,8 @@ export interface ControlDeps {
    * the preview may not open it. The real command unless a test hands in its own.
    */
   previewInspect?: (path: string) => Promise<unknown>;
+  /** The kits installed on this machine: the real command unless a test hands in its own. */
+  kits?: () => Promise<KitInfo[]>;
   // orchestration: workers deps
   /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
   workers?: WorkerDeps;
@@ -791,6 +805,115 @@ async function previewClose(
   return { closed: closing.map((entry) => entry.path), open: open.length - closing.length };
 }
 
+/* ── a kit's tabs ──────────────────────────────────────────────── */
+
+/**
+ * The tabs of the kits of the caller's own workspace (docs/kits.md). The
+ * workspace comes from the caller's pane, or its folder as preview_show finds it,
+ * and never from the request: what is passed as `workspace` or `pane` is not read.
+ * The caller comes from its pane's environment (mcp.rs), or from the pane a hook
+ * says it runs in, which Rust checked is running (server.rs).
+ */
+async function kitTabControl(op: string, args: Record<string, unknown>, caller: Caller, deps: ControlDeps): Promise<unknown> {
+  const state = deps.snapshot();
+  const ws = callerWorkspace(state, caller);
+  if (!ws) {
+    throw new Error(
+      caller.paneId
+        ? `The pane "${caller.paneId}" is in no workspace of Hangar, so there is nowhere to open a tab.`
+        : "Could not tell which workspace you are in, so there is nowhere to open a tab.",
+    );
+  }
+  const by = caller.paneName ?? ws.panes.find((pane) => pane.id === caller.paneId)?.name ?? null;
+  if (op === "kit_tab_list") {
+    return {
+      workspace: ws.name,
+      tabs: kitTabListing(withEffectiveKits(ws, state.settings), await installedKits(deps)),
+    };
+  }
+  return op === "kit_tab_open" ? kitTabOpen(ws, args, by, deps) : kitTabClose(ws, args, by, deps);
+}
+
+const installedKits = (deps: ControlDeps) => (deps.kits ?? kitsList)();
+
+/** The `kit` and `tab` of a request; both are needed. */
+function kitTabNamed(args: Record<string, unknown>): { kitId: string; tabId: string } {
+  const kitId = text(args.kit);
+  const tabId = text(args.tab);
+  if (!kitId || !tabId) throw new Error('Name the "kit" and the "tab", as kit_tab_list shows them.');
+  return { kitId, tabId };
+}
+
+async function kitTabOpen(ws: Workspace, args: Record<string, unknown>, by: string | null, deps: ControlDeps): Promise<unknown> {
+  const { kitId, tabId } = kitTabNamed(args);
+  if (args.reveal !== undefined && typeof args.reveal !== "boolean") throw new Error("reveal must be true or false.");
+  const reveal = args.reveal !== false;
+  const installed = await installedKits(deps);
+  const { tab } = kitTabToOpen(withEffectiveKits(ws, deps.snapshot().settings), installed, kitId, tabId);
+  const params = readKitTabParams(tab, args.params);
+  const singleton = Boolean(tab.singleton);
+
+  const preview = await previewOf(ws, deps);
+  const before = findKitTab((await preview.list()).models, { kitId, tabId, params, singleton });
+  const woke = wakeFor(ws, deps);
+  const id = await preview.show({
+    kind: "kit",
+    path: kitTabPath(kitId, tabId, singleton ? {} : params),
+    kitId,
+    tabId,
+    title: tab.title,
+    params,
+    singleton,
+    openedBy: by,
+    reveal,
+  });
+  const outcome = !before
+    ? "opened"
+    : Object.keys(params).length && kitParamsKey(params) !== kitParamsKey(before.params)
+      ? "replaced"
+      : "focused";
+  const answer = { outcome, kit: kitId, tab: tabId, params, workspace: ws.name };
+  if (!reveal) {
+    const { activeId, shown } = await preview.list();
+    return {
+      ...answer,
+      visible: shown && activeId === id,
+      note: "Added without opening the panel: the preview's toolbar button tells the person there is something to see.",
+    };
+  }
+  deps.announce({
+    kind: onScreen(deps.snapshot(), ws) ? "modelShown" : "modelShownElsewhere",
+    by,
+    file: tab.title,
+    workspace: ws.name,
+  });
+  return { ...answer, ...(await sight(ws, preview, woke)) };
+}
+
+/**
+ * With params, the tab holding those very ones; without, every tab of it open in
+ * the workspace. Nothing is asked of the kit: one taken off the workspace since
+ * can still have its tabs closed.
+ */
+async function kitTabClose(ws: Workspace, args: Record<string, unknown>, by: string | null, deps: ControlDeps): Promise<unknown> {
+  const { kitId, tabId } = kitTabNamed(args);
+  const preview = await previewOf(ws, deps);
+  const { models } = await preview.list();
+  const open = models.filter(isKitTab).filter((entry) => entry.kitId === kitId && entry.tabId === tabId);
+  const given = args.params as KitTabParams | undefined | null;
+  const closing = given ? open.filter((entry) => kitParamsKey(entry.params) === kitParamsKey(given)) : open;
+  const left = open.filter((entry) => !closing.includes(entry)).map((entry) => entry.params);
+  if (!closing.length) return { closed: [], open: left };
+  await preview.close(closing.map((entry) => entry.id));
+  deps.announce({
+    kind: onScreen(deps.snapshot(), ws) ? "modelClosed" : "modelClosedElsewhere",
+    by,
+    file: closing.map((entry) => entry.title).join(", "),
+    workspace: ws.name,
+  });
+  return { closed: closing.map((entry) => entry.params), open: left };
+}
+
 export async function runControl(
   op: string,
   args: Record<string, unknown>,
@@ -819,6 +942,7 @@ export async function runControl(
 
   // The project manager works across workspaces: lib/managerControl finds its own.
   if (op.startsWith("project_")) return managerControl(op, args, caller, deps);
+  if (op.startsWith("kit_tab_")) return kitTabControl(op, args, caller, deps);
 
   const ws = workspaceFor(state, args, caller);
   // What an agent does to a workspace's panes counts as using it, like typing

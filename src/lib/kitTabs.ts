@@ -13,15 +13,33 @@ import {
   type KitPermission,
   type KitTab,
 } from "./kits";
+import { kitRequested, kitState } from "./kitActivation";
+import type { KitTabParams } from "./modelStore";
 import type { Workspace } from "../types";
 
 /**
  * A kit's tabs, as a workspace offers them (docs/kits.md): which tabs its
  * enabled kits have, the URL each page is served at by the `hangar-kit`
- * scheme (src-tauri/src/kit_scheme.rs), and what each may ask Hangar for.
- * The page itself is drawn by components/preview/KitTabView, and answered
- * by lib/kitApi.
+ * scheme (src-tauri/src/kit_scheme.rs), what each may ask Hangar for, and what
+ * a caller may pass it. The page itself is drawn by
+ * components/preview/KitTabView, and answered by lib/kitApi.
  */
+
+/** What a caller may pass a tab under one name (`Tab::params` in kits/manifest.rs). */
+export interface KitTabParam {
+  description: string;
+  /** A value must match it whole. */
+  pattern?: string;
+}
+
+declare module "./kits" {
+  interface KitTab {
+    /** What a caller may pass it, by name. */
+    params?: Record<string, KitTabParam>;
+    /** One tab whatever its params, which new ones replace. */
+    singleton?: boolean;
+  }
+}
 
 const IS_WINDOWS = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
 
@@ -129,6 +147,131 @@ export function kitTabState(
   if (!choice) return { kind: "missing" };
   return { kind: "ready", choice, url: kitFileUrl(kitId, choice.tab.entry, platformIsWindows) };
 }
+
+/* ── what an agent or a hook may open ─────────────────────────── */
+
+/** The longest value a param may hold, in characters. */
+export const KIT_TAB_PARAM_MAX_CHARS = 1024;
+
+/** A value's rule as this window reads it, anchored; null for one JavaScript cannot read. */
+function paramRule(pattern: string): RegExp | null {
+  // Alone first: `a)|(?:b` only parses once wrapped, and would then match past
+  // the anchors. As Unicode first, for `\p{L}`, then without, for the stray
+  // escapes it refuses and Rust's syntax allows.
+  for (const flags of ["u", ""]) {
+    try {
+      new RegExp(pattern, flags);
+      return new RegExp(`^(?:${pattern})$`, flags);
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+/**
+ * The params a caller gave, held to what the tab declares: known names, strings,
+ * each matching its rule whole. Rust held them to the same rules first, where a
+ * rule cannot backtrack for ever (`Tab::param_refusal`). The message is the
+ * caller's to act on.
+ */
+export function readKitTabParams(tab: KitTab, raw: unknown): KitTabParams {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("params must be an object of strings, by the names the tab declares.");
+  }
+  const declared = tab.params ?? {};
+  const names = Object.keys(declared);
+  const taken = names.length ? `It takes: ${names.join(", ")}.` : "It takes none.";
+  const entries = Object.entries(raw as Record<string, unknown>);
+  for (const [name, value] of entries) {
+    if (!Object.prototype.hasOwnProperty.call(declared, name)) {
+      throw new Error(`The tab "${tab.id}" declares no param ${JSON.stringify(name)}. ${taken}`);
+    }
+    if (typeof value !== "string") throw new Error(`Param "${name}" must be a string.`);
+    if (value.length > KIT_TAB_PARAM_MAX_CHARS) {
+      throw new Error(`Param "${name}" must be at most ${KIT_TAB_PARAM_MAX_CHARS} characters.`);
+    }
+    const { pattern } = declared[name];
+    if (pattern === undefined) continue;
+    const rule = paramRule(pattern);
+    if (!rule) {
+      throw new Error(
+        `Param "${name}" cannot be checked: Hangar's window cannot read the kit's rule ${pattern}, so nothing passes. ` +
+          "The kit has to write it in the syntax Rust and JavaScript share.",
+      );
+    }
+    if (!rule.test(value)) {
+      throw new Error(`Param "${name}" must match its rule ${pattern}, and ${JSON.stringify(value.slice(0, 60))} does not.`);
+    }
+  }
+  return Object.fromEntries(entries) as KitTabParams;
+}
+
+/**
+ * The kit and its tab, for an agent or a hook opening it on the workspace; the
+ * reason when they may not, said so it can be acted on. What the person opens
+ * from the palette or the menu does not go through here.
+ */
+export function kitTabToOpen(
+  ws: Pick<Workspace, "kits" | "name">,
+  installed: readonly KitInfo[],
+  kitId: string,
+  tabId: string,
+): { kit: KitInfo; tab: KitTab } {
+  const enabled = workspaceKits(ws);
+  const entry = enabled.find((kit) => kit.id === kitId);
+  if (!entry) {
+    const list = enabled.map((kit) => kit.id).join(", ");
+    throw new Error(
+      `The kit "${kitId}" is not enabled on "${ws.name}". ${list ? `Enabled there: ${list}.` : "No kit is enabled there."} ` +
+        "Only the person can enable one.",
+    );
+  }
+  const kit = installed.find((candidate) => candidate.id === kitId);
+  if (!kit) throw new Error(`The kit "${kitId}" is enabled on "${ws.name}", and no longer installed.`);
+  const manifest = usable(installed, kitId)?.manifest;
+  if (!manifest) throw new Error(`The kit "${kitId}" cannot be used right now: ${kit.error ?? "its manifest is unreadable"}.`);
+  if (kitState(entry, kitRequested(kit)) === "review") {
+    throw new Error(
+      `The kit "${kitId}" has changes to review on "${ws.name}": nothing of it can be opened until the person accepts them, ` +
+        "in the workspace's Kits dialog or in Settings › Kits. Tell them.",
+    );
+  }
+  const tab = manifest.tabs.find((candidate) => candidate.id === tabId);
+  if (!tab) {
+    const tabs = manifest.tabs.map((candidate) => candidate.id).join(", ");
+    throw new Error(`The kit "${kitId}" has no tab "${tabId}". ${tabs ? `Its tabs: ${tabs}.` : "It has no tabs."}`);
+  }
+  return { kit, tab };
+}
+
+/** What `kit_tab_list` says of the tabs a workspace's kits bring. */
+export function kitTabListing(ws: Pick<Workspace, "kits">, installed: readonly KitInfo[]) {
+  const enabled = workspaceKits(ws);
+  return workspaceKitTabs(ws, installed).map(({ kitId, kitName, tab }) => {
+    const kit = installed.find((candidate) => candidate.id === kitId)!;
+    const entry = enabled.find((candidate) => candidate.id === kitId);
+    return {
+      kit: kitId,
+      kitName,
+      tab: tab.id,
+      title: tab.title,
+      description: kit.manifest?.description ?? "",
+      singleton: Boolean(tab.singleton),
+      params: tab.params ?? {},
+      ...(kitState(entry, kitRequested(kit)) === "review" ? { toReview: true } : {}),
+    };
+  });
+}
+
+/**
+ * Whether a page took the keyboard from a terminal by itself: focus went into its
+ * frame from a terminal, and no pointer is over the frame, so nobody clicked it.
+ * A terminal keeps Tab, so the keyboard cannot have walked there either.
+ */
+export const frameTookKeyboard = (focus: { inFrame: boolean; pointerOver: boolean; fromTerminal: boolean }) =>
+  focus.inFrame && !focus.pointerOver && focus.fromTerminal;
 
 /* ── the installed kits, read once for the window ─────────────── */
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   DISABLED,
   callerWorkspace,
@@ -8,8 +8,20 @@ import {
   type ControlDeps,
 } from "./control";
 import type { Worktree } from "./git";
-import { createRootGrants, type ModelHost } from "./modelHost";
-import type { ModelInfo, OpenFile, OpenModel, OpenPreview } from "./modelStore";
+import type { KitInfo } from "./kits";
+import { createRootGrants, localModelHost, type ModelHost } from "./modelHost";
+import {
+  closeAllModels,
+  isKitTab,
+  modelScope,
+  noteModelView,
+  setModelPanel,
+  type ModelInfo,
+  type OpenFile,
+  type OpenKitTab,
+  type OpenModel,
+  type OpenPreview,
+} from "./modelStore";
 import type { PreviewKind } from "./preview";
 import { localTerminal, readLines } from "./windows";
 import { DEFAULT_SETTINGS, type AgentId, type AppState, type Pane, type Workspace } from "../types";
@@ -165,6 +177,7 @@ function fakePreview(log: string[]) {
         (entry) => entry.path === model.path && entry.workspaceId === preview.workspace,
       );
       const id = existing?.id ?? (model.kind === "model" ? `m${next++}` : `f${next++}`);
+      if (model.kind === "kit") throw new Error("a kit's tab goes through the real store: see `kitSetup`");
       if (!existing) {
         preview.models.push(
           model.kind === "model"
@@ -1104,6 +1117,396 @@ describe("preview_show", () => {
     await expect(runControl("preview_show", { ...fromAva, path: "a.png" }, deps)).rejects.toThrow(DISABLED);
     await expect(runControl("preview_close", fromAva, deps)).rejects.toThrow(DISABLED);
     expect(log).toEqual([]);
+  });
+});
+
+describe("a kit's tabs", () => {
+  const runTab = {
+    id: "run",
+    title: "CI run",
+    entry: "tabs/run.html",
+    permissions: [],
+    params: {
+      run: { description: "The run's number", pattern: "[0-9]+" },
+      note: { description: "Anything" },
+    },
+  };
+  const boardTab = {
+    id: "board",
+    title: "Board",
+    entry: "tabs/board.html",
+    permissions: [],
+    singleton: true,
+    params: { view: { description: "Which view" } },
+  };
+  const plainTab = { id: "plain", title: "Plain", entry: "tabs/plain.html", permissions: [] };
+
+  const ciKit = (patch: Partial<KitInfo> = {}): KitInfo => ({
+    id: "ci-kit",
+    source: { kind: "folder", path: "D:/kits/ci-kit" },
+    dir: "D:/kits/ci-kit",
+    installedVersion: "1.0.0",
+    addedAt: 1,
+    manifest: {
+      schema: 1,
+      id: "ci-kit",
+      name: "CI kit",
+      version: "1.0.0",
+      description: "Shows a CI run.",
+      tabs: [runTab, boardTab, plainTab],
+      setup: [],
+    },
+    error: null,
+    update: null,
+    ...patch,
+  });
+
+  /** The real store behind the real host, for a workspace "Hangar" that has the kit. */
+  function kitSetup(kits: KitInfo[] = [ciKit()], enabled: Workspace["kits"] = [{ id: "ci-kit", granted: [] }]) {
+    const made = setup({ modelHost: async (id) => localModelHost(id), kits: async () => kits });
+    made.patch("w1", { kits: enabled });
+    return made;
+  }
+
+  const open = (deps: ControlDeps, args: Record<string, unknown>) =>
+    runControl("kit_tab_open", { ...fromAva, kit: "ci-kit", tab: "run", ...args }, deps) as Promise<any>;
+  const close = (deps: ControlDeps, args: Record<string, unknown>) =>
+    runControl("kit_tab_close", { ...fromAva, kit: "ci-kit", tab: "run", ...args }, deps) as Promise<any>;
+  const tabs = (workspaceId = "w1"): OpenKitTab[] => modelScope(workspaceId).models.filter(isKitTab);
+
+  beforeEach(() => {
+    closeAllModels();
+    noteModelView("w1", true);
+  });
+
+  describe("kit_tab_list", () => {
+    it("lists the tabs of the kits enabled on the caller's workspace, with what they take", async () => {
+      const { deps } = kitSetup();
+      const listed = (await runControl("kit_tab_list", fromAva, deps)) as any;
+      expect(listed.workspace).toBe("Hangar");
+      expect(listed.tabs).toEqual([
+        {
+          kit: "ci-kit",
+          kitName: "CI kit",
+          tab: "run",
+          title: "CI run",
+          description: "Shows a CI run.",
+          singleton: false,
+          params: runTab.params,
+        },
+        {
+          kit: "ci-kit",
+          kitName: "CI kit",
+          tab: "board",
+          title: "Board",
+          description: "Shows a CI run.",
+          singleton: true,
+          params: boardTab.params,
+        },
+        {
+          kit: "ci-kit",
+          kitName: "CI kit",
+          tab: "plain",
+          title: "Plain",
+          description: "Shows a CI run.",
+          singleton: false,
+          params: {},
+        },
+      ]);
+    });
+
+    it("lists nothing for another workspace, and a kit on all workspaces everywhere", async () => {
+      const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+      const { deps } = kitSetup();
+      expect(await runControl("kit_tab_list", fromShop, deps)).toEqual({ workspace: "Shop", tabs: [] });
+
+      const everywhere = setup({ modelHost: async (id) => localModelHost(id), kits: async () => [ciKit()] });
+      const state = everywhere.deps.snapshot();
+      everywhere.deps.snapshot = () => ({
+        ...state,
+        settings: { ...state.settings, kitsEverywhere: [{ id: "ci-kit", granted: [] }] },
+      });
+      const listed = (await runControl("kit_tab_list", fromShop, everywhere.deps)) as any;
+      expect(listed.tabs.map((tab: any) => tab.tab)).toEqual(["run", "board", "plain"]);
+    });
+
+    it("says which kits the person has changes to accept on", async () => {
+      const { deps } = kitSetup([
+        ciKit({ source: { kind: "git", url: "https://github.com/o/k" }, commandsPermission: "commands:0123456789abcdef" }),
+      ]);
+      const listed = (await runControl("kit_tab_list", fromAva, deps)) as any;
+      expect(listed.tabs[0].toReview).toBe(true);
+    });
+
+    it("is pane control like the rest: refused with the setting off", async () => {
+      const { deps } = setup({ enabled: () => false });
+      await expect(runControl("kit_tab_list", fromAva, deps)).rejects.toThrow(DISABLED);
+    });
+  });
+
+  describe("kit_tab_open", () => {
+    it("opens a tab with its params in the caller's workspace, the panel open", async () => {
+      const { deps, log } = kitSetup();
+      const answer = await open(deps, { params: { run: "4567" } });
+      expect(answer).toEqual({
+        outcome: "opened",
+        kit: "ci-kit",
+        tab: "run",
+        params: { run: "4567" },
+        workspace: "Hangar",
+        visible: true,
+      });
+      expect(tabs()).toHaveLength(1);
+      expect(tabs()[0]).toMatchObject({ params: { run: "4567" }, title: "CI run", openedBy: "Ava" });
+      expect(modelScope("w1")).toMatchObject({ panelOpen: true, activeId: tabs()[0].id, unseen: true });
+      expect(log).toContain("announce:modelShown:CI run:Ava");
+    });
+
+    it("focuses the tab that has the same params, whatever order they came in", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1", note: "a" } });
+      await open(deps, { params: { run: "2" } });
+      const [first, second] = tabs();
+      expect(modelScope("w1").activeId).toBe(second.id);
+
+      const answer = await open(deps, { params: { note: "a", run: "1" } });
+      expect(answer.outcome).toBe("focused");
+      expect(tabs().map((tab) => tab.id)).toEqual([first.id, second.id]);
+      expect(modelScope("w1").activeId).toBe(first.id);
+    });
+
+    it("opens a new tab for other params, and one for none", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1" } });
+      expect((await open(deps, { params: { run: "2" } })).outcome).toBe("opened");
+      expect((await open(deps, {})).outcome).toBe("opened");
+      expect(tabs().map((tab) => tab.params)).toEqual([{ run: "1" }, { run: "2" }, {}]);
+      expect(new Set(tabs().map((tab) => tab.path)).size).toBe(3);
+    });
+
+    it("keeps one singleton tab, whose new params replace the old", async () => {
+      const { deps } = kitSetup();
+      const asBoard = (params?: Record<string, string>) => open(deps, { tab: "board", params });
+      expect((await asBoard({ view: "a" })).outcome).toBe("opened");
+      const [tab] = tabs();
+
+      expect((await asBoard({ view: "b" })).outcome).toBe("replaced");
+      expect(tabs()).toHaveLength(1);
+      expect(tabs()[0]).toMatchObject({ id: tab.id, params: { view: "b" }, revision: 0 });
+
+      // The same again, or nothing new: brought forward, holding what it holds.
+      expect((await asBoard({ view: "b" })).outcome).toBe("focused");
+      expect((await asBoard()).outcome).toBe("focused");
+      expect(tabs()[0].params).toEqual({ view: "b" });
+    });
+
+    it("goes to the caller's workspace whatever the request says", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { workspace: "Shop", pane: "Ava", params: { run: "1" } });
+      expect(tabs("w1")).toHaveLength(1);
+      expect(tabs("w2")).toEqual([]);
+    });
+
+    it("finds a hook's workspace by its pane alone, and names it as who opened the tab", async () => {
+      const { deps } = kitSetup();
+      const hook = { caller: { paneId: "p2" }, kit: "ci-kit", tab: "run", params: { run: "9" } };
+      expect(((await runControl("kit_tab_open", hook, deps)) as any).outcome).toBe("opened");
+      expect(tabs("w1")[0].openedBy).toBe("Max");
+    });
+
+    it("refuses a pane no workspace has, without guessing one", async () => {
+      const { deps } = kitSetup();
+      const hook = { caller: { paneId: "p-gone" }, kit: "ci-kit", tab: "run" };
+      await expect(runControl("kit_tab_open", hook, deps)).rejects.toThrow(
+        'The pane "p-gone" is in no workspace of Hangar',
+      );
+      expect(modelScope("w1").models).toEqual([]);
+    });
+
+    it("refuses a kit that is not enabled there, saying what is", async () => {
+      const { deps } = kitSetup();
+      await expect(open(deps, { kit: "other-kit" })).rejects.toThrow(
+        'The kit "other-kit" is not enabled on "Hangar". Enabled there: ci-kit. Only the person can enable one.',
+      );
+      const none = kitSetup([ciKit()], []);
+      await expect(open(none.deps, {})).rejects.toThrow(
+        'The kit "ci-kit" is not enabled on "Hangar". No kit is enabled there. Only the person can enable one.',
+      );
+    });
+
+    it("refuses a kit with changes to review, and says who can accept them", async () => {
+      const github = ciKit({
+        source: { kind: "git", url: "https://github.com/o/k" },
+        commandsPermission: "commands:0123456789abcdef",
+      });
+      const { deps } = kitSetup([github], [{ id: "ci-kit", granted: ["commands:fedcba9876543210"] }]);
+      await expect(open(deps, {})).rejects.toThrow(
+        'The kit "ci-kit" has changes to review on "Hangar": nothing of it can be opened until the person accepts them',
+      );
+      expect(modelScope("w1").models).toEqual([]);
+
+      const accepted = kitSetup([github], [{ id: "ci-kit", granted: ["commands:0123456789abcdef"] }]);
+      expect((await open(accepted.deps, {})).outcome).toBe("opened");
+    });
+
+    it("refuses a kit that is gone, or that cannot be used", async () => {
+      const gone = kitSetup([]);
+      await expect(open(gone.deps, {})).rejects.toThrow('The kit "ci-kit" is enabled on "Hangar", and no longer installed.');
+      const broken = kitSetup([ciKit({ manifest: null, error: "its manifest is invalid" })]);
+      await expect(open(broken.deps, {})).rejects.toThrow('The kit "ci-kit" cannot be used right now: its manifest is invalid.');
+    });
+
+    it("refuses an unknown tab, saying which there are", async () => {
+      const { deps } = kitSetup();
+      await expect(open(deps, { tab: "nope" })).rejects.toThrow(
+        'The kit "ci-kit" has no tab "nope". Its tabs: run, board, plain.',
+      );
+    });
+
+    it("refuses a param the tab does not declare, saying which it does", async () => {
+      const { deps } = kitSetup();
+      await expect(open(deps, { params: { job: "1" } })).rejects.toThrow(
+        'The tab "run" declares no param "job". It takes: run, note.',
+      );
+      await expect(open(deps, { tab: "plain", params: { run: "1" } })).rejects.toThrow(
+        'The tab "plain" declares no param "run". It takes none.',
+      );
+      await expect(open(deps, { params: JSON.parse('{ "__proto__": "1" }') })).rejects.toThrow("declares no param");
+      expect(modelScope("w1").models).toEqual([]);
+    });
+
+    it("refuses a value that does not match its rule whole", async () => {
+      const { deps } = kitSetup();
+      for (const value of ["abc", "12a", "a12", "1\n2", "12\n", ""]) {
+        await expect(open(deps, { params: { run: value } })).rejects.toThrow('Param "run" must match its rule [0-9]+');
+      }
+      await expect(open(deps, { params: { run: "abc" } })).rejects.toThrow(
+        'Param "run" must match its rule [0-9]+, and "abc" does not.',
+      );
+      expect(modelScope("w1").models).toEqual([]);
+      expect((await open(deps, { params: { run: "4567" } })).outcome).toBe("opened");
+    });
+
+    it("refuses what is not a string, too long, or not params at all", async () => {
+      const { deps } = kitSetup();
+      await expect(open(deps, { params: { run: 4567 } })).rejects.toThrow('Param "run" must be a string.');
+      await expect(open(deps, { params: { note: "x".repeat(1025) } })).rejects.toThrow("at most 1024 characters");
+      await expect(open(deps, { params: "run=1" })).rejects.toThrow("params must be an object");
+      await expect(open(deps, { params: ["1"] })).rejects.toThrow("params must be an object");
+      await expect(open(deps, { kit: "" })).rejects.toThrow('Name the "kit" and the "tab"');
+      await expect(open(deps, { reveal: "no" })).rejects.toThrow("reveal must be true or false");
+    });
+
+    it("says so of a rule this window cannot read, and lets nothing through", async () => {
+      const unreadable = { ...runTab, params: { run: { description: "x", pattern: "(?i)abc" } } };
+      const kit = ciKit();
+      kit.manifest!.tabs = [unreadable];
+      const { deps } = kitSetup([kit]);
+      await expect(open(deps, { params: { run: "abc" } })).rejects.toThrow("cannot read the kit's rule (?i)abc");
+    });
+
+    it("reveal opens a closed panel and puts the tab in front", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1" } });
+      setModelPanel("w1", { open: false });
+      expect(modelScope("w1").panelOpen).toBe(false);
+      await open(deps, { params: { run: "2" }, reveal: true });
+      expect(modelScope("w1")).toMatchObject({ panelOpen: true, activeId: tabs()[1].id });
+    });
+
+    it("says so when the person cannot see it: no room for the panel, or another workspace on screen", async () => {
+      const { deps } = kitSetup();
+      noteModelView("w1", false);
+      const noRoom = await open(deps, { params: { run: "1" } });
+      expect(noRoom.visible).toBe(false);
+      expect(noRoom.note).toContain("no room beside the terminals");
+
+      noteModelView("w2", true);
+      const elsewhere = await open(deps, { params: { run: "2" } });
+      expect(elsewhere.visible).toBe(false);
+      expect(elsewhere.note).toContain('which is not the workspace on screen');
+    });
+
+    it("reveal false adds the tab behind a closed panel, and nothing else moves", async () => {
+      const { deps, log } = kitSetup();
+      noteModelView("w1", false);
+      const answer = await open(deps, { params: { run: "1" }, reveal: false });
+      expect(answer.outcome).toBe("opened");
+      expect(answer.visible).toBe(false);
+      expect(tabs()).toHaveLength(1);
+      expect(modelScope("w1")).toMatchObject({ panelOpen: false, unseen: true });
+      expect(log.filter((line) => line.startsWith("announce:"))).toEqual([]);
+    });
+
+    it("reveal false leaves what is in front of an open panel, and an open tab where it is", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1" } });
+      const [first] = tabs();
+      await open(deps, { params: { run: "2" }, reveal: false });
+      expect(tabs()).toHaveLength(2);
+      expect(modelScope("w1")).toMatchObject({ panelOpen: true, activeId: first.id });
+      expect((await open(deps, { params: { run: "2" }, reveal: false })).outcome).toBe("focused");
+      expect(modelScope("w1").activeId).toBe(first.id);
+    });
+
+    it("reveal false still gives a singleton its new params", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { tab: "board", params: { view: "a" } });
+      setModelPanel("w1", { open: false });
+      const answer = await open(deps, { tab: "board", params: { view: "b" }, reveal: false });
+      expect(answer.outcome).toBe("replaced");
+      expect(tabs()[0].params).toEqual({ view: "b" });
+      expect(modelScope("w1").panelOpen).toBe(false);
+    });
+  });
+
+  describe("kit_tab_close", () => {
+    it("closes the tab holding those very params", async () => {
+      const { deps, log } = kitSetup();
+      await open(deps, { params: { run: "1", note: "a" } });
+      await open(deps, { params: { run: "2" } });
+      const answer = await close(deps, { params: { note: "a", run: "1" } });
+      expect(answer).toEqual({ closed: [{ run: "1", note: "a" }], open: [{ run: "2" }] });
+      expect(tabs().map((tab) => tab.params)).toEqual([{ run: "2" }]);
+      expect(log).toContain("announce:modelClosed:CI run:Ava");
+    });
+
+    it("without params, closes every tab of it, and nothing else", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1" } });
+      await open(deps, { params: { run: "2" } });
+      await open(deps, { tab: "plain" });
+      const answer = await close(deps, {});
+      expect(answer.closed).toHaveLength(2);
+      expect(tabs().map((tab) => tab.tabId)).toEqual(["plain"]);
+    });
+
+    it("closes nothing for params nothing holds, and says what is open", async () => {
+      const { deps, log } = kitSetup();
+      await open(deps, { tab: "board", params: { view: "b" } });
+      const answer = await close(deps, { tab: "board", params: { view: "a" } });
+      expect(answer).toEqual({ closed: [], open: [{ view: "b" }] });
+      expect(tabs()).toHaveLength(1);
+      expect(log.filter((line) => line.startsWith("announce:modelClosed"))).toEqual([]);
+    });
+
+    it("closes in the caller's workspace, whatever the request says", async () => {
+      const { deps } = kitSetup();
+      await open(deps, { params: { run: "1" } });
+      const fromShop = { caller: { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" } };
+      const answer = await runControl("kit_tab_close", { ...fromShop, kit: "ci-kit", tab: "run" }, deps);
+      expect(answer).toEqual({ closed: [], open: [] });
+      expect(tabs("w1")).toHaveLength(1);
+      await close(deps, { workspace: "Shop" });
+      expect(tabs("w1")).toEqual([]);
+    });
+
+    it("still closes the tab of a kit taken off the workspace since", async () => {
+      const made = kitSetup();
+      await open(made.deps, { params: { run: "1" } });
+      made.patch("w1", { kits: [] });
+      expect((await close(made.deps, {})).closed).toEqual([{ run: "1" }]);
+    });
   });
 });
 

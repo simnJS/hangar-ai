@@ -113,6 +113,13 @@ does not keep a part of their screen.
 To send a file to the user's phone (Hangar Mobile), use `phone_share {{path, caption?}}`, when
 they ask for it or a result is clearly worth it, never for routine output.
 
+### Opening a kit's tab
+
+A kit enabled on this workspace can bring small tabs that take params, such as one showing a
+CI run for its id. `kit_tab_list` says which there are, `kit_tab_open {{kit, tab, params?, reveal?}}`
+opens one in the same panel without taking the keyboard from anyone, and
+`kit_tab_close {{kit, tab, params?}}` closes it.
+
 ## Global memory
 
 You also have a **persistent global memory**, reached through the MCP tools prefixed
@@ -357,6 +364,16 @@ mod tests {
         let block = playbook();
 
         for tool in ["preview_show", "preview_close", "phone_share"] {
+            assert!(block.contains(tool), "playbook never mentions {tool}");
+        }
+    }
+
+    /// And for a kit's tabs: an agent that never read about them cannot open one.
+    #[test]
+    fn the_generated_block_names_the_kit_tab_tools() {
+        let block = playbook();
+
+        for tool in ["kit_tab_list", "kit_tab_open", "kit_tab_close"] {
             assert!(block.contains(tool), "playbook never mentions {tool}");
         }
     }

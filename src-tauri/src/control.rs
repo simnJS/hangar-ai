@@ -36,6 +36,10 @@ pub const OPERATIONS: &[&str] = &[
     "model_close",
     "preview_show",
     "preview_close",
+    // a kit's tabs (lib/control.ts)
+    "kit_tab_list",
+    "kit_tab_open",
+    "kit_tab_close",
     // orchestration: workers (lib/workerControl.ts)
     "worker_spawn",
     "worker_list",
@@ -306,6 +310,14 @@ mod tests {
             assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
         }
         assert_eq!(answer_timeout("pane_read"), Duration::from_secs(20));
+    }
+
+    #[test]
+    fn a_kit_s_tabs_reach_the_window_and_wait_for_nothing_it_loads() {
+        for op in ["kit_tab_list", "kit_tab_open", "kit_tab_close"] {
+            assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
+            assert_eq!(answer_timeout(op), Duration::from_secs(20), "{op}");
+        }
     }
 
     #[test]

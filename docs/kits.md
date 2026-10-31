@@ -148,6 +148,8 @@ A **tab**:
 | `entry`       | string   | yes      | Relative path to an existing `.html` file.                                 |
 | `icon`        | string   | no       | Relative path to an existing `.svg` or `.png` file.                        |
 | `permissions` | string[] | yes      | Among the [permissions](#tab-permissions). `[]` asks for nothing.          |
+| `params`      | object   | no       | What callers may pass it, by name: [below](#a-tab-with-params).            |
+| `singleton`   | boolean  | no       | One tab whatever its params, which new ones replace. `false` by default.   |
 
 A **setup step**:
 
@@ -213,10 +215,11 @@ by Hangar or typed by hand — loads them.
 `missing`, `broken` (with `detail`, in English) or `forbidden`.
 
 A pane of a workspace with at least one kit also finds their data's root in
-[`HANGAR_KITS_DATA`](#a-kits-data-folder), with the bridge or without it. A pane
-started with no kit — its workspace has none, or the only ones it has are left
-out for their hooks — starts without the variable, even under a Hangar launched
-from inside a pane.
+[`HANGAR_KITS_DATA`](#a-kits-data-folder), and what a hook needs to
+[reach Hangar](#from-a-hook) in `HANGAR_API_URL` and `HANGAR_API_TOKEN`, with the
+bridge or without it. A pane started with no kit — its workspace has none, or the
+only ones it has are left out for their hooks — starts without these variables,
+even under a Hangar launched from inside a pane.
 
 ### MCP servers, in both MCP modes
 
@@ -330,11 +333,198 @@ read again at every call, so taking a grant back denies the next call.
 
 A tab opens in the workspace's side panel — the preview, beside the
 terminals — from the toolbar's **Kits** menu or the command palette, which
-list the tabs of the kits enabled on the workspace. It stays open per
+list the tabs of the kits enabled on the workspace, or when
+[an agent or a hook opens it](#opening-a-tab). It stays open per
 workspace, like the files there, and keeps running while another tab or
 workspace is in front; a workspace put to sleep lets its tabs' pages go, and
 they load again when it wakes. Its bar reloads it, and says what it was
 granted.
+
+**A restart brings it back**, with its params and the title its page gave it.
+Each window saves the tabs of the workspaces it draws in its own storage, and
+restores them the first time it mounts the workspace, so no page runs for a
+workspace nobody opened. They come back behind a closed panel, the panel's button
+saying they are there; the page loads, and sets its badge again. Files in the
+preview do not come back: only kits' tabs.
+
+**Small or large, a tab is the same thing**: it lives in the panel, at the panel's
+width. That is 320 interface points at least, so 320 CSS pixels at 100 % interface
+size and 288 at the smallest, 90 %; a very narrow window can leave less, as a drawer.
+Nothing sets a minimum width for a page but the page. A layout that holds at that
+width takes four lines, and the frame's background is white unless it sets its own:
+
+```css
+:root { color-scheme: light dark; }
+body { margin: 0; padding: 8px 10px; font: 13px/1.45 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; }
+```
+
+### A tab with params
+
+A tab can declare what callers may pass it. Nothing is ever required: the palette and the
+Kits menu open it with none, and a page given none offers its own picker, which Hangar
+has nothing to do with.
+
+```json
+{
+  "tabs": [
+    {
+      "id": "run",
+      "title": "CI run",
+      "entry": "tabs/run/index.html",
+      "permissions": ["command:ci-run"],
+      "params": {
+        "run": { "description": "The run's number", "pattern": "[0-9]+" },
+        "repo": { "description": "owner/name; the workspace's repository without it" }
+      }
+    }
+  ]
+}
+```
+
+A **param**, under its name (letters, digits, `_` and `-`, starting with a letter or `_`):
+
+| Field         | Type   | Required | Rules                                                                                |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------ |
+| `description` | string | yes      | Not blank. Listed for agents by `kit_tab_list`.                                      |
+| `pattern`     | string | no       | A regular expression a value must match **whole**, whatever its author wrote. No rule: any string. |
+
+A value is a string of 1 024 characters at most. A rule is checked by Rust when the manifest
+is read, and a value against it before anything else, in linear time, so a rule cannot hang
+Hangar. Hangar's window then holds the value to the same rule in JavaScript: write a rule both
+read alike (`[0-9]+`, `[\w.-]+/[\w.-]+`). One JavaScript cannot read, such as `(?i)abc`, refuses
+every value, with a message saying so.
+
+**One tab per set of params.** Asked for with the same params, whatever their order, the tab
+open comes forward as it is, not reloaded; with others, another tab opens: a tab per CI run.
+
+**`singleton: true`** keeps one tab. New params replace the old, and its page hears the
+[`tab.params` event](#the-tab-message-protocol) without being reloaded; the same params, or
+none, bring it forward holding what it holds.
+
+Params are what a caller said, and a page handles them as it would anything typed into a form:
+`command.run` holds them to its own rules whatever the tab declares.
+
+### Opening a tab
+
+Three doors, for one tab: **the person**, from the palette or the Kits menu, with no params; an
+**agent**, through MCP; a **hook of the kit**, through a local route. Hangar stays ignorant of
+what the tab is about: the kit brings the logic, deciding when to open which tab with what.
+
+An agent has three tools in the `hangar` MCP server. They act on the workspace it works in, found
+from its pane or else its folder, as `preview_show` finds it: **the workspace is never read from
+the request**.
+
+| Tool            | Takes                          | Does                                                                                     |
+| --------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
+| `kit_tab_list`  | —                              | `{ workspace, tabs: [{ kit, kitName, tab, title, description, singleton, params, toReview? }] }`: the tabs of the kits enabled on the workspace, `description` being the kit's. `toReview` says the person has to accept changes before any can be opened. |
+| `kit_tab_open`  | `{ kit, tab, params?, reveal? }` | `{ outcome, kit, tab, params, workspace, visible, note? }`, `outcome` being `opened`, `focused` or `replaced`. |
+| `kit_tab_close` | `{ kit, tab, params? }`        | `{ closed: [params…], open: [params…] }`. With params, the tab holding those very ones, and none if nothing does; without, every tab of it open there. It asks nothing of the kit, so the tab of a kit taken off the workspace can still be closed. |
+
+`kit_tab_open` is refused, with a message saying what to do, when:
+
+- the kit is **not enabled** on the workspace, on its own or [on all of them](#workspaces);
+- the kit is **to review** there: hooks, commands or permissions an update changed wait for the
+  person's answer. The person can still open its tabs from the palette, as they are held;
+- the kit is not installed any more, or cannot be used;
+- it has **no such tab**;
+- a param is **not declared**, is not a string, or **does not match** its rule.
+
+**`reveal`**, `true` by default, opens the side panel if it is closed, with the tab in front.
+`false` adds the tab and leaves the panel, and what is in front, as they are; a singleton still
+takes its new params, and the panel's button says something is there. Neither ever takes the
+keyboard from a terminal: without room beside the terminals the panel does not come over them as a
+drawer, as it does for the person, and `visible: false` with a `note` says the person has to look.
+A page that focuses something of its own while nobody clicked it has the keyboard handed back to
+the terminal it took it from.
+
+The three tools are pane control, like `preview_show`: refused when the person turned that off in
+Settings › General › Agents. That goes for the hooks' route too.
+
+### From a hook
+
+A plugin's [hooks](#hooks) run in the pane, and have no MCP. They open a tab through the loopback
+API that the bridge also speaks to:
+
+```
+POST $HANGAR_API_URL/api/kit/tab/open?pane=$HANGAR_PANE_ID
+Authorization: Bearer $HANGAR_API_TOKEN
+Content-Type: application/json
+
+{ "kit": "ci-kit", "tab": "run", "params": { "run": "4567" }, "reveal": true }
+```
+
+The body is `kit_tab_open`'s, and it answers the same, as `{ "error": "…" }` when refused. The
+workspace is the one of the pane in `pane`, and nothing else in the request has a say in it. Without
+the token it answers `401`; for a pane Hangar is not running, `404`.
+
+**A hook must fail quietly.** Hangar may be closed, the variables absent (a WSL pane), the kit
+disabled: none of that is the agent's problem, and a hook that exits with an error gets in its way.
+Give the call two seconds, say nothing, and always exit 0.
+
+A hook that opens the tab for a run after a `git push`, in `hooks/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/open-ci.js" }]
+      }
+    ]
+  }
+}
+```
+
+`hooks/open-ci.js`, the kit's own logic and Hangar none of it:
+
+```js
+// Never fails: whatever goes wrong here is no reason to bother the agent.
+process.on("uncaughtException", () => process.exit(0));
+const { HANGAR_API_URL: url, HANGAR_API_TOKEN: token, HANGAR_PANE_ID: pane } = process.env;
+
+let input = "";
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", async () => {
+  const command = JSON.parse(input).tool_input?.command ?? "";
+  if (!url || !token || !pane || !/\bgit push\b/.test(command)) process.exit(0);
+  await fetch(`${url}/api/kit/tab/open?pane=${encodeURIComponent(pane)}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ kit: "ci-kit", tab: "run", reveal: true }),
+    signal: AbortSignal.timeout(2000),
+  }).catch(() => undefined);
+  process.exit(0);
+});
+```
+
+Or from a shell, the same three safeguards in one line:
+
+```sh
+curl -fsS --max-time 2 -X POST "$HANGAR_API_URL/api/kit/tab/open?pane=$HANGAR_PANE_ID" \
+  -H "Authorization: Bearer $HANGAR_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"kit":"ci-kit","tab":"run","params":{"run":"4567"}}' >/dev/null 2>&1 || true
+```
+
+**Where the token goes.** `HANGAR_API_URL` and `HANGAR_API_TOKEN` are set by `pty_spawn`, in the
+environment of the process it starts in a pane of Hangar, and of what that process starts in turn; a
+pane with at least one kit gets them whether the bridge mod is on or off for it, and `HANGAR_PANE_ID`
+is in every pane. Anything else does not:
+
+- a **pane without a kit** starts without them, even under a Hangar launched from inside another
+  pane, whose values are removed rather than inherited;
+- a **tab's page** never sees them: it has no environment, and its `postMessage` is all it speaks;
+- a **WSL pane** does not carry them into Linux;
+- nothing is written into a project, and nothing is sent off the machine: the API listens on
+  `127.0.0.1` only, on a port chosen at each start, under a token generated at each start.
+
+It is the token of the whole API, not one for this route alone: the one the bridge's mod is given,
+and the one the `--mcp` process reads from `~/.hangar/endpoint.json`, where it has always been. As an
+environment variable it goes nowhere but those panes, and whatever runs in such a pane can use it
+as they can. This is the same trust as the bridge's, and the reason the person sees a kit's hooks
+before enabling it.
 
 ### Where its page comes from
 
@@ -427,6 +617,23 @@ Methods:
 | `command.run`    | `{ name, args? }`   | `command:<name>` for that exact name | `{ exitCode, stdout, stderr, timedOut, truncated }`: see [declared commands](#declared-commands). |
 | `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens in the workspace's preview, in front. |
 | `notify`         | `{ title, body? }`  | `notify`         | `null`: a desktop notification, titled `<kit name> · <title>`.          |
+| `tab.params`     | —                   | —                | `{ params }`: what this tab holds, `{}` for none.                        |
+| `tab.setTitle`   | `{ title }`         | —                | `{}`: its name in the tab strip.                                         |
+| `tab.setBadge`   | `{ state, text? }`  | —                | `{}`: its state in the tab strip.                                        |
+
+The three `tab.*` need no permission, and reach this tab alone: the tab is the host's own record,
+never the message's.
+
+- **`tab.setTitle`** takes plain text on one line, 40 characters at most, an emoji counting as one:
+  what would not show or would turn the line around is refused (`invalid`), and markup is shown as
+  it is written. Asking for the tab again leaves the name its page gave it. It lasts across a
+  restart until the page says otherwise.
+- **`tab.setBadge`** takes a `state` among `"running"`, `"success"`, `"failure"`, `"neutral"`, shown
+  as a small glyph where the tab's icon goes (a ring turning, a check, an alert, a dot), and a `text`
+  of 12 characters at most beside the title, the same plain text. `state: null` takes it away.
+  It lasts until the page loads again, so a page sets it when it starts: a stale « running » is worse
+  than none.
+- Each may be called **120 times a minute**, enough to count seconds; each change redraws the strip.
 
 A pane in `panes.list`: `name` (what `panes.send` takes), `agent` (`claude`,
 `codex`, `gemini`, `opencode` or `shell`), `role` (`orchestrator`, `worker`,
@@ -497,6 +704,21 @@ Events:
 | Event           | Needs        | Sent when                                                            |
 | --------------- | ------------ | -------------------------------------------------------------------- |
 | `panes.changed` | `panes.read` | The workspace's panes change: one added, closed, renamed, or changing state. `data` is `{}`: call `panes.list`. |
+| `tab.params`    | —            | A [singleton](#a-tab-with-params) got new params. `data` is `{ params }`. |
+
+A page that takes params reads them when it starts, and a singleton's listens as well. Reading them
+once it is ready is enough: an event sent before it listens changes what `tab.params` answers.
+
+```js
+async function show({ params }) {
+  if (!params.run) return showPicker();
+  await window.hangar.call("tab.setTitle", { title: `Run #${params.run}` });
+  await window.hangar.call("tab.setBadge", { state: "running" });
+  // … command.run, then state: "success" or "failure"
+}
+window.hangar.on("tab.params", show);
+window.hangar.call("tab.params").then(show);
+```
 
 ### The SDK
 
@@ -587,7 +809,8 @@ more. A tab showing a local server's queue and keeping a note, asking for
 permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`,
 `KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`, `KIT_COMMAND_PATTERN`, `KIT_DENIED`, the
 message types and `kitMayCall`. The window's side is `src/lib/kitApi.ts` (its
-limits and error codes), the tab itself `src/components/preview/KitTabView.tsx`,
+limits and error codes, the `tab.*` methods, which need no permission, among
+them), the tab itself `src/components/preview/KitTabView.tsx`,
 and the paths `files.read` and `preview.show` take are checked on disk by
 `kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`); the
 data folder is `src-tauri/src/kits/data.rs`, `loopback.fetch`

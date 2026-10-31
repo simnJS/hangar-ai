@@ -25,6 +25,12 @@ export const en = {
   "kitsTab.tabHint": "{title}, a tab of the kit {kit}",
   "kitsTab.tools": "Tools of the kit tab {title}",
   "kitsTab.reload": "Reload the tab",
+  "kitsTab.tabParams": "With {params}",
+  // The small glyph a page sets in the tab strip (tab.setBadge), read aloud.
+  "kitsTab.badge.running": "In progress",
+  "kitsTab.badge.success": "Succeeded",
+  "kitsTab.badge.failure": "Failed",
+  "kitsTab.badge.neutral": "No particular state",
   "kitsTab.isolated": "Runs isolated",
   "kitsTab.isolatedHint":
     "This page of the kit {kit} runs in a frame of its own: it reaches neither Hangar nor the network, only what the workspace granted it: {permissions}.",
@@ -80,6 +86,11 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsTab.tabHint": "{title}, un onglet du kit {kit}",
   "kitsTab.tools": "Outils de l'onglet de kit {title}",
   "kitsTab.reload": "Recharger l'onglet",
+  "kitsTab.tabParams": "Avec {params}",
+  "kitsTab.badge.running": "En cours",
+  "kitsTab.badge.success": "Réussi",
+  "kitsTab.badge.failure": "Échoué",
+  "kitsTab.badge.neutral": "Sans état particulier",
   "kitsTab.isolated": "Exécuté à l'écart",
   "kitsTab.isolatedHint":
     "Cette page du kit {kit} tourne dans un cadre à part : elle n'atteint ni Hangar ni le réseau, seulement ce que le workspace lui a accordé : {permissions}.",

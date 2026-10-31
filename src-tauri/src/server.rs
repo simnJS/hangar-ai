@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -6,10 +8,11 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::board::{self, BoardStore, NewTask, TaskPatch};
+use crate::control::ControlError;
 use crate::memory::{self, MemoryPatch, NewMemory};
 
 pub struct ApiState {
@@ -38,13 +41,20 @@ fn authorize(
     state: &ApiState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    authorize_token(&state.token, headers)
+}
+
+fn authorize_token(
+    token: &str,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let provided = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
 
-    if provided == state.token {
+    if provided == token {
         Ok(())
     } else {
         Err(bad(StatusCode::UNAUTHORIZED, "invalid token"))
@@ -449,15 +459,130 @@ async fn control(
     if args.get("callerCwd").is_none() && !q.cwd.is_empty() {
         args["callerCwd"] = json!(q.cwd);
     }
-    crate::control::ask(&state.app, &op, args)
+    let answer = if op == KIT_TAB_OPEN {
+        ask_kit_tab_open(&state.app, args).await
+    } else {
+        crate::control::ask(&state.app, &op, args).await
+    };
+    answer.map(Json).map_err(control_failed)
+}
+
+fn control_failed(err: ControlError) -> (StatusCode, Json<serde_json::Value>) {
+    match err {
+        ControlError::Refused(message) => bad(StatusCode::BAD_REQUEST, message),
+        ControlError::Unavailable(message) => bad(StatusCode::SERVICE_UNAVAILABLE, message),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A kit's tabs
+//
+// Agents open one through the control route, like everything they ask the
+// window (lib/control.ts). A hook of a kit runs in a pane and has no MCP, so it
+// has a route of its own, whose whole contract is docs/kits.md: the same body,
+// the bridge routes' token, and the pane it says it is in, which has to be one
+// Hangar has running. The window finds the workspace from that pane and nothing
+// else: whatever else the body holds does not get past `KitTabBody`.
+// ---------------------------------------------------------------------------
+
+const KIT_TAB_OPEN: &str = "kit_tab_open";
+
+/// Holds a `kit_tab_open`'s values to the rules of the kit as it is on disk, and
+/// asks the window. A kit Rust cannot read, or a tab it does not have, is the
+/// window's to refuse, which it does by name.
+async fn ask_kit_tab_open(app: &AppHandle, args: Value) -> Result<Value, ControlError> {
+    if let Some(refusal) = kit_param_refusal(&args).await {
+        return Err(ControlError::Refused(refusal));
+    }
+    crate::control::ask(app, KIT_TAB_OPEN, args).await
+}
+
+async fn kit_param_refusal(args: &Value) -> Option<String> {
+    let kit = args.get("kit")?.as_str()?;
+    let tab = args.get("tab")?.as_str()?;
+    let params = args.get("params")?;
+    let manifest = crate::kits::kits_list()
+        .await
+        .ok()?
+        .into_iter()
+        .find(|entry| entry.id == kit)?
+        .manifest?;
+    manifest
+        .tabs
+        .iter()
+        .find(|entry| entry.id == tab)?
+        .param_refusal(params)
+}
+
+type WindowAnswer = Pin<Box<dyn Future<Output = Result<Value, ControlError>> + Send>>;
+
+/// What the hooks' route reaches of the app, which a test stands in for.
+struct KitTabRoute {
+    token: String,
+    pane_alive: Box<dyn Fn(&str) -> bool + Send + Sync>,
+    open: Box<dyn Fn(Value) -> WindowAnswer + Send + Sync>,
+}
+
+#[derive(Deserialize)]
+struct KitTabQuery {
+    /// `$HANGAR_PANE_ID`, from the hook's environment.
+    #[serde(default)]
+    pane: String,
+}
+
+/// The body of `kit_tab_open`, and all that is read of it.
+#[derive(Deserialize)]
+struct KitTabBody {
+    kit: String,
+    tab: String,
+    #[serde(default)]
+    params: Option<Value>,
+    #[serde(default)]
+    reveal: Option<bool>,
+}
+
+/// What the window is asked: who is calling is the pane, and only the pane.
+fn kit_tab_args(pane: &str, body: KitTabBody) -> Value {
+    let mut args = json!({
+        "kit": body.kit,
+        "tab": body.tab,
+        "caller": { "paneId": pane },
+    });
+    if let Some(params) = body.params {
+        args["params"] = params;
+    }
+    if let Some(reveal) = body.reveal {
+        args["reveal"] = json!(reveal);
+    }
+    args
+}
+
+async fn kit_tab_open(
+    State(route): State<Arc<KitTabRoute>>,
+    headers: HeaderMap,
+    Query(q): Query<KitTabQuery>,
+    Json(body): Json<KitTabBody>,
+) -> ApiResult {
+    authorize_token(&route.token, &headers)?;
+    if !(route.pane_alive)(&q.pane) {
+        return Err(bad(
+            StatusCode::NOT_FOUND,
+            format!(
+                "no pane {:?} is running in Hangar: pass ?pane=$HANGAR_PANE_ID, from the pane the hook runs in",
+                q.pane
+            ),
+        ));
+    }
+    (route.open)(kit_tab_args(&q.pane, body))
         .await
         .map(Json)
-        .map_err(|err| match err {
-            crate::control::ControlError::Refused(message) => bad(StatusCode::BAD_REQUEST, message),
-            crate::control::ControlError::Unavailable(message) => {
-                bad(StatusCode::SERVICE_UNAVAILABLE, message)
-            }
-        })
+        .map_err(control_failed)
+}
+
+fn kit_tab_router(route: KitTabRoute) -> Router {
+    Router::new()
+        .route("/api/kit/tab/open", post(kit_tab_open))
+        .with_state(Arc::new(route))
 }
 
 // ---------------------------------------------------------------------------
@@ -519,6 +644,23 @@ pub async fn start(
     store: &'static BoardStore,
     token: String,
 ) -> Result<u16, String> {
+    let kit_tabs = kit_tab_router(KitTabRoute {
+        token: token.clone(),
+        pane_alive: {
+            let app = app.clone();
+            Box::new(move |pane| {
+                app.try_state::<crate::pty::PtyManager>()
+                    .is_some_and(|manager| crate::pty::pane_alive(&manager, pane))
+            })
+        },
+        open: {
+            let app = app.clone();
+            Box::new(move |args| {
+                let app = app.clone();
+                Box::pin(async move { ask_kit_tab_open(&app, args).await })
+            })
+        },
+    });
     let state = Arc::new(ApiState { store, token, app });
 
     let router = Router::new()
@@ -548,7 +690,8 @@ pub async fn start(
         .route("/api/bridge/{pane}/briefing", get(bridge_briefing))
         .route("/api/control/{op}", post(control))
         .route("/api/phone/share", post(phone_share))
-        .with_state(state);
+        .with_state(state)
+        .merge(kit_tabs);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -560,4 +703,153 @@ pub async fn start(
     });
 
     Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    const LIVE: &str = "p-live";
+    const OPEN: &str = "/api/kit/tab/open?pane=p-live";
+
+    /// The route, a pane `LIVE` running and a window that answers: what it was
+    /// asked goes to the list handed back.
+    fn route(answer: Result<Value, ControlError>) -> (Router, Arc<Mutex<Vec<Value>>>) {
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let kept = asked.clone();
+        let answer = Mutex::new(Some(answer));
+        let router = kit_tab_router(KitTabRoute {
+            token: "secret".to_string(),
+            pane_alive: Box::new(|pane| pane == LIVE),
+            open: Box::new(move |args| {
+                kept.lock().unwrap().push(args);
+                let answer = answer.lock().unwrap().take().expect("asked twice");
+                Box::pin(async move { answer })
+            }),
+        });
+        (router, asked)
+    }
+
+    fn request(uri: &str, token: Option<&str>, body: Value) -> Request<Body> {
+        let mut request = Request::post(uri).header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        request.body(Body::from(body.to_string())).unwrap()
+    }
+
+    async fn send(router: Router, request: Request<Body>) -> (StatusCode, Value) {
+        let response = router.oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    fn run() -> Value {
+        json!({ "kit": "ci-kit", "tab": "run", "params": { "run": "4567" } })
+    }
+
+    #[tokio::test]
+    async fn a_hook_opens_a_tab_as_its_own_pane() {
+        let (router, asked) = route(Ok(json!({ "outcome": "opened" })));
+        let (status, body) = send(router, request(OPEN, Some("secret"), run())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["outcome"], "opened");
+        assert_eq!(
+            asked.lock().unwrap().as_slice(),
+            [json!({
+                "kit": "ci-kit",
+                "tab": "run",
+                "params": { "run": "4567" },
+                "caller": { "paneId": LIVE },
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_route_is_refused_without_the_token() {
+        for token in [None, Some("wrong"), Some("")] {
+            let (router, asked) = route(Ok(json!({})));
+            let (status, body) = send(router, request(OPEN, token, run())).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{token:?}");
+            assert_eq!(body["error"], "invalid token");
+            assert!(asked.lock().unwrap().is_empty(), "{token:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_pane_is_refused_before_the_window_hears_of_it() {
+        for uri in ["/api/kit/tab/open?pane=p-gone", "/api/kit/tab/open"] {
+            let (router, asked) = route(Ok(json!({})));
+            let (status, body) = send(router, request(uri, Some("secret"), run())).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+            assert!(
+                body["error"].as_str().unwrap().contains("HANGAR_PANE_ID"),
+                "{body}"
+            );
+            assert!(asked.lock().unwrap().is_empty(), "{uri}");
+        }
+    }
+
+    /// The workspace comes from the pane: the body has no say in it.
+    #[tokio::test]
+    async fn a_body_cannot_say_who_is_calling_or_where() {
+        let (router, asked) = route(Ok(json!({})));
+        let body = json!({
+            "kit": "ci-kit",
+            "tab": "run",
+            "reveal": false,
+            "workspace": "another",
+            "pane": "p-other",
+            "callerCwd": "D:/elsewhere",
+            "caller": { "paneId": "p-other", "cwd": "D:/elsewhere" },
+        });
+        let (status, _) = send(router, request(OPEN, Some("secret"), body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            asked.lock().unwrap().as_slice(),
+            [json!({
+                "kit": "ci-kit",
+                "tab": "run",
+                "reveal": false,
+                "caller": { "paneId": LIVE },
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_window_s_refusal_reaches_the_hook_in_its_words() {
+        let (router, _) = route(Err(ControlError::Refused(
+            "Kit \"ci-kit\" is not enabled".to_string(),
+        )));
+        let (status, body) = send(router, request(OPEN, Some("secret"), run())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "Kit \"ci-kit\" is not enabled");
+
+        let (router, _) = route(Err(ControlError::Unavailable("no window".to_string())));
+        let (status, _) = send(router, request(OPEN, Some("secret"), run())).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn a_body_without_a_kit_or_a_tab_never_reaches_the_window() {
+        for body in [json!({ "tab": "run" }), json!({ "kit": "ci-kit" })] {
+            let (router, asked) = route(Ok(json!({})));
+            let response = router
+                .oneshot(request(OPEN, Some("secret"), body))
+                .await
+                .unwrap();
+            assert!(response.status().is_client_error());
+            assert!(asked.lock().unwrap().is_empty());
+        }
+    }
 }

@@ -14,10 +14,18 @@ import {
   type KitHostDeps,
   type KitLoopbackAnswer,
 } from "../../lib/kitApi";
-import { askRootGrant, kitTabState, useInstalledKits } from "../../lib/kitTabs";
+import { askRootGrant, frameTookKeyboard, kitTabState, useInstalledKits } from "../../lib/kitTabs";
 import { MAX_MODEL_BYTES, modelFormatOf } from "../../lib/modelFiles";
 import { grantModelRoots } from "../../lib/modelHost";
-import { reloadKitTab, showPreview, type OpenKitTab } from "../../lib/modelStore";
+import {
+  kitTabParams,
+  reloadKitTab,
+  setKitTabBadge,
+  setKitTabTitle,
+  showPreview,
+  watchKitTabParams,
+  type OpenKitTab,
+} from "../../lib/modelStore";
 import { notify } from "../../lib/notify";
 import { checkPreviewFile, previewInspect } from "../../lib/preview";
 import { bridgeEnqueue } from "../../lib/ipc";
@@ -222,19 +230,56 @@ function KitFrame({
         workspace: () => snapshot().workspaces.find((ws) => ws.id === entry.workspaceId) ?? null,
         permissions: () => now.current.permissions,
         commandsAccepted: () => now.current.commandsAccepted,
+        params: () => kitTabParams(entry.id),
+        setTitle: (title) => setKitTabTitle(entry.id, title),
+        setBadge: (badge) => setKitTabBadge(entry.id, badge),
       },
       liveDeps(() => snapshot().workspaces),
     );
     hostRef.current = host;
     const listener = (event: MessageEvent) => host.receive(event);
     window.addEventListener("message", listener);
+    // A singleton's page hears of its new params: it is not reloaded for them.
+    const stopParams = watchKitTabParams(entry.id, (params) => host.emit("tab.params", { params }));
     return () => {
       window.removeEventListener("message", listener);
+      stopParams();
       host.close();
       hostRef.current = null;
     };
     // One host per frame: the frame is remounted (its key) for anything else.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Opened by an agent or a hook, a page must not take the keyboard from
+  // whoever is typing in a terminal by focusing something of its own. Chromium
+  // (WebView2) already refuses that to a sandboxed frame; this holds wherever
+  // the webview does not.
+  useEffect(() => {
+    let last: Element | null = document.activeElement;
+    const noted = (event: FocusEvent) => {
+      last = event.target as Element | null;
+    };
+    const left = () => {
+      const frame = frameRef.current;
+      if (
+        frame &&
+        last instanceof HTMLElement &&
+        frameTookKeyboard({
+          inFrame: document.activeElement === frame,
+          pointerOver: frame.matches(":hover"),
+          fromTerminal: last.closest(".xterm") !== null,
+        })
+      ) {
+        last.focus();
+      }
+    };
+    document.addEventListener("focusin", noted);
+    window.addEventListener("blur", left);
+    return () => {
+      document.removeEventListener("focusin", noted);
+      window.removeEventListener("blur", left);
+    };
   }, []);
 
   // `panes.changed`: the panes, their names, roles or states, changed.

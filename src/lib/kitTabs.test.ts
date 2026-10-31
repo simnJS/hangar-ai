@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { withEffectiveKits, type KitInfo, type KitManifest } from "./kits";
-import { effectivePermissions, kitFileUrl, kitTabState, workspaceKitTabs } from "./kitTabs";
+import {
+  effectivePermissions,
+  frameTookKeyboard,
+  KIT_TAB_PARAM_MAX_CHARS,
+  kitFileUrl,
+  kitTabState,
+  readKitTabParams,
+  workspaceKitTabs,
+} from "./kitTabs";
 
 const manifest = (id: string, tabs: KitManifest["tabs"]): KitManifest => ({
   schema: 1,
@@ -187,6 +195,75 @@ describe("workspaceKitTabs", () => {
   it("refuses a kit whose manifest names another id than the one enabled", () => {
     const renamed = kit("hello-kit", [{ ...status, permissions: [] }], { manifest: manifest("other", []) });
     expect(workspaceKitTabs({ kits: [{ id: "hello-kit", granted: [] }] }, [renamed])).toEqual([]);
+  });
+});
+
+describe("readKitTabParams", () => {
+  const tab = {
+    id: "run",
+    title: "Run",
+    entry: "run.html",
+    permissions: [],
+    params: {
+      run: { description: "x", pattern: "[0-9]+" },
+      letter: { description: "x", pattern: "\\p{L}+" },
+      note: { description: "x" },
+      either: { description: "x", pattern: "a|b" },
+    },
+  };
+
+  it("takes nothing as nothing", () => {
+    expect(readKitTabParams(tab, undefined)).toEqual({});
+    expect(readKitTabParams(tab, null)).toEqual({});
+    expect(readKitTabParams(tab, {})).toEqual({});
+  });
+
+  it("anchors a rule whatever its author wrote", () => {
+    expect(readKitTabParams(tab, { run: "12" })).toEqual({ run: "12" });
+    expect(() => readKitTabParams(tab, { run: "12a" })).toThrow("must match its rule");
+    expect(readKitTabParams(tab, { either: "a" })).toEqual({ either: "a" });
+    // Wrapped, or `a|b` would only be anchored on one side of each.
+    expect(() => readKitTabParams(tab, { either: "ax" })).toThrow("must match its rule");
+    expect(() => readKitTabParams(tab, { either: "xb" })).toThrow("must match its rule");
+  });
+
+  it("reads Unicode classes, and takes any string where there is no rule", () => {
+    expect(readKitTabParams(tab, { letter: "éa" })).toEqual({ letter: "éa" });
+    expect(readKitTabParams(tab, { note: "; rm -rf /" })).toEqual({ note: "; rm -rf /" });
+    expect(readKitTabParams(tab, { note: "" })).toEqual({ note: "" });
+  });
+
+  it("does not let a rule climb out of its wrapping", () => {
+    const sly = { ...tab, params: { run: { description: "x", pattern: "a)|(?:b" } } };
+    expect(() => readKitTabParams(sly, { run: "ab" })).toThrow("cannot read the kit's rule");
+  });
+
+  it("holds a value to its length before anything else runs", () => {
+    expect(readKitTabParams(tab, { note: "x".repeat(KIT_TAB_PARAM_MAX_CHARS) })).toBeTruthy();
+    expect(() => readKitTabParams(tab, { note: "x".repeat(KIT_TAB_PARAM_MAX_CHARS + 1) })).toThrow("at most");
+  });
+
+  it("keeps a name like __proto__ a name, refused unless declared", () => {
+    const parsed = JSON.parse('{ "__proto__": "1" }');
+    expect(() => readKitTabParams(tab, parsed)).toThrow("declares no param");
+    const declared = { ...tab, params: JSON.parse('{ "__proto__": { "description": "x" } }') };
+    const read = readKitTabParams(declared, parsed);
+    expect(Object.keys(read)).toEqual(["__proto__"]);
+    expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+  });
+});
+
+describe("frameTookKeyboard", () => {
+  const taken = { inFrame: true, pointerOver: false, fromTerminal: true };
+
+  it("is a page focusing itself out of a terminal, nobody having clicked it", () => {
+    expect(frameTookKeyboard(taken)).toBe(true);
+  });
+
+  it("is nothing else: a click into it, the keyboard coming from elsewhere, focus staying out", () => {
+    expect(frameTookKeyboard({ ...taken, pointerOver: true })).toBe(false);
+    expect(frameTookKeyboard({ ...taken, fromTerminal: false })).toBe(false);
+    expect(frameTookKeyboard({ ...taken, inFrame: false })).toBe(false);
   });
 });
 
