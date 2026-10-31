@@ -19,6 +19,7 @@ import {
   type KitHostDeps,
 } from "./kitApi";
 import {
+  KIT_COMMAND_PATTERN,
   KIT_DATA_MAX_BYTES,
   KIT_LOOPBACK_MAX_BODY_BYTES,
   KIT_LOOPBACK_MAX_TIMEOUT_MS,
@@ -26,8 +27,10 @@ import {
   KIT_LOOPBACK_TIMEOUT_MS,
   KIT_METHODS,
   KIT_PERMISSIONS,
+  type KitInfo,
   type KitMethod,
 } from "./kits";
+import { workspaceKitTabs } from "./kitTabs";
 import type { Pane, Workspace } from "../types";
 
 const pane = (id: string, name: string, agent: Pane["agent"], role?: Pane["role"]): Pane => ({
@@ -90,6 +93,9 @@ const settle = async () => {
 let clock = 1_000_000;
 let granted: string[] = [...KIT_PERMISSIONS];
 let current: Workspace | null = workspace;
+let commandsAccepted: string | null = null;
+
+const COMMAND_ANSWER = { exitCode: 0, stdout: "{}", stderr: "", timedOut: false, truncated: false };
 
 function makeDeps(overrides: Partial<KitHostDeps> = {}): KitHostDeps {
   return {
@@ -102,6 +108,7 @@ function makeDeps(overrides: Partial<KitHostDeps> = {}): KitHostDeps {
     readData: vi.fn(async (_kit: string, path: string) => `data of ${path}`),
     writeData: vi.fn(async () => undefined),
     loopbackFetch: vi.fn(async () => ({ status: 200, text: "{}" })),
+    runCommand: vi.fn(async () => COMMAND_ANSWER),
     now: () => clock,
     ...overrides,
   };
@@ -117,6 +124,7 @@ function setup(overrides: Partial<KitHostDeps> = {}) {
       kitName: () => "Hello kit",
       workspace: () => current,
       permissions: () => granted,
+      commandsAccepted: () => commandsAccepted,
     },
     deps,
   );
@@ -137,6 +145,7 @@ beforeEach(() => {
   clock = 1_000_000;
   granted = [...KIT_PERMISSIONS];
   current = workspace;
+  commandsAccepted = null;
 });
 
 /** Each method, with params it accepts and what its fake deps answer. */
@@ -149,13 +158,21 @@ const CALLS: Record<KitMethod, { params?: unknown; result: unknown }> = {
   "data.read": { params: { path: "queue/state.json" }, result: { text: "data of queue/state.json" } },
   "data.write": { params: { path: "queue/state.json", text: "{}" }, result: {} },
   "loopback.fetch": { params: { port: 8765, path: "/queue" }, result: { status: 200, text: "{}" } },
+  "command.run": { params: { name: "ci-status", args: { run: "42" } }, result: COMMAND_ANSWER },
   notify: { params: { title: "Built", body: "The place is ready." }, result: null },
 };
 
+/** What a tab holds to make this very call. */
+function permissionFor(method: KitMethod): string {
+  const needs = KIT_METHODS[method];
+  if (needs === KIT_LOOPBACK_PATTERN) return "loopback:8765";
+  if (needs === KIT_COMMAND_PATTERN) return "command:ci-status";
+  return needs;
+}
+
 describe("each permission, granted and refused", () => {
   for (const [method, { params, result }] of Object.entries(CALLS) as [KitMethod, (typeof CALLS)[KitMethod]][]) {
-    // What a tab holds to make this very call.
-    const permission = KIT_METHODS[method] === KIT_LOOPBACK_PATTERN ? "loopback:8765" : KIT_METHODS[method];
+    const permission = permissionFor(method);
 
     it(`answers ${method} with ${permission} granted`, async () => {
       granted = [permission];
@@ -178,6 +195,7 @@ describe("each permission, granted and refused", () => {
       expect(deps.readData).not.toHaveBeenCalled();
       expect(deps.writeData).not.toHaveBeenCalled();
       expect(deps.loopbackFetch).not.toHaveBeenCalled();
+      expect(deps.runCommand).not.toHaveBeenCalled();
     });
   }
 
@@ -760,6 +778,199 @@ describe("loopback.fetch", () => {
       expect(errorOf(await call("loopback.fetch", { port: 8765, path: "/queue" }))).toBeUndefined();
     }
     expect(deps.loopbackFetch).toHaveBeenCalledTimes(polls);
+  });
+});
+
+describe("command.run", () => {
+  const RUN = { name: "ci-status", args: { run: "42", repo: "o/r" } };
+  const GRANT = "commands:0123456789abcdef";
+
+  beforeEach(() => {
+    granted = ["command:ci-status"];
+  });
+
+  it("asks Rust for that command, with the kit, the folder and the grant of the host's own record", async () => {
+    commandsAccepted = GRANT;
+    const { call, deps } = setup();
+    const answer = await call("command.run", {
+      ...RUN,
+      kit: "another-kit",
+      cwd: "C:/elsewhere",
+      accepted: "commands:ffffffffffffffff",
+    });
+    expect(answer?.result).toEqual(COMMAND_ANSWER);
+    expect(deps.runCommand).toHaveBeenCalledTimes(1);
+    expect(deps.runCommand).toHaveBeenCalledWith({
+      kit: "hello-kit",
+      name: "ci-status",
+      args: { run: "42", repo: "o/r" },
+      cwd: "C:/projects/game",
+      accepted: GRANT,
+    });
+  });
+
+  it("hands back whatever the program answered: a code, a timeout, a cut", async () => {
+    const answered = { exitCode: null, stdout: "partial", stderr: "", timedOut: true, truncated: true };
+    const { call } = setup({ runCommand: vi.fn(async () => answered) });
+    expect((await call("command.run", RUN))?.result).toEqual(answered);
+  });
+
+  it("takes a command without args", async () => {
+    const { call, deps } = setup();
+    expect(errorOf(await call("command.run", { name: "ci-status" }))).toBeUndefined();
+    expect(vi.mocked(deps.runCommand).mock.calls[0][0].args).toEqual({});
+  });
+
+  it("does not let another command's permission open it", async () => {
+    granted = ["command:deploy", "workspace.read", "loopback:8765"];
+    const { call, deps } = setup();
+    const answer = await call("command.run", RUN);
+    expect(answer?.error).toEqual({ code: "denied", message: "this tab was not granted command:ci-status" });
+    expect(deps.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not take the pattern's own spelling, or a grant of the kit's commands, for a permission", async () => {
+    for (const held of [[KIT_COMMAND_PATTERN], [GRANT], ["commands:ci-status"], ["command:ci-status2"]]) {
+      granted = held;
+      const { call, deps } = setup();
+      expect(errorOf(await call("command.run", RUN))).toBe("denied");
+      expect(deps.runCommand).not.toHaveBeenCalled();
+    }
+  });
+
+  it("answers a message from another frame or with an origin with nothing, and runs nothing", async () => {
+    const { host, sent, deps } = setup();
+    const request = { hangar: 1, id: "x", method: "command.run", params: RUN };
+    host.receive({ source: makeFrame().frame, origin: "null", data: request });
+    host.receive({ source: null, origin: "null", data: request });
+    await settle();
+    expect(sent).toEqual([]);
+    expect(deps.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name that names no command, and tells a tab holding none only that", async () => {
+    const { call, deps } = setup();
+    for (const name of [undefined, 3, "", "CI", "ci status", "../x", "command:ci-status", null]) {
+      expect(errorOf(await call("command.run", { name, args: {} }))).toBe("invalid");
+    }
+    expect(errorOf(await call("command.run"))).toBe("invalid");
+    expect(errorOf(await call("command.run", "ci-status"))).toBe("invalid");
+
+    granted = ["panes.read"];
+    const refused = await call("command.run", { name: 3 });
+    expect(refused?.error).toEqual({ code: "denied", message: "this tab was not granted command:<name>" });
+    expect(deps.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("refuses args that are not an object, and a value that is not a string", async () => {
+    const { call, deps } = setup();
+    for (const args of [[], "run=42", 42, null, ["42"]]) {
+      expect(errorOf(await call("command.run", { name: "ci-status", args }))).toBe("invalid");
+    }
+    for (const value of [42, null, true, { a: 1 }, ["42"]]) {
+      const answer = await call("command.run", { name: "ci-status", args: { run: value } });
+      expect(answer?.error).toEqual({ code: "bad_args", message: "run must be a string" });
+    }
+    expect(deps.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps a key called __proto__ a key, for Rust to refuse", async () => {
+    const { call, deps } = setup();
+    const args = JSON.parse('{"__proto__":"x","run":"42"}') as Record<string, string>;
+    await call("command.run", { name: "ci-status", args });
+    const sent = vi.mocked(deps.runCommand).mock.calls[0][0].args;
+    expect(Object.keys(sent).sort()).toEqual(["__proto__", "run"]);
+    expect(Object.getPrototypeOf(sent)).toBe(Object.prototype);
+  });
+
+  it("keeps the codes Rust refuses with, and logs nothing for a program that is not installed", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const code of ["bad_args", "not_found", "busy", "denied", "failed", "unavailable"]) {
+      const refusal = { code, message: `because ${code}` };
+      const { call } = setup({ runCommand: vi.fn(() => Promise.reject(refusal)) });
+      expect((await call("command.run", RUN))?.error).toEqual(refusal);
+    }
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("says so when the workspace is gone", async () => {
+    current = null;
+    const { call, deps } = setup();
+    expect(errorOf(await call("command.run", RUN))).toBe("unavailable");
+    expect(deps.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("is not held back when polled: it has no limit of its own", async () => {
+    const { call, deps } = setup();
+    const polls = KIT_SEND_MAX * 2;
+    for (let i = 0; i < polls; i += 1) {
+      expect(errorOf(await call("command.run", RUN))).toBeUndefined();
+    }
+    expect(deps.runCommand).toHaveBeenCalledTimes(polls);
+  });
+
+  describe("once a kit's commands have to be accepted", () => {
+    const CHANGED = "commands:fedcba9876543210";
+    const tab = { id: "ci", title: "CI", entry: "tabs/ci.html", permissions: ["command:ci-status" as const] };
+    const kitFrom = (source: KitInfo["source"], commandsPermission: string): KitInfo => ({
+      id: "hello-kit",
+      source,
+      dir: "D:/kits/hello-kit",
+      installedVersion: "1.0.0",
+      addedAt: 1,
+      manifest: {
+        schema: 1,
+        id: "hello-kit",
+        name: "Hello kit",
+        version: "1.0.0",
+        description: "",
+        tabs: [tab],
+        setup: [],
+      },
+      error: null,
+      update: null,
+      commandsPermission,
+    });
+    const github = (commandsPermission: string) =>
+      kitFrom({ kind: "git", url: "https://github.com/o/kits" }, commandsPermission);
+    const folder = (commandsPermission: string) =>
+      kitFrom({ kind: "folder", path: "D:/kits/hello-kit" }, commandsPermission);
+
+    /** A call from the tab, holding what `workspaceKitTabs` says it may hold. */
+    async function runAs(kit: KitInfo, heldByWorkspace: string[]) {
+      const [choice] = workspaceKitTabs({ kits: [{ id: "hello-kit", granted: heldByWorkspace }] }, [kit]);
+      granted = choice.permissions;
+      commandsAccepted = choice.commandsAccepted;
+      const { call, deps } = setup();
+      return { answer: await call("command.run", RUN), deps };
+    }
+
+    it("answers denied for a GitHub kit whose commands changed, until they are accepted again", async () => {
+      const { answer, deps } = await runAs(github(CHANGED), ["command:ci-status", GRANT]);
+      expect(answer?.error).toEqual({ code: "denied", message: "this tab was not granted command:ci-status" });
+      expect(deps.runCommand).not.toHaveBeenCalled();
+
+      const again = await runAs(github(CHANGED), ["command:ci-status", CHANGED]);
+      expect(errorOf(again.answer)).toBeUndefined();
+      expect(vi.mocked(again.deps.runCommand).mock.calls[0][0].accepted).toBe(CHANGED);
+    });
+
+    it("answers denied for a GitHub kit whose commands were never accepted", async () => {
+      const { answer, deps } = await runAs(github(GRANT), ["command:ci-status"]);
+      expect(errorOf(answer)).toBe("denied");
+      expect(deps.runCommand).not.toHaveBeenCalled();
+    });
+
+    it("does not ask a linked folder kit, whatever its commands became", async () => {
+      const { answer, deps } = await runAs(folder(CHANGED), ["command:ci-status"]);
+      expect(errorOf(answer)).toBeUndefined();
+      expect(vi.mocked(deps.runCommand).mock.calls[0][0].accepted).toBeNull();
+    });
   });
 });
 

@@ -193,6 +193,7 @@ pub fn run() {
             kits::data::kit_data_read,
             kits::data::kit_data_write,
             kits::loopback::kit_loopback_fetch,
+            kits::commands::kit_command_run,
             kit_scheme::files::kit_file_read,
             kit_scheme::files::kit_workspace_path,
             instructions::write_agent_instructions,

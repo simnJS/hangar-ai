@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useT, type Translator } from "../i18n";
 import { ptyAlive, ptyWrite } from "../lib/ipc";
 import {
   acceptedGrants,
+  commandsToAccept,
   disableKit,
   enableKit,
   hooksToAccept,
+  kitArgvLine,
   kitName,
   kitRequested,
+  kitRuleText,
   kitState,
   panesToRestart,
   permissionDiff,
@@ -19,12 +22,15 @@ import { kitIconUrl } from "../lib/kitIcon";
 import { useAsleep } from "../lib/hibernateStore";
 import { currentOs, runSetupCommand, showWorkspace, type KitOs } from "../lib/kitSetup";
 import {
+  everywhereKits,
+  kitCommandsGrant,
   kitHooksGrant,
   kitInspect,
   kitSetupMark,
   kitSetupStatus,
   kitsList,
   onKitsChanged,
+  type KitDeclaredCommand,
   type KitGrant,
   type KitInfo,
   type KitInspection,
@@ -39,8 +45,8 @@ import "./KitActivation.css";
 /**
  * Enabling a kit on a workspace: the list of kits with a switch each, and the
  * activation view that says what a kit brings, what its tabs ask for, which
- * commands it wants run and which its plugin runs by itself, before anything is
- * stored. Refusing changes nothing.
+ * commands it wants run, which its plugin runs by itself and which its tabs may
+ * run, before anything is stored. Refusing changes nothing.
  *
  * The view is drawn from props (`KitActivationView`); `KitActivation` reads the
  * kit from Rust; `WorkspaceKitsSection` is the list the workspace dialog shows.
@@ -68,6 +74,8 @@ export interface KitActivationViewProps {
   /** What the workspace holds for this kit now; absent: not enabled. */
   entry: WorkspaceKit | undefined;
   workspaceName: string | null;
+  /** Accepting holds for all workspaces, whichever one is open: none is named. */
+  everywhere?: boolean;
   /** The workspace exists, so a pane can be opened for a setup step. */
   canRun: boolean;
   os: KitOs;
@@ -122,26 +130,64 @@ function Names({ title, names }: { title: string; names: string[] }) {
   );
 }
 
+/** A command a kit's tabs may run: its argv as it is, and the rule of each part that changes. */
+function DeclaredCommandBlock({ t, command, tag }: { t: Translator; command: KitDeclaredCommand; tag: ReactNode }) {
+  const rules = Object.entries(command.args);
+  return (
+    <div className="kit-step">
+      <div className="kit-step__head">
+        <span className="kit-step__title">{command.name}</span>
+        {tag}
+      </div>
+      <p className="kit-act__note">{command.description}</p>
+      <pre className="kit-step__cmd" tabIndex={0} aria-label={t("kitsTab.commandLabel", { name: command.name })}>
+        {kitArgvLine(command.argv)}
+      </pre>
+      <p className="kit-act__note">{t(rules.length > 0 ? "kitsTab.commandHint" : "kitsTab.commandHintFixed")}</p>
+      {rules.length > 0 && (
+        <dl className="kit-step__rules" aria-label={t("kitsTab.commandRules", { name: command.name })}>
+          {rules.map(([name, rule]) => (
+            <div key={name} className="kit-step__rule">
+              <dt>
+                <code>{`{${name}}`}</code>
+              </dt>
+              <dd>
+                <code>{kitRuleText(rule.pattern)}</code>
+                {rule.description ? ` ${rule.description}` : ""}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 export function KitActivationView(props: KitActivationViewProps) {
-  const { t, kit, inspection, steps, entry, workspaceName, canRun, os, running, ran, error } = props;
+  const { t, kit, inspection, steps, entry, workspaceName, everywhere, canRun, os, running, ran, error } = props;
   const manifest = kit.manifest;
   const requested = kitRequested(kit);
   const diff = permissionDiff(requested ?? [], entry?.granted ?? []);
   const needsAccept = !entry || diff.added.length > 0;
   const hooksNew = hooksToAccept(diff);
+  const commandsNew = commandsToAccept(diff);
   const hooks = inspection?.hooks ?? [];
+  const declaredCommands = inspection?.declaredCommands ?? [];
   const brings =
     inspection &&
     inspection.skills.length +
       inspection.commands.length +
       inspection.agents.length +
       inspection.mcpServers.length +
-      inspection.tabs.length;
+      inspection.tabs.length +
+      declaredCommands.length;
 
   return (
     <div className="kit-act">
-      {workspaceName && (
-        <p className="kit-act__ws">{t("kitsManage.actOnWorkspace", { name: workspaceName })}</p>
+      {everywhere ? (
+        <p className="kit-act__ws">{t("kitsManage.everywhereNote")}</p>
+      ) : (
+        workspaceName && <p className="kit-act__ws">{t("kitsManage.actOnWorkspace", { name: workspaceName })}</p>
       )}
       {manifest && (
         <p className="kit-act__desc">
@@ -308,6 +354,38 @@ export function KitActivationView(props: KitActivationViewProps) {
         )}
       </section>
 
+      <section className="kit-act__block" aria-labelledby="kit-act-commands">
+        <h3 className="kit-act__heading" id="kit-act-commands">
+          {t("kitsTab.commands")}
+        </h3>
+        {inspection === null ? (
+          <p className="kit-act__note">{t("kitsManage.loading")}</p>
+        ) : declaredCommands.length === 0 ? (
+          <p className="kit-act__note">{t("kitsTab.commandsNone")}</p>
+        ) : (
+          <>
+            {commandsNew && entry && <p className="kit-act__note">{t("kitsTab.commandsChanged")}</p>}
+            {kit.source.kind === "folder" && <p className="kit-act__note">{t("kitsTab.commandsLive")}</p>}
+            {declaredCommands.map((command) => (
+              <DeclaredCommandBlock
+                key={command.name}
+                t={t}
+                command={command}
+                tag={
+                  entry &&
+                  kitCommandsGrant(kit) &&
+                  (commandsNew ? (
+                    <span className="kit-act__tag kit-act__tag--new">{t("kitsManage.actPermsNew")}</span>
+                  ) : (
+                    <span className="kit-act__tag">{t("kitsManage.actPermsGranted")}</span>
+                  ))
+                }
+              />
+            ))}
+          </>
+        )}
+      </section>
+
       {error && (
         <p className="notice notice--error" role="alert">
           <span className="notice__text">{error}</span>
@@ -328,7 +406,7 @@ export function KitActivationView(props: KitActivationViewProps) {
             >
               {!entry
                 ? t("kitsManage.actAccept")
-                : hooksNew
+                : hooksNew || commandsNew
                   ? t("kitsManage.actAcceptChanged")
                   : t("kitsManage.actAcceptPerms")}
             </button>
@@ -346,15 +424,17 @@ export function KitActivationView(props: KitActivationViewProps) {
 interface ActivationProps {
   kit: KitInfo;
   entry: WorkspaceKit | undefined;
-  /** The workspace the kit is enabled on, when it exists. */
+  /** The workspace the kit is enabled on, when it exists; a setup step runs in a pane of it. */
   workspace: Workspace | null;
+  /** Accepting holds for all workspaces: `workspace` is only where a setup step runs. */
+  everywhere?: boolean;
   /** Called with what the person accepted. */
   onAccept: (granted: KitGrant[]) => void;
   onClose: () => void;
 }
 
 /** The activation view as a dialog, fed from Rust. */
-export function KitActivation({ kit, entry, workspace, onAccept, onClose }: ActivationProps) {
+export function KitActivation({ kit, entry, workspace, everywhere, onAccept, onClose }: ActivationProps) {
   const t = useT();
   const { addPane, closePane, snapshot, setActiveWorkspace, state } = useStore();
   const asleep = useAsleep();
@@ -379,8 +459,8 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
     kitSetupStatus(kit.id)
       .then((found) => alive.current && setSteps(found))
       .catch(() => alive.current && setSteps([]));
-    // Read again when its hooks change, so what is shown is what is accepted.
-  }, [kit.id, kit.hooksPermission, t]);
+    // Read again when its hooks or commands change, so what is shown is what is accepted.
+  }, [kit.id, kit.hooksPermission, kit.commandsPermission, t]);
 
   /**
    * Run: opens a shell pane in the kit's folder and types the command shown,
@@ -474,6 +554,7 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
             steps={steps}
             entry={entry}
             workspaceName={workspace?.name ?? null}
+            everywhere={everywhere}
             canRun={workspace !== null}
             os={os}
             running={running}
@@ -509,10 +590,61 @@ export interface KitsSectionProps {
   workspace?: Workspace | null;
 }
 
+/**
+ * A kit enabled on all workspaces that this one does not list itself: on, and
+ * not this dialog's to change. Settings › Kits manages it, and what it runs here
+ * is what was accepted there.
+ */
+export function KitEverywhereRow({
+  t,
+  kit,
+  entry,
+}: {
+  t: Translator;
+  kit: KitInfo;
+  entry: WorkspaceKit;
+}) {
+  const name = kitName(kit);
+  const usable = !kit.error && !!kit.manifest;
+  const state = usable ? kitState(entry, kitRequested(kit)) : "broken";
+  return (
+    <li className="kit-sec__row">
+      <label className="kit-sec__main">
+        <span className="switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked
+            disabled
+            readOnly
+            aria-label={t("kitsManage.everywhereToggleLocked", { name })}
+          />
+          <span className="switch__track" aria-hidden="true">
+            <span className="switch__knob" />
+          </span>
+        </span>
+        <span className="kit-sec__icon" aria-hidden="true">
+          <KitIcon kit={kit} size={16} />
+        </span>
+        <span className="kit-sec__text">
+          <span className="kit-sec__name">{name}</span>
+          <span className="kit-sec__meta" title={kit.error ?? undefined}>
+            {kit.error ?? t("kitsManage.everywhereNoteHint")}
+          </span>
+        </span>
+      </label>
+      <span className="kit-act__tag">{t("kitsManage.everywhereNote")}</span>
+      {state !== "on" && (
+        <span className={`kit-act__tag ${state === "review" ? "kit-act__tag--new" : ""}`}>{t(STATE_KEY[state])}</span>
+      )}
+    </li>
+  );
+}
+
 /** The "Kits" section of the workspace dialog: a switch per installed kit. */
 export function WorkspaceKitsSection({ value, onChange, workspace = null }: KitsSectionProps) {
   const t = useT();
-  const { respawnPane } = useStore();
+  const { respawnPane, state: appState } = useStore();
   const [kits, setKits] = useState<KitInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
@@ -540,6 +672,7 @@ export function WorkspaceKitsSection({ value, onChange, workspace = null }: Kits
   const known = new Set((kits ?? []).map((kit) => kit.id));
   const gone = value.filter((entry) => kits !== null && !known.has(entry.id));
   const openKit = kits?.find((kit) => kit.id === opened) ?? null;
+  const everywhere = everywhereKits(appState.settings);
 
   function toggle(kit: KitInfo, on: boolean) {
     setRestarted(false);
@@ -576,6 +709,10 @@ export function WorkspaceKitsSection({ value, onChange, workspace = null }: Kits
       <ul className="kit-sec__list">
         {(kits ?? []).map((kit) => {
           const entry = value.find((item) => item.id === kit.id);
+          // Its own entry wins and stays this dialog's; without one, the kit is
+          // on by way of Settings › Kits.
+          const shared = entry ? undefined : everywhere.find((item) => item.id === kit.id);
+          if (shared) return <KitEverywhereRow key={kit.id} t={t} kit={kit} entry={shared} />;
           const requested = kitRequested(kit);
           const state = kit.error || !kit.manifest ? (entry ? "broken" : "off") : kitState(entry, requested);
           const usable = !kit.error && !!kit.manifest;

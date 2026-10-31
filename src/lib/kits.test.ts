@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  KIT_COMMAND_PATTERN,
   KIT_EVENTS,
   KIT_LOOPBACK_PATTERN,
   KIT_METHODS,
   KIT_PERMISSIONS,
+  isKitCommandName,
+  isKitCommandsGrant,
   isKitHooksGrant,
   isKitPermission,
   effectiveKits,
   everywhereKits,
+  kitCommandName,
+  kitCommandsGrant,
   kitHooksGrant,
   kitIssueNotes,
   kitLoopbackPort,
@@ -150,6 +155,88 @@ describe("permissions", () => {
         "notify",
       ]),
     ).toEqual(["panes.read", "notify", "loopback:8765", "loopback:9000"]);
+  });
+
+  it("names a command by the rule the manifest holds", () => {
+    expect(kitCommandName("command:ci-status")).toBe("ci-status");
+    expect(kitCommandName("command:r")).toBe("r");
+    expect(kitCommandName("command:ci-2")).toBe("ci-2");
+    for (const name of [
+      "command:",
+      "command:CI",
+      "command:1ci",
+      "command:-ci",
+      "command:ci status",
+      "command:ci_status",
+      "command:ci.status",
+      "command:ci-status ",
+      "commands:0123456789abcdef",
+      "ci-status",
+      KIT_COMMAND_PATTERN,
+      3,
+      null,
+      undefined,
+    ]) {
+      expect(kitCommandName(name), String(name)).toBeNull();
+    }
+    expect(isKitCommandName("ci-status")).toBe(true);
+    expect(isKitCommandName("CI")).toBe(false);
+    expect(isKitCommandName(3)).toBe(false);
+  });
+
+  it("knows a command's permission, and the grant of a kit's commands apart from it", () => {
+    expect(isKitPermission("command:ci-status")).toBe(true);
+    expect(isKitPermission("command:")).toBe(false);
+    expect(isKitPermission("commands:0123456789abcdef")).toBe(false);
+    expect(isKitCommandsGrant("commands:0123456789abcdef")).toBe(true);
+    expect(isKitCommandsGrant("command:ci-status")).toBe(false);
+    expect(isKitCommandsGrant("commands:0123")).toBe(false);
+    expect(isKitCommandsGrant("commands:0123456789ABCDEF")).toBe(false);
+    expect(isKitCommandsGrant("hooks:0123456789abcdef")).toBe(false);
+    expect(isKitCommandsGrant(undefined)).toBe(false);
+    expect(isKitHooksGrant("commands:0123456789abcdef")).toBe(false);
+  });
+
+  it("orders commands last, by name, and leaves the grant of a kit's commands out", () => {
+    expect(
+      kitPermissionsIn([
+        "command:view",
+        "loopback:8765",
+        "commands:0123456789abcdef",
+        "command:list",
+        "notify",
+        "command:Bad",
+        "command:view",
+      ]),
+    ).toEqual(["notify", "loopback:8765", "command:list", "command:view"]);
+  });
+});
+
+describe("a kit's commands, on a workspace", () => {
+  const GRANT = "commands:0123456789abcdef";
+
+  it("keeps what was accepted through the defensive reader, on a workspace and for all of them", () => {
+    const entry = { id: "roblox", granted: ["command:view", GRANT, "command:Bad", "commands:nope"] };
+    const kept = [{ id: "roblox", granted: ["command:view", GRANT] }];
+    expect(workspaceKits({ kits: [entry] })).toEqual(kept);
+    expect(everywhereKits({ kitsEverywhere: [entry] })).toEqual(kept);
+    expect(effectiveKits({}, { kitsEverywhere: [entry] })).toEqual(kept);
+    expect(withEffectiveKits({}, { kitsEverywhere: [entry] }).kits).toEqual(kept);
+  });
+
+  it("asks a GitHub kit that has commands, and no other", () => {
+    const git = { kind: "git" as const, url: "https://github.com/o/kits" };
+    const folder = { kind: "folder" as const, path: "D:\\k" };
+    expect(kitCommandsGrant({ source: git, commandsPermission: GRANT })).toBe(GRANT);
+    expect(kitCommandsGrant({ source: git, commandsPermission: null })).toBeNull();
+    expect(kitCommandsGrant({ source: git })).toBeNull();
+    expect(kitCommandsGrant({ source: git, commandsPermission: "nonsense" })).toBeNull();
+    expect(kitCommandsGrant({ source: folder, commandsPermission: GRANT })).toBeNull();
+  });
+
+  it("does not hold a kit out of the panes for its commands: only its tabs wait", () => {
+    const kit = installed({ id: "roblox", commandsPermission: GRANT });
+    expect(paneKits({ kits: [{ id: "roblox", granted: [] }] }, [kit])).toEqual({ ids: ["roblox"], held: [] });
   });
 });
 
@@ -412,10 +499,11 @@ describe("kitIssueNotes", () => {
 describe("the tab protocol", () => {
   it("gates every method and event behind a known permission", () => {
     for (const permission of [...Object.values(KIT_METHODS), ...Object.values(KIT_EVENTS)]) {
-      if (permission === KIT_LOOPBACK_PATTERN) continue;
+      if (permission === KIT_LOOPBACK_PATTERN || permission === KIT_COMMAND_PATTERN) continue;
       expect(KIT_PERMISSIONS).toContain(permission);
     }
     expect(Object.keys(KIT_METHODS).sort()).toEqual([
+      "command.run",
       "data.read",
       "data.write",
       "files.read",
@@ -449,5 +537,19 @@ describe("the tab protocol", () => {
     // The pattern's own spelling is no permission.
     expect(call([KIT_LOOPBACK_PATTERN], { port: 8765 })).toBe(false);
     expect(call(["loopback:80"], { port: 80 })).toBe(false);
+  });
+
+  it("lets a tab run only the command it was granted", () => {
+    const call = (granted: string[], params?: unknown) => kitMayCall("command.run", granted, params);
+    expect(call(["command:view"], { name: "view" })).toBe(true);
+    expect(call(["command:view"], { name: "list" })).toBe(false);
+    expect(call(["command:view"], { name: "view ", args: {} })).toBe(false);
+    expect(call(["command:view"], { name: 3 })).toBe(false);
+    expect(call(["command:view"])).toBe(false);
+    expect(call(["command:view"], null)).toBe(false);
+    expect(call([...KIT_PERMISSIONS], { name: "view" })).toBe(false);
+    // Neither the pattern's own spelling nor the kit's grant is a permission.
+    expect(call([KIT_COMMAND_PATTERN], { name: "view" })).toBe(false);
+    expect(call(["commands:0123456789abcdef"], { name: "view" })).toBe(false);
   });
 });

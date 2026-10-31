@@ -5,6 +5,7 @@ import {
   disableKit,
   enableKit,
   hooksToAccept,
+  onlyCommandsToAccept,
   kitName,
   kitRequested,
   kitState,
@@ -139,8 +140,8 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
       ? "broken"
       : "off"
     : kitState(everywhere, requested);
-  const heldForHooks =
-    everywhereState === "review" && hooksToAccept(permissionDiff(requested ?? [], everywhere?.granted ?? []));
+  const everywhereDiff = permissionDiff(requested ?? [], everywhere?.granted ?? []);
+  const heldForHooks = everywhereState === "review" && hooksToAccept(everywhereDiff);
   const name = kitName(kit);
 
   return (
@@ -227,7 +228,11 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
         )}
       </div>
       <p className="kit-row__note" id={`kit-every-${kit.id}`}>
-        {everywhereState === "review" ? t("kitsManage.everywhereReview") : t("kitsManage.everywhereHint")}
+        {everywhereState !== "review"
+          ? t("kitsManage.everywhereHint")
+          : onlyCommandsToAccept(everywhereDiff)
+            ? t("kitsTab.everywhereReviewCommands")
+            : t("kitsManage.everywhereReview")}
         {!everywhere && usable && !props.hasActiveWorkspace && (
           <>
             <br />
@@ -588,6 +593,7 @@ export function KitsSettings() {
         kit={activatingKit}
         entry={everywhere.find((item) => item.id === activatingKit.id)}
         workspace={activeWorkspace}
+        everywhere
         onAccept={(granted) => acceptEverywhere(activatingKit, granted)}
         onClose={() => setActivating(null)}
       />

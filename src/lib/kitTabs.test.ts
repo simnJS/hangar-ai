@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KitInfo, KitManifest } from "./kits";
+import { withEffectiveKits, type KitInfo, type KitManifest } from "./kits";
 import { effectivePermissions, kitFileUrl, kitTabState, workspaceKitTabs } from "./kitTabs";
 
 const manifest = (id: string, tabs: KitManifest["tabs"]): KitManifest => ({
@@ -97,14 +97,78 @@ describe("workspaceKitTabs", () => {
         kitName: "roblox name",
         tab: { ...explorer, permissions: [...explorer.permissions] },
         permissions: ["panes.send", "files.read"],
+        commandsAccepted: null,
       },
       {
         kitId: "hello-kit",
         kitName: "hello-kit name",
         tab: { ...status, permissions: [...status.permissions] },
         permissions: ["panes.read"],
+        commandsAccepted: null,
       },
     ]);
+  });
+
+  describe("a kit's commands", () => {
+    const GRANT = "commands:0123456789abcdef";
+    const CHANGED = "commands:fedcba9876543210";
+    const ci = { id: "ci", title: "CI", entry: "tabs/ci.html", permissions: ["command:view" as const, "notify" as const] };
+    const github = (commandsPermission: string) =>
+      kit("ci-kit", [ci], { source: { kind: "git", url: "https://github.com/o/kits" }, commandsPermission });
+    const on = (granted: string[]) => ({ kits: [{ id: "ci-kit", granted }] });
+    const held = ["command:view", "notify"];
+
+    it("holds what the tab declares once the workspace accepted these very commands", () => {
+      const [choice] = workspaceKitTabs(on([...held, GRANT]), [github(GRANT)]);
+      expect(choice.permissions).toEqual(["notify", "command:view"]);
+      expect(choice.commandsAccepted).toBe(GRANT);
+    });
+
+    it("holds none of them when they changed, and keeps the rest of what it was granted", () => {
+      const [choice] = workspaceKitTabs(on([...held, GRANT]), [github(CHANGED)]);
+      expect(choice.permissions).toEqual(["notify"]);
+      expect(choice.commandsAccepted).toBeNull();
+    });
+
+    it("holds none of them when they were never accepted", () => {
+      const [choice] = workspaceKitTabs(on(held), [github(GRANT)]);
+      expect(choice.permissions).toEqual(["notify"]);
+    });
+
+    it("still needs the tab's own permission once they are accepted", () => {
+      const [choice] = workspaceKitTabs(on(["notify", GRANT]), [github(GRANT)]);
+      expect(choice.permissions).toEqual(["notify"]);
+      expect(choice.commandsAccepted).toBe(GRANT);
+    });
+
+    it("asks a linked folder nothing", () => {
+      const folder = kit("ci-kit", [ci], { commandsPermission: CHANGED });
+      const [choice] = workspaceKitTabs(on(held), [folder]);
+      expect(choice.permissions).toEqual(["notify", "command:view"]);
+      expect(choice.commandsAccepted).toBeNull();
+    });
+
+    it("reads what a kit enabled on all workspaces accepted, and a workspace's own entry first", () => {
+      const settings = { kitsEverywhere: [{ id: "ci-kit", granted: [...held, GRANT] }] };
+      const everywhere = workspaceKitTabs(withEffectiveKits({}, settings), [github(GRANT)]);
+      expect(everywhere[0].permissions).toEqual(["notify", "command:view"]);
+      expect(everywhere[0].commandsAccepted).toBe(GRANT);
+
+      const changed = workspaceKitTabs(withEffectiveKits({}, settings), [github(CHANGED)]);
+      expect(changed[0].permissions).toEqual(["notify"]);
+
+      const own = workspaceKitTabs(withEffectiveKits(on(["notify"]), settings), [github(GRANT)]);
+      expect(own[0].permissions).toEqual(["notify"]);
+      expect(own[0].commandsAccepted).toBeNull();
+    });
+
+    it("is ready to open on any workspace once it is enabled on all of them", () => {
+      const settings = { kitsEverywhere: [{ id: "ci-kit", granted: [...held, GRANT] }] };
+      expect(kitTabState({}, [github(GRANT)], "ci-kit", "ci").kind).toBe("disabled");
+      const state = kitTabState(withEffectiveKits({}, settings), [github(GRANT)], "ci-kit", "ci");
+      expect(state.kind).toBe("ready");
+      expect(state.kind === "ready" && state.choice.permissions).toEqual(["notify", "command:view"]);
+    });
   });
 
   it("leaves out kits that are not enabled, not installed, or not usable", () => {
@@ -138,6 +202,7 @@ describe("kitTabState", () => {
         kitName: "hello-kit name",
         tab: { ...status, permissions: [...status.permissions] },
         permissions: ["panes.read", "notify"],
+        commandsAccepted: null,
       },
     });
   });

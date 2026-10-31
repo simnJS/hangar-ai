@@ -1,7 +1,10 @@
 import type { TranslateKey, Translator } from "../i18n";
 import type { Pane, Workspace, WorkspaceKit } from "../types";
 import {
+  isKitCommandsGrant,
   isKitHooksGrant,
+  kitCommandName,
+  kitCommandsGrant,
   kitHooksGrant,
   kitLoopbackPort,
   kitPermissionsIn,
@@ -23,6 +26,8 @@ import {
  * A GitHub kit's hooks go through the same diff, as the pseudo permission
  * `hooks:<hash>` (lib/kits › kitHooksGrant): changed hooks are something new
  * to accept, and the kit stays out of the workspace's new panes until they are.
+ * Its declared commands do too, as `commands:<hash>` (lib/kits › kitCommandsGrant):
+ * changed, its tabs run none of them until they are accepted again.
  */
 
 /** Every permission has its sentence in the dictionary, in plain words. */
@@ -37,8 +42,10 @@ export const PERMISSION_LABEL: Record<KitNamedPermission, TranslateKey> = {
   notify: "kitsManage.permNotify",
 };
 
-/** A permission in plain words, a local server's by its port. */
+/** A permission in plain words, a local server's by its port, a command's by its name. */
 export function permissionLabel(t: Translator, permission: KitPermission): string {
+  const command = kitCommandName(permission);
+  if (command !== null) return t("kitsTab.permCommand", { name: command });
   const port = kitLoopbackPort(permission);
   // As text: `t` writes a number the way the language does, and a port has no
   // thousands.
@@ -47,7 +54,7 @@ export function permissionLabel(t: Translator, permission: KitPermission): strin
     : t("kitsManage.permLoopback", { port: String(port) });
 }
 
-/** What the tabs of a kit ask for altogether, once each, in the closed set's order, then the ports. */
+/** What the tabs of a kit ask for altogether, once each, in the closed set's order, then the ports, then the commands. */
 export function requestedPermissions(tabs: readonly Pick<KitTab, "permissions">[]): KitPermission[] {
   return kitPermissionsIn(tabs.flatMap((tab) => tab.permissions));
 }
@@ -77,6 +84,38 @@ export function permissionDiff(
 export const hooksToAccept = (diff: Pick<PermissionDiff, "added">): boolean =>
   diff.added.some(isKitHooksGrant);
 
+/** Whether what a kit asks for waits for its commands to be accepted on this workspace. */
+export const commandsToAccept = (diff: Pick<PermissionDiff, "added">): boolean =>
+  diff.added.some(isKitCommandsGrant);
+
+/** Whether a kit's commands are all it waits for: its plugin still reaches the panes then. */
+export const onlyCommandsToAccept = (diff: Pick<PermissionDiff, "added">): boolean =>
+  diff.added.length > 0 && diff.added.every(isKitCommandsGrant);
+
+/** Characters that do not show, or turn the text around them: a line could read as another. */
+const UNSEEN = /[\p{Cc}\p{Cf}]/gu;
+
+const withUnseenWritten = (text: string) =>
+  text.replace(UNSEEN, (char) => `\\u{${char.codePointAt(0)?.toString(16)}}`);
+
+/**
+ * An argv on one line, as it is. An item holding a space, a quote or nothing at
+ * all is quoted, so `["gh", "run view"]` does not read as `["gh", "run", "view"]`,
+ * and what would not show is written out.
+ */
+export function kitArgvLine(argv: readonly string[]): string {
+  return argv
+    .map((item) =>
+      item === "" || /[\s"']/.test(item) || item.search(UNSEEN) !== -1
+        ? withUnseenWritten(JSON.stringify(item))
+        : item,
+    )
+    .join(" ");
+}
+
+/** A rule as the person is shown it: as written, with what would not show written out. */
+export const kitRuleText = (pattern: string): string => withUnseenWritten(pattern);
+
 export type KitState =
   /** Not enabled on the workspace. */
   | "off"
@@ -99,29 +138,36 @@ export function kitState(
 
 /**
  * What a workspace has to have accepted of a kit: the permissions its tabs ask
- * for, from its manifest, and its hooks when they are asked about. Null when
- * the kit cannot be used.
+ * for, from its manifest, and its hooks and commands when they are asked about.
+ * Null when the kit cannot be used.
  */
 export function kitRequested(
-  kit: Pick<KitInfo, "manifest" | "error" | "source" | "hooksPermission" | "hooksConsent">,
+  kit: Pick<KitInfo, "manifest" | "error" | "source" | "hooksPermission" | "hooksConsent" | "commandsPermission">,
 ): KitGrant[] | null {
   if (!kit.manifest || kit.error) return null;
   const hooks = kitHooksGrant(kit);
-  return [...requestedPermissions(kit.manifest.tabs), ...(hooks ? [hooks] : [])];
+  const commands = kitCommandsGrant(kit);
+  return [...requestedPermissions(kit.manifest.tabs), ...(hooks ? [hooks] : []), ...(commands ? [commands] : [])];
 }
 
 /**
- * What accepting a kit stores, from what the person was shown: its hash is the
- * inspection's, not the kit's as it may be now, so hooks that changed while the
- * view was open stay to be accepted. A linked folder's hooks store nothing.
+ * What accepting a kit stores, from what the person was shown: its hashes are the
+ * inspection's, not the kit's as it may be now, so hooks or commands that changed
+ * while the view was open stay to be accepted. A linked folder's store nothing.
  */
 export function acceptedGrants(
   kit: Pick<KitInfo, "source">,
-  inspection: Pick<KitInspection, "tabs" | "hooksPermission"> | null,
+  inspection: Pick<KitInspection, "tabs" | "hooksPermission" | "commandsPermission"> | null,
 ): KitGrant[] {
   const permissions = requestedPermissions(inspection?.tabs ?? []);
+  if (kit.source.kind !== "git") return permissions;
   const hooks = inspection?.hooksPermission;
-  return kit.source.kind === "git" && isKitHooksGrant(hooks) ? [...permissions, hooks] : permissions;
+  const commands = inspection?.commandsPermission;
+  return [
+    ...permissions,
+    ...(isKitHooksGrant(hooks) ? [hooks] : []),
+    ...(isKitCommandsGrant(commands) ? [commands] : []),
+  ];
 }
 
 /** The workspace's kits with `id` enabled, accepting exactly `granted`. */

@@ -171,6 +171,33 @@
   outline-offset: 1px;
 }
 
+/* Each part of a command that changes, beside the rule it has to match. */
+.kit-step__rules {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.kit-step__rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+.kit-step__rule dt,
+.kit-step__rule dd {
+  margin: 0;
+}
+
+.kit-step__rule code {
+  font-family: var(--mono);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
 .kit-step__ask {
   display: grid;
   gap: 8px;

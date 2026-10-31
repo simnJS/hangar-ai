@@ -8,7 +8,8 @@ about that domain. A kit can bring:
   every Claude Code pane of the workspaces the kit is enabled on;
 - **tabs**: isolated pages of its own, talking to Hangar through a small,
   declared API, with a [data folder](#a-kits-data-folder) of the kit's and, when
-  declared, a local server to talk to;
+  declared, a local server to talk to and
+  [commands to run](#declared-commands) on tools already on the machine;
 - **setup commands**: shown to the person verbatim, run in a visible pane once
   they approve, once per machine.
 
@@ -132,6 +133,7 @@ At the kit's root. Schema 1:
 | `plugin`      | string            | no       | Relative folder holding `.claude-plugin/plugin.json`. Default below.                      |
 | `tabs`        | array of tabs     | no       | See below. Ids unique.                                                                    |
 | `setup`       | array of steps    | no       | See below. Ids unique.                                                                    |
+| `commands`    | object            | no       | What its tabs may run, by name: [declared commands](#declared-commands).                  |
 
 `plugin` defaults to `"."` (the kit's root) when `<root>/.claude-plugin` exists,
 and to no plugin otherwise. A `plugin` folder without
@@ -306,12 +308,16 @@ A closed set. A permission not in it is a manifest error.
 | `data.read`       | read a text file of the kit's own data (`data.read`).                                              |
 | `data.write`      | write a text file of the kit's own data (`data.write`).                                            |
 | `loopback:<port>` | talk to the local server on that port (`loopback.fetch`), and make it do whatever that server allows. |
+| `command:<name>`  | run that [declared command](#declared-commands) on the computer (`command.run`), with the person's logins. |
 | `preview.show`    | open a file in Hangar's preview.                                                                   |
 | `notify`          | raise a desktop notification.                                                                      |
 
 `<port>` is written plainly (no sign, no leading zero), from 1024 to 65535:
 `loopback:80`, `loopback:abc` or `loopback:08765` is a manifest error. A tab holds
 it for that exact port, and no other.
+
+`<name>` is a command the kit declares under `commands`: naming another is a
+manifest error. A tab holds it for that exact command, and no other.
 
 The person accepts a tab's permissions when they enable the kit on a
 workspace; what they accepted is the workspace's `kits[].granted`. A tab may
@@ -373,9 +379,9 @@ The page runs isolated: this is code written by someone else.
   frames, workers or plugins. Inline scripts and styles run, module scripts
   and WebAssembly too; `eval` does not.
 - It talks to Hangar by `postMessage` to its parent, and only that (below).
-  **The frame still has no network of its own**: `data.read`, `data.write` and
-  `loopback.fetch` are done by the Hangar host, and a page calling `fetch` on a
-  local server is refused as ever.
+  **The frame still has no network of its own**: `data.read`, `data.write`,
+  `loopback.fetch` and `command.run` are done by the Hangar host, and a page
+  calling `fetch` on a local server is refused as ever.
 - **A tab is one page.** It speaks to Hangar from the page it opened on: if
   the frame loads another document — a link followed, the page sending itself
   elsewhere — Hangar takes the frame down and says so, until the person
@@ -418,6 +424,7 @@ Methods:
 | `data.read`      | `{ path }`          | `data.read`      | `{ text }`, or the error `not_found` when it is absent.                  |
 | `data.write`     | `{ path, text }`    | `data.write`     | `{}`: written whole, its folders made.                                   |
 | `loopback.fetch` | `{ port, path, method?, body?, timeoutMs? }` | `loopback:<port>` for that exact port | `{ status, text }`: the local server's answer, whatever its status. |
+| `command.run`    | `{ name, args? }`   | `command:<name>` for that exact name | `{ exitCode, stdout, stderr, timedOut, truncated }`: see [declared commands](#declared-commands). |
 | `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens in the workspace's preview, in front. |
 | `notify`         | `{ title, body? }`  | `notify`         | `null`: a desktop notification, titled `<kit name> · <title>`.          |
 
@@ -463,9 +470,9 @@ done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
   - `timeoutMs` is 1 to 15 000, **5 000** by default.
   - A refused or timed-out connection answers the error `unreachable`: an ordinary
     state for a tab (the editor is closed), logged nowhere.
-- **Polling.** There is no file watcher: a tab polls. `data.read` and
-  `loopback.fetch` are cheap and have no limit of their own, so one call a second
-  is fine; a tab that is not visible may slow itself down.
+- **Polling.** There is no file watcher: a tab polls. `data.read`,
+  `loopback.fetch` and `command.run` have no limit of their own, so one call a
+  second is fine; a tab that is not visible may slow itself down.
 - **`notify`** takes a `title` of 1 to 120 characters and a `body` of 1 000
   at most. At most **5 a minute**.
 - A tab has at most **16 calls** waiting for their answer at once.
@@ -474,14 +481,16 @@ Errors:
 
 | Code           | When                                                                  |
 | -------------- | --------------------------------------------------------------------- |
-| `denied`       | The tab may not call the method, a port it does not hold included; or `panes.send` to a pane that is not a Claude Code agent. |
+| `denied`       | The tab may not call the method, a port or a command it does not hold included; or `panes.send` to a pane that is not a Claude Code agent; or `command.run` on a GitHub kit whose commands were not accepted as they are now. |
 | `invalid`      | The params are not what the method takes.                             |
 | `unknown`      | No such method.                                                       |
-| `not_found`    | No pane of that name in the workspace; no such file in the kit's data. |
+| `not_found`    | No pane of that name in the workspace; no such file in the kit's data; `command.run`: the program is not installed, or the command has no argv for this OS. |
 | `rate_limited` | Over a limit above; try again later.                                  |
-| `unavailable`  | Hangar cannot do it now: the agent's session does not run the bridge, the workspace is gone. |
+| `unavailable`  | Hangar cannot do it now: the agent's session does not run the bridge, the workspace or its folder is gone, the kit cannot be used. |
 | `unreachable`  | `loopback.fetch`: nothing answers on that port, or not in time.       |
-| `failed`       | It was tried and failed: a file not found, too large, not text, a link leading out of the data folder… The message says why. |
+| `bad_args`     | `command.run`: a value is missing, does not match its rule whole, starts with `-`, or is not a string; or an argument the command does not declare. |
+| `busy`         | `command.run`: four commands of this kit are running; try again later. |
+| `failed`       | It was tried and failed: a file not found, too large, not text, a link leading out of the data folder, a program that is a batch file on Windows… The message says why. |
 
 Events:
 
@@ -497,8 +506,9 @@ tab needs:
 
 - `window.hangar.call(method, params?)` → a Promise of the result. It rejects
   with an `Error` whose `code` is the protocol's (`denied`, `invalid`…), or
-  `timeout` when Hangar does not answer within 30 seconds, or `unavailable`
-  when the page is not open as a tab.
+  `timeout` when Hangar does not answer within 30 seconds (130 for `command.run`,
+  whose commands may run for 120), or `unavailable` when the page is not open as
+  a tab.
 - `window.hangar.on(event, handler)` → a function that stops listening.
 - `window.hangar.version` → `1`.
 
@@ -575,12 +585,146 @@ more. A tab showing a local server's queue and keeping a note, asking for
 
 `src/lib/kits.ts` exports the protocol's constants: `KIT_METHODS` (method →
 permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`,
-`KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`, `KIT_DENIED`, the message types and
-`kitMayCall`. The window's side is `src/lib/kitApi.ts` (its limits and error
-codes), the tab itself `src/components/preview/KitTabView.tsx`, and the paths
-`files.read` and `preview.show` take are checked on disk by `kit_file_read` and
-`kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`); the data folder is
-`src-tauri/src/kits/data.rs` and `loopback.fetch` `src-tauri/src/kits/loopback.rs`.
+`KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`, `KIT_COMMAND_PATTERN`, `KIT_DENIED`, the
+message types and `kitMayCall`. The window's side is `src/lib/kitApi.ts` (its
+limits and error codes), the tab itself `src/components/preview/KitTabView.tsx`,
+and the paths `files.read` and `preview.show` take are checked on disk by
+`kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`); the
+data folder is `src-tauri/src/kits/data.rs`, `loopback.fetch`
+`src-tauri/src/kits/loopback.rs` and `command.run` `src-tauri/src/kits/commands.rs`.
+
+## Declared commands
+
+A tab can get data from tools already on the machine — `gh run view`, `docker ps`,
+`glab ci status` — without a network, a token or a shell of its own. The kit
+declares its commands in its manifest, the person sees them verbatim when enabling
+it, and a tab can run those and nothing else.
+
+```json
+{
+  "commands": {
+    "ci-run": {
+      "description": "The state of a CI run.",
+      "run": ["gh", "run", "view", "{run}", "--repo={repo}", "--json", "status,conclusion,jobs"],
+      "args": {
+        "run": { "pattern": "[0-9]+", "description": "The run's number" },
+        "repo": { "pattern": "[\\w.-]+/[\\w.-]+" }
+      },
+      "timeoutSeconds": 20
+    }
+  },
+  "tabs": [
+    { "id": "ci", "title": "CI", "entry": "tabs/ci/index.html", "permissions": ["command:ci-run"] }
+  ]
+}
+```
+
+A **command**, under its name, `[a-z][a-z0-9-]*`:
+
+| Field            | Type             | Required | Rules                                                                             |
+| ---------------- | ---------------- | -------- | --------------------------------------------------------------------------------- |
+| `description`    | string           | yes      | Not blank. Shown to the person.                                                   |
+| `run`            | array, or object | yes      | An argv, or `{ "windows"?, "macos"?, "linux"? }` holding one per OS, at least one. Never a command line. |
+| `args`           | object           | no       | What each placeholder may hold, by name: `{ "pattern", "description"? }`.         |
+| `timeoutSeconds` | number           | no       | A whole number from 1 to 120. 30 by default.                                      |
+
+**An argv** is the program, then literal items and placeholders. A placeholder is
+`{name}`, a name being letters, digits, `_` and `-`, starting with a letter or `_`.
+It may be a whole item (`{run}`) or inside one (`--repo={repo}`). Other braces are
+text, so `docker ps --format {{.Names}}` needs nothing special.
+
+These are manifest errors: a placeholder not declared in `args`, an arg without a
+`pattern`, a `pattern` that is not a regular expression, a placeholder or any brace
+in the program, a `run` written as a string.
+
+**The program** is a name found on the PATH: not a path, nor a name ending in a dot
+or a space. It is found on the PATH Hangar computes for everything it starts
+(`src-tauri/src/path_env.rs`), passing over relative and empty entries, so nothing
+is ever run from the project's folder for being there. Absent, the call answers
+`not_found`, an ordinary state for a tab (`gh` not installed), and nothing is logged.
+
+**On Windows, a program that resolves to a `.bat` or a `.cmd` is refused** (`failed`):
+arguments to a batch file are parsed by cmd.exe, which would bring a shell back. That
+includes what npm installs (`npm`, `pnpm`, and the tools they install), which are `.cmd`
+files there.
+
+### Running one
+
+```js
+const { exitCode, stdout, stderr, timedOut, truncated } = await window.hangar.call("command.run", {
+  name: "ci-run",
+  args: { run: "4567", repo: "simnJS/hangar-ai" },
+});
+```
+
+`exitCode` is the program's, a code other than 0 being an answer and not a failure;
+null when it did not end by itself. `truncated` says stdout or stderr went past the cap.
+
+- **No shell, ever.** The argv goes to the program as it is, `Command::new` and its
+  arguments. A value holding `;`, `$(…)` or `&&` reaches it as plain text.
+- **Each value must match its rule, whole**, whatever the author wrote: the pattern is
+  compiled on its own, then anchored at both ends (Rust's `regex` syntax, no
+  look-around and no back-reference; it matches in linear time). A value that is missing
+  or does not match, a value that is not a string, and an argument the command does not
+  declare answer `bad_args`. A value that only fills a placeholder of another OS's argv
+  need not be given.
+- **A value starting with `-` is refused** even if its pattern allows it, as is an item
+  that would start with `-` once filled in (`{a}-{b}` with an empty `a`): a parameter
+  never becomes an option. Options are the kit's to write in the argv.
+- A value is filled in once: one holding `{other}` stays that text.
+- **It starts in the workspace folder of the tab**, with Hangar's own environment and
+  nothing added, and no stdin.
+- **Stdout and stderr are kept up to 1 MB each.** Past that the rest is read and
+  dropped, so the program is not held up, and `truncated` is true. They are decoded as
+  UTF-8, what is not being replaced.
+- **At the timeout it is killed with its tree**, `timedOut` is true, and what it wrote
+  until then comes back. A process it leaves behind when it ends by itself is not
+  killed, and not waited for beyond half a second. Closing the tab does not stop a
+  command: its timeout does.
+- **At most 4 commands of a kit run at once**, whatever the tab: a further call answers
+  `busy`.
+- A tab is told only what it holds: `command.run` for a command it was not granted
+  answers `denied`, as does one the kit does not declare (any more).
+
+### What the person accepts
+
+The activation view shows each command in the same monospace block as the setup steps
+and the hooks, its argv on one line, with the rule next to each placeholder and one
+sentence: a tab of this kit can run this command on their computer whenever it wants,
+with their logins, for instance their `gh` login; only the parts in braces change, and
+they must match their rule. An item holding a space or a quote is quoted, so one item
+cannot read as two, and what would not show or would turn the line around (control and
+format characters) is written out. A tab's `command:<name>` reads in plain words among
+its permissions.
+
+`kit_inspect` lists them as `declaredCommands`: `[{ name, description, argv, args,
+timeoutSeconds }]` for this OS, the argv verbatim, placeholders included, and `args` the
+rules of the placeholders of that argv. A command with no argv for this OS is left out
+there, and answers `not_found`.
+
+For a GitHub-installed kit, what a workspace accepted is stored in its `kits[].granted`
+as the pseudo permission `commands:<hash>`, exactly like `hooks:<hash>`: the first 16 hex
+of the SHA-256 of the canonical list for this OS, the JSON
+`[{"name":…,"run":[…],"args":{"<arg>":"<pattern>"}}]` sorted by name, `args` by arg. It
+covers what can run: a reworded description or another timeout asks nothing, and a wider
+rule asks again. A manifest cannot ask for it, and no tab holds it.
+
+**A GitHub kit whose commands changed must be accepted again before its tabs can run
+any**, whatever else they hold: `command.run` answers `denied` until then, the kit reads
+« to review », and the rest of the kit works as it did, its plugin included. Accepting
+stores the hash of what the person was shown. Rust compares it with the kit as it is at
+each call, so an update cannot slip a new argv under the grant given for another.
+
+A **linked folder** kit is exempt and stores nothing, as for hooks: the person is writing
+it, it is read live, and every edit would ask again. The view says so. A kit with no
+command for this OS stores nothing, and asks nothing.
+
+Three limits to know. **A kit can declare a shell**: `["sh", "-c", "{x}"]` with a rule of
+`.*` is a valid manifest, and so is `node -e`. Hangar does not keep a list of such
+programs, which could never be whole: the person reads the argv before accepting, and that
+is what the view is for. The hash covers **the list, not the programs it names**: a `gh`
+that changes on the machine asks nothing. And the hash is **for this OS**: a kit whose
+argv changed only for another system asks nothing here.
 
 ## A kit's data folder
 
@@ -687,11 +831,19 @@ A workspace in `state.json` lists the kits enabled on it:
 kits?: { id: string; granted: string[] }[]
 ```
 
-`granted` is the tab permissions the person accepted, and `hooks:<hash>` for a
-GitHub kit's accepted hooks. `state.json` is edited by hand, so it is read through
+`granted` is the tab permissions the person accepted, and `hooks:<hash>` and
+`commands:<hash>` for a GitHub kit's accepted hooks and commands. `state.json` is edited by hand, so it is read through
 `workspaceKits(ws)` (`src/lib/kits.ts`): an entry that is not an object with a
 valid kit id and a `granted` array is no kit, a duplicate id counts once, and a
 permission Hangar does not know is never granted. A missing `kits` is no kit.
+
+A kit can also be enabled on **all workspaces at once** from Settings › Kits, accepted
+once for all of them: `kitsEverywhere` in the settings, of the same shape. What decides
+anything about a workspace's kits is `effectiveKits(ws, settings)`: its own entries, then
+the others of `kitsEverywhere`, a workspace's own entry winning for its grants. So its
+panes load such a kit, and its tabs open and hold what was accepted, the pseudo
+permissions included. The workspace's Kits dialog shows it on, its switch locked, and
+says it is managed in Settings › Kits.
 
 Nothing is ever written into a workspace's project folder: kits live in
 `~/.hangar/kits/` or where they were linked from, their data in
@@ -703,24 +855,25 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 
 | Command                      | Wrapper                      | Answers                                                                                   |
 | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>`, null without hooks), `hooksConsent`. |
+| `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>`, null without hooks), `hooksConsent`, `commandsPermission` (`commands:<hash>` for this OS, null without commands). |
 | `kit_add_folder(path)`       | `kitAddFolder(path)`         | `KitInfo`. `path` absolute, holding a valid kit.                                           |
 | `kit_add_git(url)`           | `kitAddGit(url)`             | `KitInfo`. `url` a GitHub link as above.                                                   |
 | `kit_remove(id)`             | `kitRemove(id)`              | Nothing. Deletes only a clone Hangar made.                                                 |
 | `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit.                  |
 | `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`.                                                                                 |
-| `kit_inspect(id)`            | `kitInspect(id)`             | What it brings: `plugin` (`{ name, dir }`), `skills`, `commands`, `agents`, `mcpServers` (the plugin's names, unprefixed), `hooks` (`[{ event, matcher, command }]`), `hooksPermission`, `tabs`, `setup` (this OS's steps, with `command`). |
+| `kit_inspect(id)`            | `kitInspect(id)`             | What it brings: `plugin` (`{ name, dir }`), `skills`, `commands`, `agents`, `mcpServers` (the plugin's names, unprefixed), `hooks` (`[{ event, matcher, command }]`), `hooksPermission`, `tabs`, `setup` (this OS's steps, with `command`), `declaredCommands` (`[{ name, description, argv, args, timeoutSeconds }]`, this OS's, verbatim; `commands` is the plugin's slash commands), `commandsPermission`. |
 | `kit_setup_status(id)`       | `kitSetupStatus(id)`         | `[{ id, title, description?, command, sha256, done }]`.                                   |
 | `kit_setup_mark(id, stepId)` | `kitSetupMark(id, stepId)`   | The same list, after recording the step.                                                  |
 | `kit_data_read(kit, path)`   | through `KitTabView`         | The file's text. Refuses with `{ code, message }`.                                        |
 | `kit_data_write(kit, path, text)` | through `KitTabView`    | Nothing. Refuses with `{ code, message }`.                                                |
 | `kit_loopback_fetch(port, path, method?, body?, timeoutMs?)` | through `KitTabView` | `{ status, text }`. Refuses with `{ code, message }`.                        |
+| `kit_command_run(kit, name, args, cwd, accepted)` | through `KitTabView` | `{ exitCode, stdout, stderr, timedOut, truncated }`. Refuses with `{ code, message }`. |
 
 Skills are listed from `skills/<name>/SKILL.md`, commands and agents from the
 `.md` files under `commands/` and `agents/` (a subfolder joins with `:`), in the
 plugin's folder.
 
-Errors are English strings, except those three's, whose `code` a tab tells apart.
+Errors are English strings, except those four's, whose `code` a tab tells apart.
 `kits:changed` (`onKitsChanged(fn)`) is sent, with
 no payload, whenever `kits_list` may answer something new: a kit added,
 updated, removed or checked, or the index or an installed kit's manifest

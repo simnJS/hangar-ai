@@ -16,7 +16,8 @@ import type { Settings, Workspace, WorkspaceKit } from "../types";
 
 /**
  * What a kit's tab may ask Hangar for, by name. Closed: beside these, only
- * `loopback:<port>` (`kitLoopbackPort`), and any other name is a manifest error.
+ * `loopback:<port>` (`kitLoopbackPort`) and `command:<name>` (`kitCommandName`),
+ * and any other name is a manifest error.
  */
 export const KIT_PERMISSIONS = [
   "workspace.read",
@@ -34,7 +35,10 @@ export type KitNamedPermission = (typeof KIT_PERMISSIONS)[number];
 /** This tab may talk to the local server on that port, through Hangar. */
 export type KitLoopbackPermission = `loopback:${number}`;
 
-export type KitPermission = KitNamedPermission | KitLoopbackPermission;
+/** This tab may run that command its kit declares (`command.run`). */
+export type KitCommandPermission = `command:${string}`;
+
+export type KitPermission = KitNamedPermission | KitLoopbackPermission | KitCommandPermission;
 
 /**
  * What a workspace stores to say it accepted a kit's hooks: `hooks:` and the
@@ -43,8 +47,14 @@ export type KitPermission = KitNamedPermission | KitLoopbackPermission;
  */
 export type KitHooksGrant = `hooks:${string}`;
 
+/**
+ * The same for the commands a kit's tabs may run, for this OS (kits/commands.rs):
+ * without the current one, a GitHub kit's tabs run none of them.
+ */
+export type KitCommandsGrant = `commands:${string}`;
+
 /** What a workspace's `granted` may hold. */
-export type KitGrant = KitPermission | KitHooksGrant;
+export type KitGrant = KitPermission | KitHooksGrant | KitCommandsGrant;
 
 /** Below this, a port belongs to the system. */
 export const KIT_LOOPBACK_MIN_PORT = 1024;
@@ -66,23 +76,43 @@ export function kitLoopbackPort(name: unknown): number | null {
   return isKitLoopbackPort(port) ? port : null;
 }
 
+/** How a declared command is named. `valid_command_name` in kits/manifest.rs holds the same rule. */
+export const isKitCommandName = (name: unknown): name is string =>
+  typeof name === "string" && /^[a-z][a-z0-9-]*$/.test(name);
+
+/** The name in a `command:<name>` permission; null for anything else. */
+export function kitCommandName(permission: unknown): string | null {
+  if (typeof permission !== "string" || !permission.startsWith("command:")) return null;
+  const name = permission.slice("command:".length);
+  return isKitCommandName(name) ? name : null;
+}
+
 export const isKitPermission = (name: unknown): name is KitPermission =>
   (typeof name === "string" && (KIT_PERMISSIONS as readonly string[]).includes(name)) ||
-  kitLoopbackPort(name) !== null;
+  kitLoopbackPort(name) !== null ||
+  kitCommandName(name) !== null;
 
 export const isKitHooksGrant = (name: unknown): name is KitHooksGrant =>
   typeof name === "string" && /^hooks:[0-9a-f]{16}$/.test(name);
 
-/** The permissions among `names`, once each: the closed set's order, then the ports in order. */
+export const isKitCommandsGrant = (name: unknown): name is KitCommandsGrant =>
+  typeof name === "string" && /^commands:[0-9a-f]{16}$/.test(name);
+
+/** The permissions among `names`, once each: the closed set's order, then the ports, then the commands, in order. */
 export function kitPermissionsIn(names: Iterable<string>): KitPermission[] {
   const known = new Set(names);
   const ports = [...known]
     .map(kitLoopbackPort)
     .filter((port): port is number => port !== null)
     .sort((a, b) => a - b);
+  const commands = [...known]
+    .map(kitCommandName)
+    .filter((name): name is string => name !== null)
+    .sort();
   return [
     ...KIT_PERMISSIONS.filter((permission) => known.has(permission)),
     ...ports.map((port): KitLoopbackPermission => `loopback:${port}`),
+    ...commands.map((name): KitCommandPermission => `command:${name}`),
   ];
 }
 
@@ -107,6 +137,24 @@ export interface KitSetupStep {
   title: string;
   description?: string;
   run: KitSetupRun;
+}
+
+/** What a placeholder of a declared command may hold. */
+export interface KitCommandArg {
+  /** The rule, as the manifest writes it. A value has to match it whole. */
+  pattern: string;
+  description?: string;
+}
+
+/** A command a kit's tabs may run, as `kit_inspect` lists it for this OS. */
+export interface KitDeclaredCommand {
+  name: string;
+  description: string;
+  /** The program, then the literal items and the `{placeholders}`, verbatim. */
+  argv: string[];
+  /** The rule of each placeholder of that argv. */
+  args: Record<string, KitCommandArg>;
+  timeoutSeconds: number;
 }
 
 /** `hangar-kit.json`, as Rust read and checked it: paths are normalized. */
@@ -163,6 +211,8 @@ export interface KitInfo {
    * added since that is asked, and an older one once an update changed them.
    */
   hooksConsent?: boolean;
+  /** `commands:<hash>` of what its tabs may run on this OS; null without any. */
+  commandsPermission?: string | null;
 }
 
 /** What a plugin runs by itself, exactly as it writes it. */
@@ -188,6 +238,10 @@ export interface KitInspection {
   tabs: KitTab[];
   /** The steps that have a command for this OS. */
   setup: { id: string; title: string; description?: string; command: string }[];
+  /** What its tabs may run, for this OS. `commands` above is its plugin's slash commands. */
+  declaredCommands?: KitDeclaredCommand[];
+  /** `commands:<hash>` of that very list: what accepting it stores. */
+  commandsPermission?: string | null;
 }
 
 /** A setup step for this machine's OS, and whether it ran with this very command. */
@@ -236,7 +290,7 @@ const KIT_ID = /^[a-z0-9-]{2,40}$/;
  * The kits enabled on a workspace, read defensively: state.json is a file
  * people edit, and an entry that is not `{ id, granted: string[] }` with a
  * kit id is no kit. A permission Hangar does not know is never granted; the
- * pseudo permission of accepted hooks is kept with the others.
+ * pseudo permissions of accepted hooks and commands are kept with the others.
  */
 export function workspaceKits(ws: Pick<Workspace, "kits"> | null | undefined): WorkspaceKit[] {
   return readKitEntries(ws?.kits);
@@ -285,7 +339,9 @@ function readKitEntries(kits: unknown): WorkspaceKit[] {
     if (typeof id !== "string" || !KIT_ID.test(id) || seen.has(id)) continue;
     if (!Array.isArray(granted)) continue;
     seen.add(id);
-    const kept = granted.filter((name) => isKitPermission(name) || isKitHooksGrant(name));
+    const kept = granted.filter(
+      (name) => isKitPermission(name) || isKitHooksGrant(name) || isKitCommandsGrant(name),
+    );
     out.push({ id, granted: [...new Set<string>(kept)] });
   }
   return out;
@@ -309,6 +365,19 @@ export function kitHooksGrant(
 ): KitHooksGrant | null {
   if (kit.source.kind !== "git" || !kit.hooksConsent) return null;
   return isKitHooksGrant(kit.hooksPermission) ? kit.hooksPermission : null;
+}
+
+/**
+ * What a workspace has to hold for a kit's tabs to run its commands; null when
+ * nothing has to be held. As for hooks, only a GitHub kit is asked: a linked
+ * folder is the person's own, read live. No kit predates this, as commands are
+ * new, so every GitHub kit that has some is asked.
+ */
+export function kitCommandsGrant(
+  kit: Pick<KitInfo, "source" | "commandsPermission">,
+): KitCommandsGrant | null {
+  if (kit.source.kind !== "git") return null;
+  return isKitCommandsGrant(kit.commandsPermission) ? kit.commandsPermission : null;
 }
 
 export interface PaneKits {
@@ -387,6 +456,9 @@ export function kitIssueNotes(
 /** How `KIT_METHODS` writes the permission of a call that names its port. */
 export const KIT_LOOPBACK_PATTERN = "loopback:<port>";
 
+/** How `KIT_METHODS` writes the permission of a call that names its command. */
+export const KIT_COMMAND_PATTERN = "command:<name>";
+
 /** The method a tab calls, and the permission it needs. */
 export const KIT_METHODS = {
   "workspace.info": "workspace.read",
@@ -396,9 +468,10 @@ export const KIT_METHODS = {
   "data.read": "data.read",
   "data.write": "data.write",
   "loopback.fetch": KIT_LOOPBACK_PATTERN,
+  "command.run": KIT_COMMAND_PATTERN,
   "preview.show": "preview.show",
   notify: "notify",
-} as const satisfies Record<string, KitNamedPermission | typeof KIT_LOOPBACK_PATTERN>;
+} as const satisfies Record<string, KitNamedPermission | typeof KIT_LOOPBACK_PATTERN | typeof KIT_COMMAND_PATTERN>;
 
 export type KitMethod = keyof typeof KIT_METHODS;
 
@@ -448,7 +521,8 @@ export interface KitEventMessage {
 
 /**
  * Whether a tab granted `granted` may call `method`; unknown methods never.
- * `loopback.fetch` needs the permission of the very port its `params` name.
+ * `loopback.fetch` needs the permission of the very port its `params` name, and
+ * `command.run` that of the very command.
  */
 export function kitMayCall(method: string, granted: readonly string[], params?: unknown): boolean {
   if (!Object.prototype.hasOwnProperty.call(KIT_METHODS, method)) return false;
@@ -456,6 +530,10 @@ export function kitMayCall(method: string, granted: readonly string[], params?: 
   if (permission === KIT_LOOPBACK_PATTERN) {
     const port = (params as { port?: unknown } | null | undefined)?.port;
     return isKitLoopbackPort(port) && granted.includes(`loopback:${port}`);
+  }
+  if (permission === KIT_COMMAND_PATTERN) {
+    const name = (params as { name?: unknown } | null | undefined)?.name;
+    return isKitCommandName(name) && granted.includes(`command:${name}`);
   }
   return granted.includes(permission);
 }

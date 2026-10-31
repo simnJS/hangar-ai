@@ -6,7 +6,14 @@ import { useT, type Translator } from "../../i18n";
 import { getPaneActivity, useAgentsIn } from "../../lib/agentState";
 import { modelRoots } from "../../lib/control";
 import { gitWorktreeList } from "../../lib/git";
-import { createKitHost, kitPanes, type KitHost, type KitHostDeps, type KitLoopbackAnswer } from "../../lib/kitApi";
+import {
+  createKitHost,
+  kitPanes,
+  type KitCommandAnswer,
+  type KitHost,
+  type KitHostDeps,
+  type KitLoopbackAnswer,
+} from "../../lib/kitApi";
 import { askRootGrant, kitTabState, useInstalledKits } from "../../lib/kitTabs";
 import { MAX_MODEL_BYTES, modelFormatOf } from "../../lib/modelFiles";
 import { grantModelRoots } from "../../lib/modelHost";
@@ -16,11 +23,19 @@ import { checkPreviewFile, previewInspect } from "../../lib/preview";
 import { bridgeEnqueue } from "../../lib/ipc";
 import { isMainWindow } from "../../lib/windows";
 import { useStore } from "../../store";
-import { kitLoopbackPort, type KitNamedPermission, type KitPermission } from "../../lib/kits";
+import {
+  kitCommandName,
+  kitLoopbackPort,
+  withEffectiveKits,
+  type KitNamedPermission,
+  type KitPermission,
+} from "../../lib/kits";
 import type { Workspace } from "../../types";
 
 /** What a tab was granted, for its bar's hint. */
 function permissionSaid(t: Translator, permission: KitPermission): string {
+  const command = kitCommandName(permission);
+  if (command !== null) return t("kitsTab.permission.command", { name: command });
   const port = kitLoopbackPort(permission);
   // As text: `t` writes a number the way the language does, and a port has no
   // thousands.
@@ -49,9 +64,12 @@ export function KitTabView({ entry, shown }: { entry: OpenKitTab; shown: boolean
   const { state } = useStore();
   const installed = useInstalledKits();
   const ws = state.workspaces.find((candidate) => candidate.id === entry.workspaceId) ?? null;
-  const tab = kitTabState(ws, installed, entry.kitId, entry.tabId);
+  // A kit enabled on all workspaces is this workspace's too, with what was
+  // accepted for all of them, pseudo permissions included.
+  const tab = kitTabState(ws && withEffectiveKits(ws, state.settings), installed, entry.kitId, entry.tabId);
   const kitName = tab.kind === "ready" ? tab.choice.kitName : entry.kitId;
   const permissions = tab.kind === "ready" ? tab.choice.permissions : [];
+  const commandsAccepted = tab.kind === "ready" ? tab.choice.commandsAccepted : null;
   const said = permissions.map((permission) => permissionSaid(t, permission)).join(", ");
 
   return (
@@ -87,6 +105,7 @@ export function KitTabView({ entry, shown }: { entry: OpenKitTab; shown: boolean
           url={tab.url}
           kitName={kitName}
           permissions={permissions}
+          commandsAccepted={commandsAccepted}
         />
       ) : (
         <div className="model-panel__stage preview-stage">
@@ -163,6 +182,7 @@ function liveDeps(workspaces: () => Workspace[]): KitHostDeps {
     readData: (kit, path) => invoke<string>("kit_data_read", { kit, path }),
     writeData: (kit, path, text) => invoke<void>("kit_data_write", { kit, path, text }),
     loopbackFetch: (call) => invoke<KitLoopbackAnswer>("kit_loopback_fetch", { ...call }),
+    runCommand: (call) => invoke<KitCommandAnswer>("kit_command_run", { ...call }),
     now: () => Date.now(),
   };
 }
@@ -173,12 +193,14 @@ function KitFrame({
   url,
   kitName,
   permissions,
+  commandsAccepted,
 }: {
   entry: OpenKitTab;
   workspace: Workspace;
   url: string;
   kitName: string;
   permissions: KitPermission[];
+  commandsAccepted: string | null;
 }) {
   const t = useT();
   const { snapshot } = useStore();
@@ -188,8 +210,8 @@ function KitFrame({
   const [left, setLeft] = useState(false);
 
   // What the host reads at each call: the tab's grants and kit as they are now.
-  const now = useRef({ permissions, kitName });
-  now.current = { permissions, kitName };
+  const now = useRef({ permissions, kitName, commandsAccepted });
+  now.current = { permissions, kitName, commandsAccepted };
 
   useEffect(() => {
     const host = createKitHost(
@@ -199,6 +221,7 @@ function KitFrame({
         kitName: () => now.current.kitName,
         workspace: () => snapshot().workspaces.find((ws) => ws.id === entry.workspaceId) ?? null,
         permissions: () => now.current.permissions,
+        commandsAccepted: () => now.current.commandsAccepted,
       },
       liveDeps(() => snapshot().workspaces),
     );

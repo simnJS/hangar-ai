@@ -115,6 +115,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rust-embed = "8.13"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 sha2 = "0.11"
+# The rule a kit's declared command gives each value (kits/manifest.rs). Already
+# in the tree underneath other crates; matches in linear time, whatever a kit
+# writes.
+regex = "1"
 subtle = "2.6"
 # Kits — see kits/manifest.rs: a kit's version, and the Hangar versions it
 # works with (`"hangar": ">=1.6.0"`). Already compiled for tauri at this

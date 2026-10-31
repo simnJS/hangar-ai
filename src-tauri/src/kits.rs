@@ -14,6 +14,7 @@
 //!
 //! The contract the other parts build on is written out in docs/kits.md.
 
+pub mod commands;
 pub mod data;
 mod hooks;
 pub mod loopback;
@@ -49,6 +50,12 @@ impl TabError {
     pub const NOT_FOUND: &'static str = "not_found";
     pub const UNREACHABLE: &'static str = "unreachable";
     pub const FAILED: &'static str = "failed";
+    pub const DENIED: &'static str = "denied";
+    pub const UNAVAILABLE: &'static str = "unavailable";
+    /// A value of `command.run` that is missing, or does not fit its rule.
+    pub const BAD_ARGS: &'static str = "bad_args";
+    /// Too many of a kit's commands are running.
+    pub const BUSY: &'static str = "busy";
 
     pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         TabError {
@@ -274,20 +281,29 @@ pub struct KitInfo {
     pub hooks_permission: Option<String>,
     /// Whether a workspace has to have accepted those hooks (store.rs).
     pub hooks_consent: bool,
+    /// `commands:<hash>` of what its tabs may run on this OS (commands.rs);
+    /// null without any, or when the kit cannot be used.
+    pub commands_permission: Option<String>,
 }
 
 fn info(store: &Store, entry: Entry) -> KitInfo {
-    let (manifest, error, hooks_permission) = match store.loaded(&entry) {
+    let (manifest, error, hooks_permission, commands_permission) = match store.loaded(&entry) {
         Ok(kit) => {
             let hooks_permission = kit.hooks_permission();
-            (Some(kit.manifest), None, hooks_permission)
+            let commands_permission = commands::grant(&kit.manifest, manifest::current_os());
+            (
+                Some(kit.manifest),
+                None,
+                hooks_permission,
+                commands_permission,
+            )
         }
         Err(why) => {
             // Read on its own, to say what it is even when it cannot be used.
             let manifest = manifest::read(Path::new(&entry.dir))
                 .ok()
                 .filter(|m| m.id == entry.id);
-            (manifest, Some(why), None)
+            (manifest, Some(why), None, None)
         }
     };
     KitInfo {
@@ -301,6 +317,7 @@ fn info(store: &Store, entry: Entry) -> KitInfo {
         error,
         hooks_permission,
         hooks_consent: entry.hooks_consent,
+        commands_permission,
     }
 }
 
@@ -556,6 +573,37 @@ mod tests {
         let sent = serde_json::to_value(of("hooked")).unwrap();
         assert!(sent["hooksPermission"].is_string());
         assert_eq!(sent["hooksConsent"], false);
+    }
+
+    #[test]
+    fn the_list_says_what_a_workspace_would_accept_for_a_kits_commands() {
+        let home = Folder::new("list-commands");
+        let store = Store::at(home.root.join("kits"));
+        let quiet = Folder::new("list-commands-quiet");
+        quiet.manifest(".", "quiet", "1.0.0");
+        let runner = Folder::new("list-commands-runner");
+        runner.file(
+            manifest::FILE,
+            &serde_json::json!({
+                "schema": 1, "id": "runner", "name": "Runner", "version": "1.0.0", "description": "d",
+                "commands": { "view": { "description": "d", "run": ["gh", "run", "view"] } }
+            })
+            .to_string(),
+        );
+        store.add_folder(&quiet.root.to_string_lossy(), 1).unwrap();
+        store.add_folder(&runner.root.to_string_lossy(), 1).unwrap();
+
+        let listed = list(&store).unwrap();
+        let of = |id: &str| listed.iter().find(|kit| kit.id == id).unwrap();
+        assert_eq!(of("quiet").commands_permission, None);
+        let permission = of("runner").commands_permission.as_deref().unwrap();
+        assert!(permission.starts_with("commands:"), "{permission}");
+        let sent = serde_json::to_value(of("runner")).unwrap();
+        assert_eq!(sent["commandsPermission"], permission);
+        assert_eq!(
+            sent["manifest"]["commands"]["view"]["timeoutSeconds"],
+            manifest::COMMAND_TIMEOUT_SECONDS
+        );
     }
 
     #[test]

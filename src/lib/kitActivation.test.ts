@@ -6,12 +6,16 @@ import { KIT_PERMISSIONS, type KitInfo, type KitInspection, type KitTab } from "
 import {
   PERMISSION_LABEL,
   acceptedGrants,
+  commandsToAccept,
   disableKit,
   enableKit,
   hooksToAccept,
+  kitArgvLine,
   kitName,
   kitRequested,
+  kitRuleText,
   kitState,
+  onlyCommandsToAccept,
   panesToRestart,
   permissionDiff,
   permissionLabel,
@@ -214,6 +218,135 @@ describe("hooks, in the permission diff", () => {
   });
 });
 
+const COMMANDS = "commands:0123456789abcdef";
+const OTHER_COMMANDS = "commands:fedcba9876543210";
+
+const commandKit = (commandsPermission: string | null, source: KitInfo["source"] = { kind: "git", url: "https://github.com/o/kits" }): KitInfo => ({
+  ...kit("1.0.0", [tab(["command:ci-run"])]),
+  source,
+  commandsPermission,
+});
+
+const FOLDER: KitInfo["source"] = { kind: "folder", path: "D:\\k" };
+
+describe("a kit's commands, in the permission diff", () => {
+  it("says what a command's permission lets the tab do, by its name, in both languages", () => {
+    const say = (locale: "en" | "fr") => (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
+      translate(locale, key, params);
+    expect(permissionLabel(say("en"), "command:ci-run")).toBe(
+      "run the command ci-run on your computer, with your logins",
+    );
+    expect(permissionLabel(say("fr"), "command:ci-run")).toBe(
+      "lancer la commande ci-run sur votre ordinateur, avec vos identifiants",
+    );
+  });
+
+  it("merges the tabs' commands once each, after everything else", () => {
+    expect(requestedPermissions([tab(["command:b", "notify"]), tab(["command:a", "loopback:8765", "command:b"])])).toEqual([
+      "notify",
+      "loopback:8765",
+      "command:a",
+      "command:b",
+    ]);
+  });
+
+  it("asks for a GitHub kit's commands beside its tabs' permissions", () => {
+    expect(kitRequested(commandKit(COMMANDS))).toEqual(["command:ci-run", COMMANDS]);
+  });
+
+  it("asks nothing for a kit without commands, or a linked folder", () => {
+    expect(kitRequested(commandKit(null))).toEqual(["command:ci-run"]);
+    expect(kitRequested(commandKit(COMMANDS, FOLDER))).toEqual(["command:ci-run"]);
+  });
+
+  it("splits them like any permission: the very ones accepted are kept, others are added", () => {
+    const requested = ["command:ci-run" as const, COMMANDS as `commands:${string}`];
+    expect(permissionDiff(requested, ["command:ci-run", COMMANDS])).toEqual({ kept: requested, added: [] });
+    const changed = permissionDiff(requested, ["command:ci-run", OTHER_COMMANDS]);
+    expect(changed).toEqual({ kept: ["command:ci-run"], added: [COMMANDS] });
+    expect(commandsToAccept(changed)).toBe(true);
+    expect(hooksToAccept(changed)).toBe(false);
+    expect(commandsToAccept(permissionDiff(["notify"], []))).toBe(false);
+    expect(commandsToAccept(permissionDiff([HOOKS as `hooks:${string}`], []))).toBe(false);
+  });
+
+  it("tells a kit waiting for its commands alone from one waiting for more", () => {
+    const commands = COMMANDS as `commands:${string}`;
+    expect(onlyCommandsToAccept(permissionDiff([commands], []))).toBe(true);
+    expect(onlyCommandsToAccept(permissionDiff(["notify", commands], ["notify"]))).toBe(true);
+    expect(onlyCommandsToAccept(permissionDiff(["notify", commands], []))).toBe(false);
+    expect(onlyCommandsToAccept(permissionDiff([HOOKS as `hooks:${string}`, commands], []))).toBe(false);
+    expect(onlyCommandsToAccept(permissionDiff(["notify"], ["notify"]))).toBe(false);
+  });
+
+  it("shows a workspace that accepted other commands, or none, as to review", () => {
+    const entry = (granted: string[]) => ({ id: "hello-kit", granted });
+    const requested = kitRequested(commandKit(COMMANDS));
+    expect(kitState(entry(["command:ci-run", COMMANDS]), requested)).toBe("on");
+    expect(kitState(entry(["command:ci-run", OTHER_COMMANDS]), requested)).toBe("review");
+    expect(kitState(entry(["command:ci-run"]), requested)).toBe("review");
+    // A linked folder is on whatever its commands became.
+    expect(kitState(entry(["command:ci-run"]), kitRequested(commandKit(COMMANDS, FOLDER)))).toBe("on");
+  });
+
+  it("stores what the person was shown: a GitHub kit's hash, a linked folder's nothing, no commands nothing", () => {
+    const shown: Pick<KitInspection, "tabs" | "hooksPermission" | "commandsPermission"> = {
+      tabs: [tab(["command:ci-run"])],
+      hooksPermission: HOOKS,
+      commandsPermission: COMMANDS,
+    };
+    expect(acceptedGrants(commandKit(COMMANDS), shown)).toEqual(["command:ci-run", HOOKS, COMMANDS]);
+    // The kit changed under the open view: what was accepted is what was seen.
+    expect(acceptedGrants(commandKit(OTHER_COMMANDS), shown)).toEqual(["command:ci-run", HOOKS, COMMANDS]);
+    expect(acceptedGrants(commandKit(COMMANDS, FOLDER), shown)).toEqual(["command:ci-run"]);
+    expect(acceptedGrants(commandKit(null), { ...shown, hooksPermission: null, commandsPermission: null })).toEqual([
+      "command:ci-run",
+    ]);
+  });
+
+  it("stays to review after accepting commands the kit has since changed", () => {
+    const seen = acceptedGrants(commandKit(COMMANDS), { tabs: [tab(["command:ci-run"])], commandsPermission: COMMANDS });
+    const stored = enableKit([], "hello-kit", seen);
+    expect(stored).toEqual([{ id: "hello-kit", granted: ["command:ci-run", COMMANDS] }]);
+    expect(kitState(stored[0], kitRequested(commandKit(OTHER_COMMANDS)))).toBe("review");
+  });
+
+  it("tells an update that changes the commands apart from one that does not", () => {
+    expect(updateOutcome(commandKit(COMMANDS), commandKit(COMMANDS)).newPermissions).toEqual([]);
+    expect(updateOutcome(commandKit(COMMANDS), commandKit(OTHER_COMMANDS)).newPermissions).toEqual([OTHER_COMMANDS]);
+    expect(updateOutcome(commandKit(null), commandKit(COMMANDS)).newPermissions).toEqual([COMMANDS]);
+  });
+});
+
+describe("an argv, as the person reads it", () => {
+  it("is written as it is, placeholders included", () => {
+    expect(kitArgvLine(["gh", "run", "view", "{run}", "--repo={repo}", "--json", "status"])).toBe(
+      "gh run view {run} --repo={repo} --json status",
+    );
+    expect(kitArgvLine(["docker", "ps", "--format", "{{.Names}}", "C:\\tools"])).toBe(
+      "docker ps --format {{.Names}} C:\\tools",
+    );
+  });
+
+  it("does not let one item read as two, or two as one", () => {
+    expect(kitArgvLine(["gh", "run view"])).toBe('gh "run view"');
+    expect(kitArgvLine(["gh", "", "x"])).toBe('gh "" x');
+    expect(kitArgvLine(["gh", 'a"b'])).toBe('gh "a\\"b"');
+    expect(kitArgvLine(["gh", "it's"])).toBe('gh "it\'s"');
+    expect(kitArgvLine(["gh", "a\nb"])).toBe('gh "a\\nb"');
+  });
+
+  it("writes out what would not show, or would turn the line around", () => {
+    expect(kitArgvLine(["gh", "safe\u202Emr -"])).toBe('gh "safe\\u{202e}mr -"');
+    expect(kitArgvLine(["gh\u200B", "x"])).toBe('"gh\\u{200b}" x');
+    expect(kitRuleText("[a-z]+\u202E")).toBe("[a-z]+\\u{202e}");
+    expect(kitRuleText("^[\\w.-]+/[\\w.-]+$")).toBe("^[\\w.-]+/[\\w.-]+$");
+  });
+});
+
+/** French typesetting puts no-break spaces before `;` and `:`; the strings are written with plain ones. */
+const plainSpaces = (text: string) => text.replace(/[  ]/g, " ");
+
 describe("the activation view", () => {
   const load = () => import("../components/KitActivation");
   const hooks = [
@@ -231,7 +364,11 @@ describe("the activation view", () => {
     setup: [],
   };
 
-  async function draw(locale: "en" | "fr", info: KitInfo, patch: { entry?: { id: string; granted: string[] }; shown?: KitInspection } = {}) {
+  async function draw(
+    locale: "en" | "fr",
+    info: KitInfo,
+    patch: { entry?: { id: string; granted: string[] }; shown?: KitInspection; everywhere?: boolean } = {},
+  ) {
     const { KitActivationView } = await load();
     const noop = () => undefined;
     return renderToStaticMarkup(
@@ -242,6 +379,7 @@ describe("the activation view", () => {
         steps: [],
         entry: patch.entry,
         workspaceName: "Studio",
+        everywhere: patch.everywhere,
         canRun: true,
         os: "windows",
         running: null,
@@ -310,6 +448,143 @@ describe("the activation view", () => {
     expect(out).toContain(">Close<");
     expect(out).not.toContain("Accept what changed");
     expect(out).not.toContain("stays out");
+  });
+
+  describe("a kit's commands", () => {
+    const ciRun = {
+      name: "ci-run",
+      description: "The state of a CI run.",
+      argv: ["gh", "run", "view", "{run}", "--repo={repo}"],
+      args: {
+        repo: { pattern: "[\\w.-]+/[\\w.-]+" },
+        run: { pattern: "[0-9]+", description: "The run's number" },
+      },
+      timeoutSeconds: 30,
+    };
+    const shown: KitInspection = {
+      ...inspection,
+      hooks: [],
+      hooksPermission: null,
+      tabs: [tab(["command:ci-run"])],
+      declaredCommands: [ciRun],
+      commandsPermission: COMMANDS,
+    };
+
+    it("shows each command verbatim, in the setup command's block, with its sentence and each rule", async () => {
+      const out = await draw("en", commandKit(COMMANDS), { shown });
+      expect(out).toContain("Commands its tabs can run");
+      expect(out).toContain("The state of a CI run.");
+      expect(out).toContain('<pre class="kit-step__cmd"');
+      expect(out).toContain(">gh run view {run} --repo={repo}</pre>");
+      expect(out).toContain(
+        "A tab of this kit can run this command on your computer whenever it wants, with your logins, for instance your gh login; only the parts in braces change, and they must match their rule.",
+      );
+      // The rule sits with its placeholder, and they stay as written.
+      expect(out).toContain("<code>{run}</code></dt><dd><code>[0-9]+</code> The run&#x27;s number</dd>");
+      expect(out).toContain("<code>{repo}</code></dt><dd><code>[\\w.-]+/[\\w.-]+</code></dd>");
+    });
+
+    it("says it in French, with accents", async () => {
+      const out = plainSpaces(await draw("fr", commandKit(COMMANDS), { shown }));
+      expect(out).toContain("Commandes que ses onglets peuvent lancer");
+      expect(out).toContain(
+        "Un onglet de ce kit peut lancer cette commande sur votre ordinateur quand il le veut, avec vos identifiants, par exemple votre connexion gh ; seules les parties entre accolades changent, et elles doivent respecter leur règle.",
+      );
+      expect(out).toContain("lancer la commande ci-run sur votre ordinateur, avec vos identifiants");
+    });
+
+    it("does not speak of parts that change when nothing does", async () => {
+      const fixed = { ...ciRun, argv: ["gh", "run", "list"], args: {} };
+      const out = await draw("en", commandKit(COMMANDS), { shown: { ...shown, declaredCommands: [fixed] } });
+      expect(out).toContain("whenever it wants, with your logins, for instance your gh login; nothing in it changes.");
+      expect(out).not.toContain("parts in braces");
+      expect(out).not.toContain("kit-step__rules");
+    });
+
+    it("says when its tabs run nothing", async () => {
+      const out = await draw("en", commandKit(null), { shown: { ...shown, declaredCommands: [], commandsPermission: null } });
+      expect(out).toContain("No command: its tabs run nothing on your computer.");
+      expect(out).not.toContain("whenever it wants");
+    });
+
+    it("counts them among what a kit brings", async () => {
+      const out = await draw("en", commandKit(COMMANDS), { shown: { ...shown, tabs: [] } });
+      expect(out).not.toContain(translate("en", "kitsManage.actNothing"));
+    });
+
+    it("marks commands that changed, and asks to accept them", async () => {
+      const out = await draw("en", commandKit(OTHER_COMMANDS), {
+        shown,
+        entry: { id: "hello-kit", granted: ["command:ci-run", COMMANDS] },
+      });
+      expect(out).toContain("Until you accept them, this kit&#x27;s tabs run none of them.");
+      expect(out).toContain("Accept what changed");
+      expect(out).toContain("kit-act__tag--new");
+    });
+
+    it("closes without asking once these very commands are accepted", async () => {
+      const out = await draw("en", commandKit(COMMANDS), {
+        shown,
+        entry: { id: "hello-kit", granted: ["command:ci-run", COMMANDS] },
+      });
+      expect(out).toContain(">Close<");
+      expect(out).toContain("Already accepted");
+      expect(out).not.toContain("run none of them");
+    });
+
+    it("does not ask about a linked folder's commands, and says they apply as they are edited", async () => {
+      const out = await draw("en", commandKit(OTHER_COMMANDS, FOLDER), {
+        shown,
+        entry: { id: "hello-kit", granted: ["command:ci-run"] },
+      });
+      expect(out).toContain("A linked folder is read live: what you change in these commands applies");
+      expect(out).toContain(">Close<");
+      expect(out).not.toContain("Accept what changed");
+    });
+  });
+
+  describe("on all workspaces", () => {
+    it("does not name a workspace when accepting holds for all of them", async () => {
+      const out = await draw("en", gitKit(HOOKS), { everywhere: true });
+      expect(out).toContain("On all workspaces");
+      expect(out).not.toContain("Studio");
+      expect(await draw("en", gitKit(HOOKS))).toContain("Studio");
+      expect(await draw("fr", gitKit(HOOKS), { everywhere: true })).toContain("Sur tous les workspaces");
+    });
+
+    const row = async (locale: "en" | "fr", info: KitInfo, granted: string[]) => {
+      const { KitEverywhereRow } = await load();
+      return renderToStaticMarkup(
+        createElement(KitEverywhereRow, {
+          t: (key, params) => translate(locale, key, params),
+          kit: info,
+          entry: { id: info.id, granted },
+        }),
+      );
+    };
+
+    it("shows the kit on, with its switch locked, and says where it is managed", async () => {
+      const out = await row("en", gitKit(HOOKS), ["panes.read", HOOKS]);
+      expect(out).toMatch(/<input[^>]*checked=""/);
+      expect(out).toMatch(/<input[^>]*disabled=""/);
+      expect(out).toContain('aria-label="Hello kit is enabled on all workspaces: change it in Settings › Kits"');
+      expect(out).toContain("Managed in Settings › Kits.");
+      expect(out).toContain(">On all workspaces<");
+      expect(out).not.toContain("<button");
+    });
+
+    it("says so in French", async () => {
+      const out = plainSpaces(await row("fr", gitKit(HOOKS), ["panes.read", HOOKS]));
+      expect(out).toContain('aria-label="Hello kit est activé sur tous les workspaces : modifiez-le dans Réglages › Kits"');
+      expect(out).toContain("Géré dans Réglages › Kits.");
+    });
+
+    it("says when it waits for a review, or cannot be used", async () => {
+      expect(await row("en", gitKit(OTHER_HOOKS), ["panes.read", HOOKS])).toContain("kit-act__tag--new");
+      const broken = await row("en", kit("1.0.0", [], "its manifest is invalid"), []);
+      expect(broken).toContain("its manifest is invalid");
+      expect(broken).toContain(translate("en", "kitsManage.statusBroken"));
+    });
   });
 });
 

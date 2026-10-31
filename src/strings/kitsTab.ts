@@ -37,8 +37,25 @@ export const en = {
   "kitsTab.permission.data.read": "read this kit's own data",
   "kitsTab.permission.data.write": "write this kit's own data",
   "kitsTab.permission.loopback": "talk to the local server on port {port}",
+  "kitsTab.permission.command": "run the command {name}",
   "kitsTab.permission.preview.show": "open files in the preview",
   "kitsTab.permission.notify": "raise notifications",
+  // The activation view: what a kit's tabs may run on the computer.
+  "kitsTab.permCommand": "run the command {name} on your computer, with your logins",
+  "kitsTab.commands": "Commands its tabs can run",
+  "kitsTab.commandsNone": "No command: its tabs run nothing on your computer.",
+  "kitsTab.commandsChanged":
+    "These changed since they were accepted here. Until you accept them, this kit's tabs run none of them.",
+  "kitsTab.commandsLive":
+    "A linked folder is read live: what you change in these commands applies without being asked again.",
+  "kitsTab.commandHint":
+    "A tab of this kit can run this command on your computer whenever it wants, with your logins, for instance your gh login; only the parts in braces change, and they must match their rule.",
+  "kitsTab.commandHintFixed":
+    "A tab of this kit can run this command on your computer whenever it wants, with your logins, for instance your gh login; nothing in it changes.",
+  "kitsTab.everywhereReviewCommands":
+    "Changed commands to accept: this kit's tabs run none of them until then.",
+  "kitsTab.commandLabel": "Command {name}",
+  "kitsTab.commandRules": "What changes in the command {name}",
   // When the page cannot run.
   "kitsTab.loading": "Reading the kit…",
   "kitsTab.disabled": "This kit is no longer enabled on this workspace.",
@@ -75,8 +92,24 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsTab.permission.data.read": "lire les données propres à ce kit",
   "kitsTab.permission.data.write": "écrire les données propres à ce kit",
   "kitsTab.permission.loopback": "parler au serveur local sur le port {port}",
+  "kitsTab.permission.command": "lancer la commande {name}",
   "kitsTab.permission.preview.show": "ouvrir des fichiers dans l'aperçu",
   "kitsTab.permission.notify": "envoyer des notifications",
+  "kitsTab.permCommand": "lancer la commande {name} sur votre ordinateur, avec vos identifiants",
+  "kitsTab.commands": "Commandes que ses onglets peuvent lancer",
+  "kitsTab.commandsNone": "Aucune commande : ses onglets ne lancent rien sur votre ordinateur.",
+  "kitsTab.commandsChanged":
+    "Elles ont changé depuis qu'elles ont été acceptées ici. Tant que vous ne les acceptez pas, les onglets de ce kit n'en lancent aucune.",
+  "kitsTab.commandsLive":
+    "Un dossier lié est lu en direct : ce que vous changez dans ces commandes s'applique sans nouvelle question.",
+  "kitsTab.commandHint":
+    "Un onglet de ce kit peut lancer cette commande sur votre ordinateur quand il le veut, avec vos identifiants, par exemple votre connexion gh ; seules les parties entre accolades changent, et elles doivent respecter leur règle.",
+  "kitsTab.commandHintFixed":
+    "Un onglet de ce kit peut lancer cette commande sur votre ordinateur quand il le veut, avec vos identifiants, par exemple votre connexion gh ; rien n'y change.",
+  "kitsTab.everywhereReviewCommands":
+    "Commandes modifiées à accepter : les onglets de ce kit n'en lancent aucune d'ici là.",
+  "kitsTab.commandLabel": "Commande {name}",
+  "kitsTab.commandRules": "Ce qui change dans la commande {name}",
   "kitsTab.loading": "Lecture du kit…",
   "kitsTab.disabled": "Ce kit n'est plus activé sur ce workspace.",
   "kitsTab.disabledHint": "Réactive-le sur le workspace pour te servir de cet onglet.",

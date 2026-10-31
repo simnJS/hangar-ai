@@ -1,8 +1,11 @@
 import type { PaneActivity } from "./agentState";
 import {
+  isKitCommandName,
   isKitLoopbackPort,
+  kitCommandName,
   kitLoopbackPort,
   kitMayCall,
+  KIT_COMMAND_PATTERN,
   KIT_DATA_MAX_BYTES,
   KIT_DENIED,
   KIT_EVENTS,
@@ -48,6 +51,10 @@ export const KIT_ERRORS = {
   unavailable: "unavailable",
   /** Nothing answers on that local port, or not in time: an ordinary state for a tab. */
   unreachable: "unreachable",
+  /** A value of `command.run` that is missing, or does not fit its rule. */
+  badArgs: "bad_args",
+  /** Too many of the kit's commands are running. */
+  busy: "busy",
   /** It was tried, and failed. */
   failed: "failed",
 } as const;
@@ -103,8 +110,10 @@ export interface KitHostContext {
   kitName: () => string;
   /** The workspace the tab is shown in, as it is now; null once it is gone. */
   workspace: () => Workspace | null;
-  /** What the tab may call now (lib/kitTabs › effectivePermissions). */
+  /** What the tab may call now (lib/kitTabs › workspaceKitTabs). */
   permissions: () => readonly string[];
+  /** The `commands:<hash>` the tab's commands run under now (lib/kitTabs); null when not asked. */
+  commandsAccepted: () => string | null;
 }
 
 /** What the API reaches of the app. */
@@ -125,6 +134,8 @@ export interface KitHostDeps {
   writeData: (kitId: string, path: string, text: string) => Promise<void>;
   /** `kit_loopback_fetch`, made by Rust. Rejects with `{ code, message }`. */
   loopbackFetch: (call: KitLoopbackCall) => Promise<KitLoopbackAnswer>;
+  /** `kit_command_run`, made by Rust. Rejects with `{ code, message }`. */
+  runCommand: (call: KitCommandCall) => Promise<KitCommandAnswer>;
   now: () => number;
 }
 
@@ -140,6 +151,29 @@ export interface KitLoopbackCall {
 export interface KitLoopbackAnswer {
   status: number;
   text: string;
+}
+
+/**
+ * A `command.run` once checked. The kit, the folder and the grant are the
+ * host's own record of the tab, never the message's.
+ */
+export interface KitCommandCall {
+  kit: string;
+  name: string;
+  args: Record<string, string>;
+  /** The workspace folder of the tab, where the command starts. */
+  cwd: string;
+  accepted: string | null;
+}
+
+export interface KitCommandAnswer {
+  /** Null when it did not end by itself: at its timeout, or by a signal. */
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  /** Whether stdout or stderr went past 1 MB. */
+  truncated: boolean;
 }
 
 export interface KitHost {
@@ -255,6 +289,20 @@ function loopbackCall(params: Record<string, unknown>): KitLoopbackCall {
     throw bad(`timeoutMs must be a whole number from 1 to ${KIT_LOOPBACK_MAX_TIMEOUT_MS}`);
   }
   return { port, path, method, body: body ?? null, timeoutMs };
+}
+
+/**
+ * The values of a `command.run`, as Rust takes them. Each one is a string, or
+ * no value at all; Rust holds it to its rule. Copied by entries, so a key called
+ * `__proto__` stays a key, which Rust refuses like any other it does not know.
+ */
+function commandArgs(raw: unknown): Record<string, string> {
+  if (raw === undefined) return {};
+  if (!isRecord(raw)) throw new KitError(KIT_ERRORS.invalid, "args must be an object");
+  for (const [name, value] of Object.entries(raw)) {
+    if (typeof value !== "string") throw new KitError(KIT_ERRORS.badArgs, `${name} must be a string`);
+  }
+  return Object.fromEntries(Object.entries(raw) as [string, string][]);
 }
 
 /** At most `max` takes in any `windowMs`. */
@@ -428,6 +476,25 @@ export function createKitHost(
       }
     },
 
+    // `name` was checked with the permission. No limit of its own: tabs poll,
+    // and Rust holds a kit to four at once.
+    "command.run": async (raw) => {
+      const params = paramsOf(raw);
+      const args = commandArgs(params.args);
+      const ws = workspaceNow();
+      try {
+        return await deps.runCommand({
+          kit: context.kitId,
+          name: params.name as string,
+          args,
+          cwd: ws.cwd,
+          accepted: context.commandsAccepted(),
+        });
+      } catch (error) {
+        throw tabErrorOf(error);
+      }
+    },
+
     notify: async (raw) => {
       const params = paramsOf(raw);
       const title = stringParam(params, "title", TITLE_MAX).trim();
@@ -453,6 +520,16 @@ export function createKitHost(
   /** Why a call was not let through. */
   function refusal(method: string, params: unknown, permissions: readonly string[]): KitError {
     const needs = KIT_METHODS[method as KitMethod];
+    if (needs === KIT_COMMAND_PATTERN) {
+      const name = isRecord(params) ? params.name : undefined;
+      if (isKitCommandName(name)) {
+        return new KitError(KIT_ERRORS.denied, `this tab was not granted command:${name}`);
+      }
+      // No command it could have been granted. A tab with none is told only that.
+      return permissions.some((permission) => kitCommandName(permission) !== null)
+        ? new KitError(KIT_ERRORS.invalid, "name must be the name of a command of this kit")
+        : new KitError(KIT_ERRORS.denied, `this tab was not granted ${KIT_COMMAND_PATTERN}`);
+    }
     if (needs !== KIT_LOOPBACK_PATTERN) {
       return new KitError(KIT_ERRORS.denied, `this tab was not granted ${needs}`);
     }

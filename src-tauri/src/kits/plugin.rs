@@ -16,6 +16,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use super::commands::{self, CommandInfo};
 use super::hooks::{self, Hook};
 use super::manifest::{self, Tab};
 use super::store::Loaded;
@@ -39,6 +40,12 @@ pub struct Inspection {
     pub tabs: Vec<Tab>,
     /// The steps that have a command for this OS.
     pub setup: Vec<SetupCommand>,
+    /// What its tabs may run, with the argv for this OS, verbatim, placeholders
+    /// included. `commands` above is the plugin's own: its slash commands.
+    pub declared_commands: Vec<CommandInfo>,
+    /// `commands:<hash>` of that list, null without any: what accepting these
+    /// very commands stores on a workspace.
+    pub commands_permission: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -101,6 +108,8 @@ pub fn inspect(kit: &Loaded, os: &str) -> Inspection {
                 })
             })
             .collect(),
+        declared_commands: commands::for_os(&kit.manifest, os),
+        commands_permission: commands::grant(&kit.manifest, os),
     }
 }
 
@@ -334,6 +343,61 @@ mod tests {
             sent["hooksPermission"],
             json!(found.hooks_permission.unwrap())
         );
+    }
+
+    #[test]
+    fn an_inspection_lists_the_commands_verbatim_and_what_accepting_them_stores() {
+        let home = Folder::new("inspect-commands");
+        let store = Store::at(home.root.join("kits"));
+        let kit = Folder::new("inspect-commands-src");
+        kit.kit(".", "studio", "1.0.0");
+        kit.file("commands/build.md", "A slash command.")
+            .file("tab.html", "")
+            .file(
+                manifest::FILE,
+                &json!({
+                    "schema": 1, "id": "studio", "name": "Studio", "version": "1.0.0", "description": "d",
+                    "tabs": [{ "id": "ci", "title": "CI", "entry": "tab.html", "permissions": ["command:ci-run"] }],
+                    "commands": {
+                        "ci-run": {
+                            "description": "A CI run.",
+                            "run": {
+                                "windows": ["gh.exe", "run", "view", "{run}", "--repo={repo}"],
+                                "linux": ["gh", "run", "view", "{run}", "--repo={repo}"]
+                            },
+                            "args": {
+                                "run": { "pattern": "[0-9]+", "description": "Its number" },
+                                "repo": { "pattern": "[\\w.-]+/[\\w.-]+" }
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            );
+        let found = inspect(&loaded(&kit, &store), "windows");
+        assert_eq!(found.commands, ["build"], "the plugin's own stay apart");
+        assert_eq!(found.declared_commands.len(), 1);
+        assert_eq!(
+            found.declared_commands[0].argv,
+            ["gh.exe", "run", "view", "{run}", "--repo={repo}"]
+        );
+        let on_linux = inspect(&loaded_again(&store, "studio"), "linux");
+        assert_eq!(on_linux.declared_commands[0].argv[0], "gh");
+        assert_ne!(on_linux.commands_permission, found.commands_permission);
+
+        let sent = serde_json::to_value(&found).unwrap();
+        let command = &sent["declaredCommands"][0];
+        assert_eq!(command["name"], "ci-run");
+        assert_eq!(command["description"], "A CI run.");
+        assert_eq!(command["argv"][3], "{run}");
+        assert_eq!(command["args"]["run"]["pattern"], "[0-9]+");
+        assert_eq!(command["args"]["run"]["description"], "Its number");
+        assert_eq!(command["timeoutSeconds"], 30);
+        assert_eq!(
+            sent["commandsPermission"],
+            json!(found.commands_permission.unwrap())
+        );
+        assert_eq!(sent["tabs"][0]["permissions"][0], "command:ci-run");
     }
 
     #[test]

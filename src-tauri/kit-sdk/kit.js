@@ -17,6 +17,8 @@
   var host = window.parent;
   /** Long enough for any call Hangar answers; a call nobody answers fails. */
   var TIMEOUT_MS = 30000;
+  /** A declared command may run for 120 seconds, and is answered right after. */
+  var COMMAND_TIMEOUT_MS = 130000;
   var pending = new Map();
   var listeners = new Map();
   var next = 0;
@@ -72,7 +74,7 @@
       var timer = setTimeout(function () {
         pending.delete(id);
         reject(failure("timeout", "Hangar did not answer " + method));
-      }, TIMEOUT_MS);
+      }, method === "command.run" ? COMMAND_TIMEOUT_MS : TIMEOUT_MS);
       pending.set(id, { resolve: resolve, reject: reject, timer: timer });
       var request = { hangar: 1, id: id, method: method };
       if (params !== undefined) request.params = params;

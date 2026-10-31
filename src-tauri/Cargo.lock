@@ -2016,6 +2016,7 @@ dependencies = [
  "portable-pty",
  "qrcode",
  "rand_core 0.6.4",
+ "regex",
  "rust-embed",
  "ruzstd",
  "semver",

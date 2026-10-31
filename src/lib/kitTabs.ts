@@ -2,10 +2,13 @@ import { useEffect, useSyncExternalStore } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   isKitPermission,
+  kitCommandName,
+  kitCommandsGrant,
   kitPermissionsIn,
   kitsList,
   onKitsChanged,
   workspaceKits,
+  type KitCommandsGrant,
   type KitInfo,
   type KitPermission,
   type KitTab,
@@ -56,6 +59,12 @@ export interface KitTabChoice {
   kitName: string;
   tab: KitTab;
   permissions: KitPermission[];
+  /**
+   * The `commands:<hash>` this tab's commands run under, which Rust compares
+   * with the kit as it is at each call. Null for a kit that is not asked: a
+   * linked folder, or no command.
+   */
+  commandsAccepted: KitCommandsGrant | null;
 }
 
 /** An installed kit that can be used now, under the id it is enabled by. */
@@ -74,11 +83,18 @@ export function workspaceKitTabs(
     const kit = usable(installed, id);
     if (!kit?.manifest) return [];
     const kitName = kit.manifest.name;
+    // A GitHub kit's commands run only as the workspace accepted them: changed,
+    // its tabs hold none until they are accepted again, whatever else they hold.
+    const commandsGrant = kitCommandsGrant(kit);
+    const commandsHeld = !commandsGrant || granted.includes(commandsGrant);
     return kit.manifest.tabs.map((tab) => ({
       kitId: id,
       kitName,
       tab,
-      permissions: effectivePermissions(tab.permissions.filter(isKitPermission), granted),
+      permissions: effectivePermissions(tab.permissions.filter(isKitPermission), granted).filter(
+        (permission) => commandsHeld || kitCommandName(permission) === null,
+      ),
+      commandsAccepted: commandsHeld ? commandsGrant : null,
     }));
   });
 }

@@ -9,7 +9,7 @@
 //! (forward slashes, no `.` parts), and refused when it is absolute, climbs out
 //! with `..`, or resolves outside the kit folder through a symlink.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,8 @@ pub const SCHEMA: u64 = 1;
 
 /// What a kit's tab may ask Hangar for, accepted by the person when the kit
 /// is enabled on a workspace. Closed: beside these, only `loopback:<port>`
-/// (`loopback_port`), and any other name is a manifest error.
+/// (`loopback_port`) and `command:<name>` for a command the kit declares, and
+/// any other name is a manifest error.
 pub const PERMISSIONS: &[&str] = &[
     "workspace.read",
     "panes.read",
@@ -45,6 +46,74 @@ pub fn loopback_port(permission: &str) -> Option<u16> {
     }
     let port: u16 = digits.parse().ok()?;
     (port >= super::loopback::MIN_PORT).then_some(port)
+}
+
+/// How long a declared command may run, in seconds, unless it says otherwise,
+/// and at most.
+pub const COMMAND_TIMEOUT_SECONDS: u64 = 30;
+pub const COMMAND_MAX_TIMEOUT_SECONDS: u64 = 120;
+
+/// `[a-z][a-z0-9-]*`: how a declared command is named. `kitCommandName` in
+/// src/lib/kits.ts holds the same rule.
+pub fn valid_command_name(name: &str) -> bool {
+    name.starts_with(|first: char| first.is_ascii_lowercase())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// One piece of an argv item: text as written, or the place of a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgPart<'a> {
+    Text(&'a str),
+    Value(&'a str),
+}
+
+/// The placeholders of an argv item. A placeholder is `{name}`, a name being
+/// letters, digits, `_` and `-`, starting with a letter or `_`: other braces
+/// are text, which is what `docker ps --format {{.Names}}` needs.
+pub fn arg_parts(item: &str) -> Vec<ArgPart<'_>> {
+    let mut parts = Vec::new();
+    let mut text_from = 0;
+    let mut at = 0;
+    while let Some(open) = item[at..].find('{').map(|found| at + found) {
+        let name = item[open + 1..]
+            .find('}')
+            .map(|close| &item[open + 1..open + 1 + close])
+            .filter(|name| valid_arg_name(name));
+        match name {
+            Some(name) => {
+                if text_from < open {
+                    parts.push(ArgPart::Text(&item[text_from..open]));
+                }
+                parts.push(ArgPart::Value(name));
+                at = open + name.len() + 2;
+                text_from = at;
+            }
+            None => at = open + 1,
+        }
+    }
+    if text_from < item.len() {
+        parts.push(ArgPart::Text(&item[text_from..]));
+    }
+    parts
+}
+
+/// What a `{name}` may be called.
+fn valid_arg_name(name: &str) -> bool {
+    name.starts_with(|first: char| first.is_ascii_alphabetic() || first == '_')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// A rule, compiled to match a whole value whatever its author wrote. Compiled
+/// alone first: `a)|(?:b` only parses once wrapped, and would then match past
+/// the anchors. `\A` and `\z` are what `(?m)` cannot move.
+pub fn whole_value_rule(pattern: &str) -> Result<regex::Regex, String> {
+    regex::Regex::new(pattern).map_err(|_| "is not a valid regular expression".to_string())?;
+    regex::Regex::new(&format!(r"\A(?:{pattern})\z"))
+        .map_err(|_| "is not a valid regular expression".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -69,6 +138,8 @@ pub struct Manifest {
     pub plugin: Option<String>,
     pub tabs: Vec<Tab>,
     pub setup: Vec<SetupStep>,
+    /// What a tab may run, by name: nothing else, and never through a shell.
+    pub commands: BTreeMap<String, DeclaredCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -104,6 +175,48 @@ pub struct SetupRun {
 
 impl SetupRun {
     pub fn for_os(&self, os: &str) -> Option<&str> {
+        match os {
+            "windows" => self.windows.as_deref(),
+            "macos" => self.macos.as_deref(),
+            "linux" => self.linux.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclaredCommand {
+    pub description: String,
+    pub run: CommandRun,
+    pub args: BTreeMap<String, CommandArg>,
+    pub timeout_seconds: u64,
+}
+
+/// What a `{name}` may hold.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommandArg {
+    /// As written: it is shown to the person, and matched against whole values
+    /// (`whole_value_rule`).
+    pub pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// One argv per OS: the program first, then literal items and placeholders. A
+/// `run` written as a single array holds it for every OS.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct CommandRun {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macos: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linux: Option<Vec<String>>,
+}
+
+impl CommandRun {
+    pub fn for_os(&self, os: &str) -> Option<&[String]> {
         match os {
             "windows" => self.windows.as_deref(),
             "macos" => self.macos.as_deref(),
@@ -211,6 +324,7 @@ pub fn parse(text: &str, root: &Path) -> Result<Manifest, String> {
     let mut check = Check {
         root,
         problems: Vec::new(),
+        declared_commands: HashSet::new(),
     };
     let manifest = check.manifest(&object);
     if check.problems.is_empty() {
@@ -253,6 +367,9 @@ pub fn version_of(text: &str) -> Option<(String, String)> {
 struct Check<'a> {
     root: &'a Path,
     problems: Vec<String>,
+    /// Every name under `commands`, well-formed or not: a tab naming one that
+    /// is wrong is told about it there, not a second time here.
+    declared_commands: HashSet<String>,
 }
 
 impl Check<'_> {
@@ -383,6 +500,8 @@ impl Check<'_> {
             }
         }
         let plugin = self.plugin(object);
+        // Before the tabs, whose permissions may name these.
+        let commands = self.commands(object);
         let tabs = self.tabs(object);
         let setup = self.setup(object);
 
@@ -399,6 +518,7 @@ impl Check<'_> {
             plugin,
             tabs,
             setup,
+            commands,
         }
     }
 
@@ -519,6 +639,19 @@ impl Check<'_> {
                     self.problem(&at, format!("{name:?} must name a port from 1024 to 65535"));
                     ok = false;
                 }
+                Some(name) if name.starts_with("command:") => {
+                    if self.declared_commands.contains(&name["command:".len()..]) {
+                        if !permissions.iter().any(|known| known == name) {
+                            permissions.push(name.to_string());
+                        }
+                    } else {
+                        self.problem(
+                            &at,
+                            format!("{name:?} names a command this kit does not declare"),
+                        );
+                        ok = false;
+                    }
+                }
                 Some(name) => {
                     self.problem(&at, format!("unknown permission {name:?}"));
                     ok = false;
@@ -585,6 +718,247 @@ impl Check<'_> {
         }
         Some(parsed)
     }
+
+    /// `commands`: an object of commands by name.
+    fn commands(&mut self, object: &Map<String, Value>) -> BTreeMap<String, DeclaredCommand> {
+        let mut commands = BTreeMap::new();
+        let declared = match object.get("commands") {
+            None | Some(Value::Null) => return commands,
+            Some(Value::Object(declared)) => declared,
+            Some(_) => {
+                self.problem("commands", "must be an object of commands by name");
+                return commands;
+            }
+        };
+        self.declared_commands = declared.keys().cloned().collect();
+        for (name, value) in declared {
+            let at = format!("commands.{name}");
+            if !valid_command_name(name) {
+                self.problem(&at, "must be named with a-z first, then a-z, 0-9 and -");
+            }
+            let Value::Object(command) = value else {
+                self.problem(&at, "must be an object");
+                continue;
+            };
+            let description = self.required_text(command, "description", &at);
+            let args = self.command_args(command, &at);
+            let run = self.command_run(command, &at, args.as_ref());
+            let timeout_seconds = self.command_timeout(command, &at);
+            if let (Some(description), Some(run), Some(args), Some(timeout_seconds)) =
+                (description, run, args, timeout_seconds)
+            {
+                commands.insert(
+                    name.clone(),
+                    DeclaredCommand {
+                        description,
+                        run,
+                        args,
+                        timeout_seconds,
+                    },
+                );
+            }
+        }
+        commands
+    }
+
+    /// `args`: what each placeholder may hold. `None` when one is wrong; the
+    /// placeholders of `run` are then not looked up, which would only say more
+    /// of the same.
+    fn command_args(
+        &mut self,
+        command: &Map<String, Value>,
+        at: &str,
+    ) -> Option<BTreeMap<String, CommandArg>> {
+        let at = field(at, "args");
+        let declared = match command.get("args") {
+            None | Some(Value::Null) => return Some(BTreeMap::new()),
+            Some(Value::Object(declared)) => declared,
+            Some(_) => {
+                self.problem(&at, "must be an object of args by name");
+                return None;
+            }
+        };
+        let mut args = BTreeMap::new();
+        let mut ok = true;
+        for (name, value) in declared {
+            let at = field(&at, name);
+            if !valid_arg_name(name) {
+                self.problem(
+                    &at,
+                    "must be named with a letter or _ first, then letters, digits, _ and -",
+                );
+                ok = false;
+            }
+            let Value::Object(arg) = value else {
+                self.problem(&at, "must be an object with a pattern");
+                ok = false;
+                continue;
+            };
+            let Some(pattern) = self.required_text(arg, "pattern", &at) else {
+                ok = false;
+                continue;
+            };
+            if let Err(why) = whole_value_rule(&pattern) {
+                self.problem(&field(&at, "pattern"), why);
+                ok = false;
+                continue;
+            }
+            let description = self.optional(arg, "description", &at);
+            args.insert(
+                name.clone(),
+                CommandArg {
+                    pattern,
+                    description,
+                },
+            );
+        }
+        ok.then_some(args)
+    }
+
+    /// `run`: one argv, or one per OS. Never a command line: nothing would be
+    /// there to say which words a value may become.
+    fn command_run(
+        &mut self,
+        command: &Map<String, Value>,
+        at: &str,
+        args: Option<&BTreeMap<String, CommandArg>>,
+    ) -> Option<CommandRun> {
+        let at = field(at, "run");
+        match command.get("run") {
+            Some(value @ Value::Array(_)) => {
+                let argv = self.argv(value, &at, args)?;
+                Some(CommandRun {
+                    windows: Some(argv.clone()),
+                    macos: Some(argv.clone()),
+                    linux: Some(argv),
+                })
+            }
+            Some(Value::Object(by_os)) => {
+                let mut ok = true;
+                let mut for_os = |os: &str| -> Option<Vec<String>> {
+                    let value = by_os.get(os).filter(|value| !value.is_null())?;
+                    let argv = self.argv(value, &field(&at, os), args);
+                    ok &= argv.is_some();
+                    argv
+                };
+                let run = CommandRun {
+                    windows: for_os("windows"),
+                    macos: for_os("macos"),
+                    linux: for_os("linux"),
+                };
+                if !ok {
+                    return None;
+                }
+                if run == CommandRun::default() {
+                    self.problem(&at, "needs an argv for windows, macos or linux");
+                    return None;
+                }
+                Some(run)
+            }
+            None | Some(Value::Null) => {
+                self.problem(&at, "is missing");
+                None
+            }
+            Some(_) => {
+                self.problem(
+                    &at,
+                    "must be an argv array, or one per OS: never a shell command line",
+                );
+                None
+            }
+        }
+    }
+
+    /// One argv: the program, then literal items and placeholders.
+    fn argv(
+        &mut self,
+        value: &Value,
+        at: &str,
+        args: Option<&BTreeMap<String, CommandArg>>,
+    ) -> Option<Vec<String>> {
+        let Value::Array(items) = value else {
+            self.problem(at, "must be an argv array");
+            return None;
+        };
+        let mut argv = Vec::with_capacity(items.len());
+        let mut ok = true;
+        for (index, item) in items.iter().enumerate() {
+            let at = format!("{at}[{index}]");
+            let Value::String(item) = item else {
+                self.problem(&at, "must be a string");
+                ok = false;
+                continue;
+            };
+            if item.contains('\0') {
+                self.problem(&at, "holds a NUL character");
+                ok = false;
+                continue;
+            }
+            argv.push(item.clone());
+            if index == 0 {
+                if let Err(why) = program_name(item) {
+                    self.problem(&at, why);
+                    ok = false;
+                }
+                continue;
+            }
+            let Some(args) = args else { continue };
+            for part in arg_parts(item) {
+                if let ArgPart::Value(name) = part {
+                    if !args.contains_key(name) {
+                        self.problem(
+                            &at,
+                            format!("the placeholder {{{name}}} is not declared in args"),
+                        );
+                        ok = false;
+                    }
+                }
+            }
+        }
+        if items.is_empty() {
+            self.problem(at, "needs at least the program");
+            ok = false;
+        }
+        ok.then_some(argv)
+    }
+
+    fn command_timeout(&mut self, command: &Map<String, Value>, at: &str) -> Option<u64> {
+        match command.get("timeoutSeconds") {
+            None | Some(Value::Null) => Some(COMMAND_TIMEOUT_SECONDS),
+            Some(value) => {
+                let seconds = value
+                    .as_u64()
+                    .filter(|seconds| (1..=COMMAND_MAX_TIMEOUT_SECONDS).contains(seconds));
+                if seconds.is_none() {
+                    self.problem(
+                        &field(at, "timeoutSeconds"),
+                        format!(
+                            "must be a whole number of seconds from 1 to {COMMAND_MAX_TIMEOUT_SECONDS}"
+                        ),
+                    );
+                }
+                seconds
+            }
+        }
+    }
+}
+
+/// The program of an argv: a name to find on the PATH, and only that. A path
+/// would run whatever a project keeps in its folder, which is where a command
+/// starts; the name is also what the person is shown and agrees to. A trailing
+/// dot or space, and a stream, are ways for Windows to open another file than
+/// the one named.
+fn program_name(program: &str) -> Result<(), &'static str> {
+    if program.trim().is_empty() {
+        return Err("is empty: the program comes first");
+    }
+    if program.contains(['{', '}']) {
+        return Err("must not hold a placeholder: the program is fixed");
+    }
+    if program.contains(['/', '\\', ':']) || program.ends_with(['.', ' ']) {
+        return Err("must be a program's name, found on the PATH, not a path");
+    }
+    Ok(())
 }
 
 fn field(at: &str, key: &str) -> String {
@@ -810,6 +1184,384 @@ mod tests {
             let why = problems(kit.parse(&tab(json!([bad]))));
             assert!(why.contains("unknown permission"), "{bad}: {why}");
         }
+    }
+
+    fn with_commands(commands: Value) -> Value {
+        with(minimal(), json!({ "commands": commands }))
+    }
+
+    /// A declared command, and a tab of the same kit holding `permissions`.
+    fn command_kit(permissions: Value) -> Value {
+        with(
+            minimal(),
+            json!({
+                "commands": {
+                    "ci-status": {
+                        "description": "The state of a CI run.",
+                        "run": ["gh", "run", "view", "{run}", "--repo={repo}", "--json", "status"],
+                        "args": {
+                            "run": { "pattern": "[0-9]+", "description": "The run's number" },
+                            "repo": { "pattern": "[\\w.-]+/[\\w.-]+" }
+                        },
+                        "timeoutSeconds": 60
+                    }
+                },
+                "tabs": [{ "id": "t", "title": "T", "entry": "tab.html", "permissions": permissions }]
+            }),
+        )
+    }
+
+    #[test]
+    fn a_declared_command_reads_whole() {
+        let kit = Folder::new("cmd-good");
+        kit.file("tab.html", "");
+        let manifest = kit
+            .parse(&command_kit(json!([
+                "command:ci-status",
+                "command:ci-status",
+                "notify"
+            ])))
+            .unwrap();
+        assert_eq!(
+            manifest.tabs[0].permissions,
+            ["command:ci-status", "notify"],
+            "listed once each"
+        );
+        let command = &manifest.commands["ci-status"];
+        assert_eq!(command.description, "The state of a CI run.");
+        assert_eq!(command.timeout_seconds, 60);
+        assert_eq!(command.args["run"].pattern, "[0-9]+");
+        assert_eq!(
+            command.args["run"].description.as_deref(),
+            Some("The run's number")
+        );
+        assert_eq!(command.args["repo"].description, None);
+        let argv = command.run.for_os("linux").unwrap();
+        assert_eq!(argv[0], "gh");
+        assert_eq!(argv[4], "--repo={repo}");
+        assert_eq!(command.run.for_os("windows"), Some(argv), "for every OS");
+        assert_eq!(command.run.for_os("freebsd"), None);
+        let sent = serde_json::to_value(&manifest).unwrap();
+        assert_eq!(sent["commands"]["ci-status"]["timeoutSeconds"], 60);
+    }
+
+    #[test]
+    fn a_command_may_differ_per_os_and_times_out_after_30_seconds_by_default() {
+        let kit = Folder::new("cmd-os");
+        let manifest = kit
+            .parse(&with_commands(json!({
+                "tail": {
+                    "description": "The log.",
+                    "run": { "windows": ["logview.exe", "log"], "linux": ["tail", "log"] }
+                }
+            })))
+            .unwrap();
+        let command = &manifest.commands["tail"];
+        assert_eq!(command.timeout_seconds, 30);
+        assert!(command.args.is_empty());
+        assert_eq!(command.run.for_os("windows").unwrap()[0], "logview.exe");
+        assert_eq!(command.run.for_os("macos"), None);
+        assert_eq!(command.run.for_os("linux").unwrap()[0], "tail");
+        // The longest timeout and the shortest are fine.
+        for seconds in [1, 120] {
+            assert!(kit
+                .parse(&with_commands(json!({
+                    "t": { "description": "d", "run": ["x"], "timeoutSeconds": seconds }
+                })))
+                .is_ok());
+        }
+    }
+
+    #[test]
+    fn a_kit_without_commands_has_none() {
+        let kit = Folder::new("cmd-none");
+        assert!(kit.parse(&minimal()).unwrap().commands.is_empty());
+        assert!(kit
+            .parse(&with(minimal(), json!({ "commands": null })))
+            .unwrap()
+            .commands
+            .is_empty());
+    }
+
+    #[test]
+    fn a_placeholder_must_be_declared_and_an_arg_must_have_a_pattern() {
+        let kit = Folder::new("cmd-args");
+        let undeclared = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["gh", "run", "view", "{run}", "--repo={repo}"],
+                      "args": { "run": { "pattern": "[0-9]+" } } }
+        }))));
+        assert_eq!(
+            undeclared,
+            "commands.view.run[4]: the placeholder {repo} is not declared in args"
+        );
+        let per_os = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": { "linux": ["gh", "{run}"] } }
+        }))));
+        assert_eq!(
+            per_os,
+            "commands.view.run.linux[1]: the placeholder {run} is not declared in args"
+        );
+        let no_pattern = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["gh", "{run}"],
+                      "args": { "run": { "description": "The run" } } }
+        }))));
+        assert_eq!(no_pattern, "commands.view.args.run.pattern: is missing");
+        for arg in [
+            json!("[0-9]+"),
+            json!({ "pattern": "  " }),
+            json!({ "pattern": 3 }),
+        ] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": ["gh", "{run}"], "args": { "run": arg } }
+            }))));
+            assert!(why.starts_with("commands.view.args.run"), "{why}");
+        }
+        let bad_name = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["gh"], "args": { "a b": { "pattern": "x" } } }
+        }))));
+        assert!(
+            bad_name.contains("commands.view.args.a b: must be named"),
+            "{bad_name}"
+        );
+    }
+
+    #[test]
+    fn a_pattern_that_is_no_rule_or_escapes_its_anchors_is_refused() {
+        let kit = Folder::new("cmd-pattern");
+        for pattern in ["(", "a)|(?:b", "(?<=a)b", "[", "\\"] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": ["gh", "{x}"], "args": { "x": { "pattern": pattern } } }
+            }))));
+            assert_eq!(
+                why, "commands.view.args.x.pattern: is not a valid regular expression",
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_program_is_a_fixed_name_on_the_path() {
+        let kit = Folder::new("cmd-program");
+        let why = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["{tool}", "x"], "args": { "tool": { "pattern": "gh|glab" } } }
+        }))));
+        assert_eq!(
+            why,
+            "commands.view.run[0]: must not hold a placeholder: the program is fixed"
+        );
+        let inside = problems(kit.parse(&with_commands(json!({
+            "view": { "description": "d", "run": ["g{tool}"], "args": { "tool": { "pattern": "h" } } }
+        }))));
+        assert!(inside.contains("must not hold a placeholder"), "{inside}");
+        for program in [
+            "./gh",
+            "bin/gh",
+            "bin\\gh.exe",
+            "/usr/bin/gh",
+            "C:\\gh.exe",
+            "gh.exe:stream",
+            "gh.cmd.",
+            "gh.cmd ",
+            "..",
+        ] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": [program] }
+            }))));
+            assert_eq!(
+                why,
+                "commands.view.run[0]: must be a program's name, found on the PATH, not a path",
+                "{program}"
+            );
+        }
+        for empty in ["", "  "] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "view": { "description": "d", "run": [empty] }
+            }))));
+            assert!(why.contains("the program comes first"), "{why}");
+        }
+        for program in ["gh", "gh.exe", "git-lfs", "python3.12"] {
+            assert!(
+                kit.parse(&with_commands(json!({
+                    "view": { "description": "d", "run": [program] }
+                })))
+                .is_ok(),
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_name_is_refused() {
+        let kit = Folder::new("cmd-name");
+        for name in [
+            "Run",
+            "run_it",
+            "1run",
+            "-run",
+            "ci status",
+            "ci.status",
+            "é",
+        ] {
+            let commands = json!({ name: { "description": "d", "run": ["gh"] } });
+            let why = problems(kit.parse(&with_commands(commands)));
+            assert_eq!(
+                why,
+                format!("commands.{name}: must be named with a-z first, then a-z, 0-9 and -")
+            );
+        }
+        for name in ["run", "r", "ci-status", "ci-2", "a-"] {
+            let commands = json!({ name: { "description": "d", "run": ["gh"] } });
+            assert!(kit.parse(&with_commands(commands)).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_timeout_above_the_maximum_is_refused() {
+        let kit = Folder::new("cmd-timeout");
+        for seconds in [json!(121), json!(0), json!(-1), json!(1.5), json!("30")] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "t": { "description": "d", "run": ["x"], "timeoutSeconds": seconds }
+            }))));
+            assert_eq!(
+                why,
+                "commands.t.timeoutSeconds: must be a whole number of seconds from 1 to 120"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_is_an_argv_and_never_a_command_line() {
+        let kit = Folder::new("cmd-run");
+        let line = problems(kit.parse(&with_commands(json!({
+            "t": { "description": "d", "run": "gh run view" }
+        }))));
+        assert_eq!(
+            line,
+            "commands.t.run: must be an argv array, or one per OS: never a shell command line"
+        );
+        let per_os_line = problems(kit.parse(&with_commands(json!({
+            "t": { "description": "d", "run": { "linux": "gh run view" } }
+        }))));
+        assert_eq!(per_os_line, "commands.t.run.linux: must be an argv array");
+        for (run, expected) in [
+            (json!([]), "commands.t.run: needs at least the program"),
+            (json!(["gh", 3]), "commands.t.run[1]: must be a string"),
+            (
+                json!(["gh", "a\0b"]),
+                "commands.t.run[1]: holds a NUL character",
+            ),
+            (
+                json!({ "freebsd": ["gh"] }),
+                "commands.t.run: needs an argv for windows, macos or linux",
+            ),
+            (
+                json!({}),
+                "commands.t.run: needs an argv for windows, macos or linux",
+            ),
+        ] {
+            let why = problems(kit.parse(&with_commands(json!({
+                "t": { "description": "d", "run": run }
+            }))));
+            assert_eq!(why, expected);
+        }
+        let missing = problems(kit.parse(&with_commands(json!({
+            "t": { "description": " " }
+        }))));
+        assert!(
+            missing.contains("commands.t.description: is empty"),
+            "{missing}"
+        );
+        assert!(missing.contains("commands.t.run: is missing"), "{missing}");
+        assert_eq!(
+            problems(kit.parse(&with_commands(json!(["x"])))),
+            "commands: must be an object of commands by name"
+        );
+        assert_eq!(
+            problems(kit.parse(&with_commands(json!({ "t": "gh" })))),
+            "commands.t: must be an object"
+        );
+    }
+
+    #[test]
+    fn a_tab_may_only_name_a_command_its_kit_declares() {
+        let kit = Folder::new("cmd-perm");
+        kit.file("tab.html", "");
+        let why = problems(kit.parse(&command_kit(json!(["command:ci-status", "command:deploy"]))));
+        assert_eq!(
+            why,
+            "tabs[0].permissions: \"command:deploy\" names a command this kit does not declare"
+        );
+        for bad in [
+            "command:",
+            "command:CI-STATUS",
+            "command:ci-status ",
+            "command:ci status",
+        ] {
+            let why = problems(kit.parse(&command_kit(json!([bad]))));
+            assert!(why.contains("does not declare"), "{bad}: {why}");
+        }
+        // No command at all, and a tab naming one.
+        let none = with(
+            minimal(),
+            json!({ "tabs": [{ "id": "t", "title": "T", "entry": "tab.html", "permissions": ["command:ci-status"] }] }),
+        );
+        assert!(problems(kit.parse(&none)).contains("does not declare"));
+        // Stored by a workspace, never asked for by a tab.
+        let why = problems(kit.parse(&command_kit(json!(["commands:0123456789abcdef"]))));
+        assert!(why.contains("unknown permission"), "{why}");
+        // A command that is itself wrong is told about once.
+        let why = problems(kit.parse(&with(
+            minimal(),
+            json!({
+                "commands": { "wrong": { "description": "d", "run": "gh" } },
+                "tabs": [{ "id": "t", "title": "T", "entry": "tab.html", "permissions": ["command:wrong"] }]
+            }),
+        )));
+        assert_eq!(
+            why,
+            "commands.wrong.run: must be an argv array, or one per OS: never a shell command line"
+        );
+    }
+
+    #[test]
+    fn a_placeholder_is_a_name_in_braces_and_other_braces_are_text() {
+        use ArgPart::{Text, Value as Hole};
+        assert_eq!(arg_parts("{run}"), [Hole("run")]);
+        assert_eq!(arg_parts("--repo={repo}"), [Text("--repo="), Hole("repo")]);
+        assert_eq!(
+            arg_parts("{owner}/{repo}.git"),
+            [Hole("owner"), Text("/"), Hole("repo"), Text(".git")]
+        );
+        assert_eq!(arg_parts("plain"), [Text("plain")]);
+        assert_eq!(arg_parts(""), []);
+        assert_eq!(arg_parts("{{.Names}}"), [Text("{{.Names}}")]);
+        assert_eq!(arg_parts("{{json .}}"), [Text("{{json .}}")]);
+        assert_eq!(arg_parts("{}"), [Text("{}")]);
+        assert_eq!(arg_parts("{"), [Text("{")]);
+        assert_eq!(arg_parts("{a"), [Text("{a")]);
+        assert_eq!(arg_parts("{{a}}"), [Text("{"), Hole("a"), Text("}")]);
+        assert_eq!(arg_parts("{1a}"), [Text("{1a}")]);
+        assert_eq!(
+            arg_parts("é{a_b-c}é"),
+            [Text("é"), Hole("a_b-c"), Text("é")]
+        );
+    }
+
+    #[test]
+    fn a_rule_matches_a_whole_value_whatever_its_author_wrote() {
+        let matches =
+            |pattern: &str, value: &str| whole_value_rule(pattern).unwrap().is_match(value);
+        assert!(matches("[a-z]+", "abc"));
+        assert!(!matches("[a-z]+", "abc1"), "unanchored, it would match");
+        assert!(!matches("[a-z]+", "1abc"));
+        assert!(!matches("[a-z]+", "abc\n"), "not even before a line's end");
+        assert!(!matches("^[a-z]+$", "abc\ndef"));
+        assert!(!matches("(?m)^[a-z]+$", "abc\ndef"), "(?m) stays inside");
+        assert!(!matches("a|b", "ab"), "the alternatives stay inside");
+        assert!(!matches("a|b", "xb"));
+        assert!(matches("a|ab", "ab"));
+        assert!(matches("a|b", "b"));
+        assert!(matches("^abc$", "abc"), "anchors of its own do no harm");
     }
 
     #[test]
