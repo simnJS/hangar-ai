@@ -61,6 +61,12 @@
   color: var(--fg-secondary);
 }
 
+/* What Hangar cannot read: said louder than a note, never left out. */
+.kit-act__note.kit-step__unreadable {
+  font-weight: 500;
+  color: var(--fg);
+}
+
 .kit-act__chips,
 .kit-act__perms {
   display: flex;

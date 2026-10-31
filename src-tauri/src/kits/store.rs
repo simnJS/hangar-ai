@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::hooks;
 use super::manifest::{self, Manifest};
+use super::plugin;
 use super::source::{self, GitSource};
 use super::HANGAR_VERSION;
 
@@ -43,12 +43,12 @@ pub struct Entry {
     pub installed_version: String,
     /// Milliseconds since the epoch.
     pub added_at: u64,
-    /// Whether a workspace has to have accepted this kit's hooks for them to
-    /// reach its panes. Set on every git kit added since that is asked, and on
-    /// an older one as soon as an update changes its hooks; a git kit installed
-    /// before, with its hooks as they were, keeps working as it did on the
-    /// workspaces that enabled it (docs/kits.md). A linked folder is never
-    /// asked: every edit would ask again.
+    /// Whether a workspace has to have accepted what this kit runs by itself, its
+    /// hooks and all else (plugin.rs), for it to reach its panes. Set on every git
+    /// kit added since that is asked, and on an older one as soon as an update
+    /// changes any of it; a git kit installed before, with all that as it was,
+    /// keeps working as it did on the workspaces that enabled it (docs/kits.md). A
+    /// linked folder is never asked: every edit would ask again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hooks_consent: bool,
 }
@@ -87,9 +87,10 @@ impl Loaded {
         manifest::inside(&self.root, plugin).ok()
     }
 
-    /// `hooks:<hash>` of what its plugin runs by itself; `None` without hooks.
+    /// `hooks:<hash>` of what its plugin runs by itself (plugin.rs): its hooks
+    /// and everything else; `None` when it runs nothing.
     pub fn hooks_permission(&self) -> Option<String> {
-        hooks::grant(&hooks::read(&self.plugin_dir()?))
+        plugin::permission(&self.plugin_dir()?)
     }
 }
 
@@ -764,10 +765,60 @@ mod tests {
     }
 
     #[test]
+    fn an_update_that_changes_only_what_else_runs_is_a_change() {
+        let (_home, store) = store("consent-running");
+        let remote = Remote::new("consent-running-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        with_hooks(&remote, "one.sh");
+        remote.push("first");
+        cloned(&store, &remote);
+        forget_consent(&store, "studio");
+        let before = store
+            .loaded(&store.entry("studio").unwrap())
+            .unwrap()
+            .hooks_permission()
+            .unwrap();
+
+        // The same hooks, another command line for its MCP server.
+        remote.folder.file(
+            "work/.mcp.json",
+            &json!({ "mcpServers": { "studio": { "command": "node", "args": ["other.js"] } } })
+                .to_string(),
+        );
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.push("another server");
+        let changed = store.update("studio").unwrap();
+        assert!(changed.hooks_consent);
+        assert_ne!(
+            store.loaded(&changed).unwrap().hooks_permission().unwrap(),
+            before
+        );
+
+        // A monitor on top of that.
+        let mcp_changed = store
+            .loaded(&store.entry("studio").unwrap())
+            .unwrap()
+            .hooks_permission()
+            .unwrap();
+        remote.folder.file(
+            "work/monitors/monitors.json",
+            &json!([{ "name": "log", "command": "tail -F log", "description": "d" }]).to_string(),
+        );
+        remote.folder.manifest("work", "studio", "1.2.0");
+        remote.push("a monitor");
+        let watched = store.update("studio").unwrap();
+        assert_ne!(
+            store.loaded(&watched).unwrap().hooks_permission().unwrap(),
+            mcp_changed
+        );
+    }
+
+    #[test]
     fn an_update_that_brings_hooks_to_a_kit_without_any_is_a_change() {
         let (_home, store) = store("consent-gained");
         let remote = Remote::new("consent-gained-remote");
-        remote.folder.kit("work", "studio", "1.0.0");
+        remote.folder.manifest("work", "studio", "1.0.0");
+        remote.folder.plugin("work", "studio");
         remote.push("first");
         let entry = cloned(&store, &remote);
         assert_eq!(store.loaded(&entry).unwrap().hooks_permission(), None);

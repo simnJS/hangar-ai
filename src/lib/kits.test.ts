@@ -278,6 +278,21 @@ describe("the kits a pane starts with", () => {
     expect(paneKits(ws, [kit])).toEqual({ ids: [], held: ["studio"] });
   });
 
+  it("leave out a GitHub kit accepted before the hash covered what else it starts, once", () => {
+    // Accepted on 1.8.0, with its hooks' hash; it also has an MCP server, so its hash moved.
+    const ws: Kits = { kits: [{ id: "studio", granted: ["panes.read", HOOKS] }] };
+    const moved = installed({ id: "studio", hooksPermission: OTHER_HOOKS, hooksConsent: true });
+    expect(paneKits(ws, [moved])).toEqual({ ids: [], held: ["studio"] });
+    const accepted: Kits = { kits: [{ id: "studio", granted: ["panes.read", OTHER_HOOKS] }] };
+    expect(paneKits(accepted, [moved])).toEqual({ ids: ["studio"], held: [] });
+  });
+
+  it("keep a GitHub kit that only has hooks: its hash did not move", () => {
+    const ws: Kits = { kits: [{ id: "studio", granted: ["panes.read", HOOKS] }] };
+    const same = installed({ id: "studio", hooksPermission: HOOKS, hooksConsent: true });
+    expect(paneKits(ws, [same])).toEqual({ ids: ["studio"], held: [] });
+  });
+
   it("keep a linked folder kit whatever its hooks: the person is writing it", () => {
     const ws: Kits = { kits: [{ id: "studio", granted: [] }] };
     const folder = installed({

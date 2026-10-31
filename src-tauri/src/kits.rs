@@ -276,10 +276,10 @@ pub struct KitInfo {
     pub error: Option<String>,
     /// The last update check, while the app runs; null before any.
     pub update: Option<UpdateInfo>,
-    /// `hooks:<hash>` of what its plugin runs by itself; null without hooks, or
-    /// when the kit cannot be used.
+    /// `hooks:<hash>` of what its plugin runs by itself, its hooks and everything
+    /// else (plugin.rs); null when it runs nothing, or when the kit cannot be used.
     pub hooks_permission: Option<String>,
-    /// Whether a workspace has to have accepted those hooks (store.rs).
+    /// Whether a workspace has to have accepted all that (store.rs).
     pub hooks_consent: bool,
     /// `commands:<hash>` of what its tabs may run on this OS (commands.rs);
     /// null without any, or when the kit cannot be used.
@@ -550,7 +550,8 @@ mod tests {
         let home = Folder::new("list-hooks");
         let store = Store::at(home.root.join("kits"));
         let quiet = Folder::new("list-hooks-quiet");
-        quiet.kit(".", "quiet", "1.0.0");
+        quiet.manifest(".", "quiet", "1.0.0");
+        quiet.plugin(".", "quiet");
         let hooked = Folder::new("list-hooks-hooked");
         hooked.kit(".", "hooked", "1.0.0");
         hooked.file(

@@ -2,9 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { translate } from "../i18n";
-import { KIT_PERMISSIONS, type KitInfo, type KitInspection, type KitTab } from "./kits";
+import { KIT_PERMISSIONS, type KitInfo, type KitInspection, type KitRunning, type KitTab } from "./kits";
 import {
   PERMISSION_LABEL,
+  RUNNING_LABEL,
   acceptedGrants,
   commandsToAccept,
   disableKit,
@@ -12,8 +13,11 @@ import {
   hooksToAccept,
   kitArgvLine,
   kitName,
+  kitPlainHooks,
   kitRequested,
   kitRuleText,
+  kitRunningGroups,
+  kitRunningLine,
   kitState,
   onlyCommandsToAccept,
   panesToRestart,
@@ -407,7 +411,7 @@ describe("the activation view", () => {
 
   it("says it in French, with accents", async () => {
     const out = await draw("fr", gitKit(HOOKS));
-    expect(out).toContain("Claude Code les lance de lui-même, sans demander, chaque fois qu&#x27;elles correspondent.");
+    expect(out).toContain("Claude Code les lance de lui-même, sans demander, chaque fois qu&#x27;ils correspondent.");
     expect(out).toContain("parler au serveur local sur le port 8765");
   });
 
@@ -417,10 +421,225 @@ describe("the activation view", () => {
     expect(out).toContain("read the data this kit keeps in its own folder");
   });
 
-  it("says when a plugin has no hook", async () => {
+  it("says when a plugin runs nothing by itself", async () => {
     const out = await draw("en", gitKit(null), { shown: { ...inspection, hooks: [], hooksPermission: null } });
-    expect(out).toContain("No hook: nothing runs by itself.");
+    expect(out).toContain("Nothing runs by itself.");
     expect(out).not.toContain("runs these by itself");
+  });
+
+  describe("what else a plugin starts by itself", () => {
+    const running: KitRunning[] = [
+      {
+        kind: "mcp",
+        name: "local",
+        argv: ["node", "${CLAUDE_PLUGIN_ROOT}/server.js", "4 4"],
+        env: ["API_TOKEN", "ROOT"],
+      },
+      { kind: "mcp", name: "remote", text: "https://api.example.com/mcp", headers: ["Authorization"] },
+      { kind: "mcp", name: "remote · headersHelper", text: "node ./headers.js" },
+      { kind: "mcp", name: "./packed.mcpb", text: "./packed.mcpb", unreadable: true },
+      {
+        kind: "monitor",
+        name: "deploy",
+        text: "./poll.sh",
+        when: "on-skill-invoke:deploy",
+        description: "Deploys",
+      },
+      { kind: "lsp", name: "gopls", argv: ["gopls", "serve"], when: ".go, .mod" },
+      { kind: "skillHook", name: "skills/guarded/SKILL.md", text: "hooks:\n  Stop: check.sh" },
+      { kind: "settings", name: "subagentStatusLine", text: "./line.sh" },
+      { kind: "grammar", name: "gdscript", text: "npm:hljs-gdscript@1.0.0", unreadable: true },
+      { kind: "bin", name: "tool", text: "bin/tool" },
+      { kind: "binary", name: "fetched", text: "sha256:abcd", unreadable: true },
+      { kind: "dependency", name: "audit-logger", text: "audit-logger", unreadable: true },
+      { kind: "unknown", name: "plugin.json › startup", text: "node ./boot.js" },
+      { kind: "unknown", name: ".lsp.json", unreadable: true },
+    ];
+    const shown: KitInspection = {
+      ...inspection,
+      hooks: [...hooks, { event: "modules", matcher: "", command: "./register.js" }],
+      running,
+    };
+
+    it("shows each one as written, in the setup command's block", async () => {
+      const out = await draw("en", gitKit(HOOKS), { shown });
+      expect(out).toContain('>node ${CLAUDE_PLUGIN_ROOT}/server.js &quot;4 4&quot;</pre>');
+      expect(out).toContain(">https://api.example.com/mcp</pre>");
+      expect(out).toContain(">node ./headers.js</pre>");
+      expect(out).toContain(">./poll.sh</pre>");
+      expect(out).toContain("deploy · on-skill-invoke:deploy");
+      expect(out).toContain("Deploys");
+      expect(out).toContain(">gopls serve</pre>");
+      expect(out).toContain("gopls · .go, .mod");
+      expect(out).toContain(">hooks:\n  Stop: check.sh</pre>");
+      expect(out).toContain(">./line.sh</pre>");
+      expect(out).toContain(">bin/tool</pre>");
+      expect(out).toContain(">./register.js</pre>");
+    });
+
+    it("gives only the names of what it sets and sends", async () => {
+      const out = await draw("en", gitKit(HOOKS), { shown });
+      expect(out).toContain("Environment variables it sets (values not shown): API_TOKEN, ROOT");
+      expect(out).toContain("Headers it sends (values not shown): Authorization");
+    });
+
+    it.each([
+      ["module", "Hooks modules", "Claude Code loads this code into itself when a session starts"],
+      ["mcp", "MCP servers", "when a session starts, and keeps it for the whole session"],
+      ["monitor", "Monitors", "when a session starts, or the first time the skill it names runs"],
+      ["lsp", "Language servers", "the first time Claude edits a file of the types shown"],
+      ["skillHook", "Hooks of skills and commands", "While that skill or command is in use"],
+      ["settings", "Settings", "They apply when a session starts"],
+      ["grammar", "Highlighting grammars", "Claude Code loads this JavaScript"],
+      ["bin", "Programs Claude can call by name", "Nothing starts these by itself"],
+      ["binary", "Programs to download", "Claude Code may download these"],
+      ["dependency", "Other plugins", "Claude Code enables these along with this one"],
+      ["unknown", "Not understood", "Hangar does not know what these are"],
+    ])("says plainly when a %s runs", async (_kind, title, sentence) => {
+      const out = await draw("en", gitKit(HOOKS), { shown });
+      expect(out).toContain(title);
+      expect(out).toContain(sentence);
+    });
+
+    it("says what Hangar cannot read, and the sentence of each kind, in French with accents", async () => {
+      const out = plainSpaces(await draw("fr", gitKit(HOOKS), { shown }));
+      expect(out).toContain("Ne peut pas être lu par Hangar : ce que cela lance n&#x27;est pas montré ici.");
+      expect(out).toContain("Non compris");
+      expect(out).toContain("Moniteurs");
+      expect(out).toContain("la première fois que le skill qu&#x27;il nomme se lance");
+      expect(out).toContain("Variables d&#x27;environnement qu&#x27;il définit (valeurs masquées) : API_TOKEN, ROOT");
+    });
+
+    it("says it of each bundle, remote grammar, download, other plugin and broken file", async () => {
+      const out = await draw("en", gitKit(HOOKS), { shown });
+      const unreadable = running.filter((item) => item.unreadable).length;
+      expect(out.match(/Cannot be read by Hangar/g)).toHaveLength(unreadable);
+      // A broken file has nothing to show but its name, and its name is shown.
+      expect(out).toContain('<span class="kit-step__title">.lsp.json</span>');
+    });
+
+    it("runs nothing is not said when only the rest runs", async () => {
+      const out = await draw("en", gitKit(HOOKS), { shown: { ...inspection, hooks: [], running: [running[0]] } });
+      expect(out).not.toContain("Nothing runs by itself.");
+      expect(out).toContain("MCP servers");
+      expect(out).not.toContain(">Hooks <");
+    });
+
+    it("asks once for a kit accepted when the list held only its hooks, and marks all of it", async () => {
+      const out = await draw("en", gitKit(OTHER_HOOKS), {
+        shown: { ...shown, hooksPermission: OTHER_HOOKS },
+        entry: { id: "hello-kit", granted: ["loopback:8765", "data.read", HOOKS] },
+      });
+      expect(out).toContain("was not shown in full then");
+      expect(out).toContain("this kit stays out of the workspace&#x27;s new panes");
+      expect(out).toContain("Accept what changed");
+      const steps = hooks.length + running.length + 1;
+      expect(out.match(/kit-act__tag--new/g)).toHaveLength(steps);
+    });
+
+    it("does not ask once accepted, and accepting stores what was shown", async () => {
+      const out = await draw("en", gitKit(HOOKS), {
+        shown,
+        entry: { id: "hello-kit", granted: ["panes.read", HOOKS] },
+      });
+      expect(out).toContain(">Close<");
+      expect(out).not.toContain("was not shown in full then");
+      expect(acceptedGrants(gitKit(OTHER_HOOKS), { tabs: [], hooksPermission: HOOKS })).toEqual([HOOKS]);
+    });
+
+    it("does not ask about a linked folder, though it shows the list", async () => {
+      const folder: KitInfo = { ...gitKit(OTHER_HOOKS), source: { kind: "folder", path: "D:\\k" } };
+      const out = await draw("en", folder, { shown, entry: { id: "hello-kit", granted: ["panes.read"] } });
+      expect(out).toContain("MCP servers");
+      expect(out).toContain("A linked folder is read live");
+      expect(out).toContain(">Close<");
+      expect(out).not.toContain("stays out");
+    });
+  });
+
+  describe("the groups of what runs by itself", () => {
+    it("go in the view's order, hooks modules first", () => {
+      const groups = kitRunningGroups({
+        hooks: [
+          { event: "Stop", matcher: "", command: "x.sh" },
+          { event: "modules", matcher: "", command: "./register.js" },
+        ],
+        running: [
+          { kind: "unknown", name: "z" },
+          { kind: "lsp", name: "l", argv: ["l"] },
+          { kind: "mcp", name: "a", argv: ["a"] },
+          { kind: "mcp", name: "b", text: "https://b" },
+        ],
+      });
+      expect(groups.map((group) => group.kind)).toEqual(["module", "mcp", "lsp", "unknown"]);
+      expect(groups[0].items).toEqual([{ name: "modules", text: "./register.js" }]);
+      expect(groups[1].items.map((item) => item.name)).toEqual(["a", "b"]);
+    });
+
+    it("leave nothing out: a kind this build does not know is not understood", () => {
+      const groups = kitRunningGroups({
+        running: [{ kind: "teleporter" as KitRunning["kind"], name: "t", text: "./t.sh" }],
+      });
+      expect(groups).toEqual([{ kind: "unknown", items: [{ kind: "teleporter", name: "t", text: "./t.sh" }] }]);
+    });
+
+    it("are empty for a kit that runs nothing, or before it is read", () => {
+      expect(kitRunningGroups(null)).toEqual([]);
+      expect(kitRunningGroups({ hooks: [], running: [] })).toEqual([]);
+    });
+
+    it("keep the hooks proper apart from the modules", () => {
+      expect(
+        kitPlainHooks({
+          hooks: [
+            { event: "Stop", matcher: "", command: "x.sh" },
+            { event: "modules", matcher: "", command: "./register.js" },
+          ],
+        }),
+      ).toEqual([{ event: "Stop", matcher: "", command: "x.sh" }]);
+      expect(kitPlainHooks(null)).toEqual([]);
+    });
+
+    it("write an item's line as it is written, what would not show written out", () => {
+      expect(kitRunningLine({ argv: ["node", "a b"] })).toBe('node "a b"');
+      expect(kitRunningLine({ text: "tail -F 'x y' | grep z" })).toBe("tail -F 'x y' | grep z");
+      expect(kitRunningLine({ text: "safe\u202Erm -" })).toBe("safe\\u{202e}rm -");
+      expect(kitRunningLine({ text: "hooks:\n  Stop: x\u200B" })).toBe("hooks:\n  Stop: x\\u{200b}");
+      expect(kitRunningLine({})).toBeNull();
+    });
+
+    it("have a title and a sentence for each kind", () => {
+      for (const kind of Object.keys(RUNNING_LABEL) as (keyof typeof RUNNING_LABEL)[]) {
+        for (const locale of ["en", "fr"] as const) {
+          expect(translate(locale, RUNNING_LABEL[kind].title)).not.toBe(RUNNING_LABEL[kind].title);
+          expect(translate(locale, RUNNING_LABEL[kind].when)).not.toBe(RUNNING_LABEL[kind].when);
+        }
+      }
+    });
+  });
+
+  describe("the diff, when a hash covers more than the hooks", () => {
+    const requested = ["panes.read" as const, OTHER_HOOKS as `hooks:${string}`];
+
+    it("asks again when what else runs changed, with the same permissions", () => {
+      const diff = permissionDiff(requested, ["panes.read", HOOKS]);
+      expect(diff.kept).toEqual(["panes.read"]);
+      expect(diff.added).toEqual([OTHER_HOOKS]);
+      expect(hooksToAccept(diff)).toBe(true);
+    });
+
+    it("does not ask when the workspace holds the current hash", () => {
+      const diff = permissionDiff(requested, ["panes.read", OTHER_HOOKS]);
+      expect(diff.added).toEqual([]);
+      expect(hooksToAccept(diff)).toBe(false);
+    });
+
+    it("reads as to review, and then as on", () => {
+      const kit = gitKit(OTHER_HOOKS);
+      const asked = kitRequested(kit);
+      expect(kitState({ id: "hello-kit", granted: ["panes.read", HOOKS] }, asked)).toBe("review");
+      expect(kitState({ id: "hello-kit", granted: ["panes.read", OTHER_HOOKS] }, asked)).toBe("on");
+    });
   });
 
   it("marks hooks that changed, and asks to accept them", async () => {

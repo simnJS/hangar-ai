@@ -14,6 +14,8 @@ import {
   type KitInspection,
   type KitNamedPermission,
   type KitPermission,
+  type KitRunning,
+  type KitRunningKind,
   type KitTab,
 } from "./kits";
 
@@ -23,9 +25,10 @@ import {
  * accepted, what a toggle writes into `Workspace.kits`, and which panes need a
  * restart to see a kit. The screens (components/KitActivation) only draw it.
  *
- * A GitHub kit's hooks go through the same diff, as the pseudo permission
- * `hooks:<hash>` (lib/kits › kitHooksGrant): changed hooks are something new
- * to accept, and the kit stays out of the workspace's new panes until they are.
+ * What a GitHub kit's plugin runs by itself goes through the same diff, as the
+ * pseudo permission `hooks:<hash>` (lib/kits › kitHooksGrant): its hooks and all
+ * else it starts, changed, are something new to accept, and the kit stays out of
+ * the workspace's new panes until they are.
  * Its declared commands do too, as `commands:<hash>` (lib/kits › kitCommandsGrant):
  * changed, its tabs run none of them until they are accepted again.
  */
@@ -115,6 +118,80 @@ export function kitArgvLine(argv: readonly string[]): string {
 
 /** A rule as the person is shown it: as written, with what would not show written out. */
 export const kitRuleText = (pattern: string): string => withUnseenWritten(pattern);
+
+/** What the activation view groups: `kit_inspect`'s kinds, and a hooks file's `modules`. */
+export type KitRunningGroupKind = KitRunningKind | "module";
+
+/** The order of the groups: what starts on its own first, what Hangar cannot make out last. */
+const RUNNING_GROUP_ORDER: readonly KitRunningGroupKind[] = [
+  "module",
+  "mcp",
+  "monitor",
+  "lsp",
+  "skillHook",
+  "settings",
+  "grammar",
+  "bin",
+  "binary",
+  "dependency",
+  "unknown",
+];
+
+/** The title of each group, and its one sentence saying when it runs. */
+export const RUNNING_LABEL: Record<KitRunningGroupKind, { title: TranslateKey; when: TranslateKey }> = {
+  module: { title: "kitsManage.runModule", when: "kitsManage.runModuleWhen" },
+  mcp: { title: "kitsManage.runMcp", when: "kitsManage.runMcpWhen" },
+  monitor: { title: "kitsManage.runMonitor", when: "kitsManage.runMonitorWhen" },
+  lsp: { title: "kitsManage.runLsp", when: "kitsManage.runLspWhen" },
+  skillHook: { title: "kitsManage.runSkillHook", when: "kitsManage.runSkillHookWhen" },
+  settings: { title: "kitsManage.runSettings", when: "kitsManage.runSettingsWhen" },
+  grammar: { title: "kitsManage.runGrammar", when: "kitsManage.runGrammarWhen" },
+  bin: { title: "kitsManage.runBin", when: "kitsManage.runBinWhen" },
+  binary: { title: "kitsManage.runBinary", when: "kitsManage.runBinaryWhen" },
+  dependency: { title: "kitsManage.runDependency", when: "kitsManage.runDependencyWhen" },
+  unknown: { title: "kitsManage.runUnknown", when: "kitsManage.runUnknownWhen" },
+};
+
+export interface KitRunningGroup {
+  kind: KitRunningGroupKind;
+  items: Omit<KitRunning, "kind">[];
+}
+
+/** A hooks file's `modules` entry is listed among its hooks, under this event (kits/hooks.rs). */
+const MODULES_EVENT = "modules";
+
+/** The hooks proper: a hooks module is code of its own, and has its own group. */
+export const kitPlainHooks = (inspection: Pick<KitInspection, "hooks"> | null): NonNullable<KitInspection["hooks"]> =>
+  (inspection?.hooks ?? []).filter((hook) => hook.event !== MODULES_EVENT);
+
+/**
+ * What a plugin starts by itself beside its hooks, by kind, in the view's order.
+ * A kind this build does not know counts as not understood: nothing is left out.
+ */
+export function kitRunningGroups(inspection: Pick<KitInspection, "hooks" | "running"> | null): KitRunningGroup[] {
+  const modules = (inspection?.hooks ?? [])
+    .filter((hook) => hook.event === MODULES_EVENT)
+    .map((hook) => ({ name: hook.event, text: hook.command }));
+  const byKind = new Map<KitRunningGroupKind, KitRunningGroup["items"]>();
+  if (modules.length > 0) byKind.set("module", modules);
+  for (const item of inspection?.running ?? []) {
+    const kind = RUNNING_GROUP_ORDER.includes(item.kind) ? item.kind : "unknown";
+    byKind.set(kind, [...(byKind.get(kind) ?? []), item]);
+  }
+  return RUNNING_GROUP_ORDER.flatMap((kind) => {
+    const items = byKind.get(kind);
+    return items ? [{ kind, items }] : [];
+  });
+}
+
+/**
+ * What an item starts, for its block: null when all Hangar can give is its name.
+ * A line break stays one: what a skill declares takes several lines.
+ */
+export function kitRunningLine(item: Pick<KitRunning, "argv" | "text">): string | null {
+  if (item.argv && item.argv.length > 0) return kitArgvLine(item.argv);
+  return item.text ? item.text.split("\n").map(kitRuleText).join("\n") : null;
+}
 
 export type KitState =
   /** Not enabled on the workspace. */

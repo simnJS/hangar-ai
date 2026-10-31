@@ -9,13 +9,17 @@ import {
   hooksToAccept,
   kitArgvLine,
   kitName,
+  kitPlainHooks,
   kitRequested,
   kitRuleText,
+  kitRunningGroups,
+  kitRunningLine,
   kitState,
   panesToRestart,
   permissionDiff,
   permissionLabel,
   requestedPermissions,
+  RUNNING_LABEL,
   type KitState,
 } from "../lib/kitActivation";
 import { kitIconUrl } from "../lib/kitIcon";
@@ -34,6 +38,7 @@ import {
   type KitGrant,
   type KitInfo,
   type KitInspection,
+  type KitRunning,
   type KitSetupStatus,
 } from "../lib/kits";
 import { useStore } from "../store";
@@ -163,6 +168,33 @@ function DeclaredCommandBlock({ t, command, tag }: { t: Translator; command: Kit
   );
 }
 
+/** Something a plugin starts by itself: what it starts as written, and what cannot be told. */
+function RunningBlock({ t, item, tag }: { t: Translator; item: Omit<KitRunning, "kind">; tag: ReactNode }) {
+  const name = kitRuleText(item.name);
+  const line = kitRunningLine(item);
+  return (
+    <div className="kit-step">
+      <div className="kit-step__head">
+        <span className="kit-step__title">{item.when ? `${name} · ${kitRuleText(item.when)}` : name}</span>
+        {tag}
+      </div>
+      {item.description && <p className="kit-act__note">{kitRuleText(item.description)}</p>}
+      {line !== null && (
+        <pre className="kit-step__cmd" tabIndex={0} aria-label={t("kitsManage.runWhat", { name })}>
+          {line}
+        </pre>
+      )}
+      {item.env && item.env.length > 0 && (
+        <p className="kit-act__note">{t("kitsManage.runEnv", { names: kitRuleText(item.env.join(", ")) })}</p>
+      )}
+      {item.headers && item.headers.length > 0 && (
+        <p className="kit-act__note">{t("kitsManage.runHeaders", { names: kitRuleText(item.headers.join(", ")) })}</p>
+      )}
+      {item.unreadable && <p className="kit-act__note kit-step__unreadable">{t("kitsManage.runUnreadable")}</p>}
+    </div>
+  );
+}
+
 export function KitActivationView(props: KitActivationViewProps) {
   const { t, kit, inspection, steps, entry, workspaceName, everywhere, canRun, os, running, ran, error } = props;
   const manifest = kit.manifest;
@@ -171,7 +203,14 @@ export function KitActivationView(props: KitActivationViewProps) {
   const needsAccept = !entry || diff.added.length > 0;
   const hooksNew = hooksToAccept(diff);
   const commandsNew = commandsToAccept(diff);
-  const hooks = inspection?.hooks ?? [];
+  const hooks = kitPlainHooks(inspection);
+  const runningGroups = kitRunningGroups(inspection);
+  const runsNothing = hooks.length === 0 && runningGroups.length === 0;
+  const consentTag = entry && kitHooksGrant(kit) && (
+    <span className={`kit-act__tag ${hooksNew ? "kit-act__tag--new" : ""}`}>
+      {t(hooksNew ? "kitsManage.actPermsNew" : "kitsManage.actPermsGranted")}
+    </span>
+  );
   const declaredCommands = inspection?.declaredCommands ?? [];
   const brings =
     inspection &&
@@ -320,34 +359,46 @@ export function KitActivationView(props: KitActivationViewProps) {
         </h3>
         {inspection === null ? (
           <p className="kit-act__note">{t("kitsManage.loading")}</p>
-        ) : hooks.length === 0 ? (
+        ) : runsNothing ? (
           <p className="kit-act__note">{t("kitsManage.actNoHooks")}</p>
         ) : (
           <>
-            <p className="kit-act__note">{t("kitsManage.actHooksHint")}</p>
             {hooksNew && entry && <p className="kit-act__note">{t("kitsManage.actHooksChanged")}</p>}
             {kit.source.kind === "folder" && <p className="kit-act__note">{t("kitsManage.actHooksLive")}</p>}
-            {hooks.map((hook) => (
-              <div key={`${hook.event}\n${hook.matcher}\n${hook.command}`} className="kit-step">
-                <div className="kit-step__head">
-                  <span className="kit-step__title">
-                    {hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event}
-                  </span>
-                  {entry &&
-                    kitHooksGrant(kit) &&
-                    (hooksNew ? (
-                      <span className="kit-act__tag kit-act__tag--new">{t("kitsManage.actPermsNew")}</span>
-                    ) : (
-                      <span className="kit-act__tag">{t("kitsManage.actPermsGranted")}</span>
-                    ))}
-                </div>
-                <pre
-                  className="kit-step__cmd"
-                  tabIndex={0}
-                  aria-label={t("kitsManage.actHookCommand", { event: hook.event })}
-                >
-                  {hook.command}
-                </pre>
+            {hooks.length > 0 && (
+              <div className="kit-act__group">
+                <h4 className="kit-act__label">
+                  {t("kitsManage.runHook")} <span className="kit-act__count">{hooks.length}</span>
+                </h4>
+                <p className="kit-act__note">{t("kitsManage.actHooksHint")}</p>
+                {hooks.map((hook) => (
+                  <div key={`${hook.event}\n${hook.matcher}\n${hook.command}`} className="kit-step">
+                    <div className="kit-step__head">
+                      <span className="kit-step__title">
+                        {hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event}
+                      </span>
+                      {consentTag}
+                    </div>
+                    <pre
+                      className="kit-step__cmd"
+                      tabIndex={0}
+                      aria-label={t("kitsManage.actHookCommand", { event: hook.event })}
+                    >
+                      {hook.command}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+            {runningGroups.map((group) => (
+              <div key={group.kind} className="kit-act__group">
+                <h4 className="kit-act__label">
+                  {t(RUNNING_LABEL[group.kind].title)} <span className="kit-act__count">{group.items.length}</span>
+                </h4>
+                <p className="kit-act__note">{t(RUNNING_LABEL[group.kind].when)}</p>
+                {group.items.map((item, index) => (
+                  <RunningBlock key={`${index}\n${item.name}`} t={t} item={item} tag={consentTag} />
+                ))}
               </div>
             ))}
           </>

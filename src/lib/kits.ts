@@ -41,9 +41,10 @@ export type KitCommandPermission = `command:${string}`;
 export type KitPermission = KitNamedPermission | KitLoopbackPermission | KitCommandPermission;
 
 /**
- * What a workspace stores to say it accepted a kit's hooks: `hooks:` and the
- * first 16 hex of the hash of their list (kits/hooks.rs). Never a tab's: a
- * manifest cannot ask for one, and no method answers to it.
+ * What a workspace stores to say it accepted what a kit's plugin runs by itself:
+ * `hooks:` and the first 16 hex of the hash of its hooks and of everything else
+ * it starts (kits/plugin.rs). A plugin with only hooks keeps the hash of 1.8.0.
+ * Never a tab's: a manifest cannot ask for one, and no method answers to it.
  */
 export type KitHooksGrant = `hooks:${string}`;
 
@@ -204,11 +205,11 @@ export interface KitInfo {
   error: string | null;
   /** The last update check while the app runs; null before any. */
   update: KitUpdate | null;
-  /** `hooks:<hash>` of what its plugin runs by itself; null without hooks. */
+  /** `hooks:<hash>` of what its plugin runs by itself, hooks and all else; null when it runs nothing. */
   hooksPermission?: string | null;
   /**
-   * Whether a workspace has to have accepted those hooks: every GitHub kit
-   * added since that is asked, and an older one once an update changed them.
+   * Whether a workspace has to have accepted all that: every GitHub kit added
+   * since that is asked, and an older one once an update changed it.
    */
   hooksConsent?: boolean;
   /** `commands:<hash>` of what its tabs may run on this OS; null without any. */
@@ -223,6 +224,41 @@ export interface KitHook {
   command: string;
 }
 
+/** The kinds of `KitRunning`, as `RunKind` in kits/plugin.rs names them. */
+export type KitRunningKind =
+  | "mcp"
+  | "monitor"
+  | "lsp"
+  | "skillHook"
+  | "settings"
+  | "grammar"
+  | "bin"
+  | "binary"
+  | "dependency"
+  | "unknown";
+
+/**
+ * Something a plugin starts by itself beside its hooks, or may, exactly as it
+ * writes it. Env values and headers never reach here: only their names.
+ */
+export interface KitRunning {
+  kind: KitRunningKind;
+  name: string;
+  /** The program, then its arguments. */
+  argv?: string[];
+  /** A shell command, an address, a path: what `argv` is not. */
+  text?: string;
+  /** When it says so itself: a monitor's `when`, a language server's file types. */
+  when?: string;
+  description?: string;
+  /** The names of the variables it sets. */
+  env?: string[];
+  /** The names of the headers it sends. */
+  headers?: string[];
+  /** What it runs is out of Hangar's reach: a bundle, a broken file, remote code, another plugin. */
+  unreadable?: boolean;
+}
+
 /** What a kit brings, as `kit_inspect` finds it. */
 export interface KitInspection {
   plugin?: { name: string; dir: string };
@@ -233,7 +269,9 @@ export interface KitInspection {
   mcpServers: string[];
   /** What its plugin runs by itself, from `hooks/hooks.json` and `plugin.json`. */
   hooks?: KitHook[];
-  /** `hooks:<hash>` of that very list: what accepting it stores. */
+  /** What else it starts by itself, or may. */
+  running?: KitRunning[];
+  /** `hooks:<hash>` of those very lists: what accepting them stores. */
   hooksPermission?: string | null;
   tabs: KitTab[];
   /** The steps that have a command for this OS. */
@@ -354,11 +392,11 @@ export const workspaceKitIds = (
 ): string[] => effectiveKits(ws, settings).map((kit) => kit.id);
 
 /**
- * What a workspace has to hold for a kit's hooks to reach its panes; null when
- * nothing has to be held. Only a GitHub kit is asked: a linked folder is the
- * person's own, read live, and every edit would ask again. A kit with no hooks
- * has nothing to accept, and one installed before this was asked keeps working
- * as it did until an update changes its hooks.
+ * What a workspace has to hold for what a kit runs by itself to reach its panes;
+ * null when nothing has to be held. Only a GitHub kit is asked: a linked folder is
+ * the person's own, read live, and every edit would ask again. A kit that runs
+ * nothing has nothing to accept, and one installed before this was asked keeps
+ * working as it did until an update changes what it runs.
  */
 export function kitHooksGrant(
   kit: Pick<KitInfo, "source" | "hooksPermission" | "hooksConsent">,
@@ -383,7 +421,7 @@ export function kitCommandsGrant(
 export interface PaneKits {
   /** What the pane hands `ptySpawn`, and `mcp_scope_write` in `custom` mode. */
   ids: string[];
-  /** Enabled, and held out: the hooks they would bring were not accepted here. */
+  /** Enabled, and held out: what they would run by themselves was not accepted here. */
   held: string[];
 }
 

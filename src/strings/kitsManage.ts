@@ -100,14 +100,52 @@ export const en = {
   "kitsManage.actSetupHint":
     "Shown exactly as they will run, in a pane you can see, only when you click Run, once per machine.",
   "kitsManage.actCommandOs": "Command for {os}",
-  "kitsManage.actHooks": "Commands that run by themselves",
-  "kitsManage.actNoHooks": "No hook: nothing runs by itself.",
+  "kitsManage.actHooks": "What runs by itself",
+  "kitsManage.actNoHooks": "Nothing runs by itself.",
   "kitsManage.actHooksHint": "Claude Code runs these by itself, without asking, each time they match.",
   "kitsManage.actHooksChanged":
-    "These changed since they were accepted here. Until you accept them, this kit stays out of the workspace's new panes.",
+    "This list changed since it was accepted here, or was not shown in full then. Until you accept it, this kit stays out of the workspace's new panes.",
   "kitsManage.actHooksLive":
-    "A linked folder is read live: what you change in these commands applies without being asked again.",
+    "A linked folder is read live: what you change in this list applies without being asked again.",
   "kitsManage.actHookCommand": "Command of the hook {event}",
+  "kitsManage.runHook": "Hooks",
+  "kitsManage.runModule": "Hooks modules",
+  "kitsManage.runModuleWhen":
+    "Claude Code loads this code into itself when a session starts: it runs inside Claude Code and sees what happens in the session. Hangar shows its path, not its code.",
+  "kitsManage.runMcp": "MCP servers",
+  "kitsManage.runMcpWhen":
+    "Claude Code starts each one, or connects to its address, when a session starts, and keeps it for the whole session. Claude can then call its tools.",
+  "kitsManage.runMonitor": "Monitors",
+  "kitsManage.runMonitorWhen":
+    "Each one starts in the background when a session starts, or the first time the skill it names runs, and stays until the session ends, with your rights and outside the sandbox. What it prints reaches Claude.",
+  "kitsManage.runLsp": "Language servers",
+  "kitsManage.runLspWhen":
+    "Claude Code starts each one the first time Claude edits a file of the types shown, and it stays until the session ends.",
+  "kitsManage.runSkillHook": "Hooks of skills and commands",
+  "kitsManage.runSkillHookWhen":
+    "While that skill or command is in use, Claude Code runs these by itself, without asking, each time they match.",
+  "kitsManage.runSettings": "Settings",
+  "kitsManage.runSettingsWhen":
+    "They apply when a session starts: agent makes the whole session answer as that agent of the plugin, and subagentStatusLine runs its command every few seconds while subagents work.",
+  "kitsManage.runGrammar": "Highlighting grammars",
+  "kitsManage.runGrammarWhen":
+    "Claude Code loads this JavaScript, from the plugin or from the address shown, to colour code in its interface.",
+  "kitsManage.runBin": "Programs Claude can call by name",
+  "kitsManage.runBinWhen":
+    "Nothing starts these by itself: while the kit is on, Claude can run them by name from its shell.",
+  "kitsManage.runBinary": "Programs to download",
+  "kitsManage.runBinaryWhen":
+    "Claude Code may download these into bin/ when it installs the plugin, checked against this hash. Claude can then run them by name.",
+  "kitsManage.runDependency": "Other plugins",
+  "kitsManage.runDependencyWhen":
+    "Claude Code enables these along with this one, when they are installed, and they then run whatever they bring.",
+  "kitsManage.runUnknown": "Not understood",
+  "kitsManage.runUnknownWhen":
+    "Hangar does not know what these are. Claude Code may ignore them or, in another version, act on them: read them before you accept.",
+  "kitsManage.runUnreadable": "Cannot be read by Hangar: what it runs is not shown here.",
+  "kitsManage.runWhat": "What {name} starts",
+  "kitsManage.runEnv": "Environment variables it sets (values not shown): {names}",
+  "kitsManage.runHeaders": "Headers it sends (values not shown): {names}",
   "kitsManage.stepDone": "Done on this machine",
   "kitsManage.stepTodo": "Not run yet",
   "kitsManage.stepRun": "Run",
@@ -145,7 +183,7 @@ export const en = {
   "kitsManage.permNotify": "show desktop notifications",
 
   "kitsManage.warnHooks":
-    "Kit “{id}”: its hooks changed and are not accepted on this workspace, so the pane starts without it. Review it in the workspace's “Kits…” menu.",
+    "Kit “{id}”: what it runs by itself changed, or was not shown in full, and is not accepted on this workspace, so the pane starts without it. Review it in the workspace's “Kits…” menu.",
 
   "kitsManage.restartTitle": "Running agents do not have it yet",
   "kitsManage.restartBody":
@@ -159,7 +197,8 @@ export const en = {
   "kitsManage.everywhereToggle": "Enable {name} on all workspaces",
   "kitsManage.everywhereHint":
     "Accepted once, for every workspace, the ones you create later included. A workspace's own choice for this kit still wins.",
-  "kitsManage.everywhereReview": "New permissions or hooks to accept: kept out of every pane until then.",
+  "kitsManage.everywhereReview":
+    "New permissions, or what it runs by itself, to accept: kept out of every pane until then.",
   "kitsManage.everywhereNeedsWs": "Open a workspace first to run this kit's setup steps.",
   "kitsManage.everywhereOffNote":
     "Turned off for all workspaces. The workspaces that enabled it themselves keep it.",
@@ -263,15 +302,53 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.actSetupHint":
     "Affichées exactement comme elles s'exécuteront, dans un pane visible, seulement quand vous cliquez sur Lancer, une fois par machine.",
   "kitsManage.actCommandOs": "Commande pour {os}",
-  "kitsManage.actHooks": "Commandes qui se lancent toutes seules",
-  "kitsManage.actNoHooks": "Aucun hook : rien ne se lance tout seul.",
+  "kitsManage.actHooks": "Ce qui se lance tout seul",
+  "kitsManage.actNoHooks": "Rien ne se lance tout seul.",
   "kitsManage.actHooksHint":
-    "Claude Code les lance de lui-même, sans demander, chaque fois qu'elles correspondent.",
+    "Claude Code les lance de lui-même, sans demander, chaque fois qu'ils correspondent.",
   "kitsManage.actHooksChanged":
-    "Elles ont changé depuis qu'elles ont été acceptées ici. Tant que vous ne les acceptez pas, ce kit reste hors des nouveaux panes du workspace.",
+    "Cette liste a changé depuis qu'elle a été acceptée ici, ou n'avait pas été montrée en entier. Tant que vous ne l'acceptez pas, ce kit reste hors des nouveaux panes du workspace.",
   "kitsManage.actHooksLive":
-    "Un dossier lié est lu en direct : ce que vous changez dans ces commandes s'applique sans nouvelle question.",
+    "Un dossier lié est lu en direct : ce que vous changez dans cette liste s'applique sans nouvelle question.",
   "kitsManage.actHookCommand": "Commande du hook {event}",
+  "kitsManage.runHook": "Hooks",
+  "kitsManage.runModule": "Modules de hooks",
+  "kitsManage.runModuleWhen":
+    "Claude Code charge ce code en lui-même au démarrage d'une session : il s'exécute dans Claude Code et voit ce qui se passe dans la session. Hangar montre son chemin, pas son code.",
+  "kitsManage.runMcp": "Serveurs MCP",
+  "kitsManage.runMcpWhen":
+    "Claude Code lance chacun, ou se connecte à son adresse, au démarrage d'une session, et le garde toute la session. Claude peut alors appeler ses outils.",
+  "kitsManage.runMonitor": "Moniteurs",
+  "kitsManage.runMonitorWhen":
+    "Chacun démarre en arrière-plan au début d'une session, ou la première fois que le skill qu'il nomme se lance, et reste jusqu'à la fin de la session, avec vos droits et hors du bac à sable. Ce qu'il affiche arrive à Claude.",
+  "kitsManage.runLsp": "Serveurs de langage",
+  "kitsManage.runLspWhen":
+    "Claude Code lance chacun la première fois que Claude modifie un fichier des types indiqués, et il reste jusqu'à la fin de la session.",
+  "kitsManage.runSkillHook": "Hooks des skills et des commandes",
+  "kitsManage.runSkillHookWhen":
+    "Tant que ce skill ou cette commande est en cours, Claude Code les lance de lui-même, sans demander, chaque fois qu'ils correspondent.",
+  "kitsManage.runSettings": "Réglages",
+  "kitsManage.runSettingsWhen":
+    "Ils s'appliquent au démarrage d'une session : agent fait répondre toute la session comme cet agent du plugin, et subagentStatusLine lance sa commande toutes les quelques secondes pendant que des sous-agents travaillent.",
+  "kitsManage.runGrammar": "Grammaires de coloration",
+  "kitsManage.runGrammarWhen":
+    "Claude Code charge ce JavaScript, depuis le plugin ou depuis l'adresse indiquée, pour colorer le code dans son interface.",
+  "kitsManage.runBin": "Programmes que Claude peut appeler par leur nom",
+  "kitsManage.runBinWhen":
+    "Rien ne les lance tout seul : tant que le kit est actif, Claude peut les lancer par leur nom depuis son shell.",
+  "kitsManage.runBinary": "Programmes à télécharger",
+  "kitsManage.runBinaryWhen":
+    "Claude Code peut les télécharger dans bin/ quand il installe le plugin, vérifiés avec cette empreinte. Claude peut ensuite les lancer par leur nom.",
+  "kitsManage.runDependency": "Autres plugins",
+  "kitsManage.runDependencyWhen":
+    "Claude Code les active avec celui-ci quand ils sont installés, et ils lancent alors ce qu'ils apportent.",
+  "kitsManage.runUnknown": "Non compris",
+  "kitsManage.runUnknownWhen":
+    "Hangar ne sait pas ce que c'est. Claude Code peut les ignorer ou, dans une autre version, s'en servir : lisez-les avant d'accepter.",
+  "kitsManage.runUnreadable": "Ne peut pas être lu par Hangar : ce que cela lance n'est pas montré ici.",
+  "kitsManage.runWhat": "Ce que lance {name}",
+  "kitsManage.runEnv": "Variables d'environnement qu'il définit (valeurs masquées) : {names}",
+  "kitsManage.runHeaders": "En-têtes qu'il envoie (valeurs masquées) : {names}",
   "kitsManage.stepDone": "Faite sur cette machine",
   "kitsManage.stepTodo": "Pas encore lancée",
   "kitsManage.stepRun": "Lancer",
@@ -310,7 +387,7 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.permNotify": "afficher des notifications du bureau",
 
   "kitsManage.warnHooks":
-    "Kit « {id} » : ses hooks ont changé et ne sont pas acceptés sur ce workspace, le pane démarre donc sans lui. Examinez-le depuis le menu « Kits… » du workspace.",
+    "Kit « {id} » : ce qu'il lance tout seul a changé, ou n'avait pas été montré en entier, et n'est pas accepté sur ce workspace, le pane démarre donc sans lui. Examinez-le depuis le menu « Kits… » du workspace.",
 
   "kitsManage.restartTitle": "Les agents en cours ne l'ont pas encore",
   "kitsManage.restartBody":
@@ -325,7 +402,7 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.everywhereHint":
     "Accepté une seule fois, pour tous les workspaces, ceux que vous créerez plus tard compris. Le choix propre à un workspace pour ce kit reste prioritaire.",
   "kitsManage.everywhereReview":
-    "Nouvelles autorisations ou hooks à accepter : le kit reste hors de tous les panes d'ici là.",
+    "Nouvelles autorisations, ou ce qu'il lance tout seul, à accepter : le kit reste hors de tous les panes d'ici là.",
   "kitsManage.everywhereNeedsWs":
     "Ouvrez d'abord un workspace pour lancer les commandes d'installation de ce kit.",
   "kitsManage.everywhereOffNote":
