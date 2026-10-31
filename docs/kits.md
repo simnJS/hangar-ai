@@ -15,7 +15,11 @@ Kits come from a local folder (linked, read live) or from a GitHub link
 (cloned). There is no catalog.
 
 This page is the contract. The code lives in `src-tauri/src/kits.rs` and
-`src-tauri/src/kits/`, with the typed wrappers in `src/lib/kits.ts`.
+`src-tauri/src/kits/`, with the typed wrappers in `src/lib/kits.ts`; a tab's
+page is served by `src-tauri/src/kit_scheme.rs` with the SDK in
+`src-tauri/kit-sdk/kit.js`, and framed and answered by
+`src/components/preview/KitTabView.tsx`, `src/lib/kitTabs.ts` and
+`src/lib/kitApi.ts`.
 
 ## A minimal kit
 
@@ -236,24 +240,87 @@ A closed set. A permission not in it is a manifest error.
 | `notify`         | raise a desktop notification.                                 |
 
 The person accepts a tab's permissions when they enable the kit on a
-workspace; what they accepted is the workspace's `kits[].granted`.
+workspace; what they accepted is the workspace's `kits[].granted`. A tab may
+call what it **declares in its manifest and** the workspace granted, both: a
+permission granted to the kit that this tab does not declare stays out of it,
+and one an update added to the tab waits until the person grants it. Both are
+read again at every call, so taking a grant back denies the next call.
+
+## A tab
+
+A tab opens in the workspace's side panel — the preview, beside the
+terminals — from the toolbar's **Kits** menu or the command palette, which
+list the tabs of the kits enabled on the workspace. It stays open per
+workspace, like the files there, and keeps running while another tab or
+workspace is in front; a workspace put to sleep lets its tabs' pages go, and
+they load again when it wakes. Its bar reloads it, and says what it was
+granted.
+
+### Where its page comes from
+
+The `hangar-kit` scheme (`src-tauri/src/kit_scheme.rs`) serves the kits
+installed on the machine that can be used — not a missing, broken or
+too-new one — at `<base>/<kit id>/<path in the kit>`, the base being
+`http://hangar-kit.localhost` on Windows and `hangar-kit://localhost`
+elsewhere. A tab opens at its `entry`:
+
+```
+http://hangar-kit.localhost/hello-kit/tabs/status/index.html
+```
+
+So **use relative URLs** for the kit's own files (`app.js`,
+`../shared/style.css`): an absolute one like `/style.css` leaves the kit. The
+one absolute URL is the SDK's, `/_hangar/kit.js`.
+
+It serves:
+
+- files inside the kit's folder only, once links are followed; a path with an
+  encoded `.`, `..`, slash, backslash, `:` or NUL is refused;
+- never a hidden file or folder (`.env`, `.git/…`);
+- web files only, each with its type: `.html` `.htm` `.js` `.mjs` `.css`
+  `.json` `.map` `.txt` `.md` `.csv` `.svg` `.png` `.jpg` `.jpeg` `.gif`
+  `.webp` `.avif` `.ico` `.woff` `.woff2` `.ttf` `.otf` `.wasm` `.mp3` `.wav`
+  `.ogg` `.m4a` `.mp4` `.webm`, 64 MB at most; anything else stays on disk;
+- with `Access-Control-Allow-Origin: *`, so module scripts and fonts load,
+  to the kit's pages and Hangar's own only, and never cached.
+
+### What its page can do
+
+The page runs isolated: this is code written by someone else.
+
+- It is framed with `sandbox="allow-scripts"`, and every answer of the scheme
+  carries a `sandbox allow-scripts` Content-Security-Policy as well: the page
+  has an **opaque origin**. It reaches neither Hangar's window nor its
+  commands, has **no storage** (`localStorage`, `sessionStorage`, IndexedDB
+  and cookies throw or stay empty), opens no popup, submits no form, shows no
+  `alert`/`confirm`/`prompt`, and cannot navigate Hangar.
+- Its policy allows **the kit's own files and nothing else**: no network at
+  all — no `fetch`, image, font, style or script from anywhere else, no
+  frames, workers or plugins. Inline scripts and styles run, module scripts
+  and WebAssembly too; `eval` does not.
+- It talks to Hangar by `postMessage` to its parent, and only that (below).
+- **A tab is one page.** It speaks to Hangar from the page it opened on: if
+  the frame loads another document — a link followed, the page sending itself
+  elsewhere — Hangar takes the frame down and says so, until the person
+  reloads the tab. Hash changes and `history` within the page are fine.
 
 ## The tab message protocol
 
-A tab is an isolated page (served by the `hangar-kit` scheme, framed by
-Hangar). It talks to Hangar by `postMessage` only. Every message carries
-`hangar: 1`.
+Every message carries `hangar: 1`. Hangar answers only messages whose source
+is that tab's frame, from its opaque origin; anything else is dropped without
+an answer.
 
-Request, from the page:
+Request, from the page, to `window.parent`:
 
 ```json
 { "hangar": 1, "id": "7", "method": "panes.send", "params": { "pane": "Ava", "text": "Build the place" } }
 ```
 
-Response, from Hangar, with the request's `id`:
+`id` is a non-empty string (128 characters at most) or a number; a message
+without one is dropped. Response, from Hangar, with the request's `id`:
 
 ```json
-{ "hangar": 1, "id": "7", "result": null }
+{ "hangar": 1, "id": "7", "result": { "queued": true, "pane": "Ava" } }
 { "hangar": 1, "id": "7", "error": { "code": "denied", "message": "this tab was not granted panes.send" } }
 ```
 
@@ -265,35 +332,106 @@ Event, from Hangar:
 
 Methods:
 
-| Method           | Params              | Needs            | Does                                                                     |
+| Method           | Params              | Needs            | Result                                                                   |
 | ---------------- | ------------------- | ---------------- | ------------------------------------------------------------------------ |
-| `workspace.info` | —                   | `workspace.read` | The workspace the tab is shown in.                                       |
-| `panes.list`     | —                   | `panes.read`     | The workspace's panes.                                                   |
-| `panes.send`     | `{ pane, text }`    | `panes.send`     | Sends `text` to that pane's agent, delivered when the agent is free.     |
-| `files.read`     | `{ path }`          | `files.read`     | A text file inside the workspace folder, 1 MB at most.                   |
-| `preview.show`   | `{ path }`          | `preview.show`   | Opens the file in Hangar's preview.                                      |
-| `notify`         | `{ title, body }`   | `notify`         | Raises a desktop notification.                                           |
+| `workspace.info` | —                   | `workspace.read` | `{ id, name, folder }`: the workspace the tab is shown in, `folder` its absolute path. |
+| `panes.list`     | —                   | `panes.read`     | `[{ name, agent, role, state, canSend }]`, in the workspace's order (below). |
+| `panes.send`     | `{ pane, text }`    | `panes.send`     | `{ queued: true, pane }`: `text` waits for that pane's agent to be free. |
+| `files.read`     | `{ path }`          | `files.read`     | The file's text, a string.                                               |
+| `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens in the workspace's preview, in front. |
+| `notify`         | `{ title, body? }`  | `notify`         | `null`: a desktop notification, titled `<kit name> · <title>`.          |
+
+A pane in `panes.list`: `name` (what `panes.send` takes), `agent` (`claude`,
+`codex`, `gemini`, `opencode` or `shell`), `role` (`orchestrator`, `worker`,
+`manager` or `null`), `state` (`working`, `waiting` for an answer, `yours` —
+done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
+`canSend`, whether `panes.send` reaches it now.
+
+- **`panes.send`** reaches the **Claude Code agents of the tab's own
+  workspace**, by pane name (any case), and only those whose session runs
+  Hangar's bridge: the text waits in Hangar's queue until the agent is free,
+  and reaches it labelled as coming from `kit:<kit id>` — never as typed by
+  the person, so it cannot approve anything on their behalf. `text` is 1 to
+  20 000 characters, sent as given. At most **10 a minute**.
+- **`files.read`** and **`preview.show`** take a path **relative to the
+  workspace folder**: either slash, no `..`, no drive, no `:`, no hidden file
+  or folder, 1 024 characters at most. Hangar checks it again on disk, where
+  links must not lead out of the folder. `files.read` reads a UTF-8 text file
+  of **1 MB at most** (a BOM is dropped); `preview.show` opens any file the
+  preview shows, under the kit's name.
+- **`notify`** takes a `title` of 1 to 120 characters and a `body` of 1 000
+  at most. At most **5 a minute**.
+- A tab has at most **16 calls** waiting for their answer at once.
+
+Errors:
+
+| Code           | When                                                                  |
+| -------------- | --------------------------------------------------------------------- |
+| `denied`       | The tab may not call the method; or `panes.send` to a pane that is not a Claude Code agent. |
+| `invalid`      | The params are not what the method takes.                             |
+| `unknown`      | No such method.                                                       |
+| `not_found`    | No pane of that name in the workspace.                                |
+| `rate_limited` | Over a limit above; try again later.                                  |
+| `unavailable`  | Hangar cannot do it now: the agent's session does not run the bridge, the workspace is gone. |
+| `failed`       | It was tried and failed: a file not found, too large, not text… The message says why. |
 
 Events:
 
-| Event           | Needs        | Sent when                         |
-| --------------- | ------------ | --------------------------------- |
-| `panes.changed` | `panes.read` | The workspace's panes change.     |
+| Event           | Needs        | Sent when                                                            |
+| --------------- | ------------ | -------------------------------------------------------------------- |
+| `panes.changed` | `panes.read` | The workspace's panes change: one added, closed, renamed, or changing state. `data` is `{}`: call `panes.list`. |
 
-A call without its permission is answered with the error code `denied`. The
-shapes of the results are defined with the tab frame's implementation.
+### The SDK
 
-**The SDK.** `/_hangar/kit.js`, served by the `hangar-kit` scheme to every tab,
-wraps the protocol:
+`/_hangar/kit.js`, served by the `hangar-kit` scheme to every tab, wraps the
+protocol in `window.hangar`. It is small, has no dependencies, and is all a
+tab needs:
 
-```js
-const panes = await window.hangar.call("panes.list"); // → Promise of the result
-window.hangar.on("panes.changed", (data) => { /* … */ });
+- `window.hangar.call(method, params?)` → a Promise of the result. It rejects
+  with an `Error` whose `code` is the protocol's (`denied`, `invalid`…), or
+  `timeout` when Hangar does not answer within 30 seconds, or `unavailable`
+  when the page is not open as a tab.
+- `window.hangar.on(event, handler)` → a function that stops listening.
+- `window.hangar.version` → `1`.
+
+A minimal tab, asking for `panes.read`, `panes.send` and `notify`:
+
+```html
+<!doctype html>
+<meta charset="utf-8" />
+<script src="/_hangar/kit.js"></script>
+<ul id="panes"></ul>
+<script>
+  async function show() {
+    const list = document.getElementById("panes");
+    list.replaceChildren();
+    for (const pane of await window.hangar.call("panes.list")) {
+      const item = document.createElement("li");
+      item.textContent = `${pane.name} (${pane.agent}, ${pane.state ?? "?"})`;
+      if (pane.canSend) {
+        const button = document.createElement("button");
+        button.textContent = "Ping";
+        button.onclick = () =>
+          window.hangar
+            .call("panes.send", { pane: pane.name, text: "Where are you at?" })
+            .catch((error) => window.hangar.call("notify", { title: "Not sent", body: error.message }));
+        item.append(" ", button);
+      }
+      list.append(item);
+    }
+  }
+  window.hangar.on("panes.changed", show);
+  show().catch((error) => (document.body.textContent = `${error.code}: ${error.message}`));
+</script>
 ```
 
-`src/lib/kits.ts` exports the protocol's constants for that implementation:
-`KIT_METHODS` (method → permission), `KIT_EVENTS`, `KIT_SDK_PATH`,
-`KIT_FILE_MAX_BYTES`, `KIT_DENIED`, the message types and `kitMayCall`.
+`src/lib/kits.ts` exports the protocol's constants: `KIT_METHODS` (method →
+permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`, `KIT_DENIED`,
+the message types and `kitMayCall`. The window's side is `src/lib/kitApi.ts`
+(its limits and error codes), the tab itself
+`src/components/preview/KitTabView.tsx`, and the paths `files.read` and
+`preview.show` take are checked on disk by `kit_file_read` and
+`kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`).
 
 ## Setup commands
 

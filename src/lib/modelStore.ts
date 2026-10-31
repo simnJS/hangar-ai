@@ -5,8 +5,8 @@ import type { FileKind } from "./preview";
 /**
  * What is open in this window's previews, one preview per workspace: the
  * files each workspace has open — 3D models, images, videos, sounds, text,
- * Markdown, PDF, web pages — which is in front, whether its panel shows and
- * whether it fills the work area. Switching workspaces switches previews; a
+ * Markdown, PDF, web pages — and the tabs of its kits (docs/kits.md), which
+ * is in front, whether its panel shows and whether it fills the work area. Switching workspaces switches previews; a
  * file an agent shows in a workspace that is not on screen waits there.
  *
  * Written by the MCP control handlers (an agent showing a file), by the
@@ -64,10 +64,32 @@ export interface OpenFile extends OpenEntry {
   size: number;
 }
 
+/**
+ * A kit's tab: a page of the kit, framed and isolated
+ * (components/preview/KitTabView). Which page, and what it may ask, is read
+ * from the installed kit and the workspace each time it is drawn, never
+ * kept here: a kit updated or taken off the workspace changes it at once.
+ * `path` is `kit:<kit id>/<tab id>`, which no file's path can be.
+ */
+export interface OpenKitTab extends OpenEntry {
+  kind: "kit";
+  kitId: string;
+  tabId: string;
+}
+
 /** A tab of the preview. */
-export type OpenPreview = OpenModel | OpenFile;
+export type OpenPreview = OpenModel | OpenFile | OpenKitTab;
 
 export const isModel = (entry: OpenPreview): entry is OpenModel => entry.kind === "model";
+
+export const isKitTab = (entry: OpenPreview): entry is OpenKitTab => entry.kind === "kit";
+
+/** A file of the preview: neither a 3D model nor a kit's tab. */
+export const isPreviewFile = (entry: OpenPreview): entry is OpenFile =>
+  entry.kind !== "model" && entry.kind !== "kit";
+
+/** What stands for a kit's tab where a file has its path. */
+export const kitTabPath = (kitId: string, tabId: string) => `kit:${kitId}/${tabId}`;
 
 /** What opening a file takes, its id and workspace aside. */
 export type PreviewToShow =
@@ -112,6 +134,8 @@ interface State {
   entries: OpenPreview[];
   /** Every workspace's 3D models in one list: what this window's 3D viewer may hold. */
   all: OpenModel[];
+  /** Every workspace's kit tabs: the pages this window keeps running. */
+  kits: OpenKitTab[];
 }
 
 const EMPTY: ModelScope = Object.freeze({
@@ -122,7 +146,7 @@ const EMPTY: ModelScope = Object.freeze({
   unseen: false,
 }) as ModelScope;
 
-let state: State = { scopes: {}, entries: [], all: [] };
+let state: State = { scopes: {}, entries: [], all: [], kits: [] };
 const listeners = new Set<() => void>();
 let snapshotter: Snapshotter | null = null;
 /** Callers waiting for a file to finish loading, by id. */
@@ -143,7 +167,13 @@ function set(patch: Record<string, ModelScope | null>) {
     models.length === state.all.length && models.every((model, i) => model === state.all[i])
       ? state.all
       : models;
-  state = { scopes, entries, all };
+  // The same for the kit tabs: their frames are not woken by a file opening.
+  const tabs = entries.filter(isKitTab);
+  const kits =
+    tabs.length === state.kits.length && tabs.every((tab, i) => tab === state.kits[i])
+      ? state.kits
+      : tabs;
+  state = { scopes, entries, all, kits };
   for (const listener of listeners) listener();
   for (const entry of state.entries) {
     if (entry.status === "loading") continue;
@@ -249,6 +279,61 @@ export function showPreview(file: PreviewToShow & { workspaceId: string }): stri
 }
 
 /**
+ * Opens a kit's tab in its workspace's preview, or brings it forward when it
+ * is open already — as it is: a page someone is working in is not reloaded
+ * for being asked for again. The person opens it, so it is not news to them.
+ * Opens that workspace's panel. Returns the entry's id.
+ */
+export function openKitTab(tab: { workspaceId: string; kitId: string; tabId: string; title: string }): string {
+  const scope = modelScope(tab.workspaceId);
+  const path = kitTabPath(tab.kitId, tab.tabId);
+  const title = tab.title.trim() || tab.tabId;
+  const existing = scope.models.find((entry) => entry.path === path);
+  if (existing) {
+    set({
+      [tab.workspaceId]: {
+        ...withEntry(scope, existing.id, (entry) => ({ ...entry, title })),
+        activeId: existing.id,
+        panelOpen: true,
+      },
+    });
+    return existing.id;
+  }
+  const id = newId();
+  const entry: OpenKitTab = {
+    id,
+    kind: "kit",
+    kitId: tab.kitId,
+    tabId: tab.tabId,
+    path,
+    title,
+    workspaceId: tab.workspaceId,
+    openedBy: null,
+    openedAt: Date.now(),
+    modifiedMs: 0,
+    revision: 0,
+    status: "ready",
+    error: null,
+  };
+  set({
+    [tab.workspaceId]: { ...scope, models: [...scope.models, entry], activeId: id, panelOpen: true },
+  });
+  return id;
+}
+
+/** Loads a kit tab's page afresh: its reload button. */
+export function reloadKitTab(id: string) {
+  const entry = find(id);
+  if (!entry || !isKitTab(entry)) return;
+  set({
+    [entry.workspaceId]: withEntry(modelScope(entry.workspaceId), id, (e) => ({
+      ...e,
+      revision: e.revision + 1,
+    })),
+  });
+}
+
+/**
  * Closes entries, wherever they are open. A workspace left with none has its
  * panel closed; one that still has some keeps its panel as it was, the last
  * of them in front if the one in front went.
@@ -319,13 +404,16 @@ export function settleModel(id: string, result: { info: ModelInfo } | { error: s
  */
 export function reloadModel(id: string, modifiedMs: number, size?: number) {
   const entry = find(id);
-  if (!entry) return;
+  // A kit's tab has no file to watch: its own button reloads it.
+  if (!entry || isKitTab(entry)) return;
   set({
     [entry.workspaceId]: {
       ...withEntry(modelScope(entry.workspaceId), id, (e) =>
         isModel(e)
           ? { ...e, modifiedMs, revision: e.revision + 1, status: "loading" }
-          : { ...e, modifiedMs, revision: e.revision + 1, size: size ?? e.size },
+          : isPreviewFile(e)
+            ? { ...e, modifiedMs, revision: e.revision + 1, size: size ?? e.size }
+            : e,
       ),
       unseen: true,
     },
@@ -451,6 +539,11 @@ export function useModels(workspaceId: string | null): ModelScope {
 /** Every 3D model open in this window, whichever workspace has it. */
 export function useAllModels(): OpenModel[] {
   return useSyncExternalStore(subscribe, () => state.all);
+}
+
+/** Every kit tab open in this window, whichever workspace has it. */
+export function useWindowKitTabs(): OpenKitTab[] {
+  return useSyncExternalStore(subscribe, () => state.kits);
 }
 
 /** Whether any workspace of this window has anything open in its preview; a load landing does not change it. */

@@ -27,6 +27,16 @@ const LAYOUT_ICONS: Record<LayoutSize, IconName> = {
   8: "layout8",
 };
 
+/** A kit tab the « Kits » menu opens (lib/kitTabs). */
+export interface KitMenuEntry {
+  key: string;
+  /** As the kit's manifest names the tab. */
+  title: string;
+  /** The kit's name. */
+  kit: string;
+  onOpen: () => void;
+}
+
 /**
  * The bar over the workspace: which view, how the panes are laid out, and
  * the actions on all of them at once. Everything it does is the app's — it
@@ -47,6 +57,13 @@ export interface ToolbarProps {
   /** Opened or rewritten since the preview was last on screen. */
   modelsUnseen: boolean;
   onToggleModels: () => void;
+  /**
+   * The tabs of the workspace's kits, for the « Kits » menu; null when no kit
+   * is enabled on it, and the button is not there.
+   */
+  kitTabs: KitMenuEntry[] | null;
+  /** The installed kits are still being read. */
+  kitsLoading: boolean;
   /** The main window can send this workspace to a window of its own. */
   canDetach: boolean;
   onDetach: () => void;
@@ -100,6 +117,8 @@ export function Toolbar({
   modelShown,
   modelsUnseen,
   onToggleModels,
+  kitTabs,
+  kitsLoading,
   canDetach,
   onDetach,
   inOwnWindow,
@@ -143,6 +162,14 @@ export function Toolbar({
   const [folded, setFolded] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const confirmId = useId();
+  const kitsRef = useRef<HTMLButtonElement>(null);
+  const [kitsOpen, setKitsOpen] = useState(false);
+  const closeKits = (reason: MenuCloseReason) => {
+    setKitsOpen(false);
+    if (reason === "escape" || reason === "tab") kitsRef.current?.focus();
+  };
+  // Another workspace's kits are another menu.
+  useEffect(() => setKitsOpen(false), [workspace.id]);
 
   /**
    * A smaller preset closes the panes read last. When one of them still has
@@ -376,6 +403,20 @@ export function Toolbar({
 
         <span className="toolbar__sep" aria-hidden="true" />
 
+        {kitTabs && (
+          <button
+            ref={kitsRef}
+            type="button"
+            className={`tbtn ${kitsOpen ? "is-open" : ""}`}
+            onClick={() => setKitsOpen((open) => !open)}
+            title={t("kitsTab.menuHint")}
+            aria-label={t("kitsTab.menu")}
+            aria-haspopup="menu"
+            aria-expanded={kitsOpen}
+          >
+            <Icon name="window" size={16} />
+          </button>
+        )}
         {modelsOpen && (
           <button
             type="button"
@@ -413,6 +454,35 @@ export function Toolbar({
           <Icon name="sidebarRight" size={16} />
         </button>
       </div>
+
+      {kitsOpen && kitTabs && (
+        <ToolbarMenu anchorRef={kitsRef} label={t("kitsTab.menu")} onClose={closeKits}>
+          {kitTabs.length ? (
+            kitTabs.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                role="menuitem"
+                className="tmenu__item"
+                onClick={() => {
+                  setKitsOpen(false);
+                  entry.onOpen();
+                }}
+              >
+                <Icon name="window" size={14} />
+                <span className="tmenu__label">{entry.title}</span>
+                <span className="tmenu__keys">{entry.kit}</span>
+              </button>
+            ))
+          ) : (
+            <button type="button" role="menuitem" className="tmenu__item" disabled>
+              <span className="tmenu__label">
+                {kitsLoading ? t("kitsTab.menuLoading") : t("kitsTab.menuNone")}
+              </span>
+            </button>
+          )}
+        </ToolbarMenu>
+      )}
 
       {presetAsk && (
         <ToolbarMenu

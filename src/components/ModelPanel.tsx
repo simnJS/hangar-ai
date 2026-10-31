@@ -11,6 +11,7 @@ import { Icon, type IconName } from "./Icon";
 import { ToolbarMenu, type MenuCloseReason } from "./ToolbarMenu";
 import { FileView } from "./preview/FileView";
 import { Glyph } from "./preview/Glyph";
+import { KitTabView } from "./preview/KitTabView";
 import { Banner, StageMessage } from "./preview/parts";
 import { useLocale, useT, type Locale } from "../i18n";
 import { FORMAT_PLANS } from "../lib/model3d/formats";
@@ -32,10 +33,13 @@ import { captureName, copyPng, savePng } from "../lib/modelCapture";
 import {
   activateModel,
   closeModel,
+  isKitTab,
   isModel,
+  isPreviewFile,
   reloadModel,
   useAllModels,
   useModels,
+  useWindowKitTabs,
   type ModelInfo,
   type OpenModel,
   type OpenPreview,
@@ -47,8 +51,9 @@ import { DEFAULT_SETTINGS } from "../types";
 
 /**
  * The preview: the files agents opened, one tab each — a 3D model, an image,
- * a video, a sound, a text or code file, Markdown, a PDF, a web page — in a
- * panel beside the terminals, or a drawer over them when there is no room,
+ * a video, a sound, a text or code file, Markdown, a PDF, a web page — and
+ * the tabs of the workspace's kits the person opened, in a panel beside the
+ * terminals, or a drawer over them when there is no room,
  * or the whole work area when expanded. lib/sidePanels decides which; App
  * passes it in.
  *
@@ -69,6 +74,11 @@ import { DEFAULT_SETTINGS } from "../types";
  * whatever the user is looking at. The engine itself (lib/model3d/engine,
  * three.js) arrives with the first model, through a dynamic import: a window
  * that only ever shows images and documents never loads it.
+ *
+ * Kit tabs stay mounted the same way, every workspace's, each hidden but the
+ * one in front: a kit's page keeps what it was doing while the person looks
+ * at something else (components/preview/KitTabView). A workspace put to
+ * sleep lets its pages go, and they load again when it wakes.
  */
 
 /** In interface points, like the width itself. */
@@ -105,7 +115,10 @@ export function ModelPanel(props: Props) {
   const asideRef = useRef<HTMLElement>(null);
   const panelId = useId();
   const active = entries.find((entry) => entry.id === activeId) ?? null;
-  const file = active && !isModel(active) ? active : null;
+  const file = active && isPreviewFile(active) ? active : null;
+  const kit = active && isKitTab(active) ? active : null;
+  const kitTabs = useWindowKitTabs();
+  const asleep = useAsleep();
 
   // ---------------------------------------------------------------------------
   // Focus: as a drawer the panel takes the keyboard and gives it back
@@ -186,12 +199,18 @@ export function ModelPanel(props: Props) {
         aria-labelledby={active ? `${panelId}-tab-${active.id}` : undefined}
       >
         {windowModels && (
-          <ModelView active={active && isModel(active) ? active : null} hidden={Boolean(file)} shown={shown} />
+          <ModelView active={active && isModel(active) ? active : null} hidden={Boolean(file || kit)} shown={shown} />
         )}
+        {kitTabs
+          .filter((tab) => !asleep.has(tab.workspaceId))
+          .map((tab) => (
+            <KitTabView key={tab.id} entry={tab} shown={shown && tab.id === kit?.id} />
+          ))}
         {file ? (
           <FileView entry={file} shown={shown} />
         ) : (
-          !windowModels && (
+          !windowModels &&
+          !kit && (
             <div className="model-panel__stage">
               <StageMessage icon="cube" title={t("model.empty")} detail={t("model.emptyHint")} />
             </div>
@@ -538,7 +557,13 @@ function PreviewTabs({
               aria-selected={selected}
               aria-controls={`${panelId}-stage`}
               tabIndex={selected ? 0 : -1}
-              title={by ? `${entry.path}\n${by}` : entry.path}
+              title={
+                isKitTab(entry)
+                  ? t("kitsTab.tabHint", { title: entry.title, kit: entry.kitId })
+                  : by
+                    ? `${entry.path}\n${by}`
+                    : entry.path
+              }
               onClick={() => activateModel(entry.id)}
             >
               {entry.status === "loading" ? (
@@ -547,6 +572,8 @@ function PreviewTabs({
                 <Icon name="alert" size={12} className="model-tab__icon model-tab__icon--error" />
               ) : isModel(entry) ? (
                 <Icon name="cube" size={12} className="model-tab__icon" />
+              ) : isKitTab(entry) ? (
+                <Icon name="window" size={12} className="model-tab__icon" />
               ) : (
                 <Glyph name={entry.kind} size={12} className="model-tab__icon" />
               )}

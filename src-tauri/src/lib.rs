@@ -9,6 +9,7 @@ mod endpoint;
 mod git;
 mod install;
 mod instructions;
+mod kit_scheme;
 mod kits;
 mod mcp;
 mod mcp_scope;
@@ -59,6 +60,9 @@ pub fn run() {
         // text, pages — read from the folders the window allowed and nowhere
         // else (model.rs, preview.rs).
         .register_asynchronous_uri_scheme_protocol(model::SCHEME, model::serve)
+        // The pages of kits' tabs, isolated, and the SDK they talk to Hangar
+        // with (kit_scheme.rs, docs/kits.md).
+        .register_asynchronous_uri_scheme_protocol(kit_scheme::SCHEME, kit_scheme::serve)
         .setup(|app| {
             // Warmed here rather than on the first detection call: asking the
             // login shell for its PATH takes a moment, and doing it now means
@@ -178,6 +182,8 @@ pub fn run() {
             kits::kit_inspect,
             kits::kit_setup_status,
             kits::kit_setup_mark,
+            kit_scheme::files::kit_file_read,
+            kit_scheme::files::kit_workspace_path,
             instructions::write_agent_instructions,
             instructions::agent_instructions_status,
             notify::notify_send,

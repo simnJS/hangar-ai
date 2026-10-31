@@ -8,10 +8,15 @@ import {
   closeModels,
   closeWorkspaceModels,
   getModels,
+  isKitTab,
   isModel,
+  isPreviewFile,
+  kitTabPath,
   markModelsSeen,
   modelScope,
+  openKitTab,
   pruneModels,
+  reloadKitTab,
   reloadModel,
   setModelPanel,
   settleModel,
@@ -191,7 +196,7 @@ describe("files of every kind beside the models", () => {
   beforeEach(() => closeAllModels());
 
   const file = (
-    kind: Exclude<OpenPreview["kind"], "model">,
+    kind: Exclude<OpenPreview["kind"], "model" | "kit">,
     path: string,
     workspaceId = "ws",
     openedBy: string | null = "Ava",
@@ -292,6 +297,87 @@ describe("files of every kind beside the models", () => {
     adoptModelScope("A", scope);
     expect(modelScope("A").models.map((entry) => entry.kind)).toEqual(["model", "html"]);
     expect(modelScope("A").activeId).toBe(page);
+  });
+});
+
+describe("kit tabs beside the files", () => {
+  beforeEach(() => closeAllModels());
+
+  const kitTab = (tabId: string, workspaceId = "ws", title = tabId) =>
+    openKitTab({ workspaceId, kitId: "hello-kit", tabId, title });
+
+  it("opens a kit's tab in front, its panel open, as the person's own doing", () => {
+    const id = kitTab("status", "ws", "Status");
+    const scope = modelScope("ws");
+    expect(scope.activeId).toBe(id);
+    expect(scope.panelOpen).toBe(true);
+    expect(scope.unseen).toBe(false);
+    expect(scope.models[0]).toMatchObject({
+      kind: "kit",
+      kitId: "hello-kit",
+      tabId: "status",
+      title: "Status",
+      path: kitTabPath("hello-kit", "status"),
+      status: "ready",
+      openedBy: null,
+      revision: 0,
+    });
+    expect(isKitTab(scope.models[0])).toBe(true);
+    expect(isPreviewFile(scope.models[0])).toBe(false);
+    expect(isModel(scope.models[0])).toBe(false);
+  });
+
+  it("brings an open tab forward as it is, under the manifest's title of now", () => {
+    const status = kitTab("status", "ws", "Status");
+    const shot = showPreview({
+      kind: "image",
+      path: "C:/a/shot.png",
+      mime: "image/png",
+      size: 10,
+      workspaceId: "ws",
+      openedBy: "Ava",
+      modifiedMs: 1,
+    });
+    expect(modelScope("ws").activeId).toBe(shot);
+    expect(kitTab("status", "ws", "State")).toBe(status);
+    const scope = modelScope("ws");
+    expect(scope.models).toHaveLength(2);
+    expect(scope.activeId).toBe(status);
+    expect(scope.models[0]).toMatchObject({ title: "State", revision: 0 });
+  });
+
+  it("keeps each workspace's tabs apart, and the window's list of them", () => {
+    const a = kitTab("status", "A");
+    const b = kitTab("status", "B");
+    expect(a).not.toBe(b);
+    expect(getModels().kits.map((tab) => tab.id).sort()).toEqual([a, b].sort());
+    expect(getModels().all).toEqual([]);
+    // A file opening does not disturb the frames, which watch their list.
+    const before = getModels().kits;
+    showPreview({ kind: "text", path: "C:/a/x.txt", mime: "text/plain", size: 1, workspaceId: "A", openedBy: null, modifiedMs: 1 });
+    expect(getModels().kits).toBe(before);
+    closeWorkspaceModels("A");
+    expect(getModels().kits.map((tab) => tab.id)).toEqual([b]);
+  });
+
+  it("reloads from its own button, never from a file watch", () => {
+    const id = kitTab("status");
+    reloadKitTab(id);
+    expect(modelScope("ws").models[0].revision).toBe(1);
+    reloadModel(id, 99, 5);
+    expect(modelScope("ws").models[0]).toMatchObject({ revision: 1, modifiedMs: 0 });
+  });
+
+  it("closes like any tab, and moves with its workspace to another window", () => {
+    const status = kitTab("status");
+    const other = kitTab("other");
+    closeModel(other);
+    expect(modelScope("ws").activeId).toBe(status);
+    const scope = takeModelScope("ws")!;
+    adoptModelScope("ws", scope);
+    expect(modelScope("ws").models.map((entry) => entry.kind)).toEqual(["kit"]);
+    closeModels([status]);
+    expect(modelScope("ws")).toMatchObject({ models: [], panelOpen: false });
   });
 });
 

@@ -30,7 +30,14 @@ import {
   ptyKill,
   ptyWrite,
 } from "./lib/ipc";
-import { usePaneControl, type ControlDeps } from "./lib/control";
+import { modelRoots, usePaneControl, type ControlDeps } from "./lib/control";
+import { workspaceKits } from "./lib/kits";
+import {
+  serveRootGrants,
+  useInstalledKits,
+  workspaceKitTabs,
+  type KitTabChoice,
+} from "./lib/kitTabs";
 import { useOrchestrator } from "./lib/orchestratorBrief";
 import { useRemoteControl } from "./lib/remoteControl";
 import { deliveryDeps, landDelivery } from "./lib/deliveryControl";
@@ -98,6 +105,7 @@ import {
   closeWorkspaceModels,
   markModelsSeen,
   noteModelView,
+  openKitTab,
   pruneModels,
   setModelPanel,
   useAnyModels,
@@ -563,6 +571,53 @@ export default function App() {
     else setDrawer(null);
   };
   const toggleModelExpand = () => setModelsPanel({ open: true, expanded: !models.expanded });
+
+  /**
+   * Kits (docs/kits.md): the tabs of the kits enabled on the workspace on
+   * screen, opened from the toolbar's « Kits » menu or the palette into its
+   * preview, where they stay — per workspace, like the files — until closed.
+   */
+  const installedKits = useInstalledKits();
+  const kitChoices = activeWorkspace ? workspaceKitTabs(activeWorkspace, installedKits) : [];
+  const hasKits = workspaceKits(activeWorkspace).length > 0;
+  /** Bumped by each tab opened, for the drawer below. */
+  const [kitOpened, setKitOpened] = useState(0);
+  const openKit = (choice: KitTabChoice) => {
+    if (!activeWorkspace) return;
+    openKitTab({
+      workspaceId: activeWorkspace.id,
+      kitId: choice.kitId,
+      tabId: choice.tab.id,
+      title: choice.tab.title,
+    });
+    setView("terminals");
+    setKitOpened((n) => n + 1);
+  };
+  // The person asked for the tab: without room beside the terminals, the
+  // preview comes over them as a drawer, which an agent's file never does.
+  useEffect(() => {
+    if (kitOpened && modelDrawer && !modelExpanded) setDrawer("model");
+    // Only once the render that opened the tab has placed the panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kitOpened]);
+  // A kit tab of a workspace window opens files in the preview through the
+  // folders the main window grants (lib/kitTabs › askRootGrant).
+  const kitSnapshot = useRef(snapshot);
+  kitSnapshot.current = snapshot;
+  useEffect(() => {
+    if (!isMainWindow) return;
+    return serveRootGrants(async (workspaceId) => {
+      const workspaces = kitSnapshot.current().workspaces;
+      const ws = workspaces.find((entry) => entry.id === workspaceId);
+      if (!ws) throw new Error("that workspace is gone");
+      const roots = await modelRoots(ws, { worktrees: gitWorktreeList });
+      await grantModelRoots(
+        ws.id,
+        roots,
+        workspaces.map((entry) => entry.id),
+      );
+    });
+  }, []);
 
   /**
    * Something an agent opened or changed is waiting behind the toolbar button
@@ -1386,6 +1441,17 @@ export default function App() {
               modelShown={modelShown}
               modelsUnseen={modelsUnseen}
               onToggleModels={toggleModels}
+              kitTabs={
+                hasKits
+                  ? kitChoices.map((choice) => ({
+                      key: `${choice.kitId}/${choice.tab.id}`,
+                      title: choice.tab.title,
+                      kit: choice.kitName,
+                      onOpen: () => openKit(choice),
+                    }))
+                  : null
+              }
+              kitsLoading={installedKits === null}
               canDetach={canDetach}
               onDetach={() => void detach(activeWorkspace.id)}
               inOwnWindow={Boolean(windowWorkspaceId)}
@@ -1655,6 +1721,14 @@ export default function App() {
             setView("terminals");
           }}
           onOpenManager={openManager}
+          extraEntries={kitChoices.map((choice) => ({
+            key: `kit:${choice.kitId}/${choice.tab.id}`,
+            group: t("kitsTab.paletteGroup"),
+            label: t("kitsTab.paletteOpen", { title: choice.tab.title }),
+            detail: choice.kitName,
+            keywords: [choice.tab.title, choice.kitName, choice.kitId, "kit", "kits"],
+            run: () => openKit(choice),
+          }))}
         />
       )}
 
