@@ -844,7 +844,7 @@ export function TerminalPane({
           // `claude` typed into a shell pane loads them too, like the bridge.
           // A GitHub kit whose hooks changed stays out until they are accepted
           // again on the workspace (lib/kits › paneKits).
-          const { ids: kits, held: heldKits } = await loadPaneKits(login ? null : workspace);
+          const { ids: kits, held: heldKits } = await loadPaneKits(login ? null : workspace, settingsRef.current);
           if (disposed) return;
           const launchNotes: string[] = [];
           // The Claude account it runs on, as chosen right now: the pane's

@@ -31,7 +31,7 @@ import {
   ptyWrite,
 } from "./lib/ipc";
 import { modelRoots, usePaneControl, type ControlDeps } from "./lib/control";
-import { workspaceKits } from "./lib/kits";
+import { effectiveKits, withEffectiveKits } from "./lib/kits";
 import {
   serveRootGrants,
   useInstalledKits,
@@ -578,8 +578,8 @@ export default function App() {
    * preview, where they stay — per workspace, like the files — until closed.
    */
   const installedKits = useInstalledKits();
-  const kitChoices = activeWorkspace ? workspaceKitTabs(activeWorkspace, installedKits) : [];
-  const hasKits = workspaceKits(activeWorkspace).length > 0;
+  const kitChoices = activeWorkspace ? workspaceKitTabs(withEffectiveKits(activeWorkspace, state.settings), installedKits) : [];
+  const hasKits = effectiveKits(activeWorkspace, state.settings).length > 0;
   /** Bumped by each tab opened, for the drawer below. */
   const [kitOpened, setKitOpened] = useState(0);
   const openKit = (choice: KitTabChoice) => {
