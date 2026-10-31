@@ -98,11 +98,10 @@
     const eols = [];
     for (let i = 1; i < pieces.length; i += 2) eols.push(pieces[i]);
     const count = (eol) => eols.filter((other) => other === eol).length;
-    const crlf = count("\r\n");
-    const lf = count("\n");
-    if (!crlf && !count("\r")) return edited;
-    if (crlf === eols.length) return edited.replace(/\n/g, "\r\n");
-    const common = crlf >= lf ? "\r\n" : "\n";
+    const counts = ["\n", "\r\n", "\r"].map((eol) => [eol, count(eol)]);
+    if (counts[0][1] === eols.length) return edited;
+    if (counts[1][1] === eols.length) return edited.replace(/\n/g, "\r\n");
+    const common = counts.reduce((best, each) => (each[1] > best[1] ? each : best))[0];
     const lines = edited.split("\n");
     const kept = new Array(lines.length).fill(null);
     for (const op of diffLines(normalize(original), edited)) {

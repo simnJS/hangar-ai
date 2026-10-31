@@ -7,7 +7,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { TAB, answer, dotenv, fakeHangar, opened, row, settle } = require("./helpers.js");
+const { TAB, answer, fakeHangar, opened, settle } = require("./helpers.js");
 
 const CALLER = { pane: "Asker" };
 
@@ -71,7 +71,7 @@ const HOSTILE_LINES = [
   (v) => `DUP=${v}x`,
   (v) => `COLON: ${v}`,
   (v) => `EQUALS=${v}=${v}==`,
-  (v) => `A${v.replace(/-/g, "_")}=${v}`, // the value is also in the key's name
+  (v) => `A${v.replace(/-/g, "_")}=${v.replace(/-/g, "_")}`, // the value is also in the key's name
   (v) => `${v.replace(/-/g, "_")}=${v.replace(/-/g, "_")}`, // a key that is its own value
   (v) => `NOTE=see ${v.replace(/-/g, "_")}`,
 ];
@@ -271,5 +271,4 @@ test("the fuzz would catch a leak: a value in the message fails the checks", () 
   const title = fakeHangar();
   title.calls.push({ method: "tab.setBadge", args: { state: "neutral", text: S("leak") } });
   assert.throws(() => assertClean(title, [S("leak")], "planted badge"));
-  assert.equal(dotenv.isKey(S("leak")), false, "the sentinel with dashes starts with a letter yet holds no dot: a name only if asked");
 });

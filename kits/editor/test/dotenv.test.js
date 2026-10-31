@@ -67,6 +67,13 @@ test("what is inside a multi-line value is no key, and an unclosed quote swallow
   assert.equal(value(unclosed, "A"), '"open');
 });
 
+test("a private key over several lines: none of its lines is a key", () => {
+  const pem = "-----BEGIN KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ=\nabcDEF123=\n-----END KEY-----";
+  const doc = dotenv.parse(`A=1\nPRIVATE_KEY="${pem}"\nB=2\n`);
+  assert.deepEqual(dotenv.rows(doc).map((row) => row.key), ["A", "PRIVATE_KEY", "B"]);
+  assert.equal(value(doc, "PRIVATE_KEY"), pem);
+});
+
 test("a line that is no pair is no key, and is counted to say so", () => {
   const doc = dotenv.parse(SHAPES["not understood"]);
   assert.deepEqual(dotenv.rows(doc).map((row) => row.key), ["A"]);

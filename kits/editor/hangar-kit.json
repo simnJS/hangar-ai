@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "id": "editor",
+  "name": "Éditeur",
+  "version": "0.1.0",
+  "description": "Opens a .env or a config file in a tab for you to fill in or check, so that an agent that needs a secret goes on without ever seeing it.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/editor",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Reads and changes text files of the workspace, .env and other hidden files included, and tells the agent that asked which keys were set, never their values.",
+    "tags": ["env", "secrets", "config", "tab"]
+  },
+  "tabs": [
+    {
+      "id": "editor",
+      "title": "Éditeur",
+      "entry": "tabs/editor/index.html",
+      "icon": "icon.svg",
+      "permissions": ["files.read", "files.write", "panes.send"],
+      "params": {
+        "path": {
+          "description": "The file, relative to the workspace folder: .env, config/app.yaml. A dotenv file opens as a form, any other text file in an editor. Without it the tab offers a file picker.",
+          "pattern": "[^:\\r\\n]+"
+        },
+        "keys": {
+          "description": "For a dotenv file, the keys you need filled in, separated by commas: API_KEY,DB_URL. Shown first and marked missing.",
+          "pattern": "[A-Za-z_][A-Za-z0-9_.-]*( *, *[A-Za-z_][A-Za-z0-9_.-]*)*"
+        },
+        "why": {
+          "description": "One sentence, shown at the top of the tab: what the value is for, and where the person finds it."
+        },
+        "line": {
+          "description": "For a text file, the line to jump to.",
+          "pattern": "[1-9][0-9]*"
+        }
+      }
+    }
+  ]
+}

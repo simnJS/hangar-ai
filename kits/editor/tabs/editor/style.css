@@ -1,0 +1,73 @@
+/* What Hangar UI has no component for: the editor and the shape of a key's row.
+   Layout and tokens only: every colour is one of /_hangar/kit.css's. */
+#app { display: contents; }
+
+.editor-column { display: flex; flex-direction: column; overflow: hidden; }
+.editor-notes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--kit-space-6); padding: var(--kit-space-8) var(--kit-space-12); }
+.editor-note, .editor-reason { margin: 0; padding: 0 var(--kit-space-2); }
+.editor-reason { overflow-wrap: anywhere; }
+.editor-reason--bad { color: var(--kit-danger); }
+
+/* A gutter and a text area that scroll as one: same font, same line height. */
+.editor-code { display: flex; border-top: 1px solid var(--kit-line); background: var(--kit-well); overflow: hidden; }
+.editor-gutter, .editor-area {
+  margin: 0;
+  padding: var(--kit-space-8) 0;
+  border: 0;
+  font-family: var(--kit-mono);
+  font-size: var(--kit-fs-code);
+  font-variant-ligatures: none;
+  line-height: calc(18px * var(--kit-scale));
+}
+.editor-gutter {
+  flex: none;
+  min-width: 4ch;
+  padding-inline: var(--kit-space-8) var(--kit-space-6);
+  overflow: hidden;
+  color: var(--kit-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+.editor-gutter__mark { display: inline-block; width: 100%; background: var(--kit-selected); color: var(--kit-text); font-weight: 600; }
+.editor-area {
+  flex: 1;
+  min-width: 0;
+  padding-inline: var(--kit-space-8);
+  overflow: auto;
+  border-left: 1px solid var(--kit-line);
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--kit-text);
+  tab-size: 2;
+  white-space: pre;
+}
+.editor-area:focus-visible { box-shadow: inset 0 0 0 1px var(--kit-focus); }
+
+.editor-diff { --kit-log-height: none; }
+.editor-add {
+  background: color-mix(in srgb, var(--kit-ok-fill) 10%, var(--kit-well));
+  box-shadow: inset 2px 0 0 var(--kit-ok-fill);
+}
+.editor-add .kit-log__num { color: var(--kit-text-dim); }
+
+/* A key: its name and what is known of it, then its value and the button that shows it. */
+.editor-key__main { gap: var(--kit-space-4); }
+.editor-key__name { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--kit-space-2) var(--kit-space-6); min-height: var(--kit-h-small); }
+.editor-key__name .kit-row__title { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.editor-key__mark { display: inline-flex; flex: none; }
+.editor-key__value { display: flex; align-items: flex-start; gap: var(--kit-space-4); }
+.editor-key__value .kit-input { flex: 1; min-width: 0; }
+.editor-key__value .kit-btn { flex: none; }
+
+.editor-choice { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--kit-space-2) var(--kit-space-6); cursor: pointer; }
+.editor-choice input { accent-color: var(--kit-accent); }
+.editor-choice__side { font-size: var(--kit-fs-meta); }
+.editor-value { min-width: 0; white-space: pre-wrap; }
+
+.editor-wide { flex-basis: 100%; }
+.kit-banner .kit-switch { align-items: flex-start; white-space: normal; }
+
+.editor-foot { padding-block: var(--kit-space-6); }
+.editor-foot__status { flex: 1 1 calc(120px * var(--kit-scale)); min-width: 0; overflow-wrap: anywhere; }

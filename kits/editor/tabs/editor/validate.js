@@ -74,20 +74,96 @@
     return out.join("");
   }
 
+  /**
+   * Where JSON goes wrong. JSON.parse is what says it does; engines differ on saying
+   * where (WebKit never does, V8 only sometimes), so this walks the text to find it.
+   */
+  function jsonErrorAt(text) {
+    let i = 0;
+    const stop = () => {
+      throw { json: true };
+    };
+    const blanks = () => {
+      while (i < text.length && " \t\r\n".includes(text[i])) i++;
+    };
+    const SCALAR = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
+    function string() {
+      i++;
+      for (;;) {
+        if (i >= text.length || text.charCodeAt(i) < 0x20) stop();
+        if (text[i] === '"') {
+          i++;
+          return;
+        }
+        if (text[i] === "\\") {
+          const next = text[i + 1];
+          if (next === "u") {
+            if (!/^[0-9A-Fa-f]{4}$/.test(text.slice(i + 2, i + 6))) stop();
+            i += 6;
+          } else if (next !== undefined && '"\\/bfnrt'.includes(next)) {
+            i += 2;
+          } else {
+            stop();
+          }
+        } else {
+          i++;
+        }
+      }
+    }
+    function value() {
+      blanks();
+      const char = text[i];
+      if (char === '"') return string();
+      if (char === "[" || char === "{") {
+        const close = char === "[" ? "]" : "}";
+        i++;
+        blanks();
+        if (text[i] === close) {
+          i++;
+          return undefined;
+        }
+        for (;;) {
+          blanks();
+          if (char === "{") {
+            if (text[i] !== '"') stop();
+            string();
+            blanks();
+            if (text[i] !== ":") stop();
+            i++;
+          }
+          value();
+          blanks();
+          if (text[i] === close) {
+            i++;
+            return undefined;
+          }
+          if (text[i] !== ",") stop();
+          i++;
+        }
+      }
+      SCALAR.lastIndex = i;
+      const match = SCALAR.exec(text);
+      if (!match) stop();
+      i += match[0].length;
+      return undefined;
+    }
+    try {
+      value();
+      blanks();
+      return i < text.length ? i : null;
+    } catch (error) {
+      return error && error.json ? i : null; // too deep to walk: JSON.parse's word stands, without a line
+    }
+  }
+
   function checkJson(text, kind) {
     const source = kind === "jsonc" ? blankJsonc(text) : text;
     try {
       JSON.parse(source);
       return { kind, ok: true, partial: false };
-    } catch (error) {
-      const message = String((error && error.message) || "");
-      const place = /\(line (\d+) column (\d+)\)/.exec(message);
-      const position = /position (\d+)/.exec(message);
-      let where = {};
-      if (place) where = { line: Number(place[1]), column: Number(place[2]) };
-      else if (position) where = lineOf(source, Number(position[1]));
-      else if (/end of JSON/i.test(message)) where = lineOf(source, source.length);
-      return { kind, ok: false, partial: false, code: "json", ...where };
+    } catch {
+      const at = jsonErrorAt(source);
+      return { kind, ok: false, partial: false, code: "json", ...(at === null ? {} : lineOf(source, at)) };
     }
   }
 
@@ -110,7 +186,7 @@
       if (!quote && !flow.length) {
         const lead = /^[ \t]*/.exec(line)[0];
         const rest = line.slice(lead.length);
-        const indent = lead.length;
+        const indent = /^ */.exec(line)[0].length; // only spaces indent: that is the rule being checked
         if (rest === "") continue;
         if (blockIndent !== null) {
           if (indent > blockIndent) continue;
@@ -121,7 +197,7 @@
         plainIndent = null;
         if (lead.includes("\t")) return fail("yaml-tab", n + 1, lead.indexOf("\t") + 1);
         if (line[0] === "%") continue;
-        at = indent;
+        at = lead.length;
         if (/^(---|\.\.\.)([ \t]|$)/.test(rest)) at += 3;
       }
 
@@ -323,17 +399,18 @@
     }
 
     function array() {
+      const open = i;
       i++;
       arrayGap();
       while (text[i] !== "]") {
-        if (i >= text.length) stop("toml-value");
+        if (i >= text.length) stop("toml-value", open);
         value();
         arrayGap();
         if (text[i] === ",") {
           i++;
           arrayGap();
         } else if (text[i] !== "]") {
-          stop("toml-value");
+          stop("toml-value", i >= text.length ? open : i);
         }
       }
       i++;
@@ -401,7 +478,9 @@
           endOfLine();
           if (isArray) {
             // Each [[item]] is a table of its own: its keys may repeat those of the last.
-            for (const other of [...seen]) if (other.startsWith(`${name}\u0000`)) seen.delete(other);
+            for (const other of [...seen]) {
+              if (other.startsWith(`${name}\u0000`) || other.startsWith(`[${name}\u0000`)) seen.delete(other);
+            }
           } else {
             if (seen.has(`[${name}]`)) stop("toml-duplicate", start);
             seen.add(`[${name}]`);

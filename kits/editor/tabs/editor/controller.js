@@ -14,14 +14,15 @@
    * @param {object} options
    * @param {{call(method: string, params?: object): Promise<any>, on?(event: string, fn: Function): Function}} options.hangar
    * @param {{logic, dotenv, validate, diff, gitignore, answer}} options.lib
-   * @param {string} [options.lang]
+   * @param {string} [options.lang] Used only when no `t` is given.
+   * @param {(key: string, vars?: object) => string} [options.t] The page's words.
    * @param {(state: object) => void} [options.onChange]
    * @param {(state: object) => void} [options.onTyping]
    */
   function createController(options) {
     const { hangar, lib } = options;
     const { logic, dotenv, validate, diff, gitignore, answer } = lib;
-    const lang = options.lang || "en";
+    const t = options.t || ((key, vars) => logic.t(options.lang || "en", key, vars));
     const onChange = options.onChange || (() => undefined);
     const onTyping = options.onTyping || (() => undefined);
 
@@ -34,7 +35,6 @@
       fromPicker: false,
       exists: false,
       busy: false,
-      leaving: false,
       problem: null, // what a write said: { code, detail }
       saved: false,
       told: null, // { status: "sent" | "failed" | "checked", pane, code? }
@@ -53,7 +53,8 @@
     let lastBadge = null;
     let doc = null; // the dotenv file as last read or written
     let lastRead = null; // the exact text the file held when last read, null when absent
-    let exampleKeys = [];
+    let exampleRows = [];
+    let exampleName = null;
     let exampleValues = [];
     let unsent = null; // an answer that could not be sent, to try again as it is
 
@@ -82,8 +83,8 @@
     async function setBadge() {
       const missing = missingCount();
       let badge = null;
-      if (missing) badge = { state: "neutral", text: logic.t(lang, "badgeMissing", { count: missing }).slice(0, 12) };
-      else if (state.saved) badge = { state: "success", text: logic.t(lang, "badgeSaved").slice(0, 12) };
+      if (missing) badge = { state: "neutral", text: t("badgeMissing", { n: missing }).slice(0, 12) };
+      else if (state.saved) badge = { state: "success", text: t("badgeSaved").slice(0, 12) };
       const key = badge ? `${badge.state}|${badge.text}` : "none";
       if (key === lastBadge) return;
       lastBadge = key;
@@ -145,10 +146,10 @@
 
     /* ── dotenv: the form ─────────────────────────────────────────── */
 
-    function buildForm(fileDoc, example, exampleName) {
+    function buildForm(fileDoc) {
       const present = dotenv.rows(fileDoc);
       const byKey = new Map(present.map((row) => [row.key, row]));
-      const hints = new Map(example.map((row) => [row.key, row.hint]));
+      const hints = new Map(exampleRows.map((row) => [row.key, row.hint]));
       const makeRow = (key, asked) => {
         const found = byKey.get(key);
         return {
@@ -167,7 +168,7 @@
       const rows = state.asked.map((key) => makeRow(key, true));
       for (const row of present) if (!state.asked.includes(row.key)) rows.push(makeRow(row.key, false));
       const shown = new Set(rows.map((row) => row.key));
-      const offered = example.filter((row) => !shown.has(row.key)).map((row) => ({ key: row.key, hint: row.hint }));
+      const offered = exampleRows.filter((row) => !shown.has(row.key)).map((row) => ({ key: row.key, hint: row.hint }));
       return { rows, offered, exampleName, otherLines: dotenv.otherLines(fileDoc), newKey: "", newKeyProblem: null };
     }
 
@@ -214,12 +215,12 @@
       const ignore = await checkIgnore(path);
       if (token !== generation || disposed) return;
       doc = dotenv.parse(text === null ? "" : text);
-      const exampleRows = example ? dotenv.rows(example.doc) : [];
-      exampleKeys = exampleRows.map((row) => row.key);
+      exampleRows = example ? dotenv.rows(example.doc) : [];
+      exampleName = example ? example.name : null;
       exampleValues = example ? dotenv.allValues(example.doc) : [];
       Object.assign(state, {
         view: "dotenv",
-        form: buildForm(doc, exampleRows, example ? example.name : null),
+        form: buildForm(doc),
         ignore,
         text: null,
         busy: false,
@@ -292,7 +293,7 @@
       const rows = dotenv.rows(after);
       const value = new Map(rows.map((row) => [row.key, row.value]));
       const typedNames = new Set(state.form.rows.filter((row) => row.typed).map((row) => row.key));
-      const known = new Set([...state.asked, ...exampleKeys, ...dotenv.rows(before).map((row) => row.key)]);
+      const known = new Set([...state.asked, ...exampleRows.map((row) => row.key), ...dotenv.rows(before).map((row) => row.key)]);
       for (const name of typedNames) known.delete(name);
       return {
         path: state.path,
@@ -311,9 +312,7 @@
       const message = answer.dotenvSaved({ ...facts, set: changed.set, emptied: changed.emptied });
       doc = after;
       state.exists = true;
-      const exampleName = state.form.exampleName;
-      const example = state.form.offered.map((offer) => ({ key: offer.key, hint: offer.hint, value: "", count: 1 }));
-      state.form = buildForm(after, example, exampleName);
+      state.form = buildForm(after);
       state.saved = true;
       await send(message, "sent");
     }
@@ -359,6 +358,7 @@
           ack: false,
           hunks: null,
           jump: line === null ? null : Math.min(line, total),
+          target: line === null ? null : Math.min(line, total),
           far: line !== null && line > total ? { line, total } : null,
         },
       });
@@ -449,7 +449,7 @@
 
     async function persist(text, done) {
       const token = generation;
-      Object.assign(state, { busy: true, problem: null, saved: false, told: null, leaving: false });
+      Object.assign(state, { busy: true, problem: null, saved: false, told: null });
       emit();
       let outcome;
       try {
@@ -587,7 +587,7 @@
       const token = ++generation;
       Object.assign(state, {
         view: "loading", path, busy: false, problem: null, saved: false, told: null, error: null,
-        conflict: null, leaving: false, form: null, text: null, ignore: null,
+        conflict: null, form: null, text: null, ignore: null,
       });
       unsent = null;
       emit();
@@ -609,11 +609,11 @@
       const token = ++generation;
       Object.assign(state, {
         view: "loading", path: null, busy: false, problem: null, saved: false, told: null, error: null,
-        conflict: null, leaving: false, form: null, text: null, ignore: null, fromPicker: false,
+        conflict: null, form: null, text: null, ignore: null, fromPicker: false,
       });
       unsent = null;
       emit();
-      await setTitle(logic.t(lang, "tab"));
+      await setTitle(t("tab"));
       setBadge();
       let listing;
       try {
@@ -648,21 +648,6 @@
       return false;
     }
 
-    /** From a file opened in the picker, back to the picker. Edits are not dropped without asking. */
-    function back(confirmed) {
-      if (!confirmed && isDirty()) {
-        state.leaving = true;
-        emit();
-        return undefined;
-      }
-      return showPicker();
-    }
-
-    function stay() {
-      state.leaving = false;
-      emit();
-    }
-
     /** Asked for again: the latest to ask is the one to answer, and what was typed stays. */
     function handleParams(message) {
       const read = logic.readParams(message);
@@ -679,7 +664,7 @@
             if (row) row.asked = true;
             else {
               state.form.offered = state.form.offered.filter((other) => other.key !== key);
-              state.form.rows.unshift({
+              state.form.rows.push({
                 key, asked: true, present: false, original: null, value: "", hint: "",
                 count: 0, revealed: false, added: false, typed: false,
               });
@@ -688,6 +673,7 @@
           state.form.rows.sort((a, b) => Number(b.asked) - Number(a.asked));
         }
         state.told = null;
+        state.saved = false;
         setBadge();
         emit();
         return undefined;
@@ -716,7 +702,9 @@
         return handleParams(message);
       },
       isDirty,
-      pick, setFilter, back, stay,
+      pick, setFilter,
+      /** From a file opened in the picker, back to the picker. The view asks first when there are edits. */
+      back: () => showPicker(),
       retry() {
         if (state.path) return open(state.path, null);
         return showPicker();

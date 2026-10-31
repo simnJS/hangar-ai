@@ -1,0 +1,1 @@
+{ "name": "editor", "version": "0.1.0", "description": "Tells agents to have the person fill in a secret or a config file in a Hangar tab, instead of asking for it in chat." }
