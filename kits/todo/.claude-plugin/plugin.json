@@ -1,0 +1,1 @@
+{ "name": "todo", "version": "0.1.0", "description": "Lists the TODO, FIXME, HACK and XXX comments of the project and hands them to an agent; agents read the last scan instead of searching the code again." }
