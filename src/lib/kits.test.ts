@@ -528,6 +528,7 @@ describe("the tab protocol", () => {
       "files.read",
       "files.readBinary",
       "files.write",
+      "files.writeBinary",
       "loopback.fetch",
       "notify",
       "panes.list",
@@ -550,6 +551,8 @@ describe("the tab protocol", () => {
   it("gives each file method its permission", () => {
     expect(kitMayCall("files.write", ["files.write"])).toBe(true);
     expect(kitMayCall("files.write", ["files.read"])).toBe(false);
+    expect(kitMayCall("files.writeBinary", ["files.write"])).toBe(true);
+    expect(kitMayCall("files.writeBinary", ["files.read"])).toBe(false);
     for (const method of ["files.read", "files.readBinary", "files.list"]) {
       expect(kitMayCall(method, ["files.read"]), method).toBe(true);
       expect(kitMayCall(method, ["files.write"]), method).toBe(false);

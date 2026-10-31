@@ -1,0 +1,7 @@
+{
+  "name": "annotate-kit",
+  "private": true,
+  "description": "Not a package to install: this file lets `node --test kits/annotate/` find the tests on every Node version.",
+  "main": "run-tests.js",
+  "scripts": { "test": "node --test test/" }
+}

@@ -1,6 +1,7 @@
 //! What a kit's tab reaches of the project it is shown in, beyond the text
 //! `files.read` gives every tab that holds it (kit_scheme/files.rs): changing a
-//! text file (`files.write`), reading an image or a PDF (`files.readBinary`),
+//! text file (`files.write`), making an image (`files.writeBinary`), reading an
+//! image or a PDF (`files.readBinary`),
 //! listing a folder (`files.list`), and, for a tab that holds both `files.read`
 //! and `files.write`, reading a hidden file such as `.env`.
 //!
@@ -414,6 +415,95 @@ pub fn write(root: &str, raw: &str, text: &str, expected: Option<&str>) -> Resul
     land(dir, &real, text, raw, expected, Some(permissions))
 }
 
+/// What `files.writeBinary` makes: raster images only, by extension, and the first
+/// bytes of the content have to agree. No `.svg`, which carries script, and no PDF.
+const WRITABLE_IMAGES: &[&str] = &["png", "jpg", "jpeg", "webp"];
+
+/// Whether `bytes` begin as an image of the kind `extension` names.
+fn is_image_of(extension: &str, bytes: &[u8]) -> bool {
+    match extension {
+        "png" => bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
+        "jpg" | "jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        _ => false,
+    }
+}
+
+fn exists(raw: &str) -> TabError {
+    TabError::new(
+        TabError::CONFLICT,
+        format!("{raw} already exists: nothing was written"),
+    )
+}
+
+/// Written aside in the same folder, then linked at the target: the link fails if
+/// anything is there by then, so nothing is ever replaced, and a reader finds the
+/// whole of the image or nothing.
+fn land_new(dir: &Path, target: &Path, bytes: &[u8], raw: &str) -> Result<(), TabError> {
+    let cannot = |err: std::io::Error| failed(format!("{raw} cannot be written: {err}"));
+    let tmp = dir.join(format!(".hangar-{}.tmp", uuid::Uuid::new_v4().simple()));
+    let done = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(cannot)?;
+        file.write_all(bytes).map_err(cannot)?;
+        file.sync_all().map_err(cannot)?;
+        drop(file);
+        match fs::hard_link(&tmp, target) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => Err(exists(raw)),
+            Err(err) => Err(cannot(err)),
+        }
+    })();
+    let _ = fs::remove_file(&tmp);
+    done
+}
+
+/// `files.writeBinary`: a new image at `raw`, its folders made as needed, from
+/// `base64`. A file that exists, of any kind, is a conflict and stays as it is.
+pub fn write_binary(root: &str, raw: &str, base64: &str) -> Result<(), TabError> {
+    let too_big = || TabError::new(TabError::INVALID, "the image is larger than 10 MB");
+    // Before decoding: a string this long cannot hold 10 MB.
+    if base64.len() as u64 > MAX_BINARY_BYTES / 3 * 4 + 4 {
+        return Err(too_big());
+    }
+    let parts = file_parts(raw, true)?;
+    let extension = parts
+        .last()
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|extension| WRITABLE_IMAGES.contains(&extension.as_str()))
+        .ok_or_else(|| {
+            invalid(format!(
+                "{raw} must end in .png, .jpg, .jpeg or .webp: only those images are written"
+            ))
+        })?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|_| invalid("base64 is not valid base64"))?;
+    if bytes.len() as u64 > MAX_BINARY_BYTES {
+        return Err(too_big());
+    }
+    if !is_image_of(&extension, &bytes) {
+        return Err(invalid(format!(
+            "the content is not a {extension} image: its first bytes say otherwise"
+        )));
+    }
+    let root = workspace(root)?;
+    // Looked at before anything is made, so a conflict leaves nothing behind.
+    if current_file(&root, &parts, raw)?.is_some() {
+        return Err(exists(raw));
+    }
+    let (name, dirs) = parts
+        .split_last()
+        .ok_or_else(|| invalid("must name a file inside the workspace folder"))?;
+    let dir = make_folders(&root, dirs, raw)?;
+    land_new(&dir, &dir.join(name), &bytes, raw)
+}
+
 /// A simple glob: `*` is any characters but a slash, `?` one such character, `**`
 /// any characters at all, and `**/` any folders, none included. Nothing else is
 /// special, and case counts. Without a slash it is held to a file's name, at any
@@ -603,6 +693,16 @@ pub async fn kit_files_write(
     off_thread(move || write(&root, &path, &text, expected.as_deref())).await
 }
 
+/// `files.writeBinary`.
+#[tauri::command]
+pub async fn kit_files_write_binary(
+    root: String,
+    path: String,
+    base64: String,
+) -> Result<(), TabError> {
+    off_thread(move || write_binary(&root, &path, &base64)).await
+}
+
 /// `files.readBinary`. `hidden`: the tab holds `files.write` as well.
 #[tauri::command]
 pub async fn kit_files_read_binary(
@@ -695,6 +795,160 @@ mod tests {
 
         write(&root, "empty.txt", "", None).unwrap();
         assert_eq!(body(&folder, "empty.txt"), "");
+    }
+
+    /// The smallest bytes each kind starts with: the check is on the first bytes.
+    fn image_b64(extension: &str) -> String {
+        let bytes: Vec<u8> = match extension {
+            "png" => vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3],
+            "jpg" => vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2],
+            _ => b"RIFF\x04\0\0\0WEBPVP8 ".to_vec(),
+        };
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn is_empty(folder: &Folder) -> bool {
+        fs::read_dir(&folder.root).unwrap().next().is_none()
+    }
+
+    #[test]
+    fn write_binary_makes_an_image_with_its_folders_and_reads_back() {
+        let (folder, root) = project("wb");
+        for (path, kind) in [
+            (".hangar/annotations/a.png", "png"),
+            ("b/c.JPG", "jpg"),
+            ("d.jpeg", "jpg"),
+            ("e.webp", "webp"),
+        ] {
+            write_binary(&root, path, &image_b64(kind)).unwrap();
+            let read = read_binary(&root, path, true).unwrap();
+            assert_eq!(read.base64, image_b64(kind), "{path}");
+        }
+        assert!(folder.root.join(".hangar/annotations/a.png").is_file());
+    }
+
+    #[test]
+    fn write_binary_refuses_other_extensions() {
+        let (folder, root) = project("wb-ext");
+        for path in [
+            "a.svg",
+            "a.pdf",
+            "a.gif",
+            "a.txt",
+            "a",
+            "a.png.exe",
+            "a.png.",
+        ] {
+            let err = write_binary(&root, path, &image_b64("png")).unwrap_err();
+            assert_eq!(err.code, TabError::INVALID, "{path}");
+        }
+        assert!(is_empty(&folder));
+    }
+
+    #[test]
+    fn write_binary_checks_the_first_bytes_against_the_extension() {
+        let (folder, root) = project("wb-magic");
+        let text = base64::engine::general_purpose::STANDARD.encode("<svg onload=alert(1)>");
+        let riff = base64::engine::general_purpose::STANDARD.encode("RIFF");
+        for (path, content) in [
+            ("a.png", text.clone()),
+            ("a.jpg", text.clone()),
+            ("a.webp", text),
+            ("b.png", image_b64("jpg")),
+            ("b.jpg", image_b64("webp")),
+            ("b.webp", image_b64("png")),
+            ("empty.png", String::new()),
+            ("short.webp", riff),
+        ] {
+            let err = write_binary(&root, path, &content).unwrap_err();
+            assert_eq!(err.code, TabError::INVALID, "{path}");
+        }
+        assert!(is_empty(&folder));
+    }
+
+    #[test]
+    fn write_binary_refuses_bad_base64() {
+        let (folder, root) = project("wb-b64");
+        for content in ["not base64!", "iVBO=Rw0", "a"] {
+            let err = write_binary(&root, "a.png", content).unwrap_err();
+            assert_eq!(err.code, TabError::INVALID, "{content}");
+        }
+        assert!(is_empty(&folder));
+    }
+
+    #[test]
+    fn write_binary_refuses_more_than_ten_megabytes() {
+        let (folder, root) = project("wb-big");
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        bytes.resize(MAX_BINARY_BYTES as usize + 1, 0);
+        let big = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let err = write_binary(&root, "big.png", &big).unwrap_err();
+        assert_eq!(err.code, TabError::INVALID);
+        // Far over: refused before it is decoded.
+        let err = write_binary(&root, "huge.png", &"A".repeat(20 * 1024 * 1024)).unwrap_err();
+        assert_eq!(err.code, TabError::INVALID);
+        assert!(is_empty(&folder));
+        // Exactly 10 MB goes through.
+        bytes.truncate(MAX_BINARY_BYTES as usize);
+        let exact = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        write_binary(&root, "exact.png", &exact).unwrap();
+    }
+
+    #[test]
+    fn write_binary_never_replaces_whatever_exists() {
+        let (folder, root) = project("wb-exists");
+        folder.file("text.png", "not an image");
+        write_binary(&root, "img.png", &image_b64("png")).unwrap();
+        for path in ["text.png", "img.png"] {
+            let err = write_binary(&root, path, &image_b64("png")).unwrap_err();
+            assert_eq!(err.code, TabError::CONFLICT, "{path}");
+        }
+        assert_eq!(body(&folder, "text.png"), "not an image");
+        // A folder in the way is no file.
+        fs::create_dir(folder.root.join("dir.png")).unwrap();
+        assert!(write_binary(&root, "dir.png", &image_b64("png")).is_err());
+        // Nothing is left aside.
+        let left: Vec<String> = fs::read_dir(&folder.root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn write_binary_keeps_every_path_rule_of_files_write() {
+        let (folder, root) = project("wb-paths");
+        // The names that are not paths at all ("", "ok.txt.") only turn into
+        // valid ones once an extension is added; the rest leave the folder.
+        let paths = REFUSED
+            .iter()
+            .filter(|path| path.contains(['/', '\\', ':', '\0']));
+        for path in paths {
+            let named = format!("{path}.png");
+            assert!(
+                write_binary(&root, &named, &image_b64("png")).is_err(),
+                "{named}"
+            );
+        }
+        for path in INTO_GIT {
+            let named = format!("{path}/x.png");
+            assert!(
+                write_binary(&root, &named, &image_b64("png")).is_err(),
+                "{named}"
+            );
+        }
+        assert!(!folder.root.join(".git").exists());
+    }
+
+    #[test]
+    fn write_binary_makes_nothing_through_a_link_that_leaves_the_folder() {
+        let (folder, root) = project("wb-link");
+        let outside = Folder::new("wb-link-outside");
+        if link_folder(&outside.root, &folder.root.join("out")) {
+            assert!(write_binary(&root, "out/x.png", &image_b64("png")).is_err());
+            assert!(!outside.root.join("x.png").exists());
+        }
     }
 
     #[test]

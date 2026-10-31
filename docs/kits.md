@@ -384,7 +384,7 @@ A closed set. A permission not in it is a manifest error.
 | `panes.read`      | list the workspace's panes, and hear when they change.                                             |
 | `panes.send`      | send text to a pane's agent.                                                                       |
 | `files.read`      | read a text file inside the workspace folder, read an image or a PDF there, and list its files.    |
-| `files.write`     | change text files in the project, hidden ones like `.env` included. Held with `files.read`, it [reads hidden files too](#hidden-files-and-secrets). |
+| `files.write`     | change text files in the project, hidden ones like `.env` included, and [make a new image](#the-tab-message-protocol) (`files.writeBinary`) where there is no file. Held with `files.read`, it [reads hidden files too](#hidden-files-and-secrets). |
 | `data.read`       | read a text file of the kit's own data (`data.read`).                                              |
 | `data.write`      | write a text file of the kit's own data (`data.write`).                                            |
 | `loopback:<port>` | talk to the local server on that port (`loopback.fetch`), and make it do whatever that server allows. |
@@ -714,6 +714,7 @@ Methods:
 | `files.readBinary` | `{ path }`        | `files.read`     | `{ base64, mime }`: an image or a PDF.                                   |
 | `files.list`     | `{ path?, pattern? }` | `files.read`   | `{ files: [{ path, size, modified }], truncated }`: the files under that folder. |
 | `files.write`    | `{ path, text, expected? }` | `files.write` | `{}`: written whole, its folders made.                                 |
+| `files.writeBinary` | `{ path, base64 }` | `files.write` | `{}`: a new image, written whole, its folders made. Never over a file.  |
 | `data.read`      | `{ path }`          | `data.read`      | `{ text }`, or the error `not_found` when it is absent.                  |
 | `data.write`     | `{ path, text }`    | `data.write`     | `{}`: written whole, its folders made.                                   |
 | `loopback.fetch` | `{ port, path, method?, body?, timeoutMs? }` | `loopback:<port>` for that exact port | `{ status, text }`: the local server's answer, whatever its status. |
@@ -758,7 +759,7 @@ done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
   preview shows, under the kit's name. A tab holding `files.write` as well has
   `files.read` follow the rules below, with no hidden file refused:
   [hidden files](#hidden-files-and-secrets). `preview.show` stays as it is.
-- **`files.write`, `files.readBinary` and `files.list`** take a path relative to the
+- **`files.write`, `files.writeBinary`, `files.readBinary` and `files.list`** take a path relative to the
   workspace folder as well: either slash, no `..`, no drive, no `:`, no device name on
   Windows, 1 024 characters at most. On disk, no link may lead out of the folder.
   **Nothing under `.git` is ever reached**, at any depth, whatever its case, whether a
@@ -777,6 +778,18 @@ done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
     can do so without its help.
   - A write is not shown in the workspace's activity: an agent's edits are listed by its
     pane, and a tab has none. It shows where any change does, in what git says of the folder.
+- **`files.writeBinary`** makes a **new raster image** from `base64` (standard alphabet, padded),
+  **10 MB decoded at most**, whole: a temp file in the same folder, then a link at the name, so a
+  reader finds the whole image or nothing. It makes the missing folders.
+  - The name ends in `.png`, `.jpg`, `.jpeg` or `.webp`, whatever its case. Not `.svg`, which
+    carries script, nor a PDF, nor anything else: `invalid`.
+  - The content has to be what the extension says, by its first bytes (PNG signature, JPEG
+    `FF D8 FF`, WebP `RIFF`…`WEBP`): else `invalid`. Nothing more of it is looked at.
+  - **It never replaces a file**: if anything is at that path, of any kind, the call answers
+    `conflict` and the file stays as it is. A tab that wants another version picks another name.
+  - It shares `files.write`'s limit of **10 a minute** with `data.write`'s, and the same path rules
+    as `files.write`, `.git` never reached and no link leading out. Held with `files.write`, the
+    permission the person accepted in the words of `files.write`: text files, and now new images.
 - **`files.readBinary`** reads a file of **10 MB at most** whose extension is `.png`, `.jpg`,
   `.jpeg`, `.gif`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg` or `.pdf`, whatever its case. Its
   contents are not looked at. Anything else answers `unsupported`, a link named like an
@@ -832,10 +845,10 @@ Errors:
 | Code           | When                                                                  |
 | -------------- | --------------------------------------------------------------------- |
 | `denied`       | The tab may not call the method, a port or a command it does not hold included; or `panes.send` to a pane that is not a Claude Code agent; or `command.run` on a GitHub kit whose commands were not accepted as they are now. |
-| `invalid`      | The params are not what the method takes.                             |
+| `invalid`      | The params are not what the method takes; `files.writeBinary`: not valid base64, over 10 MB, a name that is not a raster image's, or content that is not one. |
 | `unknown`      | No such method.                                                       |
 | `not_found`    | No pane of that name in the workspace; no such file in the kit's data; `files.readBinary`, `files.list`, and `files.read` for a tab that holds `files.write`: no such file or folder; `command.run`: the program is not installed, or the command has no argv for this OS. |
-| `conflict`     | `files.write`: the file changed since the page read it. Nothing was written. |
+| `conflict`     | `files.write`: the file changed since the page read it; `files.writeBinary`: something is already at that path. Nothing was written. |
 | `unsupported`  | `files.readBinary`: not an image or a PDF, by its extension.          |
 | `rate_limited` | Over a limit above; try again later.                                  |
 | `unavailable`  | Hangar cannot do it now: the agent's session does not run the bridge, the workspace or its folder is gone, the kit cannot be used. |
@@ -1022,7 +1035,7 @@ them), the tab itself `src/components/preview/KitTabView.tsx`, the `theme` event
 `kitThemeEvent` in `src/lib/kitTabs.ts`,
 and the paths `files.read` and `preview.show` take are checked on disk by
 `kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`), and
-those `files.write`, `files.readBinary` and `files.list` take, and what a tab holding
+those `files.write`, `files.writeBinary`, `files.readBinary` and `files.list` take, and what a tab holding
 `files.write` reads, by `src-tauri/src/kits/files.rs`; the
 data folder is `src-tauri/src/kits/data.rs`, `loopback.fetch`
 `src-tauri/src/kits/loopback.rs` and `command.run` `src-tauri/src/kits/commands.rs`.
@@ -1402,6 +1415,7 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 | `kit_files_read_binary(root, path, hidden)` | through `KitTabView` | `{ base64, mime }`. Refuses with `{ code, message }`.                            |
 | `kit_files_list(root, path?, pattern?)` | through `KitTabView` | `{ files, truncated }`. Refuses with `{ code, message }`.                                 |
 | `kit_files_write(root, path, text, expected?)` | through `KitTabView` | Nothing. Refuses with `{ code, message }`.                                         |
+| `kit_files_write_binary(root, path, base64)` | through `KitTabView` | Nothing. Refuses with `{ code, message }`.                                           |
 | `kit_loopback_fetch(port, path, method?, body?, timeoutMs?)` | through `KitTabView` | `{ status, text }`. Refuses with `{ code, message }`.                        |
 | `kit_command_run(kit, name, args, cwd, accepted)` | through `KitTabView` | `{ exitCode, stdout, stderr, timedOut, truncated }`. Refuses with `{ code, message }`. |
 

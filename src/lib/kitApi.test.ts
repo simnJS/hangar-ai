@@ -28,6 +28,7 @@ import {
   type KitHostDeps,
 } from "./kitApi";
 import {
+  KIT_BINARY_MAX_BYTES,
   KIT_COMMAND_PATTERN,
   KIT_DATA_MAX_BYTES,
   KIT_FILE_MAX_BYTES,
@@ -125,6 +126,7 @@ function makeDeps(overrides: Partial<KitHostDeps> = {}): KitHostDeps {
     readBinaryFile: vi.fn(async () => BINARY_ANSWER),
     listFiles: vi.fn(async () => LIST_ANSWER),
     writeFile: vi.fn(async () => undefined),
+    writeBinaryFile: vi.fn(async () => undefined),
     showFile: vi.fn(async () => undefined),
     enqueue: vi.fn(async () => ({ id: "q-1" })),
     activity: (paneId: string) => activities[paneId],
@@ -342,6 +344,7 @@ const CALLS: Record<KitMethod, { params?: unknown; result: unknown }> = {
   "files.readBinary": { params: { path: "shots/a.png" }, result: BINARY_ANSWER },
   "files.list": { params: { path: "src", pattern: "*.rs" }, result: LIST_ANSWER },
   "files.write": { params: { path: ".env", text: "A=1" }, result: {} },
+  "files.writeBinary": { params: { path: ".hangar/annotations/1.png", base64: "iVBORw==" }, result: {} },
   "preview.show": { params: { path: "docs/plan.md" }, result: { opened: true, path: "docs/plan.md" } },
   "data.read": { params: { path: "queue/state.json" }, result: { text: "data of queue/state.json" } },
   "data.write": { params: { path: "queue/state.json", text: "{}" }, result: {} },
@@ -380,6 +383,7 @@ describe("each permission, granted and refused", () => {
       expect(deps.readBinaryFile).not.toHaveBeenCalled();
       expect(deps.listFiles).not.toHaveBeenCalled();
       expect(deps.writeFile).not.toHaveBeenCalled();
+      expect(deps.writeBinaryFile).not.toHaveBeenCalled();
       expect(deps.resolveFile).not.toHaveBeenCalled();
       expect(deps.showFile).not.toHaveBeenCalled();
       expect(deps.enqueue).not.toHaveBeenCalled();
@@ -794,6 +798,74 @@ describe("files.write", () => {
     expect(projectRelativePath(".github/ci.yml")).toBe(".github/ci.yml");
     expect(() => projectRelativePath(".git/config")).toThrow("under .git");
     expect(() => projectRelativePath("a/.GIT")).toThrow("under .git");
+  });
+});
+
+describe("files.writeBinary", () => {
+  beforeEach(() => {
+    granted = ["files.write"];
+  });
+
+  it("hands Rust the normalized path and the base64, and nothing else", async () => {
+    const { call, deps } = setup();
+    expect((await call("files.writeBinary", { path: ".hangar\\annotations/./1.png", base64: "iVBORw==" }))?.result).toEqual({});
+    expect(deps.writeBinaryFile).toHaveBeenCalledWith("C:/projects/game", ".hangar/annotations/1.png", "iVBORw==");
+  });
+
+  it("refuses a path that is not the project's, or goes under .git", async () => {
+    const { call, deps } = setup();
+    for (const path of ["../x.png", "/abs.png", "C:/x.png", ".git/x.png", "a/.GIT/x.png", "a:b.png", "", undefined, 3]) {
+      expect(errorOf(await call("files.writeBinary", { path, base64: "iVBORw==" })), String(path)).toBe("invalid");
+    }
+    expect(deps.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses a base64 that is not a string, or too long for 10 MB", async () => {
+    const { call, deps } = setup();
+    for (const base64 of [undefined, 3, null, ["a"]]) {
+      expect(errorOf(await call("files.writeBinary", { path: "a.png", base64 })), String(base64)).toBe("invalid");
+    }
+    const atCap = "A".repeat(Math.ceil(KIT_BINARY_MAX_BYTES / 3) * 4);
+    expect(errorOf(await call("files.writeBinary", { path: "a.png", base64: `${atCap}A` }))).toBe("invalid");
+    expect(deps.writeBinaryFile).not.toHaveBeenCalled();
+    expect(errorOf(await call("files.writeBinary", { path: "a.png", base64: atCap }))).toBeUndefined();
+  });
+
+  it("says conflict when the file exists, and invalid when Rust says the content is no image", async () => {
+    const { call } = setup({
+      writeBinaryFile: vi.fn(async () => {
+        throw { code: "conflict", message: "a.png already exists: nothing was written" };
+      }),
+    });
+    expect((await call("files.writeBinary", { path: "a.png", base64: "iVBORw==" }))?.error).toEqual({
+      code: "conflict",
+      message: "a.png already exists: nothing was written",
+    });
+    const refused = setup({
+      writeBinaryFile: vi.fn(async () => {
+        throw { code: "invalid", message: "the content is not a png image" };
+      }),
+    });
+    expect(errorOf(await refused.call("files.writeBinary", { path: "a.png", base64: "AAAA" }))).toBe("invalid");
+  });
+
+  it("shares files.write's quota, and a failed check spends none", async () => {
+    const { call, deps } = setup();
+    for (let i = 0; i < KIT_FILES_WRITE_MAX * 2; i += 1) await call("files.writeBinary", { path: "../x.png", base64: "AAAA" });
+    for (let i = 0; i < KIT_FILES_WRITE_MAX - 1; i += 1) {
+      expect(errorOf(await call("files.write", { path: "a.txt", text: `${i}` }))).toBeUndefined();
+    }
+    expect(errorOf(await call("files.writeBinary", { path: "a.png", base64: "iVBORw==" }))).toBeUndefined();
+    expect(errorOf(await call("files.writeBinary", { path: "b.png", base64: "iVBORw==" }))).toBe("rate_limited");
+    expect(errorOf(await call("files.write", { path: "a.txt", text: "over" }))).toBe("rate_limited");
+    expect(deps.writeBinaryFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers unavailable once the workspace is gone", async () => {
+    const { call, deps } = setup();
+    current = null;
+    expect(errorOf(await call("files.writeBinary", { path: "a.png", base64: "iVBORw==" }))).toBe("unavailable");
+    expect(deps.writeBinaryFile).not.toHaveBeenCalled();
   });
 });
 
