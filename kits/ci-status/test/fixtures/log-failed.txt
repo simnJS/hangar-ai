@@ -1,0 +1,150 @@
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1099560Z test remote::proxy::tests::nothing_goes_through_without_a_paired_phone_s_cookie ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1100190Z test remote::push::tests::the_rfc_8291_example_encrypts_byte_for_byte ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1115610Z test remote::push::tests::the_rfc_8291_example_decrypts_to_its_message ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1209700Z test remote::push::tests::what_the_pc_encrypts_the_rfc_browser_reads ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1248820Z test remote::push::tests::the_vapid_token_is_signed_for_the_push_service_s_origin ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1273820Z test remote::server::tests::a_call_records_the_phone_s_visit ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1326840Z test remote::server::tests::a_code_out_of_time_pairs_nothing ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1376490Z test remote::server::tests::a_call_s_body_is_capped_at_64_kb_and_must_be_json ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1385120Z test remote::server::tests::a_code_works_once ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1451210Z test remote::server::tests::a_file_with_an_odd_name_still_downloads ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1453610Z test remote::server::tests::a_page_is_sandboxed_to_its_scripts_alone ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1517790Z test remote::server::tests::a_pairing_that_is_not_json_is_a_bad_request_not_a_try ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1579380Z test remote::server::tests::a_phone_subscribes_and_unsubscribes_itself ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1636020Z test remote::server::tests::a_post_without_x_hangar_is_forbidden ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1667650Z test remote::server::tests::a_request_from_another_site_or_a_sandboxed_page_is_refused ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1760960Z test remote::server::tests::a_revoked_phone_is_shut_out_at_once ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1761730Z test remote::server::tests::a_share_is_served_a_range_at_a_time ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.1831510Z test remote::server::tests::a_subscription_takes_the_cookie_the_header_and_a_push_service ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.3910050Z test remote::server::tests::a_window_that_does_not_answer_in_time_is_a_busy_pc ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4011730Z test remote::server::tests::a_window_that_refuses_says_why ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4113340Z test remote::server::tests::a_window_that_refuses_or_does_not_answer_opens_nothing ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4214570Z test remote::server::tests::an_app_nothing_listens_on_is_refused ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4317020Z test remote::server::tests::an_app_the_window_does_not_list_is_not_allowed ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4325490Z test remote::server::tests::an_app_opens_at_its_slot_s_address_once_tailscale_is_there ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4326110Z test remote::server::tests::an_op_outside_the_list_never_reaches_the_window ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4429280Z test remote::server::tests::an_unknown_file_id_is_not_found_and_never_a_path ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4491590Z test remote::server::tests::an_upload_lands_in_the_workspace_and_its_path_comes_back ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4492410Z test remote::server::tests::an_upload_name_cannot_leave_the_uploads_folder ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4498280Z test remote::server::tests::an_upload_needs_the_cookie_the_header_and_a_known_workspace ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4501460Z test remote::server::tests::an_upload_is_capped_at_25_mb ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4645770Z test remote::server::tests::each_call_reaches_the_window_as_its_remote_op ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4655740Z test remote::server::tests::every_answer_is_hardened ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4732970Z test remote::server::tests::every_other_route_needs_the_cookie ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.4799090Z test remote::server::tests::five_wrong_codes_and_the_right_one_no_longer_works ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5008870Z test remote::server::tests::health_answers_anyone_and_says_whether_they_are_paired ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5075220Z test remote::server::tests::nothing_answers_cors ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5112260Z test remote::server::tests::each_kind_goes_out_with_its_own_headers ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5117180Z test remote::server::tests::the_app_is_served_at_the_root_without_a_cookie ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5117970Z test remote::server::tests::the_cookie_is_read_among_others ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5149400Z test remote::server::tests::opening_an_app_takes_a_paired_phone_x_hangar_and_a_port ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5252560Z test remote::server::tests::the_push_key_is_the_pc_s_and_stays_the_same ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5306580Z test remote::server::tests::the_right_code_pairs_a_phone_with_a_strict_cookie ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5378010Z test remote::server::tests::the_shares_are_listed_newest_first_since_a_time ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5396940Z test remote::server::tests::the_shares_routes_are_closed_to_the_unpaired ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5400470Z test remote::server::tests::without_dist_mobile_the_root_is_a_placeholder_page ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5401450Z test remote::store::tests::a_first_launch_is_off_on_the_default_port ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5404390Z test remote::store::tests::a_token_finds_its_phone_and_nothing_else_does ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5410150Z test remote::store::tests::a_visit_is_recorded_to_the_minute ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5414250Z test remote::store::tests::an_older_file_missing_fields_takes_the_defaults ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5418820Z test remote::store::tests::an_unreadable_file_is_kept_aside_and_starts_off ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5422310Z test remote::store::tests::what_is_saved_comes_back_and_the_token_never_reaches_the_disk ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5423390Z test remote::tailscale::tests::a_connected_pc_gives_its_name_without_the_root_dot ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5445550Z test remote::tailscale::tests::a_missing_cli_is_an_error_to_run_not_a_panic ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5446250Z test remote::tailscale::tests::a_pc_signed_out_or_stopped_is_not_running ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5446950Z test remote::tailscale::tests::a_proxy_is_recognised_however_it_is_spelled ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5447990Z test remote::tailscale::tests::an_app_s_port_is_hangar_s_free_or_someone_else_s ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5448770Z test remote::tailscale::tests::serving_is_this_pc_s_root_proxied_to_the_port ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5449340Z test remote::tailscale::tests::serving_something_else_is_not_serving ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5449920Z test remote::tailscale::tests::the_consent_page_is_picked_out_of_what_serve_prints ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5460920Z test remote::tests::a_launch_with_it_left_on_listens_again ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.5558740Z test remote::tests::a_pairing_shows_the_code_and_a_qr_code_of_the_address ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6095790Z test remote::server::tests::the_listener_is_on_127_0_0_1_only ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6585450Z test remote::tests::a_push_reaches_each_phone_encrypted_signed_and_in_its_language ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6804480Z test remote::tests::a_revoked_phone_takes_its_subscription_along ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6872720Z test remote::tests::a_share_is_copied_recorded_and_announced ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6882180Z test remote::tests::a_share_needs_a_paired_phone ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.6932900Z test remote::tests::a_share_needs_hangar_mobile_on ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7400920Z test remote::tests::a_subscription_its_service_calls_gone_is_dropped ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7410450Z test remote::tests::it_is_off_until_turned_on_and_remembers_the_switch ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7516960Z test remote::tests::nothing_is_pushed_while_hangar_mobile_is_off ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7538080Z test remote::tests::off_and_on_again_listens_again ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7650820Z test remote::tests::one_address_belongs_to_one_phone_and_saying_it_again_writes_nothing ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7651860Z test remote::tests::pairing_needs_the_server_running ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7657610Z test remote::tests::the_history_is_kept_on_disk_beside_the_settings ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7666860Z test remote::tests::the_option_is_remembered_and_holds_again_at_launch ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7667400Z test remote::tests::the_pc_has_a_name ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7683220Z test remote::tests::the_pc_is_kept_awake_only_while_mobile_and_the_option_are_on ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7732680Z test remote::tests::the_settings_never_see_a_token_hash ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7738170Z test sessions::tests::a_claude_session_with_no_transcript_is_reported_gone ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7744030Z test sessions::tests::a_codex_session_is_found_by_the_id_ending_its_rollout_name ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7744620Z test sessions::tests::an_id_that_is_not_plain_is_left_to_the_agent ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7754070Z test sessions::tests::claude_sessions_are_read_from_every_accounts_folder_once ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7755450Z test stats::aggregate::tests::a_call_seen_in_two_files_counts_once ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7756360Z test stats::aggregate::tests::a_subagent_fills_its_parents_timeline_without_adding_turns ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7757320Z test stats::aggregate::tests::active_time_sums_gaps_and_caps_the_long_ones ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7758040Z test stats::aggregate::tests::an_unknown_model_is_listed_without_a_price ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7758670Z test stats::aggregate::tests::calls_are_summed_per_session_hour_and_model_and_priced ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7759480Z test stats::aggregate::tests::the_window_keeps_what_happened_inside_it ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7764890Z test stats::parse::tests::a_codex_subagent_belongs_to_its_parent_and_has_no_turns ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7766050Z test stats::parse::tests::a_count_before_the_first_turn_goes_to_the_model_named_next ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7767110Z test stats::parse::tests::a_line_still_being_written_waits_for_its_newline ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7768130Z test stats::parse::tests::a_running_total_that_goes_back_counts_its_last_call ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7769500Z test stats::parse::tests::claude_blocks_of_one_answer_make_one_call_with_the_final_counts ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7770820Z test stats::parse::tests::codex_calls_are_the_differences_between_running_totals ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7771830Z test stats::parse::tests::injected_and_meta_messages_are_not_turns ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7772880Z test stats::parse::tests::malformed_lines_are_skipped_and_counted ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7773810Z test stats::parse::tests::synthetic_and_empty_usage_bill_nothing ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7774720Z test stats::parse::tests::titles_rank_custom_over_ai_over_the_first_prompt ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7793520Z test stats::tests::a_rewritten_transcript_is_read_again_from_the_start ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7802700Z test stats::tests::a_second_scan_reuses_what_did_not_change ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7816220Z test stats::tests::an_appended_transcript_is_read_from_where_it_stopped ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7840840Z test stats::tests::compressed_codex_rollouts_and_claude_subagents_are_read ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7841260Z test stats::tests::real_transcripts_cold_then_warm ... ignored
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7854160Z test stats::tests::the_cache_on_disk_answers_a_fresh_process_and_a_deleted_file_leaves_it ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7865600Z test voice::capture::tests::a_fractional_ratio_keeps_its_length ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7874440Z test voice::capture::tests::an_integer_ratio_decimates_exactly ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7874910Z test voice::capture::tests::rms_of_silence_is_zero ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7877470Z test voice::capture::tests::silence_trims_to_nothing ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7879060Z test voice::capture::tests::speech_keeps_its_edges ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7882620Z test voice::capture::tests::upsampling_fills_rather_than_stalls ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7883350Z test voice::key::tests::a_refusing_keychain_keeps_the_key_where_it_was ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7884000Z test voice::key::tests::a_state_without_the_field_is_left_alone ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7891110Z test voice::key::tests::a_stored_key_leaves_the_state ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7891630Z test voice::key::tests::an_empty_field_is_dropped_without_asking_the_keychain ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7892040Z test voice::key::tests::round_trip_through_the_real_keychain ... ignored
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7892510Z test voice::local::tests::audio_ctx_is_the_full_window_once_it_would_exceed_it ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7892920Z test voice::local::tests::audio_ctx_shrinks_with_the_clip ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7893240Z test voice::local::tests::threads_is_at_least_one ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7893530Z test voice::local::tests::transcribes_real_audio ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7893880Z test voice::wav::tests::samples_past_full_scale_clamp_rather_than_wrap ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7894260Z test voice::wav::tests::the_header_describes_the_data ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7894580Z test windows::tests::only_frontend_ids_become_labels ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7894990Z test workspace_file::tests::a_named_entry_keeps_its_label ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7895400Z test workspace_file::tests::a_workspace_file_resolves_to_its_folders ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7896740Z test workspace_file::tests::an_escaped_quote_does_not_end_a_string ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7897510Z test workspace_file::tests::comments_and_trailing_commas_are_dropped ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7898110Z test workspace_file::tests::plain_json_is_untouched ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7898860Z test workspace_file::tests::relative_entries_resolve_against_the_file ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:37.7899360Z test workspace_file::tests::slashes_inside_strings_survive ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5864610Z test remote::tests::a_port_already_taken_leaves_it_off_and_says_why ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5928890Z test delivery::tests::what_an_older_version_kept_still_tells_a_branch_that_moved ... ok
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5929280Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5929350Z failures:
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5929510Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5929930Z ---- accounts::tests::an_added_account_is_listed_after_main_and_logged_out stdout ----
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5930360Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5930690Z thread 'accounts::tests::an_added_account_is_listed_after_main_and_logged_out' (18252) panicked at src/accounts.rs:688:9:
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5931230Z assertion `left == right` failed
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5931720Z   left: Account { id: "main", label: "Main", is_main: true, logged_in: true, email: Some("main@example.com"), plan: None }
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5959490Z  right: Account { id: "main", label: "Main", is_main: true, logged_in: false, email: None, plan: None }
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5961620Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5966570Z [1m[91merror[0m: test failed, to rerun pass `--lib`
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5966830Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5966870Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5967020Z failures:
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5967340Z     accounts::tests::an_added_account_is_listed_after_main_and_logged_out
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5968030Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5968330Z test result: FAILED. 502 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 45.41s
+rust (macos-latest)	Tests	2026-10-31T17:02:38.5968730Z 
+rust (macos-latest)	Tests	2026-10-31T17:02:38.6049490Z ##[error]Process completed with exit code 101.
