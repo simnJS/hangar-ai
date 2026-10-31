@@ -1340,7 +1340,7 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 | `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>` of what its plugin runs by itself, null when it runs nothing), `hooksConsent`, `commandsPermission` (`commands:<hash>` for this OS, null without commands). |
 | `kit_add_folder(path)`       | `kitAddFolder(path)`         | `KitInfo`. `path` absolute, holding a valid kit.                                           |
 | `kit_add_git(url)`           | `kitAddGit(url)`             | `KitInfo`. `url` a GitHub link as above.                                                   |
-| `kit_gallery_list`           | `kitGalleryList()`           | `{ origin: "live" | "cached" | "unavailable", kits, fetchedAt }`: the library, see [The library](#the-library). Never refuses.  |
+| `kit_gallery_list`           | `kitGalleryList()`           | `{ origin: "live" \| "cached" \| "unavailable", kits, fetchedAt }`: the library, see [The library](#the-library). Never refuses.  |
 | `kit_remove(id)`             | `kitRemove(id)`              | Nothing. Deletes only a clone Hangar made.                                                 |
 | `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit.                  |
 | `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`.                                                                                 |
