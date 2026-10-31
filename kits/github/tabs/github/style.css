@@ -1,0 +1,4 @@
+/* Layout only, in Hangar UI's tokens: the colours, sizes and states are kit.css's. */
+.gh-item-actions {
+  padding: 0 var(--kit-space-8) var(--kit-space-6) calc(var(--kit-space-8) + 1.1em + var(--kit-space-8));
+}
