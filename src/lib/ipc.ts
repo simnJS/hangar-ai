@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AccountId, AccountIssue } from "./accounts";
 import type { ContextUsage } from "./context";
 import type { DiscordPresence, DiscordStatus } from "./discord";
 import type { KitLaunchIssue } from "./kits";
@@ -9,6 +10,13 @@ import type { AgentSession, AppState, ShellInfo, WorkspaceRoot } from "../types"
 export interface PtySpawned {
   /** Kits the pane was given that stay out of it, and why. */
   kitIssues: KitLaunchIssue[];
+  /**
+   * The Claude account its Claude Code runs on: the one asked for, or main
+   * when that one is gone. Absent for a pane that is not Claude Code.
+   */
+  account?: AccountId;
+  /** What the account's profile could not take from the main account. */
+  accountIssues?: AccountIssue[];
 }
 
 /**
@@ -34,6 +42,14 @@ export const ptySpawn = (args: {
    * join CLAUDE_CODE_PLUGIN_DIRS, with the bridge or without it.
    */
   kits?: string[];
+  /** The pane's agent: a Claude account applies to `claude` panes only. */
+  agent?: string;
+  /**
+   * The Claude account its Claude Code runs on (lib/accounts
+   * `launchAccount`): CLAUDE_CONFIG_DIR names the account's profile in its
+   * shell. Main or absent keeps Claude Code's own configuration.
+   */
+  claudeAccount?: AccountId | null;
 }) => invoke<PtySpawned | undefined>("pty_spawn", args);
 
 export const ptyWrite = (id: string, data: string) =>
@@ -150,6 +166,10 @@ export const voiceKeySet = (key: string) => invoke<void>("voice_key_set", { key 
 
 export const voiceKeyClear = () => invoke<void>("voice_key_clear");
 
-/** The tail of a live pane's output, and the byte count it reaches. */
+/**
+ * The tail of a live pane's output, and the byte count it reaches; `account`
+ * is the Claude account its Claude Code was started on, absent for a pane
+ * that is not Claude Code.
+ */
 export const ptyHistory = (id: string) =>
-  invoke<{ data: string; end: number }>("pty_history", { id });
+  invoke<{ data: string; end: number; account?: AccountId }>("pty_history", { id });

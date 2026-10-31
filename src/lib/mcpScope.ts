@@ -58,7 +58,9 @@ export interface McpScopeFile {
   kitServers?: string[];
 }
 
-export const mcpServers = (cwd: string) => invoke<McpDiscovery>("mcp_servers", { cwd });
+/** `account`: the Claude account the panes run on (lib/accounts); absent, main. */
+export const mcpServers = (cwd: string, account?: string | null) =>
+  invoke<McpDiscovery>("mcp_servers", { cwd, account: account ?? null });
 
 export const mcpScopeWrite = (args: {
   workspaceId: string;
@@ -74,6 +76,11 @@ export const mcpScopeWrite = (args: {
    * a copy here would run each twice.
    */
   kits?: string[];
+  /**
+   * The Claude account the pane runs on (lib/accounts): its servers are read
+   * from that account's profile. Absent or main, Claude Code's own.
+   */
+  account?: string | null;
 }) => invoke<McpScopeFile>("mcp_scope_write", args);
 
 export const mcpScopeClear = (workspaceId: string) =>

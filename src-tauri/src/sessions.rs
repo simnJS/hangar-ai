@@ -83,32 +83,37 @@ fn label_from_jsonl(path: &Path, user_field: &str) -> String {
     String::new()
 }
 
+/// The conversations Claude Code keeps for `cwd`, on every Claude account:
+/// they share the main account's `projects/`, and a profile that could not
+/// share it is read as well (accounts.rs).
 fn claude_sessions(cwd: &str) -> Vec<AgentSession> {
-    let Some(home) = home() else {
-        return vec![];
-    };
-    let dir = home
-        .join(".claude")
-        .join("projects")
-        .join(encode_project_dir(cwd));
+    claude_sessions_in(&crate::accounts::projects_dirs(), cwd)
+}
 
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return vec![];
-    };
-
-    let mut sessions: Vec<AgentSession> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
-        .map(|p| AgentSession {
-            id: p
+fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
+    let mut sessions: Vec<AgentSession> = Vec::new();
+    for root in roots {
+        let Ok(entries) = fs::read_dir(root.join(encode_project_dir(cwd))) else {
+            continue;
+        };
+        for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+            if !path.extension().is_some_and(|e| e == "jsonl") {
+                continue;
+            }
+            let id = path
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            label: label_from_jsonl(&p, "user"),
-            modified_ms: modified_ms(&p),
-        })
-        .collect();
+                .unwrap_or_default();
+            if sessions.iter().any(|known| known.id == id) {
+                continue;
+            }
+            sessions.push(AgentSession {
+                id,
+                label: label_from_jsonl(&path, "user"),
+                modified_ms: modified_ms(&path),
+            });
+        }
+    }
 
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified_ms));
     sessions
@@ -220,11 +225,24 @@ pub fn session_exists(agent: String, id: String) -> Option<bool> {
     {
         return None;
     }
-    let home = home()?;
     match agent.as_str() {
-        "claude" => claude_transcript_exists(&home.join(".claude").join("projects"), &id),
-        "codex" => codex_transcript_exists(&home.join(".codex").join("sessions"), &id),
+        "claude" => claude_transcript_exists_in(&crate::accounts::projects_dirs(), &id),
+        "codex" => codex_transcript_exists(&home()?.join(".codex").join("sessions"), &id),
         _ => None,
+    }
+}
+
+/// Found under any of `roots` — the folders every Claude account files its
+/// conversations in — or `None` when none of them could be read.
+fn claude_transcript_exists_in(roots: &[PathBuf], id: &str) -> Option<bool> {
+    let answers: Vec<bool> = roots
+        .iter()
+        .filter_map(|root| claude_transcript_exists(root, id))
+        .collect();
+    if answers.is_empty() {
+        None
+    } else {
+        Some(answers.contains(&true))
     }
 }
 
@@ -315,6 +333,37 @@ mod tests {
         );
 
         fs::remove_dir_all(&projects).ok();
+    }
+
+    /// The main account's folder, which every account's profile shares, and
+    /// a profile that kept one of its own: each conversation listed once.
+    #[test]
+    fn claude_sessions_are_read_from_every_accounts_folder_once() {
+        let main = temp_dir("claude-main");
+        let own = temp_dir("claude-own");
+        let project = encode_project_dir(r"C:\repo");
+        for (root, id) in [(&main, "shared-1"), (&own, "own-2"), (&own, "shared-1")] {
+            let dir = root.join(&project);
+            fs::create_dir_all(&dir).expect("project dir");
+            fs::write(dir.join(format!("{id}.jsonl")), "{}\n").expect("transcript");
+        }
+        let roots = [main.clone(), own.clone()];
+
+        let mut ids: Vec<String> = claude_sessions_in(&roots, r"C:\repo")
+            .into_iter()
+            .map(|session| session.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["own-2", "shared-1"]);
+        assert_eq!(claude_transcript_exists_in(&roots, "own-2"), Some(true));
+        assert_eq!(claude_transcript_exists_in(&roots, "nowhere"), Some(false));
+        assert_eq!(
+            claude_transcript_exists_in(&[main.join("missing")], "own-2"),
+            None
+        );
+
+        fs::remove_dir_all(&main).ok();
+        fs::remove_dir_all(&own).ok();
     }
 
     #[test]

@@ -114,26 +114,17 @@ struct ClaudeFiles {
 }
 
 impl ClaudeFiles {
-    /// `CLAUDE_CONFIG_DIR` moves both, as it does for Claude Code — and a pane
-    /// inherits the app's environment, so the variable the app sees is the
-    /// one its Claude Code sees.
-    fn locate() -> Option<Self> {
-        let home = dirs::home_dir()?;
-        let custom = std::env::var_os("CLAUDE_CONFIG_DIR")
-            .filter(|dir| !dir.is_empty())
-            .map(PathBuf::from);
-        let config_home = custom.clone().unwrap_or_else(|| home.join(".claude"));
-        // A configuration written by old versions, which Claude Code still
-        // prefers when it is there.
-        let legacy = config_home.join(".config.json");
-        let config = if legacy.is_file() {
-            legacy
-        } else {
-            custom.unwrap_or(home).join(".claude.json")
-        };
+    /// The files of the Claude account a pane runs on (accounts.rs). On the
+    /// main account `CLAUDE_CONFIG_DIR` moves both, as it does for Claude
+    /// Code — a pane on it inherits the app's environment, so the variable
+    /// the app sees is the one its Claude Code sees. On another account they
+    /// are its profile's, `prepared` first — brought level with the main
+    /// account — when the file written from them is about to be used.
+    fn locate(account: Option<&str>, prepared: bool) -> Option<Self> {
+        let home = crate::accounts::home_for(account, prepared)?;
         Some(ClaudeFiles {
-            config,
-            settings: config_home.join("settings.json"),
+            settings: home.settings(),
+            config: home.config,
         })
     }
 }
@@ -798,10 +789,11 @@ fn scope_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// The servers a Claude Code session started in `cwd` would load by itself.
+/// The servers a Claude Code session started in `cwd` on `account` (main
+/// when absent) would load by itself.
 #[tauri::command]
-pub fn mcp_servers(cwd: String) -> Discovery {
-    match ClaudeFiles::locate() {
+pub fn mcp_servers(cwd: String, account: Option<String>) -> Discovery {
+    match ClaudeFiles::locate(account.as_deref(), false) {
         Some(files) => discover(&files, Path::new(&cwd)),
         None => Discovery::default(),
     }
@@ -818,6 +810,9 @@ pub fn mcp_servers(cwd: String) -> Discovery {
 /// `--strict-mcp-config`: without it, the kits' plugins start their servers
 /// themselves, and a copy here would run each one twice. A machine that
 /// forbids sideloading keeps the kits out entirely, servers included.
+///
+/// `account` is the Claude account the pane runs on: its servers are the
+/// ones its Claude Code would have, read from its profile (accounts.rs).
 #[tauri::command]
 pub fn mcp_scope_write(
     app: AppHandle,
@@ -826,8 +821,9 @@ pub fn mcp_scope_write(
     cwd: String,
     enabled: Vec<String>,
     kits: Option<Vec<String>>,
+    account: Option<String>,
 ) -> Result<ScopeFile, String> {
-    let files = ClaudeFiles::locate().ok_or("no home directory")?;
+    let files = ClaudeFiles::locate(account.as_deref(), true).ok_or("no home directory")?;
     let (resolved, _) = resolve(&files, Path::new(&cwd));
     let mut config = scoped_config(&resolved, &enabled, server_entry(&workspace_cwd)?);
     let kit_servers = match kits {

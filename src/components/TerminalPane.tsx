@@ -19,6 +19,8 @@ import {
   type QueuedPrompt,
 } from "../lib/ipc";
 import { isHandingOver } from "../lib/windows";
+import { launchAccount, LOGIN_COMMAND, MAIN_ACCOUNT, noteLaunchedAccount } from "../lib/accounts";
+import { useAccountsT } from "./accounts/strings";
 import { sessionName } from "../lib/paneNames";
 import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
 import {
@@ -269,6 +271,9 @@ export function TerminalPane({
   visibleRef.current = visible;
   const tRef = useRef(t);
   tRef.current = t;
+  const accountsT = useAccountsT();
+  const accountsTRef = useRef(accountsT);
+  accountsTRef.current = accountsT;
   const activityRef = useRef(activity);
   activityRef.current = activity;
   const bridgedRef = useRef(bridged);
@@ -547,6 +552,7 @@ export function TerminalPane({
     async function mcpLaunchConfig(
       notes: string[],
       kits: string[],
+      account: string,
     ): Promise<{ path: string; arg: string; strict: boolean } | undefined> {
       const scope = workspaceMcp({ mcp: mcpRef.current });
       const family = shellFamily(shellRef.current);
@@ -554,7 +560,13 @@ export function TerminalPane({
         updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
         if (!pane.role || family === "wsl") return undefined;
         try {
-          const file = await mcpScopeWrite({ workspaceId, workspaceCwd: cwd, cwd: paneCwd, enabled: [] });
+          const file = await mcpScopeWrite({
+            workspaceId,
+            workspaceCwd: cwd,
+            cwd: paneCwd,
+            enabled: [],
+            account,
+          });
           const arg = mcpConfigArg(file.path, family);
           return arg ? { path: file.path, arg, strict: false } : undefined;
         } catch (err) {
@@ -574,6 +586,7 @@ export function TerminalPane({
           cwd: paneCwd,
           enabled: scope.enabled,
           kits,
+          account,
         });
         const arg = mcpConfigArg(file.path, family);
         if (!arg) throw new Error(tRef.current("mcpScope.warnQuote"));
@@ -805,6 +818,8 @@ export function TerminalPane({
           }
           // The size it had in the other window is not this one's.
           ptyResize(pane.id, term.cols, term.rows).catch(() => undefined);
+          // The account it was started on, which no choice made since changes.
+          if (history?.account) noteLaunchedAccount(pane.id, history.account);
           setStatus("running");
         }
         const pending = held ?? [];
@@ -820,15 +835,33 @@ export function TerminalPane({
         if (disposed) return;
 
         if (!adopted) {
+          const workspace = snapshotRef.current().workspaces.find((ws) => ws.id === workspaceId);
+          // A pane opened to log its Claude account in runs the login and
+          // nothing else: no servers, no kits, no conversation.
+          const login = pane.agent === "claude" && pane.login === true;
           // The workspace's kits as they are now, for every pane of it — a
           // `claude` typed into a shell pane loads them too, like the bridge.
-          const kits = workspaceKitIds(
-            snapshotRef.current().workspaces.find((ws) => ws.id === workspaceId),
-          );
-          // Before the shell, which is handed the file's path.
+          const kits = login ? [] : workspaceKitIds(workspace);
           const launchNotes: string[] = [];
+          // The Claude account it runs on, as chosen right now: the pane's
+          // own, its workspace's, then the default (lib/accounts). Only
+          // Claude Code runs on an account; a gone one falls back, and says so.
+          const account =
+            pane.agent === "claude"
+              ? await launchAccount(settingsRef.current, workspace, pane)
+              : null;
+          if (disposed) return;
+          if (account?.missing) {
+            console.warn(
+              `[accounts] pane ${pane.id}: account "${account.missing}" is gone, "${account.id}" applies`,
+            );
+            launchNotes.push(accountsTRef.current("picker.missing", { id: account.missing }));
+          }
+          // Before the shell, which is handed the file's path.
           const mcpConfig =
-            pane.agent === "claude" ? await mcpLaunchConfig(launchNotes, kits) : undefined;
+            pane.agent === "claude" && !login && account
+              ? await mcpLaunchConfig(launchNotes, kits, account.id)
+              : undefined;
           if (disposed) return;
           const spawned = await ptySpawn({
             id: pane.id,
@@ -841,10 +874,16 @@ export function TerminalPane({
             portBase: pane.portBase ?? null,
             mcpConfig: mcpConfig?.path ?? null,
             kits,
+            agent: pane.agent,
+            claudeAccount: account?.id ?? null,
           });
           // Said where Claude Code runs; a shell pane has no use for it.
           if (pane.agent === "claude") {
             launchNotes.push(...kitIssueNotes(spawned?.kitIssues ?? [], tRef.current));
+            noteLaunchedAccount(pane.id, spawned?.account ?? account?.id ?? MAIN_ACCOUNT);
+            if (spawned?.accountIssues?.length) {
+              console.warn(`[accounts] pane ${pane.id}: profile not fully shared`, spawned.accountIssues);
+            }
           }
           // Same race as the subscription above: a cleanup that ran during the
           // spawn killed an id the backend did not know yet, so the shell it
@@ -857,6 +896,18 @@ export function TerminalPane({
           setStatus("running");
 
           if (pane.agent === "shell") return;
+
+          // The person logs in in the browser; nothing to resume or follow.
+          // Never on an account the pane fell back to: logging in to an
+          // account that is gone would log main in again in its place.
+          if (login) {
+            await sleep(settingsRef.current.launchDelayMs, controller.signal);
+            if (disposed || controller.signal.aborted) return;
+            for (const note of launchNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
+            const fellBack = !!account?.missing || (!!spawned?.account && spawned.account !== account?.id);
+            if (!fellBack) await ptyWrite(pane.id, `${LOGIN_COMMAND}\r`).catch(() => undefined);
+            return;
+          }
 
           // Claude Code names a session the moment it starts but writes its
           // transcript only on the first message, so a pane reset and left
@@ -913,7 +964,7 @@ export function TerminalPane({
               record(sessionEvent(resumeId ?? "", resumeId !== null));
             }
           }
-        } else if (pane.agent === "shell") {
+        } else if (pane.agent === "shell" || pane.login) {
           return;
         }
 
@@ -968,6 +1019,9 @@ export function TerminalPane({
       watcher.dispose();
       unregister();
       forgetPane(pane.id);
+      // Closed, restarted under a new id, or taken over by another window,
+      // which notes it there: not this window's to count any more.
+      noteLaunchedAccount(pane.id, null);
       unsubscribe?.();
       unsubscribeBridge?.();
       // A pane moving to another window keeps running there.

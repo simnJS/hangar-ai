@@ -88,6 +88,17 @@ export interface Pane {
    * and nothing merged. Absent on every worker that has a worktree.
    */
   sharedFolder?: boolean;
+  /**
+   * The Claude account this pane's Claude Code runs on, over its
+   * workspace's (lib/accounts). Absent or null follows the workspace.
+   */
+  claudeAccount?: string | null;
+  /**
+   * A Claude Code pane opened to log its account in: it runs
+   * `LOGIN_COMMAND` (lib/accounts) instead of starting Claude Code, and the
+   * person finishes in the browser. Absent on every other pane.
+   */
+  login?: boolean;
 }
 
 /**
@@ -176,6 +187,12 @@ export interface Workspace {
    * lib/remoteApps). Absent on every workspace without one.
    */
   mobilePorts?: number[];
+  /**
+   * The Claude account its Claude Code panes run on, workers' included
+   * (lib/accounts). Absent or null follows `Settings.claudeAccount`; read
+   * through `resolveAccount`, which takes anything malformed as no choice.
+   */
+  claudeAccount?: string | null;
 }
 
 export interface OrchestrationSettings {
@@ -391,6 +408,13 @@ export interface Settings {
    * each call still goes through the agent's own permission prompts.
    */
   agentPaneControl: boolean;
+  /**
+   * The Claude account Claude Code panes run on by default (lib/accounts):
+   * `"main"`, Claude Code's own configuration, until the person picks
+   * another. A workspace, then a pane, can choose their own. Never changed
+   * by Hangar on its own — no switching when a limit is reached.
+   */
+  claudeAccount?: string | null;
 }
 
 export interface AppState {
@@ -468,6 +492,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inspectorCollapsed: [],
   uiScale: 100,
   agentPaneControl: true,
+  claudeAccount: "main",
 };
 
 /** Bounds of the interface size slider, in percent. */
