@@ -88,6 +88,11 @@ export interface OpenKitTab extends OpenEntry {
 /** What a caller passes a kit's tab, by the names its manifest declares. */
 export type KitTabParams = Readonly<Record<string, string>>;
 
+/** The pane of the agent or hook that last asked for a kit's tab, which its page can answer. */
+export interface KitTabCaller {
+  pane: string;
+}
+
 export const KIT_BADGE_STATES = ["running", "success", "failure", "neutral"] as const;
 export type KitBadgeState = (typeof KIT_BADGE_STATES)[number];
 
@@ -355,8 +360,13 @@ export function findKitTab(
 /**
  * Opens a kit's tab in its workspace's preview, or brings it forward when it
  * is open already — as it is: a page someone is working in is not reloaded
- * for being asked for again. A singleton given other params takes them, and its
- * page hears of it (`watchKitTabParams`); none given leaves what it holds.
+ * for being asked for again. A singleton given other params takes them; none given
+ * leaves what it holds.
+ *
+ * An agent or a hook asking for an open tab becomes who its page answers
+ * (`kitTabCaller`), and the page hears of it (`watchKitTabParams`), as it does of
+ * new params. The person bringing it forward changes neither: the agent that asked
+ * is still the one waiting.
  *
  * With `reveal`, the default, it opens that workspace's panel with the tab in
  * front; without, it is only added, the panel and what is in front as they were.
@@ -386,7 +396,11 @@ export function openKitTab(tab: KitTabToOpen): string {
         unseen: scope.unseen || (openedBy !== null && (reveal || replaced)),
       },
     });
-    if (replaced) for (const watcher of paramWatchers.get(existing.id) ?? []) watcher(params);
+    if (replaced || openedBy !== null) {
+      for (const watcher of paramWatchers.get(existing.id) ?? []) {
+        watcher(kitTabParams(existing.id), kitTabCaller(existing.id));
+      }
+    }
     return existing.id;
   }
   const id = newId();
@@ -445,10 +459,22 @@ export function kitTabParams(id: string): KitTabParams {
   return entry && isKitTab(entry) ? entry.params : {};
 }
 
-const paramWatchers = new Map<string, Set<(params: KitTabParams) => void>>();
+/**
+ * Who a kit's tab answers: the pane of the agent or hook that last asked for it,
+ * from Hangar's own record of the request. Null when only the person did, and once
+ * it is closed.
+ */
+export function kitTabCaller(id: string): KitTabCaller | null {
+  const entry = find(id);
+  return entry && isKitTab(entry) && entry.openedBy ? { pane: entry.openedBy } : null;
+}
 
-/** Hears a singleton's tab taking new params. Returns the unsubscribe. */
-export function watchKitTabParams(id: string, watcher: (params: KitTabParams) => void): () => void {
+type KitTabWatcher = (params: KitTabParams, caller: KitTabCaller | null) => void;
+
+const paramWatchers = new Map<string, Set<KitTabWatcher>>();
+
+/** Hears a tab taking new params, or an agent or a hook asking for it again. Returns the unsubscribe. */
+export function watchKitTabParams(id: string, watcher: KitTabWatcher): () => void {
   const watchers = paramWatchers.get(id) ?? new Set();
   watchers.add(watcher);
   paramWatchers.set(id, watchers);

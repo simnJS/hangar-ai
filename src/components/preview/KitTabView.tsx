@@ -9,7 +9,9 @@ import { gitWorktreeList } from "../../lib/git";
 import {
   createKitHost,
   kitPanes,
+  type KitBinaryFile,
   type KitCommandAnswer,
+  type KitFileListing,
   type KitHost,
   type KitHostDeps,
   type KitLoopbackAnswer,
@@ -18,6 +20,7 @@ import { askRootGrant, frameTookKeyboard, kitTabState, useInstalledKits } from "
 import { MAX_MODEL_BYTES, modelFormatOf } from "../../lib/modelFiles";
 import { grantModelRoots } from "../../lib/modelHost";
 import {
+  kitTabCaller,
   kitTabParams,
   reloadKitTab,
   setKitTabBadge,
@@ -156,6 +159,10 @@ function liveDeps(workspaces: () => Workspace[]): KitHostDeps {
   return {
     readFile: (root, path) => invoke<string>("kit_file_read", { root, path }),
     resolveFile: (root, path) => invoke<string>("kit_workspace_path", { root, path }),
+    readHiddenFile: (root, path) => invoke<string>("kit_files_read", { root, path }),
+    readBinaryFile: (root, path, hidden) => invoke<KitBinaryFile>("kit_files_read_binary", { root, path, hidden }),
+    listFiles: (root, path, pattern) => invoke<KitFileListing>("kit_files_list", { root, path, pattern }),
+    writeFile: (root, path, text, expected) => invoke<void>("kit_files_write", { root, path, text, expected }),
     showFile: async (ws, path, openedBy) => {
       await grantRoots(ws, workspaces);
       const file = checkPreviewFile(await previewInspect(path));
@@ -231,6 +238,7 @@ function KitFrame({
         permissions: () => now.current.permissions,
         commandsAccepted: () => now.current.commandsAccepted,
         params: () => kitTabParams(entry.id),
+        caller: () => kitTabCaller(entry.id),
         setTitle: (title) => setKitTabTitle(entry.id, title),
         setBadge: (badge) => setKitTabBadge(entry.id, badge),
       },
@@ -239,8 +247,8 @@ function KitFrame({
     hostRef.current = host;
     const listener = (event: MessageEvent) => host.receive(event);
     window.addEventListener("message", listener);
-    // A singleton's page hears of its new params: it is not reloaded for them.
-    const stopParams = watchKitTabParams(entry.id, (params) => host.emit("tab.params", { params }));
+    // A page hears of new params, and of who asked again: it is not reloaded for them.
+    const stopParams = watchKitTabParams(entry.id, (params, caller) => host.emit("tab.params", { params, caller }));
     return () => {
       window.removeEventListener("message", listener);
       stopParams();

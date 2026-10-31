@@ -16,6 +16,7 @@
 
 pub mod commands;
 pub mod data;
+pub mod files;
 mod hooks;
 pub mod loopback;
 mod manifest;
@@ -56,6 +57,10 @@ impl TabError {
     pub const BAD_ARGS: &'static str = "bad_args";
     /// Too many of a kit's commands are running.
     pub const BUSY: &'static str = "busy";
+    /// `files.write`: the file changed since the page read it. Nothing was written.
+    pub const CONFLICT: &'static str = "conflict";
+    /// `files.readBinary`: not an image or a PDF.
+    pub const UNSUPPORTED: &'static str = "unsupported";
 
     pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         TabError {

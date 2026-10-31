@@ -86,6 +86,24 @@ impl Drop for Folder {
     }
 }
 
+/// A link to a folder. `link` needs Developer Mode on Windows, so this makes a
+/// junction there, which any user can.
+pub fn link_folder(target: &Path, at: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(at)
+            .arg(target)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+    #[cfg(not(windows))]
+    {
+        crate::model::tests::link(target, at)
+    }
+}
+
 fn join(relative: &str, rest: &str) -> String {
     if relative == "." || relative.is_empty() {
         rest.to_string()

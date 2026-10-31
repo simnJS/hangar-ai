@@ -39,6 +39,7 @@ export const PERMISSION_LABEL: Record<KitNamedPermission, TranslateKey> = {
   "panes.read": "kitsManage.permPanesRead",
   "panes.send": "kitsManage.permPanesSend",
   "files.read": "kitsManage.permFilesRead",
+  "files.write": "kitsTab.permFilesWrite",
   "data.read": "kitsManage.permDataRead",
   "data.write": "kitsManage.permDataWrite",
   "preview.show": "kitsManage.permPreviewShow",

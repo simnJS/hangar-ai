@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   KIT_COMMAND_PATTERN,
   KIT_EVENTS,
+  kitArgvUsesKitDir,
+  kitReadsHiddenFiles,
   KIT_LOOPBACK_PATTERN,
   KIT_METHODS,
   KIT_PERMISSIONS,
@@ -81,7 +83,7 @@ describe("workspaceKits", () => {
 
   it("never grants a permission Hangar does not know", () => {
     expect(
-      workspaceKits(raw([{ id: "roblox", granted: ["notify", "files.write", 3, "notify"] }])),
+      workspaceKits(raw([{ id: "roblox", granted: ["notify", "files.delete", 3, "notify"] }])),
     ).toEqual([{ id: "roblox", granted: ["notify"] }]);
   });
 
@@ -136,7 +138,8 @@ describe("permissions", () => {
     expect(isKitPermission("data.write")).toBe(true);
     expect(isKitPermission("loopback:8765")).toBe(true);
     expect(isKitPermission("loopback:80")).toBe(false);
-    expect(isKitPermission("files.write")).toBe(false);
+    expect(isKitPermission("files.write")).toBe(true);
+    expect(isKitPermission("files.delete")).toBe(false);
     expect(isKitPermission("hooks:0123456789abcdef")).toBe(false);
     expect(isKitHooksGrant("hooks:0123456789abcdef")).toBe(true);
     expect(isKitHooksGrant("hooks:0123")).toBe(false);
@@ -150,7 +153,7 @@ describe("permissions", () => {
         "notify",
         "hooks:0123456789abcdef",
         "loopback:8765",
-        "files.write",
+        "files.delete",
         "panes.read",
         "notify",
       ]),
@@ -416,7 +419,7 @@ describe("the kits enabled on all workspaces", () => {
     expect(
       everywhereKits(
         rawSettings([
-          { id: "ci", granted: ["notify", "files.write", "notify"] },
+          { id: "ci", granted: ["notify", "files.delete", "notify"] },
           { id: "ci", granted: ["panes.read"] },
           null,
         ]),
@@ -521,7 +524,10 @@ describe("the tab protocol", () => {
       "command.run",
       "data.read",
       "data.write",
+      "files.list",
       "files.read",
+      "files.readBinary",
+      "files.write",
       "loopback.fetch",
       "notify",
       "panes.list",
@@ -539,6 +545,32 @@ describe("the tab protocol", () => {
     expect(kitMayCall("data.write", ["data.read"])).toBe(false);
     expect(kitMayCall("toString", ["workspace.read"])).toBe(false);
     expect(kitMayCall("shell.run", [...KIT_PERMISSIONS])).toBe(false);
+  });
+
+  it("gives each file method its permission", () => {
+    expect(kitMayCall("files.write", ["files.write"])).toBe(true);
+    expect(kitMayCall("files.write", ["files.read"])).toBe(false);
+    for (const method of ["files.read", "files.readBinary", "files.list"]) {
+      expect(kitMayCall(method, ["files.read"]), method).toBe(true);
+      expect(kitMayCall(method, ["files.write"]), method).toBe(false);
+      expect(kitMayCall(method, []), method).toBe(false);
+    }
+  });
+
+  it("reads hidden files only for a tab holding both file permissions", () => {
+    expect(kitReadsHiddenFiles(["files.read", "files.write"])).toBe(true);
+    expect(kitReadsHiddenFiles(["files.write", "notify", "files.read"])).toBe(true);
+    expect(kitReadsHiddenFiles(["files.read"])).toBe(false);
+    expect(kitReadsHiddenFiles(["files.write"])).toBe(false);
+    expect(kitReadsHiddenFiles([])).toBe(false);
+  });
+
+  it("knows an argv that runs something of the kit's, as an argument and not as the program", () => {
+    expect(kitArgvUsesKitDir(["node", "{kitDir}/tools/audit.js", "{id}"])).toBe(true);
+    expect(kitArgvUsesKitDir(["node", "--root={kitDir}"])).toBe(true);
+    expect(kitArgvUsesKitDir(["gh", "run", "{kitdir}", "{{kitDir}}x"])).toBe(true);
+    expect(kitArgvUsesKitDir(["gh", "run", "{run}"])).toBe(false);
+    expect(kitArgvUsesKitDir(["{kitDir}"])).toBe(false);
   });
 
   it("lets a tab reach a local server only on the port it was granted", () => {

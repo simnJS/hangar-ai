@@ -27,9 +27,11 @@ import { useAsleep } from "../lib/hibernateStore";
 import { currentOs, runSetupCommand, showWorkspace, type KitOs } from "../lib/kitSetup";
 import {
   everywhereKits,
+  kitArgvUsesKitDir,
   kitCommandsGrant,
   kitHooksGrant,
   kitInspect,
+  kitReadsHiddenFiles,
   kitSetupMark,
   kitSetupStatus,
   kitsList,
@@ -149,6 +151,7 @@ function DeclaredCommandBlock({ t, command, tag }: { t: Translator; command: Kit
         {kitArgvLine(command.argv)}
       </pre>
       <p className="kit-act__note">{t(rules.length > 0 ? "kitsTab.commandHint" : "kitsTab.commandHintFixed")}</p>
+      {kitArgvUsesKitDir(command.argv) && <p className="kit-act__note">{t("kitsTab.commandKitDir")}</p>}
       {rules.length > 0 && (
         <dl className="kit-step__rules" aria-label={t("kitsTab.commandRules", { name: command.name })}>
           {rules.map(([name, rule]) => (
@@ -288,6 +291,11 @@ export function KitActivationView(props: KitActivationViewProps) {
                     );
                   })}
                 </ul>
+                {kitReadsHiddenFiles(tab.permissions) && (
+                  <p className="notice" role="note">
+                    <span className="notice__text">{t("kitsTab.filesSecrets")}</span>
+                  </p>
+                )}
               </div>
             ))
         )}
