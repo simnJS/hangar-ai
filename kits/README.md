@@ -28,9 +28,10 @@ before anything does.
    asks Hangar to open.
 3. **Replace what the kit does.** Declare your own `commands` (an argv, with a rule
    for each `{placeholder}`), your tab's `params` and `permissions` (one
-   `command:<name>` per command it runs), and rewrite the page. Keep what is
-   cheap to keep: logic and behaviour in files that take `window.hangar` as an
-   argument, so a test can pass a fake one.
+   `command:<name>` per command it runs), and rewrite the page on
+   [Hangar UI](../docs/kit-ui.md), the library every tab is served, so it looks like a
+   part of Hangar and follows its theme. Keep what is cheap to keep: logic and behaviour
+   in files that take `window.hangar` as an argument, so a test can pass a fake one.
 4. **Drop what you do not need.** No hook? Delete `hooks/`. No skill? Delete
    `skills/`. No plugin at all? Delete `.claude-plugin/` and the kit is just tabs.
 5. **Test it** with plain `node --test`, as `ci-status/test` does.

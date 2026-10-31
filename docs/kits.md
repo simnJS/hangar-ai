@@ -24,7 +24,8 @@ This page is the contract. The code lives in `src-tauri/src/kits.rs` and
 page is served by `src-tauri/src/kit_scheme.rs` with the SDK in
 `src-tauri/kit-sdk/kit.js`, and framed and answered by
 `src/components/preview/KitTabView.tsx`, `src/lib/kitTabs.ts` and
-`src/lib/kitApi.ts`.
+`src/lib/kitApi.ts`. How a tab should look is in [Hangar UI](kit-ui.md), the
+interface library served to every tab.
 
 ## A minimal kit
 
@@ -54,6 +55,7 @@ hello-kit/
   "version": "0.1.0",
   "description": "A skill, an MCP server and a tab, to see what a kit does.",
   "author": "You",
+  "hangar": ">=1.9.0",
   "tabs": [
     {
       "id": "status",
@@ -100,8 +102,11 @@ folder:
 ```html
 <!doctype html>
 <meta charset="utf-8" />
+<link rel="stylesheet" href="/_hangar/kit.css" />
 <script src="/_hangar/kit.js"></script>
-<pre id="out">…</pre>
+<main class="kit-page">
+  <pre id="out" class="kit-pre" tabindex="0">…</pre>
+</main>
 <script>
   async function show() {
     const panes = await window.hangar.call("panes.list");
@@ -422,15 +427,21 @@ preview do not come back: only kits' tabs.
 **Small or large, a tab is the same thing**: it lives in the panel, at the panel's
 width. That is 320 interface points at least, so 320 CSS pixels at 100 % interface
 size and 288 at the smallest, 90 %; a very narrow window can leave less, as a drawer.
-Nothing sets a minimum width for a page but the page. A layout that holds at that
-width takes four lines, and the frame's background is white unless it sets its own:
+Nothing sets a minimum width for a page but the page.
 
-```css
-:root { color-scheme: light dark; }
-body { margin: 0; padding: 8px 10px; font: 13px/1.45 system-ui, sans-serif; background: Canvas; color: CanvasText; }
-pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
-table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; }
-```
+### Its look: Hangar UI
+
+**A tab should use [Hangar UI](kit-ui.md)**, so that it looks like a part of Hangar
+rather than a page framed inside it: `/_hangar/kit.css`, its tokens and components, and
+`/_hangar/kit-ui.js`, its behaviours, loaded after the SDK. It asks for no permission and
+has nothing to install. With it a page follows the theme of its workspace, live, with
+Hangar's language and interface size, and holds at the panel's narrowest. That page also
+has [the rules a kit follows](kit-ui.md#the-rules-a-kit-follows): no colour of its own,
+designed states for what is empty, loading, failing or denied.
+
+Those addresses exist since Hangar 1.9.0, and an older one answers them with a 404, so a kit
+that uses them says `"hangar": ">=1.9.0"` in its manifest. A page that does without the
+library starts on a white frame, and has its width and all the themes to answer for itself.
 
 ### A tab with params
 
@@ -628,7 +639,8 @@ http://hangar-kit.localhost/hello-kit/tabs/status/index.html
 
 So **use relative URLs** for the kit's own files (`app.js`,
 `../shared/style.css`): an absolute one like `/style.css` leaves the kit. The
-one absolute URL is the SDK's, `/_hangar/kit.js`.
+absolute URLs a page uses are Hangar's own, under `/_hangar/`: the SDK, `kit.js`, and
+[Hangar UI](kit-ui.md), `kit.css` and `kit-ui.js`.
 
 It serves:
 
@@ -652,9 +664,9 @@ The page runs isolated: this is code written by someone else.
   commands, has **no storage** (`localStorage`, `sessionStorage`, IndexedDB
   and cookies throw or stay empty), opens no popup, submits no form, shows no
   `alert`/`confirm`/`prompt`, and cannot navigate Hangar.
-- Its policy allows **the kit's own files and nothing else**: no network at
-  all — no `fetch`, image, font, style or script from anywhere else, no
-  frames, workers or plugins. Inline scripts and styles run, module scripts
+- Its policy allows **the kit's own files and Hangar's under `/_hangar/`, and
+  nothing else**: no network at all — no `fetch`, image, font, style or script
+  from anywhere else, no frames, workers or plugins. Inline scripts and styles run, module scripts
   and WebAssembly too; `eval` does not.
 - It talks to Hangar by `postMessage` to its parent, and only that (below).
   **The frame still has no network of its own**: `data.read`, `data.write`,
@@ -838,6 +850,7 @@ Events:
 | --------------- | ------------ | -------------------------------------------------------------------- |
 | `panes.changed` | `panes.read` | The workspace's panes change: one added, closed, renamed, or changing state. `data` is `{}`: call `panes.list`. |
 | `tab.params`    | —            | A [singleton](#a-tab-with-params) got new params, or an agent or a hook [asked for this tab again](#who-asked). `data` is `{ params, caller }`. |
+| `theme`         | —            | The frame's page has loaded, or the theme of the tab's workspace, Hangar's language, its interface size or the terminals' font changed. `data` is `{ scheme, locale, tokens }`: [what the host sends](kit-ui.md#what-the-host-sends). The SDK applies it by itself, before any handler. |
 
 A page that takes params reads them when it starts, and a singleton's, or one that answers who asked,
 listens as well. Reading them once it is ready is enough: an event sent before it listens changes what
@@ -910,29 +923,43 @@ tab needs:
   a tab.
 - `window.hangar.on(event, handler)` → a function that stops listening.
 - `window.hangar.version` → `1`.
+- `window.hangar.ui` → [Hangar UI's behaviours](kit-ui.md#behaviours), once
+  `/_hangar/kit-ui.js` is loaded.
+
+It also keeps the page in Hangar's theme, by [the `theme` event](kit-ui.md#the-theme):
+the tokens of `/_hangar/kit.css`, on the root element.
 
 A minimal tab, asking for `panes.read`, `panes.send` and `notify`:
 
 ```html
 <!doctype html>
 <meta charset="utf-8" />
+<link rel="stylesheet" href="/_hangar/kit.css" />
 <script src="/_hangar/kit.js"></script>
-<ul id="panes"></ul>
+<main class="kit-page">
+  <ul id="panes" class="kit-rows"></ul>
+</main>
 <script>
   async function show() {
     const list = document.getElementById("panes");
     list.replaceChildren();
     for (const pane of await window.hangar.call("panes.list")) {
       const item = document.createElement("li");
-      item.textContent = `${pane.name} (${pane.agent}, ${pane.state ?? "?"})`;
+      item.className = "kit-row";
+      const name = document.createElement("span");
+      name.className = "kit-row__main";
+      name.textContent = `${pane.name} (${pane.agent}, ${pane.state ?? "?"})`;
+      item.append(name);
       if (pane.canSend) {
         const button = document.createElement("button");
+        button.className = "kit-btn kit-btn--small";
+        button.type = "button";
         button.textContent = "Ping";
         button.onclick = () =>
           window.hangar
             .call("panes.send", { pane: pane.name, text: "Where are you at?" })
             .catch((error) => window.hangar.call("notify", { title: "Not sent", body: error.message }));
-        item.append(" ", button);
+        item.append(button);
       }
       list.append(item);
     }
@@ -949,9 +976,12 @@ more. A tab showing a local server's queue and keeping a note, asking for
 ```html
 <!doctype html>
 <meta charset="utf-8" />
+<link rel="stylesheet" href="/_hangar/kit.css" />
 <script src="/_hangar/kit.js"></script>
-<pre id="queue">…</pre>
-<textarea id="note"></textarea>
+<main class="kit-page">
+  <pre id="queue" class="kit-pre" tabindex="0">…</pre>
+  <textarea id="note" class="kit-input" aria-label="Note"></textarea>
+</main>
 <script>
   const queue = document.getElementById("queue");
   const note = document.getElementById("note");
@@ -988,7 +1018,8 @@ permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`,
 `KIT_COMMAND_PATTERN`, `KIT_DENIED`, the message types, `kitMayCall` and
 `kitReadsHiddenFiles`. The window's side is `src/lib/kitApi.ts` (its
 limits and error codes, the `tab.*` methods, which need no permission, among
-them), the tab itself `src/components/preview/KitTabView.tsx`,
+them), the tab itself `src/components/preview/KitTabView.tsx`, the `theme` event it sends
+`kitThemeEvent` in `src/lib/kitTabs.ts`,
 and the paths `files.read` and `preview.show` take are checked on disk by
 `kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`), and
 those `files.write`, `files.readBinary` and `files.list` take, and what a tab holding

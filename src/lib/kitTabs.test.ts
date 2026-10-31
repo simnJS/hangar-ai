@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
+import { FILL_CONTRAST, TEXT_CONTRAST, THEMES, deriveChromeTokens, type TerminalTheme } from "../themes";
+import { contrastRatio } from "./contrast";
 import { withEffectiveKits, type KitInfo, type KitManifest } from "./kits";
 import {
   effectivePermissions,
@@ -6,6 +9,9 @@ import {
   KIT_TAB_PARAM_MAX_CHARS,
   kitFileUrl,
   kitTabState,
+  kitThemeEvent,
+  kitThemeSender,
+  kitUiScale,
   readKitTabParams,
   workspaceKitTabs,
 } from "./kitTabs";
@@ -294,5 +300,128 @@ describe("kitTabState", () => {
       error: "its manifest is invalid",
     });
     expect(kitTabState(null, installed, "hello-kit", "status").kind).toBe("disabled");
+  });
+});
+
+describe("the theme a tab is told", () => {
+  const settings = { uiScale: 1, mono: '"Cascadia Mono", monospace', locale: "fr" as const };
+
+  /** Every opaque surface text is written on, in the event as the page gets it. */
+  const surfaces = (tokens: Record<string, string>) =>
+    ["--kit-bg", "--kit-surface", "--kit-raised", "--kit-float", "--kit-field", "--kit-well"].map(
+      (token) => tokens[token],
+    );
+
+  /** What is below the ratio, by the pair: an empty list reads best in a failure. */
+  function below(tokens: Record<string, string>, names: string[], on: string[], ratio: number) {
+    return names.flatMap((name) =>
+      on
+        .filter((surface) => contrastRatio(tokens[name], surface) < ratio - 0.005)
+        .map((surface) => `${name} ${tokens[name]} on ${surface}`),
+    );
+  }
+
+  const TEXT = [
+    "--kit-text",
+    "--kit-text-dim",
+    "--kit-text-muted",
+    "--kit-text-faint",
+    "--kit-accent-text",
+    "--kit-ok",
+    "--kit-warn",
+    "--kit-danger",
+    "--kit-neutral",
+  ];
+  const SHAPES = ["--kit-ok-fill", "--kit-warn-fill", "--kit-neutral-fill", "--kit-danger", "--kit-focus"];
+
+  describe.each(THEMES.map((theme) => [theme.id, theme] as const))("on %s", (_id, theme) => {
+    const { hangar, event, data } = kitThemeEvent(theme, settings);
+
+    it("is the protocol's event, in the theme's own scheme and Hangar's language", () => {
+      expect({ hangar, event }).toEqual({ hangar: 1, event: "theme" });
+      expect(data.scheme).toBe(theme.appearance);
+      expect(data.locale).toBe("fr");
+    });
+
+    it("sends every token of the map, from the chrome token it names", () => {
+      const chrome = deriveChromeTokens(theme);
+      for (const [token, source] of Object.entries(tokenMap.colors)) {
+        expect(data.tokens[token], token).toBe(chrome[source]);
+        expect(data.tokens[token], token).toBeTruthy();
+      }
+      expect(Object.keys(data.tokens).sort()).toEqual(
+        [...Object.keys(tokenMap.colors), "--kit-scale", "--kit-mono"].sort(),
+      );
+    });
+
+    it(`keeps text at ${TEXT_CONTRAST}:1 on every surface`, () => {
+      expect(below(data.tokens, TEXT, surfaces(data.tokens), TEXT_CONTRAST)).toEqual([]);
+    });
+
+    it(`keeps a state's shape and the focus ring at ${FILL_CONTRAST}:1`, () => {
+      expect(below(data.tokens, SHAPES, surfaces(data.tokens), FILL_CONTRAST)).toEqual([]);
+    });
+
+    it(`keeps the primary button's label at ${TEXT_CONTRAST}:1`, () => {
+      expect(contrastRatio(data.tokens["--kit-on-accent"], data.tokens["--kit-accent"])).toBeGreaterThanOrEqual(
+        TEXT_CONTRAST - 0.005,
+      );
+    });
+  });
+
+  it("takes any theme, and what its palette gets wrong is corrected, not sent as it is", () => {
+    const custom = (appearance: "dark" | "light", background: string, foreground: string): TerminalTheme => ({
+      id: `custom-${appearance}`,
+      name: "Not bundled",
+      appearance,
+      accent: "#ff00aa",
+      xterm: { background, foreground, red: background, green: background, yellow: background },
+    });
+    for (const theme of [custom("dark", "#101014", "#1c1c20"), custom("light", "#fafafa", "#eeeeee")]) {
+      expect(THEMES.some((bundled) => bundled.id === theme.id)).toBe(false);
+      const { tokens } = kitThemeEvent(theme, settings).data;
+      expect(tokens["--kit-text"]).not.toBe(theme.xterm.foreground);
+      expect(tokens["--kit-danger"]).not.toBe(theme.xterm.red);
+      expect(below(tokens, TEXT, surfaces(tokens), TEXT_CONTRAST)).toEqual([]);
+      expect(below(tokens, SHAPES, surfaces(tokens), FILL_CONTRAST)).toEqual([]);
+    }
+  });
+
+  it("carries the interface size and the terminals' font", () => {
+    const { tokens } = kitThemeEvent(THEMES[0], { ...settings, uiScale: 1.1 }).data;
+    expect(tokens["--kit-scale"]).toBe("1.1");
+    expect(tokens["--kit-mono"]).toBe(settings.mono);
+  });
+
+  it("gives the interface size as the window applies it", () => {
+    expect(kitUiScale(100)).toBe(1);
+    expect(kitUiScale(110)).toBe(1.1);
+    expect(kitUiScale(10)).toBe(0.9);
+    expect(kitUiScale(900)).toBe(1.3);
+    expect(kitUiScale(0)).toBe(1);
+  });
+
+  it("is sent at the load of the page, then at each change, and never before the load", () => {
+    const postMessage = vi.fn();
+    const dark = kitThemeEvent(THEMES.find((theme) => theme.appearance === "dark")!, settings);
+    const light = kitThemeEvent(THEMES.find((theme) => theme.appearance === "light")!, settings);
+    const other = kitThemeEvent(THEMES.find((theme) => theme.appearance === "dark")!, { ...settings, locale: "en" });
+    const sender = kitThemeSender(() => ({ postMessage }));
+
+    sender.set(dark);
+    sender.set(light);
+    expect(postMessage).not.toHaveBeenCalled();
+
+    sender.load();
+    expect(postMessage.mock.calls).toEqual([[light, "*"]]);
+
+    sender.set(other);
+    expect(postMessage.mock.calls).toEqual([[light, "*"], [other, "*"]]);
+  });
+
+  it("asks nothing of a frame that is gone", () => {
+    const sender = kitThemeSender(() => null);
+    sender.set(kitThemeEvent(THEMES[0], settings));
+    expect(() => sender.load()).not.toThrow();
   });
 });

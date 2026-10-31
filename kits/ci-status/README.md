@@ -6,12 +6,14 @@ kit of your own: every part of a kit is in it, in the smallest form that works.
 
 ## What it does
 
-- **The CI tab.** Given a run's number it shows the workflow's name as the tab's
-  title, a badge (running, passed, failed), the jobs with their progress and the
-  step running now, and the time elapsed. It polls `gh` every 5 seconds while the
-  run is going, stops when it ends, and raises one desktop notification. When the
-  run failed it shows the end of the log of the failed steps. Without a number it
-  lists the 15 most recent runs to choose from. One tab per run.
+- **The CI tab.** Given a run's number it shows the run's title and state on one
+  line, the workflow's name as the tab's title, a badge (running, passed, failed),
+  the jobs as rows with their state, their time and the step running now, and the
+  run's link to copy. It polls `gh` every 5 seconds while the run is going, stops
+  when it ends, and raises one desktop notification. When the run failed, the jobs
+  that failed come first, with the log of the failed steps right under them, opened
+  on its first error with the errors marked. Without a number it lists the 15 most
+  recent runs to choose from, with their branch and age. One tab per run.
 - **A hook** (Claude Code `PostToolUse` on `Bash`). When an agent in a pane runs
   `git push`, it looks for the run that push started — a run takes a few seconds
   to appear, so it retries for about half a minute — and opens the tab for it. The
@@ -20,9 +22,10 @@ kit of your own: every part of a kit is in it, in the smallest form that works.
 - **A skill** telling agents to open the tab with `kit_tab_open` when the hook did
   not, and to read a run's outcome with `gh` rather than sleeping.
 
-If `gh` is missing or not signed in, the tab says so and how to fix it. English
-and French, from the browser's language; light and dark; readable at the side
-panel's narrowest.
+If `gh` is missing or not signed in, or the tab may not run it, the tab says so and
+how to fix it. It is drawn with [Hangar UI](../../docs/kit-ui.md), so it follows
+Hangar's theme, language and interface size, live, and holds at the side panel's
+narrowest.
 
 ## What it runs
 
@@ -67,18 +70,24 @@ ci-status/
 │   └── lib.js                 what counts as a push, which runs belong to it, the call to Hangar
 ├── skills/ci-status/SKILL.md
 ├── tabs/ci/
-│   ├── index.html             loads /_hangar/kit.js (the SDK), then the four scripts below
-│   ├── logic.js               pure: gh's JSON → what to show; messages in en and fr
+│   ├── index.html             loads Hangar UI (/_hangar/kit.css, kit.js, kit-ui.js), then the files below
+│   ├── logic.js               pure: gh's JSON and its logs → what to show; messages in en and fr
 │   ├── controller.js          polling, title, badge, notification — takes window.hangar as an argument
-│   ├── view.js                draws a state with createElement + textContent, never markup
-│   ├── app.js                 the three lines that wire them in the page
-│   └── style.css              one column, system colours, light and dark
+│   ├── view.js                draws a state in the library's classes, with createElement + textContent, never markup
+│   ├── app.js                 wires them in the page, and follows Hangar's language
+│   └── style.css              only what the library does not have: no colour, no measure of its own
 ├── test/                      node --test, no dependency; fixtures/ are real gh output
 └── package.json, run-tests.js let `node --test kits/ci-status/` find the tests on any Node
 ```
 
 Choices worth copying:
 
+- **Hangar's library for the look.** The components, tokens, formats and the log are
+  [Hangar UI](../../docs/kit-ui.md)'s; what the page adds is what only this tab knows,
+  such as which lines of a CI log are errors (`logic.js`, handed to `hangar.ui.log`).
+- **A redraw changes only what changed.** The page is redrawn every second while a run
+  goes: `view.js` rebuilds a part only when what it shows changed, and writes the clocks
+  in place, so nothing takes the focus from a button or scrolls a log back.
 - **Logic out of the page.** `logic.js` and `controller.js` touch neither the DOM
   nor Hangar except through arguments, so the tests drive them with a fake
   `window.hangar` and a fake clock (`test/helpers.js`).
@@ -100,8 +109,9 @@ node --test kits/ci-status/
 ```
 
 No install step. They cover the page's logic on recorded `gh` output (running,
-success, failure, not signed in, `gh` absent), the controller's polling and its
-single notification, what the view draws, the hook's recognition of `git push`
+success, failure, not signed in, `gh` absent), which line of a real failed log is its
+first error, the controller's polling and its single notification, what the view draws
+in each state, on a stand-in for `hangar.ui`, the hook's recognition of `git push`
 (and not `git push --help` or `echo git push`), and the manifest against the rules
 in [docs/kits.md](../../docs/kits.md) — Hangar's own validator is Rust, so the Node
 test restates its rules. `test/fixtures/run-running.json` is the recorded

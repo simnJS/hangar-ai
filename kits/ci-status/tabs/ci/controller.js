@@ -16,15 +16,14 @@
    * @param {object} options
    * @param {{call(method: string, params?: object): Promise<any>, on?(event: string, fn: Function): Function}} options.hangar
    * @param {object} options.logic   CiLogic
-   * @param {string} [options.lang]
+   * @param {(key: string, vars?: object) => string} options.t  What `hangar.ui.i18n` gives
    * @param {() => number} [options.now]
    * @param {(fn: Function, ms: number) => any} [options.setTimer]
    * @param {(handle: any) => void} [options.clearTimer]
    * @param {(state: object) => void} [options.onChange]
    */
   function createController(options) {
-    const { hangar, logic } = options;
-    const lang = options.lang || "en";
+    const { hangar, logic, t } = options;
     const now = options.now || Date.now;
     const setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
     const clearTimer = options.clearTimer || ((handle) => clearTimeout(handle));
@@ -35,8 +34,9 @@
       id: null,
       fromPicker: false,
       run: null,
-      log: null, // { lines, total, shown } | { empty: true } | { error } | null
+      log: null, // { lines, errors, truncated } | { empty: true } | { error } | null
       runs: null,
+      refreshing: false, // the picker shows what it last knew while it asks again
       error: null, // { kind, detail }
       warning: false,
     };
@@ -66,7 +66,7 @@
       stopTimers();
       sawRunning = false;
       failures = 0;
-      Object.assign(state, { run: null, log: null, error: null, warning: false });
+      Object.assign(state, { run: null, log: null, error: null, warning: false, refreshing: false });
     }
 
     // Title and badge are the tab's own business and never worth failing for.
@@ -100,7 +100,7 @@
         const kind = logic.classify({ code: error && error.code });
         return { ok: false, kind, detail: String((error && error.message) || "") };
       }
-      if (answer && answer.exitCode === 0) return { ok: true, stdout: String(answer.stdout || "") };
+      if (answer && answer.exitCode === 0) return { ok: true, stdout: String(answer.stdout || ""), truncated: Boolean(answer.truncated) };
       const fault = { exitCode: answer ? answer.exitCode : null, stderr: answer && answer.stderr, timedOut: answer && answer.timedOut };
       return { ok: false, kind: logic.classify(fault), detail: logic.stripAnsi((answer && (answer.stderr || answer.stdout)) || "").trim().slice(0, 500) };
     }
@@ -109,7 +109,7 @@
       const stateKey = view.kind === "queued" ? "neutral" : view.kind;
       try {
         await hangar.call("notify", {
-          title: logic.t(lang, "notifyTitle", { name: view.name || logic.t(lang, "tab"), state: logic.t(lang, stateKey).toLowerCase() }),
+          title: t("notifyTitle", { name: view.name || t("tab"), state: t(stateKey).toLowerCase() }),
           body: [view.title, view.branch].filter(Boolean).join(" · ").slice(0, 300) || undefined,
         });
       } catch {
@@ -122,7 +122,7 @@
       if (token !== generation) return;
       if (!result.ok) state.log = { error: result.kind };
       else if (!result.stdout.trim()) state.log = { empty: true };
-      else state.log = logic.trimLog(result.stdout);
+      else state.log = logic.readLog(result.stdout, result.truncated);
       emit();
     }
 
@@ -160,8 +160,8 @@
           state.view = "run";
           state.run = run;
           const view = logic.runView(run, now());
-          await setTitle(view.name || logic.t(lang, "run", { id }));
-          await setBadge(logic.badgeFor(run, lang));
+          await setTitle(view.name || t("run", { id }));
+          await setBadge(logic.badgeFor(run, t));
           if (token !== generation || disposed) return;
           if (view.done) {
             stopTimers();
@@ -216,6 +216,7 @@
         if (Array.isArray(list)) {
           state.runs = logic.runList(list);
           state.view = "picker";
+          state.refreshing = false;
           state.error = null;
           emit();
           return;
@@ -224,6 +225,7 @@
         result.detail = result.stdout.slice(0, 300);
       }
       state.view = "error";
+      state.refreshing = false;
       state.error = { kind: result.kind, detail: result.detail };
       await setBadge(null);
       emit();
@@ -238,9 +240,10 @@
 
     async function showPicker() {
       reset();
-      Object.assign(state, { view: "loading", id: null, fromPicker: false, runs: state.runs });
+      const known = Boolean(state.runs);
+      Object.assign(state, { view: known ? "picker" : "loading", id: null, fromPicker: false, refreshing: known });
       emit();
-      await setTitle(logic.t(lang, "tab"));
+      await setTitle(t("tab"));
       await setBadge(null);
       return fetchList();
     }
@@ -270,6 +273,10 @@
       retry() {
         if (state.id) return openRun(state.id, state.fromPicker);
         return showPicker();
+      },
+      /** Hangar's language changed: the badge says the run's state in the new one. */
+      relabel() {
+        return state.run ? setBadge(logic.badgeFor(state.run, t)) : undefined;
       },
       dispose() {
         disposed = true;

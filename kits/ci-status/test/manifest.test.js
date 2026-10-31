@@ -109,12 +109,14 @@ test("the commands: an argv through gh, placeholders declared with a rule", () =
   assert.deepEqual(manifest.commands["ci-list"].run.slice(0, 5), ["gh", "run", "list", "--limit", "15"]);
 });
 
-test("the tab's page loads only the kit's own files", () => {
+test("the tab's page loads the kit's own files, and Hangar's library", () => {
   const dir = path.join(KIT, "tabs", "ci");
   const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
   const sources = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((match) => match[1]);
-  assert.ok(sources.includes("/_hangar/kit.js"), "the SDK");
-  for (const source of sources.filter((source) => source !== "/_hangar/kit.js")) {
+  const library = ["/_hangar/kit.css", "/_hangar/kit.js", "/_hangar/kit-ui.js"];
+  assert.deepEqual(sources.filter((source) => source.startsWith("/")), library, "the sheet, then the SDK, then the behaviours");
+  assert.ok(sources.indexOf("/_hangar/kit-ui.js") < sources.indexOf("app.js"));
+  for (const source of sources.filter((source) => !library.includes(source))) {
     assert.doesNotMatch(source, /^([a-z]+:)?\/\//i, `${source} leaves the kit`);
     assert.doesNotMatch(source, /^\//, `${source} must be relative`);
     assert.ok(fs.existsSync(path.join(dir, source)), source);
@@ -122,6 +124,31 @@ test("the tab's page loads only the kit's own files", () => {
   for (const name of fs.readdirSync(dir)) {
     const text = fs.readFileSync(path.join(dir, name), "utf8");
     assert.doesNotMatch(text, /\bfetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|\beval\(|innerHTML|@import|url\(\s*["']?https?:/, `${name} reaches outside what a tab may`);
+  }
+});
+
+test("the tab's sheet has no colour and no measure of its own", () => {
+  const sheet = fs.readFileSync(path.join(KIT, "tabs", "ci", "style.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.doesNotMatch(sheet, /#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor-mix\(|\b(?:Canvas|CanvasText)\b|prefers-color-scheme/i, "Hangar's theme decides");
+  assert.doesNotMatch(sheet, /\b\d+(?:\.\d+)?(?:px|rem|em)\b/, "the library's measures follow the interface size");
+  for (const [, name] of sheet.matchAll(/^\.(ci-[a-z-]+)/gm)) assert.match(name, /^ci-/);
+});
+
+test("the classes the tab names are the library's, when the library is around", () => {
+  const sheet = path.join(KIT, "..", "..", "src-tauri", "kit-sdk", "kit.css");
+  if (!fs.existsSync(sheet)) return; // a kit installed on its own has no library beside it
+  const known = fs.readFileSync(sheet, "utf8");
+  const dir = path.join(KIT, "tabs", "ci");
+  for (const name of ["index.html", "view.js", "style.css"]) {
+    const text = fs.readFileSync(path.join(dir, name), "utf8");
+    // A name being put together (`kit-icon--${icon}`) is left to the captures.
+    for (const [, used] of text.matchAll(/(?<![-\w/])(kit-[a-z0-9_-]*[a-z0-9])(?![a-z0-9_-]|\$\{)/g)) {
+      if (used === "kit-ui") continue;
+      assert.ok(known.includes(`.${used}`), `${name}: ${used} is not in kit.css`);
+    }
+    for (const [, token] of text.matchAll(/var\((--kit-[a-z0-9-]+)/g)) {
+      assert.ok(known.includes(`${token}:`), `${name}: ${token} is not in kit.css`);
+    }
   }
 });
 

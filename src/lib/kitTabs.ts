@@ -1,5 +1,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
+import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
+import type { Locale } from "../i18n";
+import { deriveChromeTokens, type TerminalTheme } from "../themes";
 import {
   isKitPermission,
   kitCommandName,
@@ -15,7 +18,7 @@ import {
 } from "./kits";
 import { kitRequested, kitState } from "./kitActivation";
 import type { KitTabParams } from "./modelStore";
-import type { Workspace } from "../types";
+import { UI_SCALE_MAX, UI_SCALE_MIN, type Workspace } from "../types";
 
 /**
  * A kit's tabs, as a workspace offers them (docs/kits.md): which tabs its
@@ -272,6 +275,65 @@ export function kitTabListing(ws: Pick<Workspace, "kits">, installed: readonly K
  */
 export const frameTookKeyboard = (focus: { inFrame: boolean; pointerOver: boolean; fromTerminal: boolean }) =>
   focus.inFrame && !focus.pointerOver && focus.fromTerminal;
+
+/* ── the theme a tab is told (docs/kit-ui.md) ─────────────────── */
+
+/** The `theme` event of the tab message protocol. */
+export interface KitThemeEvent {
+  hangar: 1;
+  event: "theme";
+  data: {
+    scheme: TerminalTheme["appearance"];
+    locale: Locale;
+    tokens: Record<string, string>;
+  };
+}
+
+/** The interface size as the window applies it (App.tsx): 1 at 100 %. */
+export const kitUiScale = (percent: number): number =>
+  Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, percent || 100)) / 100;
+
+/**
+ * What a tab hears of its workspace's theme: any theme, bundled or not, since
+ * every colour comes from deriveChromeTokens, which holds text to the contrast
+ * it promises. The map is imported rather than copied, so a token added to
+ * tokens.json reaches the page by itself.
+ */
+export function kitThemeEvent(
+  theme: TerminalTheme,
+  settings: { uiScale: number; mono: string; locale: Locale },
+): KitThemeEvent {
+  const chrome = deriveChromeTokens(theme);
+  const tokens: Record<string, string> = {
+    "--kit-scale": String(settings.uiScale),
+    "--kit-mono": settings.mono,
+  };
+  for (const [token, source] of Object.entries(tokenMap.colors)) tokens[token] = chrome[source];
+  return { hangar: 1, event: "theme", data: { scheme: theme.appearance, locale: settings.locale, tokens } };
+}
+
+/**
+ * Tells one frame its theme: when its page has loaded, and at each change from
+ * then on. Before the load there is nobody to hear it, so only the latest is
+ * kept. Target origin `*`, as for every event: the frame's origin is opaque.
+ */
+export function kitThemeSender(frame: () => Pick<Window, "postMessage"> | null) {
+  let loaded = false;
+  let latest: KitThemeEvent | null = null;
+  const send = () => {
+    if (loaded && latest) frame()?.postMessage(latest, "*");
+  };
+  return {
+    load() {
+      loaded = true;
+      send();
+    },
+    set(event: KitThemeEvent) {
+      latest = event;
+      send();
+    },
+  };
+}
 
 /* ── the installed kits, read once for the window ─────────────── */
 
