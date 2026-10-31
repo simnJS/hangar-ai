@@ -105,12 +105,15 @@ export const en = {
   "kitsManage.stepRunning": "Opening the pane…",
   "kitsManage.stepRunNeedsWs": "Available once the workspace exists.",
   "kitsManage.stepOpened":
-    "Running in the pane {pane}. Hangar cannot read its exit code: once it ends, tell Hangar how it went.",
+    "Running in the pane {pane}. It is the visible pane of the workspace; close the Settings if they hide it. Hangar cannot read its exit code: once it ends, tell Hangar how it went.",
   "kitsManage.stepConfirm": "It worked, mark it done",
   "kitsManage.stepNotYet": "Not yet",
   "kitsManage.stepFailed": "Could not run it: {detail}",
   "kitsManage.stepNoPane": "The workspace has no room for another pane.",
-  "kitsManage.stepPaneLost": "The pane did not start in time. Nothing was typed.",
+  "kitsManage.stepPaneLost":
+    "The pane did not start in time, so it was closed and nothing was typed. Open the workspace, then run it again.",
+  "kitsManage.stepPaneLostDetached":
+    "The workspace is in a window of its own and its pane did not start in time. Nothing was typed. Open that window, then run it again.",
   "kitsManage.actClaudeOnly": "Kits reach Claude Code panes only, not the other agents or plain shells.",
   "kitsManage.actAccept": "Accept and enable",
   "kitsManage.actAcceptPerms": "Accept the permissions",
@@ -232,12 +235,15 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.stepRunning": "Ouverture du pane…",
   "kitsManage.stepRunNeedsWs": "Disponible une fois le workspace créé.",
   "kitsManage.stepOpened":
-    "Elle tourne dans le pane {pane}. Hangar ne peut pas lire son code de sortie : quand elle est finie, dites-lui comment ça s'est passé.",
+    "Elle tourne dans le pane {pane}. C'est le pane visible du workspace ; fermez les Réglages s'ils le cachent. Hangar ne peut pas lire son code de sortie : quand elle est finie, dites-lui comment ça s'est passé.",
   "kitsManage.stepConfirm": "Ça a marché, la marquer faite",
   "kitsManage.stepNotYet": "Pas encore",
   "kitsManage.stepFailed": "Impossible de la lancer : {detail}",
   "kitsManage.stepNoPane": "Le workspace n'a plus de place pour un autre pane.",
-  "kitsManage.stepPaneLost": "Le pane n'a pas démarré à temps. Rien n'a été saisi.",
+  "kitsManage.stepPaneLost":
+    "Le pane n'a pas démarré à temps : il a été fermé et rien n'a été saisi. Ouvrez le workspace, puis relancez.",
+  "kitsManage.stepPaneLostDetached":
+    "Le workspace est dans une fenêtre à part et son pane n'a pas démarré à temps. Rien n'a été saisi. Ouvrez cette fenêtre, puis relancez.",
   "kitsManage.actClaudeOnly":
     "Les kits n'atteignent que les panes Claude Code, ni les autres agents ni les shells simples.",
   "kitsManage.actAccept": "Accepter et activer",

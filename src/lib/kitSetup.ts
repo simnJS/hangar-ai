@@ -57,6 +57,8 @@ export interface SetupPaneDeps {
   /** Types into the pane. */
   write: (paneId: string, data: string) => Promise<void>;
   wait: (ms: number) => Promise<void>;
+  /** Closes the pane just opened, so a failed start leaves none behind. */
+  closePane?: (paneId: string) => void;
   /** How many times to look for the pane's terminal, and the pause between looks. */
   tries?: number;
   delayMs?: number;
@@ -68,8 +70,8 @@ export type SetupRunResult =
 
 /**
  * Opens the pane, waits for its terminal, then types the command. Writes
- * nothing if the terminal never starts: a command typed into nowhere would
- * look as if it ran.
+ * nothing if the terminal never starts (a command typed into nowhere would
+ * look as if it ran) and closes the pane it opened.
  */
 export async function runSetupCommand(
   command: string,
@@ -77,7 +79,8 @@ export async function runSetupCommand(
 ): Promise<SetupRunResult> {
   const paneId = deps.openPane();
   if (!paneId) return { ok: false, reason: "no-pane" };
-  const tries = deps.tries ?? 40;
+  // A workspace never opened this session has to mount before its pane can start.
+  const tries = deps.tries ?? 80;
   const delay = deps.delayMs ?? 250;
   for (let i = 0; i < tries; i++) {
     if (await deps.alive(paneId).catch(() => false)) {
@@ -85,6 +88,7 @@ export async function runSetupCommand(
         await deps.write(paneId, setupKeystrokes(command));
         return { ok: true, paneId };
       } catch (err) {
+        deps.closePane?.(paneId);
         return {
           ok: false,
           reason: "write-failed",
@@ -94,5 +98,32 @@ export async function runSetupCommand(
     }
     await deps.wait(delay);
   }
+  deps.closePane?.(paneId);
   return { ok: false, reason: "not-started" };
+}
+
+export interface ShowWorkspaceDeps {
+  workspaceId: string;
+  /** The workspace the app shows now. */
+  activeId: string | null;
+  /** It was put to sleep: its panes are unmounted, its agents stopped. */
+  asleep: boolean;
+  /** The store's action that selects a workspace; App mounts (wakes) what it selects. */
+  setActive: (id: string | null) => void;
+  wait: (ms: number) => Promise<void>;
+}
+
+/**
+ * Makes the workspace the one on screen before a pane is added to it: App only
+ * mounts the workspaces it has opened, and an unmounted pane never starts its
+ * terminal. Selecting it opens it — the way the sidebar wakes a sleeping one.
+ * A sleeping workspace that is already the selected one is selected again, from
+ * nothing, because selecting the same id changes nothing.
+ */
+export async function showWorkspace(deps: ShowWorkspaceDeps): Promise<void> {
+  if (deps.asleep && deps.activeId === deps.workspaceId) {
+    deps.setActive(null);
+    await deps.wait(50);
+  }
+  deps.setActive(deps.workspaceId);
 }

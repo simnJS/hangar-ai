@@ -13,7 +13,8 @@ import {
   requestedPermissions,
   type KitState,
 } from "../lib/kitActivation";
-import { currentOs, runSetupCommand, type KitOs } from "../lib/kitSetup";
+import { useAsleep } from "../lib/hibernateStore";
+import { currentOs, runSetupCommand, showWorkspace, type KitOs } from "../lib/kitSetup";
 import {
   kitInspect,
   kitSetupMark,
@@ -278,7 +279,8 @@ interface ActivationProps {
 /** The activation view as a dialog, fed from Rust. */
 export function KitActivation({ kit, entry, workspace, onAccept, onClose }: ActivationProps) {
   const t = useT();
-  const { addPane, snapshot } = useStore();
+  const { addPane, closePane, snapshot, setActiveWorkspace, state } = useStore();
+  const asleep = useAsleep();
   const [inspection, setInspection] = useState<KitInspection | null>(null);
   const [steps, setSteps] = useState<KitSetupStatus[] | null>(null);
   const [running, setRunning] = useState<string | null>(null);
@@ -312,6 +314,15 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
       setError(null);
       setRunning(step.id);
       let paneName = "";
+      // Only an opened workspace mounts its panes: make this one the active,
+      // visible one first, or the new pane's terminal would never start.
+      await showWorkspace({
+        workspaceId: workspace.id,
+        activeId: state.activeWorkspaceId,
+        asleep: asleep.has(workspace.id),
+        setActive: setActiveWorkspace,
+        wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+      });
       const result = await runSetupCommand(step.command, {
         openPane: () => {
           const id = addPane(workspace.id, { agent: "shell", cwd: kit.dir });
@@ -323,6 +334,7 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
           }
           return id;
         },
+        closePane: (paneId) => closePane(workspace.id, paneId),
         alive: ptyAlive,
         write: ptyWrite,
         wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
@@ -331,10 +343,11 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
       setRunning(null);
       if (result.ok) setRan({ stepId: step.id, paneName: paneName || "…" });
       else if (result.reason === "no-pane") setError(t("kitsManage.stepNoPane"));
-      else if (result.reason === "not-started") setError(t("kitsManage.stepPaneLost"));
+      else if (result.reason === "not-started")
+        setError(t(workspace.detached ? "kitsManage.stepPaneLostDetached" : "kitsManage.stepPaneLost"));
       else setError(t("kitsManage.stepFailed", { detail: result.detail ?? "" }));
     },
-    [workspace, addPane, snapshot, kit.dir, t],
+    [workspace, addPane, closePane, setActiveWorkspace, snapshot, state.activeWorkspaceId, asleep, kit.dir, t],
   );
 
   /** Marks the step done: the person confirmed it, Hangar cannot read the exit code. */
@@ -366,7 +379,9 @@ export function KitActivation({ kit, entry, workspace, onAccept, onClose }: Acti
 
   const name = kitName(kit);
   return (
-    <Backdrop onClose={onClose} escape={false}>
+    // While a setup command runs, the dialog steps aside (see KitActivation.css)
+    // so the pane it opened can be watched.
+    <Backdrop onClose={onClose} escape={false} className={ran ? "kit-act-peek" : ""}>
       <div className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="kit-act-title">
         <ModalHead
           id="kit-act-title"

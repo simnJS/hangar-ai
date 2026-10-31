@@ -176,6 +176,23 @@
   gap: 8px;
 }
 
+/* A setup command is running: the dialog moves to a corner, the pane behind it
+   stays visible and usable. (From Settings, the page still covers the pane:
+   the message says where it is.) */
+.modal-backdrop.kit-act-peek {
+  align-items: flex-end;
+  justify-content: flex-end;
+  background: transparent;
+  pointer-events: none;
+}
+
+.kit-act-peek .modal {
+  max-width: 460px;
+  max-height: 45vh;
+  overflow: auto;
+  pointer-events: auto;
+}
+
 /* The workspace dialog's Kits section. */
 
 .kit-sec {

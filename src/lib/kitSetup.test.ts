@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { KitSetupStatus } from "./kits";
 import {
   currentOs,
+  showWorkspace,
   pendingSteps,
   runSetupCommand,
   setupKeystrokes,
@@ -63,11 +64,13 @@ describe("runSetupCommand", () => {
   it("types nothing when the terminal never starts", async () => {
     const deps = { ...base(), tries: 3 };
     deps.alive.mockResolvedValue(false);
-    await expect(runSetupCommand("echo hi", deps)).resolves.toEqual({
+    const closePane = vi.fn();
+    await expect(runSetupCommand("echo hi", { ...deps, closePane })).resolves.toEqual({
       ok: false,
       reason: "not-started",
     });
     expect(deps.write).not.toHaveBeenCalled();
+    expect(closePane).toHaveBeenCalledWith("pane-1");
   });
 
   it("types nothing when the workspace is full", async () => {
@@ -83,10 +86,37 @@ describe("runSetupCommand", () => {
   it("reports a failed write", async () => {
     const deps = base();
     deps.write.mockRejectedValue(new Error("pty not found"));
-    await expect(runSetupCommand("echo hi", deps)).resolves.toEqual({
+    const closePane = vi.fn();
+    await expect(runSetupCommand("echo hi", { ...deps, closePane })).resolves.toEqual({
       ok: false,
       reason: "write-failed",
       detail: "pty not found",
     });
+    expect(closePane).toHaveBeenCalledWith("pane-1");
+  });
+});
+
+describe("showWorkspace", () => {
+  const run = async (patch: { activeId: string | null; asleep: boolean }) => {
+    const calls: (string | null)[] = [];
+    await showWorkspace({
+      workspaceId: "w1",
+      ...patch,
+      setActive: (id) => calls.push(id),
+      wait: async () => undefined,
+    });
+    return calls;
+  };
+
+  it("selects a workspace that is not the one on screen", async () => {
+    expect(await run({ activeId: "w2", asleep: false })).toEqual(["w1"]);
+  });
+
+  it("selects a sleeping one", async () => {
+    expect(await run({ activeId: "w2", asleep: true })).toEqual(["w1"]);
+  });
+
+  it("selects a sleeping workspace that is already selected from nothing, to wake it", async () => {
+    expect(await run({ activeId: "w1", asleep: true })).toEqual([null, "w1"]);
   });
 });
