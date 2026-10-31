@@ -1,0 +1,1 @@
+{ "name": "deps", "version": "0.1.0", "description": "Reads what is vulnerable or out of date in the project from its lockfile, and hands it to an agent; agents read the last audit instead of running it again." }

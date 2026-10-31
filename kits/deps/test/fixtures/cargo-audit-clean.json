@@ -1,0 +1,15 @@
+{
+  "database": {
+    "advisory-count": 900
+  },
+  "lockfile": {
+    "dependency-count": 120
+  },
+  "settings": {},
+  "vulnerabilities": {
+    "found": false,
+    "count": 0,
+    "list": []
+  },
+  "warnings": {}
+}
