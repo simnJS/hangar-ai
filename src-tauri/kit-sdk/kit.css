@@ -1207,7 +1207,15 @@ textarea.kit-input {
   flex: none;
   flex-wrap: wrap;
   gap: var(--kit-space-4);
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
+}
+/* A long label wraps inside the line instead of widening it past the page. */
+.kit-banner__action .kit-btn {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .kit-banner--warning {
   border-color: color-mix(in srgb, var(--kit-warn-fill) 45%, transparent);

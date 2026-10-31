@@ -387,6 +387,7 @@ Determinate with a width on its fill. `--indeterminate` travels when there is no
 
 A line in the flow of the page, for something that holds until it changes. Its text keeps the page's own
 colour. What only just happened is [a toast](#toast).
+An action never makes the line wider than the page: a long label wraps inside it, at 320 px and at 288 px.
 
 ```html
 <p class="kit-banner"><span class="kit-banner__text">Refreshed every 30 seconds while the tab is visible.</span></p>
@@ -470,14 +471,19 @@ surface in every theme. Hangar's own ring is quieter, its accent at 45 %; kits' 
 
 ### Inline confirmation
 
-`hangar.ui.confirm(button, { message, confirm, cancel, danger })` asks where the button is, in place of it: a
+`hangar.ui.confirm(button, { message, confirm, cancel, danger, signal })` asks where the button is, in place of it: a
 sandboxed page has no `confirm()`. A Promise of `true` or `false`. Cancel comes first and holds the focus, so a
 double click or a stray Enter never confirms; Escape cancels. `danger: false` makes the answer a primary button.
+The page can dismiss it too, which answers `false`: pass `signal`, an `AbortSignal`, or call `cancel()` on the Promise.
 
 ```js
 remove.addEventListener("click", async () => {
   if (await hangar.ui.confirm(remove, { message: "Delete this run?", confirm: "Delete" })) deleteRun();
 });
+
+// The run vanished meanwhile: take the question back.
+const asked = hangar.ui.confirm(remove, { message: "Delete this run?" });
+runGone.then(() => asked.cancel());
 ```
 
 It draws this, in the classes `.kit-confirm` and `.kit-confirm__text`.
@@ -548,7 +554,8 @@ clipboard by itself.
 `hangar.ui.list(scroller, { count, render, chunk, estimate })` keeps only what is near the view in the page, so a
 hundred thousand lines cost what a few hundred do. Lines may wrap: it works by blocks (`.kit-list__chunk`), each
 keeping its last measured height while out of the page. `render(index)` gives a line's element; `estimate` is a
-line's height before it is measured, in pixels.
+line's height before it is measured, in pixels. A block keeps what was measured when `setCount` grows or
+shrinks the list, so appending does not move what is being read further up.
 
 ```js
 const rows = hangar.ui.list(scroller, {

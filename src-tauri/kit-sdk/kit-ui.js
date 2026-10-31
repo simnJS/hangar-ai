@@ -219,11 +219,14 @@
   /**
    * Asks where the button is, in place of it, since a sandboxed page has no
    * confirm(). A Promise of true or false. Cancel comes first and has the focus,
-   * so a double click or a stray Enter never confirms.
+   * so a double click or a stray Enter never confirms. The page can dismiss it
+   * (answer false) with `options.signal`, an AbortSignal, or the `cancel()` on the
+   * Promise it got back.
    */
   function confirm(trigger, options) {
     if (asking.has(trigger)) return asking.get(trigger);
     const settings = options || {};
+    let dismiss = () => {};
     const answer = new Promise((resolve) => {
       const box = el("span", "kit-confirm");
       box.setAttribute("role", "group");
@@ -232,9 +235,11 @@
         box.remove();
         trigger.hidden = false;
         asking.delete(trigger);
+        if (settings.signal) settings.signal.removeEventListener("abort", dismiss);
         trigger.focus();
         resolve(result);
       };
+      dismiss = () => finish(false);
       const cancel = actionButton(settings.cancel || say("cancel"), "", () => finish(false));
       const yes = actionButton(
         settings.confirm || say("confirm"),
@@ -248,7 +253,13 @@
       trigger.hidden = true;
       trigger.after(box);
       cancel.focus();
+      const signal = settings.signal;
+      if (signal) {
+        if (signal.aborted) dismiss();
+        else signal.addEventListener("abort", dismiss, { once: true });
+      }
     });
+    answer.cancel = () => dismiss();
     asking.set(trigger, answer);
     return answer;
   }
@@ -583,7 +594,10 @@
     }
 
     function hollow(chunk) {
-      chunk.el.style.height = `${chunk.el.offsetHeight}px`;
+      // What was measured is kept, with the lines it was measured for.
+      chunk.height = chunk.el.offsetHeight;
+      chunk.lines = chunk.filled;
+      chunk.el.style.height = `${chunk.height}px`;
       chunk.el.replaceChildren();
       chunk.filled = 0;
     }
@@ -618,8 +632,13 @@
       for (const chunk of chunks) {
         if (chunk.filled) {
           if (chunk.filled !== linesIn(chunk)) fill(chunk);
-        } else {
+        } else if (!chunk.height) {
           chunk.el.style.height = `${linesIn(chunk) * estimate}px`;
+        } else if (chunk.lines !== linesIn(chunk)) {
+          // A measured block that got more (or fewer) lines: its own line height.
+          chunk.height = (chunk.height / chunk.lines) * linesIn(chunk);
+          chunk.lines = linesIn(chunk);
+          chunk.el.style.height = `${chunk.height}px`;
         }
       }
       if (stick) toEnd();

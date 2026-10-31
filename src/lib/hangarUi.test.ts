@@ -346,6 +346,16 @@ describe("the documentation", () => {
   });
 });
 
+describe("the banner's action", () => {
+  it("never outgrows the line: a long label wraps", () => {
+    const action = sheet.match(/\.kit-banner__action \{([^}]*)\}/)?.[1] ?? "";
+    expect(action).toMatch(/max-width:\s*100%/);
+    expect(action).toMatch(/min-width:\s*0/);
+    const button = sheet.match(/\.kit-banner__action \.kit-btn \{([^}]*)\}/)?.[1] ?? "";
+    expect(button).toMatch(/white-space:\s*normal/);
+  });
+});
+
 describe("the gallery", () => {
   it("shows every class of the sheet", () => {
     const shown = new Set(
@@ -362,7 +372,7 @@ describe("the gallery", () => {
 });
 
 /** The two scripts in a stand-in for a tab's page: nothing here needs a real DOM. */
-function loadSdk(options: { language?: string; withSdk?: boolean } = {}) {
+function loadSdk(options: { language?: string; withSdk?: boolean; document?: Record<string, unknown> } = {}) {
   const handlers: ((event: unknown) => void)[] = [];
   const styles = new Map<string, string>();
   const attributes = new Map<string, string>();
@@ -383,7 +393,7 @@ function loadSdk(options: { language?: string; withSdk?: boolean } = {}) {
   };
   const globals = {
     window: page,
-    document: { documentElement },
+    document: { documentElement, ...options.document },
     navigator: { language: options.language ?? "en-US" },
     console: { error: (...args: unknown[]) => errors.push(args) },
   };
@@ -412,6 +422,7 @@ interface UiForTest {
   locale: () => string;
   i18n: (dictionaries: Record<string, Record<string, string>>) => (key: string, vars?: Record<string, unknown>) => string;
   isErrorLine: (text: string) => boolean;
+  confirm: (trigger: unknown, options?: { message?: string; signal?: AbortSignal }) => Promise<boolean> & { cancel: () => void };
   format: {
     duration: (ms: number) => string;
     clock: (at: number, options?: { seconds?: boolean }) => string;
@@ -568,6 +579,55 @@ describe("kit-ui.js", () => {
       expect(format.bytes(15360)).toBe(french ? "15 Ko" : "15 KB");
       expect(format.bytes(1572864)).toBe(french ? "1,5 Mo" : "1.5 MB");
     });
+  });
+
+  describe("confirm, dismissed by the page", () => {
+    /** Just enough of an element for confirm(): a tree of boxes that can be added, removed and focused. */
+    function stand() {
+      const make = (tag: string) => {
+        const node: Record<string, any> = { tag, children: [] as unknown[], hidden: false, attributes: {}, listeners: {} };
+        node.append = (...kids: unknown[]) => node.children.push(...kids);
+        node.after = (kid: unknown) => (node.next = kid);
+        node.remove = () => (node.removed = true);
+        node.focus = () => {};
+        node.setAttribute = () => {};
+        node.addEventListener = (type: string, handler: () => void) => (node.listeners[type] = handler);
+        return node;
+      };
+      return { make, document: { createElement: make } };
+    }
+
+    it("answers false through the cancel() of the Promise, and gives the button back", async () => {
+      const { make, document } = stand();
+      const trigger = make("button");
+      const { ui } = loadSdk({ document });
+      const answer = ui.confirm(trigger, { message: "Sure?" });
+      expect(trigger.hidden).toBe(true);
+      answer.cancel();
+      await expect(answer).resolves.toBe(false);
+      expect(trigger.hidden).toBe(false);
+      expect(trigger.next.removed).toBe(true);
+    });
+
+    it("answers false when its AbortSignal aborts, or already has", async () => {
+      const { make, document } = stand();
+      const trigger = make("button");
+      const { ui } = loadSdk({ document });
+      const controller = new AbortController();
+      const answer = ui.confirm(trigger, { signal: controller.signal });
+      controller.abort();
+      await expect(answer).resolves.toBe(false);
+      expect(trigger.hidden).toBe(false);
+      await expect(ui.confirm(trigger, { signal: AbortSignal.abort() })).resolves.toBe(false);
+    });
+  });
+
+  it("keeps the measured height of a block of a long list when the list grows", () => {
+    const hollow = uiScript.slice(uiScript.indexOf("function hollow"), uiScript.indexOf("const watcher"));
+    expect(hollow).toContain("chunk.height");
+    const grow = uiScript.slice(uiScript.indexOf("function setCount"), uiScript.indexOf("function scrollTo"));
+    // The estimate only goes to a block never measured.
+    expect(grow).toMatch(/else if \(!chunk\.height\)[^}]*estimate/);
   });
 
   it("finds what reads as an error in a log, and what only mentions one", () => {
