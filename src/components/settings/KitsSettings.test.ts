@@ -162,7 +162,7 @@ describe("Settings › Kits", () => {
     const held = html(
       viewProps("en", { kits: [hooked], everywhere: [{ id: "roblox", granted: ["panes.send", "notify"] }] }),
     );
-    expect(held).toContain("Hooks to review");
+    expect(held).toContain("To review: kept out of new panes");
   });
 
   it("says to open a workspace first only when none is active", () => {

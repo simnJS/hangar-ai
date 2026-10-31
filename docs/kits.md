@@ -13,8 +13,8 @@ about that domain. A kit can bring:
 - **setup commands**: shown to the person verbatim, run in a visible pane once
   they approve, once per machine.
 
-Its plugin may also carry [hooks](#hooks), which Claude Code runs by itself: the
-person sees them before enabling the kit.
+Its plugin may also start things by itself, [hooks](#hooks) and
+[more](#what-runs-by-itself): the person sees all of it before enabling the kit.
 
 Kits come from a local folder (linked, read live) or from a GitHub link
 (cloned). There is no catalog.
@@ -207,9 +207,9 @@ by Hangar or typed by hand — loads them.
   servers included — and the pane says so.
 - A WSL pane does not carry the environment into Linux: kits do not reach it.
 
-- A GitHub kit whose **hooks** changed since this workspace accepted them is
-  [left out](#consent-on-change) until they are accepted again, MCP servers
-  included, and the pane says so.
+- A GitHub kit whose list of [what runs by itself](#what-runs-by-itself) changed
+  since this workspace accepted it is [left out](#consent-on-change) until it is
+  accepted again, MCP servers included, and the pane says so.
 
 `pty_spawn` answers `{ kitIssues: [{ id, reason, detail? }] }`, `reason` being
 `missing`, `broken` (with `detail`, in English) or `forbidden`.
@@ -218,7 +218,7 @@ A pane of a workspace with at least one kit also finds their data's root in
 [`HANGAR_KITS_DATA`](#a-kits-data-folder), and what a hook needs to
 [reach Hangar](#from-a-hook) in `HANGAR_API_URL` and `HANGAR_API_TOKEN`, with the
 bridge or without it. A pane started with no kit — its workspace has none, or the
-only ones it has are left out for their hooks — starts without these variables,
+only ones it has are left out for what they run by themselves — starts without these variables,
 even under a Hangar launched from inside a pane.
 
 ### MCP servers, in both MCP modes
@@ -240,10 +240,12 @@ Claude Code spells it). Other `${VAR}` references are left for Claude Code. The
 kits are not passed in `inherit` mode, where the plugins start their servers
 themselves and a copy would run each one twice.
 
-A plugin's servers are read from `mcpServers` in its `plugin.json` (inline, or
-the relative path of a JSON file), then from its `.mcp.json` for the names not
-already declared. A `.mcp.json` may hold them under `mcpServers` or at its top
-level.
+A plugin's servers are read in the order Claude Code loads them: its `.mcp.json`,
+then `mcpServers` in its `plugin.json` (inline, the relative path of a JSON file,
+or a list of either), a name declared later replacing an earlier one. A
+`.mcp.json` may hold them under `mcpServers` or at its top level. A bundle
+(`.mcpb`, `.dxt`) is shown, but stays out of the `--mcp-config` file: only Claude
+Code can unpack it, so a workspace in `custom` mode does not get its servers.
 
 ### Hooks
 
@@ -262,41 +264,110 @@ it stands, under the file's name.
 
 A hook finds the kit's data folder at `$HANGAR_KITS_DATA/<kit id>`.
 
+### What runs by itself
+
+A plugin has other ways to start code than its hooks. The activation view shows
+them all, after the hooks, in the same monospace block, each kind with one sentence
+saying when it runs. `kit_inspect` lists them as
+`running: [{ kind, name, argv?, text?, when?, description?, env?, headers?, unreadable? }]`,
+from the plugin schema of Claude Code 2.1.316, unexpanded and as the plugin writes
+them. Showing is all this does: nothing here blocks a kind from running.
+
+| `kind`       | Read from                                                                                                                 | When it runs                                                                        | What is given                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `mcp`        | `.mcp.json`, `mcpServers`                                                                                                 | A session starts: started or connected to, and kept for the session                 | `argv` (command and args), or `text` (its URL), with the names in `env` and `headers`            |
+| `mcp`        | `headersHelper` of a server, as `<server> · headersHelper`                                                                | When the server connects                                                            | `text`: the command                                                                              |
+| `mcp`        | A `.mcpb` or `.dxt` bundle in `mcpServers`                                                                                | As a server; what it starts is inside                                               | `text`: its path or URL, `unreadable`                                                            |
+| `monitor`    | `monitors/monitors.json`, `monitors`, `experimental.monitors`                                                             | A session starts, or the skill its `when` names first runs; until the session ends  | `text`: the command, `when`, `description`                                                       |
+| `lsp`        | `.lsp.json`, `lspServers`                                                                                                 | Claude first edits a file of its types; until the session ends                      | `argv`, `when`: its file extensions, the names in `env`                                          |
+| `skillHook`  | `hooks` in the frontmatter of `skills/`, `commands/`, what `skills` and `commands` name, a root `SKILL.md`, inline `content` | That skill or command is in use, each time they match                               | `text`: the lines, as written                                                                    |
+| `settings`   | `settings.json`, `settings`: `agent`, `subagentStatusLine`                                                                | `agent`: the whole session answers as it. `subagentStatusLine`: every few seconds while subagents work | `text`: the agent, or the command                                                                |
+| `grammar`    | `experimental.syntaxHighlighting.hljsLanguages`                                                                           | Claude Code loads this JavaScript to colour code                                    | `text`: its remote, when it has one, `unreadable`                                                |
+| `bin`        | The direct children of `bin/`                                                                                             | Never by itself: on the `PATH` of Claude's shell, after the person's own entries    | `text`: `bin/<name>`                                                                             |
+| `binary`     | `binaries`                                                                                                                | Downloaded into `bin/` when Claude Code installs a plugin                           | `text`: `sha256:<hash>`, `unreadable`                                                            |
+| `dependency` | `dependencies`                                                                                                            | Enabled along with this plugin, when installed, with whatever it brings             | `text`: the entry as written, `unreadable`                                                       |
+| `unknown`    | What the rest cannot use                                                                                                  | Hangar cannot say                                                                   | `text`: as written, or only `name` and `unreadable` for a file that does not parse               |
+
+A hooks module (`modules` in a hooks file) stays in `hooks`, under the event
+`modules`; the view gives it a group and a sentence of its own: code Claude Code
+loads into itself when a session starts. Hangar shows its path, not its code.
+
+**Env values and headers never leave Rust**, only their names do. In a block
+Hangar did not understand, `env`, `headers` and `authToken` are replaced by their
+names at any depth, and a file that does not parse is listed by its name alone, as
+it may hold one.
+
+What Hangar cannot read is said to be so at activation, in plain words, and never
+left out: `unreadable` is a bundle, a remote grammar, a download, another plugin, a
+file that does not parse, or more `skills` and `commands` files than it reads (500,
+four folders deep).
+
+`unknown` is the view's « not understood ». It lists a key Claude Code 2.1.316 does
+not know in `plugin.json` or its `experimental`, and a key of `settings` other than
+those two, whenever it holds any text at all: telling a path or a command from
+anything else would be a guess. A known key in a shape that cannot be read, or a
+path that leads nowhere or out of the plugin, comes the same way. A number or a
+boolean names nothing, and is not listed.
+
+These do not run by themselves, and are not listed: `commands`, `agents` (Claude
+Code ignores `hooks` and `mcpServers` in a plugin agent's frontmatter), `skills`
+apart from their hooks, `outputStyles`, `themes`, `workflows`, `channels`,
+`userConfig`, `types`, and the plugin's metadata keys.
+
 ### Consent on change
 
-For a GitHub-installed kit, **an update that changes the hooks does not reach
-new panes until it is accepted again** on the workspace.
+For a GitHub-installed kit, **an update that changes what runs by itself does not
+reach new panes until it is accepted again** on the workspace.
 
 What a workspace accepted is stored in its `kits[].granted` beside the tab
-permissions, as the pseudo permission `hooks:<hash>`: the first 16 hex of the
-SHA-256 of the canonical list, which is the JSON
+permissions, as the pseudo permission `hooks:<hash>`: the first 16 hex of a SHA-256.
+A manifest cannot ask for it, and no tab ever holds it. For a plugin with hooks and
+nothing else, the hash is of the canonical list, the JSON
 `[{"event":…,"matcher":…,"command":…}]` sorted by those three fields and without
-duplicates (so reformatting the file asks nothing). A manifest cannot ask for it,
-and no tab ever holds it.
+duplicates. With anything else, it is of the JSON
+`[<that list>, [[kind, name, what it wrote], …]]`, sorted and without duplicates,
+where « what it wrote » is the item's whole definition with its keys sorted, env
+values and headers included, and the bytes of a bundle inside the plugin. So
+reformatting a file asks nothing, and changing a value that is never shown does.
 
-The hooks go through the same diff as new permissions. When the workspace does
+The list goes through the same diff as new permissions. When the workspace does
 not hold the kit's current `hooks:<hash>`, the kit reads « to review », and its
 whole plugin stays out of `ptySpawn` and of the `--mcp-config` file, the pane
-saying why. Accepting stores the hash of the hooks the person was shown: hooks
-that changed while the view was open stay to be accepted.
+saying why. Accepting stores the hash of the list the person was shown: what
+changed while the view was open stays to be accepted.
 
 - A **linked folder** kit is exempt and stores nothing: the person is writing it,
   it is read live, and every edit would ask again. The view says so.
-- A kit with **no hooks** stores nothing, and asks nothing. An update that brings
-  hooks to it is a change like any other.
-- A git kit **installed before this was asked**, with its hooks as they were,
-  behaves on the workspaces that have it as it did: not held back, and not asked,
-  though the view lists its hooks. The index marks every kit added since
-  (`hooksConsent`), and marks an older one as soon as an update changes its hooks;
-  that is what tells it from a kit whose update just brought hooks, both holding
-  no `hooks:<hash>`.
+- A kit that **runs nothing by itself** stores nothing, and asks nothing. An update
+  that brings something to it is a change like any other.
+- A kit with **only hooks** keeps the hash of Hangar 1.8.0: a workspace that accepted
+  them is not asked again.
+- A GitHub kit with **anything else** that a workspace accepted before Hangar listed
+  it, an MCP server for one, has a new hash and is asked once: the person was never
+  shown those commands, and only the hooks' hash was ever stored, so nothing can
+  tell they did not change. Until then it stays out of new panes.
+- A git kit **installed before this was asked**, with all that as it was, behaves
+  on the workspaces that have it as it did: not held back, and not asked, though the
+  view lists it. The index marks every kit added since (`hooksConsent`), and marks
+  an older one as soon as an update changes any of it; that is what tells it from
+  a kit whose update just brought some, both holding no `hooks:<hash>`.
 
-Two limits to know. The hash covers **the list, not the scripts it names**: an
-update that changes what `node ${CLAUDE_PLUGIN_ROOT}/start.js` does, with the
-same command, asks nothing. And this holds back **new panes**: a Claude Code
-already running keeps its plugin folder, the clone an update moves, and watches
-it for changes, so an update can reach a running session's hooks module before
-anyone accepts it. Restarting panes follows the review, as for any kit change.
+What to know about its limits:
+
+- The hash covers **the list, not the scripts it names**: an update that changes
+  what `node ${CLAUDE_PLUGIN_ROOT}/start.js` does, with the same command, asks
+  nothing. The same goes for a file in `bin/` and for a hooks module's code.
+- This holds back **new panes**: a Claude Code already running keeps its plugin
+  folder, the clone an update moves, and watches it for changes, so an update can
+  reach a running session's hooks module before anyone accepts it. Restarting panes
+  follows the review, as for any kit change.
+- A skill's frontmatter is read **line by line**, with no YAML parser: `hooks` as a
+  top-level key is found, an exotic form (an anchor, a mapping on one line at the
+  root) is not.
+- A `` !`command` `` in the body of a skill or a command is **not listed**: it runs
+  when that skill or command is invoked, not by itself.
+- A key Hangar does not know, whose text changes with every version, asks again at
+  every update. That is the price of leaving nothing out.
 
 ## Tab permissions
 
@@ -1012,8 +1083,8 @@ touches the installed app's kits. Its `index.json`:
 ```
 
 `dir` is the kit's root on disk. `addedAt` is in milliseconds since the epoch.
-`hooksConsent`, on a git kit added since hooks are asked about, or one whose
-update changed them, says a workspace has to have accepted its hooks
+`hooksConsent`, on a git kit added since this is asked about, or one whose update
+changed it, says a workspace has to have accepted what it runs by itself
 ([Consent on change](#consent-on-change)). An index that cannot be read is an
 error, never a store that looks empty and gets overwritten.
 
@@ -1055,7 +1126,7 @@ kits?: { id: string; granted: string[] }[]
 ```
 
 `granted` is the tab permissions the person accepted, and `hooks:<hash>` and
-`commands:<hash>` for a GitHub kit's accepted hooks and commands. `state.json` is edited by hand, so it is read through
+`commands:<hash>` for what a GitHub kit runs by itself and the commands its tabs may run, once accepted. `state.json` is edited by hand, so it is read through
 `workspaceKits(ws)` (`src/lib/kits.ts`): an entry that is not an object with a
 valid kit id and a `granted` array is no kit, a duplicate id counts once, and a
 permission Hangar does not know is never granted. A missing `kits` is no kit.
@@ -1078,13 +1149,13 @@ Tauri commands, with their wrappers in `src/lib/kits.ts`:
 
 | Command                      | Wrapper                      | Answers                                                                                   |
 | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>`, null without hooks), `hooksConsent`, `commandsPermission` (`commands:<hash>` for this OS, null without commands). |
+| `kits_list`                  | `kitsList()`                 | `KitInfo[]`: each kit with `source`, `dir`, `installedVersion`, `addedAt`, `manifest` (null when unreadable or invalid), `error` (null when usable; a manifest can come with one: a kit needing a newer Hangar), `update` (the last check, while the app runs), `hooksPermission` (`hooks:<hash>` of what its plugin runs by itself, null when it runs nothing), `hooksConsent`, `commandsPermission` (`commands:<hash>` for this OS, null without commands). |
 | `kit_add_folder(path)`       | `kitAddFolder(path)`         | `KitInfo`. `path` absolute, holding a valid kit.                                           |
 | `kit_add_git(url)`           | `kitAddGit(url)`             | `KitInfo`. `url` a GitHub link as above.                                                   |
 | `kit_remove(id)`             | `kitRemove(id)`              | Nothing. Deletes only a clone Hangar made.                                                 |
 | `kit_check_update(id)`       | `kitCheckUpdate(id)`         | `{ current, latest, available, checkedAt }`, or `null` for a folder kit.                  |
 | `kit_update(id)`             | `kitUpdate(id)`              | `KitInfo`.                                                                                 |
-| `kit_inspect(id)`            | `kitInspect(id)`             | What it brings: `plugin` (`{ name, dir }`), `skills`, `commands`, `agents`, `mcpServers` (the plugin's names, unprefixed), `hooks` (`[{ event, matcher, command }]`), `hooksPermission`, `tabs`, `setup` (this OS's steps, with `command`), `declaredCommands` (`[{ name, description, argv, args, timeoutSeconds }]`, this OS's, verbatim; `commands` is the plugin's slash commands), `commandsPermission`. |
+| `kit_inspect(id)`            | `kitInspect(id)`             | What it brings: `plugin` (`{ name, dir }`), `skills`, `commands`, `agents`, `mcpServers` (the plugin's names, unprefixed), `hooks` (`[{ event, matcher, command }]`), `running` ([what else it starts by itself](#what-runs-by-itself), never an env value or a header), `hooksPermission`, `tabs`, `setup` (this OS's steps, with `command`), `declaredCommands` (`[{ name, description, argv, args, timeoutSeconds }]`, this OS's, verbatim; `commands` is the plugin's slash commands), `commandsPermission`. |
 | `kit_setup_status(id)`       | `kitSetupStatus(id)`         | `[{ id, title, description?, command, sha256, done }]`.                                   |
 | `kit_setup_mark(id, stepId)` | `kitSetupMark(id, stepId)`   | The same list, after recording the step.                                                  |
 | `kit_data_read(kit, path)`   | through `KitTabView`         | The file's text. Refuses with `{ code, message }`.                                        |
