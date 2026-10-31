@@ -6,6 +6,7 @@ import { buildPresence } from "../../lib/discord";
 import { isMac } from "../../lib/keys";
 import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
+import { KitsSettings } from "./KitsSettings";
 import { MobileSettings } from "./MobileSettings";
 import type { IconName } from "../Icon";
 import { ShortcutsSettings } from "./ShortcutsSettings";
@@ -738,6 +739,28 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               hint: t("mobile.switchHint"),
               keywords: t("mobile.keywords"),
               render: () => <MobileSettings />,
+            },
+          ],
+        },
+      ],
+    },
+
+    {
+      id: "kits",
+      label: t("kitsManage.title"),
+      icon: "plug",
+      sections: [
+        {
+          id: "kits",
+          title: t("kitsManage.title"),
+          items: [
+            {
+              id: "kits",
+              kind: "custom",
+              bare: true,
+              hint: t("kitsManage.intro"),
+              keywords: t("kitsManage.keywords"),
+              render: () => <KitsSettings />,
             },
           ],
         },

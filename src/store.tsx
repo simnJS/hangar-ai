@@ -36,6 +36,7 @@ import {
   type SplitNode,
   type Workspace,
   type WorkspaceFolder,
+  type WorkspaceKit,
 } from "./types";
 
 const newId = () => crypto.randomUUID();
@@ -62,6 +63,8 @@ export interface WorkspaceDraft {
   shellId: string | null;
   /** The sidebar folder to file it under. Left out, it lands at the top level. */
   folderId?: string | null;
+  /** The kits enabled while it is being created, each with the permissions accepted. */
+  kits?: WorkspaceKit[];
 }
 
 /** `taken` holds the pane names the other workspaces already use. */
@@ -82,6 +85,8 @@ export const makeWorkspace = (draft: WorkspaceDraft, taken: Iterable<string> = [
     tree: presetTree(panes.map((pane) => pane.id)),
     savedCommands: [],
     folderId: draft.folderId ?? null,
+    // Absent rather than empty when none, as in every workspace saved before kits.
+    ...(draft.kits && draft.kits.length > 0 ? { kits: draft.kits } : {}),
   };
 };
 

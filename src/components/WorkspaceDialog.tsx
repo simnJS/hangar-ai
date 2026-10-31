@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop, ModalHead } from "./Backdrop";
 import { Icon } from "./Icon";
+import { WorkspaceKitsSection } from "./KitActivation";
 import { useT } from "../i18n";
 import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
+import { workspaceKits } from "../lib/kits";
 import { allPaneNames, pickPaneNames } from "../lib/paneNames";
 import { useStore, type WorkspaceDraft } from "../store";
 import {
@@ -11,6 +13,8 @@ import {
   type AgentId,
   type LayoutSize,
   type ShellInfo,
+  type Workspace,
+  type WorkspaceKit,
   type WorkspaceRoot,
 } from "../types";
 
@@ -32,8 +36,52 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * The kits of a workspace that already exists: the same section as in the
+ * creation dialog, on its own, with what only an existing workspace allows —
+ * running a kit's setup commands in a pane of it, and restarting its Claude
+ * Code panes. Changes are saved as they are accepted.
+ *
+ * Nothing mounts this yet: opening it from a workspace's menu is App.tsx's, not
+ * this file's, and needs `workspace` to be the live one from the store.
+ */
+export function WorkspaceKitsDialog({
+  workspace,
+  onClose,
+}: {
+  workspace: Workspace;
+  onClose: () => void;
+}) {
+  const { updateWorkspace } = useStore();
+  const t = useT();
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="ws-kits-title">
+        <ModalHead
+          id="ws-kits-title"
+          title={t("kitsManage.editTitle", { name: workspace.name })}
+          onClose={onClose}
+        />
+        <div className="modal__body" data-modal-body>
+          <WorkspaceKitsSection
+            value={workspaceKits(workspace)}
+            workspace={workspace}
+            onChange={(kits) => updateWorkspace(workspace.id, { kits })}
+          />
+        </div>
+        <footer className="modal__foot">
+          <button type="button" className="btn btn--primary" onClick={onClose}>
+            {t("kitsManage.editDone")}
+          </button>
+        </footer>
+      </div>
+    </Backdrop>
+  );
+}
+
 export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
   const { addWorkspace, state } = useStore();
+  const [kits, setKits] = useState<WorkspaceKit[]>([]);
 
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
@@ -166,6 +214,7 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
       layout,
       agents: assignments,
       shellId,
+      kits,
     };
     addWorkspace(draft);
     onClose();
@@ -423,6 +472,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                 ))}
               </div>
               <span className="form-hint">{t("create.layoutHint")}</span>
+            </div>
+
+            <span className="form-grid__label">{t("kitsManage.sectionTitle")}</span>
+            <div className="form-grid__field">
+              <WorkspaceKitsSection value={kits} onChange={setKits} />
             </div>
           </div>
 
