@@ -5,9 +5,14 @@ import { en, fr } from "../strings/kitsManage";
 import type { KitInfo } from "./kits";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("../store", () => ({ useStore: () => ({}) }));
 
 const { filterGallery, galleryInstallUrl, galleryStatus, isNewer } = await import("./kitGallery");
+const { kitPinnedTag } = await import("./kits");
 const { KitsGalleryView } = await import("../components/settings/KitsGallery");
+const { KitsView } = await import("../components/settings/KitsSettings");
 type GalleryKit = import("./kitGallery").GalleryKit;
 type Gallery = import("./kitGallery").Gallery;
 type GalleryProps = Parameters<typeof KitsGalleryView>[0];
@@ -16,17 +21,19 @@ const entry = (over: Partial<GalleryKit> = {}): GalleryKit => ({
   id: "ci-status",
   name: "CI status",
   description: "Follows a GitHub Actions run.",
-  path: "kits/ci-status",
+  repo: "hangar-ai/ci-status",
+  tag: "v0.2.0",
   version: "0.2.0",
   permissionsSummary: "Runs gh.",
   tags: ["ci", "github"],
+  verified: true,
   ...over,
 });
 
 const installed = (over: Partial<KitInfo> = {}): KitInfo =>
   ({
     id: "ci-status",
-    source: { kind: "git", url: "https://github.com/simnJS/hangar-ai", ref: "main", subdir: "kits/ci-status" },
+    source: { kind: "git", url: "https://github.com/hangar-ai/ci-status", ref: "refs/tags/v0.1.0" },
     dir: "C:\\k",
     installedVersion: "0.1.0",
     addedAt: 0,
@@ -56,15 +63,54 @@ describe("galleryStatus", () => {
   it("is new when nothing of that id is installed", () => {
     expect(galleryStatus(entry(), [])).toEqual({ kind: "new" });
   });
-  it("is installed at the version it has", () => {
-    expect(galleryStatus(entry({ version: "0.1.0" }), [installed()])).toEqual({ kind: "installed", version: "0.1.0" });
+  const current = { kind: "installed", version: "0.1.0", pinned: "v0.1.0" };
+  it("is installed at the version it has, pinned to its tag", () => {
+    expect(galleryStatus(entry({ tag: "v0.1.0", version: "0.1.0" }), [installed()])).toEqual(current);
   });
-  it("offers an update when the index has a newer version", () => {
-    expect(galleryStatus(entry(), [installed()])).toEqual({ kind: "update", version: "0.1.0", latest: "0.2.0" });
+  it("offers an update when the catalog names a new tag with a newer version", () => {
+    expect(galleryStatus(entry(), [installed()])).toEqual({
+      kind: "update",
+      version: "0.1.0",
+      latest: "0.2.0",
+      pinned: "v0.1.0",
+    });
+  });
+  it("finds the repository whatever its case, as GitHub does", () => {
+    expect(galleryStatus(entry({ repo: "Hangar-AI/CI-status" }), [installed()]).kind).toBe("update");
+  });
+  it("offers nothing while the catalog names the same tag, whatever version it says", () => {
+    expect(galleryStatus(entry({ tag: "v0.1.0" }), [installed()])).toEqual(current);
+  });
+  it("offers nothing when the new tag is not a newer version", () => {
+    expect(galleryStatus(entry({ version: "0.1.0" }), [installed()])).toEqual(current);
+    expect(galleryStatus(entry({ version: "0.0.9" }), [installed()])).toEqual(current);
+  });
+  it("offers nothing for the same id in another repository", () => {
+    expect(galleryStatus(entry({ repo: "someone/ci-status" }), [installed()])).toEqual(current);
   });
   it("does not offer an update over a linked folder", () => {
     const folder = installed({ source: { kind: "folder", path: "D:\\ci-status" } });
-    expect(galleryStatus(entry(), [folder])).toEqual({ kind: "installed", version: "0.1.0" });
+    expect(galleryStatus(entry(), [folder])).toEqual({ kind: "installed", version: "0.1.0", pinned: null });
+  });
+  it("does not offer an update over a kit on a branch or a plain link, which follow their own source", () => {
+    const plain = { kind: "installed", version: "0.1.0", pinned: null };
+    const url = "https://github.com/hangar-ai/ci-status";
+    expect(galleryStatus(entry(), [installed({ source: { kind: "git", url } })])).toEqual(plain);
+    expect(galleryStatus(entry(), [installed({ source: { kind: "git", url, ref: "main" } })])).toEqual(plain);
+  });
+});
+
+describe("kitPinnedTag", () => {
+  const url = "https://github.com/o/r";
+  it("reads the tag of a kit pinned to one", () => {
+    expect(kitPinnedTag({ kind: "git", url, ref: "refs/tags/v1.2.0" })).toBe("v1.2.0");
+    expect(kitPinnedTag({ kind: "git", url, ref: "refs/tags/release/1", subdir: "kit" })).toBe("release/1");
+  });
+  it("is null for anything else", () => {
+    expect(kitPinnedTag({ kind: "git", url })).toBeNull();
+    expect(kitPinnedTag({ kind: "git", url, ref: "main" })).toBeNull();
+    expect(kitPinnedTag({ kind: "git", url, ref: "v1.2.0" })).toBeNull();
+    expect(kitPinnedTag({ kind: "folder", path: "D:\\kit" })).toBeNull();
   });
 });
 
@@ -81,8 +127,11 @@ describe("filterGallery", () => {
 });
 
 describe("galleryInstallUrl", () => {
-  it("names the kit's folder in the one repository", () => {
-    expect(galleryInstallUrl("ci-status")).toBe("https://github.com/simnJS/hangar-ai/tree/main/kits/ci-status");
+  it("names the tag of the kit's own repository, with no folder", () => {
+    expect(galleryInstallUrl(entry())).toBe("https://github.com/hangar-ai/ci-status/tree/v0.2.0");
+    expect(galleryInstallUrl(entry({ repo: "someone/kit", tag: "1.0.0" }))).toBe(
+      "https://github.com/someone/kit/tree/1.0.0",
+    );
   });
 });
 
@@ -95,6 +144,58 @@ describe("the library strings", () => {
       expect(fr[key as keyof typeof fr], key).not.toBe(en[key as keyof typeof en]);
     }
     expect(fr["kitsManage.galleryTitle"]).toBe("Bibliothèque");
+  });
+});
+
+describe("the row of an installed kit", () => {
+  type ViewProps = Parameters<typeof KitsView>[0];
+  const noop = () => undefined;
+  const row = (kit: KitInfo) =>
+    renderToStaticMarkup(
+      createElement(KitsView, {
+        t: ((key: string, vars?: Record<string, string | number>) =>
+          (en[key as keyof typeof en] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(vars?.[name] ?? ""))) as ViewProps["t"],
+        kits: [kit],
+        error: null,
+        flash: null,
+        notes: {},
+        removing: null,
+        adding: null,
+        folderError: null,
+        gitUrl: "",
+        gitError: null,
+        onGitUrl: noop,
+        onAddFolder: noop,
+        onAddGit: noop,
+        onCheck: noop,
+        onUpdate: noop,
+        onAskRemove: noop,
+        onRemove: noop,
+        workspaces: [],
+        onManageWorkspace: noop,
+        everywhere: [],
+        hasActiveWorkspace: true,
+        restartFor: null,
+        onDismissRestart: noop,
+        onToggleEverywhere: noop,
+        onReviewEverywhere: noop,
+      }),
+    );
+
+  it("says what a kit is pinned to in words, not by git's name for the tag", () => {
+    const html = row(installed());
+    expect(html).toContain("GitHub: https://github.com/hangar-ai/ci-status · pinned to v0.1.0");
+    expect(html).not.toContain("refs/tags/");
+  });
+
+  it("keeps the folder of a pinned kit, and says nothing of a kit on a branch", () => {
+    const url = "https://github.com/o/r";
+    expect(row(installed({ source: { kind: "git", url, ref: "refs/tags/v1", subdir: "kit" } }))).toContain(
+      "GitHub: https://github.com/o/r (kit) · pinned to v1",
+    );
+    const branch = row(installed({ source: { kind: "git", url, ref: "main" } }));
+    expect(branch).toContain("GitHub: https://github.com/o/r (main)");
+    expect(branch).not.toContain("pinned to");
   });
 });
 
@@ -138,8 +239,54 @@ describe("KitsGalleryView", () => {
     expect(html).toContain("Update to v0.2.0");
   });
 
+  it("says what a kit installed from a tag is pinned to, with its version", () => {
+    const current = entry({ tag: "v0.1.0", version: "0.1.0" });
+    const html = draw({ gallery: { ...live, kits: [current] }, installed: [installed()] });
+    expect(html).toContain("Installed (v0.1.0)");
+    expect(html).toContain("Pinned to v0.1.0");
+    expect(draw({ installed: [installed()] })).toContain("Pinned to v0.1.0");
+  });
+
+  it("does not say pinned of a kit that is not", () => {
+    const branch = installed({ source: { kind: "git", url: "https://github.com/o/r", ref: "main" } });
+    expect(draw({ installed: [branch] })).not.toContain("Pinned to");
+    expect(draw()).not.toContain("Pinned to");
+  });
+
+  it("names the repository and the tag a kit installs from", () => {
+    expect(draw()).toContain("hangar-ai/ci-status · v0.2.0");
+  });
+
+  it("shows a verified kit with its badge, and nothing about a review it did not have", () => {
+    const html = draw();
+    expect(html).toContain("Verified");
+    expect(html).toContain("kit-act__tag--ok");
+    expect(html).not.toContain("Community kit");
+    expect(html).not.toContain("not reviewed");
+  });
+
+  it("shows anything else as a community kit, in one plain sentence, installed the same way", () => {
+    const html = draw({ gallery: { ...live, kits: [entry({ verified: false })] } });
+    expect(html).toContain("Community kit");
+    expect(html).toContain("It was not reviewed by Hangar.");
+    expect(html).not.toContain("Verified");
+    expect(html).toContain('aria-label="Install CI status"');
+    expect(html).toContain("nothing is enabled");
+  });
+
   it("says when it shows the kept copy", () => {
-    expect(draw({ gallery: { ...live, origin: "cached" } })).toContain("Offline: showing the copy kept on");
+    expect(draw({ gallery: { ...live, origin: "cached" } })).toContain(
+      "The library could not be read: showing the copy kept on",
+    );
+  });
+
+  it("reads an empty catalog as an empty library, not as a failure", () => {
+    const html = draw({ gallery: { origin: "live", kits: [], fetchedAt: 1 } });
+    expect(html).toContain("The library lists no kit yet.");
+    expect(html).not.toContain("cannot be reached");
+    expect(html).not.toContain("could not be read");
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain("No kit matches");
   });
 
   it("says plainly when there is no list at all", () => {

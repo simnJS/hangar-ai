@@ -19,6 +19,7 @@ import {
   kitAddFolder,
   kitAddGit,
   kitCheckUpdate,
+  kitPinnedTag,
   kitRemove,
   kitUpdate,
   kitsList,
@@ -130,7 +131,9 @@ function noteText(t: Translator, note: UpdateNote): string {
 function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
   const { t, notes, removing } = props;
   const note = notes[kit.id];
-  const source = sourceLine(kit.source);
+  const pinned = kitPinnedTag(kit.source);
+  // The tag is said in words below, rather than by git's full name for it.
+  const source = sourceLine(pinned && kit.source.kind === "git" ? { ...kit.source, ref: undefined } : kit.source);
   const isFolder = kit.source.kind === "folder";
   const working = note?.kind === "checking" || note?.kind === "updating";
   const available = note?.kind === "available" || (kit.update?.available && !note);
@@ -165,6 +168,7 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
               ? t("kitsManage.sourceFolder", { path: source.text })
               : t("kitsManage.sourceGit", { url: source.text })}
             {isFolder && ` · ${t("kitsManage.linked")}`}
+            {pinned && ` · ${t("kitsManage.pinned", { tag: pinned })}`}
           </span>
         </div>
       </div>
@@ -527,7 +531,7 @@ export function KitsSettings() {
     setFlash(null);
     setGalleryBusy(id);
     try {
-      const added = await kitAddGit(galleryInstallUrl(id));
+      const added = await kitAddGit(galleryInstallUrl(entry));
       setFlash(t("kitsManage.galleryInstalledFlash", { name: kitName(added) }));
       await refresh();
     } catch (err) {

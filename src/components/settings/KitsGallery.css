@@ -41,3 +41,12 @@
 .kit-gallery__asks {
   color: var(--fg-secondary);
 }
+
+/* Whether Hangar reviewed it, and whether it is installed and pinned: tags and a
+   sentence on one line, wrapping at the page's narrowest. */
+.kit-gallery__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}

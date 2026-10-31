@@ -8,9 +8,10 @@
 //! person approves and runs once per machine.
 //!
 //! Kits come from a local folder, linked in place, or from a GitHub link,
-//! cloned shallow into `~/.hangar/kits/<id>` (store.rs, source.rs). Which
-//! workspace has which kit is the workspace's business (state.json); this
-//! side only ever hears kit ids, and resolves them to folders.
+//! cloned shallow into `~/.hangar/kits/<id>` (store.rs, source.rs); the library
+//! lists public ones, each pinned to a tag (gallery.rs). Which workspace has
+//! which kit is the workspace's business (state.json); this side only ever hears
+//! kit ids, and resolves them to folders.
 //!
 //! The contract the other parts build on is written out in docs/kits.md.
 
@@ -379,10 +380,25 @@ pub async fn kit_remove(app: AppHandle, id: String) -> Result<(), String> {
     .await
 }
 
+/// The tag the catalog names for a kit pinned to one, from the last good list when
+/// it cannot be read; `None` when it names none, and the kit then stays on its tag.
+/// Only a pinned kit asks: an update check of any other makes no request for it.
+fn catalog_tag(store: &Store, id: &str) -> Option<String> {
+    let entry = store.entry(id).ok()?;
+    let Source::Git(git) = &entry.source else {
+        return None;
+    };
+    source::pinned_tag(git)?;
+    let listed = gallery::load(Some(store.root()), now_ms(), gallery::fetch);
+    gallery::tag_for(&listed.kits, id, &git.url)
+}
+
 #[tauri::command]
 pub async fn kit_check_update(app: AppHandle, id: String) -> Result<Option<UpdateInfo>, String> {
     crate::git::off_thread(move || {
-        let found = open()?.check_update(&id, now_ms())?;
+        let store = open()?;
+        let tag = catalog_tag(&store, &id);
+        let found = store.check_update(&id, now_ms(), tag.as_deref())?;
         if found.is_some() {
             let _ = app.emit(CHANGED_EVENT, ());
         }
@@ -395,7 +411,8 @@ pub async fn kit_check_update(app: AppHandle, id: String) -> Result<Option<Updat
 pub async fn kit_update(app: AppHandle, id: String) -> Result<KitInfo, String> {
     crate::git::off_thread(move || {
         let store = open()?;
-        let entry = store.update(&id)?;
+        let tag = catalog_tag(&store, &id);
+        let entry = store.update(&id, tag.as_deref())?;
         changed(&app);
         Ok(info(&store, entry))
     })

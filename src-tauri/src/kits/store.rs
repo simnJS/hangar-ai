@@ -244,20 +244,18 @@ impl Store {
     /// Clones the kit a GitHub link points at. Only `https://github.com/`
     /// links are taken (source::parse_link).
     pub fn add_git(&self, link: &str, now: u64) -> Result<Entry, String> {
-        let link = source::parse_link(link)?;
-        let (git_ref, subdir) = if link.tree.is_empty() {
-            (None, None)
+        self.add_git_link(source::parse_link(link)?, now)
+    }
+
+    /// A link already checked: its `/tree/` part read against the remote's refs,
+    /// which is where a tag tells itself from a branch and pins the kit.
+    fn add_git_link(&self, link: source::Link, now: u64) -> Result<Entry, String> {
+        let refs = if link.tree.is_empty() {
+            source::RemoteRefs::default()
         } else {
-            source::split_tree(&link.tree, &source::remote_refs(&link.url)?)?
+            source::remote_refs(&link.url)?
         };
-        self.add_git_source(
-            GitSource {
-                url: link.url,
-                git_ref,
-                subdir,
-            },
-            now,
-        )
+        self.add_git_source(source::source_of(link, &refs)?, now)
     }
 
     /// The clone itself, from any URL git takes: the link was checked by the
@@ -345,26 +343,29 @@ impl Store {
     }
 
     /// For a git kit, the version its manifest declares at the remote ref,
-    /// against the one installed. A folder kit is always as it is on disk:
-    /// there is nothing to check, and the answer is `None`.
-    pub fn check_update(&self, id: &str, now: u64) -> Result<Option<UpdateInfo>, String> {
+    /// against the one installed. A kit pinned to a tag is only looked at on
+    /// another tag the catalog names (`catalog_tag`, `source::update_target`); with
+    /// none, it is as it is and nothing is fetched. A folder kit is always as it is
+    /// on disk: there is nothing to check, and the answer is `None`.
+    pub fn check_update(
+        &self,
+        id: &str,
+        now: u64,
+        catalog_tag: Option<&str>,
+    ) -> Result<Option<UpdateInfo>, String> {
         let _guard = lock();
         let entry = self.find(id)?;
         let Source::Git(source) = &entry.source else {
             return Ok(None);
         };
-        let latest = self.fetch_version(&entry, source)?;
-        let available = match (
-            semver::Version::parse(&latest),
-            semver::Version::parse(&entry.installed_version),
-        ) {
-            (Ok(latest), Ok(current)) => latest > current,
-            _ => latest != entry.installed_version,
+        let latest = match source::update_target(source, catalog_tag) {
+            Some(target) => self.fetch_version(&entry, &target)?,
+            None => entry.installed_version.clone(),
         };
         let info = UpdateInfo {
+            available: is_later(&latest, &entry.installed_version),
             current: entry.installed_version.clone(),
             latest,
-            available,
             checked_at: now,
         };
         checks().insert((self.root.clone(), id.to_string()), info.clone());
@@ -372,8 +373,10 @@ impl Store {
     }
 
     /// Brings a git kit to what its remote ref holds now, and a folder kit's
-    /// recorded version to what its manifest says.
-    pub fn update(&self, id: &str) -> Result<Entry, String> {
+    /// recorded version to what its manifest says. A kit pinned to a tag moves to
+    /// the tag the catalog names, which it then is pinned to, and never back to an
+    /// older version; with no other tag named, it stays as it is.
+    pub fn update(&self, id: &str, catalog_tag: Option<&str>) -> Result<Entry, String> {
         let _guard = lock();
         let mut index = self.load()?;
         let at = index
@@ -385,7 +388,20 @@ impl Store {
         let version = match &entry.source {
             Source::Folder { .. } => manifest::read(Path::new(&entry.dir))?.version,
             Source::Git(source) => {
-                let latest = self.fetch_version(&entry, source)?;
+                let Some(target) = source::update_target(source, catalog_tag) else {
+                    checks().remove(&(self.root.clone(), id.to_string()));
+                    return Ok(entry);
+                };
+                let latest = self.fetch_version(&entry, &target)?;
+                if source::pinned_tag(source).is_some()
+                    && !is_later(&latest, &entry.installed_version)
+                {
+                    return Err(format!(
+                        "the catalog names the tag {}, which holds version {latest}: not later than the installed {}",
+                        source::pinned_tag(&target).unwrap_or_default(),
+                        entry.installed_version
+                    ));
+                }
                 let hooks_before = self
                     .loaded(&entry)
                     .ok()
@@ -398,6 +414,7 @@ impl Store {
                 if hooks_now != hooks_before {
                     index.kits[at].hooks_consent = true;
                 }
+                index.kits[at].source = Source::Git(target);
                 latest
             }
         };
@@ -435,6 +452,18 @@ impl Store {
             ));
         }
         Ok(version)
+    }
+}
+
+/// Whether `latest` is an update of `current`. A version that is not semver has
+/// nothing to compare by, and any other one counts.
+fn is_later(latest: &str, current: &str) -> bool {
+    match (
+        semver::Version::parse(latest),
+        semver::Version::parse(current),
+    ) {
+        (Ok(latest), Ok(current)) => latest > current,
+        _ => latest != current,
     }
 }
 
@@ -539,7 +568,7 @@ fn clear_readonly(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kits::testing::{Folder, Remote};
+    use crate::kits::testing::{git, Folder, Remote};
     use serde_json::json;
 
     fn store(tag: &str) -> (Folder, Store) {
@@ -566,8 +595,11 @@ mod tests {
         source.manifest(".", "studio", "1.1.0");
         let loaded = store.loaded(&entry).unwrap();
         assert_eq!(loaded.manifest.version, "1.1.0");
-        assert_eq!(store.check_update("studio", 1).unwrap(), None);
-        assert_eq!(store.update("studio").unwrap().installed_version, "1.1.0");
+        assert_eq!(store.check_update("studio", 1, None).unwrap(), None);
+        assert_eq!(
+            store.update("studio", None).unwrap().installed_version,
+            "1.1.0"
+        );
 
         assert!(store
             .add_folder(&dir.to_string_lossy(), 43)
@@ -634,7 +666,7 @@ mod tests {
         );
 
         // Nothing new upstream.
-        let check = store.check_update("studio", 8).unwrap().unwrap();
+        let check = store.check_update("studio", 8, None).unwrap().unwrap();
         assert_eq!((check.latest.as_str(), check.available), ("1.0.0", false));
 
         remote.folder.manifest("work", "studio", "1.2.0");
@@ -642,7 +674,7 @@ mod tests {
             .folder
             .file("work/skills/more/SKILL.md", "---\nname: more\n---\n");
         remote.push("second");
-        let check = store.check_update("studio", 9).unwrap().unwrap();
+        let check = store.check_update("studio", 9, None).unwrap().unwrap();
         assert_eq!(
             check,
             UpdateInfo {
@@ -656,7 +688,7 @@ mod tests {
         // Something a setup step left in the kit folder.
         fs::write(clone.join("installed.txt"), "local").unwrap();
 
-        let updated = store.update("studio").unwrap();
+        let updated = store.update("studio", None).unwrap();
         assert_eq!(updated.installed_version, "1.2.0");
         assert!(clone.join("skills/more/SKILL.md").is_file());
         assert!(
@@ -664,7 +696,13 @@ mod tests {
             "untracked files stay"
         );
         assert_eq!(store.update_info("studio"), None, "the check is stale now");
-        assert!(!store.check_update("studio", 10).unwrap().unwrap().available);
+        assert!(
+            !store
+                .check_update("studio", 10, None)
+                .unwrap()
+                .unwrap()
+                .available
+        );
 
         store.remove("studio").unwrap();
         assert!(!clone.exists(), "the clone is Hangar's to delete");
@@ -722,7 +760,7 @@ mod tests {
         source.kit(".", "linked", "1.0.0");
         let linked = store.add_folder(&source.root.to_string_lossy(), 1).unwrap();
         assert!(!linked.hooks_consent);
-        store.update("linked").unwrap();
+        store.update("linked", None).unwrap();
         assert!(!store.entry("linked").unwrap().hooks_consent);
     }
 
@@ -745,7 +783,7 @@ mod tests {
         // Another version with the same hooks: as it was.
         remote.folder.manifest("work", "studio", "1.1.0");
         remote.push("same hooks");
-        let same = store.update("studio").unwrap();
+        let same = store.update("studio", None).unwrap();
         assert!(!same.hooks_consent);
         assert_eq!(same.installed_version, "1.1.0");
         assert_eq!(
@@ -756,7 +794,7 @@ mod tests {
         with_hooks(&remote, "two.sh");
         remote.folder.manifest("work", "studio", "1.2.0");
         remote.push("other hooks");
-        let changed = store.update("studio").unwrap();
+        let changed = store.update("studio", None).unwrap();
         assert!(changed.hooks_consent);
         assert_ne!(
             store.loaded(&changed).unwrap().hooks_permission().unwrap(),
@@ -787,7 +825,7 @@ mod tests {
         );
         remote.folder.manifest("work", "studio", "1.1.0");
         remote.push("another server");
-        let changed = store.update("studio").unwrap();
+        let changed = store.update("studio", None).unwrap();
         assert!(changed.hooks_consent);
         assert_ne!(
             store.loaded(&changed).unwrap().hooks_permission().unwrap(),
@@ -806,7 +844,7 @@ mod tests {
         );
         remote.folder.manifest("work", "studio", "1.2.0");
         remote.push("a monitor");
-        let watched = store.update("studio").unwrap();
+        let watched = store.update("studio", None).unwrap();
         assert_ne!(
             store.loaded(&watched).unwrap().hooks_permission().unwrap(),
             mcp_changed
@@ -827,7 +865,7 @@ mod tests {
         with_hooks(&remote, "new.sh");
         remote.folder.manifest("work", "studio", "1.1.0");
         remote.push("hooks now");
-        let updated = store.update("studio").unwrap();
+        let updated = store.update("studio", None).unwrap();
         assert!(updated.hooks_consent);
         assert!(store.loaded(&updated).unwrap().hooks_permission().is_some());
     }
@@ -858,8 +896,17 @@ mod tests {
             .folder
             .manifest("work/kits/studio", "studio", "2.1.0");
         remote.push("bump");
-        assert!(store.check_update("studio", 2).unwrap().unwrap().available);
-        assert_eq!(store.update("studio").unwrap().installed_version, "2.1.0");
+        assert!(
+            store
+                .check_update("studio", 2, None)
+                .unwrap()
+                .unwrap()
+                .available
+        );
+        assert_eq!(
+            store.update("studio", None).unwrap().installed_version,
+            "2.1.0"
+        );
         assert_eq!(store.loaded(&entry).unwrap().manifest.version, "2.1.0");
     }
 
@@ -910,11 +957,327 @@ mod tests {
         remote.folder.manifest("work", "other", "9.0.0");
         remote.push("renamed");
         assert!(store
-            .check_update("studio", 2)
+            .check_update("studio", 2, None)
             .unwrap_err()
             .contains("\"other\""));
-        assert!(store.update("studio").is_err());
+        assert!(store.update("studio", None).is_err());
         assert_eq!(store.entry("studio").unwrap().installed_version, "1.0.0");
+    }
+
+    /// Tags what the working copy holds, and pushes the tag.
+    fn tag(remote: &Remote, name: &str) {
+        git(&remote.work(), &["tag", name]);
+        git(
+            &remote.work(),
+            &["push", "-q", "origin", &format!("refs/tags/{name}")],
+        );
+    }
+
+    /// Commits a new version of the kit `studio` and tags it.
+    fn release(remote: &Remote, version: &str) {
+        remote.folder.manifest("work", "studio", version);
+        remote.push(version);
+        tag(remote, &format!("v{version}"));
+    }
+
+    /// As the gallery installs: the link `…/tree/<tree>`, read against the remote.
+    fn from_tree(store: &Store, remote: &Remote, tree: &[&str]) -> Entry {
+        store
+            .add_git_link(
+                source::Link {
+                    url: remote.url(),
+                    tree: tree.iter().map(|part| part.to_string()).collect(),
+                },
+                1,
+            )
+            .unwrap()
+    }
+
+    fn git_ref(entry: &Entry) -> Option<&str> {
+        match &entry.source {
+            Source::Git(source) => source.git_ref.as_deref(),
+            Source::Folder { .. } => None,
+        }
+    }
+
+    fn in_clone(store: &Store, id: &str, args: &[&str]) -> String {
+        source::git(Some(store.root().join(id).as_path()), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    /// The version the clone's manifest declares, on disk.
+    fn on_disk(store: &Store, id: &str) -> String {
+        store
+            .loaded(&store.entry(id).unwrap())
+            .unwrap()
+            .manifest
+            .version
+    }
+
+    /// `(latest, available)` of a check against the tag the catalog names.
+    fn check(store: &Store, catalog_tag: Option<&str>) -> (String, bool) {
+        let info = store
+            .check_update("studio", 1, catalog_tag)
+            .unwrap()
+            .unwrap();
+        (info.latest, info.available)
+    }
+
+    #[test]
+    fn a_tag_link_with_no_folder_is_a_shallow_clone_pinned_to_that_tag() {
+        let (_home, store) = store("tag-link");
+        let remote = Remote::new("tag-link-remote");
+        remote.folder.kit("work", "studio", "0.9.0");
+        remote.push("an older commit");
+        release(&remote, "1.0.0");
+        remote.folder.manifest("work", "studio", "2.0.0");
+        remote.push("the head of the branch");
+
+        let entry = from_tree(&store, &remote, &["v1.0.0"]);
+        assert_eq!(git_ref(&entry), Some("refs/tags/v1.0.0"));
+        assert_eq!(entry.installed_version, "1.0.0");
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+        assert!(entry.hooks_consent, "accepted like any git kit");
+        assert_eq!(
+            Path::new(&entry.dir),
+            dunce::canonicalize(store.root().join("studio")).unwrap()
+        );
+
+        let clone = |args: &[&str]| in_clone(&store, "studio", args);
+        assert_eq!(clone(&["rev-parse", "--is-shallow-repository"]), "true");
+        assert_eq!(clone(&["rev-list", "--count", "HEAD"]), "1");
+        assert_eq!(clone(&["tag"]), "", "no tag comes along");
+    }
+
+    #[test]
+    fn an_annotated_tag_pins_and_updates_like_a_light_one() {
+        let (_home, store) = store("tag-annotated");
+        let remote = Remote::new("tag-annotated-remote");
+        let annotate = |name: &str| {
+            git(&remote.work(), &["tag", "-a", name, "-m", name]);
+            git(
+                &remote.work(),
+                &["push", "-q", "origin", &format!("refs/tags/{name}")],
+            );
+        };
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        annotate("v1");
+        let entry = from_tree(&store, &remote, &["v1"]);
+        assert_eq!(git_ref(&entry), Some("refs/tags/v1"));
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.push("second");
+        annotate("v2");
+        assert_eq!(check(&store, Some("v2")), ("1.1.0".to_string(), true));
+        let updated = store.update("studio", Some("v2")).unwrap();
+        assert_eq!(git_ref(&updated), Some("refs/tags/v2"));
+        assert_eq!(on_disk(&store, "studio"), "1.1.0");
+    }
+
+    #[test]
+    fn a_tag_link_can_name_a_folder_it_keeps_across_an_update() {
+        let (_home, store) = store("tag-folder");
+        let remote = Remote::new("tag-folder-remote");
+        remote.folder.kit("work/kits/studio", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1");
+        let entry = from_tree(&store, &remote, &["v1", "kits", "studio"]);
+        assert_eq!(git_ref(&entry), Some("refs/tags/v1"));
+        assert!(entry.dir.ends_with("studio"));
+
+        remote
+            .folder
+            .manifest("work/kits/studio", "studio", "1.1.0");
+        remote.push("second");
+        tag(&remote, "v2");
+        let updated = store.update("studio", Some("v2")).unwrap();
+        assert_eq!(updated.dir, entry.dir);
+        assert_eq!(on_disk(&store, "studio"), "1.1.0");
+    }
+
+    #[test]
+    fn a_new_version_of_a_pinned_kit_appears_only_when_the_catalog_names_its_tag() {
+        let (_home, store) = store("tag-follow");
+        let remote = Remote::new("tag-follow-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1.0.0");
+        from_tree(&store, &remote, &["v1.0.0"]);
+        let same = ("1.0.0".to_string(), false);
+
+        // The branch moves.
+        remote.folder.manifest("work", "studio", "1.5.0");
+        remote.push("the branch moves on");
+        assert_eq!(check(&store, None), same);
+        assert_eq!(check(&store, Some("v1.0.0")), same);
+
+        // A new tag exists, which the catalog does not name yet.
+        release(&remote, "1.6.0");
+        assert_eq!(check(&store, None), same);
+        assert_eq!(check(&store, Some("v1.0.0")), same);
+        let kept = store.update("studio", Some("v1.0.0")).unwrap();
+        assert_eq!(kept.installed_version, "1.0.0");
+        assert_eq!(git_ref(&kept), Some("refs/tags/v1.0.0"));
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+
+        // The catalog names it, with the branch ahead of it.
+        remote.folder.manifest("work", "studio", "1.7.0");
+        remote.push("the branch again");
+        assert_eq!(check(&store, Some("v1.6.0")), ("1.6.0".to_string(), true));
+        fs::write(store.root().join("studio/installed.txt"), "local").unwrap();
+        let updated = store.update("studio", Some("v1.6.0")).unwrap();
+        assert_eq!(updated.installed_version, "1.6.0");
+        assert_eq!(git_ref(&updated), Some("refs/tags/v1.6.0"));
+        assert_eq!(on_disk(&store, "studio"), "1.6.0");
+        assert!(
+            store.root().join("studio/installed.txt").is_file(),
+            "untracked files stay"
+        );
+        assert_eq!(store.update_info("studio"), None, "the check is stale now");
+        assert_eq!(
+            in_clone(&store, "studio", &["rev-parse", "--is-shallow-repository"]),
+            "true"
+        );
+
+        // On the disk's index too, and the kit now stays on that one.
+        assert_eq!(
+            git_ref(&store.entry("studio").unwrap()),
+            Some("refs/tags/v1.6.0")
+        );
+        assert_eq!(check(&store, Some("v1.6.0")), ("1.6.0".to_string(), false));
+        assert_eq!(check(&store, None), ("1.6.0".to_string(), false));
+    }
+
+    #[test]
+    fn a_tag_moved_by_its_owner_reaches_nobody_until_the_catalog_names_another() {
+        let (_home, store) = store("tag-moved");
+        let remote = Remote::new("tag-moved-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1");
+        from_tree(&store, &remote, &["v1"]);
+
+        remote.folder.manifest("work", "studio", "9.0.0");
+        remote.push("not reviewed");
+        git(&remote.work(), &["tag", "-f", "v1"]);
+        git(
+            &remote.work(),
+            &["push", "-q", "-f", "origin", "refs/tags/v1"],
+        );
+
+        assert_eq!(check(&store, Some("v1")), ("1.0.0".to_string(), false));
+        let kept = store.update("studio", Some("v1")).unwrap();
+        assert_eq!(kept.installed_version, "1.0.0");
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+    }
+
+    #[test]
+    fn a_pinned_kit_is_not_taken_back_to_an_older_version() {
+        let (_home, store) = store("tag-back");
+        let remote = Remote::new("tag-back-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1.0.0");
+        release(&remote, "1.1.0");
+        from_tree(&store, &remote, &["v1.1.0"]);
+
+        assert_eq!(check(&store, Some("v1.0.0")), ("1.0.0".to_string(), false));
+        assert!(store
+            .update("studio", Some("v1.0.0"))
+            .unwrap_err()
+            .contains("not later"));
+        let kept = store.entry("studio").unwrap();
+        assert_eq!(kept.installed_version, "1.1.0");
+        assert_eq!(git_ref(&kept), Some("refs/tags/v1.1.0"));
+        assert_eq!(on_disk(&store, "studio"), "1.1.0");
+    }
+
+    #[test]
+    fn a_tag_the_catalog_names_that_cannot_be_used_changes_nothing() {
+        let (_home, store) = store("tag-bad");
+        let remote = Remote::new("tag-bad-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1");
+        from_tree(&store, &remote, &["v1"]);
+
+        assert!(store.check_update("studio", 2, Some("v404")).is_err());
+        assert!(store.update("studio", Some("v404")).is_err());
+
+        remote.folder.manifest("work", "other", "9.0.0");
+        remote.push("another kit");
+        tag(&remote, "v9");
+        assert!(store
+            .update("studio", Some("v9"))
+            .unwrap_err()
+            .contains("\"other\""));
+
+        let kept = store.entry("studio").unwrap();
+        assert_eq!(kept.installed_version, "1.0.0");
+        assert_eq!(git_ref(&kept), Some("refs/tags/v1"));
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+    }
+
+    #[test]
+    fn an_update_to_a_new_tag_goes_through_consent_like_any_other() {
+        let (_home, store) = store("tag-consent");
+        let remote = Remote::new("tag-consent-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        with_hooks(&remote, "one.sh");
+        remote.push("first");
+        tag(&remote, "v1.0.0");
+        from_tree(&store, &remote, &["v1.0.0"]);
+        forget_consent(&store, "studio");
+        let permission = || {
+            store
+                .loaded(&store.entry("studio").unwrap())
+                .unwrap()
+                .hooks_permission()
+                .unwrap()
+        };
+        let before = permission();
+
+        release(&remote, "1.1.0");
+        let same = store.update("studio", Some("v1.1.0")).unwrap();
+        assert!(!same.hooks_consent);
+        assert_eq!(permission(), before);
+
+        with_hooks(&remote, "two.sh");
+        release(&remote, "1.2.0");
+        let changed = store.update("studio", Some("v1.2.0")).unwrap();
+        assert!(changed.hooks_consent);
+        assert_ne!(
+            permission(),
+            before,
+            "what the workspace has to accept again"
+        );
+    }
+
+    #[test]
+    fn a_kit_on_a_branch_follows_it_whatever_the_catalog_names() {
+        for (tag_name, tree, wanted) in [
+            ("plain", vec![], None),
+            ("branch", vec!["main"], Some("main")),
+        ] {
+            let (_home, store) = store(tag_name);
+            let remote = Remote::new(tag_name);
+            remote.folder.kit("work", "studio", "1.0.0");
+            remote.push("first");
+            tag(&remote, "v5");
+            let entry = from_tree(&store, &remote, &tree);
+            assert_eq!(git_ref(&entry), wanted);
+
+            remote.folder.manifest("work", "studio", "1.1.0");
+            remote.push("the branch moves on");
+            assert_eq!(check(&store, Some("v5")), ("1.1.0".to_string(), true));
+            let updated = store.update("studio", Some("v5")).unwrap();
+            assert_eq!(updated.installed_version, "1.1.0");
+            assert_eq!(git_ref(&updated), wanted);
+        }
     }
 
     #[test]
@@ -949,6 +1312,6 @@ mod tests {
         }] });
         fs::write(store.index_path(), escaping.to_string()).unwrap();
         assert!(store.entries().unwrap_err().contains("invalid kit id"));
-        assert!(store.update("..").is_err() && store.remove("..").is_err());
+        assert!(store.update("..", None).is_err() && store.remove("..").is_err());
     }
 }

@@ -4,10 +4,10 @@ import type { KitInfo } from "../../lib/kits";
 import "./KitsGallery.css";
 
 /**
- * Settings › Kits › Library: the public kits of the Hangar repository, from a
- * static file Rust reads. Drawn from props alone, like `KitsView`. Installing
+ * Settings › Kits › Library: the public kits of the `hangar-ai` organization, from
+ * a static file Rust reads. Drawn from props alone, like `KitsView`. Installing
  * only brings the kit onto the machine; enabling it stays in the activation,
- * where its permissions are shown — and the page says so.
+ * where its permissions are shown, verified kit or not — and the page says so.
  */
 
 export interface KitsGalleryProps {
@@ -110,6 +110,9 @@ export function KitsGalleryView(props: KitsGalleryProps) {
                       <span className="kit-row__ver">{t("kitsManage.version", { version: entry.version })}</span>
                     </span>
                     <span className="set-row__hint">{entry.description}</span>
+                    <span className="kit-row__source" title={`${entry.repo} · ${entry.tag}`}>
+                      {entry.repo} · {entry.tag}
+                    </span>
                   </div>
                   <div className="kit-gallery__action">
                     {status.kind === "new" && (
@@ -136,6 +139,16 @@ export function KitsGalleryView(props: KitsGalleryProps) {
                     )}
                   </div>
                 </div>
+                <p className="kit-row__note kit-gallery__line">
+                  {entry.verified ? (
+                    <span className="kit-act__tag kit-act__tag--ok">{t("kitsManage.galleryVerified")}</span>
+                  ) : (
+                    <>
+                      <span className="kit-act__tag">{t("kitsManage.galleryCommunity")}</span>
+                      <span>{t("kitsManage.galleryCommunityNote")}</span>
+                    </>
+                  )}
+                </p>
                 {entry.tags.length > 0 && (
                   <ul className="kit-gallery__tags" aria-label={t("kitsManage.galleryTags")}>
                     {entry.tags.map((tag) => (
@@ -151,17 +164,21 @@ export function KitsGalleryView(props: KitsGalleryProps) {
                   </p>
                 )}
                 {status.kind === "installed" && (
-                  <p className="kit-row__note" role="status">
+                  <p className="kit-row__note kit-gallery__line" role="status">
                     <span className="kit-act__tag kit-act__tag--ok">
                       {t("kitsManage.galleryInstalled", { version: status.version })}
                     </span>
+                    {status.pinned && (
+                      <span className="kit-act__tag">{t("kitsManage.galleryPinned", { tag: status.pinned })}</span>
+                    )}
                   </p>
                 )}
                 {status.kind === "update" && (
-                  <p className="kit-row__note" role="status">
+                  <p className="kit-row__note kit-gallery__line" role="status">
                     <span className="kit-act__tag kit-act__tag--new">
                       {t("kitsManage.galleryUpdateAvailable", { version: status.version, latest: status.latest })}
                     </span>
+                    <span className="kit-act__tag">{t("kitsManage.galleryPinned", { tag: status.pinned })}</span>
                   </p>
                 )}
               </div>
