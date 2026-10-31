@@ -8,6 +8,31 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.6.0] - 2026-10-31
+
+- **Kits.** A kit brings a domain — a game engine, a framework, a studio's own tools —
+  into the workspaces you link it to, without Hangar knowing anything about that
+  domain. A kit can bring a Claude Code plugin (skills, commands, agents and MCP
+  servers), tabs of its own, and setup commands.
+  - **Settings → Kits** adds a kit from a folder, linked and read live while you make
+    it, or from a GitHub link (a whole repository or one of its folders), checks for
+    updates, updates and removes kits.
+  - Enable a kit on a workspace from its right-click menu in the sidebar (**Kits…**) or
+    when you create it. Before anything is enabled you see what the kit brings, the
+    permissions its tabs ask for in plain words, and its setup commands exactly as
+    they will run.
+  - Setup commands run only when you click **Run**, in a visible pane, once per
+    machine. A command that changes in an update is asked again.
+  - Every Claude Code pane of the workspace, workers included, gets the kit's skills
+    and MCP servers, also when the workspace picks its own MCP servers. Nothing is
+    written into your project, and other workspaces are untouched.
+  - A kit's tabs open in the side panel, from the toolbar's **Kits** menu or the command
+    palette. They run isolated, with no network, and talk to Hangar only through a
+    small API, with the permissions you accepted: see the workspace and its panes,
+    write to its Claude Code agents, read its text files, open a file in the preview,
+    raise a notification.
+  - How to make a kit: [docs/kits.md](docs/kits.md).
+
 ## [1.5.0] - 2026-10-29
 
 - **See the app an agent is building, on the phone.** In Hangar Mobile, a project whose
