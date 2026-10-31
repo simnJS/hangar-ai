@@ -1,0 +1,51 @@
+✔ adds (0.4326ms)
+✖ compares objects (1.0697ms)
+﹣ skipped one (0.063ms) # SKIP
+✖ throws (0.0587ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 116.3816
+
+✖ failing tests:
+
+test at a.test.js:4:1
+✖ compares objects (1.0697ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   a: 1
+  -   a: 2
+    }
+  
+      at TestContext.<anonymous> (/work/demo\a.test.js:4:39)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { a: 1 },
+    expected: { a: 2 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at a.test.js:6:1
+✖ throws (0.0587ms)
+  Error: kaboom
+  second line
+      at TestContext.<anonymous> (/work/demo\a.test.js:6:30)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7)

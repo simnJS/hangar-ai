@@ -1,0 +1,12 @@
+=== RUN   TestAdd
+--- PASS: TestAdd (0.00s)
+=== RUN   TestAddWrong
+    add_test.go:12: add(1, 2) = 3, want 4
+--- FAIL: TestAddWrong (0.00s)
+=== RUN   TestLater
+    add_test.go:20: later
+--- SKIP: TestLater (0.00s)
+FAIL
+exit status 1
+FAIL	example.com/demo	0.005s
+FAIL

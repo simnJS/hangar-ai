@@ -1,0 +1,10 @@
+--- FAIL: TestAddWrong (0.00s)
+    add_test.go:12: add(1, 2) = 3, want 4
+--- FAIL: TestTable (0.00s)
+    --- FAIL: TestTable/negative (0.00s)
+        add_test.go:27: add(-1, -2) = -3, want -4
+FAIL
+FAIL	example.com/demo	0.004s
+ok  	example.com/demo/util	0.002s
+?   	example.com/demo/cmd	[no test files]
+FAIL

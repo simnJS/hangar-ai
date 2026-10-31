@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "tests",
+  "name": "Tests",
+  "version": "0.1.0",
+  "description": "Shows whether the tests pass without reading a terminal, and hands a failure to an agent in one click. Agents read the last result instead of running everything again.",
+  "author": "Hangar",
+  "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/tests",
+  "icon": "icon.svg",
+  "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Runs a hook after each Bash and PowerShell call that reads the output of a test run and keeps its result in the kit's own data folder; a tab reads it and, when you click, sends a failure to an agent of the workspace.",
+    "tags": ["testing", "hooks", "tab"]
+  },
+  "tabs": [
+    {
+      "id": "tests",
+      "title": "Tests",
+      "entry": "tabs/tests/index.html",
+      "icon": "icon.svg",
+      "permissions": ["data.read", "panes.read", "panes.send"]
+    }
+  ]
+}

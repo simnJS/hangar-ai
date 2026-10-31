@@ -1,0 +1,33 @@
+   Compiling demo v0.1.0 (/work/demo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running unittests src\lib.rs (target\debug\deps\demo-e676c9e0056291bb.exe)
+
+running 4 tests
+test tests::slow ... ignored
+test tests::adds ... ok
+test tests::adds_wrong ... FAILED
+test tests::explodes ... FAILED
+
+failures:
+
+---- tests::adds_wrong stdout ----
+
+thread 'tests::adds_wrong' (1222004) panicked at src\lib.rs:7:31:
+assertion `left == right` failed: one plus two is not four
+  left: 3
+ right: 4
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::explodes stdout ----
+
+thread 'tests::explodes' (1213352) panicked at src\lib.rs:8:64:
+index out of bounds: the len is 0 but the index is 3
+
+
+failures:
+    tests::adds_wrong
+    tests::explodes
+
+test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

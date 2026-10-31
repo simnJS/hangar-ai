@@ -1,0 +1,74 @@
+TAP version 13
+# Subtest: adds
+ok 1 - adds
+  ---
+  duration_ms: 0.4407
+  type: 'test'
+  ...
+# Subtest: compares objects
+not ok 2 - compares objects
+  ---
+  duration_ms: 1.1341
+  type: 'test'
+  location: '/work/demo\\a.test.js:4:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   a: 1
+    -   a: 2
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    a: 2
+  actual:
+    a: 1
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (/work/demo\a.test.js:4:39)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1106:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+    Test.postRun (node:internal/test_runner/test:1235:19)
+    Test.run (node:internal/test_runner/test:1163:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+  ...
+# Subtest: skipped one
+ok 3 - skipped one # SKIP
+  ---
+  duration_ms: 0.0681
+  type: 'test'
+  ...
+# Subtest: throws
+not ok 4 - throws
+  ---
+  duration_ms: 0.0562
+  type: 'test'
+  location: '/work/demo\\a.test.js:6:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    kaboom
+    second line
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TestContext.<anonymous> (/work/demo\a.test.js:6:30)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1106:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+    Test.postRun (node:internal/test_runner/test:1235:19)
+    Test.run (node:internal/test_runner/test:1163:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:788:7)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 1
+# fail 2
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 105.0888

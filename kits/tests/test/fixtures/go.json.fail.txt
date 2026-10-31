@@ -1,0 +1,12 @@
+{"Time":"2026-10-31T10:00:00Z","Action":"run","Package":"example.com/demo","Test":"TestAdd"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Test":"TestAdd","Output":"=== RUN   TestAdd\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Test":"TestAdd","Output":"--- PASS: TestAdd (0.00s)\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"pass","Package":"example.com/demo","Test":"TestAdd","Elapsed":0}
+{"Time":"2026-10-31T10:00:00Z","Action":"run","Package":"example.com/demo","Test":"TestAddWrong"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Test":"TestAddWrong","Output":"=== RUN   TestAddWrong\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Test":"TestAddWrong","Output":"    add_test.go:12: add(1, 2) = 3, want 4\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Test":"TestAddWrong","Output":"--- FAIL: TestAddWrong (0.00s)\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"fail","Package":"example.com/demo","Test":"TestAddWrong","Elapsed":0}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Output":"FAIL\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"output","Package":"example.com/demo","Output":"FAIL\texample.com/demo\t0.004s\n"}
+{"Time":"2026-10-31T10:00:00Z","Action":"fail","Package":"example.com/demo","Elapsed":0.004}

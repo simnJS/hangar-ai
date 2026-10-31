@@ -1,0 +1,17 @@
+
+> hangar-ai@1.8.0 test /work/project
+> vitest run
+
+
+ RUN  v5.0.3 /work/project
+
+
+ Test Files  92 passed (92)
+      Tests  2224 passed (2224)
+   Start at  23:21:04
+   Duration  53.25s (tests 83%, transform 10%, import 6%, worker 1%)
+
+
+real	0m55.101s
+user	0m0.135s
+sys	0m0.618s

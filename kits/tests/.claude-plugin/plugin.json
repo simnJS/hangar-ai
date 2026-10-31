@@ -1,0 +1,1 @@
+{ "name": "tests", "version": "0.1.0", "description": "Notices a test run by its command and keeps its result for a tab; agents read that result instead of running everything again." }
