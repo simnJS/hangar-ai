@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const logic = require("../tabs/ci/logic.js");
 const { createController, POLL_MS } = require("../tabs/ci/controller.js");
-const { fixture, fakeClock, fakeHangar, settle } = require("./helpers.js");
+const { fixture, fakeClock, fakeHangar, fakeUi, settle } = require("./helpers.js");
 
 const ID = "41222364482";
 
@@ -13,11 +13,12 @@ function setup({ params = { id: ID }, commands, lang = "en", denyNotify } = {}) 
   const clock = fakeClock();
   const hangar = fakeHangar({ params, commands, denyNotify });
   const states = [];
+  const ui = fakeUi(lang);
   const controller = createController({
-    hangar, logic, lang, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+    hangar, logic, t: ui.i18n(logic.STRINGS), now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
     onChange: (state) => states.push(state.view),
   });
-  return { clock, hangar, controller, states };
+  return { clock, hangar, controller, states, ui };
 }
 
 const answer = (name) => ({ exitCode: 0, stdout: fixture(name) });
@@ -70,9 +71,73 @@ test("a failure: badge failure, notification, and the failed step's log", async 
   assert.match(hangar.callsTo("notify")[0].args.title, /CI : échouée/);
   assert.equal(runCalls(hangar, "ci-log").length, 1);
   assert.deepEqual(runCalls(hangar, "ci-log")[0].args.args, { id: ID });
-  assert.equal(controller.state.log.shown, 40);
-  assert.ok(controller.state.log.lines.some((line) => line.kind === "error"));
+  assert.ok(controller.state.log.lines.length > 100, "the whole of it: the page windows it");
+  assert.match(controller.state.log.lines[controller.state.log.errors[0]].text, /panicked at/);
   assert.equal(clock.pending(), 0);
+});
+
+test("a log cut at the command's limit says so", async () => {
+  const { controller } = setup({
+    commands: { "ci-run": () => answer("run-failure.json"), "ci-log": () => ({ exitCode: 0, stdout: "a line\n", truncated: true }) },
+  });
+  await controller.start();
+  await settle();
+  assert.equal(controller.state.log.truncated, true);
+});
+
+test("Hangar's language changing says the badge again in it, and nothing on a page without a run", async () => {
+  const { hangar, controller, ui } = setup({ commands: { "ci-run": () => answer("run-success.json") } });
+  await controller.start();
+  await settle();
+  ui.lang = "fr";
+  await controller.relabel();
+  assert.deepEqual(hangar.callsTo("tab.setBadge").map((call) => call.args.text), ["passed", "réussie"]);
+
+  const list = setup({ params: {}, commands: { "ci-list": () => answer("run-list.json") } });
+  await list.controller.start();
+  await settle();
+  const before = list.hangar.callsTo("tab.setBadge").length;
+  list.ui.lang = "fr";
+  await list.controller.relabel();
+  assert.equal(list.hangar.callsTo("tab.setBadge").length, before);
+});
+
+test("refreshing the picker keeps the runs it knows on screen, and a failure then says so", async () => {
+  let stderr = null;
+  let release = () => undefined;
+  const { controller } = setup({
+    params: {},
+    commands: {
+      "ci-list": async () => {
+        await new Promise((resolve) => (release = resolve));
+        return stderr ? { exitCode: 4, stderr } : answer("run-list.json");
+      },
+    },
+  });
+  const started = controller.start();
+  await settle();
+  assert.equal(controller.state.view, "loading", "nothing known yet");
+  assert.equal(controller.state.refreshing, false);
+  release();
+  await started;
+
+  const again = controller.retry();
+  await settle();
+  assert.equal(controller.state.view, "picker", "the rows stay");
+  assert.equal(controller.state.refreshing, true);
+  assert.equal(controller.state.runs.length, 15);
+  release();
+  await again;
+  assert.equal(controller.state.refreshing, false);
+
+  stderr = fixture("not-logged-in.stderr");
+  const failing = controller.retry();
+  await settle();
+  release();
+  await failing;
+  assert.equal(controller.state.view, "error");
+  assert.equal(controller.state.refreshing, false);
+  assert.equal(controller.state.error.kind, "no-auth");
 });
 
 test("a run already over when opened: its result, no notification, no polling", async () => {

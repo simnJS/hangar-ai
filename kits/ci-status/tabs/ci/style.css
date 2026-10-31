@@ -1,74 +1,70 @@
-/* Holds from 288 px up: one column, everything wraps. */
-:root {
-  color-scheme: light dark;
-  --muted: color-mix(in srgb, CanvasText 60%, Canvas);
-  --line: color-mix(in srgb, CanvasText 18%, Canvas);
-  --soft: color-mix(in srgb, CanvasText 6%, Canvas);
-  --ok: #1a7f37;
-  --bad: #cf222e;
-  --run: #9a6700;
-  --idle: #6e7781;
+/* Only what this tab has that /_hangar/kit.css does not (docs/kit-ui.md): no colour
+   and no measure of its own, so it stays in Hangar's theme and interface size. */
+
+/* The run's title and its state on one line: the title gives way first. */
+.ci-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kit-space-8);
+  min-width: 0;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ok: #3fb950;
-    --bad: #ff7b72;
-    --run: #d29922;
-    --idle: #8b949e;
-  }
+.ci-headline .kit-state {
+  flex: none;
+  font-size: var(--kit-fs-control);
 }
-* { box-sizing: border-box; }
-body { margin: 0; padding: 8px 10px; font: 13px/1.45 system-ui, sans-serif; background: Canvas; color: CanvasText; }
-pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
-table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; }
-h1 { font-size: 15px; margin: 0; overflow-wrap: anywhere; min-width: 0; }
-h2 { font-size: 11px; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-p { margin: 4px 0; overflow-wrap: anywhere; }
-ul { list-style: none; margin: 0; padding: 0; }
-.muted { color: var(--muted); }
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; justify-content: space-between; }
-button { font: inherit; color: inherit; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
-button:hover { background: color-mix(in srgb, CanvasText 12%, Canvas); }
-button:focus-visible { outline: 2px solid var(--run); outline-offset: 1px; }
 
-.pill { display: inline-block; font-weight: 600; }
-.glyph { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; }
-.glyph.success, .pill.success { color: var(--ok); }
-.glyph.failure, .pill.failure { color: var(--bad); }
-.glyph.running, .pill.running { color: var(--run); }
-.glyph.queued, .pill.queued, .glyph.neutral, .pill.neutral { color: var(--idle); }
-.glyph.running { animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .glyph.running { animation: none; } }
+/* One left edge down the page: a row's text is moved in by the padding of its hover,
+   so the page gives that back, and what has no such padding takes it. */
+.ci-page {
+  padding-inline: var(--kit-space-4);
+}
+.ci-page .kit-banner,
+.ci-page .kit-logbox {
+  margin-inline: var(--kit-space-8);
+}
 
-.summary { margin-top: 6px; }
-.summary .title { color: CanvasText; margin-top: 6px; }
-.facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0; }
-.facts dt { color: var(--muted); }
-.facts dd { margin: 0; overflow-wrap: anywhere; }
-.url { color: var(--muted); font-size: 12px; user-select: all; }
-.warning { color: var(--run); }
+/* What gh said, in an empty state: read as a block, not centred like the words around it. */
+.ci-said {
+  justify-self: stretch;
+  text-align: left;
+}
 
-.jobs li { padding: 6px 0; border-top: 1px solid var(--line); }
-.jobs li:first-child { border-top: 0; }
-.job-name { font-weight: 600; overflow-wrap: anywhere; }
-.job-line { color: CanvasText; }
-.job-line .glyph { font-weight: 700; }
-progress { width: 100px; max-width: 45%; height: 8px; vertical-align: middle; accent-color: var(--run); }
-.job.success progress { accent-color: var(--ok); }
-.job.failure progress { accent-color: var(--bad); }
-.step { color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+/* A run in the picker: where it ran, and how long ago at the end of the same line. */
+.ci-run-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--kit-space-8);
+}
+.ci-age {
+  flex: none;
+}
 
-.runs li { margin-bottom: 6px; }
-.run { display: grid; gap: 2px; width: 100%; text-align: left; padding: 6px 8px; color: CanvasText; }
-.run-top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.run-name { font-weight: 600; overflow-wrap: anywhere; }
-.run-title, .run-branch, .when { color: var(--muted); overflow-wrap: anywhere; }
+/* The library's chevron, pointing back. */
+.ci-back .kit-icon {
+  transform: rotate(90deg);
+}
 
-.log-text { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font: 12px/1.4 ui-monospace, Consolas, monospace; max-height: 60vh; overflow: auto; }
-.line.head { color: var(--muted); font-weight: 700; }
-.line.error { color: var(--bad); }
+/* A line that can be copied, in an empty state. */
+.ci-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--kit-space-4);
+  max-width: 100%;
+  min-width: 0;
+}
 
-.problem { border: 1px solid var(--bad); border-radius: 6px; padding: 8px 10px; }
-.problem h2 { margin: 0 0 4px; color: var(--bad); font-size: 13px; text-transform: none; letter-spacing: 0; }
-.problem button { margin-top: 6px; }
+/* The link at the foot: the text gives way, the button stays. */
+.ci-foot .kit-truncate {
+  flex: 1 1 0;
+}
+
+/* The log is what a failure is read for. */
+.ci-log {
+  --kit-log-height: 56vh;
+}
+
+/* Lined up with the rows' text, which their padding moves in. */
+.ci-none {
+  margin: 0;
+  padding: 0 var(--kit-space-8);
+}

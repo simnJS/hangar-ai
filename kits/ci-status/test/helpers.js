@@ -75,6 +75,36 @@ function fakeHangar({ params = {}, commands = {}, denyNotify = false } = {}) {
   };
 }
 
+/**
+ * A stand-in for window.hangar.ui, so the tests run where the kit does, with Hangar
+ * nowhere around: the same words as the real one (kit-ui.js), a clear trace of the
+ * rest, and `log` and `copyButton` remembering what they were given. The real
+ * library has a real browser to run in, and the tab's page is looked at in one.
+ */
+function fakeUi(lang = "en") {
+  const ui = {
+    lang,
+    locale: () => ui.lang,
+    // As the real one: the language is read at each call, so it can change under a page.
+    i18n: (dictionaries) => (key, vars) => {
+      const table = dictionaries[ui.lang] || dictionaries.en;
+      const template = table[key] !== undefined ? table[key] : dictionaries.en[key] !== undefined ? dictionaries.en[key] : key;
+      return template.replace(/\{(\w+)\}/g, (whole, name) => (vars && vars[name] !== undefined ? String(vars[name]) : whole));
+    },
+    format: {
+      duration: (ms) => `<${ms} ms>`,
+      since: (at, now) => `<${Math.round((now - at) / 60000)} min ago>`,
+    },
+    copyButton(button, source) {
+      button.copies = source;
+    },
+    log(root, options) {
+      root.logged = options;
+    },
+  };
+  return ui;
+}
+
 /** Just enough DOM for view.js: elements, text, children, properties. */
 class FakeNode {
   constructor(tag) {
@@ -98,6 +128,15 @@ class FakeNode {
   get text() {
     return this.children.map((child) => (typeof child === "string" ? child : child.text)).join("");
   }
+  /** Its text as a person sees it, without what is hidden. */
+  get shown() {
+    if (this.hidden) return "";
+    return this.children.map((child) => (typeof child === "string" ? child : child.shown)).join(" ");
+  }
+  /** The nodes with this class, among those under it. */
+  all(name) {
+    return this.find((node) => node.className.split(/\s+/).includes(name));
+  }
   find(predicate, found = []) {
     if (predicate(this)) found.push(this);
     for (const child of this.children) if (typeof child !== "string") child.find(predicate, found);
@@ -106,4 +145,4 @@ class FakeNode {
 }
 const fakeDocument = { createElement: (tag) => new FakeNode(tag) };
 
-module.exports = { KIT, fixture, fakeClock, fakeHangar, fakeDocument, FakeNode, settle };
+module.exports = { KIT, fixture, fakeClock, fakeHangar, fakeUi, fakeDocument, FakeNode, settle };

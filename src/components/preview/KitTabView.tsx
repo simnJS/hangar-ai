@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { StageMessage, Tool } from "./parts";
-import { useT, type Translator } from "../../i18n";
+import { useLocale, useT, type Translator } from "../../i18n";
 import { getPaneActivity, useAgentsIn } from "../../lib/agentState";
 import { modelRoots } from "../../lib/control";
 import { gitWorktreeList } from "../../lib/git";
@@ -16,7 +16,15 @@ import {
   type KitHostDeps,
   type KitLoopbackAnswer,
 } from "../../lib/kitApi";
-import { askRootGrant, frameTookKeyboard, kitTabState, useInstalledKits } from "../../lib/kitTabs";
+import {
+  askRootGrant,
+  frameTookKeyboard,
+  kitTabState,
+  kitThemeEvent,
+  kitThemeSender,
+  kitUiScale,
+  useInstalledKits,
+} from "../../lib/kitTabs";
 import { MAX_MODEL_BYTES, modelFormatOf } from "../../lib/modelFiles";
 import { grantModelRoots } from "../../lib/modelHost";
 import {
@@ -34,6 +42,7 @@ import { checkPreviewFile, previewInspect } from "../../lib/preview";
 import { bridgeEnqueue } from "../../lib/ipc";
 import { isMainWindow } from "../../lib/windows";
 import { useStore } from "../../store";
+import { getTheme } from "../../themes";
 import {
   kitCommandName,
   kitLoopbackPort,
@@ -218,7 +227,8 @@ function KitFrame({
   commandsAccepted: string | null;
 }) {
   const t = useT();
-  const { snapshot } = useStore();
+  const locale = useLocale();
+  const { state, snapshot } = useStore();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const hostRef = useRef<KitHost | null>(null);
   const loads = useRef(0);
@@ -290,6 +300,17 @@ function KitFrame({
     };
   }, []);
 
+  // The theme of the tab's own workspace, which may not be the one in front. Its
+  // page is the workspace's for as long as it lives, and hears each change.
+  const themeId = workspace.themeId ?? state.settings.themeId;
+  const { uiScale, fontFamily } = state.settings;
+  const themeEvent = useMemo(
+    () => kitThemeEvent(getTheme(themeId), { uiScale: kitUiScale(uiScale), mono: fontFamily, locale }),
+    [themeId, uiScale, fontFamily, locale],
+  );
+  const [themeSender] = useState(() => kitThemeSender(() => frameRef.current?.contentWindow ?? null));
+  useEffect(() => themeSender.set(themeEvent), [themeSender, themeEvent]);
+
   // `panes.changed`: the panes, their names, roles or states, changed.
   useAgentsIn([workspace.id]);
   const panes = JSON.stringify(kitPanes(workspace, getPaneActivity));
@@ -306,6 +327,8 @@ function KitFrame({
     if (loads.current > 1) {
       hostRef.current?.close();
       setLeft(true);
+    } else {
+      themeSender.load();
     }
   };
 
