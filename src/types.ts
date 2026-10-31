@@ -415,6 +415,13 @@ export interface Settings {
    * by Hangar on its own — no switching when a limit is reached.
    */
   claudeAccount?: string | null;
+  /**
+   * The kits enabled on every workspace at once (Settings › Kits), each with
+   * the permissions the person accepted once for all. A workspace's own entry
+   * for the same kit wins. Read through `everywhereKits`, which takes anything
+   * malformed as no kit; absent when none.
+   */
+  kitsEverywhere?: WorkspaceKit[];
 }
 
 export interface AppState {

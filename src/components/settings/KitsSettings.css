@@ -96,3 +96,22 @@
   width: 20px;
   height: 20px;
 }
+
+.kit-row__everywhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.kit-row__everywhere-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.kit-row__everywhere-label {
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--fg);
+}

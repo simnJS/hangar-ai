@@ -72,6 +72,12 @@ function viewProps(locale: "en" | "fr", patch: Partial<ViewProps> = {}): ViewPro
     onRemove: noop,
     workspaces: [{ id: "w1", name: "Studio", kits: 2 }],
     onManageWorkspace: noop,
+    everywhere: [],
+    hasActiveWorkspace: true,
+    restartFor: null,
+    onDismissRestart: noop,
+    onToggleEverywhere: noop,
+    onReviewEverywhere: noop,
     ...patch,
   };
 }
@@ -130,10 +136,54 @@ describe("Settings › Kits", () => {
     expect(out).toContain("Manage kits");
   });
 
+  it("offers a switch on all workspaces on each kit, off by default", () => {
+    const out = html(viewProps("en", { kits: [gitKit] }));
+    expect(out).toContain("On all workspaces");
+    expect(out).toContain('aria-label="Enable Roblox on all workspaces"');
+    expect(out).toContain('role="switch"');
+    expect(out).not.toMatch(/role="switch"[^>]*checked/);
+  });
+
+  it("shows a kit enabled everywhere as on", () => {
+    const out = html(
+      viewProps("en", { kits: [gitKit], everywhere: [{ id: "roblox", granted: ["panes.send", "notify"] }] }),
+    );
+    expect(out).toMatch(/checked/);
+    expect(out).toContain("Enabled");
+    expect(out).not.toContain(">Review<");
+  });
+
+  it("marks an everywhere kit to review when an update added permissions or changed its hooks", () => {
+    const added = html(viewProps("en", { kits: [gitKit], everywhere: [{ id: "roblox", granted: ["notify"] }] }));
+    expect(added).toContain("New permissions to accept");
+    expect(added).toContain(">Review<");
+    expect(added).toContain("kept out of every pane");
+    const hooked: KitInfo = { ...gitKit, hooksPermission: "hooks:0123456789abcdef", hooksConsent: true };
+    const held = html(
+      viewProps("en", { kits: [hooked], everywhere: [{ id: "roblox", granted: ["panes.send", "notify"] }] }),
+    );
+    expect(held).toContain("Hooks to review");
+  });
+
+  it("says to open a workspace first only when none is active", () => {
+    expect(html(viewProps("en", { kits: [gitKit], hasActiveWorkspace: false }))).toContain(
+      "Open a workspace first",
+    );
+    expect(html(viewProps("en", { kits: [gitKit] }))).not.toContain("Open a workspace first");
+  });
+
+  it("says running agents need a restart after a change", () => {
+    const out = html(viewProps("en", { restartFor: "Roblox" }));
+    expect(out).toContain("Running agents do not have the change yet");
+    expect(out).toContain("Roblox");
+  });
+
   it("speaks French, with accents", () => {
     const out = html(viewProps("fr", { kits: [folderKit], removing: "hello-kit" }));
     expect(out).toContain("Le dossier lié n&#x27;est pas touché");
     expect(out).toContain("Ajouter depuis un dossier");
+    expect(out).toContain("Sur tous les workspaces");
+    expect(html(viewProps("fr", { restartFor: "Roblox" }))).toContain("Les agents en cours n&#x27;ont pas encore");
   });
 });
 

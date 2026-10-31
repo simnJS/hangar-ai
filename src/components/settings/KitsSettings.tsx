@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useT, type Translator } from "../../i18n";
-import { kitName, sourceLine, updateOutcome } from "../../lib/kitActivation";
+import {
+  disableKit,
+  enableKit,
+  hooksToAccept,
+  kitName,
+  kitRequested,
+  kitState,
+  permissionDiff,
+  sourceLine,
+  updateOutcome,
+  type KitState,
+} from "../../lib/kitActivation";
+import type { WorkspaceKit } from "../../types";
 import {
   kitAddFolder,
   kitAddGit,
@@ -12,10 +24,10 @@ import {
   onKitsChanged,
   type KitInfo,
 } from "../../lib/kits";
-import { KitIcon } from "../KitActivation";
+import { KitActivation, KitIcon } from "../KitActivation";
 import { WorkspaceKitsDialog } from "../WorkspaceDialog";
 import { useStore } from "../../store";
-import { workspaceKits } from "../../lib/kits";
+import { everywhereKits, workspaceKits, type KitGrant } from "../../lib/kits";
 import "./KitsSettings.css";
 
 /**
@@ -64,6 +76,17 @@ export interface KitsViewProps {
   /** The workspaces a kit can be enabled on, with how many kits each has. */
   workspaces: { id: string; name: string; kits: number }[];
   onManageWorkspace: (id: string) => void;
+  /** The kits enabled on all workspaces, as stored (`Settings.kitsEverywhere`). */
+  everywhere: WorkspaceKit[];
+  /** Whether a workspace is active, to open a pane for a setup step in. */
+  hasActiveWorkspace: boolean;
+  /** The name of the kit whose change running agents have not got yet. */
+  restartFor: string | null;
+  onDismissRestart: () => void;
+  /** On opens the activation view; off asks nothing more. */
+  onToggleEverywhere: (kit: KitInfo, on: boolean) => void;
+  /** An update asks for something new: the activation view, to accept again. */
+  onReviewEverywhere: (kit: KitInfo) => void;
 }
 
 function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -108,6 +131,17 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
   const available = note?.kind === "available" || (kit.update?.available && !note);
   const latest = note?.kind === "available" ? note.latest : kit.update?.latest;
   const manifest = kit.manifest;
+  const everywhere = props.everywhere.find((item) => item.id === kit.id);
+  const usable = !kit.error && !!manifest;
+  const requested = kitRequested(kit);
+  const everywhereState: KitState = !usable
+    ? everywhere
+      ? "broken"
+      : "off"
+    : kitState(everywhere, requested);
+  const heldForHooks =
+    everywhereState === "review" && hooksToAccept(permissionDiff(requested ?? [], everywhere?.granted ?? []));
+  const name = kitName(kit);
 
   return (
     <div className="set-row set-row--block kit-row">
@@ -156,6 +190,51 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
           {t("kitsManage.updateAvailable", { current: kit.installedVersion, latest })}
         </p>
       )}
+
+      <div className="kit-row__everywhere">
+        <label className="kit-row__everywhere-main">
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={!!everywhere}
+              disabled={!usable && !everywhere}
+              aria-label={t("kitsManage.everywhereToggle", { name })}
+              aria-describedby={`kit-every-${kit.id}`}
+              onChange={(event) => props.onToggleEverywhere(kit, event.target.checked)}
+            />
+            <span className="switch__track" aria-hidden="true">
+              <span className="switch__knob" />
+            </span>
+          </span>
+          <span className="kit-row__everywhere-label">{t("kitsManage.everywhere")}</span>
+        </label>
+        {everywhere && everywhereState === "review" && (
+          <>
+            <span className="kit-act__tag kit-act__tag--new">
+              {heldForHooks ? t("kitsManage.statusReviewHooks") : t("kitsManage.statusReview")}
+            </span>
+            <button type="button" className="btn btn--tiny" onClick={() => props.onReviewEverywhere(kit)}>
+              {t("kitsManage.review")}
+            </button>
+          </>
+        )}
+        {everywhere && everywhereState === "on" && (
+          <span className="kit-act__tag kit-act__tag--ok">{t("kitsManage.statusOn")}</span>
+        )}
+        {everywhere && everywhereState === "broken" && (
+          <span className="kit-act__tag">{t("kitsManage.statusBroken")}</span>
+        )}
+      </div>
+      <p className="kit-row__note" id={`kit-every-${kit.id}`}>
+        {everywhereState === "review" ? t("kitsManage.everywhereReview") : t("kitsManage.everywhereHint")}
+        {!everywhere && usable && !props.hasActiveWorkspace && (
+          <>
+            <br />
+            {t("kitsManage.everywhereNeedsWs")}
+          </>
+        )}
+      </p>
 
       {removing === kit.id ? (
         <div className="kit-row__confirm" role="group" aria-label={t("kitsManage.removeAsk", { name: kitName(kit) })}>
@@ -208,6 +287,20 @@ export function KitsView(props: KitsViewProps) {
         <p className="notice notice--error" role="alert">
           <span className="notice__text">{t("kitsManage.errorPrefix", { detail: error })}</span>
         </p>
+      )}
+
+      {props.restartFor && (
+        <div className="notice kit-sec__restart" role="status">
+          <span className="notice__text">
+            <strong>{t("kitsManage.everywhereRestartTitle")}</strong>
+            <br />
+            {t("kitsManage.everywhereRestartBody", { name: props.restartFor })}{" "}
+            {t("kitsManage.restartResume")}
+          </span>
+          <button type="button" className="btn btn--tiny btn--ghost" onClick={props.onDismissRestart}>
+            {t("kitsManage.everywhereDismiss")}
+          </button>
+        </div>
       )}
 
       <Block title={t("kitsManage.installed")}>
@@ -317,8 +410,14 @@ export function KitsSettings() {
   const [folderError, setFolderError] = useState<string | null>(null);
   const [gitUrl, setGitUrl] = useState("");
   const [gitError, setGitError] = useState<string | null>(null);
-  const { state } = useStore();
+  const { state, updateSettings } = useStore();
   const [managing, setManaging] = useState<string | null>(null);
+  const [activating, setActivating] = useState<string | null>(null);
+  const [restartFor, setRestartFor] = useState<string | null>(null);
+  const everywhere = everywhereKits(state.settings);
+  // Setup steps open their pane in the active workspace; none, none to run in.
+  const activeWorkspace = state.workspaces.find((ws) => ws.id === state.activeWorkspaceId) ?? null;
+  const activatingKit = kits?.find((kit) => kit.id === activating) ?? null;
   // Read live from the store, so the dialog sees the grants it just saved.
   const managed = state.workspaces.find((ws) => ws.id === managing) ?? null;
   const live = useRef(true);
@@ -430,9 +529,33 @@ export function KitsSettings() {
     }
   }
 
+  function toggleEverywhere(kit: KitInfo, on: boolean) {
+    setFlash(null);
+    if (on) {
+      setActivating(kit.id);
+      return;
+    }
+    // Asks nothing more than the removal wording; workspaces' own entries stay.
+    updateSettings({ kitsEverywhere: disableKit(everywhere, kit.id) });
+    setFlash(t("kitsManage.everywhereOffNote"));
+    setRestartFor(kitName(kit));
+  }
+
+  function acceptEverywhere(kit: KitInfo, granted: KitGrant[]) {
+    updateSettings({ kitsEverywhere: enableKit(everywhere, kit.id, granted) });
+    setActivating(null);
+    setRestartFor(kitName(kit));
+  }
+
   return (
     <>
     <KitsView
+      everywhere={everywhere}
+      hasActiveWorkspace={activeWorkspace !== null}
+      restartFor={restartFor}
+      onDismissRestart={() => setRestartFor(null)}
+      onToggleEverywhere={toggleEverywhere}
+      onReviewEverywhere={(kit) => setActivating(kit.id)}
       workspaces={state.workspaces
         .filter((ws) => !ws.hq)
         .map((ws) => ({ id: ws.id, name: ws.name, kits: workspaceKits(ws).length }))}
@@ -458,6 +581,15 @@ export function KitsSettings() {
       onAskRemove={setRemoving}
       onRemove={(kit) => void remove(kit)}
     />
+    {activatingKit && (
+      <KitActivation
+        kit={activatingKit}
+        entry={everywhere.find((item) => item.id === activatingKit.id)}
+        workspace={activeWorkspace}
+        onAccept={(granted) => acceptEverywhere(activatingKit, granted)}
+        onClose={() => setActivating(null)}
+      />
+    )}
     {managed && <WorkspaceKitsDialog workspace={managed} onClose={() => setManaging(null)} />}
     </>
   );

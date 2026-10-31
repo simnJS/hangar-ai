@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { TranslateKey, TranslateParams } from "../i18n";
-import type { Workspace, WorkspaceKit } from "../types";
+import type { Settings, Workspace, WorkspaceKit } from "../types";
 
 /**
  * Kits (src-tauri/src/kits.rs; the whole contract is docs/kits.md).
@@ -239,7 +239,43 @@ const KIT_ID = /^[a-z0-9-]{2,40}$/;
  * pseudo permission of accepted hooks is kept with the others.
  */
 export function workspaceKits(ws: Pick<Workspace, "kits"> | null | undefined): WorkspaceKit[] {
-  const kits: unknown = ws?.kits;
+  return readKitEntries(ws?.kits);
+}
+
+/** The kits enabled on every workspace (`Settings.kitsEverywhere`), read the same way. */
+export function everywhereKits(
+  settings: Pick<Settings, "kitsEverywhere"> | null | undefined,
+): WorkspaceKit[] {
+  return readKitEntries(settings?.kitsEverywhere);
+}
+
+/**
+ * What decides anything about a workspace's kits: its own entries, then the
+ * everywhere ones it does not list itself. A workspace's own entry wins for
+ * its grants. `workspaceKits` stays the workspace's own list, which is what
+ * the workspace's Kits dialog edits.
+ */
+export function effectiveKits(
+  ws: Pick<Workspace, "kits"> | null | undefined,
+  settings: Pick<Settings, "kitsEverywhere"> | null | undefined,
+): WorkspaceKit[] {
+  const own = workspaceKits(ws);
+  const listed = new Set(own.map((kit) => kit.id));
+  return [...own, ...everywhereKits(settings).filter((kit) => !listed.has(kit.id))];
+}
+
+/**
+ * The workspace with its effective kits as `kits`, for the readers that take a
+ * workspace (`workspaceKitTabs`, `kitTabState`, …).
+ */
+export function withEffectiveKits<W extends Pick<Workspace, "kits">>(
+  ws: W | null | undefined,
+  settings: Pick<Settings, "kitsEverywhere"> | null | undefined,
+): Omit<W, "kits"> & { kits: WorkspaceKit[] } {
+  return { ...(ws ?? ({} as W)), kits: effectiveKits(ws, settings) };
+}
+
+function readKitEntries(kits: unknown): WorkspaceKit[] {
   if (!Array.isArray(kits)) return [];
   const seen = new Set<string>();
   const out: WorkspaceKit[] = [];
@@ -256,8 +292,10 @@ export function workspaceKits(ws: Pick<Workspace, "kits"> | null | undefined): W
 }
 
 /** The kits enabled on a workspace, by id. */
-export const workspaceKitIds = (ws: Pick<Workspace, "kits"> | null | undefined): string[] =>
-  workspaceKits(ws).map((kit) => kit.id);
+export const workspaceKitIds = (
+  ws: Pick<Workspace, "kits"> | null | undefined,
+  settings?: Pick<Settings, "kitsEverywhere"> | null,
+): string[] => effectiveKits(ws, settings).map((kit) => kit.id);
 
 /**
  * What a workspace has to hold for a kit's hooks to reach its panes; null when
@@ -288,9 +326,10 @@ export interface PaneKits {
 export function paneKits(
   ws: Pick<Workspace, "kits"> | null | undefined,
   installed: readonly KitInfo[] | null,
+  settings?: Pick<Settings, "kitsEverywhere"> | null,
 ): PaneKits {
   const out: PaneKits = { ids: [], held: [] };
-  for (const { id, granted } of workspaceKits(ws)) {
+  for (const { id, granted } of effectiveKits(ws, settings)) {
     const kit = installed?.find((entry) => entry.id === id);
     const grant = kit ? kitHooksGrant(kit) : null;
     (grant && !granted.includes(grant) ? out.held : out.ids).push(id);
@@ -303,10 +342,13 @@ export function paneKits(
  * nothing. When they cannot be read at all, the ids go on: Rust reads the same
  * index for `pty_spawn` and keeps every kit out, saying why.
  */
-export async function loadPaneKits(ws: Pick<Workspace, "kits"> | null | undefined): Promise<PaneKits> {
-  if (workspaceKits(ws).length === 0) return { ids: [], held: [] };
+export async function loadPaneKits(
+  ws: Pick<Workspace, "kits"> | null | undefined,
+  settings?: Pick<Settings, "kitsEverywhere"> | null,
+): Promise<PaneKits> {
+  if (effectiveKits(ws, settings).length === 0) return { ids: [], held: [] };
   const installed: unknown = await kitsList().catch(() => null);
-  return paneKits(ws, Array.isArray(installed) ? (installed as KitInfo[]) : null);
+  return paneKits(ws, Array.isArray(installed) ? (installed as KitInfo[]) : null, settings);
 }
 
 /** Why a kit stays out of a pane: `pty_spawn`'s `kitIssues`, and `hooks` from `paneKits`. */

@@ -7,6 +7,8 @@ import {
   KIT_PERMISSIONS,
   isKitHooksGrant,
   isKitPermission,
+  effectiveKits,
+  everywhereKits,
   kitHooksGrant,
   kitIssueNotes,
   kitLoopbackPort,
@@ -14,16 +16,18 @@ import {
   kitPermissionsIn,
   loadPaneKits,
   paneKits,
+  withEffectiveKits,
   workspaceKitIds,
   workspaceKits,
   type KitInfo,
 } from "./kits";
-import type { Workspace } from "../types";
+import type { Settings, Workspace } from "../types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 type Kits = Pick<Workspace, "kits">;
+type Everywhere = Pick<Settings, "kitsEverywhere">;
 
 /** state.json as someone may have edited it by hand. */
 const raw = (kits: unknown): Kits => ({ kits }) as Kits;
@@ -267,6 +271,103 @@ describe("the kits a pane starts with", () => {
       expect(await loadPaneKits({ kits: [{ id: "studio", granted: [] }] })).toEqual({ ids: ["studio"], held: [] });
       list.mockResolvedValue(undefined);
       expect(await loadPaneKits({ kits: [{ id: "studio", granted: [] }] })).toEqual({ ids: ["studio"], held: [] });
+    });
+  });
+});
+
+describe("the kits enabled on all workspaces", () => {
+  const everywhere: Everywhere = {
+    kitsEverywhere: [
+      { id: "ci", granted: ["notify"] },
+      { id: "studio", granted: ["panes.read"] },
+    ],
+  };
+  const rawSettings = (kitsEverywhere: unknown): Everywhere => ({ kitsEverywhere }) as Everywhere;
+
+  it("are added to a workspace's own, which come first", () => {
+    const ws: Kits = { kits: [{ id: "roblox", granted: [] }] };
+    expect(effectiveKits(ws, everywhere).map((kit) => kit.id)).toEqual(["roblox", "ci", "studio"]);
+    expect(workspaceKits(ws).map((kit) => kit.id)).toEqual(["roblox"]);
+    expect(effectiveKits({}, everywhere).map((kit) => kit.id)).toEqual(["ci", "studio"]);
+    expect(effectiveKits(null, everywhere).map((kit) => kit.id)).toEqual(["ci", "studio"]);
+  });
+
+  it("lose to a workspace's own entry for the same kit, grants included", () => {
+    const ws: Kits = { kits: [{ id: "ci", granted: [] }] };
+    expect(effectiveKits(ws, everywhere)).toEqual([
+      { id: "ci", granted: [] },
+      { id: "studio", granted: ["panes.read"] },
+    ]);
+  });
+
+  it("read as none when kitsEverywhere is malformed or absent", () => {
+    for (const bad of [undefined, null, "ci", 3, { ci: true }, [null, 4, "ci", { id: "ci" }, { id: "X", granted: [] }, { id: "ci", granted: "notify" }]]) {
+      expect(everywhereKits(rawSettings(bad))).toEqual([]);
+    }
+    expect(everywhereKits(null)).toEqual([]);
+    expect(effectiveKits({ kits: [{ id: "roblox", granted: [] }] }, rawSettings("ci"))).toEqual([
+      { id: "roblox", granted: [] },
+    ]);
+  });
+
+  it("keep the good entries of a half-broken list, once each, without unknown permissions", () => {
+    expect(
+      everywhereKits(
+        rawSettings([
+          { id: "ci", granted: ["notify", "files.write", "notify"] },
+          { id: "ci", granted: ["panes.read"] },
+          null,
+        ]),
+      ),
+    ).toEqual([{ id: "ci", granted: ["notify"] }]);
+  });
+
+  it("are loaded by a pane of any workspace", () => {
+    const kits = [installed({ id: "ci" }), installed({ id: "studio" })];
+    for (const ws of [{}, { kits: [{ id: "roblox", granted: [] }] }] as Kits[]) {
+      const ids = paneKits(ws, kits, everywhere).ids;
+      expect(ids).toContain("ci");
+      expect(ids).toContain("studio");
+    }
+    expect(paneKits({}, kits)).toEqual({ ids: [], held: [] });
+    expect(workspaceKitIds({}, everywhere)).toEqual(["ci", "studio"]);
+    expect(withEffectiveKits({ kits: undefined }, everywhere).kits?.map((kit) => kit.id)).toEqual(["ci", "studio"]);
+  });
+
+  it("hold back a kit whose hooks changed, on every workspace", () => {
+    const settings: Everywhere = { kitsEverywhere: [{ id: "ci", granted: [HOOKS] }] };
+    const same = installed({ id: "ci", hooksPermission: HOOKS, hooksConsent: true });
+    const changed = installed({ id: "ci", hooksPermission: OTHER_HOOKS, hooksConsent: true });
+    const empty = {};
+    const own: Kits = { kits: [{ id: "roblox", granted: [] }] };
+    for (const ws of [empty, own] as Kits[]) {
+      expect(paneKits(ws, [same], settings).held).toEqual([]);
+      expect(paneKits(ws, [same], settings).ids).toContain("ci");
+      expect(paneKits(ws, [changed], settings)).toMatchObject({ held: ["ci"] });
+      expect(paneKits(ws, [changed], settings).ids).not.toContain("ci");
+    }
+  });
+
+  it("a workspace's own accepted hooks still let the kit through", () => {
+    const settings: Everywhere = { kitsEverywhere: [{ id: "ci", granted: [] }] };
+    const kit = installed({ id: "ci", hooksPermission: HOOKS, hooksConsent: true });
+    expect(paneKits({}, [kit], settings)).toEqual({ ids: [], held: ["ci"] });
+    expect(paneKits({ kits: [{ id: "ci", granted: [HOOKS] }] }, [kit], settings)).toEqual({ ids: ["ci"], held: [] });
+  });
+
+  it("are read from the kits on disk for a workspace with none of its own", async () => {
+    const list = vi.mocked(invoke);
+    list.mockReset();
+    expect(await loadPaneKits({}, {})).toEqual({ ids: [], held: [] });
+    expect(list).not.toHaveBeenCalled();
+    list.mockResolvedValue([installed({ id: "ci", hooksPermission: HOOKS, hooksConsent: true })]);
+    expect(await loadPaneKits({}, { kitsEverywhere: [{ id: "ci", granted: [HOOKS] }] })).toEqual({
+      ids: ["ci"],
+      held: [],
+    });
+    expect(await loadPaneKits(null, { kitsEverywhere: [{ id: "ci", granted: [] }] })).toEqual({
+      ids: [],
+      held: ["ci"],
     });
   });
 });

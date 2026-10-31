@@ -154,6 +154,22 @@ export const en = {
   "kitsManage.restartResume": "Each one resumes its conversation.",
   "kitsManage.restartLater": "Later",
   "kitsManage.restartDone": "Restarted.",
+
+  "kitsManage.everywhere": "On all workspaces",
+  "kitsManage.everywhereToggle": "Enable {name} on all workspaces",
+  "kitsManage.everywhereHint":
+    "Accepted once, for every workspace, the ones you create later included. A workspace's own choice for this kit still wins.",
+  "kitsManage.everywhereReview": "New permissions or hooks to accept: kept out of every pane until then.",
+  "kitsManage.everywhereNeedsWs": "Open a workspace first to run this kit's setup steps.",
+  "kitsManage.everywhereOffNote":
+    "Turned off for all workspaces. The workspaces that enabled it themselves keep it.",
+  "kitsManage.everywhereRestartTitle": "Running agents do not have the change yet",
+  "kitsManage.everywhereRestartBody":
+    "A Claude Code that is already running keeps the kits it started with. It follows the change for {name} when it restarts: restart the Claude Code panes of your workspaces.",
+  "kitsManage.everywhereDismiss": "Got it",
+  "kitsManage.everywhereNote": "On all workspaces",
+  "kitsManage.everywhereNoteHint": "Managed in Settings › Kits.",
+  "kitsManage.everywhereToggleLocked": "{name} is enabled on all workspaces: change it in Settings › Kits",
 } as const;
 
 export const fr: Record<keyof typeof en, string> = {
@@ -303,4 +319,23 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.restartResume": "Chacun reprend sa conversation.",
   "kitsManage.restartLater": "Plus tard",
   "kitsManage.restartDone": "Redémarrés.",
+
+  "kitsManage.everywhere": "Sur tous les workspaces",
+  "kitsManage.everywhereToggle": "Activer {name} sur tous les workspaces",
+  "kitsManage.everywhereHint":
+    "Accepté une seule fois, pour tous les workspaces, ceux que vous créerez plus tard compris. Le choix propre à un workspace pour ce kit reste prioritaire.",
+  "kitsManage.everywhereReview":
+    "Nouvelles autorisations ou hooks à accepter : le kit reste hors de tous les panes d'ici là.",
+  "kitsManage.everywhereNeedsWs":
+    "Ouvrez d'abord un workspace pour lancer les commandes d'installation de ce kit.",
+  "kitsManage.everywhereOffNote":
+    "Désactivé pour tous les workspaces. Ceux qui l'ont activé eux-mêmes le gardent.",
+  "kitsManage.everywhereRestartTitle": "Les agents en cours n'ont pas encore le changement",
+  "kitsManage.everywhereRestartBody":
+    "Un Claude Code déjà lancé garde les kits avec lesquels il a démarré. Il suivra le changement pour {name} à son prochain redémarrage : redémarrez les panes Claude Code de vos workspaces.",
+  "kitsManage.everywhereDismiss": "Compris",
+  "kitsManage.everywhereNote": "Sur tous les workspaces",
+  "kitsManage.everywhereNoteHint": "Géré dans Réglages › Kits.",
+  "kitsManage.everywhereToggleLocked":
+    "{name} est activé sur tous les workspaces : modifiez-le dans Réglages › Kits",
 };
