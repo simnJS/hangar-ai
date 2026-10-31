@@ -8,6 +8,10 @@
   "homepage": "https://github.com/simnJS/hangar-ai/tree/main/kits/guard",
   "icon": "icon.svg",
   "hangar": ">=1.9.0",
+  "gallery": {
+    "permissionsSummary": "Runs a hook before each Bash, Read, Edit, Write and Grep call that can refuse it, shows a tab listing the refusals, and keeps them with its one-time passes in the kit's own data folder.",
+    "tags": ["safety", "hooks", "tab"]
+  },
   "tabs": [
     {
       "id": "guard",

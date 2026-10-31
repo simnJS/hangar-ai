@@ -37,6 +37,15 @@ test("the manifest's own fields", () => {
   safePath(manifest.icon, [".svg", ".png"], "icon");
   assert.equal(manifest.commands, undefined, "it runs no declared command");
   assert.equal(manifest.setup, undefined, "and asks for no setup");
+  assert.equal(manifest.hangar, ">=1.9.0");
+});
+
+test("the gallery's card: one sentence, and its tags", () => {
+  const { permissionsSummary, tags } = manifest.gallery;
+  assert.ok(permissionsSummary.trim());
+  assert.match(permissionsSummary, /hook/);
+  assert.match(permissionsSummary, /tab/);
+  assert.ok(Array.isArray(tags) && tags.length > 0 && tags.every((tag) => typeof tag === "string" && tag.trim()));
 });
 
 test("the plugin is found at the root, named like the kit", () => {
@@ -78,6 +87,36 @@ test("the tab's page loads only the kit's own files, and reaches for nothing els
   for (const name of fs.readdirSync(dir)) {
     const text = fs.readFileSync(path.join(dir, name), "utf8");
     assert.doesNotMatch(text, /\bfetch\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|\beval\(|innerHTML|@import|url\(\s*["']?https?:/, `${name} reaches outside what a tab may`);
+  }
+});
+
+test("the tab is built on Hangar UI, with no colour of its own", () => {
+  const dir = path.join(KIT, "tabs", "guard");
+  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+  assert.ok(html.includes('href="/_hangar/kit.css"'));
+  assert.ok(html.indexOf('src="/_hangar/kit.js"') < html.indexOf('src="/_hangar/kit-ui.js"'), "kit-ui.js loads after kit.js");
+  assert.ok(html.indexOf('src="/_hangar/kit-ui.js"') < html.indexOf('src="app.js"'));
+  assert.doesNotMatch(html, /<style/);
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith(".css")), [], "no sheet of its own");
+  for (const name of fs.readdirSync(dir)) {
+    const text = fs.readFileSync(path.join(dir, name), "utf8");
+    assert.doesNotMatch(text, /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|color\s*:/, `${name} writes a colour`);
+  }
+});
+
+test("every class the view draws is one of Hangar UI's, when the library is around", () => {
+  const sheet = path.join(KIT, "..", "..", "src-tauri", "kit-sdk", "kit.css");
+  if (!fs.existsSync(sheet)) return; // a kit installed on its own has no library beside it
+  const css = fs.readFileSync(sheet, "utf8");
+  const viewText = fs.readFileSync(path.join(KIT, "tabs", "guard", "view.js"), "utf8");
+  const classes = new Set(viewText.match(/kit-[a-z]+(?:__[a-z]+)?(?:--[a-z]+)?/g));
+  classes.delete("kit-log-height"); // a token
+  classes.delete("kit-ui"); // the name of its documentation, in a comment
+  assert.ok(classes.size > 15, "it found them");
+  for (const name of classes) assert.ok(css.includes(`.${name}`), `.${name} is not in kit.css`);
+  for (const stem of ["kit-banner--", "kit-icon--"]) assert.ok(viewText.includes(stem) && css.includes(`.${stem}`), stem);
+  for (const variant of ["kit-banner--error", "kit-banner--warning", "kit-icon--lock", "kit-icon--alert", "kit-glyph--failure", "kit-glyph--success"]) {
+    assert.ok(css.includes(`.${variant}`), variant);
   }
 });
 

@@ -43,7 +43,9 @@ panel or the keyboard, its badge showing the count. It lists each refusal: agent
 command, why, when. **« Autoriser une fois »** writes a pass for that exact command and
 that agent, valid for 2 minutes; the hook uses it up on the retry. Tell the agent to
 retry. There is no blanket allow, and a pass only stops the guard from refusing: Claude
-Code's own permission prompts apply as usual.
+Code's own permission prompts apply as usual. The list covers every workspace the kit is on,
+since its data folder is one; each row names its folder. English and French; drawn with
+[Hangar UI](../../docs/kit-ui.md), so it follows Hangar's theme and holds at the panel's narrowest.
 
 **A skill** tells agents, when refused, to explain to you why they needed it rather than
 looking for another way around it.

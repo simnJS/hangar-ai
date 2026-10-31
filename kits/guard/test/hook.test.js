@@ -169,7 +169,9 @@ test("a bad regular expression in the rules falls back, and is reported", () => 
 
 test("force pushes read the real branch, the worktree's too, and origin/HEAD", async (t) => {
   const { project, env } = setup(t);
-  const git = (...args) => execFileSync("git", args, { cwd: project, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(project, "no-config"), GIT_CONFIG_NOSYSTEM: "1" } });
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: path.join(project, "no-config"), GIT_CONFIG_NOSYSTEM: "1" };
+  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]) delete gitEnv[name];
+  const git = (...args) => execFileSync("git", args, { cwd: project, stdio: "pipe", env: gitEnv });
   git("init", "-q", "-b", "main");
   git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "first");
   const denied = async (command, cwd = project) => Boolean((await runHook(bashEvent(command, cwd), { ...env, CLAUDE_PROJECT_DIR: cwd })).stdout);
@@ -241,6 +243,9 @@ test("a refusal asks Hangar for the tab, and does not wait for its answer", asyn
   });
   const { port } = server.address();
 
+  // What a call that asks nothing takes on this machine: the refusal may not add the
+  // two seconds the route is given.
+  const baseline = (await runHook(bashEvent("npm test", project), env)).ms;
   const { code, stdout, ms } = await runHook(bashEvent("git reset --hard", project), {
     ...env,
     HANGAR_API_URL: `http://127.0.0.1:${port}`,
@@ -248,7 +253,7 @@ test("a refusal asks Hangar for the tab, and does not wait for its answer", asyn
   });
   assert.equal(code, 0);
   assert.equal(JSON.parse(stdout).hookSpecificOutput.permissionDecision, "deny");
-  assert.ok(ms < 1900, `the refusal took ${ms} ms: it must not wait for the two seconds the route may take`);
+  assert.ok(ms < baseline + 1500, `the refusal took ${ms} ms against ${baseline} ms: it must not wait for the route`);
 
   const request = await asked;
   assert.equal(request.url, "/api/kit/tab/open?pane=pane-1");

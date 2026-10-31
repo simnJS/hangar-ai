@@ -1,6 +1,7 @@
 "use strict";
-// Draws the controller's state. Only text nodes and elements made by hand: a command
-// an agent wrote is never parsed as markup.
+// Draws the controller's state with Hangar UI's components (docs/kit-ui.md), and no
+// colour of its own. Only text nodes and elements made by hand: a command an agent
+// wrote is never parsed as markup.
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -13,112 +14,192 @@
     return element;
   }
 
-  /** Renders `state` into `container`.
-   *  @param {{ doc, logic, lang, now: () => number, actions: { allow(key), clear(), retry() } }} ctx */
+  /**
+   * Renders `state` into `container`, and answers the function that brings what depends
+   * on the time up to date, touching nothing else.
+   * @param {{ doc, logic, lang, now: () => number, actions: { allow(key), clear(), retry() },
+   *           t?: (key, vars) => string, format?: { since(at, now), date(at, now) } }} ctx
+   *   `t` and `format` are hangar.ui's in the page.
+   */
   function render(container, state, ctx) {
     const { doc, logic, lang, actions } = ctx;
-    const t = (key, vars) => logic.t(lang, key, vars);
-    const now = ctx.now();
+    const t = ctx.t || ((key, vars) => logic.t(lang, key, vars));
+    const since = (at) => (ctx.format ? ctx.format.since(at, ctx.now()) : logic.relativeTime(at, ctx.now(), lang));
+    const timed = []; // [element, () => its text]
 
-    function button(label, handler) {
-      const element = make(doc, "button", "", label);
+    function live(element, text) {
+      timed.push([element, text]);
+      element.textContent = text();
+      return element;
+    }
+
+    function button(label, handler, className = "kit-btn--small") {
+      const element = make(doc, "button", `kit-btn ${className}`, label);
       element.type = "button";
       element.onclick = handler;
       return element;
     }
 
+    function banner(kind, parts, role) {
+      const box = make(doc, "p", `kit-banner${kind ? ` kit-banner--${kind}` : ""}`);
+      if (role) box.setAttribute("role", role);
+      const text = make(doc, "span", "kit-banner__text");
+      text.append(...parts);
+      box.append(text);
+      return box;
+    }
+
     function limits() {
-      const section = make(doc, "section", "limits");
-      section.append(make(doc, "h2", "", t("limitsHeading")), make(doc, "p", "", t("limits")));
-      return section;
+      return banner("", [make(doc, "strong", "", t("limitsHeading")), " ", t("limits")]);
+    }
+
+    function empty(icon, title, text, actionButton) {
+      const box = make(doc, "div", "kit-empty");
+      if (icon) box.append(make(doc, "span", `kit-icon kit-icon--${icon} kit-empty__icon`));
+      box.append(make(doc, "p", "kit-empty__title", title), make(doc, "p", "kit-empty__text", text));
+      if (actionButton) {
+        const holder = make(doc, "div", "kit-empty__actions");
+        holder.append(actionButton);
+        box.append(holder);
+      }
+      return box;
     }
 
     function passLine(row) {
-      const pass = logic.passState(row, state.grants[row.key], now);
-      const box = make(doc, "div", "pass");
+      const box = make(doc, "div", "kit-stack");
+      const pass = logic.passState(row, state.grants[row.key], ctx.now());
       if (pass.state === "used") {
-        box.append(make(doc, "p", "pass-used", t("passUsed", { when: logic.relativeTime(pass.at, now, lang) })));
+        box.append(live(make(doc, "span", "kit-state kit-state--success kit-small"), () => t("passUsed", { when: since(pass.at) })));
         return box;
       }
       if (pass.state === "active") {
-        box.setAttribute("role", "status");
-        box.append(make(doc, "p", "pass-active", t("passActive", { remaining: logic.formatRemaining(pass.remainingMs), agent: row.agent })));
+        const status = make(doc, "div", "");
+        status.setAttribute("role", "status");
+        const remaining = () => {
+          const current = logic.passState(row, state.grants[row.key], ctx.now());
+          return t("passActive", { remaining: logic.formatRemaining(current.remainingMs || 0) });
+        };
+        status.append(
+          live(make(doc, "span", "kit-state kit-state--waiting kit-small"), remaining),
+          make(doc, "div", "kit-small kit-dim", t("passActiveHint", { agent: row.agent })),
+        );
+        box.append(status);
         return box;
       }
-      if (pass.state === "expired") box.append(make(doc, "p", "pass-expired", t("passExpired")));
+      if (pass.state === "expired") box.append(make(doc, "div", "kit-small kit-dim", t("passExpired")));
       const problem = state.problems[row.key];
-      if (problem) {
-        const message = make(doc, "p", "pass-problem", t(`problem.${problem.code}`, { detail: problem.detail }));
-        message.setAttribute("role", "alert");
-        box.append(message);
-      }
+      if (problem) box.append(banner("error", [t(`problem.${problem.code}`, { detail: problem.detail })], "alert"));
       const allow = button(state.pending[row.key] ? t("allowing") : t("allow"), () => actions.allow(row.key));
+      allow.id = `allow-${row.key}`;
       if (state.pending[row.key]) allow.disabled = true;
-      box.append(allow);
+      const holder = make(doc, "div", "kit-actions");
+      holder.append(allow);
+      box.append(holder);
       return box;
     }
 
     function refusal(row) {
-      const item = make(doc, "li", "refusal");
-      const facts = make(doc, "p", "refusal-facts");
-      facts.append(make(doc, "strong", "", row.agent));
-      const when = make(doc, "time", "", logic.relativeTime(row.at, now, lang));
-      when.setAttribute("title", new Date(row.at).toLocaleString(lang));
-      facts.append(" · ", when);
+      const item = make(doc, "li", "kit-row kit-row--wrap");
+      const lead = make(doc, "span", "kit-row__lead");
+      const glyph = make(doc, "span", `kit-glyph kit-glyph--${row.usedAt === null ? "failure" : "success"}`);
+      glyph.setAttribute("role", "img");
+      glyph.setAttribute("aria-label", t(row.usedAt === null ? "refusedLabel" : "letThroughLabel"));
+      lead.append(glyph);
+
+      const main = make(doc, "div", "kit-row__main");
+      const body = make(doc, "div", "kit-stack");
+      const who = make(doc, "div", "");
+      const facts = make(doc, "div", "kit-row__sub");
+      const when = live(make(doc, "span"), () => since(row.at));
+      if (ctx.format) when.setAttribute("title", ctx.format.date(row.at, ctx.now()));
+      facts.append(when);
       const folder = logic.folderName(row.folder);
-      if (folder) facts.append(" · ", make(doc, "span", "", folder));
-      if (row.count > 1) facts.append(" · ", make(doc, "span", "", t("refusedTimes", { count: row.count })));
-      item.append(facts);
-      const pre = make(doc, "pre", "refusal-command");
-      pre.append(make(doc, "code", "", row.command));
-      item.append(pre);
-      if (row.length > row.command.length) item.append(make(doc, "p", "refusal-truncated", t("truncated", { length: row.length })));
-      item.append(make(doc, "p", "refusal-why", logic.whyFor(row, lang)), passLine(row));
+      if (folder) facts.append(` · ${folder}`);
+      if (row.count > 1) facts.append(` · ${t("refusedTimes", { n: row.count })}`);
+      who.append(make(doc, "div", "kit-row__title", row.agent), facts);
+
+      const command = make(doc, "pre", "kit-pre");
+      command.setAttribute("tabindex", "0");
+      command.setAttribute("style", "--kit-log-height: 160px");
+      command.append(make(doc, "code", "", row.command));
+
+      body.append(who, command);
+      if (row.length > row.command.length) body.append(make(doc, "div", "kit-small kit-dim", t("truncated", { n: row.length })));
+      body.append(make(doc, "div", "kit-small", logic.whyFor(row, lang, ctx.t)), passLine(row));
+      main.append(body);
+      item.append(lead, main);
       return item;
     }
 
-    const page = make(doc, "main", `view-${state.view}`);
+    function header() {
+      const head = make(doc, "header", "kit-header");
+      const main = make(doc, "div", "kit-header__main");
+      main.append(make(doc, "h1", "kit-header__title", t("tab")));
+      if (state.view === "list") {
+        const count = logic.refusedCount(state.rows);
+        const line = make(doc, "p", "kit-header__state");
+        line.append(
+          count
+            ? make(doc, "span", "kit-state kit-state--failure", t("stateRefused", { n: count }))
+            : make(doc, "span", "kit-state kit-state--neutral", t("stateClear")),
+        );
+        main.append(line);
+      }
+      head.append(main);
+      if (state.view === "list" && state.rows.length) {
+        const buttons = make(doc, "div", "kit-header__actions");
+        const clear = button(t("clear"), actions.clear, "kit-btn--small kit-btn--ghost");
+        clear.id = "clear";
+        buttons.append(clear);
+        head.append(buttons);
+      }
+      return head;
+    }
+
+    const page = make(doc, "main", "kit-page");
 
     if (state.view === "loading") {
-      page.append(make(doc, "p", "", t("loading")));
-    } else if (state.view === "denied" || state.view === "error") {
-      const box = make(doc, "section", "problem");
-      box.setAttribute("role", "alert");
-      box.append(make(doc, "h2", "", t(`${state.view}.title`)));
-      if (state.view === "denied") box.append(make(doc, "p", "", t("denied.hint")));
-      else if (state.detail) box.append(make(doc, "pre", "", state.detail));
-      box.append(button(t("retry"), actions.retry));
-      page.append(box, limits());
+      const box = make(doc, "div", "kit-empty");
+      box.append(make(doc, "span", "kit-state kit-state--running", t("loading")));
+      page.append(box);
+    } else if (state.view === "denied") {
+      page.append(empty("lock", t("deniedTitle"), t("deniedText"), button(t("retry"), actions.retry)), limits());
+    } else if (state.view === "error") {
+      page.append(empty("alert", t("errorTitle"), t("errorText"), button(t("retry"), actions.retry, "kit-btn--small kit-btn--primary")), limits());
     } else {
-      const head = make(doc, "header", "bar");
-      head.append(make(doc, "h1", "", t("heading")));
-      if (state.rows.length) head.append(button(t("clear"), actions.clear));
-      page.append(head);
-      if (state.stale) page.append(make(doc, "p", "warning", t("staleWarning")));
-      if (state.clearFailed) {
-        const message = make(doc, "p", "warning", t("clearFailed"));
-        message.setAttribute("role", "alert");
-        page.append(message);
-      }
+      if (state.stale) page.append(banner("warning", [t("staleWarning")]));
+      if (state.clearFailed) page.append(banner("error", [t("clearFailed")], "alert"));
       if (state.errors) {
-        const box = make(doc, "section", "guard-errors");
-        box.setAttribute("role", "alert");
-        const detail = make(doc, "pre");
-        detail.append(make(doc, "code", "", state.errors.last));
-        box.append(make(doc, "h2", "", t("errorsHeading")), make(doc, "p", "", t("errorsBody", { count: state.errors.count })), detail);
-        page.append(box);
+        page.append(banner("error", [t("errors", { n: state.errors.count }), " ", make(doc, "span", "kit-code", state.errors.last)], "alert"));
       }
       if (!state.rows.length) {
-        page.append(make(doc, "p", "empty", t("empty")));
+        page.append(empty(null, t("emptyTitle"), t("emptyText")));
       } else {
-        const list = make(doc, "ul", "refusals");
+        const section = make(doc, "section", "kit-section");
+        const head = make(doc, "div", "kit-section__head");
+        head.append(make(doc, "h2", "kit-section__title", t("heading")));
+        const list = make(doc, "ul", "kit-rows kit-rows--group");
         for (const row of state.rows) list.append(refusal(row));
-        page.append(list);
+        section.append(head, list);
+        page.append(section);
       }
       page.append(limits());
     }
 
-    container.replaceChildren(page);
+    // What had the keyboard keeps it: the page is drawn again, the person did not move.
+    const focused = doc.activeElement && doc.activeElement.id;
+    container.replaceChildren(header(), page);
+    if (focused && doc.getElementById) {
+      const again = doc.getElementById(focused);
+      if (again) again.focus();
+    }
+
+    return function tick() {
+      for (const [element, text] of timed) {
+        const value = text();
+        if (element.textContent !== value) element.textContent = value;
+      }
+    };
   }
 
   return { render };

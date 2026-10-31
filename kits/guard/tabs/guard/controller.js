@@ -1,7 +1,8 @@
 "use strict";
 // The tab's behaviour, apart from any DOM: follows the hook's log, keeps the badge,
-// writes passes. It reports every change through `onChange(state)`; the page draws,
-// the tests read. `hangar` is `window.hangar`, or a fake of it.
+// writes passes. It reports through `onChange(state)` when what is listed changes, so
+// the page draws again, and `onTick(state)` when only the time has passed, so a
+// selection or a focus survives a poll. `hangar` is `window.hangar`, or a fake of it.
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -12,11 +13,12 @@
 
   function createController(options) {
     const { hangar, logic } = options;
-    const lang = options.lang || "en";
+    let lang = options.lang || "en";
     const now = options.now || Date.now;
     const setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
     const clearTimer = options.clearTimer || ((handle) => clearTimeout(handle));
     const onChange = options.onChange || (() => undefined);
+    const onTick = options.onTick || (() => undefined);
 
     const state = {
       view: "loading", // loading | list | denied | error
@@ -27,7 +29,6 @@
       pending: {}, // key → true, while its pass is being written
       stale: false,
       clearFailed: false,
-      detail: "",
     };
 
     let events = [];
@@ -36,12 +37,35 @@
     let lastErrors = null;
     let clearedAt = 0;
     let lastBadge;
+    let lastDrawn = null;
     let timer = null;
     let disposed = false;
 
-    const emit = () => {
-      if (!disposed) onChange(state);
-    };
+    /** What decides what the page draws: all of it but the time. */
+    const drawn = () =>
+      JSON.stringify([
+        state.view, state.errors, state.problems, state.pending, state.stale, state.clearFailed,
+        state.rows.map((row) => [row.key, row.count, row.usedAt, logic.passState(row, state.grants[row.key], now()).state]),
+      ]);
+
+    function update() {
+      if (disposed) return;
+      const next = drawn();
+      if (next === lastDrawn) {
+        onTick(state);
+      } else {
+        lastDrawn = next;
+        onChange(state);
+      }
+    }
+
+    async function setTitle() {
+      try {
+        await hangar.call("tab.setTitle", { title: logic.t(lang, "tab") });
+      } catch {
+        /* the manifest's title stays */
+      }
+    }
 
     async function setBadge(badge) {
       const id = badge ? `${badge.state}|${badge.text}` : "none";
@@ -84,7 +108,6 @@
         }
         state.view = "list";
         state.stale = false;
-        state.detail = "";
       } catch (error) {
         if (disposed) return;
         const code = error && error.code;
@@ -96,10 +119,9 @@
           state.stale = true; // what is listed stays, the next poll may do better
         } else {
           state.view = "error";
-          state.detail = String((error && error.message) || "");
         }
       }
-      emit();
+      update();
     }
 
     function schedule() {
@@ -136,18 +158,20 @@
     return {
       state,
       async start() {
-        try {
-          await hangar.call("tab.setTitle", { title: logic.t(lang, "tab") });
-        } catch {
-          /* the manifest's title stays */
-        }
+        await setTitle();
         await readClearedAt();
         await poll();
         if (state.view === "list") {
           await readGrants();
-          emit();
+          update();
         }
         schedule();
+      },
+      /** Hangar's language changed: the strip's title follows. */
+      setLang(next) {
+        if (next === lang) return undefined;
+        lang = next;
+        return setTitle();
       },
       /** Writes the one-time pass for this row. */
       async allow(key) {
@@ -155,7 +179,7 @@
         if (!row || row.usedAt !== null || state.pending[key] || !logic.isKey(key)) return;
         state.pending[key] = true;
         delete state.problems[key];
-        emit();
+        update();
         const pass = logic.passFor(row, now());
         try {
           await hangar.call("data.write", { path: logic.passPath(key), text: JSON.stringify(pass) });
@@ -168,7 +192,7 @@
           };
         }
         delete state.pending[key];
-        emit();
+        update();
       },
       /** Empties the list: what the log holds stays, and is not shown. */
       async clear() {
@@ -181,7 +205,7 @@
         } catch {
           state.clearFailed = true;
         }
-        emit();
+        update();
       },
       retry: poll,
       dispose() {

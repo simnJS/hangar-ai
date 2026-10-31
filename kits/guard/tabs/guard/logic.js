@@ -12,67 +12,81 @@
   const ERRORS = "errors.jsonl";
   const STATE = "state.json";
 
+  // In the shape hangar.ui.i18n reads: a count `n` picks `key_one` or `key_other`.
   const STRINGS = {
     en: {
       tab: "Guardrails",
       heading: "Refused calls",
-      loading: "Loading…",
-      empty: "Nothing refused yet.",
+      loading: "Reading the refusals…",
+      stateRefused_one: "{n} refused",
+      stateRefused_other: "{n} refused",
+      stateClear: "Nothing refused",
+      emptyTitle: "Nothing refused yet",
+      emptyText: "When an agent tries a dangerous command or reads a secret, the refusal shows here, and you can allow it once.",
       clear: "Clear the list",
       clearFailed: "The list could not be cleared. Try again in a moment.",
       allow: "Allow once",
       allowing: "Writing the pass…",
-      passActive: "Allowed once, {remaining} left. Tell {agent} to retry this exact command.",
-      passExpired: "The pass expired unused. Refused again if retried.",
-      passUsed: "Let through once, {when}.",
-      "problem.denied": "This tab may not write passes: accept data.write in the Kits menu.",
+      refusedLabel: "Refused",
+      letThroughLabel: "Let through once",
+      passActive: "Allowed once, {remaining} left",
+      passActiveHint: "Tell {agent} to retry this exact command.",
+      passExpired: "The pass expired unused. A retry is refused again.",
+      passUsed: "Let through once, {when}",
+      "problem.denied": "This tab may not write passes. Accept data.write in Settings › Kits.",
       "problem.rate_limited": "Too many writes in a minute. Try again in a moment.",
       "problem.failed": "The pass could not be written: {detail}",
-      refusedTimes: "refused {count} times",
-      truncated: "Cut for display: {length} characters in all. The pass is for the whole command.",
-      staleWarning: "The last read failed; trying again…",
-      errorsHeading: "The guard failed by itself",
-      errorsBody: "{count} call(s) went through unchecked, or with the kit's own rules, because of this. Latest:",
-      limitsHeading: "What this does not protect against",
-      limits:
-        "It reads the command line, and nothing else. It is no sandbox: a script can do anything once started, and a program the rules do not list can read any file.",
-      "denied.title": "This tab may not read the kit’s data",
-      "denied.hint": "Enable the kit on this workspace and accept its permissions (Kits menu). The hook refuses either way, but nothing can be let through from here until then.",
-      "error.title": "The refusals could not be read",
+      refusedTimes: "refused {n} times",
+      truncated: "Cut for display: {n} characters in all. The pass is for the whole command.",
+      staleWarning: "The last read failed. Trying again…",
+      errors_one: "The guard hit a problem of its own, once: either a call went through unchecked, or a broken .hangar/guard.json was ignored. Latest:",
+      errors_other: "The guard hit a problem of its own, {n} times: either a call went through unchecked, or a broken .hangar/guard.json was ignored. Latest:",
+      limitsHeading: "What this does not protect against.",
+      limits: "It reads the command line, and nothing else. It is no sandbox: a script can do anything once started, and a program the rules do not list can read any file.",
+      deniedTitle: "This tab may not read the kit’s data",
+      deniedText: "Accept data.read and data.write in Settings › Kits. The hook refuses either way, but nothing can be let through from here until then.",
+      errorTitle: "The refusals could not be read",
+      errorText: "The hook goes on refusing. Try again; if it keeps failing, reload the tab.",
       retry: "Try again",
       now: "just now",
-      ago: "{n} ago",
-      "why.recursive-delete/outside": "It deletes {subject}, outside the project.",
+      ago: "{time} ago",
     },
     fr: {
       tab: "Garde-fous",
       heading: "Appels refusés",
-      loading: "Chargement…",
-      empty: "Rien de refusé pour l’instant.",
+      loading: "Lecture des refus…",
+      stateRefused_one: "{n} refus",
+      stateRefused_other: "{n} refus",
+      stateClear: "Rien de refusé",
+      emptyTitle: "Rien de refusé pour l’instant",
+      emptyText: "Quand un agent tente une commande dangereuse ou lit un secret, le refus s’affiche ici, et vous pouvez l’autoriser une fois.",
       clear: "Vider la liste",
       clearFailed: "La liste n’a pas pu être vidée. Réessayez dans un instant.",
       allow: "Autoriser une fois",
       allowing: "Écriture du laissez-passer…",
-      passActive: "Autorisé une fois, reste {remaining}. Dites à {agent} de réessayer cette commande exacte.",
-      passExpired: "Le laissez-passer a expiré sans servir. Nouveau refus en cas de nouvel essai.",
-      passUsed: "Laissé passer une fois, {when}.",
-      "problem.denied": "Cet onglet n’a pas le droit d’écrire de laissez-passer : acceptez data.write dans le menu Kits.",
+      refusedLabel: "Refusé",
+      letThroughLabel: "Laissé passer une fois",
+      passActive: "Autorisé une fois, reste {remaining}",
+      passActiveHint: "Dites à {agent} de réessayer cette commande exacte.",
+      passExpired: "Le laissez-passer a expiré sans servir. Un nouvel essai sera refusé.",
+      passUsed: "Laissé passer une fois, {when}",
+      "problem.denied": "Cet onglet n’a pas le droit d’écrire de laissez-passer. Acceptez data.write dans Réglages › Kits.",
       "problem.rate_limited": "Trop d’écritures en une minute. Réessayez dans un instant.",
       "problem.failed": "Le laissez-passer n’a pas pu être écrit : {detail}",
-      refusedTimes: "refusé {count} fois",
-      truncated: "Coupé à l’affichage : {length} caractères en tout. Le laissez-passer vaut pour la commande entière.",
-      staleWarning: "La dernière lecture a échoué ; nouvel essai…",
-      errorsHeading: "Le garde-fou a échoué de lui-même",
-      errorsBody: "{count} appel(s) sont passés sans contrôle, ou avec les seules règles du kit, à cause de cela. Le dernier :",
-      limitsHeading: "Ce dont il ne protège pas",
-      limits:
-        "Il lit la ligne de commande, et rien d’autre. Ce n’est pas un bac à sable : un script peut tout faire une fois lancé, et un programme que les règles ne citent pas peut lire n’importe quel fichier.",
-      "denied.title": "Cet onglet n’a pas le droit de lire les données du kit",
-      "denied.hint": "Activez le kit sur cet espace de travail et acceptez ses permissions (menu Kits). Le hook refuse quand même, mais rien ne peut être autorisé d’ici tant que ce n’est pas fait.",
-      "error.title": "Les refus n’ont pas pu être lus",
+      refusedTimes: "refusé {n} fois",
+      truncated: "Coupé à l’affichage : {n} caractères en tout. Le laissez-passer vaut pour la commande entière.",
+      staleWarning: "La dernière lecture a échoué. Nouvel essai…",
+      errors_one: "Le garde-fou a eu un problème de son côté, une fois : soit un appel est passé sans contrôle, soit un .hangar/guard.json cassé a été ignoré. Le dernier :",
+      errors_other: "Le garde-fou a eu un problème de son côté, {n} fois : soit un appel est passé sans contrôle, soit un .hangar/guard.json cassé a été ignoré. Le dernier :",
+      limitsHeading: "Ce dont il ne protège pas.",
+      limits: "Il lit la ligne de commande, et rien d’autre. Ce n’est pas un bac à sable : un script peut tout faire une fois lancé, et un programme que les règles ne citent pas peut lire n’importe quel fichier.",
+      deniedTitle: "Cet onglet n’a pas le droit de lire les données du kit",
+      deniedText: "Acceptez data.read et data.write dans Réglages › Kits. Le hook refuse quand même, mais rien ne peut être autorisé d’ici tant que ce n’est pas fait.",
+      errorTitle: "Les refus n’ont pas pu être lus",
+      errorText: "Le hook continue de refuser. Réessayez ; si cela persiste, rechargez l’onglet.",
       retry: "Réessayer",
       now: "à l’instant",
-      ago: "il y a {n}",
+      ago: "il y a {time}",
       "why.recursive-delete/outside": "Il supprime {subject}, hors du projet.",
       "why.recursive-delete/project": "Il supprime tout le projet ({subject}).",
       "why.recursive-delete/protected": "Il supprime {subject}, l’historique git du projet.",
@@ -93,17 +107,28 @@
 
   function t(lang, key, vars) {
     const table = STRINGS[lang] || STRINGS.en;
-    let text = table[key] !== undefined ? table[key] : STRINGS.en[key] !== undefined ? STRINGS.en[key] : key;
-    for (const [name, value] of Object.entries(vars || {})) text = text.split(`{${name}}`).join(String(value));
-    return text;
+    const values = vars || {};
+    const find = (dictionary) => {
+      if (typeof values.n === "number") {
+        const form = dictionary[`${key}_${values.n === 1 ? "one" : "other"}`];
+        if (form !== undefined) return form;
+      }
+      return dictionary[key];
+    };
+    const template = find(table) ?? find(STRINGS.en) ?? key;
+    return template.replace(/\{(\w+)\}/g, (whole, name) => (name in values ? String(values[name]) : whole));
   }
 
-  /** The reason, in the page's language. English comes as the hook told the agent. */
-  function whyFor(row, lang) {
+  /** The reason, in the page's language. English comes as the hook told the agent.
+   *  `translate(key, vars)` is hangar.ui.i18n's in the page. */
+  function whyFor(row, lang, translate) {
     const key = `why.${row.rule}/${row.kind}`;
-    if (lang !== "en" && STRINGS[lang] && STRINGS[lang][key]) return t(lang, key, { subject: row.subject });
-    const text = String(row.why || "");
-    return text ? `${text[0].toUpperCase()}${text.slice(1)}.` : "";
+    if (lang !== "en" && STRINGS[lang] && STRINGS[lang][key]) {
+      return translate ? translate(key, { subject: row.subject }) : t(lang, key, { subject: row.subject });
+    }
+    // Only "it" takes a capital: `git reset --hard` is a command's name.
+    const text = String(row.why || "").replace(/^it /, "It ");
+    return text ? `${text}.` : "";
   }
 
   const isKey = (key) => typeof key === "string" && /^[0-9a-f]{64}$/.test(key);
@@ -206,9 +231,12 @@
     return grant.expiresAt > now ? { state: "active", remainingMs: grant.expiresAt - now } : { state: "expired" };
   }
 
-  /** The tab's badge: what was refused and not let through. */
+  /** What was refused and not let through. */
+  const refusedCount = (rows) => rows.filter((row) => row.usedAt === null).length;
+
+  /** The tab's badge: that count. */
   function badgeFor(rows) {
-    const count = rows.filter((row) => row.usedAt === null).length;
+    const count = refusedCount(rows);
     return count ? { state: "failure", text: String(count) } : null;
   }
 
@@ -217,15 +245,15 @@
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   }
 
+  /** How long ago, for a page without hangar.ui. */
   function relativeTime(at, now, lang) {
     const seconds = Math.floor((now - at) / 1000);
-    if (seconds < 30) return t(lang, "now");
+    if (seconds < 60) return t(lang, "now");
     const minutes = Math.floor(seconds / 60);
-    if (minutes < 1) return t(lang, "ago", { n: `${seconds} s` });
-    if (minutes < 60) return t(lang, "ago", { n: `${minutes} min` });
+    if (minutes < 60) return t(lang, "ago", { time: `${minutes} min` });
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) return t(lang, "ago", { n: `${hours} h` });
-    return t(lang, "ago", { n: lang === "fr" ? `${Math.floor(hours / 24)} j` : `${Math.floor(hours / 24)} d` });
+    if (hours < 24) return t(lang, "ago", { time: `${hours} h` });
+    return t(lang, "ago", { time: `${Math.floor(hours / 24)} ${lang === "fr" ? "j" : "d"}` });
   }
 
   const folderName = (folder) => String(folder || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
@@ -238,7 +266,7 @@
 
   return {
     PASS_TTL_MS, LOG, ERRORS, STATE, STRINGS,
-    pickLang, t, whyFor, isKey, parseLines, buildRows, passPath, passFor, grantFromPass, passState, badgeFor,
+    pickLang, t, whyFor, isKey, parseLines, buildRows, passPath, passFor, grantFromPass, passState, refusedCount, badgeFor,
     formatRemaining, relativeTime, folderName, errorSummary,
   };
 });

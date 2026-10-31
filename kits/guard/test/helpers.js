@@ -106,6 +106,9 @@ class FakeNode {
   set textContent(text) {
     this.children = [String(text)];
   }
+  get textContent() {
+    return this.text;
+  }
   append(...nodes) {
     this.children.push(...nodes);
   }
