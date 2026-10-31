@@ -1,0 +1,80 @@
+/* Only what this tab has that /_hangar/kit.css does not (docs/kit-ui.md): no colour
+   and no measure of its own, so it stays in Hangar's theme and interface size. */
+
+/* One left edge down the page: a row's text is moved in by the padding of its hover,
+   so the page gives that back, and what has no such padding takes it. */
+.svc-page {
+  padding-inline: var(--kit-space-4);
+}
+.svc-page .kit-banner,
+.svc-page .svc-ask,
+.svc-page .svc-logs {
+  margin-inline: var(--kit-space-8);
+}
+.svc-page .svc-note {
+  margin: var(--kit-space-4) var(--kit-space-8) 0;
+}
+.svc-foot {
+  margin: var(--kit-space-12) var(--kit-space-8) 0;
+}
+
+/* A list item holds the row and, when open, the question or the log under it. */
+.svc-item {
+  list-style: none;
+}
+
+/* A row that carries its own buttons under its text. */
+.svc-row {
+  align-items: flex-start;
+}
+.svc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kit-space-4);
+  margin-top: var(--kit-space-4);
+  /* A ghost button keeps its text on the row's left edge. */
+  margin-inline-start: calc(var(--kit-space-10) * -1);
+}
+
+/* The port first, the program after it; the program gives way before the number does. */
+.svc-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kit-space-6);
+  min-width: 0;
+}
+.svc-port {
+  flex: none;
+  font-weight: 600;
+}
+.svc-program {
+  min-width: 0;
+}
+
+/* A worker's name, said once in the weight of a label. */
+.svc-owner {
+  color: var(--kit-text);
+}
+
+/* The question under a row: fields stack and the brief shows what will be sent. */
+.svc-ask {
+  display: grid;
+  gap: var(--kit-space-8);
+  padding: var(--kit-space-8) 0 var(--kit-space-12);
+}
+.svc-ask-title {
+  margin: 0;
+}
+.svc-brief {
+  --kit-log-height: 24vh;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* The log: tall enough to read an error with its lines around it. */
+.svc-logs {
+  padding: var(--kit-space-4) 0 var(--kit-space-12);
+}
+.svc-logbox {
+  --kit-log-height: 40vh;
+}
