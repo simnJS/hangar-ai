@@ -691,8 +691,10 @@ mod tests {
                 id: "main".into(),
                 label: "Main".into(),
                 is_main: true,
-                logged_in: !KEYCHAIN,
-                email: (!KEYCHAIN).then(|| "main@example.com".to_string()),
+                // With the Keychain (macOS), the account in .claude.json is
+                // the login, and the plan is not known.
+                logged_in: true,
+                email: Some("main@example.com".to_string()),
                 plan: (!KEYCHAIN).then(|| "pro".to_string()),
             }
         );
