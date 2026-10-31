@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Edit|Write|Grep",
+        "matcher": "Bash|PowerShell|Monitor|Read|Edit|Write|NotebookEdit|Grep|LSP|Artifact|ArtifactData|DesignSync",
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.js\"", "timeout": 5 }]
       }
     ]

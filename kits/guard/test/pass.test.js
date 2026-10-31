@@ -167,6 +167,53 @@ test("the file tools get a pass of their own: that tool, that file", (t) => {
   assert.ok(run("Read", { file_path }, 4000));
 });
 
+test("a pass is used up on the PowerShell tool: that tool, that command, once", (t) => {
+  const { dir, project } = setup(t);
+  const env = { HANGAR_PANE_ID: "pane-1", HANGAR_PANE_NAME: "Ava", CLAUDE_PROJECT_DIR: project };
+  const event = (tool_name, command) => JSON.stringify({ session_id: "s", cwd: project, tool_name, tool_input: { command } });
+  const run = (tool, command, now) => decide(event(tool, command), { env, now, context: { dataDir: dir } });
+  const command = "git clean -fd";
+  assert.ok(run("PowerShell", command, 1000));
+  const refused = lastRefusal(dir);
+  assert.equal(refused.tool, "PowerShell");
+  assert.equal(refused.rule, "git-clean");
+  assert.equal(refused.command, `PowerShell: ${command}`);
+  const file = writePass(dir, refused, 2000);
+  assert.ok(run("Bash", command, 3000), "the same text in another tool");
+  assert.ok(run("Monitor", command, 3000), "and in a third");
+  assert.ok(run("PowerShell", `${command} `, 3000), "another command");
+  assert.ok(fs.existsSync(file), "still there for it");
+  assert.equal(run("PowerShell", command, 3000), null, "through, with no answer: Claude Code's own flow goes on");
+  assert.equal(fs.existsSync(file), false, "used up");
+  const used = readLog(dir).pop();
+  assert.equal(used.type, "pass-used");
+  assert.equal(used.key, refused.key);
+  assert.ok(run("PowerShell", command, 4000), "once");
+});
+
+test("each new tool gets a pass of its own too", (t) => {
+  const { dir, project } = setup(t);
+  const env = { HANGAR_PANE_ID: "pane-1", HANGAR_PANE_NAME: "Ava", CLAUDE_PROJECT_DIR: project };
+  const run = (tool_name, tool_input, now) => decide(JSON.stringify({ session_id: "s", cwd: project, tool_name, tool_input }), { env, now, context: { dataDir: dir } });
+  const calls = [
+    ["Monitor", { command: "git reset --hard", description: "x", timeout_ms: 1000 }, "Monitor: git reset --hard"],
+    ["NotebookEdit", { notebook_path: "secrets.json", new_source: "x" }, "NotebookEdit secrets.json"],
+    ["LSP", { filePath: ".env", operation: "hover", line: 1, character: 1 }, "LSP .env"],
+    ["Artifact", { file_paths: [".env", "a.png"], asset: true }, "Artifact .env, a.png"],
+    ["ArtifactData", { action: "set", file_path: "secrets.json" }, "ArtifactData secrets.json"],
+    ["DesignSync", { method: "write_files", files: [{ path: "a", localPath: ".env" }] }, "DesignSync .env"],
+  ];
+  for (const [tool, input, shown] of calls) {
+    assert.ok(run(tool, input, 1000), tool);
+    const refused = lastRefusal(dir);
+    assert.equal(refused.command, shown);
+    const file = writePass(dir, refused, 2000);
+    assert.equal(run(tool, input, 3000), null, tool);
+    assert.equal(fs.existsSync(file), false, `${tool}: used up`);
+    assert.ok(run(tool, input, 4000), `${tool}: once`);
+  }
+});
+
 test("a long command: cut for the log, whole for the pass", (t) => {
   const { dir, run } = setup(t);
   const long = `git reset --hard # ${"x".repeat(5000)}`;
@@ -230,4 +277,19 @@ test("the real hook process takes a pass the tab's code wrote", async (t) => {
   assert.equal(passed.code, 0);
   assert.equal(passed.stdout, "");
   assert.ok((await runHook(bashEvent("git reset --hard", project), env)).stdout, "once");
+});
+
+test("the real hook process takes a pass the tab's code wrote, on the PowerShell tool", async (t) => {
+  const { dir, project } = setup(t);
+  const env = { HANGAR_KITS_DATA: path.dirname(dir), HANGAR_PANE_ID: "pane-1", HANGAR_PANE_NAME: "Ava", CLAUDE_PROJECT_DIR: project };
+  const event = JSON.stringify({ session_id: "s", cwd: project, hook_event_name: "PreToolUse", tool_name: "PowerShell", tool_input: { command: "Remove-Item -Recurse -Force .git" } });
+  const refused = await runHook(event, env);
+  assert.equal(JSON.parse(refused.stdout).hookSpecificOutput.permissionDecision, "deny");
+  const file = writePass(dir, lastRefusal(dir), Date.now());
+  const passed = await runHook(event, env);
+  assert.equal(passed.code, 0);
+  assert.equal(passed.stdout, "");
+  assert.equal(fs.existsSync(file), false, "used up");
+  assert.equal(readLog(dir).pop().type, "pass-used");
+  assert.ok((await runHook(event, env)).stdout, "once");
 });

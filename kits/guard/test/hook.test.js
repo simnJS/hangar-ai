@@ -271,15 +271,70 @@ test("with no Hangar to ask, the refusal stands all the same", async (t) => {
   assert.ok(answer.stdout);
 });
 
-test("hooks.json: the five tools, with a time limit, that fails open", () => {
+// Each tool of Claude Code 2.1.316 that runs a command or touches a file, read from its own
+// tool list (the init event of `claude -p`, and a session's tool definitions). MultiEdit is
+// not one of them. The README lists those left out, and why.
+const WATCHED = ["Artifact", "ArtifactData", "Bash", "DesignSync", "Edit", "Grep", "LSP", "Monitor", "NotebookEdit", "PowerShell", "Read", "Write"];
+
+test("hooks.json: the tools by name, with a time limit, that fails open", () => {
   const { hooks } = JSON.parse(fs.readFileSync(path.join(KIT, "hooks", "hooks.json"), "utf8"));
   assert.deepEqual(Object.keys(hooks), ["PreToolUse"]);
   const [entry] = hooks.PreToolUse;
-  assert.deepEqual(entry.matcher.split("|").sort(), ["Bash", "Edit", "Grep", "Read", "Write"]);
+  assert.deepEqual(entry.matcher.split("|").sort(), WATCHED);
+  assert.match(entry.matcher, /^[A-Za-z|]+$/, "explicit names, no pattern");
   assert.equal(entry.hooks[0].type, "command");
   assert.match(entry.hooks[0].command, /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/guard\.js"$/);
   assert.ok(entry.hooks[0].timeout > 0 && entry.hooks[0].timeout <= 10);
   assert.equal(entry.hooks[0].onFailure, undefined, "a hook that times out lets the call through");
+});
+
+test("the hook answers for every tool hooks.json sends it, and the README names each", async (t) => {
+  const { project, dir, env } = setup(t);
+  const inputs = {
+    Bash: { command: "git reset --hard" },
+    PowerShell: { command: "git reset --hard" },
+    Monitor: { command: "git reset --hard", description: "x", timeout_ms: 1000 },
+    Read: { file_path: path.join(project, ".env") },
+    Edit: { file_path: path.join(project, ".env"), old_string: "a", new_string: "b" },
+    Write: { file_path: path.join(project, ".env"), content: "x" },
+    NotebookEdit: { notebook_path: path.join(project, ".env"), new_source: "x" },
+    Grep: { pattern: "x", path: path.join(project, ".env") },
+    LSP: { filePath: path.join(project, ".env"), operation: "hover", line: 1, character: 1 },
+    Artifact: { file_path: path.join(project, ".env") },
+    ArtifactData: { action: "set", file_path: path.join(project, "secrets.json") },
+    DesignSync: { method: "write_files", files: [{ path: "a", localPath: ".env" }] },
+  };
+  assert.deepEqual(Object.keys(inputs).sort(), WATCHED);
+  const readme = fs.readFileSync(path.join(KIT, "README.md"), "utf8");
+  for (const [tool_name, tool_input] of Object.entries(inputs)) {
+    const event = JSON.stringify({ session_id: "s", cwd: project, hook_event_name: "PreToolUse", tool_name, tool_input });
+    const { code, stdout } = await runHook(event, env);
+    assert.equal(code, 0, tool_name);
+    assert.equal(JSON.parse(stdout).hookSpecificOutput.permissionDecision, "deny", tool_name);
+    assert.ok(readme.includes(`\`${tool_name}\``), `the README names ${tool_name}`);
+  }
+  const logged = readLog(dir);
+  assert.deepEqual(logged.map((event) => event.tool).sort(), WATCHED, "each written down under its tool");
+  assert.equal(logged.find((event) => event.tool === "PowerShell").command, "PowerShell: git reset --hard", "the tab says which tool");
+  assert.equal(logged.find((event) => event.tool === "Monitor").command, "Monitor: git reset --hard");
+  assert.equal(logged.find((event) => event.tool === "Bash").command, "git reset --hard");
+});
+
+test("a tool it does not watch stays out, whatever it holds", async (t) => {
+  const { project, dir, env } = setup(t);
+  for (const tool_name of ["Glob", "Task", "WebFetch", "mcp__x__y"]) {
+    const event = JSON.stringify({ session_id: "s", cwd: project, hook_event_name: "PreToolUse", tool_name, tool_input: { command: "git reset --hard", file_path: ".env", pattern: ".env" } });
+    const { code, stdout } = await runHook(event, env);
+    assert.equal(code, 0, tool_name);
+    assert.equal(stdout, "", tool_name);
+  }
+  assert.equal(fs.existsSync(dir), false);
+});
+
+test("the reason tells the agent to retry with the same tool", async (t) => {
+  const { project, env } = setup(t);
+  const { stdout } = await runHook(bashEvent("git reset --hard", project), env);
+  assert.match(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason, /same tool/);
 });
 
 test("nothing in the hook needs a dependency", () => {

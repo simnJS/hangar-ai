@@ -1,6 +1,6 @@
 {
   "recursiveDelete": {
-    "what": "rm -r, rimraf, find -delete and their Windows forms, when they reach outside the project, or take the whole project with them. What is inside the project passes.",
+    "what": "rm -r, rimraf, find -delete, Remove-Item -Recurse and their Windows forms, when they reach outside the project, or take the whole project with them. What is inside the project passes.",
     "enabled": true,
     "allowedOutsideProject": ["$TMPDIR", "$TEMP", "$TMP", "/tmp", "/var/tmp", "/private/tmp"],
     "protectedInsideProject": [".git"]
@@ -21,7 +21,7 @@
   "dropDatabase": {
     "what": "SQL matching `sql` given to a database client (as an argument, a here-document, or piped from echo), and these commands, each word in this order.",
     "enabled": true,
-    "clients": ["psql", "mysql", "mariadb", "sqlcmd", "mongosh", "mongo", "cockroach", "clickhouse-client", "clickhouse"],
+    "clients": ["psql", "mysql", "mariadb", "sqlcmd", "invoke-sqlcmd", "mongosh", "mongo", "cockroach", "clickhouse-client", "clickhouse"],
     "sql": "\\bdrop\\s+(database|schema)\\b|\\bdropDatabase\\s*\\(",
     "commands": [
       ["dropdb"],
@@ -37,11 +37,15 @@
   "downloadToShell": {
     "what": "A download piped into a shell or an interpreter reading its code from stdin, given to one through $(…) or <(…), or saved and run in the same command line.",
     "enabled": true,
-    "downloaders": ["curl", "wget", "fetch", "http", "https", "aria2c", "iwr", "irm", "invoke-webrequest", "invoke-restmethod"],
+    "downloaders": ["curl", "wget", "fetch", "http", "https", "aria2c", "iwr", "irm", "invoke-webrequest", "invoke-restmethod", "start-bitstransfer", ".downloadstring", ".downloaddata", ".downloadfile"],
     "interpreters": ["python", "node", "perl", "ruby", "php", "bun", "deno"]
   },
+  "encodedCommand": {
+    "what": "powershell or pwsh given -EncodedCommand, or any short form of it: base64 nobody can read before it runs, whatever it holds.",
+    "enabled": true
+  },
   "secrets": {
-    "what": "Reading, printing, copying or uploading these files with the Read, Edit, Write and Grep tools, or in a command line through the programs below. Without a slash a pattern is a file's name, with one the end of its path, and ~/ ties it to the home folder. Loading a .env for a program (source .env, node --env-file=.env) passes: nothing is shown.",
+    "what": "Reading, printing, copying or uploading these files with the Read, Edit, Write, NotebookEdit, LSP and Grep tools, the tools that send a local file (Artifact, ArtifactData, DesignSync), or in a command line through the programs below. Without a slash a pattern is a file's name, with one the end of its path, and ~/ ties it to the home folder. Loading a .env for a program (source .env, node --env-file=.env) passes: nothing is shown.",
     "enabled": true,
     "paths": [
       ".env", ".env.*", "*.env", ".envrc",
@@ -72,13 +76,23 @@
       "cut", "sort", "uniq", "paste", "column", "fold", "fmt", "pr", "rev", "expand", "iconv",
       "xxd", "od", "hexdump", "hd", "strings", "base64", "base32", "openssl", "jq", "yq",
       "diff", "sdiff", "cmp", "comm", "tar", "zip", "7z", "gzip", "bzip2", "xz", "dd",
-      "type", "get-content", "gc", "select-string", "sls", "pbcopy", "xclip", "xsel", "clip"
+      "type", "get-content", "gc", "select-string", "sls", "pbcopy", "xclip", "xsel", "clip",
+      "format-hex", "fhx", "import-csv", "ipcsv", "compress-archive", "certutil",
+      "[file]::readalltext", "[file]::readalllines", "[file]::readallbytes", "[file]::readlines", "[file]::opentext", "[file]::openread", "[file]::open"
     ],
-    "copiers": ["cp", "mv", "scp", "rsync", "install", "ditto", "copy", "move", "copy-item", "move-item"]
+    "writers": [
+      "set-content", "sc", "clear-content", "clc", "out-file", "tee-object", "tee", "new-item", "ni",
+      "[file]::writealltext", "[file]::writealllines", "[file]::writeallbytes"
+    ],
+    "copiers": ["cp", "mv", "scp", "rsync", "install", "ditto", "copy", "move", "copy-item", "cpi", "move-item", "mi", "rename-item", "ren", "rni", "[file]::copy", "[file]::move"]
   },
   "guardFiles": {
     "what": "Changing the guard's own files: its data folder (one-time passes live there), .hangar/guard.json, and the kit's folder unless it lies inside the project. Those are the person's to change.",
     "enabled": true,
-    "readers": ["cat", "ls", "dir", "head", "tail", "less", "more", "bat", "grep", "rg", "jq", "wc", "stat", "file", "diff", "git", "echo", "printf", "test", "[", "[["]
+    "readers": [
+      "cat", "ls", "dir", "head", "tail", "less", "more", "bat", "grep", "rg", "jq", "wc", "stat", "file", "diff", "git", "echo", "printf", "test", "[", "[[",
+      "type", "get-content", "gc", "select-string", "sls", "gci", "get-childitem", "gi", "get-item", "test-path", "resolve-path", "rvpa", "convert-path", "cvpa", "join-path", "split-path", "get-filehash",
+      "write-output", "write-host", "write", "[file]::readalltext", "[file]::readalllines", "[file]::readallbytes", "[file]::readlines", "[file]::exists", "[directory]::exists"
+    ]
   }
 }

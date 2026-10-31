@@ -18,7 +18,7 @@ past.
 3. **Wait for their answer.** They can let this exact command through once, from the
    **Guardrails** tab (« Garde-fous »), for two minutes.
 4. **When they tell you to retry, run the same command, character for character.**
-   The pass holds for that exact text and for you: anything else is refused again.
+   The pass holds for that exact text, that tool and you: anything else is refused again.
    If it was refused again, say so rather than changing it.
 
 Do not change `.hangar/guard.json`, the kit's rules, or its data folder to get a call
