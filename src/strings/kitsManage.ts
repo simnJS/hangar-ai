@@ -209,6 +209,29 @@ export const en = {
   "kitsManage.everywhereNote": "On all workspaces",
   "kitsManage.everywhereNoteHint": "Managed in Settings › Kits.",
   "kitsManage.everywhereToggleLocked": "{name} is enabled on all workspaces: change it in Settings › Kits",
+  "kitsManage.galleryTitle": "Library",
+  "kitsManage.galleryHint":
+    "The public kits of the Hangar repository on GitHub, listed by a file of that repository. Installing brings a kit onto this machine: nothing runs and nothing is enabled. You see what a kit does, and accept it, when you enable it.",
+  "kitsManage.galleryLoading": "Reading the library…",
+  "kitsManage.galleryEmpty": "The library lists no kit.",
+  "kitsManage.galleryNoMatch": "No kit matches this filter.",
+  "kitsManage.galleryFilter": "Filter the library",
+  "kitsManage.galleryFilterPlaceholder": "Filter by name or tag",
+  "kitsManage.galleryCached": "Offline: showing the copy kept on {date}.",
+  "kitsManage.galleryUnavailable":
+    "The library cannot be reached, and no copy is kept yet. Check your connection, then refresh.",
+  "kitsManage.galleryRefresh": "Refresh",
+  "kitsManage.galleryRefreshing": "Refreshing…",
+  "kitsManage.galleryInstall": "Install",
+  "kitsManage.galleryInstalling": "Installing…",
+  "kitsManage.galleryInstalled": "Installed (v{version})",
+  "kitsManage.galleryUpdateAvailable": "Installed v{version}, v{latest} available",
+  "kitsManage.galleryUpdate": "Update to v{latest}",
+  "kitsManage.galleryAsks": "What it will ask: {summary}",
+  "kitsManage.galleryTags": "Tags",
+  "kitsManage.galleryInstallFailed": "{name} could not be installed. {detail}",
+  "kitsManage.galleryInstalledFlash":
+    "{name} installed. It is not enabled: enable it on a workspace to see what it runs and accept it.",
 } as const;
 
 export const fr: Record<keyof typeof en, string> = {
@@ -415,4 +438,27 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.everywhereNoteHint": "Géré dans Réglages › Kits.",
   "kitsManage.everywhereToggleLocked":
     "{name} est activé sur tous les workspaces : modifiez-le dans Réglages › Kits",
+  "kitsManage.galleryTitle": "Bibliothèque",
+  "kitsManage.galleryHint":
+    "Les kits publics du dépôt Hangar sur GitHub, listés par un fichier de ce dépôt. Installer amène un kit sur cette machine : rien ne se lance et rien n'est activé. Vous voyez ce qu'un kit fait, et vous l'acceptez, quand vous l'activez.",
+  "kitsManage.galleryLoading": "Lecture de la bibliothèque…",
+  "kitsManage.galleryEmpty": "La bibliothèque ne liste aucun kit.",
+  "kitsManage.galleryNoMatch": "Aucun kit ne correspond à ce filtre.",
+  "kitsManage.galleryFilter": "Filtrer la bibliothèque",
+  "kitsManage.galleryFilterPlaceholder": "Filtrer par nom ou par étiquette",
+  "kitsManage.galleryCached": "Hors ligne : copie conservée le {date}.",
+  "kitsManage.galleryUnavailable":
+    "La bibliothèque est injoignable et aucune copie n'est encore conservée. Vérifiez votre connexion, puis actualisez.",
+  "kitsManage.galleryRefresh": "Actualiser",
+  "kitsManage.galleryRefreshing": "Actualisation…",
+  "kitsManage.galleryInstall": "Installer",
+  "kitsManage.galleryInstalling": "Installation…",
+  "kitsManage.galleryInstalled": "Installé (v{version})",
+  "kitsManage.galleryUpdateAvailable": "v{version} installée, v{latest} disponible",
+  "kitsManage.galleryUpdate": "Passer à la v{latest}",
+  "kitsManage.galleryAsks": "Ce qu'il demandera : {summary}",
+  "kitsManage.galleryTags": "Étiquettes",
+  "kitsManage.galleryInstallFailed": "{name} n'a pas pu être installé. {detail}",
+  "kitsManage.galleryInstalledFlash":
+    "{name} installé. Il n'est pas activé : activez-le sur un workspace pour voir ce qu'il lance et l'accepter.",
 };
