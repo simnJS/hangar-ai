@@ -91,3 +91,8 @@
   flex: 1 1 260px;
   min-width: 0;
 }
+
+.kit-row__icon .kit-icon {
+  width: 20px;
+  height: 20px;
+}

@@ -247,3 +247,22 @@
 .kit-sec__restart {
   flex-wrap: wrap;
 }
+
+.kit-icon {
+  display: block;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.kit-act__icon,
+.kit-sec__icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--fg-secondary);
+}
+
+.kit-act__icon {
+  margin-right: 8px;
+  vertical-align: -4px;
+}

@@ -13,6 +13,7 @@ import {
   requestedPermissions,
   type KitState,
 } from "../lib/kitActivation";
+import { kitIconUrl } from "../lib/kitIcon";
 import { useAsleep } from "../lib/hibernateStore";
 import { currentOs, runSetupCommand, showWorkspace, type KitOs } from "../lib/kitSetup";
 import {
@@ -28,6 +29,7 @@ import {
 import { useStore } from "../store";
 import type { Workspace, WorkspaceKit } from "../types";
 import { Backdrop, ModalHead } from "./Backdrop";
+import { Icon } from "./Icon";
 import "./KitActivation.css";
 
 /**
@@ -76,6 +78,27 @@ export interface KitActivationViewProps {
   onNotYet: () => void;
 }
 
+/**
+ * A kit's icon from its manifest, loaded as an `<img>` (never inlined). The
+ * generic plug glyph stands in when there is none or the file does not load.
+ */
+export function KitIcon({ kit, size = 16, className = "kit-icon" }: { kit: KitInfo; size?: number; className?: string }) {
+  const url = kitIconUrl(kit);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!url || failed === url) return <Icon name="plug" size={size} />;
+  return (
+    <img
+      className={className}
+      src={url}
+      alt=""
+      width={size}
+      height={size}
+      draggable={false}
+      onError={() => setFailed(url)}
+    />
+  );
+}
+
 function Names({ title, names }: { title: string; names: string[] }) {
   if (names.length === 0) return null;
   return (
@@ -115,6 +138,9 @@ export function KitActivationView(props: KitActivationViewProps) {
       )}
       {manifest && (
         <p className="kit-act__desc">
+          <span className="kit-act__icon" aria-hidden="true">
+            <KitIcon kit={kit} size={18} />
+          </span>
           <strong>{manifest.name}</strong> <span className="kit-act__ver">v{kit.installedVersion}</span>
           {manifest.description ? ` — ${manifest.description}` : ""}
         </p>
@@ -516,6 +542,9 @@ export function WorkspaceKitsSection({ value, onChange, workspace = null }: Kits
                   <span className="switch__track" aria-hidden="true">
                     <span className="switch__knob" />
                   </span>
+                </span>
+                <span className="kit-sec__icon" aria-hidden="true">
+                  <KitIcon kit={kit} size={16} />
                 </span>
                 <span className="kit-sec__text">
                   <span className="kit-sec__name">{name}</span>

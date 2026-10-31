@@ -12,7 +12,7 @@ import {
   onKitsChanged,
   type KitInfo,
 } from "../../lib/kits";
-import { Icon } from "../Icon";
+import { KitIcon } from "../KitActivation";
 import { WorkspaceKitsDialog } from "../WorkspaceDialog";
 import { useStore } from "../../store";
 import { workspaceKits } from "../../lib/kits";
@@ -25,9 +25,8 @@ import "./KitsSettings.css";
  * `KitsView` is the markup, from props alone, so every state can be drawn
  * without Rust; `KitsSettings` feeds it from the Tauri commands.
  *
- * A kit's own icon (`manifest.icon`, a file in the kit's folder) is not drawn:
- * the webview has no asset scope for arbitrary folders and `lib/kits` has no
- * reader for it. A plug glyph stands in until one exists.
+ * A kit's own icon (`manifest.icon`) is served by the `hangar-kit` scheme and
+ * drawn as an `<img>`; a plug glyph stands in when it has none or fails to load.
  */
 
 /** What a kit's row says about its update, once asked. */
@@ -114,7 +113,7 @@ function KitRow({ kit, props }: { kit: KitInfo; props: KitsViewProps }) {
     <div className="set-row set-row--block kit-row">
       <div className="kit-row__top">
         <span className="kit-row__icon" aria-hidden="true">
-          <Icon name="plug" size={16} />
+          <KitIcon kit={kit} size={20} />
         </span>
         <div className="kit-row__text">
           <span className="set-row__label">
