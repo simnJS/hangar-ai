@@ -1,0 +1,276 @@
+/* « Comptes Claude »: the settings page, the toolbar switcher, the workspace
+   picker and the badge. Built on the app's theme variables only, so light and
+   dark follow the theme; every control is a real button, input or select and
+   shows the focus ring. */
+
+/* ---- Settings page ---- */
+
+.acc {
+  display: grid;
+  gap: 16px;
+}
+
+.acc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.acc-row {
+  display: grid;
+  gap: 6px;
+}
+
+.acc-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.acc-row__name {
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.acc-row__meta,
+.acc-note {
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
+}
+
+.acc-note--bad,
+.acc-error {
+  color: var(--danger);
+}
+
+.acc-error {
+  margin: 0;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.acc-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: calc(10.5px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+.acc-tag--ok {
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  color: var(--success);
+}
+
+.acc-actions,
+.acc-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.acc-form .acc-note {
+  flex-basis: 100%;
+}
+
+.acc-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.acc-confirm__title {
+  margin: 0;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+}
+
+.acc-add__title {
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.acc-input,
+.acc-select {
+  min-width: 0;
+  height: calc(28px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: calc(12.5px * var(--ui-scale));
+}
+
+.acc-input {
+  flex: 1 1 180px;
+}
+
+.acc-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.acc-input:focus-visible,
+.acc-select:focus-visible,
+.acc-switch:focus-visible,
+.acc-menu__all:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.acc-warning {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+.acc-warning .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--danger);
+}
+
+.acc-warning p {
+  margin: 2px 0 0;
+  color: var(--fg-secondary);
+}
+
+/* ---- Toolbar switcher ---- */
+
+.acc-switch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  max-width: calc(180px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: calc(12px * var(--ui-scale));
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.acc-switch .icon {
+  flex: none;
+}
+
+.acc-switch:hover:not(:disabled),
+.acc-switch.is-open {
+  background: var(--line);
+  color: var(--fg);
+}
+
+.acc-switch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.acc-switch__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-menu {
+  min-width: calc(320px * var(--ui-scale));
+}
+
+.acc-menu__heading {
+  margin: calc(4px * var(--ui-scale)) calc(8px * var(--ui-scale)) calc(6px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--fg-secondary);
+}
+
+.acc-menu__row {
+  display: flex;
+  align-items: stretch;
+  gap: calc(4px * var(--ui-scale));
+}
+
+.acc-menu__main {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding-top: calc(5px * var(--ui-scale));
+  padding-bottom: calc(5px * var(--ui-scale));
+}
+
+.acc-menu__check {
+  flex: none;
+  width: calc(14px * var(--ui-scale));
+}
+
+.acc-menu__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.acc-menu__usage {
+  font-size: calc(10.5px * var(--ui-scale));
+  opacity: 0.75;
+}
+
+.acc-menu__warn {
+  opacity: 0.75;
+}
+
+.acc-menu__all {
+  flex: none;
+  width: auto;
+  height: auto;
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.acc-menu__all[aria-current="true"] {
+  color: var(--accent-hi);
+}
+
+.acc-ask__choices {
+  display: grid;
+  gap: calc(6px * var(--ui-scale));
+}
+
+.acc-ask__choices .btn {
+  white-space: normal;
+  text-align: left;
+}
+
+/* ---- Workspace picker and badge ---- */
+
+.acc-picker {
+  display: grid;
+  gap: 4px;
+}
+
+.acc-badge {
+  display: inline-block;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1.4;
+  color: var(--fg-secondary);
+}
