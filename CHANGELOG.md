@@ -8,6 +8,20 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.8.0] - 2026-10-31
+
+- **Kits can do more, and show more before you accept them.**
+  - A kit's tabs can keep their own data, in a folder of the kit outside your projects.
+    A kit can never reach another kit's folder.
+  - A kit's tab can talk to a local server on a port it declares, such as a game editor's
+    bridge. You accept each port when you enable the kit. Hangar makes the call: the
+    tab's page still has no network of its own.
+  - Before you enable a kit, you now see the hooks of its Claude Code plugin, exactly as
+    they will run, since Claude Code runs them by itself. A kit from GitHub whose hooks
+    change in an update stays out of your agents until you accept it again. A kit linked
+    from a folder, which you are writing yourself, is not asked again.
+  - The details for kit makers are in [docs/kits.md](docs/kits.md).
+
 ## [1.7.0] - 2026-10-31
 
 - **Claude accounts.** Use several Claude subscriptions from one Hangar — say a work Max
