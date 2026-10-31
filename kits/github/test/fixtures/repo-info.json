@@ -1,0 +1,9 @@
+{
+  "name": "widgets",
+  "nameWithOwner": "example/widgets",
+  "owner": {
+    "id": "O_1",
+    "login": "example"
+  },
+  "url": "https://github.com/example/widgets"
+}
