@@ -1,5 +1,7 @@
 //! The `hangar-kit` scheme: the pages of kits' tabs and the files beside
-//! them, and the SDK every tab loads, `/_hangar/kit.js` (docs/kits.md).
+//! them, the SDK every tab loads, `/_hangar/kit.js` (docs/kits.md), and Hangar
+//! UI, its stylesheet and its behaviours, for the tabs that want them
+//! (docs/kit-ui.md).
 //!
 //! A kit is code written by someone else, so its pages are kept away from
 //! Hangar the way preview.rs keeps an agent's page away, and further:
@@ -15,8 +17,8 @@
 //!   kit's), and the webview's message channel does not carry a frame's
 //!   messages — checked on Windows with a tab invoking `model_save_png` and
 //!   `pty_write`: no answer, no file, nothing typed;
-//! - the same policy allows the kit's own files and the SDK and nothing
-//!   else: no network, no frames, no workers, no forms, no plugins. Inline
+//! - the same policy allows the kit's own files, the SDK and Hangar UI and
+//!   nothing else: no network, no frames, no workers, no forms, no plugins. Inline
 //!   scripts and styles run, since that is how a small tab is written;
 //! - only installed kits that can be used are served, only files inside the
 //!   kit's folder once links are followed, only web file types, and never a
@@ -45,9 +47,49 @@ pub const SCHEME: &str = "hangar-kit";
 
 /// `KIT_SDK_PATH` in src/lib/kits.ts.
 pub const SDK_PATH: &str = "/_hangar/kit.js";
+/// Hangar UI's behaviours, window.hangar.ui.
+const UI_SCRIPT_PATH: &str = "/_hangar/kit-ui.js";
+/// Hangar UI's tokens and components.
+const UI_STYLE_PATH: &str = "/_hangar/kit.css";
+/// The face the stylesheet asks for, by a URL relative to itself.
+const UI_FONT_PATH: &str = "/_hangar/inter.woff2";
 
-/// window.hangar, small and without dependencies.
-const SDK: &str = include_str!("../kit-sdk/kit.js");
+/// A file the scheme serves to every tab, whatever its kit. These are the only
+/// ones under `/_hangar`: the rest of `kit-sdk/` (the gallery, the tokens' map)
+/// is not for kits.
+#[derive(Debug, PartialEq)]
+struct LibraryFile {
+    path: &'static str,
+    mime: &'static str,
+    bytes: &'static [u8],
+}
+
+const LIBRARY: [LibraryFile; 4] = [
+    LibraryFile {
+        path: SDK_PATH,
+        mime: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("../kit-sdk/kit.js"),
+    },
+    LibraryFile {
+        path: UI_SCRIPT_PATH,
+        mime: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("../kit-sdk/kit-ui.js"),
+    },
+    LibraryFile {
+        path: UI_STYLE_PATH,
+        mime: "text/css; charset=utf-8",
+        bytes: include_bytes!("../kit-sdk/kit.css"),
+    },
+    LibraryFile {
+        path: UI_FONT_PATH,
+        mime: "font/woff2",
+        bytes: include_bytes!("../kit-sdk/inter.woff2"),
+    },
+];
+
+fn library_file(url_path: &str) -> Option<&'static LibraryFile> {
+    LIBRARY.iter().find(|file| file.path == url_path)
+}
 
 /// How a kit's page reaches the scheme on each platform: Windows' webview as
 /// `http(s)://hangar-kit.localhost`, the others by the scheme itself. Every
@@ -121,23 +163,24 @@ pub(crate) struct KitRoot {
 
 /// The policy every file of the kit `id` goes out with.
 pub(crate) fn policy(id: &str) -> String {
-    let own = BASES
-        .iter()
-        .map(|base| format!("{base}/{id}/"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let sdk = BASES
-        .iter()
-        .map(|base| format!("{base}{SDK_PATH}"))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let at = |path: String| {
+        BASES
+            .iter()
+            .map(|base| format!("{base}{path}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let own = at(format!("/{id}/"));
+    let scripts = format!("{} {}", at(SDK_PATH.into()), at(UI_SCRIPT_PATH.into()));
+    let style = at(UI_STYLE_PATH.into());
+    let font = at(UI_FONT_PATH.into());
     [
         "sandbox allow-scripts".to_string(),
         "default-src 'none'".to_string(),
-        format!("script-src 'unsafe-inline' 'wasm-unsafe-eval' {own} {sdk}"),
-        format!("style-src 'unsafe-inline' {own}"),
+        format!("script-src 'unsafe-inline' 'wasm-unsafe-eval' {own} {scripts}"),
+        format!("style-src 'unsafe-inline' {own} {style}"),
         format!("img-src {own} data: blob:"),
-        format!("font-src {own} data:"),
+        format!("font-src {own} {font} data:"),
         format!("media-src {own} data: blob:"),
         format!("connect-src {own}"),
         "frame-src 'none'".to_string(),
@@ -151,13 +194,15 @@ pub(crate) fn policy(id: &str) -> String {
     .join("; ")
 }
 
-/// What answers that are not a kit's file go out with: an error, or the SDK.
+/// What answers that are not a kit's file go out with: an error, or a file of
+/// the library. A policy binds the document it comes with: what a tab may load
+/// of the library is said by that tab's page, in `policy`.
 const BARE_POLICY: &str = "sandbox; default-src 'none'";
 
 /// What a request names.
 #[derive(Debug, PartialEq)]
 enum Target {
-    Sdk,
+    Library(&'static LibraryFile),
     /// A file of a kit, by its path's parts, each decoded.
     File {
         kit: String,
@@ -177,8 +222,8 @@ fn valid_kit_id(id: &str) -> bool {
 /// and is refused, as is an encoded separator, a drive or a stream (`:`),
 /// and a NUL. A hidden file or folder is never served.
 fn target(url_path: &str) -> Result<Target, (StatusCode, String)> {
-    if url_path == SDK_PATH {
-        return Ok(Target::Sdk);
+    if let Some(file) = library_file(url_path) {
+        return Ok(Target::Library(file));
     }
     let not_found = |why: &str| Err((StatusCode::NOT_FOUND, why.to_string()));
     let forbidden = |why: &str| Err((StatusCode::FORBIDDEN, why.to_string()));
@@ -287,13 +332,13 @@ pub(crate) fn answer(request: &Request<Vec<u8>>, kits: &[KitRoot]) -> Response<V
     };
 
     let (kit, parts) = match target(request.uri().path()) {
-        Ok(Target::Sdk) => {
+        Ok(Target::Library(file)) => {
             return model::finish(
                 base(BARE_POLICY)
                     .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
-                    .header(header::CONTENT_LENGTH, SDK.len()),
-                body_of(SDK.as_bytes().to_vec()),
+                    .header(header::CONTENT_TYPE, file.mime)
+                    .header(header::CONTENT_LENGTH, file.bytes.len()),
+                body_of(file.bytes.to_vec()),
             )
         }
         Ok(Target::File { kit, parts }) => (kit, parts),
@@ -409,7 +454,7 @@ pub fn serve<R: Runtime>(
     responder: UriSchemeResponder,
 ) {
     tauri::async_runtime::spawn(async move {
-        let kits = if request.uri().path() == SDK_PATH {
+        let kits = if library_file(request.uri().path()).is_some() {
             Vec::new()
         } else {
             usable_kits().await
@@ -497,8 +542,8 @@ mod tests {
         ] {
             assert!(directives.contains(&blocked), "{blocked}");
         }
-        // Every source named is the kit's own folder, the SDK, or local data:
-        // no host of the network, no wildcard, no other kit.
+        // Every source named is the kit's own folder, the library, or local
+        // data: no host of the network, no wildcard, no other kit.
         for directive in &directives[1..] {
             for source in directive.split(' ').skip(1) {
                 let local = source.starts_with('\'')
@@ -507,9 +552,11 @@ mod tests {
                     || BASES
                         .iter()
                         .any(|base| source == format!("{base}/hello-kit/"))
-                    || BASES
-                        .iter()
-                        .any(|base| source == format!("{base}{SDK_PATH}"));
+                    || BASES.iter().any(|base| {
+                        LIBRARY
+                            .iter()
+                            .any(|file| source == format!("{base}{}", file.path))
+                    });
                 assert!(local, "{source} in {directive}");
             }
         }
@@ -580,13 +627,112 @@ mod tests {
         let body = String::from_utf8(response.body().clone()).unwrap();
         assert!(body.contains("window.hangar") || body.contains("\"hangar\""));
         assert!(body.contains("postMessage"));
-        // Nothing else lives under /_hangar.
-        for path in ["/_hangar/other.js", "/_hangar/", "/_hangar"] {
+        // Nothing else lives under /_hangar: what sits beside the library in
+        // kit-sdk/ is not for kits.
+        for path in [
+            "/_hangar/other.js",
+            "/_hangar/",
+            "/_hangar",
+            "/_hangar/gallery.html",
+            "/_hangar/tokens.json",
+            "/_hangar/inter.LICENSE.txt",
+            "/_hangar/kit.css.map",
+        ] {
             assert_eq!(
                 status(&answer(&get(path, None), &[])),
                 StatusCode::NOT_FOUND,
                 "{path}"
             );
+        }
+    }
+
+    #[test]
+    fn hangar_ui_is_served_with_its_type_whatever_the_kit() {
+        for (path, mime) in [
+            (UI_STYLE_PATH, "text/css; charset=utf-8"),
+            (UI_SCRIPT_PATH, "text/javascript; charset=utf-8"),
+            (UI_FONT_PATH, "font/woff2"),
+        ] {
+            let response = answer(&get(path, Some("null")), &[]);
+            assert_eq!(status(&response), StatusCode::OK, "{path}");
+            assert_eq!(header_of(&response, header::CONTENT_TYPE), mime, "{path}");
+            assert_eq!(
+                header_of(&response, header::X_CONTENT_TYPE_OPTIONS),
+                "nosniff"
+            );
+            // A font is always fetched with CORS, here from an opaque origin.
+            assert_eq!(
+                header_of(&response, header::ACCESS_CONTROL_ALLOW_ORIGIN),
+                "*"
+            );
+            assert_eq!(
+                header_of(&response, header::CONTENT_SECURITY_POLICY),
+                BARE_POLICY
+            );
+            assert!(!response.body().is_empty(), "{path}");
+        }
+        let sheet = answer(&get(UI_STYLE_PATH, None), &[]);
+        let sheet = String::from_utf8(sheet.body().clone()).unwrap();
+        assert!(sheet.contains(".kit-btn"));
+        assert!(sheet.contains("--kit-bg"));
+        // Relative to the sheet, so it comes from this scheme on every platform,
+        // and from the path the policies below name.
+        assert!(sheet.contains("url(inter.woff2)"));
+        assert_eq!(UI_FONT_PATH, "/_hangar/inter.woff2");
+        assert!(!sheet.contains("@import"));
+        let font = answer(&get(UI_FONT_PATH, None), &[]);
+        assert!(font.body().starts_with(b"wOF2"));
+        let head = Request::builder()
+            .method(Method::HEAD)
+            .uri(format!("http://hangar-kit.localhost{UI_STYLE_PATH}"))
+            .body(Vec::new())
+            .unwrap();
+        let head = answer(&head, &[]);
+        assert_eq!(status(&head), StatusCode::OK);
+        assert!(head.body().is_empty());
+    }
+
+    #[test]
+    fn every_kit_s_page_may_load_hangar_ui_and_only_as_what_it_is() {
+        let first = kit("ui-first", "hello-kit");
+        let second = kit("ui-second", "ci-status");
+        let kits = [first.clone(), second.clone()];
+        for one in &kits {
+            let page = answer(
+                &get(&format!("/{}/tabs/status/index.html", one.id), None),
+                &kits,
+            );
+            assert_eq!(status(&page), StatusCode::OK);
+            let csp = header_of(&page, header::CONTENT_SECURITY_POLICY);
+            assert_eq!(csp, policy(&one.id));
+            let directive = |name: &str| {
+                csp.split("; ")
+                    .find(|directive| directive.starts_with(name))
+                    .unwrap_or_else(|| panic!("{name} in {csp}"))
+                    .to_string()
+            };
+            let (style, script, font, connect) = (
+                directive("style-src"),
+                directive("script-src"),
+                directive("font-src"),
+                directive("connect-src"),
+            );
+            for base in BASES {
+                assert!(style.contains(&format!("{base}{UI_STYLE_PATH}")), "{style}");
+                assert!(
+                    script.contains(&format!("{base}{UI_SCRIPT_PATH}")),
+                    "{script}"
+                );
+                assert!(font.contains(&format!("{base}{UI_FONT_PATH}")), "{font}");
+            }
+            // Each is allowed as the one thing it is, and the page reads none.
+            assert!(!script.contains("kit.css"));
+            assert!(!style.contains("kit.js"));
+            assert!(!style.contains("kit-ui.js"));
+            assert!(!connect.contains("_hangar"));
+        }
+        for one in kits {
+            let _ = std::fs::remove_dir_all(&one.root);
         }
     }
 
