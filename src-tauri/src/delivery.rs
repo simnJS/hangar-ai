@@ -2180,6 +2180,16 @@ delivery_submit again."
     })
 }
 
+/// The checkout whose `<name>-worktrees` folder holds `dir`, when that is a
+/// repository. Only the sweep, which checks the rest, acts on it.
+fn checkout_of(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors().skip(1).find_map(|folder| {
+        let name = folder.file_name()?.to_str()?;
+        let main = folder.parent()?.join(name.strip_suffix("-worktrees")?);
+        common_dir(&main).ok().map(|_| main)
+    })
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Cleanup {
@@ -2199,16 +2209,23 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
         kept: vec![],
     };
     let dir = Path::new(worktree);
-    let Ok(common) = common_dir(dir) else {
-        report
-            .kept
-            .push(format!("{worktree} is not a worktree any more"));
-        return report;
-    };
     // Run from the main checkout, not from the folder being removed.
-    let repo = match worktrees(dir).ok().and_then(|list| list.into_iter().next()) {
-        Some((main, _, _)) => PathBuf::from(main),
-        None => common,
+    let repo = match common_dir(dir) {
+        Ok(common) => match worktrees(dir).ok().and_then(|list| list.into_iter().next()) {
+            Some((main, _, _)) => PathBuf::from(main),
+            None => common,
+        },
+        // Git has already let go of the folder (its `.git` is gone): the
+        // checkout it came from is found by where Hangar puts worktrees.
+        Err(_) => match checkout_of(dir) {
+            Some(main) => main,
+            None => {
+                report
+                    .kept
+                    .push(format!("{worktree} is not a worktree any more"));
+                return report;
+            }
+        },
     };
     forget_tested(&repo, task);
     let listed = worktrees(&repo).unwrap_or_default();
@@ -2216,11 +2233,29 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
         .iter()
         .skip(1)
         .any(|(path, _, _)| key(path) == key(worktree));
+    // What is left of the folder once git has done what it can.
+    let sweep = |report: &mut Cleanup, said: Option<&str>| match crate::git::sweep_leftovers(
+        &repo,
+        dir,
+        tries.clamp(1, 5),
+        Duration::from_millis(400),
+    ) {
+        Ok(()) => report.worktree_removed = true,
+        Err(crate::git::Sweep::Held(held)) => report.kept.push(held),
+        Err(crate::git::Sweep::Refused(refusal)) => report.kept.push(match said {
+            Some(said) if !said.contains("is not a working tree") => {
+                format!("the worktree {worktree} could not be removed: {said}")
+            }
+            _ => refusal,
+        }),
+    };
     if linked {
+        let mut failure: Option<String> = None;
         for attempt in 0..tries.max(1) {
             match git_run(&repo, &["worktree", "remove", worktree], false) {
                 Ok(finished) if finished.succeeded() => {
                     report.worktree_removed = true;
+                    failure = None;
                     break;
                 }
                 Ok(finished) => {
@@ -2229,15 +2264,16 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
                         report.kept.push(format!(
                             "the worktree {worktree} has changes that were never delivered ({said}): kept"
                         ));
+                        failure = None;
                         break;
                     }
-                    if attempt + 1 == tries.max(1) {
-                        report.kept.push(format!(
-                            "the worktree {worktree} could not be removed: {said}"
-                        ));
-                    } else {
-                        std::thread::sleep(Duration::from_secs(1));
+                    let gone = said.contains("is not a working tree");
+                    failure = Some(said);
+                    // Git has already let go of it: only the folder is left.
+                    if gone || attempt + 1 == tries.max(1) {
+                        break;
                     }
+                    std::thread::sleep(Duration::from_secs(1));
                 }
                 Err(err) => {
                     report.kept.push(format!(
@@ -2247,11 +2283,17 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
                 }
             }
         }
+        if let Some(said) = failure {
+            sweep(&mut report, Some(&said));
+        }
         crate::git::forget_shared_roots();
     } else if listed.iter().any(|(path, _, _)| key(path) == key(worktree)) {
         report
             .kept
             .push(format!("{worktree} is the main checkout: kept"));
+    } else if dir.exists() {
+        // Git forgot it, the folder stayed: that is what piles up on disk.
+        sweep(&mut report, None);
     } else {
         report.worktree_removed = true;
     }
@@ -3309,6 +3351,59 @@ mod tests {
             "{main:?}"
         );
         assert!(repo.main.join("a.txt").exists());
+    }
+
+    #[test]
+    fn a_folder_git_let_go_of_is_swept_after_landing_and_a_dirty_one_stays() {
+        let repo = repo("leftovers");
+        let folder = repo.root.join("repo-worktrees").join("gone");
+        fs::create_dir_all(folder.parent().unwrap()).unwrap();
+        sh(
+            &repo.main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "gone",
+                &folder.to_string_lossy(),
+                "main",
+            ],
+        );
+        // Git gave up half way: no `.git`, files left, and an untouched
+        // neighbour outside the folder.
+        write(&folder, "node_modules/p/index.js", "x");
+        write(&repo.root, "outside/keep.txt", "mine");
+        fs::remove_file(folder.join(".git")).unwrap();
+
+        let done = cleanup(&folder.to_string_lossy(), "gone", "main", &repo.task, 1);
+        assert!(
+            done.worktree_removed && done.branch_deleted && done.kept.is_empty(),
+            "{done:?}"
+        );
+        assert!(!folder.exists());
+        assert!(sh(&repo.main, &["worktree", "list"]).lines().count() == 2);
+        assert_eq!(read(&repo.root.join("outside"), "keep.txt"), "mine");
+
+        // Unmerged work keeps its folder and says so.
+        let dirty = repo.root.join("repo-worktrees").join("dirty");
+        sh(
+            &repo.main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "dirty",
+                &dirty.to_string_lossy(),
+                "main",
+            ],
+        );
+        write(&dirty, "wip.txt", "unsaved");
+        let kept = cleanup(&dirty.to_string_lossy(), "dirty", "main", &repo.task, 1);
+        assert!(!kept.worktree_removed && !kept.branch_deleted, "{kept:?}");
+        assert!(kept.kept[0].contains("never delivered"), "{kept:?}");
+        assert_eq!(read(&dirty, "wip.txt"), "unsaved");
     }
 
     #[test]
