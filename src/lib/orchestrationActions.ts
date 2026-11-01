@@ -4,7 +4,9 @@ import { preferredDir } from "./layout";
 import { hqOf, managerOf, orchestrationOf, orchestratorOf } from "./orchestration";
 import { announceRole } from "./orchestratorBrief";
 import { useStore } from "../store";
-import type { Workspace } from "../types";
+import type { AgentId, PaneRole, Workspace } from "../types";
+import type { AgentActivity } from "./agentState";
+import type { Locale } from "../i18n";
 import type { StoreValue } from "../store";
 
 /**
@@ -45,6 +47,83 @@ export function pinRefusal(
   if (pane.agent !== "claude") return "notClaude";
   if (orchestratorOf(ws)) return "taken";
   return null;
+}
+
+/**
+ * A Claude Code pane that is given a role while it runs keeps the session it
+ * started with, whose `--mcp-config` (Hangar's server: the board, memory and
+ * `worker_*` tools) was only added at launch to panes that had a role then.
+ * Hangar restarts it on the same conversation (`--resume`); the decision is
+ * made here, from plain values, and acted on by the pane.
+ */
+export type RoleRestart =
+  /** Nothing to do: not Claude Code, no role, it has the server, or it started with the role. */
+  | "skip"
+  /** In the middle of a turn: wait for it to end. */
+  | "wait"
+  /** Restart now. */
+  | "now"
+  /** It lacks the server but has no conversation to resume: a restart would lose it. */
+  | "unresumable";
+
+export interface RoleRestartInput {
+  agent: AgentId;
+  /** The role the pane has now. */
+  role: PaneRole | undefined;
+  /** The role it was launched with: a role from the start means the server was added. */
+  launchedRole: PaneRole | undefined;
+  /** `PaneMcp.hangar` of this launch; undefined when it was not recorded. */
+  hangar: boolean | undefined;
+  /** The pane is running a turn, or waiting for an answer inside one. */
+  midTurn: boolean;
+  sessionId: string | null;
+}
+
+/** Whether the pane is inside a turn, as its activity says. */
+export const isMidTurn = (activity: AgentActivity) => activity === "working" || activity === "waiting";
+
+export function roleRestart(input: RoleRestartInput): RoleRestart {
+  if (input.agent !== "claude") return "skip";
+  if (!input.role || input.launchedRole) return "skip";
+  // Only a launch known to have gone without the server: unknown is left alone.
+  if (input.hangar !== false) return "skip";
+  if (input.midTurn) return "wait";
+  return input.sessionId ? "now" : "unresumable";
+}
+
+const RESTART_TEXT = {
+  en: {
+    restarting: "Hangar is restarting this pane on the same conversation to give it Hangar's tools.",
+    failed:
+      "Hangar could not restart this pane, so it has its role but not Hangar's tools: restart it yourself (it resumes the conversation).",
+    unresumable:
+      "This pane has no saved conversation to resume, so Hangar did not restart it: it has its role but not Hangar's tools until you restart it.",
+  },
+  fr: {
+    restarting:
+      "Hangar relance ce panneau sur la même conversation pour lui donner les outils Hangar.",
+    failed:
+      "Hangar n'a pas pu relancer ce panneau : il a son rôle mais pas les outils Hangar. Relancez-le vous-même (il reprend la conversation).",
+    unresumable:
+      "Ce panneau n'a pas de conversation enregistrée à reprendre, Hangar ne l'a donc pas relancé : il a son rôle mais pas les outils Hangar tant que vous ne le relancez pas.",
+  },
+} as const;
+
+export const roleRestartText = (locale: Locale, key: keyof (typeof RESTART_TEXT)["en"]) =>
+  RESTART_TEXT[locale][key];
+
+/**
+ * The line a restart leaves for the pane that replaces it: the restart gives
+ * the pane a new id, so the old terminal's line is gone with it. Keyed by the
+ * conversation, which the new pane resumes.
+ */
+const restartNotes = new Map<string, string>();
+export const queueRestartNote = (sessionId: string, note: string) => void restartNotes.set(sessionId, note);
+export function takeRestartNote(sessionId: string | null): string | null {
+  if (!sessionId) return null;
+  const note = restartNotes.get(sessionId) ?? null;
+  restartNotes.delete(sessionId);
+  return note;
 }
 
 /** Whether the workspace can have an orchestrator created in it. */
