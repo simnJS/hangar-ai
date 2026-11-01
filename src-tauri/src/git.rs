@@ -149,12 +149,50 @@ fn diagnostic(stderr: &[u8]) -> String {
 /// forward slashes there while a path typed by the user arrives in backslashes.
 /// Comparing the two literally would report that nobody is standing in any
 /// worktree at all.
+///
+/// Both sides are first resolved to the spelling the file system itself gives
+/// the directory (`/var` → `/private/var` on macOS, `RUNNER~1` → `runneradmin`
+/// on Windows, a junction or symbolic link → its target). git and the panes do
+/// not always spell a folder the same way, and a literal comparison would
+/// refuse a sweep or miss a held worktree.
 fn compare_key(path: &str) -> String {
+    let resolved = resolve_path(path);
     #[cfg(windows)]
-    let key = path.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let key = resolved
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase();
     #[cfg(not(windows))]
-    let key = path.trim_end_matches('/').to_string();
+    let key = resolved.trim_end_matches('/').to_string();
     key
+}
+
+/// `path` with its deepest existing ancestor canonicalised and the rest, which
+/// may not exist (yet, or any more), appended unchanged. A path that cannot be
+/// resolved at all comes back as it was.
+fn resolve_path(path: &str) -> String {
+    let given = Path::new(path);
+    if !given.has_root() {
+        return path.to_string();
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut base = given.to_path_buf();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(&base) {
+            let mut real = strip_verbatim(real);
+            for part in tail.iter().rev() {
+                real.push(part);
+            }
+            return display(&real);
+        }
+        match (base.file_name().map(|name| name.to_owned()), base.parent()) {
+            (Some(name), Some(parent)) => {
+                tail.push(name);
+                base = parent.to_path_buf();
+            }
+            _ => return path.to_string(),
+        }
+    }
 }
 
 /// Drops the `\\?\` Windows verbatim prefix `fs::canonicalize` adds.
@@ -1108,7 +1146,11 @@ fn remove_worktree(
                 }),
                 Err(Sweep::Held(held)) => Err(held),
                 Err(Sweep::Refused(refusal)) => {
-                    if message.to_lowercase().contains("is not a working tree") {
+                    let lowered = message.to_lowercase();
+                    if lowered.contains("is not a working tree")
+                        || (lowered.contains("cannot remove working tree")
+                            && lowered.contains(".git does not exist"))
+                    {
                         Err(refusal)
                     } else {
                         Err(message)
@@ -2838,6 +2880,9 @@ mod tests {
         git(&main, &["config", "user.email", "t@example.com"]);
         git(&main, &["config", "user.name", "T"]);
         git(&main, &["config", "commit.gpgsign", "false"]);
+        // The tests compare contents byte for byte: a machine's own autocrlf
+        // must not rewrite the line endings on the way through stash.
+        git(&main, &["config", "core.autocrlf", "false"]);
         write(&main, "a.txt", "one\n");
         write(&main, "b.txt", "bee\n");
         git(&main, &["add", "."]);
@@ -3894,6 +3939,35 @@ mod tests {
         assert!(matches!(go(&other), Err(Sweep::Refused(_))));
         assert!(other.join(".git").is_dir());
         assert!(elsewhere.join("x.txt").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_link_to_the_worktrees_folder_is_followed_and_a_link_out_of_it_is_not() {
+        let (root, main, linked) = laid_out("via-link");
+        git(
+            &main,
+            &["worktree", "remove", "--force", linked.to_str().unwrap()],
+        );
+        write(&linked, "left.txt", "left");
+        // The same folder reached through a link spells differently but is inside.
+        let alias = root.join("alias");
+        link_dir(&root.join("repo-worktrees"), &alias);
+        sweep_leftovers(&main, &alias.join("w"), 1, Duration::ZERO).expect("swept via link");
+        assert!(!linked.exists());
+
+        // A folder outside the worktrees folder stays refused, link or not.
+        let elsewhere = root.join("elsewhere");
+        write(&elsewhere, "x.txt", "x");
+        let sneaky = root.join("repo-worktrees").join("sneaky");
+        link_dir(&elsewhere, &sneaky);
+        assert!(matches!(
+            sweep_leftovers(&main, &sneaky, 1, Duration::ZERO),
+            Err(Sweep::Refused(_))
+        ));
+        assert!(elsewhere.join("x.txt").is_file());
+        let _ = std::fs::remove_dir_all(&alias);
+        let _ = std::fs::remove_dir_all(&sneaky);
         let _ = std::fs::remove_dir_all(&root);
     }
 
