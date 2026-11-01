@@ -134,7 +134,7 @@ function scenery(now: number, locale: Locale) {
     workspaceId: string,
     id: string,
     name: string,
-    role: string | null,
+    role: Pane["role"],
     activity: Activity | null,
     body: string[],
     agent = "claude",

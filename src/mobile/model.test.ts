@@ -15,7 +15,7 @@ import {
   waitingKey,
 } from "./model";
 
-const pane = (id: string, name: string, role: string | null, activity: Pane["activity"]): Pane => ({
+const pane = (id: string, name: string, role: Pane["role"], activity: Pane["activity"]): Pane => ({
   id,
   name,
   agent: "claude",
