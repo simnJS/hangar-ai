@@ -45,6 +45,22 @@ export const en = {
   "worktrees.cleanupBranchesDone_one": "{n} branch deleted",
   "worktrees.cleanupBranchesDone_other": "{n} branches deleted",
   "worktrees.cleanupBack": "Back to the list",
+  "worktrees.migrate": "Bring changes back",
+  "worktrees.migrateHint": "Moves this worktree's uncommitted changes into the main checkout",
+  "worktrees.migrateConfirm": "Confirm?",
+  "worktrees.migrateWarn":
+    "This empties the uncommitted changes of this worktree and applies them in the main checkout. Staged files come across as plain changes.",
+  "worktrees.migrateCancel": "Cancel",
+  "worktrees.migrateDone": "Changes brought back to the main checkout.",
+  "worktrees.migrateNothing": "This worktree has no uncommitted change.",
+  "worktrees.migrateConflict":
+    "Modified both here and in the main checkout, nothing was moved:",
+  "worktrees.migrateMore_one": "and {n} more",
+  "worktrees.migrateMore_other": "and {n} more",
+  "worktrees.migrateFailed":
+    "The changes could not be applied in the main checkout. Nothing is lost: they are kept in a stash. Get them back with: git stash apply {stash}",
+  "worktrees.migrateDropFailed":
+    "Changes brought back, but their stash could not be dropped. It is harmless; remove it with git stash drop when you want.",
 };
 
 export const fr: Record<keyof typeof en, string> = {
@@ -82,4 +98,20 @@ export const fr: Record<keyof typeof en, string> = {
   "worktrees.cleanupBranchesDone_one": "{n} branche supprimée",
   "worktrees.cleanupBranchesDone_other": "{n} branches supprimées",
   "worktrees.cleanupBack": "Retour à la liste",
+  "worktrees.migrate": "Rapatrier les changements",
+  "worktrees.migrateHint": "Déplace les changements non commités de ce worktree vers le checkout principal",
+  "worktrees.migrateConfirm": "Confirmer ?",
+  "worktrees.migrateWarn":
+    "Cela vide les changements non commités de ce worktree et les applique dans le checkout principal. Les fichiers indexés arrivent comme de simples modifications.",
+  "worktrees.migrateCancel": "Annuler",
+  "worktrees.migrateDone": "Changements rapatriés dans le checkout principal.",
+  "worktrees.migrateNothing": "Ce worktree n'a aucun changement non commité.",
+  "worktrees.migrateConflict":
+    "Modifiés ici et dans le checkout principal, rien n'a été déplacé :",
+  "worktrees.migrateMore_one": "et {n} autre",
+  "worktrees.migrateMore_other": "et {n} autres",
+  "worktrees.migrateFailed":
+    "Les changements n'ont pas pu être appliqués dans le checkout principal. Rien n'est perdu : ils sont gardés dans un stash. Pour les récupérer : git stash apply {stash}",
+  "worktrees.migrateDropFailed":
+    "Changements rapatriés, mais leur stash n'a pas pu être supprimé. Il est sans danger ; retirez-le avec git stash drop quand vous voulez.",
 };

@@ -153,6 +153,30 @@ export const gitWorktreeAdd = (args: {
 export const gitWorktreeRemove = (path: string, worktreePath: string, force: boolean) =>
   invoke<RemoveResult>("git_worktree_remove", { path, worktreePath, force });
 
+export interface MigrateResult {
+  /**
+   * `moved`; `nothing` (no uncommitted change in the worktree); `conflict` (a
+   * path is modified on both sides — nothing was touched); `applyFailed` (the
+   * work is safe in the kept stash).
+   */
+  outcome: "moved" | "nothing" | "conflict" | "applyFailed";
+  /** The first paths modified on both sides — `conflict` only. */
+  files: string[];
+  /** How many more paths than `files` lists. */
+  more: number;
+  /** The kept stash commit: `git stash apply <stash>` gets the work back. */
+  stash: string | null;
+  message: string | null;
+}
+
+/**
+ * Stashes the worktree's uncommitted work (index, tracked, untracked) and
+ * applies it in the main checkout. Staged state is not kept. Expected refusals
+ * resolve as an `outcome`; only a git that cannot run rejects.
+ */
+export const gitWorktreeMigrate = (path: string, worktreePath: string) =>
+  invoke<MigrateResult>("git_worktree_migrate", { path, worktreePath });
+
 /** Forgets the worktrees whose folder is gone. */
 export const gitWorktreePrune = (path: string) =>
   invoke<void>("git_worktree_prune", { path });
