@@ -496,6 +496,21 @@ pub struct MergedWorktree {
     /// Files with uncommitted changes, untracked ones included. None when git
     /// could not say — treated as unknown, never as clean.
     pub dirty: Option<u32>,
+    /// Its head is the main checkout's: the branch has no commit of its own.
+    /// git calls that merged, but it is as likely a worker that just started.
+    pub no_own_commit: bool,
+    /// A pane of Hangar is open in it.
+    pub held: bool,
+    /// What the UI ticks by default: merged with something to show for it,
+    /// clean, unlocked, and nobody working in it. Everything else is listed,
+    /// with the reason, and left to the person to tick.
+    pub preselected: bool,
+}
+
+impl MergedWorktree {
+    fn is_preselected(&self) -> bool {
+        self.locked.is_none() && self.dirty == Some(0) && !self.no_own_commit && !self.held
+    }
 }
 
 /// The branch names `git branch --merged` lists as checked out in another
@@ -518,7 +533,15 @@ fn merged_in_other_worktrees(listing: &str) -> HashSet<String> {
 /// a bare or detached entry (no branch to judge), nor one whose folder is gone
 /// (`prune` is the tool for those). Locks and dirtiness are carried, not
 /// filtered: the person sees why a worktree is held back.
-fn merged_candidates(worktrees: &[Worktree], merged: &HashSet<String>) -> Vec<MergedWorktree> {
+fn merged_candidates(
+    worktrees: &[Worktree],
+    merged: &HashSet<String>,
+    held: &[String],
+) -> Vec<MergedWorktree> {
+    let main_head = worktrees
+        .iter()
+        .find(|worktree| worktree.is_main)
+        .and_then(|worktree| worktree.head.as_deref());
     worktrees
         .iter()
         .filter(|worktree| {
@@ -535,6 +558,11 @@ fn merged_candidates(worktrees: &[Worktree], merged: &HashSet<String>) -> Vec<Me
                 branch: branch.clone(),
                 locked: worktree.locked.clone(),
                 dirty: None,
+                no_own_commit: main_head.is_some() && worktree.head.as_deref() == main_head,
+                held: held
+                    .iter()
+                    .any(|folder| compare_key(folder) == compare_key(&worktree.path)),
+                preselected: false,
             })
         })
         .collect()
@@ -549,7 +577,7 @@ fn dirty_files(worktree: &str) -> Option<u32> {
     .map(|out| out.lines().filter(|line| !line.trim().is_empty()).count() as u32)
 }
 
-fn merged_worktrees(dir: &Path) -> Result<Vec<MergedWorktree>, GitError> {
+fn merged_worktrees(dir: &Path, held: &[String]) -> Result<Vec<MergedWorktree>, GitError> {
     let worktrees = list_worktrees(dir)?;
     // Judged against the main checkout's HEAD, wherever the panel was opened
     // from: from a linked worktree, `--merged` would compare to its own branch.
@@ -560,16 +588,20 @@ fn merged_worktrees(dir: &Path) -> Result<Vec<MergedWorktree>, GitError> {
     let base = main.as_deref().map(Path::new).unwrap_or(dir);
     let merged = merged_in_other_worktrees(&run_git(base, &["branch", "--merged"])?);
 
-    let mut found = merged_candidates(&worktrees, &merged);
+    let mut found = merged_candidates(&worktrees, &merged, held);
     for entry in &mut found {
         entry.dirty = dirty_files(&entry.path);
+        entry.preselected = entry.is_preselected();
     }
     Ok(found)
 }
 
 #[tauri::command]
-pub async fn git_worktrees_merged(path: String) -> Result<Vec<MergedWorktree>, String> {
-    off_thread(move || Ok(merged_worktrees(Path::new(&path))?)).await
+pub async fn git_worktrees_merged(
+    path: String,
+    held_folders: Vec<String>,
+) -> Result<Vec<MergedWorktree>, String> {
+    off_thread(move || Ok(merged_worktrees(Path::new(&path), &held_folders)?)).await
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2511,6 +2543,7 @@ mod tests {
                 unmerged,
             ],
             &merged,
+            &[],
         );
         let paths: Vec<_> = picked.iter().map(|w| w.path.as_str()).collect();
         assert_eq!(paths, ["/r-a", "/r-f"]);
@@ -2573,7 +2606,7 @@ mod tests {
         assert!(fixture_git(&dir, &["merge", "-q", "--ff-only", "landed"]));
         assert!(fixture_git(&dir, &["branch", "plain"]));
 
-        let list = merged_worktrees(&dir).expect("merged");
+        let list = merged_worktrees(&dir, &[]).expect("merged");
         // `plain` is merged but has no worktree; `main` is the main checkout.
         assert_eq!(found(&list), ["fresh", "landed"]);
         assert!(list
@@ -2589,7 +2622,7 @@ mod tests {
             return;
         };
         // Judged against main either way, but the current one drops out.
-        let list = merged_worktrees(&paths[0]).expect("merged");
+        let list = merged_worktrees(&paths[0], &[]).expect("merged");
         assert_eq!(found(&list), ["two"]);
         cleanup(&dir, &paths);
     }
@@ -2606,7 +2639,7 @@ mod tests {
             &["worktree", "lock", "--reason", "mine", &held]
         ));
 
-        let list = merged_worktrees(&dir).expect("merged");
+        let list = merged_worktrees(&dir, &[]).expect("merged");
         let held = list.iter().find(|w| w.branch == "held").expect("held");
         assert_eq!(held.locked.as_deref(), Some("mine"));
         let free = list.iter().find(|w| w.branch == "free").expect("free");
@@ -2623,7 +2656,7 @@ mod tests {
         write(&paths[0], "scratch.txt", "mine");
         write(&paths[0], "notes/a.txt", "mine");
 
-        let list = merged_worktrees(&dir).expect("merged");
+        let list = merged_worktrees(&dir, &[]).expect("merged");
         let messy = list.iter().find(|w| w.branch == "messy").expect("messy");
         assert_eq!(messy.dirty, Some(2));
         let tidy = list.iter().find(|w| w.branch == "tidy").expect("tidy");
@@ -2638,6 +2671,60 @@ mod tests {
             other => panic!("expected a refusal, got {other:?}"),
         }
         assert!(paths[0].join("scratch.txt").exists());
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn a_fresh_worktree_at_the_head_of_main_is_not_preselected() {
+        let Some((dir, paths)) = repo_with_worktrees("fresh-only", &[("started", false)]) else {
+            return;
+        };
+        let list = merged_worktrees(&dir, &[]).expect("merged");
+        assert_eq!(found(&list), ["started"]);
+        assert!(list[0].no_own_commit);
+        assert!(!list[0].preselected);
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn only_a_clean_free_worktree_with_commits_of_its_own_is_preselected() {
+        let Some((dir, paths)) = repo_with_worktrees(
+            "preselect",
+            &[
+                ("good", true),
+                ("open", true),
+                ("messy", true),
+                ("held", true),
+            ],
+        ) else {
+            return;
+        };
+        for branch in ["good", "open", "messy", "held"] {
+            assert!(fixture_git(&dir, &["merge", "-q", "--no-edit", branch]));
+        }
+        // Main moves on, so no head is main's any more.
+        write(
+            &dir,
+            "later.txt",
+            "x
+",
+        );
+        assert!(fixture_git(&dir, &["add", "."]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "later"]));
+        write(&paths[2], "scratch.txt", "mine");
+        let held = paths[3].to_string_lossy().into_owned();
+        assert!(fixture_git(&dir, &["worktree", "lock", &held]));
+        // A pane is open in `open`; the spelling differs from git's on purpose.
+        let pane = paths[1].to_string_lossy().replace('\\', "/");
+
+        let list = merged_worktrees(&dir, &[pane]).expect("merged");
+        let by = |branch: &str| list.iter().find(|w| w.branch == branch).expect(branch);
+        assert!(list.iter().all(|w| !w.no_own_commit));
+        assert!(by("good").preselected);
+        assert!(by("open").held && !by("open").preselected);
+        assert_eq!(by("messy").dirty, Some(1));
+        assert!(!by("messy").preselected);
+        assert!(by("held").locked.is_some() && !by("held").preselected);
         cleanup(&dir, &paths);
     }
 }

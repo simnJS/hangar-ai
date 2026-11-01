@@ -15,7 +15,9 @@ import {
   gitWorktreePrune,
   gitWorktreeRemove,
   gitWorktreeUnlock,
+  gitWorktreesMerged,
   type Branch,
+  type MergedWorktree,
   type RepoInfo,
   type Worktree,
 } from "../lib/git";
@@ -117,6 +119,24 @@ function relativeAge(t: Translator, seconds: number): string {
   return t("worktrees.ageWeek", { n: Math.floor(days / 7) });
 }
 
+/** The end-of-cycle cleanup: what is on offer, what is ticked, how it went. */
+interface Cleanup {
+  /** null while git is still being asked. */
+  items: MergedWorktree[] | null;
+  selected: Set<string>;
+  /** The inline « are you sure », armed by the first click. */
+  confirming: boolean;
+  /** Refused without force (dirty): git's reason, one confirmation per row. */
+  forced: { item: MergedWorktree; message: string | null }[];
+  failed: { item: MergedWorktree; message: string }[];
+  removed: number;
+  /** Branches the removals left with no worktree, offered for deletion. */
+  branches: string[];
+  /** The branches git said are not fully merged: a second, explicit question. */
+  branchesForce: boolean;
+  branchesDeleted: number;
+}
+
 /** What `create` is about to ask git for, once the selection is resolved. */
 interface Plan {
   branch: string;
@@ -164,6 +184,8 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
   const [copyUntracked, setCopyUntracked] = useState(true);
   /** The worktree whose changes are on screen, in place of the panel. */
   const [diffFor, setDiffFor] = useState<Worktree | null>(null);
+  /** The cleanup of merged worktrees; null while it is closed. */
+  const [cleanup, setCleanup] = useState<Cleanup | null>(null);
   const t = useT();
 
   const timer = useRef<number | null>(null);
@@ -377,6 +399,169 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     }
     return map;
   }, [state.workspaces]);
+
+  async function openCleanup() {
+    setError(null);
+    setCleanup({
+      items: null,
+      selected: new Set(),
+      confirming: false,
+      forced: [],
+      failed: [],
+      removed: 0,
+      branches: [],
+      branchesForce: false,
+      branchesDeleted: 0,
+    });
+    try {
+      // Every folder a pane of Hangar is open in: an agent may be working there.
+      const held: string[] = [];
+      for (const ws of state.workspaces) {
+        held.push(ws.cwd);
+        for (const pane of ws.panes) if (pane.cwd) held.push(pane.cwd);
+      }
+      const items = await gitWorktreesMerged(cwd, held);
+      setCleanup(
+        (c) =>
+          c && {
+            ...c,
+            items,
+            selected: new Set(items.filter((i) => i.preselected).map((i) => i.path)),
+          },
+      );
+    } catch (err) {
+      setError(String(err));
+      setCleanup(null);
+    }
+  }
+
+  function toggleCleanup(path: string) {
+    setCleanup((c) => {
+      if (!c) return c;
+      const selected = new Set(c.selected);
+      if (!selected.delete(path)) selected.add(path);
+      return { ...c, selected, confirming: false };
+    });
+  }
+
+  /**
+   * Removes the ticked worktrees one after the other, without force: a dirty
+   * one comes back as `needsForce` and waits for its own confirmation, a failure
+   * is gathered rather than stopping the batch. The main checkout, the current
+   * worktree and the locked ones never get here — they are not on offer, or not
+   * tickable.
+   */
+  async function runCleanup() {
+    if (!cleanup?.items) return;
+    const todo = cleanup.items.filter(
+      (item) => cleanup.selected.has(item.path) && item.locked === null,
+    );
+    setBusy("cleanup");
+    setError(null);
+    const forced: Cleanup["forced"] = [];
+    const failed: Cleanup["failed"] = [];
+    const gone = new Set<string>();
+    const branches: string[] = [];
+    for (const item of todo) {
+      try {
+        const result = await gitWorktreeRemove(cwd, item.path, false);
+        if (result.removed) {
+          gone.add(item.path);
+          branches.push(item.branch);
+        } else if (result.needsForce) forced.push({ item, message: result.message });
+        else failed.push({ item, message: result.message ?? "" });
+      } catch (err) {
+        failed.push({ item, message: String(err) });
+      }
+    }
+    setBusy(null);
+    const fresh = await load();
+    // Only the branches git no longer ties to a worktree can be offered.
+    const orphans = branches.filter((name) =>
+      fresh?.branches.some(
+        (entry) =>
+          entry.kind === "local" && entry.name === name && entry.worktreePath === null,
+      ),
+    );
+    setCleanup(
+      (c) =>
+        c && {
+          ...c,
+          items: c.items?.filter((i) => !gone.has(i.path)) ?? null,
+          selected: new Set(),
+          confirming: false,
+          forced,
+          failed,
+          removed: c.removed + gone.size,
+          branches: orphans,
+          branchesForce: false,
+        },
+    );
+  }
+
+  /** The forced removal of one dirty worktree, after its own confirmation. */
+  async function forceCleanup(item: MergedWorktree) {
+    setBusy(`cleanup:${item.path}`);
+    setError(null);
+    let failure: string | null = null;
+    try {
+      const result = await gitWorktreeRemove(cwd, item.path, true);
+      if (!result.removed) failure = result.message ?? "";
+    } catch (err) {
+      failure = String(err);
+    }
+    setBusy(null);
+    const fresh = await load();
+    setCleanup((c) => {
+      if (!c) return c;
+      const forced = c.forced.filter((f) => f.item.path !== item.path);
+      if (failure !== null)
+        return { ...c, forced, failed: [...c.failed, { item, message: failure }] };
+      const orphan = fresh?.branches.some(
+        (entry) =>
+          entry.kind === "local" &&
+          entry.name === item.branch &&
+          entry.worktreePath === null,
+      );
+      return {
+        ...c,
+        forced,
+        items: c.items?.filter((i) => i.path !== item.path) ?? null,
+        removed: c.removed + 1,
+        branches: orphan ? [...c.branches, item.branch] : c.branches,
+      };
+    });
+  }
+
+  /** `-d` for all; the ones git calls not fully merged are asked about again. */
+  async function deleteCleanupBranches(force: boolean) {
+    if (!cleanup) return;
+    setBusy("cleanup:branches");
+    setError(null);
+    const left: string[] = [];
+    let deleted = 0;
+    for (const name of cleanup.branches) {
+      try {
+        const result = await gitBranchDelete(cwd, name, force);
+        if (result.deleted) deleted += 1;
+        else if (result.needsForce) left.push(name);
+        else setError(result.message);
+      } catch (err) {
+        setError(String(err));
+      }
+    }
+    setBusy(null);
+    await load();
+    setCleanup(
+      (c) =>
+        c && {
+          ...c,
+          branches: left,
+          branchesForce: left.length > 0,
+          branchesDeleted: c.branchesDeleted + deleted,
+        },
+    );
+  }
 
   function openInPane(target: string) {
     if (addPane(workspaceId, { cwd: target }) === null) {
@@ -882,6 +1067,205 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                     </button>
                   </div>
                 )}
+
+                {cleanup && (
+                  <div className="wt__cleanup">
+                    <h3>{t("worktrees.cleanupTitle")}</h3>
+                    {cleanup.items === null && (
+                      <p className="modal__empty">{t("worktrees.cleanupLoading")}</p>
+                    )}
+                    {cleanup.items !== null && cleanup.items.length === 0 && cleanup.removed === 0 && (
+                      <p className="modal__empty">{t("worktrees.cleanupNone")}</p>
+                    )}
+                    {cleanup.items !== null && cleanup.items.length > 0 && (
+                      <>
+                        <p className="form-hint form-hint--block">
+                          {t("worktrees.cleanupIntro")}
+                        </p>
+                        {cleanup.items.map((item) => {
+                          const heldBy = item.held
+                            ? (openWorktrees.get(normalize(item.path)) ?? "")
+                            : null;
+                          return (
+                            <label
+                              key={item.path}
+                              className="wt__check"
+                              title={
+                                item.locked !== null
+                                  ? t("worktrees.cleanupLockedHint")
+                                  : item.path
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                className="check"
+                                checked={cleanup.selected.has(item.path)}
+                                disabled={busy !== null || item.locked !== null}
+                                onChange={() => toggleCleanup(item.path)}
+                              />
+                              <span className="wt__branch">{item.branch}</span>
+                              <span className="target__path">{shortenPath(item.path)}</span>
+                              {item.locked !== null && (
+                                <em className="target__badge target__badge--alert">
+                                  {t("worktrees.locked")}
+                                </em>
+                              )}
+                              {item.noOwnCommit && (
+                                <em
+                                  className="target__badge target__badge--muted"
+                                  title={t("worktrees.cleanupNoOwnCommitHint")}
+                                >
+                                  {t("worktrees.cleanupNoOwnCommit")}
+                                </em>
+                              )}
+                              {heldBy !== null && (
+                                <em
+                                  className="target__badge target__badge--alert"
+                                  title={t("worktrees.cleanupHeldHint")}
+                                >
+                                  {t("worktrees.cleanupHeld", { name: heldBy })}
+                                </em>
+                              )}
+                              {item.dirty === null && (
+                                <em className="target__badge target__badge--alert">
+                                  {t("worktrees.cleanupDirtyUnknown")}
+                                </em>
+                              )}
+                              {item.dirty !== null && item.dirty > 0 && (
+                                <em className="target__badge target__badge--alert">
+                                  {t("worktrees.cleanupDirty", { n: item.dirty })}
+                                </em>
+                              )}
+                            </label>
+                          );
+                        })}
+
+                        {(() => {
+                          const picked = cleanup.items.filter((i) =>
+                            cleanup.selected.has(i.path),
+                          );
+                          const dirty = picked.filter((i) => i.dirty !== 0).length;
+                          return (
+                            <div className="notice wt__orphan">
+                              {cleanup.confirming && dirty > 0 && (
+                                <span className="notice__text">
+                                  {t("worktrees.cleanupConfirmDirty", { n: dirty })}
+                                </span>
+                              )}
+                              <button
+                                className="btn btn--tiny btn--danger"
+                                disabled={busy !== null || picked.length === 0}
+                                onClick={() => {
+                                  // Inline, as everywhere in this panel: a native
+                                  // dialog would block the terminals' event loop.
+                                  if (cleanup.confirming) void runCleanup();
+                                  else setCleanup({ ...cleanup, confirming: true });
+                                }}
+                              >
+                                {busy === "cleanup"
+                                  ? t("worktrees.cleanupRemoving")
+                                  : t(
+                                      cleanup.confirming
+                                        ? "worktrees.cleanupConfirm"
+                                        : "worktrees.cleanupRemove",
+                                      { n: picked.length },
+                                    )}
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+
+                    {cleanup.removed > 0 && (
+                      <p className="form-hint form-hint--block">
+                        {t("worktrees.cleanupRemoved", { n: cleanup.removed })}
+                      </p>
+                    )}
+
+                    {cleanup.forced.length > 0 && (
+                      <div className="notice notice--error wt__blocked">
+                        <span className="notice__text">
+                          {t("worktrees.cleanupNeedsForce")}
+                        </span>
+                        {cleanup.forced.map(({ item, message }) => (
+                          <div key={item.path}>
+                            <span className="notice__text" title={message ?? undefined}>
+                              {item.branch}: {message}
+                            </span>
+                            {!/locked/i.test(message ?? "") && (
+                              <button
+                                className="btn btn--tiny btn--danger"
+                                disabled={busy !== null}
+                                onClick={() => void forceCleanup(item)}
+                              >
+                                {t("worktrees.force")}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {cleanup.failed.length > 0 && (
+                      <div className="notice notice--error">
+                        <span className="notice__text">{t("worktrees.cleanupFailed")}</span>
+                        {cleanup.failed.map(({ item, message }) => (
+                          <span key={item.path} className="notice__text">
+                            {item.branch}: {message}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {cleanup.branches.length > 0 && (
+                      <div
+                        className={`notice wt__orphan ${
+                          cleanup.branchesForce ? "notice--error" : ""
+                        }`}
+                      >
+                        <span className="notice__text">
+                          {cleanup.branchesForce
+                            ? t("worktrees.cleanupBranchesForce")
+                            : t("worktrees.cleanupBranches")}{" "}
+                          {cleanup.branches.join(", ")}
+                        </span>
+                        <button
+                          className="btn btn--tiny btn--danger"
+                          disabled={busy !== null}
+                          onClick={() => void deleteCleanupBranches(cleanup.branchesForce)}
+                        >
+                          {cleanup.branchesForce
+                            ? t("worktrees.orphanForce")
+                            : t("worktrees.cleanupBranchesDelete")}
+                        </button>
+                        <button
+                          className="btn btn--tiny"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            setCleanup({ ...cleanup, branches: [], branchesForce: false })
+                          }
+                        >
+                          {t("worktrees.cleanupBranchesKeep")}
+                        </button>
+                      </div>
+                    )}
+
+                    {cleanup.branchesDeleted > 0 && (
+                      <p className="form-hint form-hint--block">
+                        {t("worktrees.cleanupBranchesDone", { n: cleanup.branchesDeleted })}
+                      </p>
+                    )}
+
+                    <button
+                      className="btn btn--tiny"
+                      disabled={busy !== null}
+                      onClick={() => setCleanup(null)}
+                    >
+                      {t("worktrees.cleanupBack")}
+                    </button>
+                  </div>
+                )}
               </section>
 
               {/* Laid out like every other dialog's form: labels right-aligned
@@ -1082,6 +1466,14 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
               onClick={() => void prune()}
             >
               {t("worktrees.prune")}
+            </button>
+            <button
+              className="btn btn--ghost"
+              title={t("worktrees.cleanupHint")}
+              disabled={busy !== null || loading || cleanup !== null}
+              onClick={() => void openCleanup()}
+            >
+              {t("worktrees.cleanup")}
             </button>
             <button
               className="btn btn--ghost"

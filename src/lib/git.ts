@@ -39,6 +39,12 @@ export interface MergedWorktree {
   locked: string | null;
   /** Files with uncommitted changes; null when git could not say. */
   dirty: number | null;
+  /** Its head is the main checkout's — as likely a worker that just started. */
+  noOwnCommit: boolean;
+  /** A pane of Hangar is open in it. */
+  held: boolean;
+  /** What to tick by default: clean, unlocked, not held, with commits of its own. */
+  preselected: boolean;
 }
 
 export interface Branch {
@@ -122,10 +128,11 @@ export const gitWorktreeList = (path: string) =>
  * The cleanup candidates: linked worktrees whose branch `git branch --merged`
  * lists. Never the main checkout, the worktree `path` is in, or a bare,
  * detached or orphaned entry. Locked and dirty ones are listed, flagged, so the
- * UI can say why it holds them back.
+ * UI can say why it holds them back. `heldFolders` are the folders where a pane
+ * of Hangar is open; those are never preselected.
  */
-export const gitWorktreesMerged = (path: string) =>
-  invoke<MergedWorktree[]>("git_worktrees_merged", { path });
+export const gitWorktreesMerged = (path: string, heldFolders: string[]) =>
+  invoke<MergedWorktree[]>("git_worktrees_merged", { path, heldFolders });
 
 /**
  * Local and remote branches, each with the worktree already holding it, sorted
