@@ -837,13 +837,17 @@ export async function stopWorker(
         await removeWorktree(ws, path, deps);
         worktree.removed = true;
       } catch (err) {
-        worktree.kept = `git could not remove it (${messageOf(err)}); the person can from the worktree panel`;
+        // Already one plain line naming what holds it: say it as it is.
+        worktree.kept = `${messageOf(err).replace(/\s+/g, " ").trim()} The person can finish from the worktree panel.`;
       }
       if (worktree.removed && tree.branch) {
         worktree.branchDeleted = await workers
           .branchDelete(ws.cwd, tree.branch, true)
           .then((result) => result.deleted)
           .catch(() => false);
+        if (!worktree.branchDeleted) {
+          worktree.kept = `the worktree is gone, but the branch ${tree.branch} could not be deleted`;
+        }
       }
     }
   }

@@ -139,6 +139,9 @@ function world(
     repo?: "none" | "detached" | "noGit";
     /** What the postCreate command answers; passes when absent. */
     hook?: HookReport | "throws";
+    /** What removing the worktree throws, or the branch deletion answers. */
+    remove?: string;
+    branchKept?: boolean;
   } = {};
   let next = 10;
 
@@ -207,6 +210,7 @@ function world(
     },
     worktreeRemove: async (_path, worktreePath, force) => {
       log.push(`unworktree:${worktreePath}:${force}`);
+      if (fail.remove) throw fail.remove;
       folders.delete(worktreePath);
       const at = trees.findIndex((tree) => tree.path === worktreePath.replace(/\\/g, "/"));
       if (at >= 0) trees.splice(at, 1);
@@ -219,6 +223,7 @@ function world(
     },
     branchDelete: async (_path, branch, force) => {
       log.push(`unbranch:${branch}:${force}`);
+      if (fail.branchKept) return { deleted: false, needsForce: false, message: "checked out" };
       branches.delete(branch);
       return { deleted: true, needsForce: false, message: null };
     },
@@ -774,6 +779,25 @@ describe("worker_stop", () => {
     const stopped = await app.call("worker_stop", { worker: "Mia" });
     expect(stopped.worktree.kept).toMatch(/hangar\/one-t1 has 2 commit\(s\) that main does not/);
     expect(app.branches.has("hangar/one-t1")).toBe(true);
+  });
+
+  it("says in one plain line what holds a worktree that would not go", async () => {
+    const { app } = await started();
+    app.fail.remove = "C:/wt/node_modules/x.node cannot be removed, a program still uses it.";
+
+    const stopped = await app.call("worker_stop", { worker: "Mia" });
+    expect(stopped.worktree).toMatchObject({ removed: false, branchDeleted: false });
+    expect(stopped.worktree.kept).toContain("x.node cannot be removed");
+    expect(stopped.worktree.kept).not.toMatch(/not a working tree|\n/);
+  });
+
+  it("does not claim the branch went when it did not", async () => {
+    const { app } = await started();
+    app.fail.branchKept = true;
+
+    const stopped = await app.call("worker_stop", { worker: "Mia" });
+    expect(stopped.worktree).toMatchObject({ removed: true, branchDeleted: false });
+    expect(stopped.worktree.kept).toMatch(/branch hangar\/one-t1 could not be deleted/);
   });
 
   it("keeps the worktree when asked to", async () => {

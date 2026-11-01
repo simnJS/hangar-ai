@@ -770,6 +770,16 @@ pub async fn git_branch_delete(
                     message: Some(message),
                 })
             }
+            // Already gone: the branch is not there, which is what was asked.
+            Err(GitError::Failed(message))
+                if message.contains("not found") && message.contains("branch") =>
+            {
+                Ok(DeleteBranchResult {
+                    deleted: true,
+                    needs_force: false,
+                    message: Some(message),
+                })
+            }
             Err(error) => Err(error.into()),
         }
     })
@@ -848,6 +858,189 @@ fn recoverable_by_force(message: &str) -> bool {
         || message.contains("locked working tree")
 }
 
+// ---------------------------------------------------------------------------
+// Leftovers
+//
+// On Windows `git worktree remove` can give up half way: a process of the
+// worker that just closed still holds a file, a path is too long. Git has by
+// then taken the folder's `.git` away, so the next try answers "is not a
+// working tree" and what is left of the folder stays on the disk for good.
+// This deletes what remains, and only what Hangar made.
+// ---------------------------------------------------------------------------
+
+/// Why a folder was not swept.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Sweep {
+    /// Not a folder Hangar made for a worker, or one git still owns: nothing
+    /// was touched.
+    Refused(String),
+    /// It is Hangar's, but something holds it. One line naming what.
+    Held(String),
+}
+
+const SWEEP_TRIES: u32 = 5;
+const SWEEP_PAUSE: Duration = Duration::from_millis(400);
+
+/// Whether the entry is a symbolic link or a junction: something to delete, never to enter.
+fn is_link(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        meta.file_attributes() & REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        meta.file_type().is_symlink()
+    }
+}
+
+fn remove_link(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const DIRECTORY: u32 = 0x10;
+        if meta.file_attributes() & DIRECTORY != 0 {
+            return std::fs::remove_dir(path);
+        }
+    }
+    let _ = meta;
+    std::fs::remove_file(path)
+}
+
+/// Deletes what it can under `path`, `path` included, noting each entry it
+/// could not. A link is removed itself and never entered, so a junction in
+/// `node_modules` costs its own entry and not its target.
+fn remove_tree(path: &Path, held: &mut Vec<PathBuf>) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if is_link(&meta) {
+        if remove_link(path, &meta).is_err() {
+            held.push(path.to_path_buf());
+        }
+        return;
+    }
+    if meta.is_dir() {
+        let before = held.len();
+        match std::fs::read_dir(path) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    remove_tree(&entry.path(), held);
+                }
+            }
+            Err(_) => held.push(path.to_path_buf()),
+        }
+        if held.len() == before && std::fs::remove_dir(path).is_err() {
+            held.push(path.to_path_buf());
+        }
+        return;
+    }
+    let mut permissions = meta.permissions();
+    if permissions.readonly() {
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        let _ = std::fs::set_permissions(path, permissions);
+    }
+    if std::fs::remove_file(path).is_err() {
+        held.push(path.to_path_buf());
+    }
+}
+
+/// `<parent of the main checkout>/<name>-worktrees`, where Hangar makes them.
+fn worktrees_folder(main: &str) -> Option<String> {
+    let main = main.trim_end_matches(['/', '\\']);
+    let (parent, name) = main.rsplit_once(['/', '\\'])?;
+    (!name.is_empty()).then(|| format!("{parent}/{name}-worktrees"))
+}
+
+/// Removes the folder of a worktree git no longer holds (or has just let go
+/// of), then forgets whatever registration is left. Waits and retries while
+/// something holds it. Succeeds when the folder is gone.
+pub(crate) fn sweep_leftovers(
+    repo: &Path,
+    folder: &Path,
+    tries: u32,
+    pause: Duration,
+) -> Result<(), Sweep> {
+    let name = folder.display().to_string();
+    let refused = |why: &str| Err(Sweep::Refused(format!("{name} {why}: nothing was deleted")));
+    let listed = list_worktrees(repo).map_err(|error| {
+        Sweep::Refused(format!(
+            "{name} could not be checked ({}): nothing was deleted",
+            String::from(error)
+        ))
+    })?;
+    let here = compare_key(&name);
+    let Some(main) = listed.first() else {
+        return refused("is not in a repository");
+    };
+    if compare_key(&main.path) == here {
+        return refused("is the main checkout");
+    }
+    let inside = worktrees_folder(&main.path)
+        .map(|root| format!("{}/", compare_key(&root)))
+        .is_some_and(|root| here.starts_with(&root) && here.len() > root.len());
+    if !inside {
+        return refused("is not in the workspace's worktrees folder");
+    }
+    let registered = listed.iter().any(|entry| compare_key(&entry.path) == here);
+    match std::fs::symlink_metadata(folder) {
+        Ok(meta) if is_link(&meta) => return refused("is a link"),
+        Ok(meta) if !meta.is_dir() => return refused("is not a folder"),
+        _ => {}
+    }
+    // A live `.git` file is git's: the worktree is still whole. A `.git`
+    // folder is a repository of its own.
+    let dot_git = folder.join(".git");
+    if dot_git.is_dir() {
+        return refused("holds a repository of its own");
+    }
+    if registered && dot_git.exists() {
+        return refused("is still a working tree");
+    }
+
+    let mut held = Vec::new();
+    for attempt in 1..=tries.max(1) {
+        held.clear();
+        remove_tree(folder, &mut held);
+        if !folder.exists() {
+            break;
+        }
+        if attempt < tries.max(1) {
+            std::thread::sleep(pause * attempt);
+        }
+    }
+    if folder.exists() {
+        held.sort();
+        let shown: Vec<String> = held
+            .iter()
+            .take(3)
+            .map(|path| path.display().to_string())
+            .collect();
+        let more = held.len().saturating_sub(shown.len());
+        let files = if shown.is_empty() {
+            "something in it".to_string()
+        } else {
+            format!(
+                "{}{}",
+                shown.join(", "),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            )
+        };
+        return Err(Sweep::Held(format!(
+            "{name} could not be deleted: {files} cannot be removed, a program still uses it. Close it and remove the folder."
+        )));
+    }
+    let _ = run_git(repo, &["worktree", "prune"]);
+    forget_shared_roots();
+    Ok(())
+}
+
 /// `pre_remove` is the workspace's command, run in the worktree first. A
 /// failure or a timeout keeps the worktree. The caller leaves it out when the
 /// person chose to remove anyway.
@@ -898,6 +1091,30 @@ fn remove_worktree(
                 hook,
                 ..RemoveResult::plain(false, true, Some(message))
             })
+        }
+        // Git gave up half way, or has nothing left to remove: what remains of
+        // the folder is swept, and the answer is about that, never git's stale
+        // "is not a working tree".
+        Err(GitError::Failed(message)) => {
+            match sweep_leftovers(
+                Path::new(path),
+                Path::new(worktree_path),
+                SWEEP_TRIES,
+                SWEEP_PAUSE,
+            ) {
+                Ok(()) => Ok(RemoveResult {
+                    hook,
+                    ..RemoveResult::plain(true, false, None)
+                }),
+                Err(Sweep::Held(held)) => Err(held),
+                Err(Sweep::Refused(refusal)) => {
+                    if message.to_lowercase().contains("is not a working tree") {
+                        Err(refusal)
+                    } else {
+                        Err(message)
+                    }
+                }
+            }
         }
         Err(error) => Err(error.into()),
     }
@@ -3557,6 +3774,198 @@ mod tests {
         assert!(result.hook_blocked && !result.removed);
         assert!(result.message.unwrap().contains("timed out"));
         assert!(linked.is_dir());
+    }
+
+    // --- leftovers ------------------------------------------------------------
+
+    /// `<root>/repo` with a commit, and `<root>/repo-worktrees/w` on `feature`.
+    fn laid_out(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = temp_dir(tag);
+        let main = root.join("repo");
+        std::fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["config", "user.email", "t@example.com"]);
+        git(&main, &["config", "user.name", "T"]);
+        git(&main, &["config", "commit.gpgsign", "false"]);
+        write(&main, "a.txt", "one\n");
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        let linked = root.join("repo-worktrees").join("w");
+        std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        );
+        (root, main, linked)
+    }
+
+    fn listed(main: &Path, folder: &Path) -> bool {
+        list_worktrees(main)
+            .unwrap()
+            .iter()
+            .any(|entry| compare_key(&entry.path) == compare_key(&wt_str(folder)))
+    }
+
+    /// A link from `at` to `target` that is a junction on Windows.
+    fn link_dir(target: &Path, at: &Path) {
+        #[cfg(windows)]
+        {
+            let status = Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                // Backslashes: `/n` in a path reads as one of its switches.
+                .arg(at.to_string_lossy().replace('/', "\\"))
+                .arg(target.to_string_lossy().replace('/', "\\"))
+                .stdout(Stdio::null())
+                .status()
+                .expect("mklink");
+            assert!(status.success());
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, at).expect("symlink");
+    }
+
+    #[test]
+    fn what_is_left_of_a_half_removed_worktree_is_swept_and_links_are_not_followed() {
+        let (root, main, linked) = laid_out("sweep");
+        let outside = root.join("precious");
+        write(&outside, "keep.txt", "mine");
+        write(&linked, "node_modules/pkg/index.js", "x");
+        link_dir(&outside, &linked.join("node_modules/linked"));
+        // What git leaves after giving up: its `.git` is gone, the rest stays.
+        std::fs::remove_file(linked.join(".git")).unwrap();
+
+        let result = remove_worktree(&wt_str(&main), &wt_str(&linked), true, None, HOOK_WAIT)
+            .expect("swept");
+        assert!(result.removed && result.message.is_none(), "{result:?}");
+        assert!(!linked.exists());
+        assert!(!listed(&main, &linked));
+        assert_eq!(read(&outside, "keep.txt"), "mine");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_git_no_longer_lists_is_swept() {
+        let (root, main, linked) = laid_out("unlisted");
+        git(
+            &main,
+            &["worktree", "remove", "--force", linked.to_str().unwrap()],
+        );
+        write(&linked, "README.md", "left");
+        write(&linked, "src/deep/file.ts", "left");
+        assert!(!listed(&main, &linked));
+
+        sweep_leftovers(&main, &linked, 1, Duration::ZERO).expect("swept");
+        assert!(!linked.exists());
+        // And once more is still fine: nothing there, nothing to say.
+        sweep_leftovers(&main, &linked, 1, Duration::ZERO).expect("idempotent");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nothing_is_swept_that_hangar_did_not_make_or_git_still_holds() {
+        let (root, main, linked) = laid_out("refuse");
+        let go = |folder: &Path| sweep_leftovers(&main, folder, 1, Duration::ZERO);
+
+        // A live worktree.
+        assert!(matches!(go(&linked), Err(Sweep::Refused(_))));
+        assert!(linked.join("a.txt").is_file());
+        // The main checkout.
+        assert!(matches!(go(&main), Err(Sweep::Refused(_))));
+        assert!(main.join("a.txt").is_file());
+        // A folder elsewhere, however unlisted.
+        let elsewhere = root.join("elsewhere");
+        write(&elsewhere, "x.txt", "x");
+        assert!(matches!(go(&elsewhere), Err(Sweep::Refused(_))));
+        // The worktrees folder itself, and a repository of its own inside it.
+        assert!(matches!(
+            go(&root.join("repo-worktrees")),
+            Err(Sweep::Refused(_))
+        ));
+        let other = root.join("repo-worktrees").join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        git(&other, &["init", "-q"]);
+        assert!(matches!(go(&other), Err(Sweep::Refused(_))));
+        assert!(other.join(".git").is_dir());
+        assert!(elsewhere.join("x.txt").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn uncommitted_work_keeps_the_worktree_and_stale_git_words_never_reach_the_person() {
+        let (root, main, linked) = laid_out("dirty");
+        write(&linked, "wip.txt", "unsaved");
+        let result = remove_worktree(&wt_str(&main), &wt_str(&linked), false, None, HOOK_WAIT)
+            .expect("asks");
+        assert!(!result.removed && result.needs_force, "{result:?}");
+        assert_eq!(read(&linked, "wip.txt"), "unsaved");
+
+        // A folder git cannot call a worktree, outside the worktrees folder.
+        let stray = root.join("stray");
+        write(&stray, "x.txt", "x");
+        let error = remove_worktree(&wt_str(&main), &wt_str(&stray), true, None, HOOK_WAIT)
+            .expect_err("refused");
+        assert!(!error.contains("is not a working tree"), "{error}");
+        assert!(error.contains("nothing was deleted"), "{error}");
+        assert!(stray.join("x.txt").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_held_file_is_named_in_one_line() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (root, main, linked) = laid_out("held");
+        git(
+            &main,
+            &["worktree", "remove", "--force", linked.to_str().unwrap()],
+        );
+        write(&linked, "free.txt", "x");
+        write(&linked, "held.txt", "x");
+        // Opened without sharing delete, as a program standing in it would.
+        let _guard = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(linked.join("held.txt"))
+            .unwrap();
+        let Err(Sweep::Held(message)) =
+            sweep_leftovers(&main, &linked, 2, Duration::from_millis(20))
+        else {
+            panic!("expected the folder to be held");
+        };
+        assert!(
+            message.contains("held.txt") && !message.contains('\n'),
+            "{message}"
+        );
+        assert!(!linked.join("free.txt").exists());
+        drop(_guard);
+        sweep_leftovers(&main, &linked, 1, Duration::ZERO).expect("free now");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_branch_already_gone_counts_as_deleted() {
+        let (root, main, linked) = laid_out("branch-gone");
+        git(
+            &main,
+            &["worktree", "remove", "--force", linked.to_str().unwrap()],
+        );
+        git(&main, &["branch", "-D", "feature"]);
+        let again = run_git(&main, &["branch", "-D", "feature"]);
+        let Err(GitError::Failed(message)) = again else {
+            panic!("git should refuse");
+        };
+        assert!(
+            message.contains("not found") && message.contains("branch"),
+            "{message}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
