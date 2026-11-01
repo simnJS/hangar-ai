@@ -36,6 +36,7 @@ import {
   type RemoteStatsMeasure,
   type RemoteStatsPeriod,
   type RemoteWaiting,
+  type RemoteWorkspace,
   type RemoteWoken,
 } from "../remote/types";
 import { AGENTS, type AppState, type Pane, type Workspace } from "../types";
@@ -786,6 +787,26 @@ async function remoteStats(deps: ControlDeps, args: Record<string, unknown>, sou
   });
 }
 
+/** A folder as the Windows way compares it: either separator, any case, no trailing one. */
+const folderKey = (path: string) => path.trim().replace(/[\\/]+/g, "/").replace(/\/+$/, "").toLowerCase();
+
+/**
+ * remote_workspace: a workspace by id, or by folder. Not one of the phone's
+ * calls (the server's CALLS list leaves it out): the server asks it itself, for
+ * the folder an upload lands in and the name a share is shown under.
+ */
+function remoteWorkspace(deps: ControlDeps, args: Record<string, unknown>): RemoteWorkspace {
+  const id = typeof args.workspace === "string" ? args.workspace.trim() : "";
+  const folder = typeof args.folder === "string" ? args.folder.trim() : "";
+  if (!id && !folder) throw new Error("Name the workspace, by id or by folder.");
+  const workspaces = deps.snapshot().workspaces;
+  const found = id
+    ? workspaces.find((ws) => ws.id === id)
+    : workspaces.find((ws) => folderKey(ws.cwd) === folderKey(folder));
+  if (!found) throw new Error(`No workspace ${id ? `with id "${id}"` : `at "${folder}"`} in Hangar.`);
+  return { id: found.id, name: found.name, cwd: found.cwd };
+}
+
 /** Every op this module answers; any other is not its to answer. */
 export const isRemoteOp = (op: string) => op.startsWith("remote_");
 
@@ -824,6 +845,8 @@ export async function runRemote(
       return remoteAnswer(asPerson, args, chat);
     case "remote_wake":
       return remoteWake(asPerson, args);
+    case "remote_workspace":
+      return remoteWorkspace(asPerson, args);
     case "remote_stats":
       return remoteStats(asPerson, args, stats);
     default:
