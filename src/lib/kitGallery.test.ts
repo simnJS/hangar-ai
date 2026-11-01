@@ -2,6 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { en, fr } from "../strings/kitsManage";
+import ui from "../../src-tauri/kit-sdk/kit-ui.js?raw";
+import sdk from "../../src-tauri/kit-sdk/kit.js?raw";
 import type { KitInfo } from "./kits";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -88,9 +90,9 @@ describe("galleryStatus", () => {
   it("offers nothing for the same id in another repository", () => {
     expect(galleryStatus(entry({ repo: "someone/ci-status" }), [installed()])).toEqual(current);
   });
-  it("does not offer an update over a linked folder", () => {
+  it("says a folder of that id is linked, and offers neither install nor update", () => {
     const folder = installed({ source: { kind: "folder", path: "D:\\ci-status" } });
-    expect(galleryStatus(entry(), [folder])).toEqual({ kind: "installed", version: "0.1.0", pinned: null });
+    expect(galleryStatus(entry(), [folder])).toEqual({ kind: "linked", version: "0.1.0" });
   });
   it("does not offer an update over a kit on a branch or a plain link, which follow their own source", () => {
     const plain = { kind: "installed", version: "0.1.0", pinned: null };
@@ -199,6 +201,60 @@ describe("the row of an installed kit", () => {
   });
 });
 
+describe("confirm() of kit-ui.js, and the focus", () => {
+  /** A page with a focus that moves: the box of the confirmation holds it, or something else does. */
+  function stand() {
+    const state: { active: any } = { active: null };
+    const make = (tag: string) => {
+      const node: Record<string, any> = { tag, children: [] as any[], hidden: false, focusCalls: 0 };
+      node.append = (...kids: any[]) => node.children.push(...kids);
+      node.after = (kid: any) => (node.next = kid);
+      node.remove = () => {};
+      node.setAttribute = () => {};
+      node.addEventListener = () => {};
+      node.contains = (other: any) => other === node || node.children.some((kid: any) => kid.contains?.(other));
+      node.focus = () => {
+        node.focusCalls++;
+        state.active = node;
+      };
+      return node;
+    };
+    const document = {
+      createElement: make,
+      documentElement: { style: { setProperty() {}, removeProperty() {} }, setAttribute() {}, getAttribute: () => null },
+      get activeElement() {
+        return state.active;
+      },
+    };
+    const page: Record<string, any> = { parent: { postMessage() {} }, addEventListener() {} };
+    const globals = { window: page, document, navigator: { language: "en" }, console };
+    for (const code of [sdk, ui]) new Function(...Object.keys(globals), code)(...Object.values(globals));
+    return { make, state, confirm: page.hangar.ui.confirm };
+  }
+
+  it("does not take the focus back when the page cancels while it is elsewhere", async () => {
+    const { make, state, confirm } = stand();
+    const trigger = make("button");
+    const elsewhere = make("input");
+    const answer = confirm(trigger, { message: "Sure?" });
+    elsewhere.focus();
+    answer.cancel();
+    await expect(answer).resolves.toBe(false);
+    expect(trigger.focusCalls).toBe(0);
+    expect(state.active).toBe(elsewhere);
+  });
+
+  it("gives the focus back to the button when the confirmation held it", async () => {
+    const { make, state, confirm } = stand();
+    const trigger = make("button");
+    const answer = confirm(trigger, { message: "Sure?" });
+    answer.cancel();
+    await expect(answer).resolves.toBe(false);
+    expect(trigger.focusCalls).toBe(1);
+    expect(state.active).toBe(trigger);
+  });
+});
+
 describe("KitsGalleryView", () => {
   const t = (key: string, vars?: Record<string, string | number>) =>
     (en[key as keyof typeof en] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(vars?.[name] ?? ""));
@@ -245,6 +301,15 @@ describe("KitsGalleryView", () => {
     expect(html).toContain("Installed (v0.1.0)");
     expect(html).toContain("Pinned to v0.1.0");
     expect(draw({ installed: [installed()] })).toContain("Pinned to v0.1.0");
+  });
+
+  it("says a linked folder holds that id, not that the kit is installed, and offers nothing", () => {
+    const folder = installed({ source: { kind: "folder", path: "D:\\ci-status" } });
+    const html = draw({ installed: [folder] });
+    expect(html).toContain("linked, read live (v0.1.0)");
+    expect(html).not.toContain("Installed");
+    expect(html).not.toContain("Pinned to");
+    expect(html).not.toContain("btn--primary");
   });
 
   it("does not say pinned of a kit that is not", () => {
