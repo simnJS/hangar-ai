@@ -2727,7 +2727,6 @@ mod tests {
         } else {
             "sleep 60; echo late".into()
         });
-        let started = Instant::now();
 
         let outcome = deliver(
             &request,
@@ -2748,10 +2747,14 @@ mod tests {
             "{}",
             outcome.detail
         );
+        // The check was stopped at its limit, not left to run its 60 s. This is the
+        // check's own duration: the git work around it, slow on a loaded machine,
+        // does not count.
+        let seconds = outcome.check.as_ref().unwrap().seconds;
         assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "{:?}",
-            started.elapsed()
+            seconds < 30,
+            "the check ran {seconds} s: {:?}",
+            outcome.check
         );
         // On Windows, a process still running in the worktree would hold it.
         assert_no_scratch(&repo);
