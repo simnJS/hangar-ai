@@ -204,6 +204,15 @@ pub fn find<'a>(memory: &'a Memory, id: &str) -> Option<&'a MemoryEntry> {
     memory.entries.iter().find(|entry| entry.id == id)
 }
 
+/// The refusal at the entry ceiling. It says plainly that nothing is evicted
+/// and what the caller can do about it: an agent that only reads "limit
+/// reached" might retry in a loop, or assume the oldest entry was dropped.
+fn full_message(count: usize) -> String {
+    format!(
+        "memory is full: it holds {count} entries, the limit is {MAX_ENTRIES}. Nothing was written, and nothing is ever deleted automatically. Delete what is obsolete with memory_delete (memory_list shows the ids), then write again"
+    )
+}
+
 /// Writes a fact, replacing the one that already carries the same title.
 ///
 /// Returns the entry and whether it is new. Dedup by title is what keeps the
@@ -239,9 +248,7 @@ pub fn upsert(memory: &mut Memory, input: NewMemory) -> Result<(MemoryEntry, boo
     }
 
     if memory.entries.len() >= MAX_ENTRIES {
-        return Err(format!(
-            "memory holds {MAX_ENTRIES} entries, which is the limit; delete something before writing more"
-        ));
+        return Err(full_message(memory.entries.len()));
     }
 
     let entry = MemoryEntry {
@@ -781,6 +788,16 @@ mod tests {
         let err = upsert(&mut memory, fact("one too many", "body")).expect_err("refused");
 
         assert!(err.contains(&MAX_ENTRIES.to_string()), "got: {err}");
+        assert!(err.contains("memory is full"), "got: {err}");
+        assert!(
+            err.contains(&format!("holds {MAX_ENTRIES} entries")),
+            "the count must be stated, got: {err}"
+        );
+        assert!(
+            err.contains("nothing is ever deleted automatically"),
+            "got: {err}"
+        );
+        assert!(err.contains("memory_delete"), "got: {err}");
         assert_eq!(memory.entries.len(), MAX_ENTRIES);
         // The ceiling must not block corrections to what is already stored.
         assert!(upsert(&mut memory, fact("fact 0", "revised")).is_ok());

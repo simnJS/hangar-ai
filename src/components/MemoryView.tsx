@@ -11,6 +11,7 @@ import {
 import { compactPath, shortDay, signerName, wasUpdated } from "../lib/memoryFormat";
 import { useLocale, useT } from "../i18n";
 import { Icon } from "./Icon";
+import { MEMORY_CAP, findTitleClash, nearCap, sortEntries, type MemorySort } from "./memoryGuards";
 
 interface Props {
   /** Active workspace: the origin stamped on what is written from here. */
@@ -53,6 +54,9 @@ export function MemoryView({ cwd }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  /** The composer's title is taken: the next click on the button replaces it. */
+  const [confirmingReplace, setConfirmingReplace] = useState(false);
+  const [sort, setSort] = useState<MemorySort>("recent");
   /** Entries whose full content is on screen. */
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -97,9 +101,10 @@ export function MemoryView({ cwd }: Props) {
 
   const all = useMemo(() => entries ?? [], [entries]);
   const visible = useMemo(
-    () => all.filter((entry) => matches(entry, terms)).sort((a, b) => b.updated_at - a.updated_at),
-    [all, terms],
+    () => sortEntries(all.filter((entry) => matches(entry, terms)), sort),
+    [all, terms, sort],
   );
+  const clash = useMemo(() => findTitleClash(all, draft.title), [all, draft.title]);
 
   /** Every write funnels through here, so a rejected limit is always shown. */
   async function run(action: () => Promise<unknown>) {
@@ -118,6 +123,13 @@ export function MemoryView({ cwd }: Props) {
     const title = draft.title.trim();
     const content = draft.content.trim();
     if (!title || !content) return;
+    // Creating is an upsert: a taken title would overwrite that entry. Ask
+    // inline first, with the entries already loaded — no native dialog.
+    if (clash && !confirmingReplace) {
+      setConfirmingReplace(true);
+      return;
+    }
+    setConfirmingReplace(false);
     const ok = await run(() =>
       memoryCreate({
         title,
@@ -236,6 +248,21 @@ export function MemoryView({ cwd }: Props) {
         </p>
       )}
 
+      {loaded && nearCap(all.length) && (
+        <p className="memory__note memory__cap" role="status">
+          <Icon name="alert" size={12} />
+          <span>{t("memory.nearCap", { n: all.length, max: MEMORY_CAP })}</span>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            aria-pressed={sort === "oldest"}
+            onClick={() => setSort(sort === "oldest" ? "recent" : "oldest")}
+          >
+            {sort === "oldest" ? t("memory.sortRecent") : t("memory.sortOldest")}
+          </button>
+        </p>
+      )}
+
       <div className="memory__list">
         {composing && (
           <section className="memory__composer" aria-label={t("memory.new")}>
@@ -245,7 +272,10 @@ export function MemoryView({ cwd }: Props) {
               placeholder={t("memory.titlePlaceholder")}
               aria-label={t("memory.titlePlaceholder")}
               value={draft.title}
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              onChange={(e) => {
+                setDraft({ ...draft, title: e.target.value });
+                setConfirmingReplace(false);
+              }}
             />
             <textarea
               className="memory__input memory__input--area"
@@ -262,6 +292,12 @@ export function MemoryView({ cwd }: Props) {
               value={draft.tags}
               onChange={(e) => setDraft({ ...draft, tags: e.target.value })}
             />
+            {confirmingReplace && clash && (
+              <p className="memory__error" role="alert">
+                <Icon name="alert" size={12} />
+                <span>{t("memory.replaceAsk", { title: clash.title })}</span>
+              </p>
+            )}
             <div className="memory__composer-foot">
               <span className="memory__note">{t("memory.upsertHint")}</span>
               <button
@@ -269,6 +305,7 @@ export function MemoryView({ cwd }: Props) {
                 onClick={() => {
                   setComposing(false);
                   setDraft(EMPTY_DRAFT);
+                  setConfirmingReplace(false);
                   setError(null);
                 }}
               >
@@ -279,7 +316,7 @@ export function MemoryView({ cwd }: Props) {
                 onClick={create}
                 disabled={!draft.title.trim() || !draft.content.trim()}
               >
-                {t("memory.create")}
+                {confirmingReplace && clash ? t("memory.replaceConfirm") : t("memory.create")}
               </button>
             </div>
           </section>
