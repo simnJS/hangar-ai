@@ -38,7 +38,7 @@ fn home() -> Option<PathBuf> {
 /// Extracts a display label from a `.jsonl` transcript by finding the first
 /// real user message. Reads only the head of the file.
 fn label_from_jsonl(path: &Path, user_field: &str) -> String {
-    let Ok(file) = fs::File::open(path) else {
+    let Ok(file) = crate::stats::open_rollout(path) else {
         return String::new();
     };
     let reader = BufReader::new(file);
@@ -125,10 +125,12 @@ fn codex_sessions(cwd: &str) -> Vec<AgentSession> {
     let Some(home) = home() else {
         return vec![];
     };
-    let root = home.join(".codex").join("sessions");
+    codex_sessions_in(&home.join(".codex").join("sessions"), cwd)
+}
 
+fn codex_sessions_in(root: &Path, cwd: &str) -> Vec<AgentSession> {
     let mut files: Vec<PathBuf> = Vec::new();
-    collect_jsonl(&root, &mut files, 0);
+    collect_jsonl(root, &mut files, 0);
     files.sort_by_key(|p| std::cmp::Reverse(modified_ms(p)));
     files.truncate(80);
 
@@ -137,7 +139,7 @@ fn codex_sessions(cwd: &str) -> Vec<AgentSession> {
     files
         .into_iter()
         .filter_map(|path| {
-            let file = fs::File::open(&path).ok()?;
+            let file = crate::stats::open_rollout(&path).ok()?;
             let mut first = String::new();
             BufReader::new(file).read_line(&mut first).ok()?;
             let meta: serde_json::Value = serde_json::from_str(&first).ok()?;
@@ -169,9 +171,10 @@ fn codex_sessions(cwd: &str) -> Vec<AgentSession> {
         .collect()
 }
 
-/// `rollout-2025-01-01T10-00-00-<uuid>.jsonl` -> `<uuid>`
+/// `rollout-2025-01-01T10-00-00-<uuid>.jsonl[.zst]` -> `<uuid>`
 fn uuid_from_filename(path: &Path) -> Option<String> {
-    let stem = path.file_stem()?.to_string_lossy();
+    let name = path.file_name()?.to_string_lossy();
+    let stem = name.trim_end_matches(".zst").trim_end_matches(".jsonl");
     let parts: Vec<&str> = stem.split('-').collect();
     if parts.len() < 5 {
         return None;
@@ -190,7 +193,9 @@ pub(crate) fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
         let path = entry.path();
         if path.is_dir() {
             collect_jsonl(&path, out, depth + 1);
-        } else if path.extension().is_some_and(|e| e == "jsonl") {
+        } else if path.extension().is_some_and(|e| e == "jsonl")
+            || path.to_string_lossy().ends_with(".jsonl.zst")
+        {
             out.push(path);
         }
     }
@@ -262,8 +267,12 @@ fn codex_transcript_exists(root: &Path, id: &str) -> Option<bool> {
     let mut files = Vec::new();
     collect_jsonl(root, &mut files, 0);
     Some(files.iter().any(|path| {
-        path.file_stem()
-            .is_some_and(|stem| stem.to_string_lossy().ends_with(id))
+        path.file_name().is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.trim_end_matches(".zst")
+                .trim_end_matches(".jsonl")
+                .ends_with(id)
+        })
     }))
 }
 
@@ -386,6 +395,37 @@ mod tests {
             Some(false)
         );
         assert_eq!(codex_transcript_exists(&root.join("missing"), "x"), None);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_compressed_codex_rollout_is_listed_and_found() {
+        let id = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+        let root = temp_dir("codex-zst");
+        let day = root.join("2026").join("10").join("07");
+        fs::create_dir_all(&day).expect("day dir");
+        let rollout = format!(
+            "{}\n{}\n",
+            r#"{"type":"session_meta","payload":{"id":"0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b","cwd":"/work/app"}}"#,
+            r#"{"type":"response_item","payload":{"role":"user","content":[{"text":"fix the bug"}]}}"#
+        );
+        let path = day.join(format!("rollout-2026-10-07T10-00-00-{id}.jsonl.zst"));
+        fs::write(
+            &path,
+            ruzstd::encoding::compress_to_vec(
+                rollout.as_bytes(),
+                ruzstd::encoding::CompressionLevel::Fastest,
+            ),
+        )
+        .expect("rollout");
+
+        assert_eq!(codex_transcript_exists(&root, id), Some(true));
+        let listed = codex_sessions_in(&root, "/work/app");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].label, "fix the bug");
+        assert_eq!(uuid_from_filename(&path).as_deref(), Some(id));
 
         fs::remove_dir_all(&root).ok();
     }
