@@ -1,7 +1,15 @@
 import type {
+  ChatAnswer,
+  ChatItem,
+  ChatItemBody,
+  ChatPending as Pending,
+  ChatQuestion,
+  RemoteActivity,
   RemoteApp as App,
   RemoteAppOpened as AppOpened,
   RemoteAppSource as AppSource,
+  RemoteChat as Chat,
+  RemoteChatReason as ChatReason,
   RemoteDelivery as Delivery,
   RemoteDeliveryBlocking as DeliveryBlocking,
   RemoteDeliveryCheck as DeliveryCheck,
@@ -10,7 +18,16 @@ import type {
   RemoteDeliveryPatch as DeliveryPatch,
   RemoteDeliveryReview as DeliveryReview,
   RemoteDeliveryStage as DeliveryStage,
+  RemoteHistoryEntry as HistoryEntry,
+  RemoteKey as Key,
   RemoteLanded as Landed,
+  RemotePane as Pane,
+  RemoteProject as Project,
+  RemoteScreen as Screen,
+  RemoteSendArgs as SendArgs,
+  RemoteState,
+  RemoteTask as Task,
+  RemoteWaiting as Waiting,
   RemoteStats as Stats,
   RemoteStatsMeasure as StatsMeasure,
   RemoteStatsPeriod as StatsPeriod,
@@ -26,13 +43,37 @@ import type {
  * again. The client also keeps the time of the last call the PC answered, so
  * the app can say how long it has been unreachable.
  *
- * Task M6 switches these types to the shared src/remote/types.ts.
+ * The contract's shapes are the shared ones of src/remote/types.ts, re-exported
+ * here under the phone's names.
  */
 
-/* ── The contract's shapes ─────────────────────────────────────── */
+/* ── The contract's shapes: the shared ones, under the phone's names ── */
 
-/** What an agent pane is doing; null when no agent the PC knows of runs in it. */
-export type Activity = "working" | "waiting" | "yours" | "idle";
+/** What an agent pane is doing; `Activity | null` when no agent the PC knows of runs in it. */
+export type Activity = NonNullable<RemoteActivity>;
+export type Manager = NonNullable<RemoteState["manager"]>;
+export type {
+  ChatAnswer,
+  ChatItem,
+  ChatQuestion,
+  Chat,
+  ChatReason,
+  HistoryEntry,
+  Key,
+  Pane,
+  Pending,
+  Project,
+  RemoteState,
+  Screen,
+  SendArgs,
+  Task,
+  Waiting,
+};
+export type WaitingKind = Waiting["kind"];
+export type ActionState = Extract<ChatItemBody, { kind: "action" }>["state"];
+
+/* ── The phone's own shapes ────────────────────────────────────── */
+
 
 export interface Health {
   ok: boolean;
@@ -46,161 +87,6 @@ export interface Health {
 export interface Device {
   id: string;
   name: string;
-}
-
-export interface Manager {
-  paneId: string;
-  name: string;
-  activity: Activity | null;
-}
-
-export type WaitingKind = "pane" | "needsYou" | "readyToLand";
-
-/** Something that waits for the person, in one project. */
-export interface Waiting {
-  kind: WaitingKind;
-  workspaceId: string;
-  workspace: string;
-  paneId?: string;
-  pane?: string;
-  taskId?: string;
-  title?: string;
-  /** Since when, in ms. */
-  since: number;
-}
-
-export interface Pane {
-  id: string;
-  name: string;
-  /** The agent running in it: claude, codex… */
-  agent: string;
-  /** orchestrator, worker, or nothing in particular. */
-  role: string | null;
-  activity: Activity | null;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  /** Its panes are up in a window on the PC. */
-  open: boolean;
-  asleep: boolean;
-  git: boolean | null;
-  orchestrator: { name: string; activity: Activity | null } | null;
-  panes: Pane[];
-  board: { todo: number; doing: number; review: number; done: number };
-  /** The "Status:" line of the orchestrator's plan; null without a plan. */
-  planStatus: string | null;
-  needsYou: Task[];
-  readyToLand: Task[];
-}
-
-export interface RemoteState {
-  at: number;
-  manager: Manager | null;
-  waiting: Waiting[];
-  projects: Project[];
-}
-
-export interface Screen {
-  paneId: string;
-  pane: string;
-  workspace: string;
-  agent: string;
-  activity: Activity | null;
-  /** The pane's last lines, as text. */
-  text: string;
-}
-
-/* ── The chat: a Claude Code pane's conversation, read from its transcript ── */
-
-export interface ChatQuestion {
-  question: string;
-  /** A short label for the question: "Delivery", "Auth method". */
-  header: string;
-  multiSelect: boolean;
-  options: { label: string; description: string }[];
-}
-
-/** The answer to one question: the labels of the options chosen, and what was typed instead. */
-export interface ChatAnswer {
-  selected: string[];
-  other?: string;
-}
-
-export type ActionState = "running" | "done" | "error";
-
-interface ChatItemBase {
-  id: string;
-  /** In ms. */
-  at: number;
-}
-
-export type ChatItem = ChatItemBase &
-  (
-    | { kind: "user"; text: string; from: "person" | "hangar"; images: number }
-    | { kind: "assistant"; text: string }
-    | {
-        kind: "action";
-        tool: string;
-        /** One line, as the PC writes it: "Edited src/a.ts", "Ran pnpm test". */
-        title: string;
-        /** The input that matters: the command, the diff, the pattern. */
-        detail?: string;
-        result?: { ok: boolean; text: string };
-        state: ActionState;
-      }
-    | { kind: "question"; toolUseId: string; questions: ChatQuestion[]; answer?: ChatAnswer[] }
-    | { kind: "notice"; text: string }
-  );
-
-/** What the pane waits for the person to answer, if anything. */
-export type Pending =
-  | { kind: "question"; toolUseId: string; questions: ChatQuestion[] }
-  | { kind: "permission"; tool: string; title: string; detail?: string };
-
-/** Why a pane has no chat to show: not Claude Code, no session captured yet, no transcript written yet. */
-export type ChatReason = "notClaude" | "noSession" | "noTranscript";
-
-export interface Chat {
-  paneId: string;
-  pane: string;
-  workspace: string;
-  agent: string;
-  activity: Activity | null;
-  sessionId: string | null;
-  /** Oldest first. */
-  items: ChatItem[];
-  /** There are items before these. */
-  older: boolean;
-  /** Passed as `before`, gets the page before these items. */
-  cursor: string | null;
-  pending: Pending | null;
-  /** Why there is no chat; the terminal shows instead. */
-  reason?: ChatReason;
-}
-
-export type Key = "enter" | "escape" | "tab" | "up" | "down" | "ctrl+c";
-
-export interface SendArgs {
-  /** A pane's id or name. */
-  pane: string;
-  text?: string;
-  keys?: Key[];
-  /** Press Enter after the text. */
-  submit?: boolean;
-}
-
-export interface HistoryEntry {
-  at: number;
-  workspace: string;
-  kind: string;
-  text: string;
 }
 
 /**
