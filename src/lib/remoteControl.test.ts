@@ -1,3 +1,4 @@
+import server from "../../src-tauri/src/remote/server.rs?raw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearPaneActivity, getPaneActivity, setPaneActivity, type AgentActivity } from "./agentState";
 import type { ControlDeps } from "./control";
@@ -17,7 +18,7 @@ import {
 import { answerInternal } from "./orchestratorBrief";
 import type { StatsBucket, UsageStats } from "./stats";
 import { addDays, modelLabel, startOfDay } from "./statsModel";
-import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState, RemoteStats } from "../remote/types";
+import type { ChatItem, RemoteChat, RemoteHistory, RemoteScreen, RemoteState, RemoteStats, RemoteWorkspace } from "../remote/types";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type PaneRole, type Workspace } from "../types";
 
 const journals = vi.hoisted(() => ({
@@ -760,6 +761,45 @@ describe("sending to a project asleep", () => {
     });
     // Reading is not using it.
     expect(opened).toEqual([]);
+  });
+});
+
+describe("remote_workspace", () => {
+  it("finds a workspace by id", async () => {
+    const { deps } = rig([shop()]);
+    const found = (await runRemote("remote_workspace", { workspace: "shop" }, deps)) as RemoteWorkspace;
+    expect(found).toEqual({ id: "shop", name: "Shop", cwd: "C:\\dev\\shop" });
+  });
+
+  it("finds one by folder, either separator, any case, with or without a trailing one", async () => {
+    const { deps } = rig([shop()]);
+    for (const folder of ["C:\\dev\\shop", "c:/DEV/shop", "C:/dev/shop/", " c:\\dev\\SHOP\\ "]) {
+      const found = (await runRemote("remote_workspace", { folder }, deps)) as RemoteWorkspace;
+      expect(found.id, folder).toBe("shop");
+    }
+  });
+
+  it("refuses an unknown workspace, an unknown folder and a request naming neither", async () => {
+    const { deps } = rig([shop()]);
+    await expect(runRemote("remote_workspace", { workspace: "nope" }, deps)).rejects.toThrow('No workspace with id "nope"');
+    await expect(runRemote("remote_workspace", { folder: "C:\\dev\\sho" }, deps)).rejects.toThrow("No workspace at");
+    await expect(runRemote("remote_workspace", {}, deps)).rejects.toThrow("Name the workspace");
+  });
+
+  it("is answered as an internal request", async () => {
+    const { deps } = rig([shop()]);
+    const sent: unknown[][] = [];
+    answerRemote({ id: "9", op: "remote_workspace", args: { workspace: "shop" } }, deps, async (...args) => void sent.push(args));
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].slice(0, 2)).toEqual(["9", true]);
+  });
+
+  it("is not among the calls a phone may make (the server's CALLS list)", () => {
+    const calls = /pub const CALLS: &\[&str\] = &\[([\s\S]*?)\n\];/.exec(server)?.[1] ?? "";
+    const ops = [...calls.matchAll(/^\s*"([^"]+)",/gm)].map((m) => m[1]);
+    expect(ops.length).toBeGreaterThan(5);
+    expect(ops).not.toContain("workspace");
+    expect(ops).not.toContain("remote_workspace");
   });
 });
 

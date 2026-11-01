@@ -554,3 +554,18 @@ export interface RemoteStats {
    */
   plan: { at: number; windows: RemoteStatsWindow[] } | null;
 }
+
+/**
+ * remote_workspace: internal, asked by the PC's server and never by a phone
+ * (it is not among the /m/api/call ops). By id or by folder, either separator
+ * and any case; refused when no workspace matches.
+ */
+export interface RemoteWorkspaceArgs {
+  workspace?: string;
+  folder?: string;
+}
+export interface RemoteWorkspace {
+  id: string;
+  name: string;
+  cwd: string;
+}
