@@ -227,9 +227,8 @@ by Hangar or typed by hand — loads them.
 - A GitHub kit whose list of [what runs by itself](#what-runs-by-itself) changed
   since this workspace accepted it is [left out](#consent-on-change) until it is
   accepted again, MCP servers included. The workspace's Kits dialog shows it as to be
-  reviewed and kept out of new panes; that is what holds. The pane also prints a note,
-  but Claude Code erases it as soon as it starts: it may stay on screen a few seconds
-  at most, so do not rely on it.
+  reviewed and kept out of new panes; that is what holds. The pane also shows a note,
+  in a bar under its header that holds when Claude Code starts, until it is dismissed.
 
 `pty_spawn` answers `{ kitIssues: [{ id, reason, detail? }] }`, `reason` being
 `missing`, `broken` (with `detail`, in English) or `forbidden`.

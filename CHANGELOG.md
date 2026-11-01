@@ -8,6 +8,37 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.10.0] - 2026-11-01
+
+- **The git branch in each pane's header.** You see at a glance which branch a pane's
+  folder is on.
+- **Worktrees, easier to keep tidy.**
+  - Remove the worktrees whose branch is already merged in one go, from the worktree
+    panel.
+  - **Bring changes back** moves a worktree's uncommitted work into the main checkout.
+    If a file was modified on both sides, nothing is moved.
+  - A workspace can run a command after a worktree is created and another before it is
+    removed, workers' worktrees included. Only you set them. They run on this machine,
+    as you, and a command that fails or takes more than five minutes is reported.
+- **Fixed: Board, shortcuts and Hangar Mobile.**
+  - Moving Board cards by drag and drop now works on Windows.
+  - The fullscreen shortcut works again.
+  - Sending a file from the phone in Hangar Mobile finds its workspace's folder.
+- **Fixed: sessions and panes.**
+  - Compressed Codex sessions are now read by the session picker and the context gauge.
+  - A pane pinned as orchestrator gets Hangar's tools: it restarts on the same
+    conversation.
+  - A pane moved to another window while it launches still starts its agent.
+  - Launch notes stay visible when Claude Code starts, in a bar under the pane's header
+    that you can dismiss.
+  - After a delivery on Windows, worktree folders are no longer left on disk.
+- **Fixed: the global memory.**
+  - It warns you when it nears its limit, and never deletes anything by itself.
+  - `memory_list` takes a limit.
+  - Creating an entry with a title already taken asks before replacing it.
+- **Fixed: agents' tools.** `board_list_tasks` and the other tools that filter ignore an
+  empty filter instead of matching nothing.
+
 ## [1.9.1] - 2026-11-01
 
 ### Fixed
