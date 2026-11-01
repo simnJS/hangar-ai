@@ -1051,8 +1051,17 @@ impl Verdict {
 
 /// Reads a delivery and decides. The real one is a Claude Code run; the tests
 /// hand in their own.
+///
+/// `account` is the Claude account of the workspace the delivery is for
+/// (`None`: the default one): the review spends that account, as its panes do.
 pub trait Reviewer {
-    fn review(&self, dir: &Path, model: &str, prompt: &str) -> Result<Verdict, String>;
+    fn review(
+        &self,
+        dir: &Path,
+        model: &str,
+        prompt: &str,
+        account: Option<&str>,
+    ) -> Result<Verdict, String>;
 }
 
 /// `claude -p` with a fresh context, in the temporary worktree, able to read
@@ -1114,12 +1123,87 @@ fn review_args(model: &str) -> Vec<String> {
     .collect()
 }
 
+/// The reviewer's command: `claude -p` in `dir`, with Hangar's environment
+/// minus `SCRUBBED`, and `account_env` — what accounts.rs gives a pane on the
+/// workspace's account — on top. Empty on the default account, which keeps
+/// the environment as it is.
+fn review_command(
+    program: &Path,
+    dir: &Path,
+    model: &str,
+    account_env: &[(&'static str, Option<PathBuf>)],
+) -> Command {
+    let mut command = Command::new(program);
+    command.args(review_args(model)).current_dir(dir);
+    scrub(&mut command);
+    for (name, value) in account_env {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    command
+}
+
+/// A usage limit of the account, as Claude Code words it (« You've hit your
+/// weekly limit · resets Nov 3, 1pm »).
+fn usage_limit(said: &str) -> Option<String> {
+    let lower = said.to_lowercase();
+    if !(lower.contains("hit your") && lower.contains("limit"))
+        && !lower.contains("usage limit")
+        && !lower.contains("limit reached")
+    {
+        return None;
+    }
+    said.lines()
+        .find(|line| line.to_lowercase().contains("limit"))
+        .map(|line| {
+            let line = line.trim().trim_matches(['"', ',']);
+            line.rsplit("\"result\":\"")
+                .next()
+                .unwrap_or(line)
+                .trim_end_matches(['"', '}', ','])
+                .to_string()
+        })
+}
+
+/// The name the person gave the account, for a message.
+fn account_label(id: &str) -> String {
+    crate::accounts::accounts_list()
+        .into_iter()
+        .find(|account| account.id == id)
+        .map(|account| account.label)
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// What the person reads when the account behind the review is out of quota:
+/// the work is fine, the review is waiting for the account.
+fn limit_message(account: &str, said: &str) -> String {
+    format!(
+        "the Claude account \"{account}\" has reached its usage limit, so the review could not run \
+(Claude Code said: {said}). Nothing is wrong with the delivery: submit it again once the limit resets"
+    )
+}
+
 impl Reviewer for Claude {
-    fn review(&self, dir: &Path, model: &str, prompt: &str) -> Result<Verdict, String> {
+    fn review(
+        &self,
+        dir: &Path,
+        model: &str,
+        prompt: &str,
+        account: Option<&str>,
+    ) -> Result<Verdict, String> {
         let program = claude_program().ok_or(NO_CLAUDE)?;
-        let mut command = Command::new(&program);
-        command.args(review_args(model)).current_dir(dir);
-        scrub(&mut command);
+        let launch = crate::accounts::for_launch(Some("claude"), account);
+        let env = launch
+            .as_ref()
+            .map(|launch| crate::accounts::env_for(Some("claude"), launch.dir.as_deref()))
+            .unwrap_or_default();
+        let account_name = launch
+            .as_ref()
+            .map(|launch| account_label(&launch.id))
+            .unwrap_or_default();
+        let command = review_command(&program, dir, model, &env);
         let finished = run(
             command,
             Spawn {
@@ -1138,6 +1222,11 @@ impl Reviewer for Claude {
                 self.limit.as_secs() / 60
             )),
             Ended::Exited => verdict_of(&finished.out).map_err(|err| {
+                if let Some(limit) =
+                    usage_limit(&finished.out).or_else(|| usage_limit(&finished.err))
+                {
+                    return limit_message(&account_name, &limit);
+                }
                 let said = tail(finished.err.trim());
                 if said.is_empty() {
                     err
@@ -1318,6 +1407,10 @@ pub struct Delivery {
     #[serde(default)]
     pub shell: Option<ShellInfo>,
     pub reviewer_model: String,
+    /// The workspace's Claude account, which the review spends; none: the
+    /// default one.
+    #[serde(default)]
+    pub claude_account: Option<String>,
     /// Lands once it passes; otherwise it waits, tested, for the person.
     pub land: bool,
     /// Lands the merge tested earlier as it is, when the branch it lands on
@@ -1739,7 +1832,12 @@ commit, then call delivery_submit again.",
     )
     .unwrap_or_default();
     let prompt = review_prompt(request, &base, &merge, &changed, &outside, &diff);
-    let verdict = match reviewer.review(&dir, &request.reviewer_model, &prompt) {
+    let verdict = match reviewer.review(
+        &dir,
+        &request.reviewer_model,
+        &prompt,
+        request.claude_account.as_deref(),
+    ) {
         Ok(verdict) => verdict,
         Err(err) => {
             let mut outcome = passed;
@@ -2351,6 +2449,7 @@ mod tests {
             check_command: None,
             shell: None,
             reviewer_model: "sonnet".into(),
+            claude_account: None,
             land: true,
             reuse: false,
             port_base: None,
@@ -2424,7 +2523,13 @@ mod tests {
     }
 
     impl<F: Fn(usize)> Reviewer for Fake<F> {
-        fn review(&self, dir: &Path, model: &str, prompt: &str) -> Result<Verdict, String> {
+        fn review(
+            &self,
+            dir: &Path,
+            model: &str,
+            prompt: &str,
+            _: Option<&str>,
+        ) -> Result<Verdict, String> {
             assert_eq!(model, "sonnet");
             assert!(dir.is_dir(), "the reviewer reads the merged worktree");
             let call = self.calls.get();
@@ -2444,7 +2549,7 @@ mod tests {
     struct Never;
 
     impl Reviewer for Never {
-        fn review(&self, _: &Path, _: &str, _: &str) -> Result<Verdict, String> {
+        fn review(&self, _: &Path, _: &str, _: &str, _: Option<&str>) -> Result<Verdict, String> {
             panic!("reviewed");
         }
     }
@@ -3348,6 +3453,60 @@ mod tests {
             schema["required"],
             serde_json::json!(["approve", "blocking", "notes"])
         );
+    }
+
+    fn env_of(command: &Command, name: &str) -> Option<Option<std::ffi::OsString>> {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new(name))
+            .map(|(_, value)| value.map(|v| v.to_os_string()))
+    }
+
+    #[test]
+    fn the_reviewer_runs_on_the_config_dir_of_the_workspace_account() {
+        let profile = PathBuf::from("/home/me/.hangar/accounts/work");
+        let launch = crate::accounts::Launch {
+            id: "work".into(),
+            dir: Some(profile.clone()),
+            issues: Vec::new(),
+        };
+        let env = crate::accounts::env_for(Some("claude"), launch.dir.as_deref());
+        let command = review_command(Path::new("claude"), Path::new("."), "sonnet", &env);
+        assert_eq!(
+            env_of(&command, "CLAUDE_CONFIG_DIR"),
+            Some(Some(profile.into_os_string()))
+        );
+        // The Keychain entry is the profile's own, not main's.
+        assert_eq!(
+            env_of(&command, "CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn the_default_account_leaves_the_reviewer_environment_as_it_was() {
+        let launch = crate::accounts::for_launch(Some("claude"), None).unwrap();
+        assert_eq!(launch.dir, None);
+        let env = crate::accounts::env_for(Some("claude"), launch.dir.as_deref());
+        assert!(env.is_empty());
+        let command = review_command(Path::new("claude"), Path::new("."), "sonnet", &env);
+        assert_eq!(env_of(&command, "CLAUDE_CONFIG_DIR"), None);
+        // Only the scrubbed variables are touched, all removed.
+        assert!(command
+            .get_envs()
+            .all(|(name, value)| value.is_none() && SCRUBBED.iter().any(|s| *s == name)));
+    }
+
+    #[test]
+    fn a_usage_limit_is_named_with_its_account() {
+        let out = r#"{"type":"result","is_error":true,"result":"You've hit your weekly limit · resets Nov 3, 1pm"}"#;
+        let said = usage_limit(out).expect("a limit");
+        assert!(said.contains("weekly limit · resets Nov 3, 1pm"), "{said}");
+        let message = limit_message("Work", &said);
+        assert!(message.contains("\"Work\""));
+        assert!(message.contains("usage limit"));
+        assert!(message.contains("Nothing is wrong with the delivery"));
+        assert_eq!(usage_limit("the review crashed"), None);
     }
 
     #[test]
