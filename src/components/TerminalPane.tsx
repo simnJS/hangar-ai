@@ -37,6 +37,7 @@ import { computeContextGauge, type ContextGauge } from "../lib/context";
 import {
   clearPaneInsight,
   getPaneInsight,
+  usePaneInsight,
   recordEditedFile,
   recordPaneEvent,
   updatePaneInsight,
@@ -85,6 +86,13 @@ import {
 import { mcpConfigArg, mcpScopeWrite, shellFamily, workspaceMcp } from "../lib/mcpScope";
 import { kitIssueNotes, loadPaneKits, type KitLaunchIssue } from "../lib/kits";
 import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
+import {
+  isMidTurn,
+  queueRestartNote,
+  roleRestart,
+  roleRestartText,
+  takeRestartNote,
+} from "../lib/orchestrationActions";
 import { useLocale, useT } from "../i18n";
 import { usePaneBranch, type PaneBranch } from "../lib/paneBranch";
 import { paneBranchText } from "../strings/paneBranch";
@@ -293,6 +301,54 @@ export function TerminalPane({
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
 
+  /** The role this pane's Claude Code was launched with: a role then meant Hangar's server. */
+  const launchedRoleRef = useRef(pane.role);
+  const onRestartRef = useRef(onRestart);
+  onRestartRef.current = onRestart;
+  /** The pane id whose missing server was already dealt with, once per pin. */
+  const roleHandledRef = useRef<string | null>(null);
+  const paneMcp = usePaneInsight(pane.id).mcp;
+  const restartLocale = useLocale();
+
+  // Pinned (or given a role) while it runs, a Claude Code started without
+  // Hangar's server restarts on its own conversation — at once, or when its
+  // turn ends — so the role comes with the tools. See roleRestart.
+  useEffect(() => {
+    if (!pane.role) roleHandledRef.current = null;
+    if (status !== "running") return;
+    const verdict = roleRestart({
+      agent: pane.agent,
+      role: pane.role,
+      launchedRole: launchedRoleRef.current,
+      hangar: paneMcp?.hangar,
+      midTurn: isMidTurn(activity),
+      sessionId: pane.sessionId,
+    });
+    if (verdict === "skip" || verdict === "wait") return;
+    if (roleHandledRef.current === pane.id) return;
+    roleHandledRef.current = pane.id;
+    const say = (key: "restarting" | "failed" | "unresumable") =>
+      termRef.current?.writeln(`
+[33m${roleRestartText(restartLocale, key)}[0m`);
+    const sessionId = pane.sessionId;
+    if (verdict === "unresumable" || !sessionId) {
+      say("unresumable");
+      return;
+    }
+    say("restarting");
+    // The restart gives the pane a new id: the line follows to its terminal.
+    queueRestartNote(sessionId, roleRestartText(restartLocale, "restarting"));
+    sessionExists(pane.agent, sessionId)
+      .then((found) => {
+        if (!found) throw new Error("no conversation");
+        onRestartRef.current();
+      })
+      .catch(() => {
+        takeRestartNote(sessionId);
+        say("failed");
+      });
+  }, [status, pane.id, pane.role, pane.agent, pane.sessionId, paneMcp, activity, restartLocale]);
+
   const jumpKeys = index < 9 ? shortcut(`pane.focus${index + 1}` as CommandId) : "";
 
   const paneCwd = pane.cwd || cwd;
@@ -308,6 +364,7 @@ export function TerminalPane({
     const controller = new AbortController();
     let unsubscribe: (() => void) | null = null;
     let disposed = false;
+    launchedRoleRef.current = pane.role;
 
     const term = new Terminal({
       fontFamily: settings.fontFamily,
@@ -560,7 +617,7 @@ export function TerminalPane({
       const scope = workspaceMcp({ mcp: mcpRef.current });
       const family = shellFamily(shellRef.current);
       if (scope.mode === "inherit") {
-        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        updatePaneInsight(pane.id, { mcp: { mode: "inherit", hangar: false } });
         if (!pane.role || family === "wsl") return undefined;
         try {
           const file = await mcpScopeWrite({
@@ -571,6 +628,7 @@ export function TerminalPane({
             account,
           });
           const arg = mcpConfigArg(file.path, family);
+          if (arg) updatePaneInsight(pane.id, { mcp: { mode: "inherit", hangar: true } });
           return arg ? { path: file.path, arg, strict: false } : undefined;
         } catch (err) {
           notes.push(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
@@ -579,7 +637,7 @@ export function TerminalPane({
       }
       if (family === "wsl") {
         notes.push(tRef.current("mcpScope.warnWsl"));
-        updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        updatePaneInsight(pane.id, { mcp: { mode: "inherit", hangar: false } });
         return undefined;
       }
       try {
@@ -596,11 +654,11 @@ export function TerminalPane({
         if (file.missing.length) {
           notes.push(tRef.current("mcpScope.warnMissing", { names: file.missing.join(", ") }));
         }
-        updatePaneInsight(pane.id, { mcp: { mode: "custom", servers: file.servers } });
+        updatePaneInsight(pane.id, { mcp: { mode: "custom", servers: file.servers, hangar: true } });
         return { path: file.path, arg, strict: true };
       } catch (err) {
         notes.push(tRef.current("mcpScope.warnFailed", { error: String(err).replace(/^Error: /, "") }));
-        if (!disposed) updatePaneInsight(pane.id, { mcp: { mode: "inherit" } });
+        if (!disposed) updatePaneInsight(pane.id, { mcp: { mode: "inherit", hangar: false } });
         return undefined;
       }
     }
@@ -849,6 +907,9 @@ export function TerminalPane({
           const { ids: kits, held: heldKits } = await loadPaneKits(login ? null : workspace, settingsRef.current);
           if (disposed) return;
           const launchNotes: string[] = [];
+          // A restart that gave this pane Hangar's tools says so on the way in.
+          const restartNote = takeRestartNote(pane.sessionId);
+          if (restartNote) launchNotes.push(restartNote);
           // The Claude account it runs on, as chosen right now: the pane's
           // own, its workspace's, then the default (lib/accounts). Only
           // Claude Code runs on an account; a gone one falls back, and says so.

@@ -122,7 +122,15 @@ export interface PaneInsight {
  * `inherit`: Claude Code's own configuration. `custom`: the servers the
  * workspace chose, Hangar's included, as they went into the launch.
  */
-export type PaneMcp = { mode: "inherit" } | { mode: "custom"; servers: string[] };
+export type PaneMcp = ({ mode: "inherit" } | { mode: "custom"; servers: string[] }) & {
+  /**
+   * Whether Hangar's own server went into the launch (`--mcp-config`). False
+   * for a Claude Code started without a role: pinned later, it has none of
+   * the board, memory or worker tools until it restarts. Absent when the
+   * launch did not say.
+   */
+  hangar?: boolean;
+};
 
 /** Enough history to read back over a coffee, not a transcript. */
 export const MAX_EVENTS = 40;

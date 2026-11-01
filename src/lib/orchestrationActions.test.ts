@@ -5,7 +5,16 @@ import type { AgentId, AppState, Pane, Workspace } from "../types";
 // itself needs neither.
 vi.mock("../store", () => ({ useStore: () => ({}) }));
 
-const { canCreateOrchestrator, openManager, pinRefusal } = await import("./orchestrationActions");
+const {
+  canCreateOrchestrator,
+  isMidTurn,
+  openManager,
+  pinRefusal,
+  queueRestartNote,
+  roleRestart,
+  roleRestartText,
+  takeRestartNote,
+} = await import("./orchestrationActions");
 
 const pane = (id: string, agent: AgentId = "claude", patch: Partial<Pane> = {}): Pane => ({
   id,
@@ -178,5 +187,68 @@ describe("the HQ and its manager", () => {
     });
     expect(result).toEqual({ kind: "failed", error: "Error: denied" });
     expect(store.get().workspaces).toHaveLength(0);
+  });
+});
+
+describe("roleRestart", () => {
+  const base = {
+    agent: "claude" as AgentId,
+    role: "orchestrator" as const,
+    launchedRole: undefined,
+    hangar: false as boolean | undefined,
+    midTurn: false,
+    sessionId: "abc-123" as string | null,
+  };
+
+  it("restarts at once a pinned session that started without the server", () => {
+    expect(roleRestart(base)).toBe("now");
+  });
+
+  it("waits for the end of the turn when it is mid-turn", () => {
+    expect(roleRestart({ ...base, midTurn: true })).toBe("wait");
+  });
+
+  it("leaves a pane that already holds the server alone", () => {
+    expect(roleRestart({ ...base, hangar: true })).toBe("skip");
+  });
+
+  it("leaves a pane alone when the launch did not say", () => {
+    expect(roleRestart({ ...base, hangar: undefined })).toBe("skip");
+  });
+
+  it("leaves a pane that was launched with its role alone", () => {
+    expect(roleRestart({ ...base, launchedRole: "orchestrator" })).toBe("skip");
+  });
+
+  it("does nothing for other agents or without a role", () => {
+    for (const agent of ["codex", "shell"] as AgentId[]) {
+      expect(roleRestart({ ...base, agent })).toBe("skip");
+      expect(roleRestart({ ...base, agent, midTurn: true })).toBe("skip");
+    }
+    expect(roleRestart({ ...base, role: undefined })).toBe("skip");
+  });
+
+  it("refuses to lose a conversation that cannot be resumed", () => {
+    expect(roleRestart({ ...base, sessionId: null })).toBe("unresumable");
+  });
+
+  it("tells a turn from a pause", () => {
+    expect(isMidTurn("working")).toBe(true);
+    expect(isMidTurn("waiting")).toBe(true);
+    expect(isMidTurn("idle")).toBe(false);
+    expect(isMidTurn("yours")).toBe(false);
+  });
+
+  it("says it in English and French", () => {
+    for (const key of ["restarting", "failed", "unresumable"] as const) {
+      expect(roleRestartText("en", key)).not.toBe(roleRestartText("fr", key));
+    }
+  });
+
+  it("hands a note to the replacement pane once", () => {
+    queueRestartNote("s1", "note");
+    expect(takeRestartNote("s1")).toBe("note");
+    expect(takeRestartNote("s1")).toBeNull();
+    expect(takeRestartNote(null)).toBeNull();
   });
 });
