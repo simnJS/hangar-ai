@@ -83,6 +83,30 @@ function ensureBus(): Promise<void> {
 }
 
 /**
+ * Prompts queued for a pane that is restarting under a new id. The backend
+ * keeps the queue per id and drops it with the old pane, so the old pane
+ * stashes what it still holds and the new one (same workspace, same name)
+ * takes it. It wears off: a pane closed for real must not pass its queue to
+ * one created later under the same name.
+ */
+const CARRY_MS = 10_000;
+const carried = new Map<string, { until: number; prompts: QueuedPrompt[] }>();
+
+export const carryKey = (workspaceId: string, paneName: string) => `${workspaceId}/${paneName}`;
+
+export function stashQueue(key: string, prompts: QueuedPrompt[], now = Date.now()) {
+  if (prompts.length === 0) carried.delete(key);
+  else carried.set(key, { until: now + CARRY_MS, prompts });
+}
+
+/** The stashed prompts, once: taking them empties the stash. */
+export function takeStashedQueue(key: string, now = Date.now()): QueuedPrompt[] {
+  const entry = carried.get(key);
+  carried.delete(key);
+  return entry && entry.until >= now ? entry.prompts : [];
+}
+
+/**
  * Resolves with the unsubscribe function. Outside the desktop shell there is
  * no event bus, and the pane simply never hears from a mod.
  */

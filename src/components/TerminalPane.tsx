@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import {
   bridgeCancel,
+  bridgeEnqueue,
   contextUsage,
   ptyAlive,
   ptyHistory,
@@ -18,12 +19,25 @@ import {
   sessionExists,
   type QueuedPrompt,
 } from "../lib/ipc";
-import { isHandingOver } from "../lib/windows";
+import {
+  beginLaunch,
+  endLaunch,
+  finishesLaunch,
+  isHandingOver,
+  launchesPane,
+  visibleLaunchNotes,
+} from "../lib/windows";
 import { launchAccount, LOGIN_COMMAND, MAIN_ACCOUNT, noteLaunchedAccount } from "../lib/accounts";
 import { useAccountsT } from "./accounts/strings";
 import { PaneAccountBadge } from "./accounts/PaneAccountBadge";
 import { sessionName } from "../lib/paneNames";
-import { subscribeBridge, type BridgeEvent } from "../lib/bridge";
+import {
+  carryKey,
+  stashQueue,
+  subscribeBridge,
+  takeStashedQueue,
+  type BridgeEvent,
+} from "../lib/bridge";
 import {
   activityAtHello,
   clearPaneActivity,
@@ -252,6 +266,12 @@ export function TerminalPane({
   const [bridgeContext, setBridgeContext] = useState<ContextGauge | null>(null);
   /** Prompts waiting for the agent to be free. */
   const [queue, setQueue] = useState<QueuedPrompt[]>([]);
+  /**
+   * What the launch had to say (a kit left out, an account that is gone…).
+   * Kept out of the terminal: Claude Code clears the screen as it starts.
+   */
+  const [barNotes, setBarNotes] = useState<string[]>([]);
+  const [dismissedNotes, setDismissedNotes] = useState<ReadonlySet<string>>(() => new Set());
   /** Another pane is asking whether it may edit a file this one edited. */
   const conflictFrom = useConflict(pane.id);
   /** The search bar, while open. `request` counts the shortcut's presses. */
@@ -364,6 +384,12 @@ export function TerminalPane({
     const controller = new AbortController();
     let unsubscribe: (() => void) | null = null;
     let disposed = false;
+    // The pane left for another window before its agent was launched: this
+    // window still types the launch command (the one that adopts the shell
+    // never does), then lets go. See lib/windows › finishesLaunch.
+    let finishing = false;
+    const halted = () => disposed && !finishing;
+    const stopped = () => halted() || (controller.signal.aborted && !finishing);
     launchedRoleRef.current = pane.role;
 
     const term = new Terminal({
@@ -857,6 +883,12 @@ export function TerminalPane({
         }
         unsubscribeBridge = stopBridge;
 
+        // A restart gave this pane a new id: the prompts still queued for the
+        // old one come along (see lib/bridge › stashQueue).
+        for (const carried of takeStashedQueue(carryKey(workspaceId, pane.name))) {
+          bridgeEnqueue(pane.id, carried.text, carried.from).catch(() => undefined);
+        }
+
         /**
          * Already running: another window let go of this pane — its workspace
          * moved to this window — or this window was reloaded. The pane is
@@ -895,7 +927,7 @@ export function TerminalPane({
           : new Set<string>();
         if (disposed) return;
 
-        if (!adopted) {
+        if (launchesPane(adopted)) {
           const workspace = snapshotRef.current().workspaces.find((ws) => ws.id === workspaceId);
           // A pane opened to log its Claude account in runs the login and
           // nothing else: no servers, no kits, no conversation.
@@ -930,6 +962,7 @@ export function TerminalPane({
               ? await mcpLaunchConfig(launchNotes, kits, account.id)
               : undefined;
           if (disposed) return;
+          beginLaunch(pane.id);
           const spawned = await ptySpawn({
             id: pane.id,
             cwd: paneCwd,
@@ -957,11 +990,16 @@ export function TerminalPane({
           // spawn killed an id the backend did not know yet, so the shell it
           // just registered would outlive the pane. Killing again is free when
           // the id is already gone.
-          if (disposed) {
+          if (halted()) {
             if (!isHandingOver(pane.id)) ptyKill(pane.id).catch(() => undefined);
             return;
           }
-          setStatus("running");
+          if (!disposed) {
+            setStatus("running");
+            // In the pane's note bar, not its terminal: Claude Code clears the
+            // screen as it starts and the notes would go with it.
+            setBarNotes(launchNotes);
+          }
 
           if (pane.agent === "shell") return;
 
@@ -970,8 +1008,7 @@ export function TerminalPane({
           // account that is gone would log main in again in its place.
           if (login) {
             await sleep(settingsRef.current.launchDelayMs, controller.signal);
-            if (disposed || controller.signal.aborted) return;
-            for (const note of launchNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
+            if (stopped()) return;
             const fellBack = !!account?.missing || (!!spawned?.account && spawned.account !== account?.id);
             if (!fellBack) await ptyWrite(pane.id, `${LOGIN_COMMAND}\r`).catch(() => undefined);
             return;
@@ -994,16 +1031,15 @@ export function TerminalPane({
 
           // Let the shell profile settle before typing into it.
           await sleep(settingsRef.current.launchDelayMs, controller.signal);
-          if (disposed || controller.signal.aborted) return;
+          if (stopped()) return;
           if (owed) mustResume(pane.id, true);
 
           let resumeId = saved;
           if (resumeId && (await behind) === false) {
-            if (disposed) return;
+            if (halted()) return;
             resumeId = null;
-            onSessionCaptured(null);
+            if (!disposed) onSessionCaptured(null);
           }
-          for (const note of launchNotes) term.writeln(`\x1b[33m${note}\x1b[0m`);
           const command = launchCommand(pane.agent, resumeId, {
             extraRoots: extraRootsRef.current,
             commands: settingsRef.current.agentCommands,
@@ -1032,6 +1068,9 @@ export function TerminalPane({
               record(sessionEvent(resumeId ?? "", resumeId !== null));
             }
           }
+          // Launched from a window the pane has since left: the one that
+          // adopted it watches for its session.
+          if (disposed) return;
         } else if (pane.agent === "shell" || pane.login) {
           return;
         }
@@ -1068,6 +1107,8 @@ export function TerminalPane({
           `\r\n\x1b[31m${tRef.current("pane.spawnFailed")}: ${String(err)}\x1b[0m`,
         );
         setStatus("exited");
+      } finally {
+        endLaunch(pane.id);
       }
     })();
 
@@ -1081,8 +1122,16 @@ export function TerminalPane({
     observer.observe(host);
 
     return () => {
+      finishing = finishesLaunch(pane.id);
       disposed = true;
-      controller.abort();
+      if (!finishing) controller.abort();
+      // Restarted under a new id, its prompts still queued come along; closed
+      // for real, they go with it.
+      const successor = snapshotRef
+        .current()
+        .workspaces.find((ws) => ws.id === workspaceId)
+        ?.panes.some((p) => p.name === pane.name && p.id !== pane.id);
+      if (successor) stashQueue(carryKey(workspaceId, pane.name), queueRef.current);
       observer.disconnect();
       watcher.dispose();
       unregister();
@@ -1727,6 +1776,37 @@ export function TerminalPane({
           </button>
         </span>
       </header>
+
+      {/* What the launch said. Outside the terminal on purpose: Claude Code
+          clears the screen as it starts, and the notes went with it. */}
+      {visibleLaunchNotes(barNotes, dismissedNotes).map((note) => (
+        <div
+          key={note}
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "2px 8px",
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: "#e5c07b",
+            background: "rgba(229, 192, 123, 0.1)",
+            borderBottom: "1px solid rgba(229, 192, 123, 0.25)",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{note}</span>
+          <button
+            type="button"
+            className="btn btn--tiny btn--ghost"
+            title={restartLocale === "fr" ? "Masquer" : "Dismiss"}
+            aria-label={restartLocale === "fr" ? "Masquer la note" : "Dismiss the note"}
+            onClick={() => setDismissedNotes((prev) => new Set(prev).add(note))}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      ))}
 
       {/* The search bar floats over the terminal from beside its host rather
           than inside it: xterm owns every child of that element. */}

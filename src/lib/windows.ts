@@ -84,6 +84,43 @@ export function isHandingOver(paneId: string): boolean {
 }
 
 /**
+ * Panes whose agent launch is still ahead: the shell is up, the launch command
+ * is not typed yet. A window that adopts a running pane never launches it (it
+ * cannot tell a launched shell from a waiting one), so the window that started
+ * the launch finishes it even if the pane is handed over meanwhile. One owner,
+ * one launch: it cannot happen twice.
+ */
+const launching = new Set<string>();
+
+export const beginLaunch = (paneId: string) => void launching.add(paneId);
+export const endLaunch = (paneId: string) => void launching.delete(paneId);
+
+/**
+ * Should the window that unmounts this pane keep going with its launch? Yes
+ * when the pane is being handed over before the command was typed; otherwise
+ * an unmount stops the launch, as before.
+ */
+export const finishesLaunch = (paneId: string): boolean => launching.has(paneId) && isHandingOver(paneId);
+
+/** Who types the launch command: the window that spawned the shell, never one
+    that adopted it. */
+export const launchesPane = (adopted: boolean): boolean => !adopted;
+
+/** What a launch says in the pane's note bar: trimmed, deduplicated, and not
+    the ones already dismissed. */
+export function visibleLaunchNotes(notes: string[], dismissed: ReadonlySet<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of notes) {
+    const note = raw.trim();
+    if (!note || dismissed.has(note) || seen.has(note)) continue;
+    seen.add(note);
+    out.push(note);
+  }
+  return out;
+}
+
+/**
  * A pane's terminal, wherever it is drawn. The main window carries out the
  * agents' requests, but a detached workspace's terminals live in another
  * window: these are the few things a request needs from one.
