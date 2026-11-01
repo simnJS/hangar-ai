@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window and the workspace windows",
+  "windows": ["main", "workspace-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**/*.pdf" }]
+    },
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "updater:default",
+    "process:allow-restart",
+    "notification:default"
+  ]
+}

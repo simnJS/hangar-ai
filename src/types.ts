@@ -1,0 +1,507 @@
+export type AgentId = "shell" | "claude" | "codex" | "gemini" | "opencode";
+
+/** Where a dictation is transcribed. Mirrored in Rust as `EngineKind`. */
+export type VoiceEngine = "local" | "groq";
+
+/**
+ * The catalogue id the Rust side downloads and loads for local dictation.
+ *
+ * A settings file written before this changed still names the old checkpoint;
+ * Rust resolves an id it does not know to the one model there is, so nothing
+ * has to migrate this.
+ */
+export const DEFAULT_VOICE_MODEL = "whisper-small-q5_1";
+
+/**
+ * Groq's transcription models, cheapest first.
+ *
+ * Turbo is the default for the same reason it is elsewhere: at $0.04 an hour
+ * against $0.111 it is the one that makes the cloud fallback cost nothing worth
+ * noticing, and dictation is too short for the accuracy gap to show.
+ */
+export const CLOUD_MODELS = [
+  { id: "whisper-large-v3-turbo", label: "Whisper large-v3 turbo", price: "$0.04/h" },
+  { id: "whisper-large-v3", label: "Whisper large-v3", price: "$0.111/h" },
+];
+
+/** Mirrors `cleanup::DEFAULT_MODEL`, and only ever shown as a placeholder. */
+export const DEFAULT_CLEANUP_MODEL = "llama-3.1-8b-instant";
+
+/**
+ * Offered in the language picker. Not the ninety-nine Whisper handles — just
+ * the ones worth a click, with "detect" covering the rest.
+ */
+export const VOICE_LANGUAGES = [
+  "en",
+  "fr",
+  "de",
+  "es",
+  "it",
+  "pt",
+  "nl",
+  "pl",
+  "ru",
+  "uk",
+  "sv",
+];
+
+/** Starting points offered in the UI; a workspace can hold any pane count. */
+export type LayoutSize = 1 | 2 | 4 | 8;
+
+/** A shell discovered on this machine, as reported by the Rust side. */
+export interface ShellInfo {
+  id: string;
+  label: string;
+  program: string;
+  args: string[];
+}
+
+export interface Pane {
+  id: string;
+  /**
+   * Human name for this pane — unique within its workspace, and stable across
+   * splits, moves and restarts, unlike a position.
+   */
+  name: string;
+  agent: AgentId;
+  /** Agent session to resume on next launch. Captured automatically. */
+  sessionId: string | null;
+  /** Optional per-pane directory, overriding the workspace root. */
+  cwd: string | null;
+  /** Overrides the workspace shell. null follows the workspace. */
+  shellId: string | null;
+  title: string | null;
+  /**
+   * The pane's part in its workspace's orchestration (lib/orchestration).
+   * Absent on every other pane, and on every pane saved before it existed.
+   */
+  role?: PaneRole;
+  /** A worker's board task, by id. */
+  taskId?: string | null;
+  /** The model its agent starts with (`--model`); absent: the agent's own. */
+  model?: string | null;
+  /** First of the ports a worker may bind (HANGAR_PORT_BASE in its shell). */
+  portBase?: number | null;
+  /**
+   * A worker started in its workspace's own folder, beside the other workers,
+   * because the workspace is not a git repository: no worktree, no branch,
+   * and nothing merged. Absent on every worker that has a worktree.
+   */
+  sharedFolder?: boolean;
+  /**
+   * The Claude account this pane's Claude Code runs on, over its
+   * workspace's (lib/accounts). Absent or null follows the workspace.
+   */
+  claudeAccount?: string | null;
+  /**
+   * A Claude Code pane opened to log its account in: it runs
+   * `LOGIN_COMMAND` (lib/accounts) instead of starting Claude Code, and the
+   * person finishes in the browser. Absent on every other pane.
+   */
+  login?: boolean;
+}
+
+/**
+ * An orchestrator coordinates; a worker does one board task in its worktree.
+ * The manager, one pane in the HQ workspace, follows every workspace and
+ * speaks to their orchestrators (lib/projects); it is neither of the others.
+ */
+export type PaneRole = "orchestrator" | "worker" | "manager";
+
+/**
+ * A command kept around to be run again — `pnpm tauri dev`, `cargo check`, the
+ * prompt an agent gets asked the same way every morning.
+ *
+ * `command` is typed into a pane verbatim; `autoRun` decides whether the Enter
+ * that runs it is sent along or left to the user, and `broadcast` sends it to
+ * every pane of the workspace rather than to the one it was launched from.
+ */
+export interface SavedCommand {
+  id: string;
+  /** What the menu entry reads. Empty falls back to the command itself. */
+  label: string;
+  command: string;
+  autoRun: boolean;
+  broadcast: boolean;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  cwd: string;
+  /**
+   * The other folders of a VS Code `.code-workspace`, once `cwd` has taken the
+   * main one. Terminals still open in `cwd` — a shell has one directory — but
+   * the agents that can read beyond it are told about these.
+   */
+  extraRoots: string[];
+  panes: Pane[];
+  /** Overrides the global theme for this workspace only. */
+  themeId: string | null;
+  /** Overrides the global default shell. null follows the settings. */
+  shellId: string | null;
+  /**
+   * Nested split tree describing the pane arrangement. Unlike a CSS grid, each
+   * split owns its own ratio, so resizing one boundary leaves the rest alone.
+   */
+  tree: SplitNode | null;
+  /**
+   * Saved commands belonging to this project, listed before the global ones —
+   * the useful ones are usually the ones a single repository needs.
+   */
+  savedCommands: SavedCommand[];
+  /** The sidebar folder it is filed under. null sits at the top level. */
+  folderId: string | null;
+  /**
+   * Shown in a window of its own — on a second screen, typically — instead of
+   * in the main window. Reopened there on the next launch.
+   */
+  detached?: boolean;
+  /** Where that window last stood, in logical pixels. */
+  windowBounds?: WindowBounds | null;
+  /**
+   * The MCP servers its Claude Code panes start with (lib/mcpScope). Absent
+   * reads as `inherit`, which is what every workspace saved before this did.
+   */
+  mcp?: WorkspaceMcp;
+  /**
+   * The kits enabled on it (lib/kits, docs/kits.md): every Claude Code pane
+   * of the workspace, workers' included, loads their plugins. Read through
+   * `workspaceKits`, which takes anything malformed as no kit. Absent on
+   * every workspace without one.
+   */
+  kits?: WorkspaceKit[];
+  /**
+   * How its orchestrator works (lib/orchestration). Absent reads as the
+   * defaults there; a workspace without an orchestrator ignores it.
+   */
+  orchestration?: OrchestrationSettings;
+  /**
+   * The HQ: the workspace Hangar creates for the manager pane, left out of
+   * the projects it follows (lib/projects). Absent on every other workspace.
+   */
+  hq?: boolean;
+  /**
+   * Ports the person lets Hangar Mobile open for this workspace, besides its
+   * workers' port blocks: their own `pnpm dev`, say 5173 (Settings › Mobile,
+   * lib/remoteApps). Absent on every workspace without one.
+   */
+  mobilePorts?: number[];
+  /**
+   * The Claude account its Claude Code panes run on, workers' included
+   * (lib/accounts). Absent or null follows `Settings.claudeAccount`; read
+   * through `resolveAccount`, which takes anything malformed as no choice.
+   */
+  claudeAccount?: string | null;
+}
+
+export interface OrchestrationSettings {
+  /** Workers running at once; the orchestrator itself does not count. */
+  maxWorkers: number;
+  /** Workers started on one task before it goes back to the person. */
+  maxAttempts: number;
+  /**
+   * Whether a delivery that passed its check and its review lands on the
+   * branch by itself. Off, it waits for the person. Nothing is ever pushed.
+   */
+  autoMerge: boolean;
+  /** Run in a delivery's worktree before it lands; null: none. */
+  checkCommand: string | null;
+  /** `--model` of the orchestrator, of its workers, of its reviewers. */
+  orchestratorModel: string;
+  workerModel: string;
+  reviewerModel: string;
+  /** The branch deliveries land on; null: the workspace's current branch. */
+  branch: string | null;
+  /**
+   * `--permission-mode` of the orchestrator and its workers; null: the
+   * person's own default. Workers nobody watches stop at every prompt this
+   * leaves them.
+   */
+  permissionMode: string | null;
+}
+
+/**
+ * `inherit` launches Claude Code as it always was, with whatever servers its
+ * own configuration gives it. `custom` launches it with only the servers
+ * named in `enabled` — plus Hangar's own, which is never left out.
+ */
+export interface WorkspaceMcp {
+  mode: "inherit" | "custom";
+  /** Server names, as Claude Code's configuration spells them. */
+  enabled: string[];
+}
+
+/** A kit enabled on a workspace. */
+export interface WorkspaceKit {
+  /** The kit's id, as its `hangar-kit.json` gives it. */
+  id: string;
+  /**
+   * The tab permissions the person accepted when enabling it
+   * (`KIT_PERMISSIONS` in lib/kits). A tab asking for one not listed here
+   * is answered `denied`.
+   */
+  granted: string[];
+}
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A sidebar group of workspaces. One level deep only: a folder holds
+ * workspaces, never other folders.
+ *
+ * It owns nothing — deleting one sends its workspaces back to the top level —
+ * and its contents are not listed here: each workspace names its folder, and
+ * the order of `AppState.workspaces` is the order inside every folder.
+ */
+export interface WorkspaceFolder {
+  id: string;
+  name: string;
+  collapsed: boolean;
+}
+
+export type SplitNode =
+  /** Leaves point at a pane id: closing or moving a pane never renumbers. */
+  | { type: "pane"; id: string }
+  /** `row` places children side by side (vertical bar), `col` stacks them. */
+  | { type: "split"; dir: "row" | "col"; ratio: number; a: SplitNode; b: SplitNode };
+
+export interface Settings {
+  themeId: string;
+  /** null follows the OS language. */
+  locale: "en" | "fr" | null;
+  /** Default shell for every new pane. null means "first one detected". */
+  shellId: string | null;
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+  cursorStyle: "block" | "bar" | "underline";
+  cursorBlink: boolean;
+  scrollback: number;
+  padding: number;
+  /**
+   * What a pane types to start each agent, by agent id — only where it differs
+   * from the plain command, so an agent nobody customised follows whatever a
+   * later version ships.
+   *
+   * This is the command line, not a path: it is typed into an interactive
+   * shell, so an alias or a function of your own works as well as a binary.
+   * Resume arguments are appended to it, which is what keeps `--resume`
+   * working on top of a custom launcher.
+   */
+  agentCommands: Record<string, string>;
+  /** Relaunch agents with their previous session when a workspace opens. */
+  autoResume: boolean;
+  /**
+   * Put a workspace nobody uses to sleep: its terminals close, its agents stop
+   * and give their memory back, and they resume their sessions when it opens
+   * again (lib/hibernate decides when it is safe). On by default — a dozen
+   * idle Claude Code sessions in workspaces left behind cost gigabytes.
+   */
+  hibernateIdle: boolean;
+  /** How long a workspace has to be left alone first, in minutes. */
+  hibernateAfterMin: number;
+  /**
+   * Load the hangar-bridge mod into the Claude Code each pane starts (see
+   * src-tauri/src/bridge.rs). On by default; the way out for a machine whose
+   * Claude Code refuses to start with a plugin directory it did not install.
+   */
+  claudeBridge: boolean;
+  /** Wait before auto-launching agents, so the shell finishes its profile. */
+  launchDelayMs: number;
+  /** Raise a desktop notification when a pane hands control back. */
+  notifyOnIdle: boolean;
+  /** Silence, in ms, after which a working pane counts as finished. */
+  notifyIdleMs: number;
+  /** Stay quiet for the pane you are already watching. */
+  notifyOnlyWhenAway: boolean;
+  /**
+   * Re-bound keyboard shortcuts, by command id — only what differs from the
+   * defaults in lib/shortcuts, so a default that changes in a later version
+   * reaches everyone who never touched it. An empty array disables a command.
+   */
+  keybindings: Record<string, string[]>;
+  /**
+   * Saved commands every workspace offers, after its own. A command that is
+   * about the tool rather than the project — `git status`, a prompt you reuse
+   * — belongs here.
+   */
+  savedCommands: SavedCommand[];
+  /**
+   * Dictation. Off until asked for: it wants a microphone, and either a model
+   * downloaded or a key pasted, so turning it on is a decision rather than a
+   * default someone stumbles into.
+   */
+  voiceEnabled: boolean;
+  /** `local` runs on this machine, `groq` sends the audio to Groq. */
+  voiceEngine: VoiceEngine;
+  /** Downloaded checkpoint, by catalogue id. */
+  voiceModel: string;
+  /** Model name on Groq. Kept apart from `voiceModel` so switching engines
+      back and forth does not lose either choice. */
+  voiceCloudModel: string;
+  /** ISO code, or empty to let the model work it out. */
+  voiceLanguage: string;
+  /**
+   * Legacy: the Groq key, in plain text, as versions before the keychain kept
+   * it. load_state moves it to the system keychain and drops it; it is only
+   * still here when the keychain refused it, and is never used for dictation.
+   * The voice settings offer to delete it.
+   */
+  voiceApiKey?: string;
+  /** Rewrite the transcript with a small model before it lands. */
+  voiceCleanup: boolean;
+  voiceCleanupModel: string;
+  /** Project words the cleanup pass should spell the way you do. */
+  voiceCleanupHint: string;
+  /**
+   * Press Enter for you once the text is in. Off by default — reading back
+   * what a microphone heard before an agent acts on it is worth the keystroke.
+   */
+  voiceSubmit: boolean;
+  /**
+   * Publish what you are working on to Discord. Off by default: this is the
+   * one setting that sends anything out of the machine.
+   */
+  discordPresence: boolean;
+  /** Name the workspace on Discord. Off keeps the presence generic. */
+  discordShowWorkspace: boolean;
+  /** Name the agents running. Off only shows how many. */
+  discordShowAgents: boolean;
+  /**
+   * Discord application the presence speaks for — its uploaded art is what the
+   * card shows. Empty follows the one this app ships with.
+   */
+  discordAppId: string;
+  /** The board shown as a panel beside the terminals. */
+  boardDockOpen: boolean;
+  /** Its width in px, as last dragged. */
+  boardDockWidth: number;
+  /**
+   * The 3D preview's width beside the terminals, as last dragged. Whether it
+   * shows is not a setting: it exists while an agent has a model open.
+   */
+  modelPanelWidth: number;
+  /** The navigator on the left: the workspaces and the agents in each. */
+  navigatorOpen: boolean;
+  /** The inspector on the right: everything about the focused pane. */
+  inspectorOpen: boolean;
+  /** Its width in px, as last dragged. */
+  inspectorWidth: number;
+  /** Inspector sections folded away, by section id. */
+  inspectorCollapsed: string[];
+  /**
+   * Size of the interface text, in percent — sidebar, board, settings, pane
+   * headers. The terminals keep `fontSize`: the two are read at different
+   * distances and rarely want changing together.
+   */
+  uiScale: number;
+  /**
+   * Agents may list, open, close, restart and type into panes through the MCP
+   * server. On by default — orchestrating other agents is what it is for — and
+   * each call still goes through the agent's own permission prompts.
+   */
+  agentPaneControl: boolean;
+  /**
+   * The Claude account Claude Code panes run on by default (lib/accounts):
+   * `"main"`, Claude Code's own configuration, until the person picks
+   * another. A workspace, then a pane, can choose their own. Never changed
+   * by Hangar on its own — no switching when a limit is reached.
+   */
+  claudeAccount?: string | null;
+  /**
+   * The kits enabled on every workspace at once (Settings › Kits), each with
+   * the permissions the person accepted once for all. A workspace's own entry
+   * for the same kit wins. Read through `everywhereKits`, which takes anything
+   * malformed as no kit; absent when none.
+   */
+  kitsEverywhere?: WorkspaceKit[];
+}
+
+export interface AppState {
+  workspaces: Workspace[];
+  /** In sidebar order. */
+  folders: WorkspaceFolder[];
+  activeWorkspaceId: string | null;
+  settings: Settings;
+}
+
+/** One `folders[]` entry of a VS Code `.code-workspace`, already resolved. */
+export interface WorkspaceRoot {
+  name: string;
+  path: string;
+  /** False when the file points at a folder this machine does not have. */
+  exists: boolean;
+}
+
+export interface AgentSession {
+  id: string;
+  label: string;
+  modified_ms: number;
+}
+
+export const AGENTS: { id: AgentId; label: string; resumable: boolean }[] = [
+  { id: "shell", label: "Shell", resumable: false },
+  { id: "claude", label: "Claude Code", resumable: true },
+  { id: "codex", label: "Codex", resumable: true },
+  { id: "gemini", label: "Gemini", resumable: false },
+  { id: "opencode", label: "OpenCode", resumable: false },
+];
+
+export const DEFAULT_SETTINGS: Settings = {
+  themeId: "graphite",
+  locale: null,
+  shellId: null,
+  fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace',
+  fontSize: 13,
+  lineHeight: 1.3,
+  letterSpacing: 0,
+  cursorStyle: "bar",
+  cursorBlink: true,
+  scrollback: 10000,
+  padding: 10,
+  agentCommands: {},
+  autoResume: true,
+  hibernateIdle: true,
+  hibernateAfterMin: 10,
+  claudeBridge: true,
+  launchDelayMs: 700,
+  notifyOnIdle: true,
+  notifyIdleMs: 3000,
+  notifyOnlyWhenAway: true,
+  keybindings: {},
+  savedCommands: [],
+  voiceEnabled: false,
+  voiceEngine: "local",
+  voiceModel: DEFAULT_VOICE_MODEL,
+  voiceCloudModel: CLOUD_MODELS[0].id,
+  voiceLanguage: "",
+  voiceCleanup: false,
+  voiceCleanupModel: "",
+  voiceCleanupHint: "",
+  voiceSubmit: false,
+  discordPresence: false,
+  discordShowWorkspace: true,
+  discordShowAgents: true,
+  discordAppId: "",
+  boardDockOpen: false,
+  boardDockWidth: 420,
+  modelPanelWidth: 440,
+  navigatorOpen: true,
+  inspectorOpen: true,
+  inspectorWidth: 296,
+  inspectorCollapsed: [],
+  uiScale: 100,
+  agentPaneControl: true,
+  claudeAccount: "main",
+};
+
+/** Bounds of the interface size slider, in percent. */
+export const UI_SCALE_MIN = 90;
+export const UI_SCALE_MAX = 130;

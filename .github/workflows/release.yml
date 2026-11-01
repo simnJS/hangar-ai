@@ -1,0 +1,353 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # In CI every build is from scratch, so incremental only pays for dependency
+  # tracking nobody reuses — and it is what makes the cached target directory
+  # big enough for restoring it to cost more than it saves.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # The one place a release is created.
+  #
+  # Letting the three build jobs race for it — first one creates, the others
+  # attach to what they find — works only while they finish far enough apart.
+  # When they do not, two releases appear under the same tag with the assets
+  # split between them, and the publish job below refuses a `latest.json` that
+  # is missing whichever platform landed in the other one. Creating it once,
+  # before anything builds, is what removes the race rather than narrowing it.
+  draft:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Create the draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          NOTES: |
+            - **Windows** — the `.exe` under **Assets**. Installs for you alone,
+              with no administrator rights. Unsigned, so SmartScreen warns on
+              first run: **More info** → **Run anyway**. Requires WebView2,
+              which ships with Windows 11.
+            - **macOS** — the `.dmg`, universal for Apple Silicon and Intel.${{ secrets.APPLE_CERTIFICATE == '' && ' The build is unsigned, so the first launch is right-click → **Open**.' || '' }}
+            - **Linux** — the `.AppImage` runs without installing on
+              distributions with glibc 2.35 or later (2022 on); the `.deb` and
+              `.rpm` are there for a package manager, and bring WebKitGTK 4.1
+              with them.
+        run: |
+          set -euo pipefail
+
+          # A re-run of a failed release finds its own draft from the first
+          # attempt; reusing it keeps whatever assets already uploaded rather
+          # than starting a second release beside the first.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                --jq 'map(select(.tag_name == env.TAG)) | .[0].id // empty')
+
+          if [ -z "$id" ]; then
+            id=$(jq -n --arg tag "$TAG" --arg body "$NOTES" \
+                  '{ tag_name: $tag, name: ("Hangar.AI " + $tag),
+                     body: $body, draft: true, prerelease: false }' \
+                 | gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+                     --input - --jq .id)
+            echo "created release $id for $TAG"
+          else
+            echo "reusing release $id for $TAG"
+          fi
+
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    strategy:
+      # All three at once. They no longer contend for `latest.json` — the
+      # publish job below assembles it alone, from the signatures they leave
+      # on the release — so a release now takes as long as its slowest
+      # platform rather than the sum of all of them.
+      fail-fast: false
+      matrix:
+        include:
+          # One universal binary rather than two downloads: an Apple Silicon
+          # user picking the Intel build gets a working app either way, and
+          # nobody has to know which one they are on.
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+          # Not `ubuntu-latest`: an AppImage links against the glibc of the
+          # machine that built it, so building on a newer Ubuntu quietly drops
+          # every distribution older than it.
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+    env:
+      # Read by the guard on the signing step below, and by the release notes.
+      # Left empty until an Apple certificate is configured, which is what makes
+      # the macOS job fall back to an unsigned build rather than failing.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Windows runner spends about twice as long on this crate as the
+      # other two, and most of the difference is Defender opening every one of
+      # the tens of thousands of files cargo writes. The runner is already
+      # ephemeral and already runs whatever this workflow says, so scanning the
+      # build it is about to produce buys nothing.
+      - name: Keep Defender out of the build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+          Add-MpPreference -ExclusionProcess "rustc.exe"
+          Add-MpPreference -ExclusionProcess "cargo.exe"
+          Add-MpPreference -ExclusionProcess "link.exe"
+
+      # Linux has no system WebView, and `tauri-build` needs it at compile
+      # time. `patchelf` is what the AppImage bundler rewrites the binary with.
+      # The last two are dictation: `libasound2-dev` is the ALSA header set cpal
+      # captures the microphone through, and `libclang-dev` is what whisper.cpp's
+      # bindings are generated with. Both fail the build, not the run.
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libasound2-dev \
+            libclang-dev \
+            patchelf
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      # Worth having for a re-run of the same tag, but not much more: a cache
+      # written under a tag ref is not readable from the next tag, so a release
+      # normally compiles from scratch whatever this restores. Warming it would
+      # mean a full release build on every push to main, which costs more than
+      # it saves at this rate of releasing.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Signing and notarisation are driven entirely by the environment, and an
+      # empty-but-present variable reads as "sign with this" rather than "do not
+      # sign" — which fails the build instead of skipping the step. They are
+      # exported only once the certificate is actually configured, so a clone
+      # without Apple credentials still gets a (unsigned) .dmg out of this job.
+      - name: Enable Apple signing and notarisation
+        if: matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != ''
+        env:
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          ID: ${{ secrets.APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE_PASSWORD=$CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY"
+            echo "APPLE_ID=$ID"
+            echo "APPLE_PASSWORD=$APP_PASSWORD"
+            echo "APPLE_TEAM_ID=$TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      # whisper.cpp is compiled from source here, and ggml's default is to
+      # build for the machine doing the building. GitHub hands out whatever
+      # runner it has: on one with AVX-512 that produces a release that dies
+      # with an illegal instruction on every CPU without it — which is most
+      # consumer Intel since 2021 — and on the next runner it does not. A
+      # release that works depending on which machine built it is not a release.
+      #
+      # AVX2 instead, which is 2013 onwards and covers anything that can run
+      # this app. It is not a compromise on speed: measured on the dictation
+      # path, the AVX-512 build and this one are within noise of each other
+      # (4.51s vs 4.67s), because what the work is bound by is not vector width.
+      #
+      # x86 only. The macOS bundle also targets arm64, where none of these mean
+      # anything and GGML_NATIVE is what picks the NEON features instead.
+      - name: Pin whisper.cpp to a portable instruction set
+        if: matrix.platform != 'macos-latest'
+        shell: bash
+        run: |
+          {
+            echo "GGML_NATIVE=OFF"
+            echo "GGML_SSE42=ON"
+            echo "GGML_AVX=ON"
+            echo "GGML_AVX2=ON"
+            echo "GGML_FMA=ON"
+            echo "GGML_F16C=ON"
+            echo "GGML_BMI2=ON"
+          } >> "$GITHUB_ENV"
+
+      # Builds the installers and, because the signing key is present, the
+      # `.sig` next to each updater bundle. Without these secrets the release
+      # still succeeds but auto-update will reject the artifacts.
+      #
+      # Uploads into the release the `draft` job made. Naming it by id rather
+      # than by tag is what keeps three parallel jobs on one release: with an
+      # id there is nothing left to look up, and nothing to lose a race over.
+      # The release stays a draft until the job below publishes it — a
+      # half-built release under /releases/latest/ is one a visitor downloads
+      # the wrong half of.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          args: ${{ matrix.args }}
+          # `latest.json` is assembled once, by the job below. Left to this
+          # action, each platform would build it by reading the copy already on
+          # the release and writing the result back — a read-modify-write with
+          # no lock, which is only safe while the jobs are serialised. Taking it
+          # away from them is what lets all three run at once.
+          includeUpdaterJson: false
+
+      # `tauri build` makes the phone app first (beforeBuildCommand in
+      # tauri.conf.json), and the binary embeds whatever dist-mobile/ holds.
+      # Without it the build still succeeds and every phone gets a page saying
+      # the app is missing, so this job fails instead: the release stays a
+      # draft and nothing reaches /releases/latest/.
+      - name: Check that Hangar Mobile is in the build
+        shell: bash
+        run: |
+          if ! grep -q '<div id="root"></div>' dist-mobile/index.html 2>/dev/null || [ ! -f dist-mobile/sw.js ]; then
+            echo "::error::dist-mobile/ is missing or incomplete: the installers would serve the placeholder instead of Hangar Mobile"
+            exit 1
+          fi
+          ls dist-mobile dist-mobile/assets
+
+  # The single writer of `latest.json`, and the only thing that publishes.
+  # Everything the updater relies on is decided here, once, with all three
+  # platforms already on the release.
+  publish:
+    needs: [draft, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assemble latest.json and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          # Taken from the job that created it rather than looked up by tag:
+          # a search would have to pick one of whatever is there, which is the
+          # mistake that published nothing when two releases shared a tag.
+          ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+
+          id="$ID"
+          if [ -z "$id" ]; then
+            echo "no release id from the draft job" >&2
+            exit 1
+          fi
+
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100")
+          platforms='{}'
+
+          # Every updater bundle leaves a `.sig` beside it, so the signatures
+          # are the list of what can actually be updated to — a `.deb` or a
+          # `.dmg` has none and is a download only. The bundle a signature
+          # belongs to is its own name without the suffix, and the extension
+          # says which platform keys it answers for.
+          #
+          # Both the plain key and the per-bundle one are written, as
+          # tauri-action did: an app installed by an older release polls for
+          # the name it already knows.
+          while read -r asset_id name; do
+            bundle="${name%.sig}"
+            case "$bundle" in
+              *.app.tar.gz) keys="darwin-aarch64 darwin-x86_64 darwin-aarch64-app darwin-x86_64-app" ;;
+              # The AppImage takes the plain linux key: it is the one bundle
+              # that can replace itself in place, which is what the updater
+              # does. The other two are listed under their own name for an
+              # install that came from a package manager.
+              *.AppImage)   keys="linux-x86_64 linux-x86_64-appimage" ;;
+              *.deb)        keys="linux-x86_64-deb" ;;
+              *.rpm)        keys="linux-x86_64-rpm" ;;
+              # The plain windows key belongs to the NSIS installer, which is
+              # the only one shipped: it installs per-user, so an update can
+              # replace an install without asking for rights the first one
+              # never needed. The msi line is kept for the day that target
+              # comes back, and stays on its own key so it cannot take the
+              # default back by simply existing.
+              *-setup.exe)  keys="windows-x86_64 windows-x86_64-nsis" ;;
+              *.msi)        keys="windows-x86_64-msi" ;;
+              *)            echo "::warning::no platform key for $bundle"; continue ;;
+            esac
+            signature=$(gh api -H "Accept: application/octet-stream" \
+                          "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id")
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$bundle"
+            for key in $keys; do
+              platforms=$(jq -c --arg k "$key" --arg s "$signature" --arg u "$url" \
+                '.[$k] = { signature: $s, url: $u }' <<<"$platforms")
+            done
+          done < <(jq -r '.[] | select(.name | endswith(".sig")) | "\(.id) \(.name)"' <<<"$assets")
+
+          # A `latest.json` missing a platform is exactly the silent failure
+          # this job exists to prevent, and one missing all of them means the
+          # signing key never reached the builds. Neither gets published.
+          for required in darwin-aarch64 linux-x86_64 windows-x86_64; do
+            if [ "$(jq --arg k "$required" 'has($k)' <<<"$platforms")" != "true" ]; then
+              echo "latest.json would ship without $required" >&2
+              exit 1
+            fi
+          done
+
+          jq -n --arg v "${TAG#v}" \
+                --arg n "$(gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body)" \
+                --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --argjson p "$platforms" \
+            '{ version: $v, notes: $n, pub_date: $d, platforms: $p }' > latest.json
+          jq -r '.platforms | keys[]' latest.json | sed 's/^/  /'
+
+          # Replaced rather than added, so re-running this job is harmless: an
+          # asset name is unique per release and the upload would be refused.
+          old=$(jq -r 'first(.[] | select(.name == "latest.json") | .id) // empty' <<<"$assets")
+          if [ -n "$old" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+          fi
+          gh api --method POST \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=latest.json" \
+            --header "Content-Type: application/json" \
+            --input latest.json > /dev/null
+
+          # Publishing is what moves the release under /releases/latest/, which
+          # is where the updater polls. It happens last, with the json complete.
+          # `draft` is a boolean and `make_latest` a string, per the REST API.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
+            -F draft=false -f make_latest=true
