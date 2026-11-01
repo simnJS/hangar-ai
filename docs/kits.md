@@ -140,12 +140,17 @@ At the kit's root. Schema 1:
 | `description` | string            | yes      |                                                                                           |
 | `author`      | string            | no       |                                                                                           |
 | `homepage`    | string            | no       | An `http://` or `https://` link.                                                          |
-| `icon`        | string            | no       | Relative path to an existing `.svg` or `.png` file.                                       |
+| `icon`        | string            | no       | Relative path to an existing `.svg` or `.png` file. An SVG is [drawn as a mask](#icon-colour). |
 | `hangar`      | string            | no       | A semver requirement on the Hangar version, like `>=1.6.0`. Unmet, the kit is unusable.   |
 | `plugin`      | string            | no       | Relative folder holding `.claude-plugin/plugin.json`. Default below.                      |
 | `tabs`        | array of tabs     | no       | See below. Ids unique.                                                                    |
 | `setup`       | array of steps    | no       | See below. Ids unique.                                                                    |
 | `commands`    | object            | no       | What its tabs may run, by name: [declared commands](#declared-commands).                  |
+
+<a id="icon-colour"></a>
+**Icon colour.** Hangar draws a kit's SVG icon (the kit's and its tabs') as a mask in the
+theme's colour, so it follows light and dark themes, and a multicolored SVG becomes one
+colour. A kit that wants its own colours uses a `.png`, which is shown as an image.
 
 `plugin` defaults to `"."` (the kit's root) when `<root>/.claude-plugin` exists,
 and to no plugin otherwise. A `plugin` folder without
@@ -221,7 +226,10 @@ by Hangar or typed by hand — loads them.
 
 - A GitHub kit whose list of [what runs by itself](#what-runs-by-itself) changed
   since this workspace accepted it is [left out](#consent-on-change) until it is
-  accepted again, MCP servers included, and the pane says so.
+  accepted again, MCP servers included. The workspace's Kits dialog shows it as to be
+  reviewed and kept out of new panes; that is what holds. The pane also prints a note,
+  but Claude Code erases it as soon as it starts: it may stay on screen a few seconds
+  at most, so do not rely on it.
 
 `pty_spawn` answers `{ kitIssues: [{ id, reason, detail? }] }`, `reason` being
 `missing`, `broken` (with `detail`, in English) or `forbidden`.

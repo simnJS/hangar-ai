@@ -8,6 +8,44 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.9.0] - 2026-11-01
+
+- **A kit Library.** **Settings → Kits → Library** lists the kits of the
+  [hangar-ai](https://github.com/hangar-ai) organization, read from a static file: no
+  server, nothing of yours sent.
+  - Each kit is pinned to a tag the catalog names. An update reaches you only when the
+    catalog names a new tag.
+  - The organization's kits carry a **Verified** badge. Any other kit says that Hangar
+    did not review it. Installing and accepting work the same for both.
+- **Public kits**, ready to install from the Library.
+  - **Guardrails** refuses dangerous commands and the reading of secrets.
+  - **Editor**: an agent that needs a secret opens the `.env` for you to fill in, and
+    never sees the value.
+  - **Checklist**: you work through the manual checks an agent lists, and the result
+    goes back to it.
+  - **Annotate**: circle a problem on a capture, and the agent gets the image and your
+    notes.
+  - **CI status** follows a GitHub Actions run after a push.
+  - **Tests** shows the last test run per project and agent.
+  - **GitHub** shows pull requests and issues, and hands any of them to an agent.
+  - **Dependencies** lists vulnerable and outdated packages, and hands them to an agent.
+  - **Services** shows listening ports and Docker containers, tied to the worker they
+    belong to. It stops nothing: an agent is asked to.
+  - **TODO** groups the `TODO`, `FIXME`, `HACK` and `XXX` comments of the project.
+  - **Database** is a read-only look at a SQLite file of the workspace.
+- **Kits that do more.**
+  - An agent, or a hook of a kit, can open one of the kit's tabs.
+  - A kit can declare commands its tabs run. You accept them when you enable the kit.
+  - A kit can be turned on for **all workspaces** from Settings → Kits, accepted once.
+- **You see everything a kit starts.** Before enabling it, you see all that its plugin
+  runs by itself: hooks, commands, MCP servers.
+  - A kit from GitHub that runs more than hooks is asked again, once, after this update.
+    Until you accept it, it stays out of new panes of the workspace.
+- **Hangar UI, for kit makers.** A shared look for kits' tabs, following your theme and
+  language, described in [docs/kit-ui.md](docs/kit-ui.md). The rest is in
+  [docs/kits.md](docs/kits.md).
+  - A kit's SVG icon now takes the theme's colour, so it stays visible on a dark theme.
+
 ## [1.8.0] - 2026-10-31
 
 - **Kits can do more, and show more before you accept them.**
