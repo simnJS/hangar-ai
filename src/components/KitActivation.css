@@ -4,6 +4,8 @@
 
 .kit-act {
   display: grid;
+  /* Never wider than the dialog, whatever a kit writes in a block below. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -151,6 +153,9 @@
 }
 
 .kit-step__title {
+  min-width: 0;
+  /* A hook's matcher is one long word, `Bash|PowerShell|Monitor|…`. */
+  overflow-wrap: anywhere;
   font-size: calc(13px * var(--ui-scale));
   font-weight: 500;
   color: var(--fg);
@@ -285,6 +290,18 @@
   display: block;
   object-fit: contain;
   border-radius: 3px;
+}
+
+/* An SVG, as a mask: it takes the colour around it (KitIcon says why). */
+.kit-icon--glyph {
+  border-radius: 0;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .kit-act__icon,

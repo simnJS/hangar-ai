@@ -99,13 +99,29 @@ export interface KitActivationViewProps {
 }
 
 /**
- * A kit's icon from its manifest, loaded as an `<img>` (never inlined). The
- * generic plug glyph stands in when there is none or the file does not load.
+ * A kit's icon from its manifest, loaded from the kit's own files (never
+ * inlined). The generic plug glyph stands in when there is none or the file
+ * does not load.
+ *
+ * An `<img>` cannot hand an SVG its `currentColor`: it draws black, which on a
+ * dark theme is nothing at all. So an SVG is a mask, and takes the colour around
+ * it as Hangar's own icons do; the hidden image is there to hear that it failed.
  */
 export function KitIcon({ kit, size = 16, className = "kit-icon" }: { kit: KitInfo; size?: number; className?: string }) {
   const url = kitIconUrl(kit);
   const [failed, setFailed] = useState<string | null>(null);
   if (!url || failed === url) return <Icon name="plug" size={size} />;
+  if (/\.svg$/i.test(url)) {
+    const mask = `url("${url}")`;
+    return (
+      <span
+        className={`${className} kit-icon--glyph`}
+        style={{ width: size, height: size, maskImage: mask, WebkitMaskImage: mask }}
+      >
+        <img src={url} alt="" hidden onError={() => setFailed(url)} />
+      </span>
+    );
+  }
   return (
     <img
       className={className}
