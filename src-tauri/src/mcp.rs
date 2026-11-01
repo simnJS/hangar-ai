@@ -351,12 +351,13 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "memory_list",
-            "description": "List what is in the memory, titles and tags only, without the contents. Use it to get a feel for what has been recorded, or to find an id to read or delete; prefer memory_search when you have a question to answer.",
+            "description": "List what is in the memory, titles and tags only, without the contents, most recently updated first. Use it to get a feel for what has been recorded, or to find an id to read or delete; prefer memory_search when you have a question to answer. The answer carries `total` (entries matching, before the cut) and, when the list is cut to `limit`, a `note` saying so.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "tag": { "type": "string", "description": "Only entries carrying this tag." },
-                    "workspace": { "type": "string", "description": "Only entries written from a workspace path containing this text." }
+                    "workspace": { "type": "string", "description": "Only entries written from a workspace path containing this text." },
+                    "limit": { "type": "integer", "description": "Default 100, maximum 1000." }
                 }
             }
         },
@@ -786,6 +787,40 @@ fn optional_text(args: &Value, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// `memory_list` page size when the caller gives none, and the most it may ask.
+/// The listing is read by a model, and a thousand titles is a lot of context.
+const DEFAULT_LIST_LIMIT: usize = 100;
+const MAX_LIST_LIMIT: usize = 1000;
+
+/// Cuts the `entries` of a memory listing to `limit` and says so.
+///
+/// The route returns the whole filtered index; paging happens here, on the MCP
+/// side, so the answer always carries `total` (entries matching the filters,
+/// before the cut) and, when the list is cut, a `note` that tells the model
+/// there is more and how to reach it. The most recently updated come first:
+/// when the list is cut, what a model needs is the live end of the memory.
+fn limit_memory_list(listing: &mut Value, limit: Option<u64>) {
+    let limit = limit
+        .map(|n| n.clamp(1, MAX_LIST_LIMIT as u64) as usize)
+        .unwrap_or(DEFAULT_LIST_LIMIT);
+    let Some(entries) = listing.get_mut("entries").and_then(Value::as_array_mut) else {
+        return;
+    };
+    entries.sort_by_key(|entry| {
+        std::cmp::Reverse(entry.get("updated_at").and_then(Value::as_u64).unwrap_or(0))
+    });
+    let total = entries.len();
+    let cut = total > limit;
+    entries.truncate(limit);
+    let shown = entries.len();
+    listing["total"] = json!(total);
+    if cut {
+        listing["note"] = json!(format!(
+            "Showing the {shown} most recently updated of {total} entries. Pass a larger limit (up to {MAX_LIST_LIMIT}), or narrow with tag or workspace, or use memory_search with a query."
+        ));
+    }
+}
+
 /// Keeps the tasks of one column; no column (or an empty one) keeps them all.
 fn filter_tasks_by_column(board: &mut Value, column: Option<&str>) {
     let Some(column) = column.map(str::trim).filter(|c| !c.is_empty()) else {
@@ -891,7 +926,10 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
                     sep = '&';
                 }
             }
-            api.get(&path)
+            let mut listing = api.get(&path)?;
+            let limit = args.get("limit").and_then(|v| v.as_u64());
+            limit_memory_list(&mut listing, limit);
+            Ok(listing)
         }
         "memory_read" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
@@ -1032,6 +1070,59 @@ mod tests {
             .find(|tool| tool["name"] == name)
             .cloned()
             .unwrap_or_else(|| panic!("no tool named {name}"))
+    }
+
+    fn listing(count: u64) -> Value {
+        let entries: Vec<Value> = (0..count)
+            .map(|n| json!({ "id": format!("e{n}"), "updated_at": n }))
+            .collect();
+        json!({ "entries": entries })
+    }
+
+    #[test]
+    fn memory_list_is_cut_to_100_by_default_and_says_so() {
+        let mut result = listing(250);
+        limit_memory_list(&mut result, None);
+        assert_eq!(result["entries"].as_array().unwrap().len(), 100);
+        assert_eq!(result["total"], 250);
+        let note = result["note"].as_str().expect("a cut list carries a note");
+        assert!(note.contains("100") && note.contains("250"), "got: {note}");
+        // The freshest come first.
+        assert_eq!(result["entries"][0]["id"], "e249");
+    }
+
+    #[test]
+    fn memory_list_honours_limit_and_clamps_it() {
+        let mut result = listing(30);
+        limit_memory_list(&mut result, Some(5));
+        assert_eq!(result["entries"].as_array().unwrap().len(), 5);
+        assert_eq!(result["total"], 30);
+        assert!(result.get("note").is_some());
+
+        let mut result = listing(30);
+        limit_memory_list(&mut result, Some(0));
+        assert_eq!(result["entries"].as_array().unwrap().len(), 1, "0 means 1");
+
+        let mut result = listing(30);
+        limit_memory_list(&mut result, Some(1_000_000));
+        assert_eq!(result["entries"].as_array().unwrap().len(), 30);
+    }
+
+    #[test]
+    fn memory_list_that_fits_has_a_total_and_no_note() {
+        let mut result = listing(7);
+        limit_memory_list(&mut result, None);
+        assert_eq!(result["entries"].as_array().unwrap().len(), 7);
+        assert_eq!(result["total"], 7);
+        assert!(result.get("note").is_none());
+    }
+
+    #[test]
+    fn memory_list_documents_its_limit() {
+        let definition = tool("memory_list");
+        assert!(definition["inputSchema"]["properties"]["limit"].is_object());
+        let description = definition["description"].as_str().unwrap();
+        assert!(description.contains("total"), "got: {description}");
     }
 
     fn board() -> Value {
