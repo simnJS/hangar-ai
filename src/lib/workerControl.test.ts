@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "./board";
 import { runControl, type ControlDeps } from "./control";
-import type { ChangedFile, Worktree } from "./git";
+import type { ChangedFile, HookReport, Worktree } from "./git";
 import { MAX_PANES } from "./layout";
 import type { OrchestratorEvent } from "./orchestratorEvents";
 import {
@@ -89,6 +89,7 @@ function world(
     panes?: Pane[];
     /** The workspace's folder: the repository's root unless said otherwise. */
     cwd?: string;
+    worktreeHooks?: Workspace["worktreeHooks"];
   } = {},
 ) {
   let state: AppState = {
@@ -103,6 +104,7 @@ function world(
         orchestration: options.orchestration
           ? ({ ...options.orchestration } as OrchestrationSettings)
           : undefined,
+        worktreeHooks: options.worktreeHooks,
       },
       workspace("w2", "Blog", "C:\\dev\\blog", [pane("p9", "Leo", "claude", { portBase: PORT_POOL_START })]),
     ],
@@ -135,6 +137,8 @@ function world(
     addPane?: boolean;
     enqueue?: string;
     repo?: "none" | "detached" | "noGit";
+    /** What the postCreate command answers; passes when absent. */
+    hook?: HookReport | "throws";
   } = {};
   let next = 10;
 
@@ -207,6 +211,11 @@ function world(
       const at = trees.findIndex((tree) => tree.path === worktreePath.replace(/\\/g, "/"));
       if (at >= 0) trees.splice(at, 1);
       return { removed: true, needsForce: false, message: null };
+    },
+    worktreeHook: async (_path, worktreePath, command) => {
+      log.push(`hook:${worktreePath}:${command}`);
+      if (fail.hook === "throws") throw "the shell is gone";
+      return fail.hook ?? { ok: true, timedOut: false, exitCode: 0, output: "", error: null };
     },
     branchDelete: async (_path, branch, force) => {
       log.push(`unbranch:${branch}:${force}`);
@@ -339,6 +348,48 @@ describe("worker_spawn", () => {
     expect(brief).toContain(`on branch ${branch}, made from main`);
     expect(brief).toContain("delivery_submit");
     expect(brief).toContain("Never mock, stub or guess");
+  });
+
+  it("runs the workspace's postCreate command in the new worktree, after the copy, and never otherwise", async () => {
+    const app = world({
+      tasks: [task("t1", "One", { owns: ["a/**"] }), task("t2", "Two", { owns: ["b/**"] })],
+      worktreeHooks: { postCreate: "  pnpm install  " },
+    });
+    await app.call("worker_spawn", { task: "t1" });
+    const path = `${SIBLINGS}\\hangar-one-t1`;
+    const lines = app.log.filter((line) => /^(copy|hook|add):/.test(line));
+    expect(lines.slice(0, 2)).toEqual([`copy:${REPO}:${path}`, `hook:${path}:pnpm install`]);
+    expect(app.briefs.get(app.paneNamed("Mia")!.id)).not.toContain("postCreate");
+
+    const plain = world({ tasks: [task("t1", "One", { owns: ["a/**"] })], worktreeHooks: { postCreate: "  " } });
+    await plain.call("worker_spawn", { task: "t1" });
+    expect(plain.log.some((line) => line.startsWith("hook:"))).toBe(false);
+  });
+
+  it("starts the worker anyway when its postCreate command fails, and tells it in the brief", async () => {
+    const app = world({
+      tasks: [task("t1", "One", { owns: ["a/**"] })],
+      worktreeHooks: { postCreate: "pnpm install" },
+    });
+    app.fail.hook = { ok: false, timedOut: false, exitCode: 3, output: "ERR_PNPM_NO_LOCKFILE", error: null };
+
+    const spawned = await app.call("worker_spawn", { task: "t1" });
+
+    expect(spawned.worker).toBe("Mia");
+    expect(spawned.note).toContain("postCreate command (pnpm install) failed (exit 3): ERR_PNPM_NO_LOCKFILE");
+    const brief = app.briefs.get(app.paneNamed("Mia")!.id)!;
+    expect(brief).toContain("postCreate command (`pnpm install`) ran in your worktree and failed (exit 3): ERR_PNPM_NO_LOCKFILE");
+    expect(app.log.some((line) => line.startsWith("unworktree:"))).toBe(false);
+    expect(app.tasks.get("t1")).toMatchObject({ column: "doing", assignee: "Mia" });
+
+    // A command that cannot even be asked for is the same report.
+    const broken = world({
+      tasks: [task("t1", "One", { owns: ["a/**"] })],
+      worktreeHooks: { postCreate: "pnpm install" },
+    });
+    broken.fail.hook = "throws";
+    await broken.call("worker_spawn", { task: "t1" });
+    expect(broken.briefs.get(broken.paneNamed("Mia")!.id)).toContain("could not run: the shell is gone");
   });
 
   it("starts the worker with the model asked for, and refuses one that is not a model name", async () => {

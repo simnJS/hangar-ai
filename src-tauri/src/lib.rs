@@ -155,6 +155,7 @@ pub fn run() {
             git::git_branches,
             git::git_worktree_add,
             git::git_worktree_remove,
+            git::git_worktree_hook,
             git::git_worktree_migrate,
             git::git_worktree_prune,
             git::git_worktree_lock,

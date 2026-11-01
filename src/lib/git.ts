@@ -67,11 +67,39 @@ export interface Branch {
   track: string | null;
 }
 
+/** What a worktree hook did (git.rs `HookReport`). */
+export interface HookReport {
+  ok: boolean;
+  timedOut: boolean;
+  exitCode: number | null;
+  /** The end of stdout then stderr, capped. */
+  output: string;
+  /** Why it did not even start. */
+  error: string | null;
+}
+
+/** One line for a failed hook, with its output after it; null when it passed. */
+export function hookProblem(report: HookReport): string | null {
+  if (report.ok) return null;
+  const why = report.error
+    ? `could not run: ${report.error}`
+    : report.timedOut
+      ? "timed out and was stopped"
+      : report.exitCode === null
+        ? "was stopped by a signal"
+        : `failed (exit ${report.exitCode})`;
+  return report.output ? `${why}: ${report.output}` : why;
+}
+
 export interface RemoveResult {
   removed: boolean;
   /** Dirty or locked — ask the user, then retry with `force`. */
   needsForce: boolean;
   message: string | null;
+  /** The `preRemove` hook failed or timed out and kept the worktree. */
+  hookBlocked?: boolean;
+  /** What the `preRemove` hook did, when one ran. */
+  hook?: HookReport | null;
 }
 
 export interface DeleteBranchResult {
@@ -149,9 +177,35 @@ export const gitWorktreeAdd = (args: {
   baseRef: string | null;
 }) => invoke<void>("git_worktree_add", args);
 
-/** Resolves with `needsForce` rather than rejecting when the tree is dirty. */
-export const gitWorktreeRemove = (path: string, worktreePath: string, force: boolean) =>
-  invoke<RemoveResult>("git_worktree_remove", { path, worktreePath, force });
+/**
+ * Resolves with `needsForce` rather than rejecting when the tree is dirty.
+ * `preRemove` is the workspace's command: when it fails the worktree is kept
+ * and `hookBlocked` is set. Leave it out to remove anyway.
+ */
+export const gitWorktreeRemove = (
+  path: string,
+  worktreePath: string,
+  force: boolean,
+  preRemove?: string | null,
+) =>
+  invoke<RemoveResult>("git_worktree_remove", {
+    path,
+    worktreePath,
+    force,
+    preRemove: preRemove?.trim() || null,
+  });
+
+/**
+ * Runs the workspace's `postCreate` command in a worktree that exists. Never
+ * rejects for a failing command: that is the report. Null when `command` is
+ * blank, and nothing ran. Takes up to five minutes.
+ */
+export const gitWorktreeHook = (path: string, worktreePath: string, command?: string | null) =>
+  invoke<HookReport | null>("git_worktree_hook", {
+    path,
+    worktreePath,
+    command: command?.trim() || null,
+  });
 
 export interface MigrateResult {
   /**

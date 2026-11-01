@@ -61,6 +61,19 @@ export const en = {
     "The changes could not be applied in the main checkout. Nothing is lost: they are kept in a stash. Get them back with: git stash apply {stash}",
   "worktrees.migrateDropFailed":
     "Changes brought back, but their stash could not be dropped. It is harmless; remove it with git stash drop when you want.",
+  "worktrees.hooksTitle": "Worktree commands",
+  "worktrees.hooksRunsHere":
+    "These commands run on this machine, as you, through your default shell. Only you can set them: no agent can.",
+  "worktrees.hooksPostCreate": "After creating a worktree",
+  "worktrees.hooksPostCreateHint":
+    "Runs in the new worktree, for the panel's and for a worker's, with WORKTREE_PATH and BASE_PATH set. If it fails the worktree is kept and the failure is shown (and told to the worker).",
+  "worktrees.hooksPreRemove": "Before removing a worktree",
+  "worktrees.hooksPreRemoveHint":
+    "Runs in the worktree first, also when cleaning up merged ones. If it fails or runs past 5 minutes the worktree is kept, and you can remove it anyway.",
+  "worktrees.hooksPlaceholder": "Empty runs nothing — e.g. pnpm install",
+  "worktrees.hookPostDone": "The postCreate command ran.",
+  "worktrees.hookPostFailed": "The postCreate command {problem}. The worktree was kept.",
+  "worktrees.hookRemoveAnyway": "Remove anyway",
 };
 
 export const fr: Record<keyof typeof en, string> = {
@@ -114,4 +127,17 @@ export const fr: Record<keyof typeof en, string> = {
     "Les changements n'ont pas pu être appliqués dans le checkout principal. Rien n'est perdu : ils sont gardés dans un stash. Pour les récupérer : git stash apply {stash}",
   "worktrees.migrateDropFailed":
     "Changements rapatriés, mais leur stash n'a pas pu être supprimé. Il est sans danger ; retirez-le avec git stash drop quand vous voulez.",
+  "worktrees.hooksTitle": "Commandes de worktree",
+  "worktrees.hooksRunsHere":
+    "Ces commandes s'exécutent sur cette machine, sous votre compte, via votre shell par défaut. Vous seul pouvez les définir : aucun agent ne le peut.",
+  "worktrees.hooksPostCreate": "Après la création d'un worktree",
+  "worktrees.hooksPostCreateHint":
+    "S'exécute dans le nouveau worktree, celui du panneau comme celui d'un worker, avec WORKTREE_PATH et BASE_PATH définis. En cas d'échec le worktree est gardé et l'échec est affiché (et signalé au worker).",
+  "worktrees.hooksPreRemove": "Avant la suppression d'un worktree",
+  "worktrees.hooksPreRemoveHint":
+    "S'exécute d'abord dans le worktree, y compris au nettoyage des worktrees fusionnés. En cas d'échec ou au-delà de 5 minutes, le worktree est gardé et vous pouvez le supprimer quand même.",
+  "worktrees.hooksPlaceholder": "Vide : rien ne s'exécute — par ex. pnpm install",
+  "worktrees.hookPostDone": "La commande postCreate s'est exécutée.",
+  "worktrees.hookPostFailed": "La commande postCreate {problem}. Le worktree est conservé.",
+  "worktrees.hookRemoveAnyway": "Supprimer quand même",
 };

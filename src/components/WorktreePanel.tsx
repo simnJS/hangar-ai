@@ -10,6 +10,7 @@ import {
   gitFetch,
   gitRepoInfo,
   gitWorktreeAdd,
+  gitWorktreeHook,
   gitWorktreeList,
   gitWorktreeLock,
   gitWorktreeMigrate,
@@ -18,6 +19,7 @@ import {
   gitWorktreeUnlock,
   gitWorktreesMerged,
   type Branch,
+  hookProblem,
   type MergedWorktree,
   type MigrateResult,
   type RepoInfo,
@@ -161,9 +163,12 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     null,
   );
   /** A removal git turned down, kept per worktree so the row can offer force. */
-  const [blocked, setBlocked] = useState<{ path: string; message: string | null } | null>(
-    null,
-  );
+  const [blocked, setBlocked] = useState<{
+    path: string;
+    message: string | null;
+    /** The preRemove command stopped it: the way out is « remove anyway ». */
+    hook?: boolean;
+  } | null>(null);
   /** The worktree whose « bring changes back » waits for its confirmation. */
   const [migrating, setMigrating] = useState<string | null>(null);
   /** What the last migration said, kept on the row it concerns until dismissed. */
@@ -195,6 +200,10 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
   /** The cleanup of merged worktrees; null while it is closed. */
   const [cleanup, setCleanup] = useState<Cleanup | null>(null);
   const t = useT();
+  // The person's own commands, set in the workspace's dialog. Blank runs nothing.
+  const hooks = state.workspaces.find((entry) => entry.id === workspaceId)?.worktreeHooks;
+  const postCreate = hooks?.postCreate?.trim() || null;
+  const preRemove = hooks?.preRemove?.trim() || null;
 
   const timer = useRef<number | null>(null);
   const flash = useCallback((tone: "info" | "warn", text: string) => {
@@ -472,7 +481,7 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     const branches: string[] = [];
     for (const item of todo) {
       try {
-        const result = await gitWorktreeRemove(cwd, item.path, false);
+        const result = await gitWorktreeRemove(cwd, item.path, false, preRemove);
         if (result.removed) {
           gone.add(item.path);
           branches.push(item.branch);
@@ -579,7 +588,8 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     onClose();
   }
 
-  async function remove(worktree: Worktree, force: boolean) {
+  /** `skipHook`: the person read why preRemove failed and removes anyway. */
+  async function remove(worktree: Worktree, force: boolean, skipHook = false) {
     // Read before the deletion: afterwards git no longer ties the branch to a
     // worktree, and the offer to delete it would name the wrong one.
     const removedBranch =
@@ -587,7 +597,13 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     setBusy(`remove:${worktree.path}`);
     setError(null);
     try {
-      const result = await gitWorktreeRemove(cwd, worktree.path, force);
+      // Forcing follows a first try that already ran the command.
+      const result = await gitWorktreeRemove(
+        cwd,
+        worktree.path,
+        force,
+        force || skipHook ? null : preRemove,
+      );
       setArmed(null);
       if (result.removed) {
         setBlocked(null);
@@ -604,8 +620,11 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
       }
       // Dirty or locked. Throwing the work away is the user's call, so the row
       // keeps git's reason and offers the forced run instead of deciding.
-      if (result.needsForce) setBlocked({ path: worktree.path, message: result.message });
-      else setError(result.message);
+      if (result.hookBlocked) {
+        setBlocked({ path: worktree.path, message: result.message, hook: true });
+      } else if (result.needsForce) {
+        setBlocked({ path: worktree.path, message: result.message });
+      } else setError(result.message);
     } catch (err) {
       setArmed(null);
       setError(String(err));
@@ -759,6 +778,21 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
       notes.push(report.text);
       if (report.warn) tone = "warn";
     }
+    // After the copy, so the command finds the .env it may need. A failure
+    // keeps the worktree and stays on screen until the next action.
+    let hookFailure: string | null = null;
+    if (postCreate) {
+      setBusy("hook");
+      try {
+        const report = await gitWorktreeHook(cwd, target, postCreate);
+        const problem = report ? hookProblem(report) : null;
+        if (problem) hookFailure = problem;
+        else if (report) notes.push(t("worktrees.hookPostDone"));
+      } catch (err) {
+        hookFailure = String(err);
+      }
+      if (hookFailure !== null) setError(t("worktrees.hookPostFailed", { problem: hookFailure }));
+    }
     if (notes.length > 0) flash(tone, notes.join(" "));
 
     setBusy(null);
@@ -773,7 +807,7 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
       // or a suffixed folder is exactly what the user must not miss. The
       // workspace is already switched behind the dialog; when there is
       // nothing to say, the panel goes with it as before.
-      if (notes.length === 0) {
+      if (notes.length === 0 && hookFailure === null) {
         onClose();
         return;
       }
@@ -1126,9 +1160,13 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                                   : undefined
                               }
                               disabled={busy !== null || heldBy !== null}
-                              onClick={() => void remove(worktree, true)}
+                              onClick={() =>
+                                void (blocked.hook
+                                  ? remove(worktree, false, true)
+                                  : remove(worktree, true))
+                              }
                             >
-                              {t("worktrees.force")}
+                              {blocked.hook ? t("worktrees.hookRemoveAnyway") : t("worktrees.force")}
                             </button>
                           </div>
                         )}

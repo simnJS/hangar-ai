@@ -10,6 +10,9 @@ import {
   gitChanges,
   gitCommitsAhead,
   gitCopyUntracked,
+  gitWorktreeHook,
+  hookProblem,
+  type HookReport,
   gitRepoInfo,
   gitWorktreeAdd,
   gitWorktreeRemove,
@@ -73,6 +76,8 @@ export interface WorkerDeps {
     baseRef: string | null;
   }) => Promise<void>;
   worktreeRemove: (path: string, worktreePath: string, force: boolean) => Promise<RemoveResult>;
+  /** The workspace's postCreate command, run in the new worktree (git.rs). */
+  worktreeHook: (path: string, worktreePath: string, command: string) => Promise<HookReport | null>;
   branchDelete: (path: string, branch: string, force: boolean) => Promise<DeleteBranchResult>;
   /** The files git ignores that the patterns name: a worker's `.env`. */
   copyIgnored: (from: string, to: string, patterns: string[]) => Promise<CopyResult>;
@@ -91,6 +96,7 @@ export const liveWorkerDeps = (updatePane: WorkerDeps["updatePane"]): WorkerDeps
   repoInfo: gitRepoInfo,
   worktreeAdd: gitWorktreeAdd,
   worktreeRemove: gitWorktreeRemove,
+  worktreeHook: gitWorktreeHook,
   branchDelete: gitBranchDelete,
   copyIgnored: (from, to, patterns) => gitCopyUntracked(from, to, patterns, true),
   changes: (path) => gitChanges(path, null),
@@ -236,6 +242,8 @@ export interface BriefFacts {
   checkCommand: string | null;
   attempt: number;
   maxAttempts: number;
+  /** The workspace's postCreate command failed in the worktree: what it said. */
+  hookFailure?: { command: string; problem: string } | null;
 }
 
 /**
@@ -285,6 +293,11 @@ export function workerBrief(facts: BriefFacts): string {
       ? `- Files you own: ${owns.map((pattern) => `\`${pattern}\``).join(", ")}. Change nothing outside them. ` +
         "If the task cannot be done without another file, name it in a comment on the task and stop."
       : "- No files were assigned to this task. Change only what it needs, and name every file you changed in your report.",
+    facts.hookFailure
+      ? `- The workspace's postCreate command (\`${facts.hookFailure.command}\`) ran in your worktree and ${facts.hookFailure.problem}. ` +
+        "Your worktree is there and your task goes on, but what that command sets up (dependencies, submodules…) may be missing: " +
+        "run what you need yourself, and mention it in your report if it kept you from checking something."
+      : null,
     `- Your ports: HANGAR_PORT_BASE to HANGAR_PORT_BASE+19 (${portBase} to ${portBase + PORT_COUNT - 1}; ` +
       "HANGAR_PORT_BASE and HANGAR_PORT_COUNT are set in your shell). Bind every server, test server and " +
       "debugger you start to these: other agents run beside you.",
@@ -516,6 +529,7 @@ export async function spawnWorker(
     undo.push({ what: "give the task back", run: () => workers.release(ws.cwd, taskId, name, true) });
 
     let tree: { branch: string; path: string } | null = null;
+    let hookFailure: { command: string; problem: string } | null = null;
     let folder = ws.cwd;
     if (git && target) {
       tree = await addWorktree(ws, git.mainRoot, task, target, deps);
@@ -531,6 +545,25 @@ export async function spawnWorker(
       });
       // A convenience, as in the worktree panel: a failed copy never undoes the start.
       await workers.copyIgnored(git.root, path, COPY_PATTERNS).catch(() => null);
+      // The person's own command, if they set one. Its failure never undoes the
+      // start: the worker is told in its brief, and so is the orchestrator.
+      const command = deps
+        .snapshot()
+        .workspaces.find((entry) => entry.id === ws.id)
+        ?.worktreeHooks?.postCreate?.trim();
+      if (command) {
+        const report = await workers.worktreeHook(ws.cwd, path, command).catch(
+          (err): HookReport => ({
+            ok: false,
+            timedOut: false,
+            exitCode: null,
+            output: "",
+            error: messageOf(err),
+          }),
+        );
+        const problem = report ? hookProblem(report) : null;
+        if (problem) hookFailure = { command, problem };
+      }
     }
 
     // Read again: the workspace may have changed during the awaits above.
@@ -583,6 +616,7 @@ export async function spawnWorker(
       checkCommand: settings.checkCommand,
       attempt: task.attempts ?? 1,
       maxAttempts: settings.maxAttempts,
+      hookFailure,
     });
     await deps.enqueue(id, brief, by?.name ?? "hangar");
 
@@ -609,6 +643,9 @@ export async function spawnWorker(
           : `"${ws.name}" is not a git repository, so the worker works in its folder, beside any other worker: ` +
             "no worktree, no branch, nothing merged or reviewed. Its changes are in place as it saves them, and " +
             "its task is done when it delivers. ") +
+        (hookFailure
+          ? `The workspace's postCreate command (${hookFailure.command}) ${hookFailure.problem}; the worker was told in its brief. `
+          : "") +
         "Its comments, its delivery, a wait for the person or an exit reach you as events: do not poll it. " +
         "worker_list shows where every worker stands.",
     };

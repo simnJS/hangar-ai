@@ -18,6 +18,7 @@ import {
   type ShellInfo,
   type Workspace,
   type WorkspaceKit,
+  type WorktreeHooks,
   type WorkspaceRoot,
 } from "../types";
 
@@ -37,6 +38,50 @@ interface Props {
   availableAgents: string[];
   shells: ShellInfo[];
   onClose: () => void;
+}
+
+/**
+ * The two commands run around a workspace's worktrees. Typed here by the
+ * person and by nobody else: they run on this machine, as them. A blank field
+ * runs nothing, and is stored as absent.
+ */
+export function WorkspaceHooksSection({
+  value,
+  onChange,
+}: {
+  value: WorktreeHooks;
+  onChange: (next: WorktreeHooks) => void;
+}) {
+  const t = useT();
+  const field = (key: keyof WorktreeHooks, label: string, hint: string) => (
+    <label className="form-grid__field" style={{ display: "block", marginBottom: 8 }}>
+      <span className="form-hint">{label}</span>
+      <input
+        className="text-input"
+        value={value[key] ?? ""}
+        placeholder={t("worktrees.hooksPlaceholder")}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => onChange({ ...value, [key]: e.target.value })}
+      />
+      <span className="form-hint">{hint}</span>
+    </label>
+  );
+  return (
+    <div>
+      <p className="form-hint">{t("worktrees.hooksRunsHere")}</p>
+      {field("postCreate", t("worktrees.hooksPostCreate"), t("worktrees.hooksPostCreateHint"))}
+      {field("preRemove", t("worktrees.hooksPreRemove"), t("worktrees.hooksPreRemoveHint"))}
+    </div>
+  );
+}
+
+/** Blank commands are dropped; nothing left means no setting at all. */
+export function cleanHooks(value: WorktreeHooks): WorktreeHooks | undefined {
+  const postCreate = value.postCreate?.trim();
+  const preRemove = value.preRemove?.trim();
+  if (!postCreate && !preRemove) return undefined;
+  return { ...(postCreate ? { postCreate } : {}), ...(preRemove ? { preRemove } : {}) };
 }
 
 /**
@@ -82,6 +127,11 @@ export function WorkspaceKitsDialog({
             workspace={workspace}
             onChange={(kits) => updateWorkspace(workspace.id, { kits })}
           />
+          <h3 className="form-hint">{t("worktrees.hooksTitle")}</h3>
+          <WorkspaceHooksSection
+            value={workspace.worktreeHooks ?? {}}
+            onChange={(next) => updateWorkspace(workspace.id, { worktreeHooks: cleanHooks(next) })}
+          />
         </div>
         <footer className="modal__foot">
           <button type="button" className="btn btn--primary" onClick={onClose}>
@@ -94,9 +144,10 @@ export function WorkspaceKitsDialog({
 }
 
 export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
-  const { addWorkspace, state } = useStore();
+  const { addWorkspace, updateWorkspace, state } = useStore();
   const [kits, setKits] = useState<WorkspaceKit[]>([]);
   const [claudeAccount, setClaudeAccount] = useState<string | null>(null);
+  const [hooks, setHooks] = useState<WorktreeHooks>({});
   const { accounts } = useAccounts();
   const accountsT = useAccountsT();
 
@@ -234,7 +285,9 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
       kits,
       claudeAccount,
     };
-    addWorkspace(draft);
+    const id = addWorkspace(draft);
+    const worktreeHooks = cleanHooks(hooks);
+    if (worktreeHooks) updateWorkspace(id, { worktreeHooks });
     onClose();
   }
 
@@ -512,6 +565,11 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
             <span className="form-grid__label">{t("kitsManage.sectionTitle")}</span>
             <div className="form-grid__field">
               <WorkspaceKitsSection value={kits} onChange={setKits} />
+            </div>
+
+            <span className="form-grid__label">{t("worktrees.hooksTitle")}</span>
+            <div className="form-grid__field">
+              <WorkspaceHooksSection value={hooks} onChange={setHooks} />
             </div>
           </div>
 

@@ -14,9 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -816,6 +818,23 @@ pub struct RemoveResult {
     /// turns this into a confirmation, not an error.
     pub needs_force: bool,
     pub message: Option<String>,
+    /// The `preRemove` hook stopped the removal: nothing was removed, and the
+    /// person may remove anyway (without the hook) once they have read why.
+    pub hook_blocked: bool,
+    /// What the `preRemove` hook did, when one ran.
+    pub hook: Option<HookReport>,
+}
+
+impl RemoveResult {
+    fn plain(removed: bool, needs_force: bool, message: Option<String>) -> Self {
+        RemoveResult {
+            removed,
+            needs_force,
+            message,
+            hook_blocked: false,
+            hook: None,
+        }
+    }
 }
 
 /// Refusals that a confirmation answers, rather than something to go and fix.
@@ -829,41 +848,354 @@ fn recoverable_by_force(message: &str) -> bool {
         || message.contains("locked working tree")
 }
 
+/// `pre_remove` is the workspace's command, run in the worktree first. A
+/// failure or a timeout keeps the worktree. The caller leaves it out when the
+/// person chose to remove anyway.
+fn remove_worktree(
+    path: &str,
+    worktree_path: &str,
+    force: bool,
+    pre_remove: Option<&str>,
+    timeout: Duration,
+) -> Result<RemoveResult, String> {
+    let mut hook = None;
+    if Path::new(worktree_path).is_dir() {
+        if let Some(report) = run_configured_hook(pre_remove, path, worktree_path, timeout) {
+            if !report.ok {
+                let message = format!("The preRemove hook {}", report.describe(timeout));
+                return Ok(RemoveResult {
+                    removed: false,
+                    needs_force: false,
+                    message: Some(message),
+                    hook_blocked: true,
+                    hook: Some(report),
+                });
+            }
+            hook = Some(report);
+        }
+    }
+
+    let mut args: Vec<&str> = vec!["worktree", "remove"];
+    if force {
+        // Twice on purpose. One `--force` covers a worktree with uncommitted
+        // work in it; git documents a second one as what it takes to remove a
+        // locked worktree, and the user has already been asked by then.
+        args.push("--force");
+        args.push("--force");
+    }
+    args.push(worktree_path);
+
+    match run_git(Path::new(path), &args) {
+        Ok(_) => {
+            forget_shared_roots();
+            Ok(RemoveResult {
+                hook,
+                ..RemoveResult::plain(true, false, None)
+            })
+        }
+        Err(GitError::Failed(message)) if !force && recoverable_by_force(&message) => {
+            Ok(RemoveResult {
+                hook,
+                ..RemoveResult::plain(false, true, Some(message))
+            })
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 #[tauri::command]
 pub async fn git_worktree_remove(
     path: String,
     worktree_path: String,
     force: bool,
+    pre_remove: Option<String>,
 ) -> Result<RemoveResult, String> {
     off_thread(move || {
-        let mut args: Vec<&str> = vec!["worktree", "remove"];
-        if force {
-            // Twice on purpose. One `--force` covers a worktree with uncommitted
-            // work in it; git documents a second one as what it takes to remove a
-            // locked worktree, and the user has already been asked by then.
-            args.push("--force");
-            args.push("--force");
-        }
-        args.push(&worktree_path);
+        remove_worktree(
+            &path,
+            &worktree_path,
+            force,
+            pre_remove.as_deref(),
+            HOOK_TIMEOUT,
+        )
+    })
+    .await
+}
 
-        match run_git(Path::new(&path), &args) {
-            Ok(_) => {
-                forget_shared_roots();
-                Ok(RemoveResult {
-                    removed: true,
-                    needs_force: false,
-                    message: None,
-                })
+// ---------------------------------------------------------------------------
+// Worktree hooks
+//
+// Two commands the person may set per workspace: `postCreate`, run in a new
+// worktree, and `preRemove`, run in one about to go. They run on this machine,
+// as the person, through the default shell — which is why nothing here runs
+// unless the person configured it, and why no agent has a way to set one.
+// ---------------------------------------------------------------------------
+
+/// How long a hook may run before its whole process tree is killed.
+const HOOK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How much of a hook's output is kept, per stream: the end of it, where the
+/// reason for a failure usually is.
+const HOOK_OUTPUT_CAP: usize = 8 * 1024;
+
+/// What a hook did.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookReport {
+    /// Exit status zero.
+    pub ok: bool,
+    pub timed_out: bool,
+    pub exit_code: Option<i32>,
+    /// stdout then stderr, capped.
+    pub output: String,
+    /// Why it did not even start, when it did not.
+    pub error: Option<String>,
+}
+
+impl HookReport {
+    /// "failed (exit 3): <output>", for a message that carries its reason.
+    fn describe(&self, timeout: Duration) -> String {
+        let why = if let Some(error) = &self.error {
+            format!("could not run: {error}")
+        } else if self.timed_out {
+            format!("timed out after {}", format_timeout(timeout))
+        } else {
+            match self.exit_code {
+                Some(code) => format!("failed (exit {code})"),
+                None => "was stopped by a signal".to_string(),
             }
-            Err(GitError::Failed(message)) if !force && recoverable_by_force(&message) => {
-                Ok(RemoveResult {
-                    removed: false,
-                    needs_force: true,
-                    message: Some(message),
-                })
-            }
-            Err(error) => Err(error.into()),
+        };
+        if self.output.is_empty() {
+            why
+        } else {
+            format!("{why}: {}", self.output)
         }
+    }
+}
+
+fn format_timeout(timeout: Duration) -> String {
+    let seconds = timeout.as_secs();
+    if seconds >= 60 && seconds.is_multiple_of(60) {
+        format!("{} min", seconds / 60)
+    } else {
+        format!("{seconds} s")
+    }
+}
+
+/// The shell a hook goes through: the default detected one, WSL aside (it does
+/// not carry the environment and the folder into its own filesystem).
+fn hook_shell() -> Option<crate::shells::ShellInfo> {
+    crate::shells::detect_shells()
+        .into_iter()
+        .find(|shell| shell.id != "wsl")
+}
+
+fn hook_command(shell: &crate::shells::ShellInfo, command: &str) -> Command {
+    let mut process = Command::new(&shell.program);
+    match shell.id.as_str() {
+        "pwsh" | "powershell" => {
+            process.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command,
+            ]);
+        }
+        #[cfg(windows)]
+        "cmd" => {
+            use std::os::windows::process::CommandExt;
+            // The command line is handed over verbatim: Rust's own quoting
+            // is not the one cmd.exe reads.
+            process.raw_arg(format!("/D /S /C \"{command}\""));
+        }
+        _ => {
+            // The pane arguments minus the interactive flag: a login shell
+            // keeps PATH complete, an interactive one would wait for input.
+            process.args(shell.args.iter().filter(|arg| arg.as_str() != "-i"));
+            process.arg("-c").arg(command);
+        }
+    }
+    process
+}
+
+/// Ends the process and everything it started.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        // The hook leads its own process group (see `run_hook`).
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+}
+
+type Drained = std::thread::JoinHandle<(Vec<u8>, bool)>;
+
+/// Reads a stream to its end, keeping only the last `HOOK_OUTPUT_CAP` bytes
+/// (and whether anything was dropped). It never stops reading: a full pipe
+/// would stall the hook.
+fn drain<R: Read + Send + 'static>(mut stream: R) -> Drained {
+    std::thread::spawn(move || {
+        let mut kept: Vec<u8> = Vec::new();
+        let mut dropped = false;
+        let mut buffer = [0u8; 4096];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    kept.extend_from_slice(&buffer[..read]);
+                    if kept.len() > HOOK_OUTPUT_CAP * 2 {
+                        let cut = kept.len() - HOOK_OUTPUT_CAP;
+                        kept.drain(..cut);
+                        dropped = true;
+                    }
+                }
+            }
+        }
+        if kept.len() > HOOK_OUTPUT_CAP {
+            let cut = kept.len() - HOOK_OUTPUT_CAP;
+            kept.drain(..cut);
+            dropped = true;
+        }
+        (kept, dropped)
+    })
+}
+
+fn collect_output(handles: Vec<Drained>) -> String {
+    let mut parts = Vec::new();
+    for handle in handles {
+        let Ok((bytes, dropped)) = handle.join() else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes).replace('\0', "");
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        parts.push(if dropped {
+            format!("…{text}")
+        } else {
+            text.to_string()
+        });
+    }
+    parts.join("\n")
+}
+
+/// Runs `command` in `worktree` through the shell, with `WORKTREE_PATH` and
+/// `BASE_PATH` in its environment. Blocks: callers are on the blocking pool.
+fn run_hook(command: &str, base: &str, worktree: &str, timeout: Duration) -> HookReport {
+    let failed = |error: String| HookReport {
+        error: Some(error),
+        ..HookReport::default()
+    };
+    let Some(shell) = hook_shell() else {
+        return failed("no shell was found on this machine".to_string());
+    };
+    crate::path_env::ensure();
+
+    let mut process = hook_command(&shell, command);
+    process
+        .current_dir(worktree)
+        .env("WORKTREE_PATH", worktree)
+        .env("BASE_PATH", base)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
+
+    let mut child = match process.spawn() {
+        Ok(child) => child,
+        Err(err) => return failed(err.to_string()),
+    };
+    let mut readers = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        readers.push(drain(stdout));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        readers.push(drain(stderr));
+    }
+
+    let started = Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if started.elapsed() >= timeout => {
+                timed_out = true;
+                kill_tree(&mut child);
+                break child.wait().ok();
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(_) => break None,
+        }
+    };
+
+    let output = collect_output(readers);
+    HookReport {
+        ok: !timed_out && status.is_some_and(|status| status.success()),
+        timed_out,
+        exit_code: status.and_then(|status| status.code()),
+        output,
+        error: None,
+    }
+}
+
+/// The base checkout a worktree hangs off: where `workspace` is, or the main
+/// checkout when it is itself a linked worktree.
+fn base_of(workspace: &str) -> String {
+    shared_root(workspace).unwrap_or_else(|| workspace.to_string())
+}
+
+/// `None` — and nothing run — unless the person configured a command.
+fn run_configured_hook(
+    command: Option<&str>,
+    workspace: &str,
+    worktree: &str,
+    timeout: Duration,
+) -> Option<HookReport> {
+    let command = command
+        .map(str::trim)
+        .filter(|command| !command.is_empty())?;
+    Some(run_hook(command, &base_of(workspace), worktree, timeout))
+}
+
+/// The `postCreate` command, run in a worktree that exists by now. Resolves
+/// with what it did; a failing hook is a report, never an error, and never
+/// undoes the worktree. `None` when no command is set.
+#[tauri::command]
+pub async fn git_worktree_hook(
+    path: String,
+    worktree_path: String,
+    command: Option<String>,
+) -> Result<Option<HookReport>, String> {
+    off_thread(move || {
+        Ok(run_configured_hook(
+            command.as_deref(),
+            &path,
+            &worktree_path,
+            HOOK_TIMEOUT,
+        ))
     })
     .await
 }
@@ -3048,5 +3380,206 @@ mod tests {
         assert!(!by("messy").preselected);
         assert!(by("held").locked.is_some() && !by("held").preselected);
         cleanup(&dir, &paths);
+    }
+
+    // --- worktree hooks -----------------------------------------------------
+
+    /// The shell kind a hook goes through here, so a test writes its command
+    /// in that shell's own words. None when the machine has no shell at all.
+    fn hook_dialect() -> Option<&'static str> {
+        let shell = hook_shell()?;
+        Some(match shell.id.as_str() {
+            "pwsh" | "powershell" => "powershell",
+            "cmd" => "cmd",
+            _ => "posix",
+        })
+    }
+
+    /// Writes `WORKTREE_PATH|BASE_PATH` to `marker.txt` in the hook's folder.
+    fn marker_command(dialect: &str) -> &'static str {
+        match dialect {
+            "powershell" => {
+                "\"$env:WORKTREE_PATH|$env:BASE_PATH\" | Out-File -Encoding ascii marker.txt"
+            }
+            "cmd" => "echo %WORKTREE_PATH%^|%BASE_PATH%> marker.txt",
+            _ => "printf '%s|%s' \"$WORKTREE_PATH\" \"$BASE_PATH\" > marker.txt",
+        }
+    }
+
+    fn sleep_command(dialect: &str) -> &'static str {
+        match dialect {
+            "powershell" => "Start-Sleep -Seconds 60",
+            "cmd" => "ping -n 60 127.0.0.1 > nul",
+            _ => "sleep 60",
+        }
+    }
+
+    fn wt_str(path: &Path) -> String {
+        path.to_str().unwrap().to_string()
+    }
+
+    const HOOK_WAIT: Duration = Duration::from_secs(60);
+
+    #[test]
+    fn a_post_create_hook_runs_in_the_worktree_and_sees_its_variables() {
+        let Some(dialect) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-post");
+        let report = run_configured_hook(
+            Some(marker_command(dialect)),
+            &wt_str(&main),
+            &wt_str(&linked),
+            HOOK_WAIT,
+        )
+        .expect("a configured hook runs");
+        assert!(report.ok, "{report:?}");
+
+        // The file landed in the worktree, so that is where it ran.
+        let marker = std::fs::read_to_string(linked.join("marker.txt")).expect("marker");
+        let marker = marker.trim().to_string();
+        let (worktree_seen, base_seen) = marker.split_once('|').expect("two variables");
+        let tail = |path: &Path| path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(worktree_seen.contains(&tail(&linked)), "{marker}");
+        assert!(base_seen.contains(&tail(&main)), "{marker}");
+        assert!(!main.join("marker.txt").exists());
+    }
+
+    #[test]
+    fn a_failing_post_create_hook_keeps_the_worktree_and_reports() {
+        let Some(_) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-post-fail");
+        let report =
+            run_configured_hook(Some("exit 3"), &wt_str(&main), &wt_str(&linked), HOOK_WAIT)
+                .expect("ran");
+        assert!(!report.ok && !report.timed_out, "{report:?}");
+        assert_eq!(report.exit_code, Some(3));
+        assert!(linked.is_dir());
+        assert!(list_worktrees(&main)
+            .unwrap()
+            .iter()
+            .any(|entry| compare_key(&entry.path) == compare_key(&wt_str(&linked))));
+    }
+
+    #[test]
+    fn nothing_runs_when_no_hook_is_set() {
+        let (main, linked) = main_and_worktree("hook-unset");
+        for command in [None, Some(""), Some("   ")] {
+            assert!(
+                run_configured_hook(command, &wt_str(&main), &wt_str(&linked), HOOK_WAIT).is_none()
+            );
+        }
+        // Removal without a hook is plain git.
+        let result = remove_worktree(&wt_str(&main), &wt_str(&linked), false, None, HOOK_WAIT)
+            .expect("removed");
+        assert!(result.removed && result.hook.is_none() && !result.hook_blocked);
+        assert!(!linked.exists());
+    }
+
+    #[test]
+    fn a_failing_pre_remove_hook_keeps_the_worktree_and_says_why() {
+        let Some(dialect) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-pre-fail");
+        let command = match dialect {
+            "powershell" => "Write-Output 'teardown refused'; exit 4",
+            "cmd" => "echo teardown refused& exit 4",
+            _ => "echo 'teardown refused'; exit 4",
+        };
+        let result = remove_worktree(
+            &wt_str(&main),
+            &wt_str(&linked),
+            false,
+            Some(command),
+            HOOK_WAIT,
+        )
+        .expect("answers");
+        assert!(!result.removed && result.hook_blocked && !result.needs_force);
+        let message = result.message.expect("message");
+        assert!(message.contains("exit 4"), "{message}");
+        assert!(message.contains("teardown refused"), "{message}");
+        assert!(linked.is_dir());
+    }
+
+    #[test]
+    fn a_passing_pre_remove_hook_lets_the_removal_go_through() {
+        let Some(dialect) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-pre-ok");
+        // Writes outside the worktree, which is about to disappear.
+        let result = remove_worktree(
+            &wt_str(&main),
+            &wt_str(&linked),
+            false,
+            Some(match dialect {
+                "powershell" => "Write-Output ok",
+                "cmd" => "echo ok",
+                _ => "echo ok",
+            }),
+            HOOK_WAIT,
+        )
+        .expect("removed");
+        assert!(result.removed, "{result:?}");
+        assert!(result.hook.is_some_and(|hook| hook.ok));
+        assert!(!linked.exists());
+    }
+
+    #[test]
+    fn a_hook_that_outlives_the_timeout_is_stopped() {
+        let Some(dialect) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-timeout");
+        let started = Instant::now();
+        let report = run_configured_hook(
+            Some(sleep_command(dialect)),
+            &wt_str(&main),
+            &wt_str(&linked),
+            Duration::from_millis(1500),
+        )
+        .expect("ran");
+        assert!(report.timed_out && !report.ok, "{report:?}");
+        assert!(started.elapsed() < Duration::from_secs(30));
+
+        // And as a pre-remove hook, a timeout aborts the removal.
+        let result = remove_worktree(
+            &wt_str(&main),
+            &wt_str(&linked),
+            false,
+            Some(sleep_command(dialect)),
+            Duration::from_millis(1500),
+        )
+        .expect("answers");
+        assert!(result.hook_blocked && !result.removed);
+        assert!(result.message.unwrap().contains("timed out"));
+        assert!(linked.is_dir());
+    }
+
+    #[test]
+    fn a_hook_s_output_is_capped_to_its_end() {
+        let Some(dialect) = hook_dialect() else {
+            return;
+        };
+        let (main, linked) = main_and_worktree("hook-cap");
+        let command = match dialect {
+            "powershell" => "1..4000 | ForEach-Object { 'line number ' + $_ }",
+            "cmd" => "for /L %i in (1,1,4000) do @echo line number %i",
+            _ => "i=1; while [ $i -le 4000 ]; do echo \"line number $i\"; i=$((i+1)); done",
+        };
+        let report =
+            run_configured_hook(Some(command), &wt_str(&main), &wt_str(&linked), HOOK_WAIT)
+                .expect("ran");
+        assert!(report.ok, "{report:?}");
+        assert!(
+            report.output.len() <= HOOK_OUTPUT_CAP + 8,
+            "{}",
+            report.output.len()
+        );
+        assert!(report.output.starts_with('…'));
+        assert!(report.output.contains("line number 4000"));
     }
 }

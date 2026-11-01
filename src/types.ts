@@ -193,6 +193,21 @@ export interface Workspace {
    * through `resolveAccount`, which takes anything malformed as no choice.
    */
   claudeAccount?: string | null;
+  /** Commands run when a worktree is created or removed; see `WorktreeHooks`. */
+  worktreeHooks?: WorktreeHooks;
+}
+
+/**
+ * The commands a workspace runs around its worktrees, on this machine, as the
+ * person, through the default shell. Set by the person in the workspace's
+ * dialog and nowhere else: no agent, MCP tool or kit writes them. Absent or
+ * blank runs nothing.
+ */
+export interface WorktreeHooks {
+  /** In a new worktree, once it exists, with WORKTREE_PATH and BASE_PATH set. */
+  postCreate?: string;
+  /** In a worktree before it is removed; a failure keeps the worktree. */
+  preRemove?: string;
 }
 
 export interface OrchestrationSettings {
