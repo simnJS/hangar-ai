@@ -3,6 +3,7 @@ import { useStore } from "./store";
 import { typeset } from "./lib/typography";
 import * as kitsManage from "./strings/kitsManage";
 import * as kitsTab from "./strings/kitsTab";
+import * as worktrees from "./strings/worktrees";
 
 /**
  * Minimal typed i18n. `en` is the reference: `fr` is declared as
@@ -1495,6 +1496,7 @@ const en = {
   // (src/strings/): a French key missing there fails the build there.
   ...kitsManage.en,
   ...kitsTab.en,
+  ...worktrees.en,
 } as const;
 
 type Key = keyof typeof en;
@@ -3014,6 +3016,7 @@ const fr: Record<Key, string> = {
 
   ...kitsManage.fr,
   ...kitsTab.fr,
+  ...worktrees.fr,
 };
 
 const typesetAll = (dict: Record<Key, string>, locale: Locale) =>

@@ -31,6 +31,22 @@ export interface Worktree {
   prunable: string | null;
 }
 
+/** A linked worktree on a branch already merged into the main checkout. */
+export interface MergedWorktree {
+  path: string;
+  branch: string;
+  /** Lock reason — empty when locked without one, null when not locked. */
+  locked: string | null;
+  /** Files with uncommitted changes; null when git could not say. */
+  dirty: number | null;
+  /** Its head is the main checkout's — as likely a worker that just started. */
+  noOwnCommit: boolean;
+  /** A pane of Hangar is open in it. */
+  held: boolean;
+  /** What to tick by default: clean, unlocked, not held, with commits of its own. */
+  preselected: boolean;
+}
+
 export interface Branch {
   /** Short name — a remote branch keeps its remote prefix ("origin/xyz"). */
   name: string;
@@ -107,6 +123,16 @@ export const gitRepoInfo = (path: string) => invoke<RepoInfo>("git_repo_info", {
 /** Every worktree attached to the repository containing `path`, main included. */
 export const gitWorktreeList = (path: string) =>
   invoke<Worktree[]>("git_worktree_list", { path });
+
+/**
+ * The cleanup candidates: linked worktrees whose branch `git branch --merged`
+ * lists. Never the main checkout, the worktree `path` is in, or a bare,
+ * detached or orphaned entry. Locked and dirty ones are listed, flagged, so the
+ * UI can say why it holds them back. `heldFolders` are the folders where a pane
+ * of Hangar is open; those are never preselected.
+ */
+export const gitWorktreesMerged = (path: string, heldFolders: string[]) =>
+  invoke<MergedWorktree[]>("git_worktrees_merged", { path, heldFolders });
 
 /**
  * Local and remote branches, each with the worktree already holding it, sorted

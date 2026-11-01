@@ -151,6 +151,7 @@ pub fn run() {
             board_comment,
             git::git_repo_info,
             git::git_worktree_list,
+            git::git_worktrees_merged,
             git::git_branches,
             git::git_worktree_add,
             git::git_worktree_remove,

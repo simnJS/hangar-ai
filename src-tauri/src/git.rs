@@ -453,35 +453,157 @@ fn short_branch(refname: &str) -> &str {
     refname.strip_prefix("refs/heads/").unwrap_or(refname)
 }
 
-#[tauri::command]
-pub async fn git_worktree_list(path: String) -> Result<Vec<Worktree>, String> {
-    off_thread(move || {
-        let dir = Path::new(&path);
-        let mut worktrees =
-            parse_worktree_list(&run_git(dir, &["worktree", "list", "--porcelain"])?);
+/// Every worktree of the repository holding `dir`, the one `dir` is inside
+/// marked as current.
+fn list_worktrees(dir: &Path) -> Result<Vec<Worktree>, GitError> {
+    let mut worktrees = parse_worktree_list(&run_git(dir, &["worktree", "list", "--porcelain"])?);
 
-        // Which entry the caller is inside. `--show-toplevel` is absolute on
-        // every git that has it, and comes out in the same spelling as the
-        // porcelain paths, so the two are comparable. A bare repository has no
-        // toplevel and simply leaves every entry unmarked.
-        if let Ok(toplevel) = run_git(dir, &["rev-parse", "--show-toplevel"]) {
-            let here = compare_key(toplevel.trim());
-            if let Some(entry) = worktrees
-                .iter_mut()
-                .find(|worktree| compare_key(&worktree.path) == here)
-            {
-                entry.is_current = true;
-            }
+    // Which entry the caller is inside. `--show-toplevel` is absolute on
+    // every git that has it, and comes out in the same spelling as the
+    // porcelain paths, so the two are comparable. A bare repository has no
+    // toplevel and simply leaves every entry unmarked.
+    if let Ok(toplevel) = run_git(dir, &["rev-parse", "--show-toplevel"]) {
+        let here = compare_key(toplevel.trim());
+        if let Some(entry) = worktrees
+            .iter_mut()
+            .find(|worktree| compare_key(&worktree.path) == here)
+        {
+            entry.is_current = true;
         }
-
-        Ok(worktrees)
-    })
-    .await
+    }
+    Ok(worktrees)
 }
 
-/// A ref as the branch list shows it — local and remote alike, carrying
-/// everything the panel labels a row with so it does not have to ask again per
-/// branch.
+#[tauri::command]
+pub async fn git_worktree_list(path: String) -> Result<Vec<Worktree>, String> {
+    off_thread(move || Ok(list_worktrees(Path::new(&path))?)).await
+}
+
+/// A worktree whose branch is merged into the main checkout's HEAD — a
+/// candidate for the end-of-cycle cleanup.
+///
+/// Ported from Git Worktree Manager (MIT): `git branch --merged`, keeping the
+/// `+` lines (a branch checked out in another worktree), crossed with
+/// `git worktree list --porcelain` for the paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergedWorktree {
+    pub path: String,
+    pub branch: String,
+    /// Lock reason, as in `Worktree`. A locked worktree is listed so the user
+    /// sees why it stays, but the UI never offers to remove it.
+    pub locked: Option<String>,
+    /// Files with uncommitted changes, untracked ones included. None when git
+    /// could not say — treated as unknown, never as clean.
+    pub dirty: Option<u32>,
+    /// Its head is the main checkout's: the branch has no commit of its own.
+    /// git calls that merged, but it is as likely a worker that just started.
+    pub no_own_commit: bool,
+    /// A pane of Hangar is open in it.
+    pub held: bool,
+    /// What the UI ticks by default: merged with something to show for it,
+    /// clean, unlocked, and nobody working in it. Everything else is listed,
+    /// with the reason, and left to the person to tick.
+    pub preselected: bool,
+}
+
+impl MergedWorktree {
+    fn is_preselected(&self) -> bool {
+        self.locked.is_none() && self.dirty == Some(0) && !self.no_own_commit && !self.held
+    }
+}
+
+/// The branch names `git branch --merged` lists as checked out in another
+/// worktree. Each line is a two-character marker then the name: `*` for the
+/// branch of the directory git ran in, `+` for one held by another worktree,
+/// blank for the rest. Only `+` lines can have a worktree to clean up; the
+/// `*` one is where we stand, and a detached head is written in parentheses.
+fn merged_in_other_worktrees(listing: &str) -> HashSet<String> {
+    listing
+        .lines()
+        .filter_map(|line| line.strip_prefix('+'))
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !name.starts_with('('))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Which worktrees the cleanup may even propose: a linked worktree on a branch
+/// that is merged. Never the main checkout, the one the panel is opened from,
+/// a bare or detached entry (no branch to judge), nor one whose folder is gone
+/// (`prune` is the tool for those). Locks and dirtiness are carried, not
+/// filtered: the person sees why a worktree is held back.
+fn merged_candidates(
+    worktrees: &[Worktree],
+    merged: &HashSet<String>,
+    held: &[String],
+) -> Vec<MergedWorktree> {
+    let main_head = worktrees
+        .iter()
+        .find(|worktree| worktree.is_main)
+        .and_then(|worktree| worktree.head.as_deref());
+    worktrees
+        .iter()
+        .filter(|worktree| {
+            !worktree.is_main
+                && !worktree.is_current
+                && !worktree.bare
+                && !worktree.detached
+                && worktree.prunable.is_none()
+        })
+        .filter_map(|worktree| {
+            let branch = worktree.branch.as_ref()?;
+            merged.contains(branch).then(|| MergedWorktree {
+                path: worktree.path.clone(),
+                branch: branch.clone(),
+                locked: worktree.locked.clone(),
+                dirty: None,
+                no_own_commit: main_head.is_some() && worktree.head.as_deref() == main_head,
+                held: held
+                    .iter()
+                    .any(|folder| compare_key(folder) == compare_key(&worktree.path)),
+                preselected: false,
+            })
+        })
+        .collect()
+}
+
+fn dirty_files(worktree: &str) -> Option<u32> {
+    run_git(
+        Path::new(worktree),
+        &["status", "--porcelain", "--untracked-files=all"],
+    )
+    .ok()
+    .map(|out| out.lines().filter(|line| !line.trim().is_empty()).count() as u32)
+}
+
+fn merged_worktrees(dir: &Path, held: &[String]) -> Result<Vec<MergedWorktree>, GitError> {
+    let worktrees = list_worktrees(dir)?;
+    // Judged against the main checkout's HEAD, wherever the panel was opened
+    // from: from a linked worktree, `--merged` would compare to its own branch.
+    let main = worktrees
+        .iter()
+        .find(|worktree| worktree.is_main && !worktree.bare)
+        .map(|worktree| worktree.path.clone());
+    let base = main.as_deref().map(Path::new).unwrap_or(dir);
+    let merged = merged_in_other_worktrees(&run_git(base, &["branch", "--merged"])?);
+
+    let mut found = merged_candidates(&worktrees, &merged, held);
+    for entry in &mut found {
+        entry.dirty = dirty_files(&entry.path);
+        entry.preselected = entry.is_preselected();
+    }
+    Ok(found)
+}
+
+#[tauri::command]
+pub async fn git_worktrees_merged(
+    path: String,
+    held_folders: Vec<String>,
+) -> Result<Vec<MergedWorktree>, String> {
+    off_thread(move || Ok(merged_worktrees(Path::new(&path), &held_folders)?)).await
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
@@ -2364,5 +2486,245 @@ mod tests {
         assert!(ignored.contains(&".env".to_string()), "{ignored:?}");
         assert!(!ignored.contains(&"notes.local".to_string()), "{ignored:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn entry(path: &str, branch: Option<&str>) -> Worktree {
+        Worktree {
+            path: path.to_string(),
+            branch: branch.map(str::to_string),
+            ..Worktree::default()
+        }
+    }
+
+    #[test]
+    fn only_plus_lines_of_a_merged_listing_name_other_worktrees() {
+        let listing = "* main
++ done
+  stale
++ other/feat
+* (HEAD detached at abc1234)
++ (no branch)
+";
+        let merged = merged_in_other_worktrees(listing);
+        let mut names: Vec<_> = merged.iter().map(String::as_str).collect();
+        names.sort();
+        assert_eq!(names, ["done", "other/feat"]);
+    }
+
+    #[test]
+    fn the_selection_leaves_out_main_current_bare_detached_and_orphaned_entries() {
+        let merged: HashSet<String> = ["main", "a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        let mut main = entry("/r", Some("main"));
+        main.is_main = true;
+        let mut current = entry("/r-b", Some("b"));
+        current.is_current = true;
+        let mut bare = entry("/r-c", Some("c"));
+        bare.bare = true;
+        let mut detached = entry("/r-d", None);
+        detached.detached = true;
+        let mut gone = entry("/r-e", Some("e"));
+        gone.prunable = Some("gitdir file points to non-existent location".into());
+        let mut locked = entry("/r-f", Some("f"));
+        locked.locked = Some(String::new());
+        let unmerged = entry("/r-g", Some("g"));
+
+        let picked = merged_candidates(
+            &[
+                main,
+                entry("/r-a", Some("a")),
+                current,
+                bare,
+                detached,
+                gone,
+                locked,
+                unmerged,
+            ],
+            &merged,
+            &[],
+        );
+        let paths: Vec<_> = picked.iter().map(|w| w.path.as_str()).collect();
+        assert_eq!(paths, ["/r-a", "/r-f"]);
+        // A lock is carried, with its empty reason, not filtered out.
+        assert_eq!(picked[1].locked.as_deref(), Some(""));
+    }
+
+    /// `repo` plus one linked worktree per `(branch, extra commit)`.
+    fn repo_with_worktrees(
+        tag: &str,
+        branches: &[(&str, bool)],
+    ) -> Option<(PathBuf, Vec<PathBuf>)> {
+        let dir = fixture_repo(tag)?;
+        let mut paths = Vec::new();
+        for (branch, commit) in branches {
+            let target = temp_dir(&format!("{tag}-{branch}")).join("wt");
+            let arg = target.to_string_lossy().into_owned();
+            assert!(fixture_git(
+                &dir,
+                &["worktree", "add", "-q", "-b", branch, &arg]
+            ));
+            if *commit {
+                write(
+                    &target,
+                    &format!("{branch}.txt"),
+                    "done
+",
+                );
+                assert!(fixture_git(&target, &["add", "."]));
+                assert!(fixture_git(&target, &["commit", "-q", "-m", "work"]));
+            }
+            paths.push(target);
+        }
+        Some((dir, paths))
+    }
+
+    fn cleanup(dir: &Path, paths: &[PathBuf]) {
+        for path in paths {
+            let _ = std::fs::remove_dir_all(path.parent().unwrap_or(path));
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn found(list: &[MergedWorktree]) -> Vec<&str> {
+        let mut names: Vec<_> = list.iter().map(|w| w.branch.as_str()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn merged_worktrees_are_told_apart_from_the_ones_with_work_of_their_own() {
+        let Some((dir, paths)) = repo_with_worktrees(
+            "merged",
+            &[("fresh", false), ("landed", true), ("ongoing", true)],
+        ) else {
+            return;
+        };
+        // `landed` is merged into main; `ongoing` is not; `fresh` has no commit
+        // beyond main, which git counts as merged too.
+        assert!(fixture_git(&dir, &["merge", "-q", "--ff-only", "landed"]));
+        assert!(fixture_git(&dir, &["branch", "plain"]));
+
+        let list = merged_worktrees(&dir, &[]).expect("merged");
+        // `plain` is merged but has no worktree; `main` is the main checkout.
+        assert_eq!(found(&list), ["fresh", "landed"]);
+        assert!(list
+            .iter()
+            .all(|w| w.locked.is_none() && w.dirty == Some(0)));
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn the_worktree_the_panel_is_opened_from_is_never_offered() {
+        let Some((dir, paths)) = repo_with_worktrees("current", &[("one", false), ("two", false)])
+        else {
+            return;
+        };
+        // Judged against main either way, but the current one drops out.
+        let list = merged_worktrees(&paths[0], &[]).expect("merged");
+        assert_eq!(found(&list), ["two"]);
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn a_locked_worktree_is_listed_with_its_lock() {
+        let Some((dir, paths)) = repo_with_worktrees("locked", &[("held", false), ("free", false)])
+        else {
+            return;
+        };
+        let held = paths[0].to_string_lossy().into_owned();
+        assert!(fixture_git(
+            &dir,
+            &["worktree", "lock", "--reason", "mine", &held]
+        ));
+
+        let list = merged_worktrees(&dir, &[]).expect("merged");
+        let held = list.iter().find(|w| w.branch == "held").expect("held");
+        assert_eq!(held.locked.as_deref(), Some("mine"));
+        let free = list.iter().find(|w| w.branch == "free").expect("free");
+        assert_eq!(free.locked, None);
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn uncommitted_work_is_counted_and_a_plain_removal_leaves_it_alone() {
+        let Some((dir, paths)) = repo_with_worktrees("dirty", &[("messy", false), ("tidy", false)])
+        else {
+            return;
+        };
+        write(&paths[0], "scratch.txt", "mine");
+        write(&paths[0], "notes/a.txt", "mine");
+
+        let list = merged_worktrees(&dir, &[]).expect("merged");
+        let messy = list.iter().find(|w| w.branch == "messy").expect("messy");
+        assert_eq!(messy.dirty, Some(2));
+        let tidy = list.iter().find(|w| w.branch == "tidy").expect("tidy");
+        assert_eq!(tidy.dirty, Some(0));
+
+        // The removal the batch performs without force is refused on the dirty
+        // one, and git's refusal is the kind a confirmation answers.
+        let target = paths[0].to_string_lossy().into_owned();
+        let refusal = run_git(&dir, &["worktree", "remove", &target]);
+        match refusal {
+            Err(GitError::Failed(message)) => assert!(recoverable_by_force(&message), "{message}"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(paths[0].join("scratch.txt").exists());
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn a_fresh_worktree_at_the_head_of_main_is_not_preselected() {
+        let Some((dir, paths)) = repo_with_worktrees("fresh-only", &[("started", false)]) else {
+            return;
+        };
+        let list = merged_worktrees(&dir, &[]).expect("merged");
+        assert_eq!(found(&list), ["started"]);
+        assert!(list[0].no_own_commit);
+        assert!(!list[0].preselected);
+        cleanup(&dir, &paths);
+    }
+
+    #[test]
+    fn only_a_clean_free_worktree_with_commits_of_its_own_is_preselected() {
+        let Some((dir, paths)) = repo_with_worktrees(
+            "preselect",
+            &[
+                ("good", true),
+                ("open", true),
+                ("messy", true),
+                ("held", true),
+            ],
+        ) else {
+            return;
+        };
+        for branch in ["good", "open", "messy", "held"] {
+            assert!(fixture_git(&dir, &["merge", "-q", "--no-edit", branch]));
+        }
+        // Main moves on, so no head is main's any more.
+        write(
+            &dir,
+            "later.txt",
+            "x
+",
+        );
+        assert!(fixture_git(&dir, &["add", "."]));
+        assert!(fixture_git(&dir, &["commit", "-q", "-m", "later"]));
+        write(&paths[2], "scratch.txt", "mine");
+        let held = paths[3].to_string_lossy().into_owned();
+        assert!(fixture_git(&dir, &["worktree", "lock", &held]));
+        // A pane is open in `open`; the spelling differs from git's on purpose.
+        let pane = paths[1].to_string_lossy().replace('\\', "/");
+
+        let list = merged_worktrees(&dir, &[pane]).expect("merged");
+        let by = |branch: &str| list.iter().find(|w| w.branch == branch).expect(branch);
+        assert!(list.iter().all(|w| !w.no_own_commit));
+        assert!(by("good").preselected);
+        assert!(by("open").held && !by("open").preselected);
+        assert_eq!(by("messy").dirty, Some(1));
+        assert!(!by("messy").preselected);
+        assert!(by("held").locked.is_some() && !by("held").preselected);
+        cleanup(&dir, &paths);
     }
 }
