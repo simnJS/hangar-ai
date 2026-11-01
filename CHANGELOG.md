@@ -8,6 +8,12 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.9.1] - 2026-11-01
+
+### Fixed
+
+- The review of a delivery now runs on the Claude account of its workspace, as its panes do, not on the machine's default login. When that account hits its usage limit, the delivery says so plainly, and it no longer counts as a failed delivery.
+
 ## [1.9.0] - 2026-11-01
 
 - **A kit Library.** **Settings → Kits → Library** lists the kits of the
