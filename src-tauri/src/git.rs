@@ -901,6 +901,188 @@ pub async fn git_worktree_unlock(path: String, worktree_path: String) -> Result<
     .await
 }
 
+/// How many conflicting paths a refusal names; the rest is a count.
+const MIGRATE_LISTED: usize = 5;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrateResult {
+    /// `moved`, `nothing` (the source holds no uncommitted change), `conflict`
+    /// (a path is modified on both sides: nothing was touched) or
+    /// `applyFailed` (the stash could not be applied in the target and is
+    /// still kept).
+    pub outcome: &'static str,
+    /// The first paths changed on both sides; `conflict` only.
+    pub files: Vec<String>,
+    /// How many more paths than `files` lists.
+    pub more: u32,
+    /// The kept stash commit, to get the work back with
+    /// `git stash apply <stash>`; `applyFailed` (and `moved` when the drop of
+    /// the applied stash itself failed).
+    pub stash: Option<String>,
+    /// git's own words for a failure.
+    pub message: Option<String>,
+}
+
+impl MigrateResult {
+    fn of(outcome: &'static str) -> Self {
+        MigrateResult {
+            outcome,
+            files: Vec::new(),
+            more: 0,
+            stash: None,
+            message: None,
+        }
+    }
+}
+
+/// The paths `git status -z` reports as changed: staged, unstaged and
+/// untracked, both ends of a rename.
+fn changed_paths(dir: &Path) -> Result<HashSet<String>, GitError> {
+    let status = run_git(
+        dir,
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+    )?;
+    let mut paths = HashSet::new();
+    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        paths.insert(path.to_string());
+        // A rename or copy carries its origin as a second entry.
+        if entry.starts_with(['R', 'C']) || entry[1..].starts_with(['R', 'C']) {
+            if let Some(origin) = entries.next() {
+                paths.insert(origin.to_string());
+            }
+        }
+    }
+    Ok(paths)
+}
+
+/// `main`, or the short sha of a detached HEAD.
+fn ref_label(dir: &Path) -> Result<String, GitError> {
+    match run_git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]) {
+        Ok(name) if !name.trim().is_empty() => Ok(name.trim().to_string()),
+        _ => Ok(run_git(dir, &["rev-parse", "--short", "HEAD"])?
+            .trim()
+            .to_string()),
+    }
+}
+
+/// The stash commit named `name`, looked up by name and not as `stash@{0}`:
+/// the stash list is shared with every other worktree and another agent may
+/// push onto it between our push and our lookup.
+fn find_stash(dir: &Path, name: &str) -> Result<Option<String>, GitError> {
+    let list = run_git(dir, &["stash", "list", "--format=%H %gs"])?;
+    Ok(list.lines().find_map(|line| {
+        let (sha, subject) = line.split_once(' ')?;
+        subject
+            .ends_with(&format!(": {name}"))
+            .then(|| sha.to_string())
+    }))
+}
+
+/// Moves the uncommitted work of `source` into `target`, emptying `source`.
+///
+/// Ported from microsoft/vscode extensions/git (MIT), `migrateChanges`: stash
+/// index, tracked and untracked files under `migration:<source>-<target>`,
+/// apply that stash in the target.
+///
+/// Nothing is dropped before the apply succeeded: a refusal touches nothing,
+/// and a failed apply leaves the stash in place with its sha in the result.
+///
+/// Staged state is not kept: the work arrives as working-tree changes (new
+/// files git had staged stay staged, that being what `stash apply` does).
+/// `--index` is not used because it fails as soon as the two HEADs differ.
+fn migrate_changes(source: &Path, target: &Path) -> Result<MigrateResult, GitError> {
+    let source_paths = changed_paths(source)?;
+    if source_paths.is_empty() {
+        return Ok(MigrateResult::of("nothing"));
+    }
+
+    let target_paths = changed_paths(target)?;
+    let mut both: Vec<String> = source_paths.intersection(&target_paths).cloned().collect();
+    if !both.is_empty() {
+        both.sort();
+        let more = both.len().saturating_sub(MIGRATE_LISTED) as u32;
+        both.truncate(MIGRATE_LISTED);
+        return Ok(MigrateResult {
+            files: both,
+            more,
+            ..MigrateResult::of("conflict")
+        });
+    }
+
+    let name = format!("migration:{}-{}", ref_label(source)?, ref_label(target)?);
+    run_git(
+        source,
+        &["stash", "push", "--include-untracked", "-m", &name],
+    )?;
+    let Some(stash) = find_stash(source, &name)? else {
+        return Err(GitError::Failed(format!(
+            "the stash {name} was created but could not be found again; look in `git stash list`"
+        )));
+    };
+
+    if let Err(error) = run_git(target, &["stash", "apply", &stash]) {
+        let message: String = error.into();
+        // git can fail halfway, with part of the work already written. A target
+        // that held nothing of its own has nothing to lose by being put back as
+        // it was (`clean` without `-x` leaves ignored files alone); one that
+        // does is left as it is rather than guessed at. Either way the whole
+        // work sits in the stash.
+        if target_paths.is_empty() {
+            let _ = run_git(target, &["reset", "--hard", "-q"]);
+            let _ = run_git(target, &["clean", "-fdq"]);
+        }
+        return Ok(MigrateResult {
+            stash: Some(stash),
+            message: Some(message),
+            ..MigrateResult::of("applyFailed")
+        });
+    }
+
+    // Applied: the stash has done its job. Dropping by the index it has now,
+    // since the sha is not an accepted argument of `stash drop`.
+    let index = run_git(source, &["stash", "list", "--format=%H"])?
+        .lines()
+        .position(|line| line == stash);
+    let dropped = match index {
+        Some(n) => run_git(source, &["stash", "drop", &format!("stash@{{{n}}}")]).is_ok(),
+        None => true,
+    };
+    Ok(MigrateResult {
+        stash: (!dropped).then_some(stash),
+        ..MigrateResult::of("moved")
+    })
+}
+
+/// « Bring changes back »: `worktree_path`'s uncommitted work into the main
+/// checkout of the repository `path` belongs to.
+#[tauri::command]
+pub async fn git_worktree_migrate(
+    path: String,
+    worktree_path: String,
+) -> Result<MigrateResult, String> {
+    off_thread(move || {
+        let worktrees = list_worktrees(Path::new(&path))?;
+        let main = worktrees
+            .iter()
+            .find(|worktree| worktree.is_main)
+            .filter(|worktree| !worktree.bare)
+            .ok_or_else(|| {
+                "this repository has no main checkout to bring changes to".to_string()
+            })?;
+        if compare_key(&main.path) == compare_key(&worktree_path) {
+            return Err("the main checkout is the destination, not a source".to_string());
+        }
+        Ok(migrate_changes(
+            Path::new(&worktree_path),
+            Path::new(&main.path),
+        )?)
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyResult {
@@ -2099,6 +2281,146 @@ mod tests {
         write(&ignored, ".gitignore", ".hangar/\n");
         exclude_locally(&ignored, ".hangar", ".hangar/board.json");
         assert!(!read(&ignored, ".git/info/exclude").contains("/.hangar/"));
+    }
+
+    /// A main checkout with one commit, and a linked worktree made from it.
+    fn main_and_worktree(tag: &str) -> (PathBuf, PathBuf) {
+        let main = repo(tag);
+        git(&main, &["config", "user.email", "t@example.com"]);
+        git(&main, &["config", "user.name", "T"]);
+        git(&main, &["config", "commit.gpgsign", "false"]);
+        write(&main, "a.txt", "one\n");
+        write(&main, "b.txt", "bee\n");
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        let linked = temp_dir(&format!("{tag}-wt")).join("wt");
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        );
+        (main, linked)
+    }
+
+    fn stash_count(dir: &Path) -> usize {
+        run_git(dir, &["stash", "list"])
+            .expect("stash list")
+            .lines()
+            .count()
+    }
+
+    #[test]
+    fn tracked_and_untracked_changes_come_across_and_the_source_is_emptied() {
+        let (main, linked) = main_and_worktree("migrate-ok");
+        write(&linked, "a.txt", "one\ntwo\n");
+        write(&linked, "new/deep.txt", "fresh\n");
+        write(&linked, "staged.txt", "staged\n");
+        git(&linked, &["add", "staged.txt"]);
+
+        let result = migrate_changes(&linked, &main).expect("migrate");
+
+        assert_eq!(result.outcome, "moved");
+        assert_eq!(result.stash, None);
+        assert_eq!(read(&main, "a.txt"), "one\ntwo\n");
+        assert_eq!(read(&main, "new/deep.txt"), "fresh\n");
+        assert_eq!(read(&main, "staged.txt"), "staged\n");
+        assert_eq!(untracked(&linked), "");
+        // The stash was dropped once applied.
+        assert_eq!(stash_count(&main), 0);
+    }
+
+    #[test]
+    fn a_path_changed_on_both_sides_is_refused_and_nothing_moves() {
+        let (main, linked) = main_and_worktree("migrate-both");
+        write(&linked, "a.txt", "from worktree\n");
+        write(&linked, "only-here.txt", "x\n");
+        write(&main, "a.txt", "from main\n");
+
+        let result = migrate_changes(&linked, &main).expect("migrate");
+
+        assert_eq!(result.outcome, "conflict");
+        assert_eq!(result.files, vec!["a.txt".to_string()]);
+        assert_eq!(result.more, 0);
+        assert_eq!(read(&linked, "a.txt"), "from worktree\n");
+        assert_eq!(read(&linked, "only-here.txt"), "x\n");
+        assert_eq!(read(&main, "a.txt"), "from main\n");
+        assert!(!main.join("only-here.txt").exists());
+        assert_eq!(stash_count(&main), 0);
+    }
+
+    #[test]
+    fn a_refusal_lists_five_files_and_counts_the_rest() {
+        let (main, linked) = main_and_worktree("migrate-many");
+        for n in 0..8 {
+            write(&linked, &format!("f{n}.txt"), "w\n");
+            write(&main, &format!("f{n}.txt"), "m\n");
+        }
+
+        let result = migrate_changes(&linked, &main).expect("migrate");
+
+        assert_eq!(result.outcome, "conflict");
+        assert_eq!(result.files.len(), 5);
+        assert_eq!(result.files[0], "f0.txt");
+        assert_eq!(result.more, 3);
+    }
+
+    #[test]
+    fn a_clean_source_has_nothing_to_move() {
+        let (main, linked) = main_and_worktree("migrate-none");
+        let result = migrate_changes(&linked, &main).expect("migrate");
+        assert_eq!(result.outcome, "nothing");
+        assert_eq!(stash_count(&main), 0);
+    }
+
+    /// The apply fails (the file exists in the target's newer HEAD): the work
+    /// has left the source, so it must still be in the stash, and the target
+    /// must be as it was.
+    #[test]
+    fn a_failed_apply_keeps_the_stash_and_loses_nothing() {
+        let (main, linked) = main_and_worktree("migrate-fail");
+        write(&main, "clash.txt", "committed in main\n");
+        git(&main, &["add", "clash.txt"]);
+        git(&main, &["commit", "-q", "-m", "add clash"]);
+        write(&linked, "clash.txt", "untracked in worktree\n");
+        write(&linked, "a.txt", "one\nedited\n");
+
+        let result = migrate_changes(&linked, &main).expect("migrate");
+
+        assert_eq!(result.outcome, "applyFailed");
+        assert!(result.message.is_some());
+        let stash = result.stash.expect("stash sha");
+        assert_eq!(stash_count(&main), 1);
+        assert_eq!(read(&main, "clash.txt"), "committed in main\n");
+        assert_eq!(untracked(&main), "");
+        // The work is recoverable from the stash by its sha.
+        assert_eq!(
+            run_git(&main, &["show", &format!("{stash}:a.txt")]).expect("show"),
+            "one\nedited\n"
+        );
+        assert_eq!(
+            run_git(&main, &["show", &format!("{stash}^3:clash.txt")]).expect("show"),
+            "untracked in worktree\n"
+        );
+    }
+
+    #[test]
+    fn the_stash_is_named_after_both_refs() {
+        let (main, linked) = main_and_worktree("migrate-name");
+        write(&main, "clash.txt", "m\n");
+        git(&main, &["add", "clash.txt"]);
+        git(&main, &["commit", "-q", "-m", "c"]);
+        write(&linked, "clash.txt", "w\n");
+
+        migrate_changes(&linked, &main).expect("migrate");
+
+        let list = run_git(&main, &["stash", "list"]).expect("list");
+        assert!(list.contains("migration:feature-"), "{list}");
     }
 
     #[test]

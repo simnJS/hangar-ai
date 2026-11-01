@@ -12,12 +12,14 @@ import {
   gitWorktreeAdd,
   gitWorktreeList,
   gitWorktreeLock,
+  gitWorktreeMigrate,
   gitWorktreePrune,
   gitWorktreeRemove,
   gitWorktreeUnlock,
   gitWorktreesMerged,
   type Branch,
   type MergedWorktree,
+  type MigrateResult,
   type RepoInfo,
   type Worktree,
 } from "../lib/git";
@@ -160,6 +162,12 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
   );
   /** A removal git turned down, kept per worktree so the row can offer force. */
   const [blocked, setBlocked] = useState<{ path: string; message: string | null } | null>(
+    null,
+  );
+  /** The worktree whose « bring changes back » waits for its confirmation. */
+  const [migrating, setMigrating] = useState<string | null>(null);
+  /** What the last migration said, kept on the row it concerns until dismissed. */
+  const [migrated, setMigrated] = useState<{ path: string; result: MigrateResult } | null>(
     null,
   );
   /** A branch left with no worktree by the removal that just went through. */
@@ -605,6 +613,25 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
     setBusy(null);
   }
 
+  async function migrate(worktree: Worktree) {
+    setMigrating(null);
+    setMigrated(null);
+    setBusy(`migrate:${worktree.path}`);
+    setError(null);
+    try {
+      const result = await gitWorktreeMigrate(cwd, worktree.path);
+      if (result.outcome === "moved" && result.stash === null) {
+        flash("info", t("worktrees.migrateDone"));
+      } else {
+        // Everything else is worth reading, so it stays on the row.
+        setMigrated({ path: worktree.path, result });
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+    setBusy(null);
+  }
+
   async function deleteOrphan(force: boolean) {
     if (!orphan) return;
     setBusy(`branch:${orphan.name}`);
@@ -970,6 +997,23 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                           </button>
                           {/* git refuses to lock the main worktree, so the
                               button only exists where it can work. */}
+                          {/* The main checkout is where the changes go, and a
+                              bare or prunable entry has nothing to take. */}
+                          {!worktree.isMain && !worktree.bare && worktree.prunable === null && (
+                            <button
+                              className="btn btn--tiny"
+                              title={t("worktrees.migrateHint")}
+                              disabled={busy !== null}
+                              onClick={() => {
+                                setMigrated(null);
+                                setMigrating(
+                                  migrating === worktree.path ? null : worktree.path,
+                                );
+                              }}
+                            >
+                              {t("worktrees.migrate")}
+                            </button>
+                          )}
                           {!worktree.isMain && (
                             <button
                               className="btn btn--tiny"
@@ -1013,6 +1057,61 @@ export function WorktreePanel({ workspaceId, cwd, onClose }: Props) {
                             </button>
                           )}
                         </div>
+
+                        {migrating === worktree.path && (
+                          <div className="notice wt__blocked">
+                            <span className="notice__text">{t("worktrees.migrateWarn")}</span>
+                            <button
+                              className="btn btn--tiny"
+                              disabled={busy !== null}
+                              onClick={() => void migrate(worktree)}
+                            >
+                              {t("worktrees.migrateConfirm")}
+                            </button>
+                            <button
+                              className="btn btn--tiny"
+                              onClick={() => setMigrating(null)}
+                            >
+                              {t("worktrees.migrateCancel")}
+                            </button>
+                          </div>
+                        )}
+
+                        {migrated?.path === worktree.path && (
+                          <div
+                            className={`notice wt__blocked ${
+                              migrated.result.outcome === "moved" ? "" : "notice--error"
+                            }`}
+                          >
+                            <span className="notice__text">
+                              {migrated.result.outcome === "nothing" &&
+                                t("worktrees.migrateNothing")}
+                              {migrated.result.outcome === "moved" &&
+                                t("worktrees.migrateDropFailed")}
+                              {migrated.result.outcome === "conflict" && (
+                                <>
+                                  {t("worktrees.migrateConflict")}{" "}
+                                  {migrated.result.files.join(", ")}
+                                  {migrated.result.more > 0 &&
+                                    ` ${t("worktrees.migrateMore", { n: migrated.result.more })}`}
+                                </>
+                              )}
+                              {migrated.result.outcome === "applyFailed" && (
+                                <>
+                                  {t("worktrees.migrateFailed", {
+                                    stash: migrated.result.stash ?? "",
+                                  })}
+                                  {migrated.result.message
+                                    ? ` (${migrated.result.message})`
+                                    : ""}
+                                </>
+                              )}
+                            </span>
+                            <button className="btn btn--tiny" onClick={() => setMigrated(null)}>
+                              ×
+                            </button>
+                          </div>
+                        )}
 
                         {blocked?.path === worktree.path && (
                           <div className="notice notice--error wt__blocked">
