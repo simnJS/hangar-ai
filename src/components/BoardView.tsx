@@ -12,6 +12,7 @@ import {
   type Task,
 } from "../lib/board";
 import { findAgentPane } from "../lib/agentPane";
+import { columnAtPoint, movedBeyond, startsDrag, type Point } from "../lib/boardDrag";
 import { focusablesIn } from "../lib/focusable";
 import { elapsedLabel, shortTaskId } from "../lib/boardFormat";
 import { useLocale, useT } from "../i18n";
@@ -94,6 +95,10 @@ export function BoardView({
   const [focusAdd, setFocusAdd] = useState<BoardColumn | null>(null);
   const addRefs = useRef<Partial<Record<BoardColumn, HTMLInputElement | null>>>({});
   const rootRef = useRef<HTMLDivElement>(null);
+  /** Set once a drag has moved: the click that ends it must not open the card. */
+  const justDragged = useRef(false);
+  /** Ends the drag in progress, if any (unmount, a second press). */
+  const endDrag = useRef<(() => void) | null>(null);
   const t = useT();
   const locale = useLocale();
   const { state } = useStore();
@@ -140,6 +145,68 @@ export function BoardView({
     await boardUpdate(cwd, id, { column }).catch(() => undefined);
     refresh();
   }
+
+  /** Under the pointer, the column the card would land in. */
+  function columnUnder(point: Point): BoardColumn | null {
+    const boxes: { column: BoardColumn; box: DOMRect }[] = [];
+    rootRef.current?.querySelectorAll<HTMLElement>("[data-column]").forEach((el) => {
+      boxes.push({ column: el.dataset.column as BoardColumn, box: el.getBoundingClientRect() });
+    });
+    return columnAtPoint(point, boxes);
+  }
+
+  /** A press on a card: a plain click until the pointer has travelled, then a
+      drag. Pointer events, not HTML5 drag-and-drop, which never reaches its
+      drop on Windows (lib/boardDrag). */
+  function pressCard(e: React.PointerEvent, task: Task) {
+    if (!startsDrag(e.button, e.target)) return;
+    endDrag.current?.();
+    const start: Point = { x: e.clientX, y: e.clientY };
+    let moved = false;
+    let over: BoardColumn | null = null;
+
+    const onMove = (ev: PointerEvent) => {
+      const here = { x: ev.clientX, y: ev.clientY };
+      if (!moved) {
+        if (!movedBeyond(start, here)) return;
+        moved = true;
+        setDragging(task.id);
+        document.body.style.userSelect = "none";
+      }
+      over = columnUnder(here);
+      setDragOver(over);
+    };
+    const finish = (drop: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey, true);
+      endDrag.current = null;
+      document.body.style.userSelect = "";
+      setDragging(null);
+      setDragOver(null);
+      if (!moved) return;
+      justDragged.current = true;
+      window.setTimeout(() => {
+        justDragged.current = false;
+      }, 0);
+      if (drop && over && over !== task.column) moveTask(task.id, over);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.stopPropagation();
+      finish(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey, true);
+    endDrag.current = () => finish(false);
+  }
+
+  useEffect(() => () => endDrag.current?.(), []);
 
   /** Puts the cursor in a column's add field, unfolding it if need be. */
   function startAdding(column: BoardColumn) {
@@ -271,16 +338,12 @@ export function BoardView({
         className={`card ${done ? "card--done" : ""} ${blockers.length ? "card--blocked" : ""} ${
           dragging === task.id ? "card--dragging" : ""
         }`}
-        draggable
         tabIndex={0}
         aria-label={t("board.openTask", { title: task.title })}
-        onDragStart={(e) => {
-          e.dataTransfer.setData("text/plain", task.id);
-          e.dataTransfer.effectAllowed = "move";
-          setDragging(task.id);
+        onPointerDown={(e) => pressCard(e, task)}
+        onClick={() => {
+          if (!justDragged.current) setOpenTaskId(task.id);
         }}
-        onDragEnd={() => setDragging(null)}
-        onClick={() => setOpenTaskId(task.id)}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
@@ -368,17 +431,7 @@ export function BoardView({
           isFolded ? "column--folded" : ""
         } ${items.length === 0 ? "column--empty" : ""}`}
         aria-label={name}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(column);
-        }}
-        onDragLeave={() => setDragOver((c) => (c === column ? null : c))}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(null);
-          const id = e.dataTransfer.getData("text/plain");
-          if (id) moveTask(id, column);
-        }}
+        data-column={column}
       >
         <header className="column__head">
           {dock ? (
