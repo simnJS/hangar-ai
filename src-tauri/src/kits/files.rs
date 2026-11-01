@@ -488,9 +488,10 @@ pub fn write_binary(root: &str, raw: &str, base64: &str) -> Result<(), TabError>
         return Err(too_big());
     }
     if !is_image_of(&extension, &bytes) {
-        return Err(invalid(format!(
-            "the content is not a {extension} image: its first bytes say otherwise"
-        )));
+        return Err(TabError::new(
+            TabError::INVALID,
+            format!("{raw} was not written: its content is not a {extension} image (the first bytes say otherwise)"),
+        ));
     }
     let root = workspace(root)?;
     // Looked at before anything is made, so a conflict leaves nothing behind.
@@ -864,6 +865,17 @@ mod tests {
             assert_eq!(err.code, TabError::INVALID, "{path}");
         }
         assert!(is_empty(&folder));
+    }
+
+    #[test]
+    fn write_binary_says_in_a_sentence_which_file_is_not_the_image_it_names() {
+        let (_folder, root) = project("wb-sentence");
+        let text = base64::engine::general_purpose::STANDARD.encode("<svg onload=alert(1)>");
+        let err = write_binary(&root, "shots/a.png", &text).unwrap_err();
+        assert_eq!(
+            err.message,
+            "shots/a.png was not written: its content is not a png image (the first bytes say otherwise)"
+        );
     }
 
     #[test]

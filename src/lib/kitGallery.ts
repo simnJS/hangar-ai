@@ -45,6 +45,8 @@ export const galleryInstallUrl = (kit: Pick<GalleryKit, "repo" | "tag">) =>
 export type GalleryStatus =
   | { kind: "new" }
   | { kind: "installed"; version: string; pinned: string | null }
+  /** A folder of the same id is linked: it is the person's own copy, not this catalog kit. */
+  | { kind: "linked"; version: string }
   | { kind: "update"; version: string; latest: string; pinned: string };
 
 /** `1.2.3-rc.1` as numbers and whether it is a pre-release; null when it is not semver. */
@@ -75,6 +77,8 @@ export function galleryStatus(entry: GalleryKit, installed: readonly KitInfo[]):
   const kit = installed.find((item) => item.id === entry.id);
   if (!kit) return { kind: "new" };
   const version = kit.installedVersion;
+  // Not installed from the catalog, and installing would clash on the id: say so.
+  if (kit.source.kind === "folder") return { kind: "linked", version };
   const pinned = kitPinnedTag(kit.source);
   // As Rust goes by (kits/gallery.rs, `tag_for`): the catalog only has a say on a
   // kit pinned from this very repository. A linked folder is the person's own copy,

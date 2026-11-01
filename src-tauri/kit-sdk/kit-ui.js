@@ -232,11 +232,15 @@
       box.setAttribute("role", "group");
       if (settings.message) box.append(el("span", "kit-confirm__text", settings.message));
       const finish = (result) => {
+        // Looked at before the box goes: a page that cancels by itself must not pull
+        // the focus from wherever the person is.
+        const active = document.activeElement;
+        const held = active != null && box.contains(active);
         box.remove();
         trigger.hidden = false;
         asking.delete(trigger);
         if (settings.signal) settings.signal.removeEventListener("abort", dismiss);
-        trigger.focus();
+        if (held) trigger.focus();
         resolve(result);
       };
       dismiss = () => finish(false);

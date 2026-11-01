@@ -173,6 +173,13 @@ export function KitsGalleryView(props: KitsGalleryProps) {
                     )}
                   </p>
                 )}
+                {status.kind === "linked" && (
+                  <p className="kit-row__note kit-gallery__line" role="status">
+                    <span className="kit-act__tag">
+                      {t("kitsManage.linked")} (v{status.version})
+                    </span>
+                  </p>
+                )}
                 {status.kind === "update" && (
                   <p className="kit-row__note kit-gallery__line" role="status">
                     <span className="kit-act__tag kit-act__tag--new">
