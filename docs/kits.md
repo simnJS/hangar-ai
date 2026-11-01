@@ -19,6 +19,13 @@ Its plugin may also start things by itself, [hooks](#hooks) and
 Kits come from a local folder (linked, read live), from a GitHub link (cloned),
 or from [the library](#the-library), which lists public kits pinned to a tag.
 
+The public kits live in their own repositories in the
+[`hangar-ai`](https://github.com/hangar-ai) organization, such as
+[`kit-editor`](https://github.com/hangar-ai/kit-editor),
+[`kit-guard`](https://github.com/hangar-ai/kit-guard) or
+[`kit-ci`](https://github.com/hangar-ai/kit-ci): they are good models to read. A new
+kit starts from [`kit-template`](https://github.com/hangar-ai/kit-template).
+
 This page is the contract. The code lives in `src-tauri/src/kits.rs` and
 `src-tauri/src/kits/`, with the typed wrappers in `src/lib/kits.ts`; a tab's
 page is served by `src-tauri/src/kit_scheme.rs` with the SDK in

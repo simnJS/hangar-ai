@@ -1,6 +1,0 @@
-2026-10-31T15:50:03.114Z listening on :3000
-2026-10-31T15:50:04.002Z GET /health 200 3ms
-2026-10-31T15:52:11.870Z warn: slow query (412 ms)
-2026-10-31T15:58:40.331Z Error: connect ECONNREFUSED 172.17.0.2:5432
-    at TCPConnectWrap.afterConnect (node:net:1555:16)
-2026-10-31T15:58:40.335Z fatal: database unreachable, exiting

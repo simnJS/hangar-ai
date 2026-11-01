@@ -1,5 +1,0 @@
-Test Suites: 1 passed, 1 total
-Tests:       3 skipped, 1 passed, 4 total
-Snapshots:   0 total
-Time:        0.351 s, estimated 1 s
-Ran all test suites with tests matching "adds$".

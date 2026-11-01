@@ -1,8 +1,0 @@
-============================= test session starts =============================
-platform win32 -- Python 3.14.2, pytest-9.2.0, pluggy-1.7.0
-rootdir: /work/demo
-collected 6 items / 5 deselected / 1 selected
-
-test_math.py .                                                           [100%]
-
-======================= 1 passed, 5 deselected in 0.02s =======================

@@ -1,4 +1,0 @@
-# example.com/demo [example.com/demo.test]
-./add_test.go:9:15: undefined: addd
-FAIL	example.com/demo [build failed]
-FAIL

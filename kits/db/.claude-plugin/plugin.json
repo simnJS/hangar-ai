@@ -1,1 +1,0 @@
-{ "name": "db", "version": "0.1.0", "description": "Opens a SQLite database of the project read-only and shows its tables and rows; hands a table and a question, never rows, to an agent." }

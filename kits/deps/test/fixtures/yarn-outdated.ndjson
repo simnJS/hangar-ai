@@ -1,2 +1,0 @@
-{"type":"info","data":"Color legend"}
-{"type":"table","data":{"head":["Package","Current","Wanted","Latest","Package Type","URL"],"body":[["left-pad","1.1.0","1.1.0","1.3.0","dependencies","https://github.com/left-pad/left-pad"],["semver","7.0.0","7.0.0","7.8.5","devDependencies","https://github.com/npm/node-semver"],["react","17.0.2","17.0.2","19.1.0","dependencies","https://react.dev"]]}}

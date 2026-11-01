@@ -1,1 +1,0 @@
-{"value":"minimist","children":{"ID":1179,"Issue":"Prototype Pollution in minimist","URL":"https://github.com/advisories/GHSA-xvch-5gv4-984h","Severity":"critical","Vulnerable Versions":">=1.0.0 <1.2.6","Tree Versions":["1.2.0"],"Dependents":["app@workspace:."]}}
