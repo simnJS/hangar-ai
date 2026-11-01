@@ -12,6 +12,7 @@ import {
   type DeliveryRequest,
   type TestedDelivery,
 } from "./deliveryControl";
+import type { ClaudeAccount } from "./accounts";
 import type { OrchestratorEvent } from "./orchestratorEvents";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type Workspace } from "../types";
 
@@ -71,6 +72,7 @@ let preflightError: string | null;
 /** What preflight says waits for the person, when asked about a task. */
 let tested: TestedDelivery | null;
 let preflightTasks: (string | undefined)[];
+let accounts: ClaudeAccount[];
 let deps: ControlDeps;
 
 function workspace(): Workspace {
@@ -92,6 +94,7 @@ beforeEach(() => {
   preflightError = null;
   tested = null;
   preflightTasks = [];
+  accounts = [{ id: "work", label: "Work", isMain: false, loggedIn: true }];
   tasks = [task()];
   next = async () => outcome({ outcome: "landed", detail: "worker landed on main (abcdef1)." });
   state = {
@@ -147,6 +150,7 @@ beforeEach(() => {
       return { worktreeRemoved: true, branchDeleted: true, kept: [] };
     },
     running: async () => [],
+    accounts: async () => accounts,
     shells: () => [{ id: "pwsh", label: "PowerShell 7", program: "pwsh.exe", args: [] }],
     board: {
       load: async () => ({ tasks: tasks.map((entry) => ({ ...entry })) }),
@@ -244,6 +248,49 @@ describe("delivery_submit", () => {
     await settled();
     expect(deliveryState("t1")?.state).toBe("landed");
     expect(deliveringIn("w1")).toBe(false);
+  });
+
+  it("reviews on the workspace's Claude account, and on nothing when it is the default one", async () => {
+    // A delivery that does not land keeps the worker's pane for the next one.
+    next = async () => outcome({ outcome: "conflict", detail: "conflict" });
+    await submit();
+    await settled();
+    expect(runs[0].claudeAccount).toBeNull();
+
+    resetDeliveries();
+    state.workspaces[0].claudeAccount = "work";
+    await submit();
+    await settled();
+    expect(runs[1].claudeAccount).toBe("work");
+
+    resetDeliveries();
+    state.workspaces[0].claudeAccount = "gone";
+    await submit();
+    await settled();
+    expect(runs[2].claudeAccount).toBeNull();
+
+    resetDeliveries();
+    state.workspaces[0].claudeAccount = "main";
+    await submit();
+    await settled();
+    expect(runs[3].claudeAccount).toBeNull();
+  });
+
+  it("does not count a review stopped by a usage limit as a failed delivery", async () => {
+    next = async () =>
+      outcome({
+        outcome: "error",
+        detail: 'The review could not run: the Claude account "Work" has reached its usage limit, so the review could not run',
+        merge: null,
+      });
+    await submit();
+    await settled();
+    const comment = log.find((line) => line.startsWith("comment:"))!;
+    expect(comment).not.toContain("Delivery failed");
+    expect(comment).toContain("usage limit");
+    expect(log.find((line) => line.startsWith("tell:p2:"))).toContain("not a problem with your work");
+    expect(events[events.length - 1]?.event).toMatchObject({ outcome: "error" });
+    expect(JSON.stringify(events[events.length - 1]?.event)).not.toContain("failed delivery");
   });
 
   it("leaves a landing to the person when automatic landing is off", async () => {

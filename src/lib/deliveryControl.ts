@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { accountsList, launchAccount, MAIN_ACCOUNT, type ClaudeAccount } from "./accounts";
 import { boardComment, boardLoad, boardUpdate, type Task, type TaskPatch } from "./board";
 import { resolvePath, type Caller, type ControlDeps } from "./control";
 import { bridgeEnqueue } from "./ipc";
@@ -93,6 +94,8 @@ export interface DeliveryRequest {
   checkCommand: string | null;
   shell: ShellInfo | null;
   reviewerModel: string;
+  /** The Claude account the review spends: the workspace's, as its panes; null on the default one. */
+  claudeAccount: string | null;
   land: boolean;
   /** Lands the merge tested earlier when the target has not moved since. */
   reuse: boolean;
@@ -132,6 +135,8 @@ export interface DeliveryDeps {
     taskId: string;
   }) => Promise<DeliveryCleanup>;
   running: () => Promise<RunningDelivery[]>;
+  /** The Claude accounts that exist, to resolve the workspace's. */
+  accounts?: () => Promise<ClaudeAccount[]>;
   /** The shells detected on this machine, for the worker's own. */
   shells: () => ShellInfo[];
   board: {
@@ -152,6 +157,9 @@ export { NEEDS_YOU_LABEL };
 export const MAX_FAILED_DELIVERIES = 3;
 /** How the board's comments count the failed deliveries: they outlive the app. */
 const FAILED = "Delivery failed";
+/** What delivery.rs says when the account behind the review is out of quota. */
+const USAGE_LIMIT = "has reached its usage limit";
+const REVIEW_STOPPED = "Review not run (usage limit)";
 /** A worker done without git keeps its pane this long: its answer has to reach it first. */
 const CLOSE_AFTER_MS = 5_000;
 
@@ -168,6 +176,7 @@ export function deliveryDeps(shells: () => ShellInfo[]): DeliveryDeps {
     run: (delivery) => invoke<DeliveryOutcome>("delivery_run", { delivery }),
     cleanup: (args) => invoke<DeliveryCleanup>("delivery_cleanup", args),
     running: () => invoke<RunningDelivery[]>("delivery_running"),
+    accounts: accountsList,
     shells,
     board: {
       load: boardLoad,
@@ -548,6 +557,8 @@ async function deliver(
 ): Promise<DeliveryOutcome> {
   const settings = orchestrationOf(ws);
   const state = deps.snapshot();
+  // The review spends the account a pane of this workspace would start on.
+  const account = await launchAccount(state.settings, ws, null, delivery.accounts);
   const request: DeliveryRequest = {
     workspace: ws.cwd,
     worktree: resolvePath(ws.cwd, pane.cwd || ws.cwd),
@@ -558,6 +569,7 @@ async function deliver(
     checkCommand: settings.checkCommand,
     shell: resolveShell(delivery.shells(), pane.shellId, ws.shellId, state.settings.shellId),
     reviewerModel: settings.reviewerModel,
+    claudeAccount: account.id === MAIN_ACCOUNT ? null : account.id,
     land: landing || settings.autoMerge,
     reuse: landing,
     portBase: pane.portBase ?? null,
@@ -684,6 +696,26 @@ async function settle(
         `${short(outcome.merge)}). It is withdrawn; ${pane.name} was asked to submit again.`,
     );
     if (worker) await delivery.tell(worker.id, `"${current.title}" was not landed.\n\n${outcome.detail}`);
+    post(eventDetail(outcome, target));
+    return;
+  }
+
+  if (outcome.outcome === "error" && outcome.detail.includes(USAGE_LIMIT)) {
+    // The account behind the review is out of quota: nothing is wrong with
+    // the work, so this is no failed delivery. It goes back to the worker,
+    // which submits again once the limit resets.
+    await delivery.board.comment(cwd, task.id, HANGAR, `${REVIEW_STOPPED}: ${outcome.detail}`);
+    if (worker) {
+      await delivery.tell(
+        worker.id,
+        `The review of "${current.title}" could not run.
+
+${outcome.detail}
+
+This is not a problem with your work and ` +
+          "it does not count as a failed delivery: stop here, and submit again when you are asked to.",
+      );
+    }
     post(eventDetail(outcome, target));
     return;
   }
