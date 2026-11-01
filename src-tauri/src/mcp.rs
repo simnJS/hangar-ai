@@ -776,23 +776,40 @@ fn text_block(value: &Value) -> Value {
     json!({ "type": "text", "text": serde_json::to_string_pretty(value).unwrap_or_default() })
 }
 
+/// An optional text argument: trimmed, and absent when empty. A model that
+/// fills every property of the schema sends `""` for the ones it has no value
+/// for, and that means "not given", never "equal to nothing".
+fn optional_text(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Keeps the tasks of one column; no column (or an empty one) keeps them all.
+fn filter_tasks_by_column(board: &mut Value, column: Option<&str>) {
+    let Some(column) = column.map(str::trim).filter(|c| !c.is_empty()) else {
+        return;
+    };
+    if let Some(tasks) = board.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+        tasks.retain(|t| t.get("column").and_then(|c| c.as_str()) == Some(column));
+    }
+}
+
 fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
     let str_arg = |key: &str| args.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let opt_arg = |key: &str| optional_text(args, key);
 
     match name {
         "board_list_tasks" => {
             let mut result = api.get("/api/board")?;
-            if let Some(column) = str_arg("column") {
-                if let Some(tasks) = result.get_mut("tasks").and_then(|t| t.as_array_mut()) {
-                    tasks.retain(|t| t.get("column").and_then(|c| c.as_str()) == Some(&column));
-                }
-            }
+            filter_tasks_by_column(&mut result, opt_arg("column").as_deref());
             Ok(result)
         }
         "board_next_task" => api.get("/api/next"),
         "board_claim_task" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
-            let agent = str_arg("agent").unwrap_or_else(agent_name);
+            let agent = opt_arg("agent").unwrap_or_else(agent_name);
             api.send(
                 "POST",
                 &format!("/api/tasks/{id}/claim"),
@@ -811,7 +828,7 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
         "board_comment_task" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
             let text = str_arg("text").ok_or("missing 'text'")?;
-            let author = str_arg("author").unwrap_or_else(agent_name);
+            let author = opt_arg("author").unwrap_or_else(agent_name);
             api.send(
                 "POST",
                 &format!("/api/tasks/{id}/comment"),
@@ -825,10 +842,10 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
         "memory_search" => {
             let query = str_arg("query").ok_or("missing 'query'")?;
             let mut path = format!("/api/memory/search?q={}", urlencode(&query));
-            if let Some(tag) = str_arg("tag") {
+            if let Some(tag) = opt_arg("tag") {
                 path.push_str(&format!("&tag={}", urlencode(&tag)));
             }
-            if let Some(workspace) = str_arg("workspace") {
+            if let Some(workspace) = opt_arg("workspace") {
                 path.push_str(&format!("&workspace={}", urlencode(&workspace)));
             }
             if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
@@ -868,10 +885,7 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
             let mut path = String::from("/api/memory");
             let mut sep = '?';
             for key in ["tag", "workspace"] {
-                if let Some(value) = str_arg(key)
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty())
-                {
+                if let Some(value) = opt_arg(key) {
                     path.push(sep);
                     path.push_str(&format!("{key}={}", urlencode(&value)));
                     sep = '&';
@@ -894,7 +908,7 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
                 // environment Hangar gave this process.
                 "paneName": env_var(&["HANGAR_PANE_NAME"]).unwrap_or_default(),
             });
-            if let Some(caption) = str_arg("caption") {
+            if let Some(caption) = opt_arg("caption") {
                 body["caption"] = json!(caption);
             }
             if let Ok(here) = std::env::current_dir() {
@@ -1018,6 +1032,40 @@ mod tests {
             .find(|tool| tool["name"] == name)
             .cloned()
             .unwrap_or_else(|| panic!("no tool named {name}"))
+    }
+
+    fn board() -> Value {
+        json!({ "tasks": [
+            { "id": "a", "column": "todo" },
+            { "id": "b", "column": "doing" },
+            { "id": "c", "column": "todo" }
+        ] })
+    }
+
+    #[test]
+    fn an_empty_or_blank_column_filter_keeps_every_task() {
+        for column in [None, Some(""), Some("   ")] {
+            let mut result = board();
+            filter_tasks_by_column(&mut result, column);
+            assert_eq!(result["tasks"].as_array().unwrap().len(), 3, "{column:?}");
+        }
+    }
+
+    #[test]
+    fn a_column_filter_keeps_only_that_column_even_padded() {
+        let mut result = board();
+        filter_tasks_by_column(&mut result, Some(" todo "));
+        assert_eq!(result["tasks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_empty_optional_argument_is_absent() {
+        let args = json!({ "column": "", "agent": "  ", "tag": " x ", "n": 3 });
+        assert_eq!(optional_text(&args, "column"), None);
+        assert_eq!(optional_text(&args, "agent"), None);
+        assert_eq!(optional_text(&args, "tag").as_deref(), Some("x"));
+        assert_eq!(optional_text(&args, "n"), None);
+        assert_eq!(optional_text(&args, "missing"), None);
     }
 
     /// The window's answer to model_snapshot, as the agent must receive it: a
