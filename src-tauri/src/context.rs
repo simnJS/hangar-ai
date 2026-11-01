@@ -166,6 +166,18 @@ fn advance(
     let len = fs::metadata(path).ok()?.len();
     let cursor = cursors.entry(path.to_path_buf()).or_default();
 
+    // A compressed rollout is finished and cannot be seeked into: its cursor
+    // counts decoded bytes, so it is decoded whole, and again only if the
+    // file changed size.
+    if crate::stats::is_compressed(path) {
+        if cursor.len != len || cursor.used.is_none() {
+            *cursor = Cursor::default();
+            scan(agent, path, cursor, false);
+            cursor.len = len;
+        }
+        return cursor.snapshot();
+    }
+
     // Shorter than what was already parsed: the file was rewritten from
     // scratch (a restarted session), so the parse starts over with it.
     if len < cursor.offset {
@@ -194,15 +206,24 @@ fn advance(
 /// Parses the complete lines between the cursor and the end of the file.
 /// `drop_first` discards the partial line a tail seek landed inside of.
 fn scan(agent: &str, path: &Path, cursor: &mut Cursor, drop_first: bool) {
-    let Ok(mut file) = fs::File::open(path) else {
-        return;
-    };
-    if file.seek(SeekFrom::Start(cursor.offset)).is_err() {
-        return;
-    }
     let mut buf = Vec::new();
-    if file.read_to_end(&mut buf).is_err() {
-        return;
+    if crate::stats::is_compressed(path) {
+        let Ok(mut decoded) = crate::stats::open_rollout(path) else {
+            return;
+        };
+        // A rollout cut mid-frame still yields what decoded before the cut.
+        let _ = decoded.read_to_end(&mut buf);
+        buf.drain(..(cursor.offset as usize).min(buf.len()));
+    } else {
+        let Ok(mut file) = fs::File::open(path) else {
+            return;
+        };
+        if file.seek(SeekFrom::Start(cursor.offset)).is_err() {
+            return;
+        }
+        if file.read_to_end(&mut buf).is_err() {
+            return;
+        }
     }
     // Only complete lines move the cursor; a line mid-write waits its turn.
     let Some(last_newline) = buf.iter().rposition(|&b| b == b'\n') else {
@@ -266,12 +287,16 @@ fn codex_transcript(session_id: &str) -> Option<PathBuf> {
     let root = dirs::home_dir()?.join(".codex").join("sessions");
     let mut files = Vec::new();
     crate::sessions::collect_jsonl(&root, &mut files, 0);
-    let suffix = format!("-{session_id}.jsonl");
-    let path = files.into_iter().find(|p| {
-        p.file_name()
-            .map(|n| n.to_string_lossy().ends_with(&suffix))
-            .unwrap_or(false)
+    // A rollout still being written is `.jsonl`; Codex compresses it once
+    // done. Should both exist, the live one is the current.
+    let path = [".jsonl", ".jsonl.zst"].iter().find_map(|ext| {
+        let suffix = format!("-{session_id}{ext}");
+        files.iter().find(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(&suffix))
+        })
     })?;
+    let path = path.clone();
     cache.insert(session_id.to_string(), path.clone());
     Some(path)
 }
@@ -354,6 +379,22 @@ mod tests {
             }
             _ => panic!("expected usage"),
         }
+    }
+
+    #[test]
+    fn a_compressed_codex_rollout_feeds_the_gauge() {
+        let path = temp_file("zst").with_file_name("rollout-x-1.jsonl.zst");
+        let body = format!("{CODEX_TURN}\n{CODEX_COUNT}\n");
+        let compressed = ruzstd::encoding::compress_to_vec(
+            body.as_bytes(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        fs::write(&path, compressed).unwrap();
+        let usage = advance_once("codex", &path).expect("usage from the compressed rollout");
+        assert_eq!(usage.used_tokens, 98823);
+        assert_eq!(usage.context_window, Some(353400));
+        assert_eq!(usage.model.as_deref(), Some("gpt-5.6-sol"));
+        fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
     #[test]

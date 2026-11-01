@@ -206,6 +206,25 @@ impl<R: BufRead> Read for Frames<R> {
     }
 }
 
+/// Whether a path is a compressed (`.jsonl.zst`) rollout.
+pub(crate) fn is_compressed(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "zst")
+}
+
+/// Opens a rollout for reading, `.jsonl` or `.jsonl.zst`, and yields its
+/// decoded bytes. Read-only: nothing is written or copied.
+pub(crate) fn open_rollout(path: &Path) -> std::io::Result<Box<dyn Read>> {
+    let file = fs::File::open(path)?;
+    if is_compressed(path) {
+        Ok(Box::new(Frames::new(BufReader::with_capacity(
+            256 * 1024,
+            file,
+        ))?))
+    } else {
+        Ok(Box::new(file))
+    }
+}
+
 /// What the cache keeps per file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Entry {
