@@ -85,7 +85,9 @@ import {
 import { mcpConfigArg, mcpScopeWrite, shellFamily, workspaceMcp } from "../lib/mcpScope";
 import { kitIssueNotes, loadPaneKits, type KitLaunchIssue } from "../lib/kits";
 import { ORCHESTRATION_ALLOWED_TOOLS, orchestrationOf } from "../lib/orchestration";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
+import { usePaneBranch, type PaneBranch } from "../lib/paneBranch";
+import { paneBranchText } from "../strings/paneBranch";
 import type { CommandId } from "../lib/shortcuts";
 import { useStore, type CommandScope } from "../store";
 import type { TerminalTheme } from "../themes";
@@ -1448,6 +1450,7 @@ export function TerminalPane({
           {pane.name}
         </span>
 
+        <PaneBranchLabel folder={paneCwd} focused={focused} />
         <OrchestrationBadge pane={pane} cwd={cwd} />
         <PaneAccountBadge workspaceId={workspaceId} paneId={pane.id} />
 
@@ -1715,5 +1718,50 @@ export function TerminalPane({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The git branch of the pane's folder, beside its name. It is the first thing
+ * a narrow header gives up: it shrinks past the other items (which hold their
+ * width), down to nothing, rather than push them out.
+ */
+function PaneBranchLabel({ folder, focused }: { folder: string; focused: boolean }) {
+  const branch: PaneBranch | null = usePaneBranch(folder, focused);
+  const locale = useLocale();
+  if (!branch) return null;
+  const detached = branch.kind === "detached";
+  const text = detached ? branch.head : branch.name;
+  const title = detached
+    ? paneBranchText(locale, "paneBranch.detached", { head: branch.head })
+    : paneBranchText(
+        locale,
+        branch.linkedWorktree ? "paneBranch.branchWorktree" : "paneBranch.branch",
+        { branch: branch.name },
+      );
+  return (
+    <span
+      className="pane__branch"
+      title={title}
+      style={{
+        flex: "0 1000 auto",
+        minWidth: 0,
+        maxWidth: "18ch",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: "var(--fg-muted)",
+        fontFamily: "var(--font-mono, monospace)",
+        fontSize: "0.9em",
+        opacity: 0.85,
+      }}
+    >
+      {text}
+      {detached && (
+        <span style={{ marginLeft: "0.5ch", fontStyle: "italic" }}>
+          {paneBranchText(locale, "paneBranch.detachedMark")}
+        </span>
+      )}
+    </span>
   );
 }
