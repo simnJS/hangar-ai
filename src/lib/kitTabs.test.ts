@@ -8,6 +8,7 @@ import {
   frameTookKeyboard,
   KIT_TAB_PARAM_MAX_CHARS,
   kitFileUrl,
+  kitTabLoads,
   kitTabState,
   kitThemeEvent,
   kitThemeSender,
@@ -423,5 +424,17 @@ describe("the theme a tab is told", () => {
     const sender = kitThemeSender(() => null);
     sender.set(kitThemeEvent(THEMES[0], settings));
     expect(() => sender.load()).not.toThrow();
+  });
+});
+
+describe("kitTabLoads", () => {
+  it("keeps a restored tab unloaded while it is hidden, and loads it once shown", () => {
+    expect(kitTabLoads({ restored: true }, false)).toBe(false);
+    expect(kitTabLoads({ restored: true }, true)).toBe(true);
+  });
+
+  it("loads a tab no restart brought back at once, shown or not", () => {
+    expect(kitTabLoads({ restored: false }, false)).toBe(true);
+    expect(kitTabLoads({ restored: false }, true)).toBe(true);
   });
 });

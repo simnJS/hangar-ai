@@ -19,6 +19,7 @@ import {
 import {
   askRootGrant,
   frameTookKeyboard,
+  kitTabLoads,
   kitTabState,
   kitThemeEvent,
   kitThemeSender,
@@ -30,6 +31,7 @@ import { grantModelRoots } from "../../lib/modelHost";
 import {
   kitTabCaller,
   kitTabParams,
+  markKitTabShown,
   reloadKitTab,
   setKitTabBadge,
   setKitTabTitle,
@@ -73,7 +75,9 @@ function permissionSaid(t: Translator, permission: KitPermission): string {
  *
  * ModelPanel keeps every kit tab of the window mounted, hidden when it is not
  * the one on screen, so a page keeps its state while another tab or
- * workspace is in front; a workspace put to sleep lets its pages go.
+ * workspace is in front; a workspace put to sleep lets its pages go. A tab
+ * restored at startup stays unloaded, its frame not even created, until it is
+ * first shown.
  *
  * A tab speaks to Hangar from the page it opened on and no other: the frame
  * loading a second document — a link followed, a page sent elsewhere — ends
@@ -91,6 +95,11 @@ export function KitTabView({ entry, shown }: { entry: OpenKitTab; shown: boolean
   const permissions = tab.kind === "ready" ? tab.choice.permissions : [];
   const commandsAccepted = tab.kind === "ready" ? tab.choice.commandsAccepted : null;
   const said = permissions.map((permission) => permissionSaid(t, permission)).join(", ");
+  // A tab restored at startup loads its page when first shown (kitTabLoads).
+  const loads = kitTabLoads(entry, shown);
+  useEffect(() => {
+    if (shown) markKitTabShown(entry.id);
+  }, [shown, entry.id]);
 
   return (
     <div
@@ -116,7 +125,9 @@ export function KitTabView({ entry, shown }: { entry: OpenKitTab; shown: boolean
           {t("kitsTab.isolated")}
         </span>
       </div>
-      {tab.kind === "ready" && ws ? (
+      {tab.kind === "ready" && ws && !loads ? (
+        <div className="model-panel__stage preview-stage" />
+      ) : tab.kind === "ready" && ws ? (
         <KitFrame
           // A reload is a new frame, and a new host: nothing of the last page carries over.
           key={`${entry.revision}:${tab.url}`}
