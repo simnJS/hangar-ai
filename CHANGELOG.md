@@ -8,6 +8,24 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/simnJS/hangar-ai/releases).
 
+## [1.11.0] - 2026-11-02
+
+- **A workspace from a Git repository.** Ask any Claude "create a workspace for
+  `owner/repo`", or pick **From a Git repository** when you create a workspace. Hangar
+  clones the repository and starts an orchestrator in it. The orchestrator reads the
+  project, installs its dependencies, sets the check command, runs the tests once, sums
+  up, and waits for your objective. It changes no code.
+  - If the repository is not yours or one of your organizations', an agent's request
+    first asks you for a click: **Clone** or **Refuse**. Claude Code's own question about
+    trusting the folder stays, and you answer it yourself.
+  - If it is yours, Hangar records that trust for that folder alone, in Claude Code's
+    config.
+  - A new **Projects folder** setting chooses where the clones go.
+  - Each answer to the click is written in the activity log.
+- **Open with VS Code** when you right-click a workspace.
+- **Kit tabs use less memory.** Tabs restored at startup load only when you first show
+  them.
+
 ## [1.10.0] - 2026-11-01
 
 - **The git branch in each pane's header.** You see at a glance which branch a pane's
