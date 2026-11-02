@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { launchCommand } from "./agents";
+import { isTrustPrompt, launchCommand } from "./agents";
 import { mcpConfigArg, type ShellFamily } from "./mcpScope";
 
 describe("launchCommand with a model", () => {
@@ -80,5 +80,27 @@ describe("launchCommand for an orchestration pane", () => {
     expect(launchCommand("claude", null, { allowedTools: ["mcp__hangar", "Bash(rm *)"] })).toBe(
       "claude --allowedTools mcp__hangar",
     );
+  });
+});
+
+describe("isTrustPrompt", () => {
+  const screen = [
+    " Accessing workspace:",
+    "  C:\Users\me\projects\tool",
+    " Quick safety check: Is this a project you created or one you trust? (Like your own code,",
+    " a well-known open source project, or work from your team).",
+    " ❯ 1. Yes, I trust this folder",
+    "   2. No, exit",
+  ].join("\n");
+
+  it("recognises the question, wrapped or not", () => {
+    expect(isTrustPrompt(screen)).toBe(true);
+    expect(isTrustPrompt(screen.replace("safety check", "safety\ncheck"))).toBe(true);
+  });
+
+  it("does not take a conversation about it, or a plain screen, for the question", () => {
+    expect(isTrustPrompt("> explain the quick safety check")).toBe(false);
+    expect(isTrustPrompt("I trust this folder")).toBe(false);
+    expect(isTrustPrompt("")).toBe(false);
   });
 });

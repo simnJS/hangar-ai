@@ -243,3 +243,16 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
+
+/**
+ * Whether a screen of Claude Code is its question about a folder it has not
+ * seen: "Quick safety check: Is this a project you created or one you trust?",
+ * answered with "Yes, I trust this folder". It comes before the session
+ * exists, so none of the mod's events can announce it, and the pane would
+ * otherwise read as done. Both phrases are needed: a transcript that merely
+ * talks about trust is not the question.
+ */
+export function isTrustPrompt(screen: string): boolean {
+  const text = screen.replace(/\s+/g, " ").toLowerCase();
+  return text.includes("quick safety check") && text.includes("trust this folder");
+}

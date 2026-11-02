@@ -91,6 +91,14 @@ export interface FromGitDeps {
     orchestrator: { id: string; name: string };
   };
   removeWorkspace: (workspaceId: string) => void;
+  /**
+   * Tells Claude Code that this folder — the clone of a repository that is the
+   * person's own, never another — is trusted, so that the orchestrator starts
+   * without the "Do you trust the files in this folder?" question. Called only
+   * for an owned repository. Absent where it cannot be done: the question
+   * then stays, and the notes say so.
+   */
+  trustFolder?: (path: string) => Promise<void>;
   /** The first message, through the queue a worker's brief goes through. */
   sendFirstMessage: (paneId: string, text: string) => Promise<void>;
   /** Mounts the workspace's terminals, once everything that can fail has not. */
@@ -389,6 +397,18 @@ async function proceed(
   // Only a folder this very call made is this call's to take back.
   const madeFolder = !cloned.reused;
 
+  // The person's decision: no question for their own repositories. A foreign
+  // one keeps Claude Code's question, which only they answer.
+  let trustFailure: string | null = null;
+  if (ownership.mine && deps.trustFolder) {
+    try {
+      await deps.trustFolder(cloned.path);
+    } catch (err) {
+      trustFailure = messageOf(err);
+    }
+  }
+  const trustSet = ownership.mine && !!deps.trustFolder && trustFailure === null;
+
   let made: { workspace: WorkspaceRef; orchestrator: { id: string; name: string } } | null = null;
   try {
     made = deps.createWorkspace({ name, cwd: cloned.path, activate: fromPerson });
@@ -432,10 +452,20 @@ async function proceed(
 
   const notes: string[] = [];
   if (cloned.reused) notes.push(`${cloned.path} already held a clone of this repository: it was used as it was.`);
-  notes.push(
-    "Claude Code asks the person to trust a folder it has not seen before. The orchestrator may wait on that prompt " +
-      "until they answer it in its pane, and reads its first message once they have.",
-  );
+  if (trustSet) {
+    notes.push("The repository is the person's own: Claude Code was told to trust this folder, so the orchestrator starts without the trust question.");
+  } else if (ownership.mine) {
+    notes.push(
+      "Claude Code may ask the person to trust this folder" +
+        (trustFailure ? ` (Hangar could not record the trust: ${trustFailure})` : "") +
+        ". The orchestrator waits on that prompt until they answer it in its pane, and reads its first message once they have.",
+    );
+  } else {
+    notes.push(
+      "The repository is not the person's own, so Claude Code asks them to trust this folder, and only they can answer. " +
+        "The orchestrator waits on that prompt, shown as waiting for the person in its pane, and reads its first message once they have.",
+    );
+  }
   return {
     status: "created",
     workspace: made.workspace,

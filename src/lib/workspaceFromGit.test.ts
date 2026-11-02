@@ -54,6 +54,8 @@ interface Options {
   discard?: boolean;
   discardFails?: boolean;
   removeFails?: boolean;
+  noTrust?: boolean;
+  trustFails?: boolean;
 }
 
 /** Fake dependencies and the log of everything that reached them. */
@@ -108,6 +110,12 @@ function fakes(options: Options = {}) {
       const orchestrator = { id: "p-orch", name: "Kai" };
       return { workspace: { id: "w-new", name, cwd, orchestrator }, orchestrator };
     },
+    trustFolder: options.noTrust
+      ? undefined
+      : async (path) => {
+          log.push(`trust:${path}`);
+          if (options.trustFails) throw new Error("the config is locked");
+        },
     removeWorkspace: (id) => {
       log.push(`remove:${id}`);
       if (options.removeFails) throw new Error("busy");
@@ -147,6 +155,7 @@ describe("the flow, in order", () => {
       "find:C:\\dev\\shop",
       "ownership:acme@github.com",
       "clone:https://github.com/acme/shop.git:C:\\dev:shop",
+      "trust:C:\\dev\\shop",
       "workspace:shop:C:\\dev\\shop:behind",
       "message:p-orch",
       "open:w-new",
@@ -234,6 +243,51 @@ describe("whose repository it is", () => {
     expect(consents).toEqual([]);
     expect(log).toContain("workspace:tool:C:\\dev\\tool:front");
     expect(outcome).toMatchObject({ status: "created", mine: false, consented: false });
+  });
+});
+
+describe("the trust question of Claude Code", () => {
+  const trusted = (log: string[]) => log.filter((entry) => entry.startsWith("trust:"));
+
+  it("trusts the clone of the person's own repository, before the workspace starts", async () => {
+    const { deps, log } = fakes({ mine: true });
+    const outcome = await workspaceFromGit(byAgent("me/tool"), deps);
+    expect(trusted(log)).toEqual(["trust:C:\\dev\\tool"]);
+    expect(log.findIndex((e) => e.startsWith("trust:"))).toBeLessThan(
+      log.findIndex((e) => e.startsWith("workspace:")),
+    );
+    expect(outcome.status === "created" && outcome.notes.join(" ")).toMatch(/without the trust question/);
+  });
+
+  it("never trusts a repository that is not the person's, and says the person must answer", async () => {
+    for (const make of [() => fakes({ mine: false }), () => fakes({ ownershipFails: true })]) {
+      const { deps, log } = make();
+      const outcome = await workspaceFromGit(byAgent("evil/tool"), deps);
+      expect(trusted(log)).toEqual([]);
+      expect(outcome.status === "created" && outcome.notes.join(" ")).toMatch(/not the person's own.*only they can answer/);
+    }
+  });
+
+  it("does not trust anything when the person asked and the repository is foreign", async () => {
+    const { deps, log } = fakes({ mine: false });
+    await workspaceFromGit(byPerson("evil/tool"), deps);
+    expect(trusted(log)).toEqual([]);
+  });
+
+  it("does not trust a folder that was never cloned", async () => {
+    const { deps, log } = fakes({ mine: true, cloneThrows: true });
+    await workspaceFromGit(byAgent("me/tool"), deps);
+    expect(trusted(log)).toEqual([]);
+  });
+
+  it("carries on, and says the question may come, when the trust cannot be recorded", async () => {
+    for (const options of [{ trustFails: true }, { noTrust: true }]) {
+      const { deps, messages } = fakes({ mine: true, ...options });
+      const outcome = await workspaceFromGit(byAgent("me/tool"), deps);
+      expect(outcome.status).toBe("created");
+      expect(messages).toHaveLength(1);
+      expect(outcome.status === "created" && outcome.notes.join(" ")).toMatch(/may ask the person to trust/);
+    }
   });
 });
 

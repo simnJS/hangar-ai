@@ -92,6 +92,7 @@ import {
 import {
   claim,
   isResumable,
+  isTrustPrompt,
   knownSessionIds,
   launchCommand,
   sleep,
@@ -561,7 +562,23 @@ export function TerminalPane({
     const watcher = createActivityWatcher({
       idleMs: () => settingsRef.current.notifyIdleMs,
       onSettle: () => {
-        if (!bridgedRef.current) handBack(tRef.current("notify.settled"));
+        if (bridgedRef.current) return;
+        // Claude Code stopped on its question about an unknown folder: the
+        // mod is not loaded yet, so nothing else says so. The pane is waiting
+        // for the person, not done.
+        const buffer = term.buffer.active;
+        const rows: string[] = [];
+        for (let y = buffer.baseY; y < buffer.baseY + term.rows; y++) {
+          rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
+        }
+        if (isTrustPrompt(rows.join("\n"))) {
+          if (activityRef.current !== "waiting") {
+            setActivity("waiting");
+            announce(tRef.current("notify.permission", { tool: "trust this folder" }));
+          }
+          return;
+        }
+        handBack(tRef.current("notify.settled"));
       },
       onBusy: () => {
         if (!bridgedRef.current) setActivity("working");

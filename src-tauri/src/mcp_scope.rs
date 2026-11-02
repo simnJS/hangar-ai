@@ -859,6 +859,112 @@ pub fn mcp_scope_clear(app: AppHandle, workspace_id: String) -> Result<(), Strin
     Ok(())
 }
 
+/// What `trust_folder` did.
+// Not yet in lib.rs's invoke handler (a file this change does not own).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Trusted {
+    /// An entry now says the folder is trusted.
+    Added,
+    /// It already was — by its own entry, or by a folder above it.
+    Already,
+}
+
+/// Marks `folder` as trusted in the Claude config at `config`, so that Claude
+/// Code does not stop on "Quick safety check: Is this a project you created
+/// or one you trust?" the first time it starts there.
+///
+/// The caller decides that the folder is the person's own: nothing here asks.
+/// Only that exact folder is written, never a parent, and every other key of
+/// the file is kept as it was. A file that is missing is not created (Claude
+/// Code has not run on that account yet, and a file of ours alone would look
+/// like its setup) and one that cannot be read is left alone.
+///
+/// Claude Code rewrites this file under a lock Hangar does not take: the
+/// result goes to a temporary file renamed over it only when the file has not
+/// moved since it was read, and is read again otherwise.
+#[allow(dead_code)]
+fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err("the folder to trust must be an existing absolute path".into());
+    }
+    let shown = folder.to_string_lossy().replace('\\', "/");
+    let shown = shown.strip_prefix("//?/").unwrap_or(&shown);
+    let shown = shown.trim_end_matches('/').to_string();
+    let wanted = path_key(Path::new(&shown));
+    let stamp = |path: &Path| {
+        fs::metadata(path)
+            .ok()
+            .map(|meta| (meta.len(), meta.modified().ok()))
+    };
+    for _ in 0..4 {
+        let before = stamp(config);
+        let mut root = match read_object(config) {
+            Ok(Some(root)) => root,
+            Ok(None) => {
+                return Err("Claude Code has no configuration file on this account yet".into())
+            }
+            Err(()) => {
+                return Err("the Claude configuration cannot be read; it is left alone".into())
+            }
+        };
+        let projects = root
+            .entry("projects")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or("the Claude configuration's `projects` is not an object; it is left alone")?;
+        let trusted_above = projects.iter().any(|(key, entry)| {
+            let key = path_key(Path::new(key));
+            (wanted == key || wanted.starts_with(&format!("{}/", key.trim_end_matches('/'))))
+                && entry.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true)
+        });
+        if trusted_above {
+            return Ok(Trusted::Already);
+        }
+        let own = projects
+            .keys()
+            .find(|key| path_key(Path::new(key.as_str())) == wanted)
+            .cloned()
+            .unwrap_or_else(|| shown.clone());
+        let entry = projects.entry(own).or_insert_with(|| json!({}));
+        match entry.as_object_mut() {
+            Some(entry) => {
+                entry.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
+            }
+            None => *entry = json!({ "hasTrustDialogAccepted": true }),
+        }
+        let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let tmp = config.with_extension(format!(
+            "hangar-{}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&tmp, body).map_err(|e| e.to_string())?;
+        if stamp(config) != before {
+            let _ = fs::remove_file(&tmp);
+            continue;
+        }
+        fs::rename(&tmp, config).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            e.to_string()
+        })?;
+        return Ok(Trusted::Added);
+    }
+    Err("the Claude configuration kept changing; try again".into())
+}
+
+/// Starts a workspace's Claude Code on `folder` without the trust question,
+/// for a repository that is the person's own. `account` is the workspace's
+/// Claude account (main when absent).
+#[allow(dead_code)]
+#[tauri::command]
+pub fn claude_trust_folder(folder: String, account: Option<String>) -> Result<Trusted, String> {
+    let files = ClaudeFiles::locate(account.as_deref(), true).ok_or("no home directory")?;
+    trust_folder(&files.config, Path::new(&folder))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1273,5 +1379,92 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "{\"a\":1}");
         let leftovers = fs::read_dir(path.parent().unwrap()).unwrap().count();
         assert_eq!(leftovers, 1, "no temporary file left behind");
+    }
+
+    #[test]
+    fn trusts_only_the_exact_folder_and_keeps_the_rest() {
+        let m = Machine::new("trust-write");
+        let repo = m.dir("work/mine");
+        m.dir("work/other");
+        m.write(
+            "home/.claude.json",
+            &json!({
+                "oauthAccount": { "id": "x" },
+                "mcpServers": { "a": stdio("a") },
+                "projects": { "keep": { "allowedTools": ["Bash"], "hasTrustDialogAccepted": false } }
+            }),
+        );
+        assert_eq!(
+            trust_folder(&m.files.config, &repo).unwrap(),
+            Trusted::Added
+        );
+        let after: Value =
+            serde_json::from_str(&fs::read_to_string(&m.files.config).unwrap()).unwrap();
+        assert_eq!(after["oauthAccount"]["id"], "x");
+        assert_eq!(after["mcpServers"]["a"]["command"], "a");
+        assert_eq!(after["projects"]["keep"]["allowedTools"][0], "Bash");
+        assert_eq!(after["projects"]["keep"]["hasTrustDialogAccepted"], false);
+        let key = repo.to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            after["projects"][key.as_str()]["hasTrustDialogAccepted"],
+            true
+        );
+        // Nothing for its parent, nor for a neighbour.
+        assert_eq!(after["projects"].as_object().unwrap().len(), 2);
+        // No temporary file is left beside it.
+        let leftovers = fs::read_dir(m.root.join("home"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        // Again, or from below a trusted folder: nothing to add.
+        assert_eq!(
+            trust_folder(&m.files.config, &repo).unwrap(),
+            Trusted::Already
+        );
+        let below = m.dir("work/mine/sub");
+        assert_eq!(
+            trust_folder(&m.files.config, &below).unwrap(),
+            Trusted::Already
+        );
+    }
+
+    #[test]
+    fn trust_merges_into_an_existing_entry_of_the_folder() {
+        let m = Machine::new("trust-merge");
+        let repo = m.dir("work/mine");
+        m.config(json!({}), &[(repo.as_path(), json!({ "lastCost": 2 }))]);
+        assert_eq!(
+            trust_folder(&m.files.config, &repo).unwrap(),
+            Trusted::Added
+        );
+        let after: Value =
+            serde_json::from_str(&fs::read_to_string(&m.files.config).unwrap()).unwrap();
+        let entries = after["projects"].as_object().unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = entries.values().next().unwrap();
+        assert_eq!(entry["lastCost"], 2);
+        assert_eq!(entry["hasTrustDialogAccepted"], true);
+    }
+
+    #[test]
+    fn trust_leaves_a_missing_or_broken_config_alone() {
+        let m = Machine::new("trust-refuse");
+        let repo = m.dir("work/mine");
+        assert!(trust_folder(&m.files.config, &repo).is_err());
+        assert!(!m.files.config.exists());
+        fs::write(&m.files.config, "{ half written").unwrap();
+        assert!(trust_folder(&m.files.config, &repo).is_err());
+        assert_eq!(
+            fs::read_to_string(&m.files.config).unwrap(),
+            "{ half written"
+        );
+        m.write("home/.claude.json", &json!({ "projects": [] }));
+        assert!(trust_folder(&m.files.config, &repo).is_err());
+        // A relative or missing folder is refused, whatever the file holds.
+        m.config(json!({}), &[]);
+        assert!(trust_folder(&m.files.config, Path::new("relative/dir")).is_err());
+        assert!(trust_folder(&m.files.config, &m.root.join("nope")).is_err());
     }
 }
