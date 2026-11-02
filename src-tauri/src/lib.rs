@@ -8,6 +8,7 @@ mod delivery;
 mod discord;
 mod endpoint;
 mod git;
+mod git_clone;
 mod install;
 mod instructions;
 mod kit_scheme;
@@ -166,6 +167,10 @@ pub fn run() {
             git::git_commits_ahead,
             git::git_changes,
             git::git_file_diff,
+            git_clone::git_repo_parse,
+            git_clone::git_repo_ownership,
+            git_clone::git_clone,
+            git_clone::git_clone_cancel,
             delivery::delivery_preflight,
             delivery::delivery_run,
             delivery::delivery_cleanup,
