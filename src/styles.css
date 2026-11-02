@@ -8291,3 +8291,71 @@ select.task__input {
 :is(.preview-code, .preview-markdown) .hljs-strong {
   font-weight: 600;
 }
+
+/* A task waiting on something outside the board: muted, not an alarm. */
+.card--onhold {
+  opacity: 0.85;
+}
+
+.card__onhold {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-muted, var(--text-dim, inherit));
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.card__onhold .icon {
+  margin-top: 0.15em;
+  flex: none;
+}
+
+.card__onhold span {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.board__toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: min(520px, 90%);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-raised, var(--panel, #222));
+  border: 1px solid var(--border, transparent);
+  font-size: calc(12px * var(--ui-scale));
+  z-index: 5;
+}
+
+.task__block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task__block-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+}
+
+.task__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task__error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.board {
+  position: relative;
+}

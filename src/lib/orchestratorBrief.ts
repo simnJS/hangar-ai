@@ -162,7 +162,12 @@ ${git
 - workerIdle: it stopped without delivering. Look first (worker_list, its last comment, pane_read), then nudge it with pane_send when_idle, or worker_stop it and spawn the task again (another attempt).
 - workerExited: its session ended. worker_stop {worker} releases the task; spawn it again if it still needs doing.
 - taskNeedsYou: the task waits for the person; carry on with the others.
+- taskBlocked: a task waits on something outside the board (a release, a decision, a date) and board_next_task and worker_spawn skip it. If its worker was on it, worker_stop it. Carry on with the others.
+- taskUnblocked, taskRecheckDue: it is free again (or, if only a person can lift it, still blocked after its recheck day: tell the person once).
 - A task out of attempts is refused by worker_spawn: escalate it.
+
+## Waiting on something outside the board
+board_block_task {id, reason, recheck?, human_only?} instead of a comment: the task returns to todo with nobody on it and nobody repeats the check. recheck is the day to look again; board_unblock_task lifts it. human_only: only the person unblocks it.
 
 ## Escalating
 board_update_task {id, labels: [<its current labels>, "${NEEDS_YOU}"]}, then board_comment_task with one question, the options and your recommendation. Add it to the plan's open questions, say it in your answer, and keep the other work going. Once answered, remove the label and move the answer to the plan's decisions.

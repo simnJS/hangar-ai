@@ -34,6 +34,27 @@ export interface ManagerJournalEntry {
   event: ManagerEvent;
 }
 
+/**
+ * A task blocked for the person (humanOnly), then unblocked or reminded. Told
+ * to the manager like the rest, but kept apart from `ManagerEvent`: the
+ * phone push (lib/remotePush) knows only those four, and a block is not a
+ * notification it was asked to make.
+ */
+export type BlockEvent =
+  | { kind: "taskBlocked"; workspaceId: string; workspace: string; taskId: string; title: string; by: string; reason: string }
+  | { kind: "taskUnblocked"; workspaceId: string; workspace: string; taskId: string; title: string; how: string }
+  | { kind: "taskRecheckDue"; workspaceId: string; workspace: string; taskId: string; title: string; reason: string };
+
+export type ManagerNews = ManagerEvent | BlockEvent;
+
+export interface ManagerNewsEntry {
+  at: number;
+  event: ManagerNews;
+}
+
+export const isBlockEvent = (event: ManagerNews): event is BlockEvent =>
+  event.kind === "taskBlocked" || event.kind === "taskUnblocked" || event.kind === "taskRecheckDue";
+
 /** A sink beside the manager's pane: it hears every event while `active()` says it listens. */
 export interface ManagerSink {
   active: () => boolean;
@@ -56,9 +77,15 @@ const JOURNAL_SIZE = 50;
 const MAX_PENDING = 200;
 const MAX_LINES = 12;
 
-export function describeManagerEvent(event: ManagerEvent): string {
+export function describeManagerEvent(event: ManagerNews): string {
   const where = `Workspace "${event.workspace}"`;
   switch (event.kind) {
+    case "taskBlocked":
+      return `${where}: ${event.by === "user" ? "the person" : event.by} blocked ${taskRef(event.title, event.taskId)} until a person lifts it: ${event.reason}`;
+    case "taskUnblocked":
+      return `${where}: ${taskRef(event.title, event.taskId)} unblocked: ${event.how}`;
+    case "taskRecheckDue":
+      return `${where}: ${taskRef(event.title, event.taskId)}: its recheck day passed, it waits for a person (${event.reason})`;
     case "paneWaiting":
       return (
         `${where}: pane "${event.pane}" has been waiting for the person for ` +
@@ -73,20 +100,23 @@ export function describeManagerEvent(event: ManagerEvent): string {
   }
 }
 
-const RANK: Record<ManagerEvent["kind"], number> = {
+const RANK: Record<ManagerNews["kind"], number> = {
   paneWaiting: 0,
   taskNeedsYou: 1,
+  taskRecheckDue: 1.5,
+  taskBlocked: 1.6,
+  taskUnblocked: 1.7,
   readyToLand: 2,
   boardDone: 3,
 };
 
-const keyOf = (event: ManagerEvent) =>
+const keyOf = (event: ManagerNews) =>
   `${event.kind}\n${event.workspaceId}\n${"paneId" in event ? event.paneId : "taskId" in event ? event.taskId : ""}`;
 
 /** The events of a batch worth sending: repeats folded, waits that ended dropped, most pressing first. */
-export function settleManager(batch: ManagerJournalEntry[], isWaiting: (paneId: string) => boolean): ManagerEvent[] {
+export function settleManager(batch: ManagerNewsEntry[], isWaiting: (paneId: string) => boolean): ManagerNews[] {
   const seen = new Set<string>();
-  const out: ManagerEvent[] = [];
+  const out: ManagerNews[] = [];
   for (const { event } of batch) {
     if (event.kind === "paneWaiting" && !isWaiting(event.paneId)) continue;
     const key = keyOf(event);
@@ -100,7 +130,7 @@ export function settleManager(batch: ManagerJournalEntry[], isWaiting: (paneId: 
     .map(({ event }) => event);
 }
 
-export function renderManagerDelta(events: ManagerEvent[]): string {
+export function renderManagerDelta(events: ManagerNews[]): string {
   const shown = events.slice(0, MAX_LINES);
   const lines = shown.map((event) => `- ${oneLine(describeManagerEvent(event), 400)}`);
   const hidden = events.length - shown.length;
@@ -112,6 +142,8 @@ export function renderManagerDelta(events: ManagerEvent[]): string {
 interface BoardWatch {
   /** Labels of each task as last read. */
   labels: Map<string, string[]>;
+  /** Tasks blocked for the person, and whether the recheck reminder went out. */
+  blocked: Map<string, { reminded: boolean }>;
   allDone: boolean;
 }
 
@@ -128,6 +160,8 @@ export interface ManagerFeed {
   /** Sends what is pending now, waits and holds aside (tests). */
   flush: () => Promise<string | null>;
   journal: () => ManagerJournalEntry[];
+  /** The journal with the block events too. */
+  news: () => ManagerNewsEntry[];
   stop: () => void;
 }
 
@@ -137,8 +171,8 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
   const clearTimer = deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const boards = new Map<string, BoardWatch>();
   const waits = new Map<string, WaitWatch>();
-  const journal: ManagerJournalEntry[] = [];
-  let pending: ManagerJournalEntry[] = [];
+  const journal: ManagerNewsEntry[] = [];
+  let pending: ManagerNewsEntry[] = [];
   let firstPendingAt: number | null = null;
   let lastSentAt = 0;
   let timer: unknown = null;
@@ -160,12 +194,12 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
 
   const watched = (): Workspace[] => deps.snapshot().workspaces.filter((ws) => ws.hq !== true);
 
-  function post(event: ManagerEvent) {
+  function post(event: ManagerNews) {
     if (stopped) return;
     const entry = { at: now(), event };
     journal.push(entry);
     if (journal.length > JOURNAL_SIZE) journal.splice(0, journal.length - JOURNAL_SIZE);
-    if (pushing()) {
+    if (pushing() && !isBlockEvent(event)) {
       try {
         deps.push?.post(event);
       } catch {
@@ -228,6 +262,11 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
     const before = boards.get(ws.id);
     const next: BoardWatch = {
       labels: new Map(tasks.map((task) => [task.id, [...task.labels]])),
+      blocked: new Map(
+        tasks.flatMap((task) =>
+          task.blocked?.humanOnly ? [[task.id, { reminded: !!task.blocked.reminded }] as const] : [],
+        ),
+      ),
       allDone: tasks.length > 0 && tasks.every((task) => task.column === "done"),
     };
     boards.set(ws.id, next);
@@ -236,6 +275,16 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
     for (const task of tasks) {
       const was = before.labels.get(task.id);
       if (!was) continue;
+      const wasBlocked = before.blocked.get(task.id);
+      const where = { workspaceId: ws.id, workspace: ws.name, taskId: task.id, title: task.title };
+      if (task.blocked?.humanOnly && !wasBlocked) {
+        post({ kind: "taskBlocked", ...where, by: task.blocked.by || "an agent", reason: oneLine(task.blocked.reason) });
+      } else if (!task.blocked && wasBlocked) {
+        const last = task.comments[task.comments.length - 1];
+        post({ kind: "taskUnblocked", ...where, how: last && /^hangar\b/i.test(last.author) ? oneLine(last.text) : "unblocked" });
+      } else if (task.blocked?.humanOnly && wasBlocked && task.blocked.reminded && !wasBlocked.reminded) {
+        post({ kind: "taskRecheckDue", ...where, reason: oneLine(task.blocked.reason) });
+      }
       if (task.labels.includes(NEEDS_YOU) && !was.includes(NEEDS_YOU)) {
         const last = task.comments[task.comments.length - 1];
         post({
@@ -333,7 +382,9 @@ export function createManagerFeed(deps: ManagerFeedDeps): ManagerFeed {
       }
       return send();
     },
-    journal: () => [...journal],
+    journal: () =>
+      journal.flatMap((entry) => (isBlockEvent(entry.event) ? [] : [{ at: entry.at, event: entry.event }])),
+    news: () => [...journal],
     stop() {
       stopped = true;
       if (timer !== null) clearTimer(timer);
@@ -362,4 +413,9 @@ export function stopManagerEvents() {
 /** What waited for the person lately, oldest first, for the manager's briefing. */
 export function managerJournal(): ManagerJournalEntry[] {
   return feed?.journal() ?? [];
+}
+
+/** The same with the block events: the briefing and the activity log tell them. */
+export function managerNews(): ManagerNewsEntry[] {
+  return feed?.news() ?? [];
 }

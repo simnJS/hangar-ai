@@ -8,7 +8,11 @@ import {
   boardComment,
   boardDelete,
   boardUpdate,
+  blockPatch,
   columnKey,
+  MAX_BLOCK_REASON,
+  recheckProblem,
+  unblockPatch,
   type BoardColumn,
   type Task,
 } from "../lib/board";
@@ -39,6 +43,13 @@ export function TaskDialog({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [comment, setComment] = useState("");
+  /** The block form: open, and what it holds. */
+  const [blocking, setBlocking] = useState(false);
+  const [reason, setReason] = useState("");
+  const [recheck, setRecheck] = useState("");
+  const [humanOnly, setHumanOnly] = useState(false);
+  const [note, setNote] = useState("");
+  const [blockError, setBlockError] = useState<string | null>(null);
   /** Delete asks twice, like the memory's: a task and its thread do not come back. */
   const [confirmDelete, setConfirmDelete] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -88,6 +99,36 @@ export function TaskDialog({
 
   async function save(patch: Parameters<typeof boardUpdate>[2]) {
     await boardUpdate(cwd, task.id, patch).catch(() => undefined);
+    onChanged();
+  }
+
+  async function block() {
+    if (!reason.trim()) return setBlockError(t("board.blockReasonRequired"));
+    const problem = recheckProblem(recheck);
+    if (problem) {
+      return setBlockError(t(problem === "past" ? "board.blockRecheckPast" : "board.blockRecheckFormat"));
+    }
+    try {
+      await boardUpdate(cwd, task.id, blockPatch(reason, recheck, humanOnly));
+    } catch (error) {
+      return setBlockError(String(error));
+    }
+    setBlocking(false);
+    setReason("");
+    setRecheck("");
+    setHumanOnly(false);
+    setBlockError(null);
+    onChanged();
+  }
+
+  async function unblock() {
+    try {
+      await boardUpdate(cwd, task.id, unblockPatch(note));
+    } catch (error) {
+      return setBlockError(String(error));
+    }
+    setNote("");
+    setBlockError(null);
     onChanged();
   }
 
@@ -180,7 +221,11 @@ export function TaskDialog({
                 onChange={(e) => save({ column: e.target.value as BoardColumn })}
               >
                 {BOARD_COLUMNS.map((column) => (
-                  <option key={column} value={column}>
+                  <option
+                    key={column}
+                    value={column}
+                    disabled={Boolean(task.blocked) && column !== "todo"}
+                  >
                     {t(columnKey(column))}
                   </option>
                 ))}
@@ -228,6 +273,95 @@ export function TaskDialog({
               )}
             </div>
           </div>
+
+          {(task.blocked || task.column === "todo" || task.column === "doing") && (
+            <section className="task__block" aria-label={t("board.blocked")}>
+              {task.blocked ? (
+                <>
+                  <p className="task__block-reason">
+                    <Icon name="pause" size={12} />
+                    <span>{t("board.blockedFor", { reason: task.blocked.reason })}</span>
+                  </p>
+                  <p className="task__hint">
+                    {t("board.blockedSince", { by: task.blocked.by, date: when(task.blocked.since) })}
+                    {task.blocked.recheck
+                      ? ` · ${t("board.blockedRecheck", { date: task.blocked.recheck })}`
+                      : ""}
+                    {task.blocked.humanOnly ? ` · ${t("board.blockedPerson")}` : ""}
+                  </p>
+                  <div className="task__compose">
+                    <input
+                      className="task__input"
+                      placeholder={t("board.unblockNote")}
+                      aria-label={t("board.unblockNote")}
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void unblock();
+                      }}
+                    />
+                    <button className="btn" onClick={() => void unblock()}>
+                      {t("board.unblock")}
+                    </button>
+                  </div>
+                </>
+              ) : blocking ? (
+                <>
+                  <label className="task__label" htmlFor={`${id}-reason`}>
+                    {t("board.blockReason")}
+                    <span className="task__hint">{t("board.blockHint")}</span>
+                  </label>
+                  <input
+                    id={`${id}-reason`}
+                    className="task__input"
+                    maxLength={MAX_BLOCK_REASON}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void block();
+                    }}
+                    autoFocus
+                  />
+                  <label className="task__label" htmlFor={`${id}-recheck`}>
+                    {t("board.blockRecheck")}
+                  </label>
+                  <input
+                    id={`${id}-recheck`}
+                    className="task__input"
+                    type="date"
+                    value={recheck}
+                    onChange={(e) => setRecheck(e.target.value)}
+                  />
+                  <label className="task__check">
+                    <input
+                      type="checkbox"
+                      checked={humanOnly}
+                      onChange={(e) => setHumanOnly(e.target.checked)}
+                    />
+                    {t("board.blockHumanOnly")}
+                  </label>
+                  <div className="task__compose">
+                    <button className="btn btn--ghost" onClick={() => setBlocking(false)}>
+                      {t("create.cancel")}
+                    </button>
+                    <button className="btn" onClick={() => void block()}>
+                      {t("board.blockConfirm")}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button className="btn task__small" onClick={() => setBlocking(true)}>
+                  <Icon name="pause" size={11} />
+                  {t("board.block")}
+                </button>
+              )}
+              {blockError && (
+                <p className="task__error" role="alert">
+                  {blockError}
+                </p>
+              )}
+            </section>
+          )}
 
           {task.labels.length > 0 && (
             <div className="task__labels" aria-label={t("task.labels")}>

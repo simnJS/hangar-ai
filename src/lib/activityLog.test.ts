@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createActivityLog, lasted, textOf, type ActivityDeps, type ActivityEntry } from "./activityLog";
-import type { ManagerJournalEntry } from "./managerEvents";
+import type { ManagerNewsEntry } from "./managerEvents";
 import type { JournalEntry, OrchestratorEvent } from "./orchestratorEvents";
 import type { SharedFile } from "./remotePush";
 import { DEFAULT_SETTINGS, type AppState, type Pane, type Workspace } from "../types";
@@ -28,7 +28,7 @@ function workspace(id: string, name: string, extra: Partial<Workspace> = {}): Wo
 interface Rig {
   deps: ActivityDeps;
   written: ActivityEntry[][];
-  manager: ManagerJournalEntry[];
+  manager: ManagerNewsEntry[];
   orchestrators: Record<string, JournalEntry[]>;
   asleep: Set<string>;
   waiting: Set<string>;
@@ -252,5 +252,23 @@ describe("words", () => {
     expect(textOf({ at: 1, workspace: "", kind: "appStopped", text: "" }, say)).toBe("activity.appStopped");
     expect(textOf({ at: 1, workspace: "", kind: "landed", text: "Landed: x" }, say)).toBe("Landed: x");
     expect(textOf({ at: 1, workspace: "", kind: "mystery", text: "" }, say)).toBe("mystery");
+  });
+});
+
+describe("blocked tasks in the log", () => {
+  it("writes a block and an unblock once, whoever saw them", async () => {
+    const r = rig([workspace("shop", "Shop")]);
+    r.manager = [
+      { at: 100, event: { kind: "taskBlocked", workspaceId: "shop", workspace: "Shop", taskId: "t1", title: "Pay", by: "Eli", reason: "waiting" } },
+    ];
+    r.orchestrators.shop = [
+      journalEntry(120, { kind: "taskBlocked", taskId: "t1", title: "Pay", by: "Eli", reason: "waiting", humanOnly: false }),
+      journalEntry(900_000, { kind: "taskUnblocked", taskId: "t1", title: "Pay", how: "recheck passed" }),
+    ];
+    await createActivityLog(r.deps).tick();
+    expect(flat(r).map((e) => [e.kind, e.text])).toEqual([
+      ["taskBlocked", "Eli blocked Pay: waiting"],
+      ["taskUnblocked", "Pay unblocked (recheck passed)"],
+    ]);
   });
 });

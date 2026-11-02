@@ -455,3 +455,32 @@ describe("settleManager", () => {
     expect(settleManager([waiting("w1")], () => false)).toEqual([]);
   });
 });
+
+describe("manager feed, blocked tasks", () => {
+  const person = { reason: "pick a license", by: "Eli", since: 1, humanOnly: true };
+
+  it("tells a block only the person can lift, and its unblock, but not the phone", async () => {
+    const r = rig({ push: true });
+    await primed(r);
+    r.boards.set("C:\\dev\\a", [task("t1", { column: "doing" }), task("t2", { blocked: person })]);
+    await r.feed.tick();
+    r.boards.set("C:\\dev\\a", [
+      task("t1", { column: "doing" }),
+      task("t2", { comments: [{ id: "c", author: "hangar", text: "Unblocked by user", created_at: 2 }] }),
+    ]);
+    await r.feed.tick();
+    expect(r.feed.news().map((e) => e.event.kind)).toEqual(["taskBlocked", "taskUnblocked"]);
+    expect(r.feed.journal()).toEqual([]);
+    expect(r.push.posted).toEqual([]);
+    await r.time.advance(TIMING.maxWaitMs);
+    expect(r.sent[0].text).toContain('Eli blocked "Task t2" [t2] until a person lifts it: pick a license');
+  });
+
+  it("leaves a block an agent can lift to the orchestrator", async () => {
+    const r = rig();
+    await primed(r);
+    r.boards.set("C:\\dev\\a", [task("t1", { column: "doing" }), task("t2", { blocked: { ...person, humanOnly: false } })]);
+    await r.feed.tick();
+    expect(r.feed.news()).toEqual([]);
+  });
+});

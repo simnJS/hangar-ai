@@ -17,6 +17,9 @@ export type OrchestratorEvent =
   | { kind: "taskMoved"; taskId: string; title: string; from: string; to: string; by: string | null }
   | { kind: "taskCommented"; taskId: string; title: string; by: string; text: string }
   | { kind: "taskNeedsYou"; taskId: string; title: string; reason: string }
+  | { kind: "taskBlocked"; taskId: string; title: string; by: string; reason: string; humanOnly: boolean }
+  | { kind: "taskUnblocked"; taskId: string; title: string; how: string }
+  | { kind: "taskRecheckDue"; taskId: string; title: string; reason: string }
   | {
       kind: "delivery";
       taskId: string;
@@ -147,6 +150,15 @@ export function describeEvent(event: OrchestratorEvent, titles: Titles): string 
     }
     case "taskNeedsYou":
       return `${taskRef(event.title, event.taskId)} needs the person: ${oneLine(event.reason)}`;
+    case "taskBlocked":
+      return (
+        `${event.by === "user" ? "The person" : event.by} blocked ${taskRef(event.title, event.taskId)}: ${oneLine(event.reason)}` +
+        (event.humanOnly ? " (only the person can unblock it)" : "")
+      );
+    case "taskUnblocked":
+      return `${taskRef(event.title, event.taskId)} unblocked: ${oneLine(event.how)}`;
+    case "taskRecheckDue":
+      return `${taskRef(event.title, event.taskId)}: its recheck day passed and it stays blocked until the person lifts it (${oneLine(event.reason)})`;
     case "taskCommented": {
       const who = event.by === "user" ? "The person" : event.by;
       return `${who} commented${onTask(event.taskId, () => event.title)}: "${oneLine(event.text)}"`;
@@ -174,6 +186,9 @@ export function describeEvent(event: OrchestratorEvent, titles: Titles): string 
 const RANK: Record<OrchestratorEvent["kind"], number> = {
   delivery: 0,
   taskNeedsYou: 1,
+  taskRecheckDue: 1.5,
+  taskBlocked: 1.6,
+  taskUnblocked: 1.7,
   taskCommented: 2,
   workerExited: 3,
   workerWaiting: 4,
@@ -318,6 +333,7 @@ export function readyTasks(tasks: BoardTask[]): BoardTask[] {
         task.column === "todo" &&
         !task.assignee &&
         !task.labels.includes(NEEDS_YOU) &&
+        !task.blocked &&
         task.depends_on.every((id) => isDone(byId.get(id))),
     )
     .sort((a, b) => b.priority - a.priority || a.order - b.order);
@@ -356,13 +372,20 @@ export interface TaskSnap {
   column: string;
   labels: string[];
   comments: string[];
+  /** Absent: not blocked (and in snapshots made before blocking existed). */
+  blocked?: { reason: string; reminded: boolean } | null;
 }
 
 export function snapBoard(tasks: BoardTask[]): Map<string, TaskSnap> {
   return new Map(
     tasks.map((task) => [
       task.id,
-      { column: task.column, labels: [...task.labels], comments: task.comments.map((c) => c.id) },
+      {
+        column: task.column,
+        labels: [...task.labels],
+        comments: task.comments.map((c) => c.id),
+        blocked: task.blocked ? { reason: task.blocked.reason, reminded: !!task.blocked.reminded } : null,
+      },
     ]),
   );
 }
@@ -405,6 +428,37 @@ export function diffBoard(
       if (sameName(comment.author, orchestrator.name) || HANGAR_AUTHOR.test(comment.author)) continue;
       out.push({
         event: { kind: "taskCommented", taskId: task.id, title: task.title, by: comment.author, text: comment.text },
+        quiet: false,
+      });
+    }
+    const wasBlocked = was.blocked ?? null;
+    if (task.blocked && !wasBlocked) {
+      out.push({
+        event: {
+          kind: "taskBlocked",
+          taskId: task.id,
+          title: task.title,
+          by: task.blocked.by || "an agent",
+          reason: task.blocked.reason,
+          humanOnly: task.blocked.humanOnly,
+        },
+        quiet: self && sameName(task.blocked.by, orchestrator.name),
+      });
+    } else if (!task.blocked && wasBlocked) {
+      // Hangar signs why it was lifted: who, or "recheck passed".
+      const last = task.comments[task.comments.length - 1];
+      out.push({
+        event: {
+          kind: "taskUnblocked",
+          taskId: task.id,
+          title: task.title,
+          how: last && HANGAR_AUTHOR.test(last.author) ? last.text : "unblocked",
+        },
+        quiet: false,
+      });
+    } else if (task.blocked && wasBlocked && task.blocked.reminded && !wasBlocked.reminded) {
+      out.push({
+        event: { kind: "taskRecheckDue", taskId: task.id, title: task.title, reason: task.blocked.reason },
         quiet: false,
       });
     }

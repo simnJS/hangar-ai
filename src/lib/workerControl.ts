@@ -313,7 +313,9 @@ export function workerBrief(facts: BriefFacts): string {
     "",
     "## When blocked",
     "If something is missing — a decision, an access, a file outside yours, a dependency that does not work — " +
-      "say what it is in a comment on the task and stop. Never mock, stub or guess your way past it.",
+      "say what it is in a comment on the task and stop. Never mock, stub or guess your way past it. " +
+      "If it is something outside the board (a release, a person's decision, a date), board_block_task " +
+      "{id, reason, recheck?} puts the task on hold; then stop, without delivering.",
     "",
     "## When done",
     done,

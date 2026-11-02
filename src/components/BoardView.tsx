@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import {
   BOARD_COLUMNS,
+  blockedMoveRefusal,
   blockersOf,
   boardCreate,
   boardLoad,
@@ -84,6 +85,9 @@ export function BoardView({
   const [dragging, setDragging] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState(ANY);
   const [assigneeFilter, setAssigneeFilter] = useState(ANY);
+  const [stateFilter, setStateFilter] = useState(ANY);
+  /** Why a move was refused, shown for a few seconds. */
+  const [toast, setToast] = useState<string | null>(null);
   // Finished work, and work nobody started, are the least useful things to
   // keep in view next to the agents.
   const [folded, setFolded] = useState<BoardColumn[]>(() => (dock ? ["todo", "done"] : []));
@@ -141,7 +145,20 @@ export function BoardView({
     refresh();
   }
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   async function moveTask(id: string, column: BoardColumn) {
+    const task = tasks?.find((entry) => entry.id === id);
+    const refusal = task ? blockedMoveRefusal(task, column) : null;
+    if (task && refusal) {
+      // Never clear the state silently: the task has to be unblocked first.
+      setToast(t("board.blockedStays", { title: task.title, reason: refusal }));
+      return;
+    }
     await boardUpdate(cwd, id, { column }).catch(() => undefined);
     refresh();
   }
@@ -271,17 +288,33 @@ export function BoardView({
     }),
   ];
 
-  const filtering = labelFilter !== ANY || assigneeFilter !== ANY;
+  const stateOptions: FilterOption[] = [
+    { value: ANY, label: t("board.stateAny"), short: t("board.filterAll") },
+    { value: "blocked", label: t("board.stateBlocked") },
+    { value: "free", label: t("board.stateFree") },
+  ];
+
+  const filtering = labelFilter !== ANY || assigneeFilter !== ANY || stateFilter !== ANY;
   const shown = useMemo(
     () =>
       all.filter(
         (task) =>
           (labelFilter === ANY || task.labels.includes(labelFilter)) &&
           (assigneeFilter === ANY ||
-            (assigneeFilter === NOBODY ? !task.assignee : task.assignee === assigneeFilter)),
+            (assigneeFilter === NOBODY ? !task.assignee : task.assignee === assigneeFilter)) &&
+          (stateFilter === ANY || (stateFilter === "blocked") === Boolean(task.blocked)),
       ),
-    [all, labelFilter, assigneeFilter],
+    [all, labelFilter, assigneeFilter, stateFilter],
   );
+
+  // A recheck day that passes unblocks the task when the board is next read
+  // (board.rs): reading it again now and then is what shows that.
+  const rechecking = all.some((task) => task.blocked?.recheck);
+  useEffect(() => {
+    if (!rechecking) return;
+    const timer = window.setInterval(refresh, 60_000);
+    return () => window.clearInterval(timer);
+  }, [rechecking, refresh]);
 
   const now = useMinuteClock(all.some((task) => task.column === "doing" && task.doing_since));
 
@@ -319,6 +352,7 @@ export function BoardView({
   function clearFilters() {
     setLabelFilter(ANY);
     setAssigneeFilter(ANY);
+    setStateFilter(ANY);
   }
 
   function renderCard(task: Task) {
@@ -336,6 +370,8 @@ export function BoardView({
         key={task.id}
         data-task-id={task.id}
         className={`card ${done ? "card--done" : ""} ${blockers.length ? "card--blocked" : ""} ${
+          task.blocked ? "card--onhold" : ""
+        } ${
           dragging === task.id ? "card--dragging" : ""
         }`}
         tabIndex={0}
@@ -369,6 +405,25 @@ export function BoardView({
               </span>
             ))}
           </div>
+        )}
+
+        {task.blocked && (
+          <p
+            className="card__onhold"
+            title={[
+              task.blocked.reason,
+              task.blocked.recheck ? t("board.blockedRecheck", { date: task.blocked.recheck }) : "",
+              task.blocked.humanOnly ? t("board.blockedPerson") : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          >
+            <Icon name="pause" size={11} />
+            <span>
+              <strong>{t("board.blocked")}</strong> · {task.blocked.reason}
+              {task.blocked.recheck ? ` · ${t("board.blockedRecheck", { date: task.blocked.recheck })}` : ""}
+            </span>
+          </p>
         )}
 
         {blockers.length > 0 && (
@@ -518,6 +573,14 @@ export function BoardView({
         active={assigneeFilter !== ANY}
         onChange={setAssigneeFilter}
       />
+      <BoardFilter
+        name={t("board.filterName.state")}
+        title={t("board.filterState")}
+        value={stateFilter}
+        options={stateOptions}
+        active={stateFilter !== ANY}
+        onChange={setStateFilter}
+      />
       {filtering && (
         <button
           type="button"
@@ -627,6 +690,12 @@ export function BoardView({
       ) : (
         <div className="board__columns">
           {(dock ? DOCK_ORDER : BOARD_COLUMNS).map(renderColumn)}
+        </div>
+      )}
+
+      {toast && (
+        <div className="board__toast" role="status" aria-live="polite">
+          {toast}
         </div>
       )}
 

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getPaneActivity } from "./agentState";
 import { isAsleep } from "./hibernateStore";
-import { managerJournal, type ManagerJournalEntry } from "./managerEvents";
+import { managerNews, type ManagerNewsEntry } from "./managerEvents";
 import { orchestratorJournal, type JournalEntry } from "./orchestratorEvents";
 import { workspaceOfShare, type SharedFile } from "./remotePush";
 import { systemLocale, translate, type Locale, type TranslateKey, type TranslateParams } from "../i18n";
@@ -36,6 +36,8 @@ export const ACTIVITY_KINDS = [
   "taskDone",
   "needsYou",
   "readyToLand",
+  "taskBlocked",
+  "taskUnblocked",
   "boardDone",
   "paneWaiting",
   "paneWaited",
@@ -78,10 +80,13 @@ export function textOf(entry: ActivityEntry, say: Say): string {
   return key ? say(key) : entry.kind;
 }
 
+/** Who blocked a task, as a line says it: "user" is the person. */
+const byOf = (by: string, t: Say) => (by === "user" ? t("activity.thePerson") : by);
+
 export interface ActivityDeps {
   snapshot: () => AppState;
   append: (entries: ActivityEntry[]) => Promise<unknown>;
-  managerJournal?: () => ManagerJournalEntry[];
+  managerJournal?: () => ManagerNewsEntry[];
   orchestratorJournal?: (workspaceId: string) => JournalEntry[];
   isAsleep?: (workspaceId: string) => boolean;
   isWaiting?: (paneId: string) => boolean;
@@ -105,7 +110,7 @@ const sayIn = (state: AppState): Say => {
 
 export function createActivityLog(deps: ActivityDeps): ActivityLog {
   const now = deps.now ?? Date.now;
-  const managerEntries = deps.managerJournal ?? managerJournal;
+  const managerEntries = deps.managerJournal ?? managerNews;
   const orchestratorEntries = deps.orchestratorJournal ?? orchestratorJournal;
   const asleepNow = deps.isAsleep ?? isAsleep;
   const waitingNow = deps.isWaiting ?? ((paneId: string) => getPaneActivity(paneId)?.activity === "waiting");
@@ -158,6 +163,16 @@ export function createActivityLog(deps: ActivityDeps): ActivityLog {
             add({ ...base, kind: "readyToLand", text: t("activity.readyToLand", { title: event.title }) });
           }
           break;
+        case "taskBlocked":
+          if (ask("taskBlocked", event.workspaceId, event.taskId, at)) {
+            add({ ...base, kind: "taskBlocked", text: t("activity.taskBlocked", { by: byOf(event.by, t), title: event.title, reason: event.reason }) });
+          }
+          break;
+        case "taskUnblocked":
+          if (ask("taskUnblocked", event.workspaceId, event.taskId, at)) {
+            add({ ...base, kind: "taskUnblocked", text: t("activity.taskUnblocked", { title: event.title, how: event.how }) });
+          }
+          break;
         case "boardDone":
           add({ ...base, kind: "boardDone", text: t("activity.boardDone", { n: event.tasks }) });
           break;
@@ -188,6 +203,10 @@ export function createActivityLog(deps: ActivityDeps): ActivityLog {
           });
         } else if (event.kind === "taskMoved" && event.to === "done" && !delivered.has(event.taskId)) {
           add({ ...base, kind: "taskDone", text: t("activity.taskDone", { title: event.title }) });
+        } else if (event.kind === "taskBlocked" && ask("taskBlocked", ws.id, event.taskId, at)) {
+          add({ ...base, kind: "taskBlocked", text: t("activity.taskBlocked", { by: byOf(event.by, t), title: event.title, reason: event.reason }) });
+        } else if (event.kind === "taskUnblocked" && ask("taskUnblocked", ws.id, event.taskId, at)) {
+          add({ ...base, kind: "taskUnblocked", text: t("activity.taskUnblocked", { title: event.title, how: event.how }) });
         } else if (event.kind === "taskNeedsYou" && ask("needsYou", ws.id, event.taskId, at)) {
           add({ ...base, kind: "needsYou", text: t("activity.needsYou", { title: event.title }) });
         }

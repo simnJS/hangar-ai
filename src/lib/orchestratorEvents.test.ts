@@ -3,6 +3,7 @@ import type { AgentActivity } from "./agentState";
 import {
   TIMING,
   createOrchestratorEngine,
+  describeEvent,
   diffBoard,
   readyTasks,
   renderDelta,
@@ -527,5 +528,51 @@ describe("the workers", () => {
     await restarted.engine.tick();
     await restarted.time.advance(TIMING.debounceMs);
     expect(restarted.sent).toHaveLength(0);
+  });
+});
+
+describe("blocked tasks", () => {
+  const blocked = { reason: "npm release", by: "Eli", since: 1, humanOnly: false };
+  const orch = { name: "orch", busy: false };
+
+  it("tells a block with its author and reason, and an unblock with how", () => {
+    const before = snapBoard([task("a")]);
+    const on = [task("a", { blocked })];
+    const [told] = diffBoard(before, on, orch);
+    expect(told.event).toMatchObject({ kind: "taskBlocked", by: "Eli", reason: "npm release" });
+    expect(describeEvent(told.event, () => "Task a")).toBe(
+      'Eli blocked "Task a" [a]: npm release',
+    );
+
+    const comments = [{ id: "c", author: "hangar", text: "recheck passed (2026-11-05)", created_at: 2 }];
+    const [lifted] = diffBoard(snapBoard(on), [task("a", { comments })], orch);
+    expect(lifted.event).toMatchObject({ kind: "taskUnblocked", how: "recheck passed (2026-11-05)" });
+    expect(diffBoard(snapBoard(on), on, orch)).toEqual([]);
+  });
+
+  it("keeps the orchestrator's own block quiet and says when only a person can lift one", () => {
+    const own = diffBoard(snapBoard([task("a")]), [task("a", { blocked: { ...blocked, by: "orch" } })], {
+      name: "orch",
+      busy: true,
+    });
+    expect(own[0].quiet).toBe(true);
+    const human = { ...blocked, humanOnly: true };
+    expect(describeEvent(diffBoard(snapBoard([task("a")]), [task("a", { blocked: human })], orch)[0].event, () => null)).toContain(
+      "only the person can unblock it",
+    );
+  });
+
+  it("reminds once when a human-only recheck passes", () => {
+    const human = { ...blocked, humanOnly: true };
+    const [due] = diffBoard(
+      snapBoard([task("a", { blocked: human })]),
+      [task("a", { blocked: { ...human, reminded: 5 } })],
+      orch,
+    );
+    expect(due.event).toMatchObject({ kind: "taskRecheckDue" });
+  });
+
+  it("does not offer a blocked task as ready", () => {
+    expect(readyTasks([task("a", { blocked }), task("b")]).map((t) => t.id)).toEqual(["b"]);
   });
 });

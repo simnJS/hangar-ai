@@ -34,6 +34,78 @@ export interface Task {
   owns?: string[];
   /** Workers started on it so far (orchestration). Missing: none. */
   attempts?: number;
+  /** Waiting on something outside the board. Missing: not blocked. A blocked
+      task sits in todo, held by nobody. */
+  blocked?: Blocked | null;
+}
+
+/** Why a task cannot go on. Field names follow board.rs (camelCase here). */
+export interface Blocked {
+  reason: string;
+  /** An agent's name, or "user". */
+  by: string;
+  since: number;
+  /** ISO day (YYYY-MM-DD) to look again. */
+  recheck?: string | null;
+  /** Only a person lifts it. */
+  humanOnly: boolean;
+  /** When the recheck day's reminder went out (human-only blocks stay). */
+  reminded?: number | null;
+}
+
+/** The longest reason board.rs keeps. */
+export const MAX_BLOCK_REASON = 500;
+
+export const isBlocked = (task: Pick<Task, "blocked">): boolean => !!task.blocked;
+
+/** Today, as the local ISO day: what board.rs compares a recheck day with. */
+export function isoDay(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** What is wrong with a recheck day typed for a new block; null when it is fine. */
+export function recheckProblem(day: string, today: string = isoDay()): "format" | "past" | null {
+  const text = day.trim();
+  if (!text) return null;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!parts) return "format";
+  const [year, month, date] = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
+  const real = new Date(year, month - 1, date);
+  if (real.getFullYear() !== year || real.getMonth() !== month - 1 || real.getDate() !== date) {
+    return "format";
+  }
+  return text < today ? "past" : null;
+}
+
+/**
+ * Why a card cannot leave todo, when it is blocked: the reason to show. A
+ * move out of todo would leave the state behind on a task that is not waiting
+ * any more, or clear it silently; the task has to be unblocked first.
+ */
+export function blockedMoveRefusal(task: Task, to: BoardColumn): string | null {
+  if (!task.blocked || to === "todo") return null;
+  return task.blocked.reason;
+}
+
+/** The patch that blocks a task from the window: the person is the caller. */
+export function blockPatch(reason: string, recheck: string, humanOnly: boolean): TaskPatch {
+  const day = recheck.trim();
+  return {
+    block: {
+      reason: reason.trim(),
+      ...(day ? { recheck: day } : {}),
+      human_only: humanOnly,
+      by: "user",
+      person: true,
+    },
+  };
+}
+
+/** The patch that unblocks a task from the window. */
+export function unblockPatch(note: string): TaskPatch {
+  const text = note.trim();
+  return { unblock: { by: "user", person: true, ...(text ? { note: text } : {}) } };
 }
 
 /**
@@ -60,6 +132,10 @@ export interface TaskPatch {
   depends_on?: string[];
   order?: number;
   owns?: string[];
+  /** Blocks the task (board.rs `block_task`); `person` is the window's alone. */
+  block?: { reason: string; recheck?: string; human_only?: boolean; by?: string; person?: boolean };
+  /** Lifts the block. */
+  unblock?: { note?: string; by?: string; person?: boolean };
 }
 
 export interface NewTask {
