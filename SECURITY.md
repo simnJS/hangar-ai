@@ -7,7 +7,7 @@ reaches you once you accept the update.
 
 | Version | Supported |
 |---|---|
-| Latest release ([releases/latest](https://github.com/simnJS/hangar-ai/releases/latest)) | Yes |
+| Latest release ([releases/latest](https://github.com/hangar-ai/hangar/releases/latest)) | Yes |
 | Anything older | No: please update first |
 
 ## Reporting a vulnerability
@@ -15,7 +15,7 @@ reaches you once you accept the update.
 **Please do not open a public issue for a security problem.**
 
 Report it privately through GitHub Security Advisories. Open the repository's
-[**Security** tab](https://github.com/simnJS/hangar-ai/security), click **Report a
+[**Security** tab](https://github.com/hangar-ai/hangar/security), click **Report a
 vulnerability**, and fill in the form. Only the maintainer can see the report.
 
 Please include:

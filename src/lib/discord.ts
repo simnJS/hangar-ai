@@ -19,7 +19,7 @@ import { AGENTS, type Pane, type Settings, type Workspace } from "../types";
  */
 export const DEFAULT_APP_ID = "1534592584045957282";
 
-export const REPO_URL = "https://github.com/simnJS/hangar-ai";
+export const REPO_URL = "https://github.com/hangar-ai/hangar";
 
 /**
  * The logo, served straight from the repository — the same file the README
@@ -32,7 +32,7 @@ export const REPO_URL = "https://github.com/simnJS/hangar-ai";
  * drops the keys it cannot resolve without complaining, so a card missing its
  * art is still a card.
  */
-const LARGE_IMAGE = "https://raw.githubusercontent.com/simnJS/hangar-ai/main/assets/logo.png";
+const LARGE_IMAGE = "https://raw.githubusercontent.com/hangar-ai/hangar/main/assets/logo.png";
 const agentImage = (agent: string) => `agent-${agent}`;
 
 /**

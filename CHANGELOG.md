@@ -6,7 +6,11 @@ What changed in each Hangar.AI release, newest first. The format loosely follows
 change behaviour as well as add to it. The 0.x history is grouped by minor version.
 
 Every release, with its installers, is on the
-[releases page](https://github.com/simnJS/hangar-ai/releases).
+[releases page](https://github.com/hangar-ai/hangar/releases).
+
+## [1.11.1] - 2026-11-02
+
+- Hangar's repository moved to hangar-ai/hangar, with the kits. Old links redirect, and updates keep coming.
 
 ## [1.11.0] - 2026-11-02
 

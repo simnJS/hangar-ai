@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Hangar.AI",
   "mainBinaryName": "hangar-ai",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "identifier": "com.simnjs.iabench",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -58,7 +58,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/simnJS/hangar-ai/releases/latest/download/latest.json"
+        "https://github.com/hangar-ai/hangar/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFN0M0MjlEQTA4OUM1MwpSV1JUbkFqYUtjVG5EUldHd0F6aGRWSmdpWWRWcXVOanhqUG5Tak5NZVhpdXRKTzZZRmkxQXl3RQo="
     }

@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/simnJS/hangar-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/simnJS/hangar-ai?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/simnJS/hangar-ai?style=flat-square"></a>
-  <a href="https://github.com/simnJS/hangar-ai/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/simnJS/hangar-ai/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="https://github.com/hangar-ai/hangar/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/hangar-ai/hangar?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/hangar-ai/hangar?style=flat-square"></a>
+  <a href="https://github.com/hangar-ai/hangar/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hangar-ai/hangar/ci.yml?branch=main&style=flat-square&label=CI"></a>
 </p>
 
 <p align="center">
@@ -244,7 +244,7 @@ chat.
 ## Install
 
 Download the file for your system from the
-**[latest release](https://github.com/simnJS/hangar-ai/releases/latest)**, under
+**[latest release](https://github.com/hangar-ai/hangar/releases/latest)**, under
 **Assets**. You only download once: after that, the app offers each new version and
 installs it in one click.
 

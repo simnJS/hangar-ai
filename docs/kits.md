@@ -1144,7 +1144,7 @@ as written, `{kitDir}` included, and the hash covers that: an update that change
 ```js
 const { exitCode, stdout, stderr, timedOut, truncated } = await window.hangar.call("command.run", {
   name: "ci-run",
-  args: { run: "4567", repo: "simnJS/hangar-ai" },
+  args: { run: "4567", repo: "hangar-ai/hangar" },
 });
 ```
 

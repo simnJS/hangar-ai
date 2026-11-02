@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. For a security problem, do not use this form: see [SECURITY.md](https://github.com/simnJS/hangar-ai/blob/main/SECURITY.md).
+        Thanks for reporting a bug. For a security problem, do not use this form: see [SECURITY.md](https://github.com/hangar-ai/hangar/blob/main/SECURITY.md).
 
   - type: input
     id: version

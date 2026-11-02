@@ -467,7 +467,7 @@ mod tests {
     fn a_repo_is_owner_slash_name_and_nothing_else() {
         for good in [
             "hangar-ai/ci-status",
-            "simnJS/hangar-ai",
+            "hangar-ai/hangar",
             "a/b",
             "o/my.kit_2",
             "0wner/1",
