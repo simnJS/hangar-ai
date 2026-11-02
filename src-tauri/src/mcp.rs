@@ -174,6 +174,7 @@ fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     if let Some(all) = tools.as_array_mut() {
         for more in [
+            block_tool_definitions(),
             preview_tool_definitions(),
             kit_tool_definitions(),
             manager_tool_definitions(),
@@ -710,6 +711,37 @@ fn repository_tool_definitions() -> Value {
 
 /// The project manager's tools, apart from the rest: one `json!` this long
 /// would run out of the macro's recursion limit.
+fn block_tool_definitions() -> Value {
+    json!([
+        {
+            "name": "board_block_task",
+            "description": "Put a task on hold for something outside the board: a package release, a person's decision, a date. Use it instead of a comment, so nobody picks the task up and repeats the same check. The task goes to 'todo' with nobody on it (its files are free for others), board_next_task and worker_spawn skip it, and tasks that depend on it keep waiting. Refused for a task in 'review' or 'done'. If it is YOUR task, stop right after: do not deliver. Set recheck to the day to look again: once it has passed the task unblocks itself (unless human_only).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "reason": { "type": "string", "description": "What it waits for, in a sentence (at most 500 characters). Required." },
+                    "recheck": { "type": "string", "description": "ISO day, YYYY-MM-DD, today or later. The day after it, the task is unblocked by itself." },
+                    "human_only": { "type": "boolean", "description": "Only a person may unblock it (a decision that is theirs). No agent can; the recheck day then only reminds." }
+                },
+                "required": ["id", "reason"]
+            }
+        },
+        {
+            "name": "board_unblock_task",
+            "description": "Lift the block of a task once what it waited for is there: it is then free to pick up again. Refused when the block is human_only: a person unblocks those, from the board.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "note": { "type": "string", "description": "What changed, kept as a comment on the task." }
+                },
+                "required": ["id"]
+            }
+        }
+    ])
+}
+
 fn manager_tool_definitions() -> Value {
     json!([
         // orchestration: the project manager (project_* tools)
@@ -852,6 +884,61 @@ fn limit_memory_list(listing: &mut Value, limit: Option<u64>) {
     }
 }
 
+/// What a worker is told when it blocks the task it was working on.
+const STOP_AFTER_OWN_BLOCK: &str = "Your task is blocked and back in todo, free of you: stop now. Do not call \
+    delivery_submit (it would be refused: the task is no longer in doing) and do not carry on. Leave one short \
+    comment on the task saying what you did and what it waits for, then end your turn. The orchestrator has \
+    been told and will stop your worker.";
+
+/// The keys that block or unblock a task. An agent's board_update_task never
+/// carries them: `person` in particular is the window's alone, and what lets
+/// a human_only block be lifted.
+fn strip_block_keys(patch: &mut Value) {
+    if let Some(obj) = patch.as_object_mut() {
+        obj.remove("block");
+        obj.remove("unblock");
+    }
+}
+
+/// The patch board_block_task sends. Whatever the agent passed besides the
+/// known arguments is dropped, `person` first: over MCP nothing tells a
+/// person from an agent, so none can claim to be one.
+fn block_body(args: &Value, agent: &str) -> Value {
+    let mut block = json!({
+        "reason": optional_text(args, "reason").unwrap_or_default(),
+        "human_only": args.get("human_only").and_then(Value::as_bool).unwrap_or(false),
+        "by": agent,
+    });
+    if let Some(recheck) = optional_text(args, "recheck") {
+        block["recheck"] = json!(recheck);
+    }
+    json!({ "block": block })
+}
+
+/// The patch board_unblock_task sends; the task's own `human_only` decides,
+/// and for an MCP caller it always refuses.
+fn unblock_body(args: &Value, agent: &str) -> Value {
+    let mut unblock = json!({ "by": agent });
+    if let Some(note) = optional_text(args, "note") {
+        unblock["note"] = json!(note);
+    }
+    json!({ "unblock": unblock })
+}
+
+/// Whether `agent` is the assignee of task `id` on a board as the API returns it.
+fn held_by(board: &Value, id: &str, agent: &str) -> bool {
+    board
+        .get("tasks")
+        .and_then(Value::as_array)
+        .and_then(|tasks| {
+            tasks
+                .iter()
+                .find(|task| task.get("id").and_then(Value::as_str) == Some(id))
+        })
+        .and_then(|task| task.get("assignee").and_then(Value::as_str))
+        .is_some_and(|assignee| assignee == agent)
+}
+
 /// Keeps the tasks of one column; no column (or an empty one) keeps them all.
 fn filter_tasks_by_column(board: &mut Value, column: Option<&str>) {
     let Some(column) = column.map(str::trim).filter(|c| !c.is_empty()) else {
@@ -889,7 +976,35 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
             if let Some(obj) = patch.as_object_mut() {
                 obj.remove("id");
             }
+            // Blocking has its own tools: they are what knows who is asking.
+            strip_block_keys(&mut patch);
             api.send("PATCH", &format!("/api/tasks/{id}"), patch)
+        }
+        "board_block_task" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            let agent = agent_name();
+            // Read before: blocking frees the task, and who held it is gone after.
+            let own = api
+                .get("/api/board")
+                .map(|board| held_by(&board, &id, &agent))
+                .unwrap_or(false);
+            let mut result = api.send(
+                "PATCH",
+                &format!("/api/tasks/{id}"),
+                block_body(args, &agent),
+            )?;
+            if own {
+                result["stop"] = json!(STOP_AFTER_OWN_BLOCK);
+            }
+            Ok(result)
+        }
+        "board_unblock_task" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            api.send(
+                "PATCH",
+                &format!("/api/tasks/{id}"),
+                unblock_body(args, &agent_name()),
+            )
         }
         "board_comment_task" => {
             let id = str_arg("id").ok_or("missing 'id'")?;
@@ -1355,6 +1470,51 @@ mod tests {
         for field in ["owns", "labels", "depends_on"] {
             assert_eq!(update[field]["items"]["type"], "string", "{field}");
         }
+    }
+
+    #[test]
+    fn the_block_tools_are_listed_and_take_what_the_board_needs() {
+        let block = tool("board_block_task");
+        assert_eq!(block["inputSchema"]["required"], json!(["id", "reason"]));
+        let props = &block["inputSchema"]["properties"];
+        assert_eq!(props["human_only"]["type"], "boolean");
+        // `person` is the window's: an agent has no way to say it.
+        assert!(props.get("person").is_none());
+        let unblock = tool("board_unblock_task");
+        assert_eq!(unblock["inputSchema"]["required"], json!(["id"]));
+    }
+
+    #[test]
+    fn an_agent_cannot_pass_itself_off_as_a_person() {
+        let sent = block_body(
+            &json!({ "reason": " npm release ", "person": true, "human_only": true, "by": "someone", "recheck": "2026-12-01" }),
+            "Eli",
+        );
+        assert_eq!(
+            sent,
+            json!({ "block": { "reason": "npm release", "human_only": true, "by": "Eli", "recheck": "2026-12-01" } })
+        );
+        let lifted = unblock_body(&json!({ "person": true, "note": "out" }), "Eli");
+        assert_eq!(lifted, json!({ "unblock": { "by": "Eli", "note": "out" } }));
+
+        // …nor smuggle block state through board_update_task.
+        let mut patch =
+            json!({ "title": "t", "unblock": { "person": true }, "block": { "reason": "x" } });
+        strip_block_keys(&mut patch);
+        assert_eq!(patch, json!({ "title": "t" }));
+    }
+
+    #[test]
+    fn a_worker_blocking_its_own_task_is_recognised() {
+        let board = json!({ "tasks": [
+            { "id": "a", "assignee": "Jude" },
+            { "id": "b", "assignee": "Mia" },
+            { "id": "c", "assignee": null }
+        ]});
+        assert!(held_by(&board, "a", "Jude"));
+        assert!(!held_by(&board, "b", "Jude"));
+        assert!(!held_by(&board, "c", "Jude"));
+        assert!(!held_by(&board, "zz", "Jude"));
     }
 
     #[test]

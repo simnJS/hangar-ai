@@ -6,6 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+/// The label of a task that waits for the person (src/lib/orchestration.ts).
+pub const NEEDS_YOU_LABEL: &str = "needs-you";
+
 pub const COLUMNS: [&str; 4] = ["todo", "doing", "review", "done"];
 
 fn now_ms() -> u64 {
@@ -64,6 +67,79 @@ pub struct Task {
     /// How many workers were started on this task (orchestration).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub attempts: u32,
+    /// Waiting on something outside the board (see `Blocked`). A blocked task
+    /// stays in `todo`, held by nobody. Absent from boards written before it
+    /// existed, which read as not blocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<Blocked>,
+}
+
+/// A task that cannot go on because of something outside the board: a package
+/// release, a person's decision, a date. A state, not a column: the board keeps
+/// its four, and whoever reads `COLUMNS` sees nothing new.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Blocked {
+    /// What it waits for. Never empty.
+    pub reason: String,
+    /// Who blocked it: an agent's name, or "user".
+    #[serde(default)]
+    pub by: String,
+    /// When, in ms since the epoch.
+    #[serde(default)]
+    pub since: u64,
+    /// The day (ISO, YYYY-MM-DD) to look again. Once it has passed (the day
+    /// after) the task unblocks itself (`sweep_rechecks`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recheck: Option<String>,
+    /// Only a person lifts it: no agent can, whatever it says.
+    #[serde(default)]
+    pub human_only: bool,
+    /// When a `human_only` task's recheck day passed and the reminder went out;
+    /// it stays blocked, and is reminded once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminded: Option<u64>,
+}
+
+/// The longest reason kept, in characters.
+pub const MAX_BLOCK_REASON: usize = 500;
+/// The longest note kept with an unblock.
+const MAX_UNBLOCK_NOTE: usize = 500;
+/// Who signs the comments Hangar writes itself on a task.
+pub const HANGAR_AUTHOR: &str = "hangar";
+
+/// What blocks a task, as `block_task` takes it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BlockRequest {
+    pub reason: String,
+    /// ISO day, YYYY-MM-DD, today or later.
+    #[serde(default)]
+    pub recheck: Option<String>,
+    #[serde(default)]
+    pub human_only: bool,
+    /// Who is blocking; "user" when empty.
+    #[serde(default)]
+    pub by: Option<String>,
+    /// The request comes from the window's own UI, not from an agent over MCP.
+    /// Only the window sets it (mcp.rs strips it from what an agent sends).
+    #[serde(default)]
+    pub person: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UnblockRequest {
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub by: Option<String>,
+    /// See `BlockRequest::person`.
+    #[serde(default)]
+    pub person: bool,
+}
+
+/// Today's date as the board reads it: the local day, ISO.
+pub fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -198,9 +274,16 @@ pub struct BoardStore {
 }
 
 impl BoardStore {
+    /// Reading is also when a recheck day that has passed is acted on
+    /// (`sweep_rechecks`): the orchestrator's engine reads every board every
+    /// few seconds, so no timer of its own is needed.
     pub fn read(&self, cwd: &str) -> Board {
         let _guard = self.guard.lock().unwrap();
-        read_board(cwd)
+        let mut board = read_board(cwd);
+        if sweep_rechecks(&mut board, &today()) {
+            let _ = write_board(cwd, &board);
+        }
+        board
     }
 
     /// Applies `mutate` under the global lock and persists the result.
@@ -211,6 +294,7 @@ impl BoardStore {
     ) -> Result<T, String> {
         let _guard = self.guard.lock().unwrap();
         let mut board = read_board(cwd);
+        sweep_rechecks(&mut board, &today());
         let outcome = mutate(&mut board)?;
         write_board(cwd, &board)?;
         Ok(outcome)
@@ -249,6 +333,12 @@ pub struct TaskPatch {
     pub depends_on: Option<Vec<String>>,
     pub order: Option<f64>,
     pub owns: Option<Vec<String>>,
+    /// Blocks the task on something outside the board (`block_task`).
+    #[serde(default)]
+    pub block: Option<BlockRequest>,
+    /// Lifts the block (`unblock_task`).
+    #[serde(default)]
+    pub unblock: Option<UnblockRequest>,
 }
 
 pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
@@ -273,18 +363,32 @@ pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
         updated_at: stamp,
         owns: input.owns,
         attempts: 0,
+        blocked: None,
     };
     board.tasks.push(task.clone());
     Ok(task)
 }
 
-pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task, String> {
+pub fn patch_task(board: &mut Board, id: &str, mut patch: TaskPatch) -> Result<Task, String> {
     if let Some(column) = &patch.column {
         if !COLUMNS.contains(&column.as_str()) {
             return Err(format!("unknown column '{column}'"));
         }
     }
+    if let Some(request) = patch.unblock.take() {
+        unblock_task(board, id, request)?;
+    }
+    let block = patch.block.take();
     let task = board.find_mut(id).ok_or("task not found")?;
+    if let (Some(blocked), Some(column)) = (&task.blocked, &patch.column) {
+        if column != "todo" {
+            return Err(format!(
+                "\"{}\" is blocked ({}) and stays in todo: it cannot go to {column}. Unblock it first \
+                 (board_unblock_task) once what it waits for is there.",
+                task.title, blocked.reason
+            ));
+        }
+    }
     let stamp = now_ms();
 
     if let Some(v) = patch.title {
@@ -318,6 +422,9 @@ pub fn patch_task(board: &mut Board, id: &str, patch: TaskPatch) -> Result<Task,
         task.order = v;
     }
     task.updated_at = stamp;
+    if let Some(request) = block {
+        return block_task(board, id, request, &today());
+    }
     Ok(task.clone())
 }
 
@@ -341,6 +448,14 @@ pub fn claim_task(board: &mut Board, id: &str, agent: &str) -> Result<Task, Stri
         .ok_or("task not found")?;
     if let Some(owner) = task.assignee.as_ref().filter(|owner| *owner != agent) {
         return Err(format!("already claimed by {owner}"));
+    }
+    if let Some(blocked) = &task.blocked {
+        return Err(format!(
+            "cannot claim \"{}\": it is blocked: {}. {}",
+            task.title,
+            blocked.reason,
+            blocked_advice(blocked)
+        ));
     }
     // Only a task entering `doing` can collide with the ones already there.
     if task.column == "todo" {
@@ -398,6 +513,13 @@ pub fn claim_for_worker(
         }
         _ => return Err(format!("\"{title}\" is done already.")),
     }
+    if let Some(blocked) = &task.blocked {
+        return Err(format!(
+            "\"{title}\" is blocked: {}. Do not start a worker on it. {}",
+            blocked.reason,
+            blocked_advice(blocked)
+        ));
+    }
     if let Some(owner) = task.assignee.as_ref().filter(|owner| *owner != worker) {
         return Err(format!(
             "\"{title}\" is in todo but held by {owner}. If nobody is on it, release it \
@@ -409,7 +531,16 @@ pub fn claim_for_worker(
         .iter()
         .filter_map(|dep| match board.tasks.iter().find(|t| &t.id == dep) {
             Some(t) if t.column == "done" => None,
-            Some(t) => Some(format!("\"{}\" ({}, in {})", t.title, t.id, t.column)),
+            Some(t) => Some(format!(
+                "\"{}\" ({}, in {}{})",
+                t.title,
+                t.id,
+                t.column,
+                t.blocked
+                    .as_ref()
+                    .map(|b| format!(", blocked: {}", b.reason))
+                    .unwrap_or_default()
+            )),
             None => Some(format!("{dep} (no longer on the board)")),
         })
         .collect();
@@ -821,6 +952,199 @@ fn char_class(pattern: &[char]) -> Option<(usize, Box<dyn Fn(char) -> bool>)> {
     Some((close + 1, Box::new(accepts)))
 }
 
+fn blocked_advice(blocked: &Blocked) -> String {
+    if blocked.human_only {
+        "Only a person lifts this block; pick another task.".to_string()
+    } else {
+        "Pick another task; board_unblock_task lifts it once what it waits for is there."
+            .to_string()
+    }
+}
+
+/// Puts a task on hold for something outside the board.
+///
+/// It lands in `todo` with nobody on it, so it holds no worker and no file
+/// (`ownership_clash` only looks at `doing`). A task that was being worked on
+/// gives the attempt back: it was stopped by the wait, not by the worker's
+/// failure, and the next worker should not start one short. `attempts` counts
+/// workers started (`claim_for_worker`); an agent's plain claim does not count,
+/// so a task an agent held and blocks has at worst one attempt more than it
+/// used, never fewer.
+pub fn block_task(
+    board: &mut Board,
+    id: &str,
+    request: BlockRequest,
+    today: &str,
+) -> Result<Task, String> {
+    let task = board.find_mut(id).ok_or("task not found")?;
+    match task.column.as_str() {
+        "done" => {
+            return Err(format!(
+                "\"{}\" is done: there is nothing left to wait for. Blocking is for work that cannot go on.",
+                task.title
+            ))
+        }
+        "review" => {
+            return Err(format!(
+                "\"{}\" is in review: its work is finished and waits to be checked, not blocked. \
+                 Move it back to todo (board_update_task) first if it needs more work.",
+                task.title
+            ))
+        }
+        _ => {}
+    }
+    let reason = request.reason.trim().to_string();
+    if reason.is_empty() {
+        return Err("A block needs a reason: say what the task waits for.".into());
+    }
+    if reason.chars().count() > MAX_BLOCK_REASON {
+        return Err(format!(
+            "The reason is too long ({} characters, at most {MAX_BLOCK_REASON}): say it shorter and put the detail in a comment.",
+            reason.chars().count()
+        ));
+    }
+    let recheck = match request
+        .recheck
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        None => None,
+        Some(day) => {
+            let parsed = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+                .map_err(|_| format!("recheck '{day}' is not a day: write it YYYY-MM-DD."))?;
+            let normal = parsed.format("%Y-%m-%d").to_string();
+            if normal.as_str() < today {
+                return Err(format!(
+                    "recheck {normal} is in the past (today is {today}): pick today or a later day."
+                ));
+            }
+            Some(normal)
+        }
+    };
+    if let Some(held) = &task.blocked {
+        if held.human_only && !request.person {
+            return Err(format!(
+                "\"{}\" is already blocked for a person ({}): an agent cannot change that block.",
+                task.title, held.reason
+            ));
+        }
+    }
+    let stamp = now_ms();
+    if task.column == "doing" && task.assignee.is_some() {
+        task.attempts = task.attempts.saturating_sub(1);
+    }
+    task.assignee = None;
+    task.enter_column("todo".into(), stamp);
+    let by = request
+        .by
+        .map(|by| by.trim().to_string())
+        .filter(|by| !by.is_empty())
+        .unwrap_or_else(|| "user".into());
+    task.blocked = Some(Blocked {
+        reason,
+        by,
+        since: stamp,
+        recheck,
+        human_only: request.human_only,
+        reminded: None,
+    });
+    task.updated_at = stamp;
+    Ok(task.clone())
+}
+
+/// Lifts a block. A `human_only` one is the person's: only the window's own
+/// call (`person`) may. Over MCP nothing tells a person from an agent (the
+/// proxy only knows its pane), so for any MCP caller it is refused.
+pub fn unblock_task(board: &mut Board, id: &str, request: UnblockRequest) -> Result<Task, String> {
+    let task = board.find_mut(id).ok_or("task not found")?;
+    let Some(blocked) = task.blocked.clone() else {
+        return Err(format!("\"{}\" is not blocked.", task.title));
+    };
+    if blocked.human_only && !request.person {
+        return Err(format!(
+            "\"{}\" is blocked for a person to lift ({}). A person must unblock it, from the board; \
+             Hangar cannot tell a person from an agent over MCP, so no agent can. Tell the orchestrator, \
+             or comment on the task, and carry on with another one.",
+            task.title, blocked.reason
+        ));
+    }
+    let by = request
+        .by
+        .map(|by| by.trim().to_string())
+        .filter(|by| !by.is_empty())
+        .unwrap_or_else(|| "user".into());
+    let note = request
+        .note
+        .map(|note| {
+            note.trim()
+                .chars()
+                .take(MAX_UNBLOCK_NOTE)
+                .collect::<String>()
+        })
+        .filter(|note| !note.is_empty());
+    let text = match note {
+        Some(note) => format!(
+            "Unblocked by {by}: {note} (was blocked: {})",
+            blocked.reason
+        ),
+        None => format!("Unblocked by {by} (was blocked: {})", blocked.reason),
+    };
+    task.blocked = None;
+    push_comment(task, HANGAR_AUTHOR, text);
+    Ok(task.clone())
+}
+
+/// Acts on the recheck days that have passed (the day after the one named). A
+/// task unblocks by itself, with `recheck passed` noted; a `human_only` one
+/// stays blocked and is reminded, once. True when something changed.
+pub fn sweep_rechecks(board: &mut Board, today: &str) -> bool {
+    let stamp = now_ms();
+    let mut changed = false;
+    for task in &mut board.tasks {
+        let Some(blocked) = &task.blocked else {
+            continue;
+        };
+        let Some(day) = blocked.recheck.clone().filter(|day| day.as_str() < today) else {
+            continue;
+        };
+        let reason = blocked.reason.clone();
+        if blocked.human_only {
+            if blocked.reminded.is_some() {
+                continue;
+            }
+            if let Some(blocked) = task.blocked.as_mut() {
+                blocked.reminded = Some(stamp);
+            }
+            push_comment(
+                task,
+                HANGAR_AUTHOR,
+                format!("recheck passed ({day}): still blocked until a person lifts it ({reason})"),
+            );
+        } else {
+            task.blocked = None;
+            push_comment(
+                task,
+                HANGAR_AUTHOR,
+                format!("recheck passed ({day}; was blocked: {reason})"),
+            );
+        }
+        changed = true;
+    }
+    changed
+}
+
+fn push_comment(task: &mut Task, author: &str, text: String) {
+    let stamp = now_ms();
+    task.comments.push(Comment {
+        id: new_id(),
+        author: author.to_string(),
+        text,
+        created_at: stamp,
+    });
+    task.updated_at = stamp;
+}
+
 pub fn add_comment(board: &mut Board, id: &str, author: &str, text: &str) -> Result<Task, String> {
     let task = board.find_mut(id).ok_or("task not found")?;
     task.comments.push(Comment {
@@ -834,7 +1158,8 @@ pub fn add_comment(board: &mut Board, id: &str, author: &str, text: &str) -> Res
 }
 
 /// The coordination primitive: highest-priority unassigned task in `todo`
-/// whose dependencies are all done. Returns None when nothing is actionable.
+/// whose dependencies are all done, that is neither blocked nor waiting for
+/// the person (needs-you). Returns None when nothing is actionable.
 pub fn next_task(board: &Board) -> Option<Task> {
     let done: Vec<&str> = board
         .tasks
@@ -847,6 +1172,9 @@ pub fn next_task(board: &Board) -> Option<Task> {
         .tasks
         .iter()
         .filter(|t| t.column == "todo" && t.assignee.is_none())
+        // Waiting on something outside the board, or on the person: not for
+        // another agent to pick up and repeat the same check.
+        .filter(|t| t.blocked.is_none() && !t.labels.iter().any(|l| l == NEEDS_YOU_LABEL))
         .filter(|t| t.depends_on.iter().all(|dep| done.contains(&dep.as_str())))
         .max_by(|a, b| {
             a.priority.cmp(&b.priority).then(
@@ -1325,6 +1653,327 @@ mod tests {
             (theirs.column.as_str(), theirs.assignee.as_deref()),
             ("doing", Some("ava"))
         );
+    }
+
+    // -- blocked ------------------------------------------------------------
+
+    fn block(reason: &str) -> BlockRequest {
+        BlockRequest {
+            reason: reason.into(),
+            by: Some("Eli".into()),
+            ..Default::default()
+        }
+    }
+
+    const TODAY: &str = "2026-11-02";
+
+    #[test]
+    fn an_old_board_reads_as_not_blocked_and_writes_nothing_new() {
+        let board: Board = serde_json::from_str(ONE_TASK).unwrap();
+        assert!(board.tasks[0].blocked.is_none());
+        let again = serde_json::to_string(&board).unwrap();
+        assert!(!again.contains("blocked"), "{again}");
+    }
+
+    #[test]
+    fn a_blocked_task_round_trips_with_the_documented_names() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(
+            &mut board,
+            &id,
+            BlockRequest {
+                recheck: Some("2026-11-10".into()),
+                human_only: true,
+                ..block("waiting for the release")
+            },
+            TODAY,
+        )
+        .unwrap();
+        let json = serde_json::to_string(&board).unwrap();
+        assert!(json.contains("\"humanOnly\":true"), "{json}");
+        let back: Board = serde_json::from_str(&json).unwrap();
+        let blocked = back.tasks[0].blocked.as_ref().unwrap();
+        assert_eq!(blocked.reason, "waiting for the release");
+        assert_eq!(blocked.by, "Eli");
+        assert_eq!(blocked.recheck.as_deref(), Some("2026-11-10"));
+    }
+
+    #[test]
+    fn next_task_skips_blocked_and_needs_you_tasks() {
+        let mut board = Board::default();
+        let blocked = todo_task(&mut board);
+        let needs_you = todo_task(&mut board);
+        let free = todo_task(&mut board);
+        board.find_mut(&blocked).unwrap().priority = 9;
+        board.find_mut(&needs_you).unwrap().priority = 8;
+        board.find_mut(&needs_you).unwrap().labels = vec![NEEDS_YOU_LABEL.into()];
+        block_task(&mut board, &blocked, block("npm release"), TODAY).unwrap();
+
+        assert_eq!(next_task(&board).unwrap().id, free);
+        unblock_task(&mut board, &blocked, UnblockRequest::default()).unwrap();
+        assert_eq!(next_task(&board).unwrap().id, blocked);
+    }
+
+    #[test]
+    fn claims_refuse_a_blocked_task_and_say_why() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(&mut board, &id, block("npm release"), TODAY).unwrap();
+
+        let plain = claim_task(&mut board, &id, "ava").unwrap_err();
+        assert!(plain.contains("npm release"), "{plain}");
+        let worker = claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap_err();
+        assert!(
+            worker.contains("blocked") && worker.contains("npm release"),
+            "{worker}"
+        );
+        let task = &board.tasks[0];
+        assert_eq!((task.column.as_str(), task.attempts), ("todo", 0));
+        assert!(task.assignee.is_none());
+    }
+
+    #[test]
+    fn a_blocked_task_is_not_done_for_the_tasks_waiting_on_it() {
+        let mut board = Board::default();
+        let first = todo_task(&mut board);
+        let second = todo_task(&mut board);
+        board.find_mut(&second).unwrap().depends_on = vec![first.clone()];
+        block_task(&mut board, &first, block("a decision"), TODAY).unwrap();
+
+        assert!(next_task(&board).is_none());
+        let refused = claim_for_worker(&mut board, &second, "Leo", 2, false).unwrap_err();
+        assert!(refused.contains("blocked: a decision"), "{refused}");
+    }
+
+    #[test]
+    fn a_block_needs_a_reason_of_reasonable_length() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        for empty in ["", "   \n"] {
+            let refused = block_task(&mut board, &id, block(empty), TODAY).unwrap_err();
+            assert!(refused.contains("reason"), "{refused}");
+        }
+        let long = "x".repeat(MAX_BLOCK_REASON + 1);
+        assert!(block_task(&mut board, &id, block(&long), TODAY).is_err());
+        assert!(board.tasks[0].blocked.is_none());
+
+        let kept = block_task(&mut board, &id, block("  trimmed  "), TODAY).unwrap();
+        assert_eq!(kept.blocked.unwrap().reason, "trimmed");
+    }
+
+    #[test]
+    fn blocking_a_task_in_doing_frees_its_files_and_keeps_the_attempt() {
+        let mut board = Board::default();
+        let mine = owned(&mut board, "mine", &["src/a/"]);
+        let other = owned(&mut board, "other", &["src/a/"]);
+        claim_for_worker(&mut board, &mine, "Leo", 2, false).unwrap();
+        assert!(claim_for_worker(&mut board, &other, "Mia", 2, false).is_err());
+
+        let blocked = block_task(&mut board, &mine, block("waiting"), TODAY).unwrap();
+        assert_eq!(
+            (
+                blocked.column.as_str(),
+                blocked.assignee.as_deref(),
+                blocked.attempts
+            ),
+            ("todo", None, 0)
+        );
+        assert!(blocked.doing_since.is_none());
+        claim_for_worker(&mut board, &other, "Mia", 2, false).unwrap();
+    }
+
+    #[test]
+    fn done_and_review_tasks_cannot_be_blocked() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        move_to(&mut board, &id, "review");
+        let review = block_task(&mut board, &id, block("x"), TODAY).unwrap_err();
+        assert!(review.contains("review"), "{review}");
+        move_to(&mut board, &id, "done");
+        let done = block_task(&mut board, &id, block("x"), TODAY).unwrap_err();
+        assert!(done.contains("done"), "{done}");
+        assert!(board.tasks[0].blocked.is_none());
+    }
+
+    #[test]
+    fn a_blocked_task_stays_in_todo() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(&mut board, &id, block("npm release"), TODAY).unwrap();
+        let refused = patch_task(
+            &mut board,
+            &id,
+            TaskPatch {
+                column: Some("doing".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(refused.contains("npm release"), "{refused}");
+        assert!(board.tasks[0].blocked.is_some());
+        assert_eq!(board.tasks[0].column, "todo");
+    }
+
+    #[test]
+    fn human_only_is_lifted_by_the_window_alone() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(
+            &mut board,
+            &id,
+            BlockRequest {
+                human_only: true,
+                ..block("the person decides")
+            },
+            TODAY,
+        )
+        .unwrap();
+
+        let agent = unblock_task(&mut board, &id, UnblockRequest::default()).unwrap_err();
+        assert!(agent.contains("person must unblock"), "{agent}");
+        // An agent cannot replace the block either.
+        assert!(block_task(&mut board, &id, block("softer"), TODAY).is_err());
+        assert!(board.tasks[0].blocked.is_some());
+
+        let lifted = unblock_task(
+            &mut board,
+            &id,
+            UnblockRequest {
+                person: true,
+                note: Some("decided".into()),
+                by: Some("simn".into()),
+            },
+        )
+        .unwrap();
+        assert!(lifted.blocked.is_none());
+        let last = lifted.comments.last().unwrap();
+        assert!(
+            last.text.contains("simn") && last.text.contains("decided"),
+            "{last:?}"
+        );
+    }
+
+    #[test]
+    fn unblocking_a_task_that_is_not_blocked_says_so() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        let refused = unblock_task(&mut board, &id, UnblockRequest::default()).unwrap_err();
+        assert!(refused.contains("not blocked"), "{refused}");
+    }
+
+    #[test]
+    fn a_recheck_in_the_past_is_refused_and_a_bad_date_too() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        let with = |day: &str| BlockRequest {
+            recheck: Some(day.into()),
+            ..block("waiting")
+        };
+        let past = block_task(&mut board, &id, with("2026-11-01"), TODAY).unwrap_err();
+        assert!(past.contains("past"), "{past}");
+        assert!(block_task(&mut board, &id, with("next week"), TODAY).is_err());
+        assert!(board.tasks[0].blocked.is_none());
+        block_task(&mut board, &id, with(TODAY), TODAY).unwrap();
+        assert_eq!(
+            board.tasks[0].blocked.as_ref().unwrap().recheck.as_deref(),
+            Some(TODAY)
+        );
+    }
+
+    #[test]
+    fn a_recheck_that_has_passed_unblocks_with_a_comment() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(
+            &mut board,
+            &id,
+            BlockRequest {
+                recheck: Some("2026-11-05".into()),
+                ..block("waiting")
+            },
+            TODAY,
+        )
+        .unwrap();
+
+        // The day itself is not "passed".
+        assert!(!sweep_rechecks(&mut board, "2026-11-05"));
+        assert!(board.tasks[0].blocked.is_some());
+
+        assert!(sweep_rechecks(&mut board, "2026-11-06"));
+        let task = &board.tasks[0];
+        assert!(task.blocked.is_none());
+        let note = task.comments.last().unwrap();
+        assert_eq!(note.author, HANGAR_AUTHOR);
+        assert!(note.text.starts_with("recheck passed"), "{}", note.text);
+        assert!(!sweep_rechecks(&mut board, "2026-11-07"));
+    }
+
+    #[test]
+    fn a_human_only_recheck_reminds_once_and_stays_blocked() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        block_task(
+            &mut board,
+            &id,
+            BlockRequest {
+                recheck: Some("2026-11-05".into()),
+                human_only: true,
+                ..block("waiting")
+            },
+            TODAY,
+        )
+        .unwrap();
+
+        assert!(sweep_rechecks(&mut board, "2026-11-06"));
+        assert!(board.tasks[0].blocked.as_ref().unwrap().reminded.is_some());
+        assert_eq!(board.tasks[0].comments.len(), 1);
+        assert!(!sweep_rechecks(&mut board, "2026-11-07"));
+        assert_eq!(board.tasks[0].comments.len(), 1);
+    }
+
+    #[test]
+    fn reading_the_board_acts_on_a_recheck_that_has_passed() {
+        let dir = temp_workspace("recheck");
+        let cwd = dir.to_string_lossy().into_owned();
+        seed(
+            &board_path(&cwd),
+            r#"{"tasks":[{"id":"a","title":"t","column":"todo","created_at":1,"updated_at":1,
+            "blocked":{"reason":"waiting","by":"Eli","since":1,"recheck":"2020-01-01"}}]}"#,
+        );
+
+        let store = BoardStore::default();
+        let board = store.read(&cwd);
+
+        assert!(board.tasks[0].blocked.is_none());
+        assert!(read_board(&cwd).tasks[0].blocked.is_none(), "kept on disk");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_patch_can_block_and_unblock() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        let blocked = patch_task(
+            &mut board,
+            &id,
+            TaskPatch {
+                block: Some(block("a package release")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(blocked.blocked.unwrap().by, "Eli");
+        let free = patch_task(
+            &mut board,
+            &id,
+            TaskPatch {
+                unblock: Some(UnblockRequest::default()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(free.blocked.is_none());
     }
 
     #[test]

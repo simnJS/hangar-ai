@@ -72,6 +72,14 @@ change: create tasks with `board_create_task` so other agents can pick them up.
   to never hand out work that cannot start yet.
 - Use `priority` (integer, higher is more urgent) for work that unblocks others.
 
+### Waiting on something outside the board
+
+When a task cannot go on because of a package release, a person's decision or a date,
+call `board_block_task` with a `reason` (and `recheck`, the day to look again), not a
+comment: the task returns to `todo`, nobody picks it up, and the next agent does not
+repeat your check. If it was your task, stop there and do not deliver. Once the wait
+is over, `board_unblock_task`; a `human_only` block is lifted by the person alone.
+
 ### Columns
 
 | Column   | Meaning |
@@ -350,6 +358,14 @@ mod tests {
 
     /// Same reason as the memory tools: an agent that has never read about
     /// `model_show` hands the user a file path instead.
+    #[test]
+    fn the_generated_block_teaches_blocking_a_task() {
+        let block = playbook();
+        for tool in ["board_block_task", "board_unblock_task"] {
+            assert!(block.contains(tool), "playbook never mentions {tool}");
+        }
+    }
+
     #[test]
     fn the_generated_block_names_the_model_tools() {
         let block = playbook();
