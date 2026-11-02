@@ -985,6 +985,9 @@ async function workspaceCreate(
   if (args.name !== undefined && args.name !== null && typeof args.name !== "string") {
     throw new Error("name must be a string.");
   }
+  if (args.parent !== undefined && args.parent !== null && typeof args.parent !== "string") {
+    throw new Error("parent must be a string: an absolute folder, such as E:\\ or /mnt/data.");
+  }
   const repo = text(args.repo);
   if (!repo) throw new Error("Give repo: owner/repo, or the repository's https or ssh address.");
 
@@ -993,6 +996,7 @@ async function workspaceCreate(
     {
       repo,
       name: text(args.name),
+      parent: text(args.parent),
       origin: { kind: "agent", pane: caller.paneName },
       askerCwd: asker?.cwd ?? caller.cwd,
     },
@@ -1027,6 +1031,8 @@ async function workspaceCreate(
     repository: outcome.repo.url,
     yours: outcome.mine,
     cloned: !outcome.reusedFolder,
+    // Where it landed: the person is told it, with no card for their own repository.
+    folder: workspace.cwd,
     firstMessage:
       "queued for the orchestrator: it reads the repository, installs its dependencies, sets the check command, " +
       "runs the tests once and reports. It then waits for an objective, which the person gives it or you pass on with pane_send.",

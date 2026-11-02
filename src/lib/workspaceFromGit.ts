@@ -4,6 +4,7 @@ import { workspaceFromGitText } from "../strings/workspaceFromGit";
 import {
   cleanRepoInput,
   defaultCloneFolder,
+  type CloneRefusalKind,
   type CloneResult,
   type Ownership,
   type RepoParse,
@@ -36,6 +37,11 @@ export interface FromGitRequest {
   repo: string;
   /** The workspace's name; the repository's by default. */
   name?: string | null;
+  /**
+   * The folder the clone lands in, when the person said where: absolute, on any
+   * drive. Used over the projects folder setting, which it never changes.
+   */
+  parent?: string | null;
   origin: FromGitOrigin;
   /** The folder of the workspace asking: where the clone goes when no projects folder is set. */
   askerCwd: string | null;
@@ -119,6 +125,7 @@ export type FromGitRefusal =
   | "invalidRepo"
   | "invalidName"
   | "noDestination"
+  | "invalidParent"
   | "declined"
   | "noDecision"
   | "folderBusy"
@@ -151,6 +158,28 @@ const refuse = (kind: FromGitRefusal, reason: string): FromGitOutcome => ({
   reason,
 });
 
+/** What the agent does next, for each way a clone can be refused: one sentence. */
+function nextStep(kind: CloneRefusalKind): string {
+  switch (kind) {
+    case "exists":
+      return "Nothing was changed there: call again with another `parent` (the clone goes in <parent>/<repository>) rather than asking the person.";
+    case "invalidDestination":
+      return "Nothing was cloned: call again with `parent` set to an absolute folder that exists or can be made, away from system folders.";
+    case "gitMissing":
+      return "Nothing was cloned: git is not installed or not on PATH, which only the person can fix; tell them.";
+    case "cancelled":
+      return "The person cancelled it in Hangar: do not retry unless they ask.";
+    case "timeout":
+      return "Nothing was kept: the folder was taken back; tell the person, and call again only if they want to retry.";
+    case "busy":
+      return "Another clone is running with the same id: call again in a moment.";
+    case "invalidUrl":
+      return "Call again with the repository as owner/repo or its https or ssh address.";
+    default:
+      return "The folder was left as it was found: check the reason above, and call again once it is fixed (another `parent` if the disk is the problem).";
+  }
+}
+
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /* ── paths ─────────────────────────────────────────────────────── */
@@ -177,6 +206,35 @@ export const sameRepoUrl = (a: string, b: string) => {
   const flat = (url: string) => url.trim().replace(/\/+$/, "").replace(/\.git$/i, "");
   return flat(a) === flat(b);
 };
+
+/**
+ * Why `parent` can never receive a clone, seen before anyone is asked: not
+ * absolute, `..` in it, or an operating system folder. Rust judges again, with
+ * the real paths of the machine, and also refuses Hangar's own data.
+ */
+export function parentProblem(parent: string): string | null {
+  const path = parent.trim();
+  if (!/^([a-zA-Z]:[\\/]|\\\\|\/)/.test(path)) {
+    return `parent must be an absolute folder, such as E:\\ or /mnt/data (got "${path}"). Call again with an absolute parent; find the drive yourself.`;
+  }
+  const parts = path.split(/[\\/]+/);
+  if (parts.includes("..")) {
+    return "parent cannot hold `..`. Call again with the folder written out in full.";
+  }
+  const flat = parts.map((part) => part.toLowerCase());
+  const windows = /^[a-z]:$/.test(flat[0] ?? "") || path.startsWith("\\\\");
+  const unixSystem = ["bin", "sbin", "usr", "etc", "boot", "dev", "proc", "sys", "lib", "lib64", "system", "library"];
+  const system = windows
+    ? flat[1] === "windows" ||
+      flat[1] === "program files" ||
+      flat[1] === "program files (x86)" ||
+      flat.includes("system volume information")
+    : unixSystem.includes(flat[1] ?? "");
+  if (system) {
+    return `${path} is a folder of the operating system: nothing is cloned there. Call again with another parent, such as a data drive or a projects folder.`;
+  }
+  return null;
+}
 
 /** Why a second repository cannot take a folder the first is already using. */
 const busyReason = (url: string, destination: string) =>
@@ -342,11 +400,17 @@ export async function workspaceFromGit(
     return refuse("invalidName", "The workspace name must be one line of at most 80 characters.");
   }
 
-  const parent = resolveParent(null, deps.projectsFolder(), request.askerCwd);
+  const asked = request.parent?.trim() || null;
+  if (asked) {
+    const problem = parentProblem(asked);
+    if (problem) return refuse("invalidParent", problem);
+  }
+  const parent = resolveParent(asked, deps.projectsFolder(), request.askerCwd);
   if (!parent) {
     return refuse(
       "noDestination",
-      "Hangar has no folder to clone into: no projects folder is set, and the workspace asking has no parent folder.",
+      "Hangar has no folder to clone into: no projects folder is set, and the workspace asking has no parent folder. " +
+        "Call again with `parent`, an absolute folder (find the drive yourself if the person named one); the person can also set Settings › General › Projects folder.",
     );
   }
   const destination = joinFolder(parent, defaultCloneFolder(repo));
@@ -400,7 +464,7 @@ async function proceed(
     });
     if (answer === "busy") return refuse("folderBusy", busyReason(repo.url, destination));
     if (answer === "refuse") {
-      return refuse("declined", "The person refused to clone this repository. Nothing was cloned and no workspace was made.");
+      return refuse("declined", "The person refused to clone this repository. Nothing was cloned and no workspace was made. Do not ask again unless they bring it up.");
     }
     if (answer === "timeout") {
       return refuse(
@@ -421,7 +485,7 @@ async function proceed(
     return refuse("cloneFailed", `The clone failed: ${messageOf(err)}`);
   }
   if (cloned.status !== "cloned") {
-    return refuse("cloneFailed", `The clone was refused (${cloned.kind}): ${cloned.reason}`);
+    return refuse("cloneFailed", `The clone was refused (${cloned.kind}): ${cloned.reason}. ${nextStep(cloned.kind)}`);
   }
   // Only a folder this very call made is this call's to take back.
   const madeFolder = !cloned.reused;

@@ -338,6 +338,72 @@ describe("where it is cloned", () => {
     expect(log).toContain("clone:https://github.com/acme/shop.git:/home/me/code:shop");
   });
 
+  it("goes to the given parent over the projects folder and the asker's folder", async () => {
+    const { deps, log } = fakes({ mine: true, projectsFolder: "D:\\Projects" });
+    const outcome = await workspaceFromGit(byAgent("boykopovar/AnyPS5", { parent: " E:\\ " }), deps);
+    expect(log).toContain("clone:https://github.com/boykopovar/AnyPS5.git:E:\\:AnyPS5");
+    expect(log).toContain("find:E:\\AnyPS5");
+    expect(outcome).toMatchObject({ status: "created", workspace: { cwd: expect.stringMatching(/^E:.*AnyPS5$/) } });
+  });
+
+  it("works without any projects folder or parent folder when the person says where", async () => {
+    const { deps, log } = fakes({ mine: true });
+    await workspaceFromGit(byAgent("acme/shop", { parent: "/mnt/ssd/code", askerCwd: null }), deps);
+    expect(log).toContain("clone:https://github.com/acme/shop.git:/mnt/ssd/code:shop");
+  });
+
+  it("shows the person the given destination before cloning a repository that is not theirs", async () => {
+    const { deps, consents } = fakes({ mine: false });
+    await workspaceFromGit(byAgent("evil/tool", { parent: "E:\\" }), deps);
+    expect(consents.map((card) => card.destination)).toEqual(["E:\\tool"]);
+  });
+
+  it("never writes the projects folder: the dependencies have no way to", async () => {
+    const { deps } = fakes({ mine: true, projectsFolder: "D:\\Projects" });
+    await workspaceFromGit(byAgent("acme/shop", { parent: "E:\\" }), deps);
+    expect(Object.keys(deps).filter((key) => /set.*folder|write/i.test(key))).toEqual([]);
+    expect(deps.projectsFolder()).toBe("D:\\Projects");
+  });
+
+  it("refuses a parent that is relative, holds .., or is the system's, before asking or cloning anything", async () => {
+    for (const parent of [
+      "projects",
+      "..\\projects",
+      "E:\\a\\..\\b",
+      "/home/me/../x",
+      "C:\\Windows\\System32",
+      "C:\\Program Files (x86)\\x",
+      "E:\\System Volume Information",
+      "/etc/cron.d",
+      "/usr",
+    ]) {
+      const { deps, log } = fakes({ mine: false });
+      const outcome = await workspaceFromGit(byAgent("evil/tool", { parent }), deps);
+      expect(outcome, parent).toMatchObject({ status: "refused", kind: "invalidParent" });
+      if (outcome.status === "refused") expect(outcome.reason, parent).toMatch(/Call again/);
+      expect(log.some((entry) => /^(ownership|consent|clone|workspace)/.test(entry)), parent).toBe(false);
+    }
+  });
+
+  it("tells the agent the next step for every refusal of the clone, in one sentence", async () => {
+    for (const kind of ["exists", "invalidDestination", "gitMissing", "cancelled", "timeout", "failed", "busy", "invalidUrl"] as const) {
+      const { deps } = fakes({ mine: true, clone: { status: "refused", kind, reason: "because" } });
+      const outcome = await workspaceFromGit(byAgent("acme/shop", { parent: "E:\\" }), deps);
+      expect(outcome, kind).toMatchObject({ status: "refused", kind: "cloneFailed" });
+      if (outcome.status === "refused") expect(outcome.reason, kind).toMatch(/because\. [A-Z].+[.]$/);
+    }
+  });
+
+  it("points the agent at parent and at the setting when there is no folder at all", async () => {
+    const { deps } = fakes({ mine: true });
+    const outcome = await workspaceFromGit(byAgent("a/b", { askerCwd: null }), deps);
+    expect(outcome).toMatchObject({ status: "refused", kind: "noDestination" });
+    if (outcome.status === "refused") {
+      expect(outcome.reason).toContain("`parent`");
+      expect(outcome.reason).toContain("Settings › General › Projects folder");
+    }
+  });
+
   it("reads the projects folder from the settings when they have one, and only then", () => {
     expect(projectsFolderOf({})).toBeNull();
     expect(projectsFolderOf({ projectsFolder: "  " })).toBeNull();

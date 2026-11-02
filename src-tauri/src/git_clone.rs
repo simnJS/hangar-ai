@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -598,6 +598,227 @@ fn folder_name_problem(name: &str) -> Option<&'static str> {
 }
 
 // ---------------------------------------------------------------------------
+// Where a clone may land
+// ---------------------------------------------------------------------------
+
+/// The comparable form of `path`, resolved as far as it exists, so a link
+/// cannot hide a protected folder and a folder yet to be made can be judged.
+fn resolved(path: &Path) -> String {
+    let mut tail = Vec::new();
+    let mut current = path.to_path_buf();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(&current) {
+            let mut out = real;
+            for part in tail.iter().rev() {
+                out.push(part);
+            }
+            return comparable(&out);
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(up), Some(name)) => {
+                tail.push(name.to_os_string());
+                current = up.to_path_buf();
+            }
+            _ => return comparable(path),
+        }
+    }
+}
+
+fn is_under(path: &str, root: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    !root.is_empty() && (path == root || path.starts_with(&format!("{root}/")))
+}
+
+/// The folders of the operating system itself, where nothing is cloned.
+fn system_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if cfg!(windows) {
+        for var in [
+            "SystemRoot",
+            "windir",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+        ] {
+            if let Some(value) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+                roots.push(PathBuf::from(value));
+            }
+        }
+    } else {
+        for fixed in [
+            "/bin",
+            "/sbin",
+            "/usr",
+            "/etc",
+            "/boot",
+            "/dev",
+            "/proc",
+            "/sys",
+            "/lib",
+            "/lib32",
+            "/lib64",
+            "/System",
+            "/Library",
+            "/private/etc",
+        ] {
+            roots.push(PathBuf::from(fixed));
+        }
+    }
+    roots
+}
+
+/// Where Hangar keeps its own data.
+fn hangar_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.join(".hangar"));
+    }
+    for base in [dirs::data_dir(), dirs::data_local_dir(), dirs::config_dir()]
+        .into_iter()
+        .flatten()
+    {
+        roots.push(base.join("com.simnjs.iabench"));
+    }
+    roots
+}
+
+/// Why `parent` cannot receive a clone, if it cannot. Anywhere else is fine:
+/// another drive, a removable one, a network one.
+fn parent_problem(parent: &Path) -> Option<String> {
+    if !parent.is_absolute() {
+        return Some(
+            "the parent folder must be an absolute path (such as E:\\ or /mnt/data): pass one"
+                .to_string(),
+        );
+    }
+    if parent
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Some("the parent folder path cannot hold `..`: pass it without".to_string());
+    }
+    let real = resolved(parent);
+    let system = format!(
+        "{} is a folder of the operating system: nothing is cloned there, pick another one",
+        parent.display()
+    );
+    if real
+        .split('/')
+        .any(|part| part == "system volume information" || part == "$recycle.bin")
+    {
+        return Some(system);
+    }
+    if system_roots()
+        .iter()
+        .any(|root| is_under(&real, &resolved(root)))
+    {
+        return Some(system);
+    }
+    if hangar_roots()
+        .iter()
+        .any(|root| is_under(&real, &resolved(root)))
+    {
+        return Some(format!(
+            "{} is where Hangar keeps its own data: nothing is cloned there, pick another folder",
+            parent.display()
+        ));
+    }
+    None
+}
+
+/// Makes `parent` and the folders above it that are missing. Hands back what it
+/// made, shallowest first; on failure it takes that back.
+fn make_parents(parent: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut missing = Vec::new();
+    let mut current = parent.to_path_buf();
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(_) => {
+                if !std::fs::metadata(&current).is_ok_and(|meta| meta.is_dir()) {
+                    return Err(format!(
+                        "{} is not a folder: pass a folder as the parent",
+                        current.display()
+                    ));
+                }
+                break;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.clone());
+                match current.parent() {
+                    Some(up) => current = up.to_path_buf(),
+                    None => break,
+                }
+            }
+            Err(_) => return Err("the parent folder cannot be checked".to_string()),
+        }
+    }
+    missing.reverse();
+    let mut made = Vec::new();
+    for folder in missing {
+        match std::fs::create_dir(&folder) {
+            Ok(()) => made.push(folder),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => {
+                undo_parents(&made);
+                return Err(format!(
+                    "{} cannot be created (is the drive connected and writable?)",
+                    folder.display()
+                ));
+            }
+        }
+    }
+    Ok(made)
+}
+
+/// Removes folders this call made, deepest first, only while they are empty.
+fn undo_parents(made: &[PathBuf]) {
+    for folder in made.iter().rev() {
+        let _ = std::fs::remove_dir(folder);
+    }
+}
+
+fn is_empty_dir(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none())
+}
+
+/// What a clone in progress made, to be taken back if it does not end well.
+struct Made {
+    dest: PathBuf,
+    /// The destination existed, empty: it goes back to that, and stays.
+    adopted: bool,
+    parents: Vec<PathBuf>,
+}
+
+impl Made {
+    /// A killed git can hold its files for a moment (Windows), and a removal
+    /// that fails quietly is how a cancelled clone leaves a folder on a disk.
+    /// So it is retried until the folder is as it was found.
+    fn undo(&self) {
+        for attempt in 0..30 {
+            if self.adopted {
+                if let Ok(entries) = std::fs::read_dir(&self.dest) {
+                    for entry in entries.flatten() {
+                        remove_tree(&entry.path());
+                    }
+                }
+                if is_empty_dir(&self.dest) {
+                    break;
+                }
+            } else {
+                remove_tree(&self.dest);
+                if std::fs::symlink_metadata(&self.dest).is_err() {
+                    break;
+                }
+            }
+            if attempt < 29 {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+        undo_parents(&self.parents);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Cloning
 // ---------------------------------------------------------------------------
 
@@ -766,6 +987,10 @@ struct MadeClone {
     /// The destination folder, as it was when the clone was made.
     parent_real: String,
     made_at: Instant,
+    /// The folder was there, empty, before the clone: it is emptied, not removed.
+    adopted: bool,
+    /// Folders above the destination that this clone made.
+    parents: Vec<PathBuf>,
 }
 
 /// Where a path is looked up: separators and case flattened, never resolved,
@@ -786,13 +1011,15 @@ fn made_clones() -> &'static Mutex<HashMap<String, MadeClone>> {
 }
 
 /// Remembers that this process made `dest` in `parent`.
-fn remember_made(dest: &Path, parent: &Path) {
+fn remember_made(dest: &Path, parent: &Path, made: &Made) {
     if let Ok(mut table) = made_clones().lock() {
         table.insert(
             lexical_key(dest),
             MadeClone {
                 parent_real: comparable(parent),
                 made_at: Instant::now(),
+                adopted: made.adopted,
+                parents: made.parents.clone(),
             },
         );
     }
@@ -882,10 +1109,24 @@ fn discard_clone(path: &str, window: Duration) -> DiscardOutcome {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return DiscardOutcome::Removed,
         Err(_) => return discard_refused("failed", "the folder cannot be checked"),
     }
-    remove_tree(dest);
-    match std::fs::symlink_metadata(dest) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => DiscardOutcome::Removed,
-        _ => discard_refused("failed", "the folder could not be fully removed"),
+    let undo = Made {
+        dest: dest.to_path_buf(),
+        adopted: made.adopted,
+        parents: made.parents,
+    };
+    undo.undo();
+    let gone = if undo.adopted {
+        is_empty_dir(dest)
+    } else {
+        matches!(
+            std::fs::symlink_metadata(dest),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound
+        )
+    };
+    if gone {
+        DiscardOutcome::Removed
+    } else {
+        discard_refused("failed", "the folder could not be fully removed")
     }
 }
 
@@ -943,55 +1184,80 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
         return refused("invalidDestination", problem);
     }
     let parent = Path::new(request.parent);
-    if !parent.is_absolute() {
-        return refused(
-            "invalidDestination",
-            "the parent folder must be an absolute path",
-        );
-    }
-    match std::fs::metadata(parent) {
-        Ok(meta) if meta.is_dir() => {}
-        _ => return refused("invalidDestination", "the parent folder does not exist"),
+    if let Some(problem) = parent_problem(parent) {
+        return refused("invalidDestination", problem);
     }
     let Some(registered) = Registered::new(request.job_id) else {
         return refused("busy", "a clone is already running under this job id");
     };
+    // A folder that is missing in `parent` is made; what this call made it
+    // takes back if the clone does not happen.
+    let parents = match make_parents(parent) {
+        Ok(made) => made,
+        Err(reason) => return refused("invalidDestination", reason),
+    };
     let dest = parent.join(request.name);
 
+    // An existing EMPTY folder is cloned into, as git allows. It was not made
+    // here, so it is never deleted: a failure puts it back empty.
+    let mut adopted = false;
     match std::fs::symlink_metadata(&dest) {
         Ok(meta) => {
-            if meta.is_dir() && !is_link(&meta) && is_same_clone(&dest, &repo) {
-                forget_made(&dest);
-                return CloneOutcome::Cloned {
-                    path: dest.to_string_lossy().into_owned(),
-                    reused: true,
-                    branch: current_branch(&dest),
-                };
+            if meta.is_dir() && !is_link(&meta) {
+                if is_same_clone(&dest, &repo) {
+                    undo_parents(&parents);
+                    forget_made(&dest);
+                    return CloneOutcome::Cloned {
+                        path: dest.to_string_lossy().into_owned(),
+                        reused: true,
+                        branch: current_branch(&dest),
+                    };
+                }
+                if is_empty_dir(&dest) {
+                    adopted = true;
+                }
             }
-            return refused(
-                "exists",
-                "a different file or folder is already there; nothing was changed",
-            );
+            if !adopted {
+                undo_parents(&parents);
+                return refused(
+                    "exists",
+                    format!(
+                        "{} already holds other files, or another repository; nothing was touched there",
+                        dest.display()
+                    ),
+                );
+            }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return refused("invalidDestination", "the destination cannot be checked"),
+        Err(_) => {
+            undo_parents(&parents);
+            return refused("invalidDestination", "the destination cannot be checked");
+        }
     }
 
     // Created here, atomically: from now on the folder is this call's, and a
     // folder somebody else makes in the meantime fails this and is left alone.
-    if let Err(err) = std::fs::create_dir(&dest) {
-        return if err.kind() == std::io::ErrorKind::AlreadyExists {
-            refused(
-                "exists",
-                "a file or folder appeared there; nothing was changed",
-            )
-        } else {
-            refused(
-                "invalidDestination",
-                "the destination folder cannot be created",
-            )
-        };
+    if !adopted {
+        if let Err(err) = std::fs::create_dir(&dest) {
+            undo_parents(&parents);
+            return if err.kind() == std::io::ErrorKind::AlreadyExists {
+                refused(
+                    "exists",
+                    format!("{} appeared there; nothing was touched", dest.display()),
+                )
+            } else {
+                refused(
+                    "invalidDestination",
+                    "the destination folder cannot be created",
+                )
+            };
+        }
     }
+    let made = Made {
+        dest: dest.clone(),
+        adopted,
+        parents,
+    };
 
     let mut command = git_command();
     command
@@ -1024,7 +1290,7 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) => {
-            remove_tree(&dest);
+            made.undo();
             return if err.kind() == std::io::ErrorKind::NotFound {
                 refused("gitMissing", "git was not found on PATH")
             } else {
@@ -1125,19 +1391,19 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
                 take(line, &mut said);
             }
             if status.success() {
-                remember_made(&dest, parent);
+                remember_made(&dest, parent, &made);
                 CloneOutcome::Cloned {
                     path: dest.to_string_lossy().into_owned(),
                     reused: false,
                     branch: current_branch(&dest),
                 }
             } else {
-                remove_tree(&dest);
+                made.undo();
                 refused("failed", diagnostic(&said))
             }
         }
         Err(outcome) => {
-            remove_tree(&dest);
+            made.undo();
             outcome
         }
     }
@@ -1178,7 +1444,6 @@ pub async fn git_clone(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn ok(input: &str) -> RepoRef {
         parse_repo(input).unwrap_or_else(|why| panic!("{input:?} refused: {why}"))
@@ -1628,8 +1893,6 @@ mod tests {
         std::fs::write(plain.join("note.txt"), "keep").unwrap();
         // A plain file.
         std::fs::write(parent.join("afile"), "keep").unwrap();
-        // An empty folder is not ours either.
-        std::fs::create_dir_all(parent.join("empty")).unwrap();
         // A repository of another origin.
         let other = parent.join("other");
         std::fs::create_dir_all(&other).unwrap();
@@ -1650,11 +1913,11 @@ mod tests {
         // A folder inside a repository is not a repository root.
         let inner = other.join("sub");
         std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("keep.txt"), "keep").unwrap();
 
         for (name, parent_dir) in [
             ("plain", parent_s.clone()),
             ("afile", parent_s.clone()),
-            ("empty", parent_s.clone()),
             ("other", parent_s.clone()),
             ("nothing", parent_s.clone()),
             ("sub", other.to_string_lossy().into_owned()),
@@ -1676,7 +1939,6 @@ mod tests {
             std::fs::read_to_string(parent.join("afile")).unwrap(),
             "keep"
         );
-        assert!(parent.join("empty").is_dir());
         assert!(other.join(".git").is_dir() && nothing.join(".git").is_dir());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1706,13 +1968,23 @@ mod tests {
         check(FAKE, &parent_s, "..", "invalidDestination");
         check(FAKE, &parent_s, "a/b", "invalidDestination");
         check(FAKE, "relative/dir", "x", "invalidDestination");
+        // A file where the parent folder should be.
+        let file = root.join("afile");
+        std::fs::write(&file, "keep").unwrap();
         check(
             FAKE,
-            &root.join("missing").to_string_lossy(),
+            &file.join("inside").to_string_lossy(),
             "x",
             "invalidDestination",
         );
-        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        // `..` in the parent, even when it would land somewhere harmless.
+        check(
+            FAKE,
+            &format!("{}/sub/../other", root.to_string_lossy()),
+            "x",
+            "invalidDestination",
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
 
         // A job id in use is refused.
         let id = job_id("busy");
@@ -2025,6 +2297,240 @@ mod tests {
             std::fs::read_to_string(outside.join("precious.txt")).unwrap(),
             "keep"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // -- an empty folder, and folders yet to be made -----------------------------
+
+    #[test]
+    fn an_empty_folder_is_cloned_into_and_not_called_reused() {
+        let root = temp_dir("empty-ok");
+        let bare = bare_source(&root);
+        let parent = root.join("projects");
+        let found = parent.join("hello");
+        std::fs::create_dir_all(&found).unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("e"), via(&bare)),
+            &|_, _| {},
+        );
+        let CloneOutcome::Cloned { path, reused, .. } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(!reused);
+        assert_eq!(PathBuf::from(&path), found);
+        assert!(found.join("README.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_clone_puts_the_found_empty_folder_back_empty() {
+        let root = temp_dir("empty-fail");
+        let parent = root.join("projects");
+        let found = parent.join("hello");
+        std::fs::create_dir_all(&found).unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        let missing = root.join("nope.git");
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("ef"), via(&missing)),
+            &|_, _| {},
+        );
+        assert!(
+            matches!(outcome, CloneOutcome::Refused { kind: "failed", .. }),
+            "{outcome:?}"
+        );
+        // Not made by this call: left in place, as empty as it was found.
+        assert!(found.is_dir());
+        assert_eq!(std::fs::read_dir(&found).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_cancelled_clone_puts_the_found_empty_folder_back_empty() {
+        let root = temp_dir("empty-cancel");
+        let parent = root.join("projects");
+        let found = parent.join("hello");
+        std::fs::create_dir_all(&found).unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        let hang = vec![
+            "protocol.ext.allow=always".to_string(),
+            format!("url.ext::sleep 60.insteadOf={FAKE}"),
+        ];
+        let id = job_id("ec");
+        let canceller = {
+            let id = id.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(700));
+                assert!(cancel_job(&id), "the job should be running");
+            })
+        };
+        let outcome = clone_into(&request(&parent_s, "hello", &id, hang), &|_, _| {});
+        canceller.join().unwrap();
+        assert!(
+            matches!(
+                outcome,
+                CloneOutcome::Refused {
+                    kind: "cancelled",
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert!(found.is_dir());
+        assert_eq!(std::fs::read_dir(&found).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_clone_removes_every_folder_it_made() {
+        let root = temp_dir("made-fail");
+        let existing = root.join("drive");
+        std::fs::create_dir_all(&existing).unwrap();
+        let parent = existing.join("a").join("b");
+        let parent_s = parent.to_string_lossy().into_owned();
+        let missing = root.join("nope.git");
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("mf"), via(&missing)),
+            &|_, _| {},
+        );
+        assert!(
+            matches!(outcome, CloneOutcome::Refused { kind: "failed", .. }),
+            "{outcome:?}"
+        );
+        // The destination and the parents this call made are gone; the
+        // folder that was there is not.
+        assert!(!existing.join("a").exists());
+        assert!(existing.is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_parent_folders_are_made() {
+        let root = temp_dir("parents");
+        let bare = bare_source(&root);
+        let parent = root.join("deep").join("er").join("projects");
+        let parent_s = parent.to_string_lossy().into_owned();
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("p"), via(&bare)),
+            &|_, _| {},
+        );
+        let CloneOutcome::Cloned { path, reused, .. } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(!reused);
+        assert!(Path::new(&path).join("README.md").is_file());
+        assert_eq!(PathBuf::from(path), parent.join("hello"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_non_empty_folder_is_refused_by_name_and_untouched() {
+        let root = temp_dir("nonempty");
+        let bare = bare_source(&root);
+        let parent = root.join("projects");
+        let found = parent.join("hello");
+        std::fs::create_dir_all(found.join("sub")).unwrap();
+        std::fs::write(found.join("note.txt"), "keep").unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("ne"), via(&bare)),
+            &|_, _| {},
+        );
+        match outcome {
+            CloneOutcome::Refused {
+                kind: "exists",
+                reason,
+            } => {
+                assert!(reason.contains(&*found.to_string_lossy()), "{reason}");
+                assert!(reason.contains("nothing was touched"), "{reason}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(found.join("note.txt")).unwrap(),
+            "keep"
+        );
+        assert!(found.join("sub").is_dir());
+        assert_eq!(std::fs::read_dir(&found).unwrap().count(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_clone_into_a_found_empty_folder_is_taken_back_to_empty() {
+        let root = temp_dir("empty-discard");
+        let bare = bare_source(&root);
+        let parent = root.join("projects");
+        let found = parent.join("hello");
+        std::fs::create_dir_all(&found).unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        let outcome = clone_into(
+            &request(&parent_s, "hello", &job_id("ed"), via(&bare)),
+            &|_, _| {},
+        );
+        assert!(
+            matches!(outcome, CloneOutcome::Cloned { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(discarded(&found), DiscardOutcome::Removed);
+        assert!(found.is_dir());
+        assert_eq!(std::fs::read_dir(&found).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn some_parents_are_never_cloned_into() {
+        let root = temp_dir("forbidden");
+        let mut refused_paths: Vec<String> = vec![
+            "relative/dir".to_string(),
+            format!("{}/a/../b", root.to_string_lossy()),
+        ];
+        if cfg!(windows) {
+            for var in ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)"] {
+                if let Ok(value) = std::env::var(var) {
+                    refused_paths.push(value.clone());
+                    refused_paths.push(format!("{value}\\Sub\\Deeper"));
+                }
+            }
+            refused_paths.push("C:\\System Volume Information".to_string());
+            refused_paths.push("C:\\System Volume Information\\x".to_string());
+        } else {
+            for fixed in ["/etc", "/usr/local", "/bin", "/System/Library", "/proc"] {
+                refused_paths.push(fixed.to_string());
+            }
+        }
+        if let Some(home) = dirs::home_dir() {
+            refused_paths.push(home.join(".hangar").to_string_lossy().into_owned());
+            refused_paths.push(
+                home.join(".hangar")
+                    .join("accounts")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        for path in &refused_paths {
+            assert!(parent_problem(Path::new(path)).is_some(), "{path}");
+            let outcome = clone_into(
+                &request(path, "hello", &job_id("fb"), Vec::new()),
+                &|_, _| {},
+            );
+            assert!(
+                matches!(
+                    outcome,
+                    CloneOutcome::Refused {
+                        kind: "invalidDestination",
+                        ..
+                    }
+                ),
+                "{path}: {outcome:?}"
+            );
+        }
+        // Another drive, a removable one or just another folder is fine.
+        assert!(parent_problem(&root).is_none());
+        assert!(parent_problem(&root.join("not").join("yet")).is_none());
+        if cfg!(windows) {
+            assert!(parent_problem(Path::new("E:\\")).is_none());
+            assert!(parent_problem(Path::new("D:\\Projects")).is_none());
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

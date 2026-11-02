@@ -1773,6 +1773,86 @@ describe("workspace_create", () => {
     );
   });
 
+  describe("parent: where the person said the clone goes", () => {
+    it("clones in the given folder over the projects folder, and says where", async () => {
+      const seen: string[] = [];
+      const { deps } = setup({ fromGit: { ...fakeFromGit(seen), projectsFolder: () => "D:\\projects" } });
+      const answer = (await runControl(
+        "workspace_create",
+        { ...fromAva, repo: "boykopovar/AnyPS5", parent: "E:\\" },
+        deps,
+      )) as any;
+      expect(seen[0]).toBe("clone:https://github.com/boykopovar/AnyPS5.git:E:\\:AnyPS5");
+      expect(answer).toMatchObject({ created: true, folder: expect.stringMatching(/^E:.*AnyPS5$/) });
+    });
+
+    it("shows the person the given destination when the repository is not theirs", async () => {
+      const seen: string[] = [];
+      const { deps } = setup({ fromGit: fakeFromGit(seen, false) });
+      await runControl("workspace_create", { ...fromAva, repo: "evil/tool", parent: "E:\\" }, deps);
+      expect(seen[0]).toBe("consent:Ava:E:\\tool");
+    });
+
+    it("uses the setting when no parent is given", async () => {
+      const seen: string[] = [];
+      const { deps } = setup({ fromGit: { ...fakeFromGit(seen), projectsFolder: () => "D:\\projects" } });
+      await runControl("workspace_create", { ...fromAva, repo: "a/b" }, deps);
+      expect(seen[0]).toBe("clone:https://github.com/a/b.git:D:\\projects:b");
+    });
+
+    it("refuses what can never receive a clone, and clones and asks nothing", async () => {
+      for (const parent of [
+        "relative\\dir",
+        "dir",
+        "~/projects",
+        "E:projects",
+        "C:\\a\\..\\b",
+        "/home/me/../you",
+        "C:\\Windows",
+        "c:\\windows\\system32",
+        "C:\\Program Files\\Tools",
+        "D:\\System Volume Information",
+        "/etc",
+        "/usr/local",
+      ]) {
+        const seen: string[] = [];
+        const { deps } = setup({ fromGit: fakeFromGit(seen, false) });
+        await expect(
+          runControl("workspace_create", { ...fromAva, repo: "evil/tool", parent }, deps),
+        ).rejects.toThrow(/Call again/);
+        expect(seen, parent).toEqual([]);
+      }
+    });
+
+    it("takes a drive, a removable one or a network share as they come", async () => {
+      for (const parent of ["E:\\", "F:/media", "\\\\nas\\share\\code", "/mnt/ssd", "/Volumes/SSD"]) {
+        const seen: string[] = [];
+        const { deps } = setup({ fromGit: fakeFromGit(seen) });
+        await runControl("workspace_create", { ...fromAva, repo: "a/b", parent }, deps);
+        expect(seen[0], parent).toMatch(/^clone:/);
+      }
+    });
+
+    it("wants a string", async () => {
+      const { deps } = setup({ fromGit: fakeFromGit() });
+      await expect(runControl("workspace_create", { ...fromAva, repo: "a/b", parent: 3 }, deps)).rejects.toThrow(
+        /parent must be a string/,
+      );
+    });
+
+    it("tells the agent what to do next when the folder cannot take the clone", async () => {
+      const { deps } = setup({
+        fromGit: {
+          ...fakeFromGit(),
+          clone: async () => ({ status: "refused", kind: "exists", reason: "E:\\a already holds other files; nothing was touched there" }),
+        },
+      });
+      await expect(
+        runControl("workspace_create", { ...fromAva, repo: "a/b", parent: "E:\\" }, deps),
+      ).rejects.toThrow(/nothing was touched there.*call again with another `parent`/i);
+    });
+  });
+
   it("is turned off with the rest of the pane control", async () => {
     const { deps } = setup({ fromGit: fakeFromGit(), enabled: () => false });
     await expect(runControl("workspace_create", { ...fromAva, repo: "a/b" }, deps)).rejects.toThrow(DISABLED);
