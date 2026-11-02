@@ -1,3 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
+import { systemLocale, type Locale } from "../i18n";
+import { workspaceFromGitText } from "../strings/workspaceFromGit";
 import {
   cleanRepoInput,
   defaultCloneFolder,
@@ -53,7 +56,12 @@ export interface ConsentRequest {
   by: string | null;
 }
 
-export type ConsentAnswer = "allow" | "refuse" | "timeout";
+/**
+ * `busy`: another repository is already waiting for the person's word on this
+ * very folder. It is not an answer of theirs: the card they see belongs to the
+ * other repository, so this request is refused at once and nothing is asked.
+ */
+export type ConsentAnswer = "allow" | "refuse" | "timeout" | "busy";
 
 export interface WorkspaceRef {
   id: string;
@@ -113,6 +121,7 @@ export type FromGitRefusal =
   | "noDestination"
   | "declined"
   | "noDecision"
+  | "folderBusy"
   | "cloneFailed"
   | "failed";
 
@@ -162,6 +171,17 @@ export function joinFolder(parent: string, name: string): string {
   const separator = separatorOf(parent);
   return `${parent.replace(/[\\/]+$/, "")}${separator}${name}`;
 }
+
+/** The same repository address: a trailing slash or `.git` does not tell two repositories apart. */
+export const sameRepoUrl = (a: string, b: string) => {
+  const flat = (url: string) => url.trim().replace(/\/+$/, "").replace(/\.git$/i, "");
+  return flat(a) === flat(b);
+};
+
+/** Why a second repository cannot take a folder the first is already using. */
+const busyReason = (url: string, destination: string) =>
+  `Another repository is already using ${destination} and is waiting for the person, so ${url} was not asked about. ` +
+  "Nothing was cloned and no workspace was made. Wait for that request to end, or ask for another folder.";
 
 /** Same folder, the way Windows compares them: either separator, any case. */
 export const sameFolder = (a: string, b: string) => {
@@ -287,10 +307,12 @@ function workspaceName(value: string | null | undefined, fallback: string): stri
 /* ── the flow ──────────────────────────────────────────────────── */
 
 /**
- * Two requests for the same folder at once are one: the second waits for the
- * first and is told the same.
+ * Two requests for the same repository in the same folder at once are one: the
+ * second waits for the first and is told the same. A request for ANOTHER
+ * repository in a folder that is taken is not: it would be told the first
+ * one's result, a workspace on a repository it never named.
  */
-const inflight = new Map<string, Promise<FromGitOutcome>>();
+const inflight = new Map<string, { url: string; run: Promise<FromGitOutcome> }>();
 
 export async function workspaceFromGit(
   request: FromGitRequest,
@@ -331,13 +353,17 @@ export async function workspaceFromGit(
 
   const key = destination.replace(/\\/g, "/").toLowerCase();
   const running = inflight.get(key);
-  if (running) return running;
+  if (running) {
+    if (sameRepoUrl(running.url, repo.url)) return running.run;
+    return refuse("folderBusy", busyReason(repo.url, destination));
+  }
   const run = proceed(request, deps, { repo, name, parent, destination });
-  inflight.set(key, run);
+  const entry = { url: repo.url, run };
+  inflight.set(key, entry);
   try {
     return await run;
   } finally {
-    inflight.delete(key);
+    if (inflight.get(key) === entry) inflight.delete(key);
   }
 }
 
@@ -372,6 +398,7 @@ async function proceed(
       reason: ownership.reason,
       by: request.origin.kind === "agent" ? request.origin.pane : null,
     });
+    if (answer === "busy") return refuse("folderBusy", busyReason(repo.url, destination));
     if (answer === "refuse") {
       return refuse("declined", "The person refused to clone this repository. Nothing was cloned and no workspace was made.");
     }
@@ -514,6 +541,8 @@ export function createConsentQueue(
     set: (run, ms) => globalThis.setTimeout(run, ms),
     clear: (handle) => globalThis.clearTimeout(handle as number),
   },
+  /** Told once for each question the person answered or let run out. */
+  onAnswer?: (request: ConsentRequest, answer: ConsentAnswer) => void,
 ): ConsentQueue {
   interface Waiting {
     request: ConsentRequest;
@@ -534,6 +563,11 @@ export function createConsentQueue(
     timers.clear(entry.handle);
     waiting.delete(id);
     publish();
+    try {
+      onAnswer?.(entry.request, answer);
+    } catch {
+      // A trace that cannot be written never holds the answer back.
+    }
     for (const resolve of entry.resolvers) resolve(answer);
     return true;
   };
@@ -541,11 +575,14 @@ export function createConsentQueue(
   return {
     ask(request, timeoutMs = CONSENT_TIMEOUT_MS) {
       return new Promise<ConsentAnswer>((resolve) => {
-        const same = [...waiting.values()].find(
+        const taken = [...waiting.values()].find(
           (entry) => sameFolder(entry.request.destination, request.destination),
         );
-        if (same) {
-          same.resolvers.push(resolve);
+        if (taken) {
+          // The card shows one repository: only a request for that very one
+          // may ride on its answer.
+          if (sameRepoUrl(taken.request.url, request.url)) taken.resolvers.push(resolve);
+          else resolve("busy");
           return;
         }
         waiting.set(request.id, {
@@ -566,7 +603,43 @@ export function createConsentQueue(
 }
 
 /** The app's one queue: the tool waits on it, the consent card answers it. */
-export const gitCloneConsent: ConsentQueue = createConsentQueue();
+export const gitCloneConsent: ConsentQueue = createConsentQueue(undefined, (request, answer) =>
+  recordConsent(request, answer),
+);
+
+/* ── the trace of each answer ──────────────────────────────────── */
+
+/** The last part of a folder's path: the only part of it the log keeps. */
+export const folderName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+
+/**
+ * The line Hangar's activity log keeps of a consent answer: the repository,
+ * the folder's name (never its path, which holds the person's home) and how
+ * it ended. In the PC's language, like the rest of the log.
+ */
+export function consentTrace(
+  request: ConsentRequest,
+  answer: Exclude<ConsentAnswer, "busy">,
+  locale: Locale,
+  at: number = Date.now(),
+) {
+  const key =
+    answer === "allow" ? "gitConsent.logAllow" : answer === "refuse" ? "gitConsent.logRefuse" : "gitConsent.logTimeout";
+  return {
+    at,
+    workspace: "",
+    kind: "gitConsent",
+    text: workspaceFromGitText(locale, key, { repo: request.url, folder: folderName(request.destination) }),
+  };
+}
+
+/** Writes the line to the activity log on disk; a log that cannot be written never gets in the way. */
+export function recordConsent(request: ConsentRequest, answer: ConsentAnswer) {
+  if (answer === "busy") return;
+  void Promise.resolve(invoke("activity_append", { entries: [consentTrace(request, answer, systemLocale())] })).catch(
+    () => undefined,
+  );
+}
 
 /* ── what the orchestrator is first told ───────────────────────── */
 

@@ -6,7 +6,10 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 import {
   CONSENT_TIMEOUT_MS,
   cloneDestination,
+  consentTrace,
   createConsentQueue,
+  folderName,
+  recordConsent,
   firstMessage,
   fromGitButton,
   fromGitFieldsDisabled,
@@ -405,6 +408,58 @@ describe("a workspace that is already there", () => {
     expect(first).toBe(second);
     expect(log.filter((entry) => entry.startsWith("clone:"))).toHaveLength(1);
   });
+
+  it("does not hand the first repository's result to another repository for the same folder", async () => {
+    const { deps, log } = fakes({ mine: true });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const slowClone = deps.clone;
+    deps.clone = async (...args) => {
+      await gate;
+      return slowClone(...args);
+    };
+    const good = workspaceFromGit(byAgent("good/theirs"), deps);
+    await vi.waitFor(() => expect(log.some((entry) => entry.startsWith("ownership:"))).toBe(true));
+    const evil = await workspaceFromGit(byAgent("evil/theirs"), deps);
+    expect(evil).toMatchObject({ status: "refused", kind: "folderBusy" });
+    if (evil.status === "refused") expect(evil.reason).toContain("evil/theirs");
+    release();
+    expect(await good).toMatchObject({ status: "created" });
+    const clones = log.filter((entry) => entry.startsWith("clone:"));
+    expect(clones).toHaveLength(1);
+    expect(clones[0]).toContain("good/theirs");
+    // Once the first is over, the folder is free for a request of its own.
+    expect(await workspaceFromGit(byAgent("evil/theirs"), fakes({ mine: true }).deps)).toMatchObject({
+      status: "created",
+    });
+  });
+
+  it("refuses at once, through the real queue, a foreign repository for a folder already waiting", async () => {
+    const queue = createConsentQueue();
+    const first = fakes();
+    first.deps.consent = (asked) => queue.ask(asked);
+    const waiting = workspaceFromGit(byAgent("good/theirs"), first.deps);
+    await vi.waitFor(() => expect(queue.pending()).toHaveLength(1));
+    // The flow-level guard catches it before the queue: nothing is asked, nothing cloned.
+    const second = fakes();
+    second.deps.consent = (asked) => queue.ask(asked);
+    expect(await workspaceFromGit(byAgent("evil/theirs"), second.deps)).toMatchObject({
+      status: "refused",
+      kind: "folderBusy",
+    });
+    expect(queue.pending()).toHaveLength(1);
+    expect(cloned(second.log)).toBe(false);
+    queue.answer("consent-1", true);
+    expect((await waiting).status).toBe("created");
+    expect(first.log.filter((entry) => entry.startsWith("clone:"))).toHaveLength(1);
+  });
+
+  it("reads a busy answer from the consent as a refusal with its reason", async () => {
+    const { deps, log } = fakes({ answer: "busy" });
+    const outcome = await workspaceFromGit(byAgent("evil/theirs"), deps);
+    expect(outcome).toMatchObject({ status: "refused", kind: "folderBusy" });
+    expect(cloned(log)).toBe(false);
+  });
 });
 
 describe("a step that fails leaves nothing half made", () => {
@@ -600,13 +655,50 @@ describe("the consent waiting for the person", () => {
     expect(queue.answer("a", true)).toBe(false);
   });
 
-  it("shares one question between two requests for one folder", async () => {
+  it("shares one question between two requests for one repository in one folder", async () => {
     const queue = createConsentQueue(clock().timers);
     const first = queue.ask(request("a", "C:\\dev\\same"));
-    const second = queue.ask(request("b", "c:/dev/same"));
+    const second = queue.ask({ ...request("b", "c:/dev/same"), url: "https://github.com/x/a" });
     expect(queue.pending()).toHaveLength(1);
     queue.answer("a", true);
     await expect(Promise.all([first, second])).resolves.toEqual(["allow", "allow"]);
+  });
+
+  it("never lets another repository ride on the answer to a card it never showed", async () => {
+    const queue = createConsentQueue(clock().timers);
+    const good = queue.ask({ ...request("a", "C:\\dev\\theirs"), url: "https://github.com/good/theirs.git" });
+    const evil = queue.ask({ ...request("b", "C:\\dev\\theirs"), url: "https://github.com/evil/theirs.git" });
+    // Refused at once, with no second card.
+    await expect(evil).resolves.toBe("busy");
+    expect(queue.pending().map((entry) => entry.url)).toEqual(["https://github.com/good/theirs.git"]);
+    queue.answer("a", true);
+    await expect(good).resolves.toBe("allow");
+  });
+
+  it("tells the trace once per question, shared askers included", async () => {
+    const answered = vi.fn();
+    const { timers, advance } = clock();
+    const queue = createConsentQueue(timers, answered);
+    void queue.ask(request("a"));
+    void queue.ask(request("a"));
+    void queue.ask({ ...request("b", "C:\\dev\\a"), url: "https://github.com/other/a.git" });
+    expect(answered).not.toHaveBeenCalled();
+    queue.answer("a", false);
+    expect(answered).toHaveBeenCalledTimes(1);
+    expect(answered).toHaveBeenLastCalledWith(expect.objectContaining({ id: "a" }), "refuse");
+    void queue.ask(request("c"));
+    advance(CONSENT_TIMEOUT_MS);
+    expect(answered).toHaveBeenLastCalledWith(expect.objectContaining({ id: "c" }), "timeout");
+    expect(answered).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes on when the trace throws", async () => {
+    const queue = createConsentQueue(clock().timers, () => {
+      throw new Error("disk full");
+    });
+    const answer = queue.ask(request("a"));
+    queue.answer("a", true);
+    await expect(answer).resolves.toBe("allow");
   });
 
   it("keeps the order of different questions, and a stable list between changes", () => {
@@ -637,6 +729,55 @@ describe("the consent waiting for the person", () => {
     await vi.waitFor(() => expect(queue.pending()).toHaveLength(1));
     queue.answer("consent-1", true);
     expect((await again).status).toBe("created");
+  });
+});
+
+describe("the trace of each consent answer", () => {
+  const asked = (destination: string): ConsentRequest => ({
+    id: "c1",
+    url: "https://github.com/evil/theirs.git",
+    host: "github.com",
+    owner: "evil",
+    name: "theirs",
+    destination,
+    reason: "",
+    by: "Ava",
+  });
+
+  it("names the repository, the folder's name and how it ended, never the path", () => {
+    const request = asked("C:\\Users\\simnJS\\Documents\\projects\\theirs");
+    const lines = (["allow", "refuse", "timeout"] as const).map((answer) => consentTrace(request, answer, "en", 5));
+    expect(lines.map((line) => line.text)).toEqual([
+      'Clone of https://github.com/evil/theirs.git into the folder "theirs": you clicked Clone',
+      'Clone of https://github.com/evil/theirs.git into the folder "theirs": you clicked Refuse',
+      'Clone of https://github.com/evil/theirs.git into the folder "theirs": no answer in time, nothing cloned',
+    ]);
+    for (const line of lines) {
+      expect(line).toMatchObject({ at: 5, workspace: "", kind: "gitConsent" });
+      expect(line.text).not.toContain("simnJS");
+    }
+    expect(consentTrace(request, "allow", "fr", 5).text).toContain("tu as cliqué sur Cloner");
+  });
+
+  it("keeps the last part of a folder, either separator, trailing one included", () => {
+    expect(folderName("/home/me/code/theirs/")).toBe("theirs");
+    expect(folderName("C:\\a\\b")).toBe("b");
+  });
+
+  it("writes one line to the activity log per answer, and none for a refused-at-once request", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const call = vi.mocked(invoke);
+    call.mockReset();
+    call.mockResolvedValue(undefined);
+    recordConsent(asked("C:\\x\\theirs"), "allow");
+    recordConsent(asked("C:\\x\\theirs"), "busy");
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith(
+      "activity_append",
+      expect.objectContaining({ entries: [expect.objectContaining({ kind: "gitConsent" })] }),
+    );
+    call.mockRejectedValue(new Error("disk"));
+    expect(() => recordConsent(asked("C:\\x\\theirs"), "refuse")).not.toThrow();
   });
 });
 
