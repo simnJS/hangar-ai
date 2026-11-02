@@ -557,28 +557,43 @@ export function TerminalPane({
       announce(body);
     }
 
+    // Claude Code's question about trusting a folder it has not seen comes
+    // before its session exists, so no event of the mod can announce it, and
+    // it is drawn in one short burst the idle watcher below never counts as
+    // work. The screen is read a moment after the last output instead: the
+    // pane is waiting for the person, and not done.
+    let trustTimer: number | null = null;
+    let trustAsked = false;
+    const lookForTrustQuestion = () => {
+      trustTimer = null;
+      if (disposed || bridgedRef.current) return;
+      const buffer = term.buffer.active;
+      const rows: string[] = [];
+      for (let y = buffer.viewportY; y < buffer.viewportY + term.rows; y++) {
+        rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
+      }
+      const asking = isTrustPrompt(rows.join("\n"));
+      if (asking && !trustAsked) {
+        trustAsked = true;
+        setActivity("waiting");
+        announce(tRef.current("notify.trustFolder"));
+      } else if (!asking && trustAsked) {
+        trustAsked = false;
+        if (activityRef.current === "waiting") setActivity("working");
+      }
+    };
+    const scheduleTrustLook = () => {
+      if (bridgedRef.current) return;
+      if (trustTimer !== null) window.clearTimeout(trustTimer);
+      trustTimer = window.setTimeout(lookForTrustQuestion, 600);
+    };
+
     // Everything below that reads the output is a guess, and a pane whose mod
     // reports its turns has no use for one — it would only notify twice.
     const watcher = createActivityWatcher({
       idleMs: () => settingsRef.current.notifyIdleMs,
       onSettle: () => {
-        if (bridgedRef.current) return;
-        // Claude Code stopped on its question about an unknown folder: the
-        // mod is not loaded yet, so nothing else says so. The pane is waiting
-        // for the person, not done.
-        const buffer = term.buffer.active;
-        const rows: string[] = [];
-        for (let y = buffer.viewportY; y < buffer.viewportY + term.rows; y++) {
-          rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
-        }
-        if (isTrustPrompt(rows.join("\n"))) {
-          if (activityRef.current !== "waiting") {
-            setActivity("waiting");
-            announce(tRef.current("notify.trustFolder"));
-          }
-          return;
-        }
-        handBack(tRef.current("notify.settled"));
+        if (!bridgedRef.current && !trustAsked) handBack(tRef.current("notify.settled"));
       },
       onBusy: () => {
         if (!bridgedRef.current) setActivity("working");
@@ -865,6 +880,7 @@ export function TerminalPane({
             if (replayed(seq)) return;
             term.write(data);
             watcher.push();
+            scheduleTrustLook();
             printedSinceLastLook = true;
           },
           () => {
@@ -1151,6 +1167,7 @@ export function TerminalPane({
       if (successor) stashQueue(carryKey(workspaceId, pane.name), queueRef.current);
       observer.disconnect();
       watcher.dispose();
+      if (trustTimer !== null) window.clearTimeout(trustTimer);
       unregister();
       forgetPane(pane.id);
       // Closed, restarted under a new id, or taken over by another window,
