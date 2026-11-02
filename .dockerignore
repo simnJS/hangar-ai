@@ -5,3 +5,4 @@ dist
 site/demo
 .hangar
 .iabench
+!src-tauri/kit-sdk/tokens.json
