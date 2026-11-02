@@ -1,15 +1,37 @@
 import { WorkspaceAccountPicker } from "./accounts/WorkspaceAccountPicker";
 import { useAccountsT } from "./accounts/strings";
 import { useAccounts } from "./accounts/useAccounts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Backdrop, ModalHead } from "./Backdrop";
 import { Icon } from "./Icon";
 import { WorkspaceKitsSection } from "./KitActivation";
 import { useT } from "../i18n";
+import {
+  cleanRepoInput,
+  gitCloneCancel,
+  gitRepoParse,
+  newCloneJobId,
+  onCloneProgress,
+  overallPercent,
+  progressLabel,
+  type CloneProgress,
+  type RepoParse,
+} from "../lib/gitClone";
 import { findCodeWorkspace, readCodeWorkspace } from "../lib/ipc";
 import { workspaceKits } from "../lib/kits";
 import { allPaneNames, pickPaneNames } from "../lib/paneNames";
+import {
+  cloneDestination,
+  fromGitButton,
+  fromGitFieldsDisabled,
+  fromGitKey,
+  fromGitStatus,
+  oneLine,
+  projectsFolderOf,
+  resolveParent,
+  type FromGitOutcome,
+} from "../lib/workspaceFromGit";
 import { useStore, type WorkspaceDraft } from "../store";
 import {
   AGENTS,
@@ -37,6 +59,17 @@ const PREVIEW_COLUMNS: Record<LayoutSize, number> = { 1: 1, 2: 2, 4: 2, 8: 4 };
 interface Props {
   availableAgents: string[];
   shells: ShellInfo[];
+  /** The folder of the workspace in front: where a clone goes when no projects folder is set. */
+  askerCwd: string | null;
+  /** « From a Git repository »: the flow of lib/workspaceFromGit, called as the person. */
+  fromGit: (args: {
+    repo: string;
+    name: string | null;
+    parent: string;
+    jobId: string;
+  }) => Promise<FromGitOutcome>;
+  /** A line shown once the dialog is gone. */
+  onNotice: (text: string) => void;
   onClose: () => void;
 }
 
@@ -143,7 +176,14 @@ export function WorkspaceKitsDialog({
   );
 }
 
-export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
+export function WorkspaceDialog({
+  availableAgents,
+  shells,
+  askerCwd,
+  fromGit,
+  onNotice,
+  onClose,
+}: Props) {
   const { addWorkspace, updateWorkspace, state } = useStore();
   const [kits, setKits] = useState<WorkspaceKit[]>([]);
   const [claudeAccount, setClaudeAccount] = useState<string | null>(null);
@@ -291,18 +331,146 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
     onClose();
   }
 
+  /* ── « From a Git repository » ───────────────────────────────── */
+
+  const [source, setSource] = useState<"folder" | "git">("folder");
+  const [repoInput, setRepoInput] = useState("");
+  /** The folder typed in the dialog; empty follows the setting, then the current workspace. */
+  const [parentInput, setParentInput] = useState("");
+  const [parsed, setParsed] = useState<{ input: string; result: RepoParse } | null>(null);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<CloneProgress | null>(null);
+  const [gitError, setGitError] = useState<string | null>(null);
+  const jobRef = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
+
+  const cleanedRepo = cleanRepoInput(repoInput);
+  useEffect(() => {
+    if (source !== "git" || !cleanedRepo) return;
+    let live = true;
+    // Rust reads the address; a pause in the typing is enough to ask.
+    const timer = window.setTimeout(() => {
+      gitRepoParse(cleanedRepo)
+        .then((result) => live && setParsed({ input: cleanedRepo, result }))
+        .catch(
+          (err) =>
+            live &&
+            setParsed({ input: cleanedRepo, result: { status: "refused", reason: String(err) } }),
+        );
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [cleanedRepo, source]);
+
+  /** What was said about the address as it is now, never about an older one. */
+  const parse = parsed && parsed.input === cleanedRepo ? parsed.result : null;
+  const parent = resolveParent(parentInput, projectsFolderOf(state.settings), askerCwd);
+  const gitStatus = fromGitStatus({ input: repoInput, parse, parent, running });
+  const gitButton = fromGitButton(gitStatus);
+  const gitLocked = fromGitFieldsDisabled(gitStatus);
+  const destination =
+    parse && parse.status === "ok" ? cloneDestination(parent, parse.name) : null;
+
+  async function browseParent() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: t("create.gitParentDialog"),
+    });
+    if (typeof selected === "string") setParentInput(selected);
+  }
+
+  async function startFromGit() {
+    if (fromGitKey("Enter", gitStatus) !== "start" || !parent) return;
+    const jobId = newCloneJobId();
+    jobRef.current = jobId;
+    cancelledRef.current = false;
+    setGitError(null);
+    setProgress(null);
+    setRunning(true);
+    let stopListening: (() => void) | null = null;
+    try {
+      stopListening = await onCloneProgress(jobId, setProgress);
+    } catch {
+      // No progress to show; the clone itself does not depend on it.
+    }
+    let done = false;
+    try {
+      const outcome = await fromGit({
+        repo: repoInput,
+        name: name.trim() || null,
+        parent,
+        jobId,
+      });
+      if (outcome.status === "refused") {
+        setGitError(
+          cancelledRef.current
+            ? t("create.gitCancelled")
+            : t("create.gitFailed", { reason: oneLine(outcome.reason) }),
+        );
+      } else {
+        done = true;
+        if (outcome.status === "existing") {
+          onNotice(t("create.gitExisting", { path: outcome.workspace.cwd }));
+        } else if (outcome.reusedFolder) {
+          onNotice(t("create.gitReused", { path: outcome.workspace.cwd }));
+        }
+        onClose();
+      }
+    } catch (err) {
+      setGitError(
+        t("create.gitFailed", {
+          reason: oneLine(err instanceof Error ? err.message : String(err)),
+        }),
+      );
+    } finally {
+      stopListening?.();
+      jobRef.current = null;
+      if (!done) setRunning(false);
+    }
+  }
+
+  /** Stops the clone. It may not have started yet (the address is being checked): ask again briefly. */
+  async function stopClone() {
+    cancelledRef.current = true;
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      const id = jobRef.current;
+      if (!id) return;
+      if (await gitCloneCancel(id).catch(() => false)) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 200));
+    }
+  }
+
+  function requestClose() {
+    if (!running) onClose();
+  }
+
+  // Escape closes the dialog, except while a clone runs: Cancel is the way out.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (source === "git" ? fromGitKey("Escape", gitStatus) === "close" : true) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, source, gitStatus]);
+
+  const percent = progress ? overallPercent(progress) : null;
+
   const columns = PREVIEW_COLUMNS[layout];
   const agentLabel = (id: AgentId) => AGENTS.find((a) => a.id === id)?.label ?? id;
 
   return (
-    <Backdrop onClose={onClose}>
+    <Backdrop onClose={requestClose} escape={false}>
       <div
         className="modal modal--wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="ws-dialog-title"
       >
-        <ModalHead id="ws-dialog-title" title={t("create.title")} onClose={onClose} />
+        <ModalHead id="ws-dialog-title" title={t("create.title")} onClose={requestClose} />
 
         {/* A form, so Return creates the workspace the way a dialog's default
             button answers it; submit() still refuses without a folder. */}
@@ -310,10 +478,100 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
           className="modal__form"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            if (source === "git") void startFromGit();
+            else submit();
           }}
         >
           <div className="modal__body form-grid" data-modal-body>
+            <span className="form-grid__label" id="ws-source">
+              {t("create.source")}
+            </span>
+            <div className="form-grid__field">
+              <div className="seg" role="group" aria-labelledby="ws-source">
+                {(["folder", "git"] as const).map((choice) => (
+                  <button
+                    type="button"
+                    key={choice}
+                    className={`seg__btn ${source === choice ? "is-active" : ""}`}
+                    aria-pressed={source === choice}
+                    disabled={running}
+                    onClick={() => setSource(choice)}
+                  >
+                    {choice === "git" ? t("create.sourceGit") : t("create.sourceFolder")}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {source === "git" && (
+              <>
+                <label className="form-grid__label" htmlFor="ws-repo">
+                  {t("create.gitRepo")}
+                </label>
+                <div className="form-grid__field">
+                  <input
+                    id="ws-repo"
+                    className="text-input"
+                    value={repoInput}
+                    placeholder={t("create.gitRepoPlaceholder")}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoFocus
+                    disabled={gitLocked}
+                    aria-invalid={gitStatus === "refused"}
+                    aria-describedby="ws-repo-note"
+                    onChange={(e) => setRepoInput(e.target.value)}
+                  />
+                  <span id="ws-repo-note" aria-live="polite">
+                    {gitStatus === "refused" && parse?.status === "refused" && (
+                      <span className="form-hint">
+                        {t("create.gitRefused", { reason: parse.reason })}
+                      </span>
+                    )}
+                    {gitStatus === "checking" && (
+                      <span className="form-hint">{t("create.gitChecking")}</span>
+                    )}
+                  </span>
+                </div>
+
+                <label className="form-grid__label" htmlFor="ws-parent">
+                  {t("create.gitParent")}
+                </label>
+                <div className="form-grid__field">
+                  <div className="picker">
+                    <input
+                      id="ws-parent"
+                      className="picker__path"
+                      value={parentInput}
+                      placeholder={parent ?? t("create.folderEmpty")}
+                      spellCheck={false}
+                      disabled={gitLocked}
+                      onChange={(e) => setParentInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={gitLocked}
+                      onClick={browseParent}
+                    >
+                      {t("create.browse")}
+                    </button>
+                  </div>
+                  <span className="form-hint">{t("create.gitParentHint")}</span>
+                  {gitStatus === "noFolder" ? (
+                    <span className="form-hint">{t("create.gitNoFolder")}</span>
+                  ) : (
+                    destination && (
+                      <span className="form-hint" title={destination}>
+                        {t("create.gitDestination", { path: destination })}
+                      </span>
+                    )
+                  )}
+                </div>
+              </>
+            )}
+
+            {source === "folder" && (<>
             <label className="form-grid__label" htmlFor="ws-folder">
               {t("create.folder")}
             </label>
@@ -407,6 +665,8 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
               )}
             </div>
 
+            </>)}
+
             <label className="form-grid__label" htmlFor="ws-name">
               {t("create.name")}
             </label>
@@ -415,11 +675,47 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
                 id="ws-name"
                 className="text-input"
                 value={name}
-                placeholder={cwd ? basename(cwd) : t("create.namePlaceholder")}
+                placeholder={
+                  source === "git"
+                    ? parse?.status === "ok"
+                      ? parse.name
+                      : t("create.namePlaceholder")
+                    : cwd
+                      ? basename(cwd)
+                      : t("create.namePlaceholder")
+                }
+                disabled={gitLocked}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
 
+            {source === "git" && (running || gitError) && (
+              <>
+                <span className="form-grid__label" aria-hidden="true" />
+                <div className="form-grid__field" aria-live="polite">
+                  {running && (
+                    <>
+                      <progress
+                        max={100}
+                        value={percent ?? undefined}
+                        style={{ width: "100%" }}
+                        aria-label={t("create.gitRunning")}
+                      />
+                      <span className="form-hint">
+                        {progress ? progressLabel(progress) : t("create.gitStarting")}
+                      </span>
+                    </>
+                  )}
+                  {gitError && !running && (
+                    <p className="notice notice--error">
+                      <span className="notice__text">{gitError}</span>
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {source === "folder" && (<>
             <label className="form-grid__label" htmlFor="ws-shell">
               {t("pane.shell")}
             </label>
@@ -571,15 +867,28 @@ export function WorkspaceDialog({ availableAgents, shells, onClose }: Props) {
             <div className="form-grid__field">
               <WorkspaceHooksSection value={hooks} onChange={setHooks} />
             </div>
+            </>)}
           </div>
 
           <footer className="modal__foot">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>
-              {t("create.cancel")}
-            </button>
-            <button type="submit" className="btn btn--primary" disabled={!cwd}>
-              {t("create.submit")}
-            </button>
+            {running ? (
+              <button type="button" className="btn btn--ghost" onClick={stopClone}>
+                {t("create.gitStop")}
+              </button>
+            ) : (
+              <button type="button" className="btn btn--ghost" onClick={onClose}>
+                {t("create.cancel")}
+              </button>
+            )}
+            {source === "git" ? (
+              <button type="submit" className="btn btn--primary" disabled={gitButton.disabled}>
+                {t(gitButton.label)}
+              </button>
+            ) : (
+              <button type="submit" className="btn btn--primary" disabled={!cwd}>
+                {t("create.submit")}
+              </button>
+            )}
           </footer>
         </form>
       </div>

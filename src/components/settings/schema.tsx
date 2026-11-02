@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { LOCALES, systemLocale, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { HIBERNATE_DELAYS } from "../../lib/hibernate";
@@ -326,6 +327,45 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
               ],
               onChange: (value) =>
                 set("locale", (value || null) as Settings["locale"]),
+            },
+          ],
+        },
+        {
+          id: "projects",
+          title: t("settings.projectsFolder"),
+          items: [
+            {
+              id: "projectsFolder",
+              kind: "custom",
+              label: t("settings.projectsFolder"),
+              hint: t("settings.projectsFolderHint"),
+              keywords: "git clone repository repo dépôt cloner dossier projets folder",
+              render: () => (
+                <div className="picker">
+                  <input
+                    className="picker__path"
+                    aria-label={t("settings.projectsFolder")}
+                    value={settings.projectsFolder ?? ""}
+                    placeholder={t("settings.projectsFolderPlaceholder")}
+                    spellCheck={false}
+                    onChange={(e) => set("projectsFolder", e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                      const selected = await open({
+                        directory: true,
+                        multiple: false,
+                        title: t("settings.projectsFolderDialog"),
+                      });
+                      if (typeof selected === "string") set("projectsFolder", selected);
+                    }}
+                  >
+                    {t("create.browse")}
+                  </button>
+                </div>
+              ),
             },
           ],
         },

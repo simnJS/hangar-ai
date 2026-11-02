@@ -204,6 +204,12 @@ chat.
 - **Saved workspaces.** A workspace is a project folder and its layout, and reopening it
   brings every agent back. Workspaces can be grouped in folders, or moved to a window of
   their own.
+- **From a Git repository.** In the new-workspace dialog, choose *From a Git repository*,
+  paste `owner/repo` or an https or ssh address, and see the folder it will be cloned into
+  before anything runs. Hangar clones it (with progress, and a Cancel), opens a workspace
+  and starts an orchestrator that reads the repository and gets it ready. A folder that
+  already holds the repository is reused. Set the folder repositories go in under *Projects
+  folder* in the settings; left empty, it is next to the current workspace's folder.
 - **Sleep.** A workspace idle for 10 minutes is put to sleep to free memory. When you open
   it again, its agents resume their sessions. You can change the delay or turn this off.
 - **MCP servers per workspace.** Choose which MCP servers a workspace's Claude Code panes

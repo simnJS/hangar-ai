@@ -20,6 +20,7 @@ import {
   defaultCloneFolder,
   gitClone,
   gitCloneCancel,
+  gitCloneDiscard,
   gitRepoOwnership,
   gitRepoParse,
   newCloneJobId,
@@ -95,6 +96,8 @@ describe("commands", () => {
     });
     await gitCloneCancel("job-1");
     expect(invoke).toHaveBeenLastCalledWith("git_clone_cancel", { jobId: "job-1" });
+    await gitCloneDiscard("C:/p/hello");
+    expect(invoke).toHaveBeenLastCalledWith("git_clone_discard", { path: "C:/p/hello" });
   });
 
   it("only hands over the progress of its own job", async () => {

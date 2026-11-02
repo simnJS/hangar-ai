@@ -122,11 +122,18 @@ import {
   type ShortcutHandlers,
 } from "./lib/useShortcuts";
 import { liveWorkerDeps } from "./lib/workerControl";
-import { gitClone, gitRepoOwnership, gitRepoParse, newCloneJobId } from "./lib/gitClone";
+import {
+  gitClone,
+  gitCloneDiscard,
+  gitRepoOwnership,
+  gitRepoParse,
+  newCloneJobId,
+} from "./lib/gitClone";
 import {
   gitCloneConsent,
   projectsFolderOf,
   sameFolder,
+  workspaceFromGit,
   type FromGitDeps,
 } from "./lib/workspaceFromGit";
 import { useT } from "./i18n";
@@ -766,8 +773,9 @@ export default function App() {
   const detachRef = useRef<(workspaceId: string) => Promise<void>>(async () => undefined);
   const reattachRef = useRef<(workspaceId: string) => void>(() => undefined);
   // « Créer un workspace depuis un dépôt »: what lib/workspaceFromGit reaches.
-  // Hangar cannot delete a folder from here, so `discardClone` is left out: a
-  // clone that outlives a failed start is reported with its path instead.
+  // `discardClone` asks Rust to take back a clone this very run made: it
+  // refuses a reused folder, a link or anything it did not clone, and the flow
+  // then reports where the folder is left.
   const fromGitDeps: FromGitDeps = {
     parse: gitRepoParse,
     ownership: gitRepoOwnership,
@@ -786,6 +794,10 @@ export default function App() {
     },
     consent: (request) => gitCloneConsent.ask(request),
     clone: gitClone,
+    discardClone: async (path) => {
+      const result = await gitCloneDiscard(path);
+      if (result.status !== "removed") throw new Error(result.reason);
+    },
     newJobId: newCloneJobId,
     newConsentId: newCloneJobId,
     createWorkspace: ({ name, cwd, activate }) => {
@@ -816,6 +828,23 @@ export default function App() {
       setOpenedIds((current) => (current.includes(id) ? current : [...current, id])),
     showWorkspace: setActiveWorkspace,
   };
+  // The person's own « From a Git repository »: no consent to ask, they just
+  // chose. The dialog picks the folder and the job id it follows and cancels.
+  const createFromGit = (args: {
+    repo: string;
+    name: string | null;
+    parent: string;
+    jobId: string;
+  }) =>
+    workspaceFromGit(
+      {
+        repo: args.repo,
+        name: args.name,
+        origin: { kind: "person" },
+        askerCwd: activeWorkspace?.cwd ?? null,
+      },
+      { ...fromGitDeps, projectsFolder: () => args.parent, newJobId: () => args.jobId },
+    );
   const controlDeps: ControlDeps | null =
     hydrated
       ? {
@@ -1820,6 +1849,9 @@ export default function App() {
         <WorkspaceDialog
           availableAgents={availableAgents}
           shells={shells}
+          askerCwd={activeWorkspace?.cwd ?? null}
+          fromGit={createFromGit}
+          onNotice={setNotice}
           onClose={() => setShowCreate(false)}
         />
       )}

@@ -437,6 +437,12 @@ export interface Settings {
    * malformed as no kit; absent when none.
    */
   kitsEverywhere?: WorkspaceKit[];
+  /**
+   * Where repositories cloned from Git go (« From a Git repository »). Absent
+   * or blank: the parent of the current workspace's folder. Read through
+   * `projectsFolderOf`.
+   */
+  projectsFolder?: string;
 }
 
 export interface AppState {

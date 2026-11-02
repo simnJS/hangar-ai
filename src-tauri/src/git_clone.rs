@@ -1,6 +1,7 @@
 //! « Créer un espace de travail depuis un dépôt Git »: the Rust side.
 //!
-//! Three commands, and a fourth to cancel:
+//! Three commands, a fourth to cancel and a fifth to take a fresh clone back
+//! (`git_clone_discard`, which only removes what this process cloned itself):
 //! - `git_repo_parse` says what a pasted address is, or why it is refused;
 //! - `git_repo_ownership` says whether the repository's owner is the person
 //!   (or one of their organisations), as far as `gh` knows;
@@ -752,6 +753,149 @@ pub fn git_clone_cancel(job_id: String) -> bool {
     cancel_job(&job_id)
 }
 
+// ---------------------------------------------------------------------------
+// Taking back a clone
+// ---------------------------------------------------------------------------
+
+/// A clone made by this process stays discardable for this long: enough for
+/// the steps that follow it, not for a folder the person has since used.
+const DISCARD_WINDOW: Duration = Duration::from_secs(10 * 60);
+
+/// A folder `git_clone` made itself.
+struct MadeClone {
+    /// The destination folder, as it was when the clone was made.
+    parent_real: String,
+    made_at: Instant,
+}
+
+/// Where a path is looked up: separators and case flattened, never resolved,
+/// so a link put in its place is still seen as a link.
+fn lexical_key(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = text.trim_end_matches('/').to_string();
+    if cfg!(windows) {
+        text.to_lowercase()
+    } else {
+        text
+    }
+}
+
+fn made_clones() -> &'static Mutex<HashMap<String, MadeClone>> {
+    static MADE: OnceLock<Mutex<HashMap<String, MadeClone>>> = OnceLock::new();
+    MADE.get_or_init(Default::default)
+}
+
+/// Remembers that this process made `dest` in `parent`.
+fn remember_made(dest: &Path, parent: &Path) {
+    if let Ok(mut table) = made_clones().lock() {
+        table.insert(
+            lexical_key(dest),
+            MadeClone {
+                parent_real: comparable(parent),
+                made_at: Instant::now(),
+            },
+        );
+    }
+}
+
+/// A folder that was reused is nobody's to take back, even if this process
+/// made it a moment ago.
+fn forget_made(dest: &Path) {
+    if let Ok(mut table) = made_clones().lock() {
+        table.remove(&lexical_key(dest));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum DiscardOutcome {
+    Removed,
+    Refused {
+        /// `invalidPath`, `notMade`, `expired`, `moved`, `link` or `failed`.
+        kind: &'static str,
+        reason: String,
+    },
+}
+
+fn discard_refused(kind: &'static str, reason: impl Into<String>) -> DiscardOutcome {
+    DiscardOutcome::Refused {
+        kind,
+        reason: reason.into(),
+    }
+}
+
+/// Removes a clone this process made, and only that: the path must be exactly
+/// what `git_clone` handed back for a fresh clone, still be a real folder (not a
+/// link) directly under the destination folder it was made in, and be younger
+/// than `window`. Whatever is refused is left as it is.
+fn discard_clone(path: &str, window: Duration) -> DiscardOutcome {
+    let dest = Path::new(path);
+    let plain = dest.components().all(|c| {
+        !matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    });
+    if !dest.is_absolute() || !plain {
+        return discard_refused(
+            "invalidPath",
+            "the path must be absolute and have no . or ..",
+        );
+    }
+    let (Some(parent), Some(_)) = (dest.parent(), dest.file_name()) else {
+        return discard_refused("invalidPath", "the path names no folder under another");
+    };
+
+    // Looked up, and taken out, before anything else: a second call, or a call
+    // racing this one, finds nothing.
+    let made = match made_clones().lock() {
+        Ok(mut table) => table.remove(&lexical_key(dest)),
+        Err(_) => None,
+    };
+    let Some(made) = made else {
+        return discard_refused(
+            "notMade",
+            "Hangar did not make this folder in this run, or it was reused: it is left alone",
+        );
+    };
+    if made.made_at.elapsed() > window {
+        return discard_refused("expired", "this clone is too old to be taken back here");
+    }
+    if comparable(parent) != made.parent_real {
+        return discard_refused(
+            "moved",
+            "the destination folder is not the one it was made in",
+        );
+    }
+    match std::fs::symlink_metadata(dest) {
+        Ok(meta) if is_link(&meta) => {
+            return discard_refused(
+                "link",
+                "a link stands where the clone was: it is left alone",
+            )
+        }
+        Ok(meta) if !meta.is_dir() => {
+            return discard_refused("notMade", "this is not a folder: it is left alone")
+        }
+        Ok(_) => {}
+        // Already gone: nothing is left to take back.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return DiscardOutcome::Removed,
+        Err(_) => return discard_refused("failed", "the folder cannot be checked"),
+    }
+    remove_tree(dest);
+    match std::fs::symlink_metadata(dest) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => DiscardOutcome::Removed,
+        _ => discard_refused("failed", "the folder could not be fully removed"),
+    }
+}
+
+#[tauri::command]
+pub async fn git_clone_discard(path: String) -> DiscardOutcome {
+    tauri::async_runtime::spawn_blocking(move || discard_clone(&path, DISCARD_WINDOW))
+        .await
+        .unwrap_or_else(|_| discard_refused("failed", "the removal was interrupted"))
+}
+
 struct CloneRequest<'a> {
     url: &'a str,
     parent: &'a str,
@@ -817,6 +961,7 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
     match std::fs::symlink_metadata(&dest) {
         Ok(meta) => {
             if meta.is_dir() && !is_link(&meta) && is_same_clone(&dest, &repo) {
+                forget_made(&dest);
                 return CloneOutcome::Cloned {
                     path: dest.to_string_lossy().into_owned(),
                     reused: true,
@@ -980,6 +1125,7 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
                 take(line, &mut said);
             }
             if status.success() {
+                remember_made(&dest, parent);
                 CloneOutcome::Cloned {
                     path: dest.to_string_lossy().into_owned(),
                     reused: false,
@@ -1637,6 +1783,222 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A link at `link` to the folder `target`: a junction on Windows, which
+    /// needs no privilege, a symlink elsewhere.
+    fn make_link(link: &Path, target: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .stdout(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link).is_ok()
+        }
+    }
+
+    // -- taking a clone back ---------------------------------------------------
+
+    /// A fresh clone of the test repository in `parent/hello`.
+    fn fresh_clone(root: &Path, parent: &Path) -> PathBuf {
+        let bare = bare_source(root);
+        std::fs::create_dir_all(parent).unwrap();
+        let parent_s = parent.to_string_lossy().into_owned();
+        match clone_into(
+            &request(&parent_s, "hello", &job_id("d"), via(&bare)),
+            &|_, _| {},
+        ) {
+            CloneOutcome::Cloned {
+                path,
+                reused: false,
+                ..
+            } => PathBuf::from(path),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn discarded(path: &Path) -> DiscardOutcome {
+        discard_clone(&path.to_string_lossy(), DISCARD_WINDOW)
+    }
+
+    fn refusal(outcome: DiscardOutcome) -> &'static str {
+        match outcome {
+            DiscardOutcome::Refused { kind, .. } => kind,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_fresh_clone_is_taken_back_once() {
+        let root = temp_dir("discard");
+        let parent = root.join("projects");
+        std::fs::write(root.join("keep.txt"), "keep").unwrap();
+        let clone = fresh_clone(&root, &parent);
+        // git's objects are read-only on Windows; they go too.
+        assert!(clone.join(".git").is_dir());
+        std::fs::write(parent.join("neighbour.txt"), "keep").unwrap();
+
+        assert_eq!(discarded(&clone), DiscardOutcome::Removed);
+        assert!(!clone.exists());
+        assert!(parent.join("neighbour.txt").is_file());
+        assert!(root.join("keep.txt").is_file());
+        // It is no longer anyone's: a second call is refused, not a no-op that
+        // could later remove a folder somebody puts there.
+        std::fs::create_dir_all(&clone).unwrap();
+        assert_eq!(refusal(discarded(&clone)), "notMade");
+        assert!(clone.is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_clone_that_is_already_gone_leaves_nothing_to_take_back() {
+        let root = temp_dir("discard-gone");
+        let clone = fresh_clone(&root, &root.join("projects"));
+        std::fs::remove_dir_all(&clone).unwrap();
+        assert_eq!(discarded(&clone), DiscardOutcome::Removed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_hangar_did_not_clone_is_never_discarded() {
+        let root = temp_dir("discard-foreign");
+        let parent = root.join("projects");
+        let clone = fresh_clone(&root, &parent);
+        let plain = parent.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("note.txt"), "keep").unwrap();
+        // Same name in another folder, a folder inside the clone, the
+        // destination folder itself, and the root of the test.
+        let elsewhere = root.join("elsewhere").join("hello");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        for path in [
+            plain.clone(),
+            elsewhere.clone(),
+            clone.join(".git"),
+            parent.clone(),
+            root.clone(),
+        ] {
+            assert_eq!(refusal(discarded(&path)), "notMade", "{path:?}");
+            assert!(path.exists(), "{path:?}");
+        }
+        assert!(plain.join("note.txt").is_file());
+        assert!(clone.join("README.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_reused_clone_is_never_discarded() {
+        let root = temp_dir("discard-reused");
+        let parent = root.join("projects");
+        let clone = fresh_clone(&root, &parent);
+        // The same folder, asked for again: reused, whoever made it first.
+        let parent_s = parent.to_string_lossy().into_owned();
+        let again = clone_into(
+            &request(&parent_s, "hello", &job_id("again"), Vec::new()),
+            &|_, _| {},
+        );
+        assert!(
+            matches!(again, CloneOutcome::Cloned { reused: true, .. }),
+            "{again:?}"
+        );
+        assert_eq!(refusal(discarded(&clone)), "notMade");
+        assert!(clone.join("README.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_path_that_is_not_plainly_absolute_is_refused() {
+        let root = temp_dir("discard-shape");
+        let parent = root.join("projects");
+        let clone = fresh_clone(&root, &parent);
+        let sneaky = parent.join("other").join("..").join("hello");
+        for path in [
+            "".to_string(),
+            "hello".to_string(),
+            "projects/hello".to_string(),
+            "./hello".to_string(),
+            sneaky.to_string_lossy().into_owned(),
+            format!("{}/..", clone.to_string_lossy()),
+        ] {
+            assert_eq!(
+                refusal(discard_clone(&path, DISCARD_WINDOW)),
+                "invalidPath",
+                "{path:?}"
+            );
+        }
+        assert!(clone.join("README.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_old_clone_is_not_taken_back() {
+        let root = temp_dir("discard-old");
+        let clone = fresh_clone(&root, &root.join("projects"));
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            refusal(discard_clone(&clone.to_string_lossy(), Duration::ZERO)),
+            "expired"
+        );
+        assert!(clone.join("README.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_link_where_the_clone_was_is_left_alone() {
+        let root = temp_dir("discard-link");
+        let parent = root.join("projects");
+        let clone = fresh_clone(&root, &parent);
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("precious.txt"), "keep").unwrap();
+        std::fs::remove_dir_all(&clone).unwrap();
+        assert!(
+            make_link(&clone, &outside),
+            "could not make a link for the test"
+        );
+
+        assert_eq!(refusal(discarded(&clone)), "link");
+        assert_eq!(
+            std::fs::read_to_string(outside.join("precious.txt")).unwrap(),
+            "keep"
+        );
+        assert!(std::fs::symlink_metadata(&clone).is_ok());
+        let _ = std::fs::remove_dir_all(&clone);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_destination_folder_swapped_for_a_link_is_not_followed() {
+        let root = temp_dir("discard-moved");
+        let parent = root.join("projects");
+        let clone = fresh_clone(&root, &parent);
+        // `projects` is moved away and a link to somewhere else, holding a
+        // folder of the same name, takes its place.
+        let decoy = root.join("decoy");
+        std::fs::create_dir_all(decoy.join("hello")).unwrap();
+        std::fs::write(decoy.join("hello").join("precious.txt"), "keep").unwrap();
+        std::fs::rename(&parent, root.join("projects-away")).unwrap();
+        assert!(
+            make_link(&parent, &decoy),
+            "could not make a link for the test"
+        );
+
+        assert_eq!(refusal(discarded(&clone)), "moved");
+        assert_eq!(
+            std::fs::read_to_string(decoy.join("hello").join("precious.txt")).unwrap(),
+            "keep"
+        );
+        assert!(root.join("projects-away").join("hello").is_dir());
+        let _ = std::fs::remove_dir(&parent);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn removing_a_tree_never_follows_a_link() {
         let root = temp_dir("link");
@@ -1653,25 +2015,10 @@ mod tests {
         std::fs::set_permissions(&readonly, permissions).unwrap();
 
         let link = made.join("link");
-        let linked = {
-            #[cfg(windows)]
-            {
-                // A junction, which needs no privilege.
-                Command::new("cmd")
-                    .args(["/C", "mklink", "/J"])
-                    .arg(&link)
-                    .arg(&outside)
-                    .stdout(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            }
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&outside, &link).is_ok()
-            }
-        };
-        assert!(linked, "could not make a link for the test");
+        assert!(
+            make_link(&link, &outside),
+            "could not make a link for the test"
+        );
         remove_tree(&made);
         assert!(!made.exists());
         assert_eq!(

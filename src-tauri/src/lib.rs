@@ -171,6 +171,7 @@ pub fn run() {
             git_clone::git_repo_ownership,
             git_clone::git_clone,
             git_clone::git_clone_cancel,
+            git_clone::git_clone_discard,
             delivery::delivery_preflight,
             delivery::delivery_run,
             delivery::delivery_cleanup,

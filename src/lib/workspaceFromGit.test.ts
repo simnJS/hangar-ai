@@ -5,16 +5,24 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 import {
   CONSENT_TIMEOUT_MS,
+  cloneDestination,
   createConsentQueue,
   firstMessage,
+  fromGitButton,
+  fromGitFieldsDisabled,
+  fromGitKey,
+  fromGitStatus,
   joinFolder,
+  oneLine,
   parentFolder,
   projectsFolderOf,
+  resolveParent,
   sameFolder,
   workspaceFromGit,
   type ConsentAnswer,
   type ConsentRequest,
   type FromGitDeps,
+  type FromGitFormState,
   type FromGitRequest,
   type WorkspaceRef,
 } from "./workspaceFromGit";
@@ -575,5 +583,79 @@ describe("the consent waiting for the person", () => {
     await vi.waitFor(() => expect(queue.pending()).toHaveLength(1));
     queue.answer("consent-1", true);
     expect((await again).status).toBe("created");
+  });
+});
+
+describe("the form behind « From a Git repository »", () => {
+  const ok: RepoParse = {
+    status: "ok",
+    url: "https://github.com/acme/shop.git",
+    host: "github.com",
+    owner: "acme",
+    name: "shop",
+  };
+  const refused: RepoParse = { status: "refused", reason: "the address is not valid" };
+  const form = (patch: Partial<FromGitFormState> = {}): FromGitFormState => ({
+    input: "acme/shop",
+    parse: ok,
+    parent: "D:\\Projects",
+    running: false,
+    ...patch,
+  });
+
+  it("clones into the typed folder, else the setting, else next to the current workspace", () => {
+    expect(resolveParent(" E:\\Repos ", "D:\\Projects", "C:\\Work\\app")).toBe("E:\\Repos");
+    expect(resolveParent("", "D:\\Projects", "C:\\Work\\app")).toBe("D:\\Projects");
+    expect(resolveParent(null, "  ", "C:\\Work\\app")).toBe("C:\\Work");
+    expect(resolveParent(undefined, null, "/home/me/code/app/")).toBe("/home/me/code");
+    expect(resolveParent(null, null, null)).toBeNull();
+    expect(resolveParent(null, null, "C:\\")).toBeNull();
+  });
+
+  it("names the destination from the folder and the repository", () => {
+    expect(cloneDestination("D:\\Projects", "shop")).toBe("D:\\Projects\\shop");
+    expect(cloneDestination("/home/me/code/", "shop")).toBe("/home/me/code/shop");
+    expect(cloneDestination("  ", "shop")).toBeNull();
+    expect(cloneDestination("D:\\Projects", null)).toBeNull();
+  });
+
+  it("reads the form's status", () => {
+    expect(fromGitStatus(form({ input: "  \n" }))).toBe("empty");
+    expect(fromGitStatus(form({ parse: null }))).toBe("checking");
+    expect(fromGitStatus(form({ parse: refused }))).toBe("refused");
+    expect(fromGitStatus(form({ parent: null }))).toBe("noFolder");
+    expect(fromGitStatus(form({ parent: "  " }))).toBe("noFolder");
+    expect(fromGitStatus(form())).toBe("ready");
+    expect(fromGitStatus(form({ running: true, input: "" }))).toBe("running");
+  });
+
+  it("says what the button says, and enables it only when ready", () => {
+    expect(fromGitButton("ready")).toEqual({ label: "create.gitSubmit", disabled: false });
+    expect(fromGitButton("running")).toEqual({ label: "create.gitRunning", disabled: true });
+    for (const status of ["empty", "checking", "refused", "noFolder"] as const) {
+      expect(fromGitButton(status)).toEqual({ label: "create.gitSubmit", disabled: true });
+    }
+    expect(fromGitFieldsDisabled("running")).toBe(true);
+    expect(fromGitFieldsDisabled("ready")).toBe(false);
+  });
+
+  it("Enter starts a ready form, Escape closes unless something runs", () => {
+    expect(fromGitKey("Enter", "ready")).toBe("start");
+    for (const status of ["empty", "checking", "refused", "noFolder", "running"] as const) {
+      expect(fromGitKey("Enter", status)).toBeNull();
+    }
+    expect(fromGitKey("Escape", "ready")).toBe("close");
+    expect(fromGitKey("Escape", "refused")).toBe("close");
+    expect(fromGitKey("Escape", "running")).toBeNull();
+    expect(fromGitKey("a", "ready")).toBeNull();
+  });
+
+  it("keeps a failure to one short line", () => {
+    expect(oneLine("The clone failed: repository not found")).toBe("The clone failed: repository not found");
+    expect(oneLine("\n  first   line \nsecond")).toBe("first line");
+    expect(oneLine("")).toBe("");
+    const cut = oneLine("x".repeat(400));
+    expect(cut).toHaveLength(160);
+    expect(cut.endsWith("…")).toBe(true);
   });
 });

@@ -120,6 +120,27 @@ export function gitCloneCancel(jobId: string): Promise<boolean> {
   return invoke<boolean>("git_clone_cancel", { jobId });
 }
 
+export type DiscardRefusalKind =
+  | "invalidPath"
+  | "notMade"
+  | "expired"
+  | "moved"
+  | "link"
+  | "failed";
+
+export type DiscardResult =
+  | { status: "removed" }
+  | { status: "refused"; kind: DiscardRefusalKind; reason: string };
+
+/**
+ * Takes back a clone `gitClone` just made. Rust validates it: only a fresh
+ * clone of this run, never a reused folder, never through a link. A refusal
+ * comes back as a value; the folder is then left where it is.
+ */
+export function gitCloneDiscard(path: string): Promise<DiscardResult> {
+  return invoke<DiscardResult>("git_clone_discard", { path });
+}
+
 /** Progress of one clone; the returned function stops listening. */
 export function onCloneProgress(
   jobId: string,

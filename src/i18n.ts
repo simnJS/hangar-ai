@@ -3,6 +3,7 @@ import { useStore } from "./store";
 import { typeset } from "./lib/typography";
 import * as kitsManage from "./strings/kitsManage";
 import * as kitsTab from "./strings/kitsTab";
+import * as workspaceFromGit from "./strings/workspaceFromGit";
 import * as worktrees from "./strings/worktrees";
 
 /**
@@ -1504,6 +1505,7 @@ const en = {
   ...kitsManage.en,
   ...kitsTab.en,
   ...worktrees.en,
+  ...workspaceFromGit.en,
 } as const;
 
 type Key = keyof typeof en;
@@ -3031,6 +3033,7 @@ const fr: Record<Key, string> = {
   ...kitsManage.fr,
   ...kitsTab.fr,
   ...worktrees.fr,
+  ...workspaceFromGit.fr,
 };
 
 const typesetAll = (dict: Record<Key, string>, locale: Locale) =>

@@ -170,6 +170,101 @@ export function projectsFolderOf(settings: object): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/**
+ * The folder repositories are cloned into: the one typed in the dialog, else
+ * the « Projects folder » setting, else the parent of the current workspace's
+ * folder. `null` when none of them gives one.
+ */
+export function resolveParent(
+  edited: string | null | undefined,
+  projectsFolder: string | null | undefined,
+  askerCwd: string | null | undefined,
+): string | null {
+  const typed = edited?.trim();
+  if (typed) return typed;
+  const configured = projectsFolder?.trim();
+  if (configured) return configured;
+  return askerCwd ? parentFolder(askerCwd) : null;
+}
+
+/** Where a clone of `repoName` would land in `parent`; null until both are known. */
+export function cloneDestination(
+  parent: string | null | undefined,
+  repoName: string | null | undefined,
+): string | null {
+  const folder = parent?.trim();
+  if (!folder || !repoName) return null;
+  return joinFolder(folder, defaultCloneFolder({ name: repoName }));
+}
+
+/* ── the dialog's form ─────────────────────────────────────────── */
+
+/** What the « From a Git repository » form can be in. */
+export type FromGitStatus =
+  /** Nothing typed yet. */
+  | "empty"
+  /** The address is being read. */
+  | "checking"
+  /** The address is refused: the reason shows under the field. */
+  | "refused"
+  /** The address is good, but there is no folder to clone into. */
+  | "noFolder"
+  | "ready"
+  /** A clone, or the steps after it, is running. */
+  | "running";
+
+export interface FromGitFormState {
+  /** The field as typed. */
+  input: string;
+  /** What reading `input` said; null while it has not answered. */
+  parse: RepoParse | null;
+  /** The folder it will be cloned into, once resolved. */
+  parent: string | null;
+  running: boolean;
+}
+
+export function fromGitStatus(form: FromGitFormState): FromGitStatus {
+  if (form.running) return "running";
+  if (!cleanRepoInput(form.input)) return "empty";
+  if (!form.parse) return "checking";
+  if (form.parse.status !== "ok") return "refused";
+  return form.parent?.trim() ? "ready" : "noFolder";
+}
+
+/** The submit button: only a form that is ready can be sent. */
+export function fromGitButton(status: FromGitStatus): {
+  label: "create.gitSubmit" | "create.gitRunning";
+  disabled: boolean;
+} {
+  return {
+    label: status === "running" ? "create.gitRunning" : "create.gitSubmit",
+    disabled: status !== "ready",
+  };
+}
+
+/** What stays disabled while a clone runs: everything that would change the request. */
+export const fromGitFieldsDisabled = (status: FromGitStatus) => status === "running";
+
+/**
+ * What a key does in the form: Enter starts it when it is ready; Escape closes
+ * the dialog, and does nothing while something runs (Cancel is the way out).
+ */
+export function fromGitKey(key: string, status: FromGitStatus): "start" | "close" | null {
+  if (key === "Enter") return status === "ready" ? "start" : null;
+  if (key === "Escape") return status === "running" ? null : "close";
+  return null;
+}
+
+/** A failure on one line: the first sentence-bearing line, spaces collapsed, cut at `max`. */
+export function oneLine(reason: string, max = 160): string {
+  const line = reason
+    .split(/\r?\n/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .find(Boolean);
+  if (!line) return "";
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
 /** A workspace name worth keeping: one line, no control characters. */
 function workspaceName(value: string | null | undefined, fallback: string): string | null {
   if (value === undefined || value === null || value.trim() === "") return fallback;
@@ -215,7 +310,7 @@ export async function workspaceFromGit(
     return refuse("invalidName", "The workspace name must be one line of at most 80 characters.");
   }
 
-  const parent = deps.projectsFolder() ?? (request.askerCwd ? parentFolder(request.askerCwd) : null);
+  const parent = resolveParent(null, deps.projectsFolder(), request.askerCwd);
   if (!parent) {
     return refuse(
       "noDestination",
