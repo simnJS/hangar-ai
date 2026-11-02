@@ -83,6 +83,12 @@ export interface OpenKitTab extends OpenEntry {
   badge: KitTabBadge | null;
   /** The page named it (`tab.setTitle`): asking for it again leaves that name. */
   titled: boolean;
+  /**
+   * Brought back at startup and not shown since: its page is not loaded yet
+   * (`kitTabLoads`). Never saved; it ends when the tab is first shown, reloaded,
+   * or asked for again by an agent or a hook.
+   */
+  restored: boolean;
 }
 
 /** What a caller passes a kit's tab, by the names its manifest declares. */
@@ -390,6 +396,8 @@ export function openKitTab(tab: KitTabToOpen): string {
           ...entry,
           ...(existing.titled ? {} : { title }),
           openedBy: openedBy ?? entry.openedBy,
+          // Asked for by an agent or a hook: it may be followed, so it loads.
+          ...(openedBy !== null && isKitTab(entry) ? { restored: false } : {}),
           ...(replaced ? { params } : {}),
         })),
         ...(reveal ? { activeId: existing.id, panelOpen: true } : {}),
@@ -433,6 +441,7 @@ const kitTabEntry = (
   ...tab,
   kind: "kit",
   badge: null,
+  restored: false,
   openedAt: Date.now(),
   modifiedMs: 0,
   revision: 0,
@@ -449,8 +458,16 @@ export function reloadKitTab(id: string) {
       ...e,
       revision: e.revision + 1,
       badge: null,
+      restored: false,
     })),
   });
+}
+
+/** A restored kit tab has been shown: from now on its page is loaded like any other. */
+export function markKitTabShown(id: string) {
+  const entry = find(id);
+  if (!entry || !isKitTab(entry) || !entry.restored) return;
+  set({ [entry.workspaceId]: withEntry(modelScope(entry.workspaceId), id, (e) => ({ ...e, restored: false })) });
 }
 
 /** What a kit's tab holds now; none once it is closed. */
@@ -595,7 +612,7 @@ export function restoreKitTabs(workspaceId: string) {
   const paths = new Set(scope.models.map((entry) => entry.path));
   const arriving = readSavedTabs(workspaceId)
     .filter((tab) => !paths.has(tab.path))
-    .map((tab) => kitTabEntry({ ...tab, id: newId(), workspaceId }));
+    .map((tab) => ({ ...kitTabEntry({ ...tab, id: newId(), workspaceId }), restored: true }));
   if (!arriving.length) return saveKitTabs(workspaceId);
   set({
     [workspaceId]: {

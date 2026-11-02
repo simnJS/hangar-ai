@@ -847,6 +847,57 @@ describe("a kit's tabs across a restart", () => {
     expect(store.modelScope("other").models).toEqual([]);
     store.forgetSavedKitTabs([]);
   });
+
+  // A restored tab waits to be shown (kitTabLoads).
+  it("come back flagged restored, with their params, and a tab opened later does not", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "4567" }, openedBy: "Ava" });
+    const after = await start();
+    after.restoreKitTabs("ws");
+    const [restored] = after.modelScope("ws").models;
+    expect(restored).toMatchObject({ kind: "kit", restored: true, params: { run: "4567" } });
+    const live = after.openKitTab({ ...CI, params: { run: "9" }, openedBy: "Ava" });
+    expect(after.modelScope("ws").models.find((entry) => entry.id === live)).toMatchObject({ restored: false });
+  });
+
+  it("a tab opened by a hook in a workspace not restored yet loads at once", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+    const after = await start();
+    const id = after.openKitTab({ ...CI, params: { run: "2" }, openedBy: "Ava" });
+    const models = after.modelScope("ws").models;
+    expect(models.find((entry) => entry.id === id)).toMatchObject({ restored: false });
+    expect(models.filter((entry) => entry.id !== id)).toMatchObject([{ restored: true }]);
+  });
+
+  it("stop being restored once shown, and the flag is not saved", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+    const after = await start();
+    after.restoreKitTabs("ws");
+    const [entry] = after.modelScope("ws").models;
+    after.markKitTabShown(entry.id);
+    expect(after.modelScope("ws").models[0]).toMatchObject({ restored: false, params: { run: "1" } });
+    const third = await start();
+    third.restoreKitTabs("ws");
+    expect(third.modelScope("ws").models[0]).toMatchObject({ restored: true });
+  });
+
+  it("an agent or a hook asking for a restored tab, or a reload, loads it", async () => {
+    const before = await start();
+    before.openKitTab({ ...CI, params: { run: "1" } });
+    const after = await start();
+    after.restoreKitTabs("ws");
+    after.openKitTab({ ...CI, params: { run: "1" } });
+    expect(after.modelScope("ws").models[0]).toMatchObject({ restored: true });
+    after.openKitTab({ ...CI, params: { run: "1" }, openedBy: "Ava" });
+    expect(after.modelScope("ws").models[0]).toMatchObject({ restored: false });
+
+    const again = await start();
+    again.restoreKitTabs("ws");
+    again.reloadKitTab(again.modelScope("ws").models[0].id);
+    expect(again.modelScope("ws").models[0]).toMatchObject({ restored: false });
+  });
 });
 
 describe("modelFiles", () => {
