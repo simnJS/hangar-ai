@@ -151,6 +151,15 @@ export function kitTabState(
   return { kind: "ready", choice, url: kitFileUrl(kitId, choice.tab.entry, platformIsWindows) };
 }
 
+/**
+ * Whether a kit tab's page is loaded now. A tab brought back at startup waits
+ * for the first time it is shown; one an agent or a hook opened, or asked for
+ * again, loads at once, as it may be following something (a CI run). Once
+ * shown, a tab is a normal one: its page is kept loaded, hidden or not.
+ */
+export const kitTabLoads = (tab: { restored: boolean }, shown: boolean): boolean => !tab.restored || shown;
+
+
 /* ── what an agent or a hook may open ─────────────────────────── */
 
 /** The longest value a param may hold, in characters. */

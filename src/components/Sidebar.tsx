@@ -23,6 +23,7 @@ import { useAsleep } from "../lib/hibernateStore";
 import type { ForcedSleep } from "../lib/useHibernation";
 import { proseTime } from "../lib/inspectorFormat";
 import { mcpScopeClear } from "../lib/mcpScope";
+import { editorNotice, openInVSCode } from "../lib/openEditor";
 import { orchestratorOf, workersOf } from "../lib/orchestration";
 import { useShortcutTitle } from "../lib/useShortcuts";
 import type { Workspace } from "../types";
@@ -154,6 +155,16 @@ export function Sidebar({
   const uid = useId();
   /** Workspaces put to sleep for being left alone (lib/hibernate). */
   const asleep = useAsleep();
+  /** One line on why « Ouvrir avec VS Code » did nothing; gone after a few seconds. */
+  const [editorNote, setEditorNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editorNote) return;
+    const timer = window.setTimeout(() => setEditorNote(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [editorNote]);
+  function openEditor(ws: Workspace) {
+    void openInVSCode(ws).then((outcome) => setEditorNote(editorNotice(outcome, ws.name, t)));
+  }
   // Only the view narrowed to the agents that want you depends on every
   // pane's state at once; otherwise this asks for nothing and never changes.
   const wanting = useAgentsIn(attentionOnly ? state.workspaces.map((ws) => ws.id) : []);
@@ -825,6 +836,12 @@ export function Sidebar({
       },
       {
         kind: "item",
+        label: t("editor.open"),
+        icon: "folder",
+        onSelect: () => openEditor(ws),
+      },
+      {
+        kind: "item",
         label: t("worktrees.action"),
         icon: "branch",
         takesFocus: true,
@@ -1013,6 +1030,12 @@ export function Sidebar({
           {tree.loose.map((ws) => renderWorkspace(ws, 1))}
           {tree.folders.map(renderFolder)}
         </div>
+
+        {editorNote && (
+          <p className="nav-empty" role="status">
+            {editorNote}
+          </p>
+        )}
 
         {projects.length === 0 && <p className="nav-empty">{t("sidebar.empty")}</p>}
 
