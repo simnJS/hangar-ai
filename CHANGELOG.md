@@ -8,6 +8,29 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
+## [1.12.0] - 2026-11-02
+
+- **Tell it where.** Ask any Claude to create a workspace from a repository and say where
+  it goes, on any drive: "put it on my second SSD". The clone lands in that folder, and
+  missing folders are made. An empty folder already there is used, and put back empty if
+  the clone fails. Your **Projects folder** setting is not changed.
+  - A repository that is not yours still asks for your click first, and the card now
+    shows where it would go. For your own, the agent tells you the folder.
+  - Still refused, with a message saying what to do next: a relative path, a path with
+    `..`, the operating system's folders and Hangar's own data. A folder that already
+    holds something else is refused untouched.
+- **Blocked tasks.** A task that waits on something outside the board (a package release,
+  a decision, a date) can be blocked with a reason, from the Board or by an agent with
+  `board_block_task`. It goes back to To do holding no worker and no files, and agents are
+  no longer handed it. The tasks that depend on it keep waiting.
+  - Give it a day to look again: the day after, it unblocks itself.
+  - Or choose **Only a person can unblock it**: no agent can lift that block, and the
+    day only reminds you.
+  - A worker that blocks its own task is told to stop.
+  - Unblock from the Board, or with `board_unblock_task`. The Board can filter by blocked
+    state, and the activity log records each block and unblock.
+- **`board_next_task` skips tasks that need you.** Agents are no longer handed them.
+
 ## [1.11.1] - 2026-11-02
 
 - Hangar's repository moved to hangar-ai/hangar, with the kits. Old links redirect, and updates keep coming.
