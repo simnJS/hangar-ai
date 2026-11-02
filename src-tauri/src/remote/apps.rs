@@ -789,13 +789,33 @@ pub(super) mod tests {
     #[test]
     fn the_ports_listening_are_those_that_take_a_connection() {
         on_ports(|| async {
-            let server = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, test_port(9)))
-                .await
-                .unwrap();
-            let port = server.local_addr().unwrap().port();
-            assert_eq!(listening(&[port, 0, port]).await, [port]);
-            assert_eq!(reach(port).await, Some(at(port)));
-            drop(server);
+            // Without HANGAR_PORT_BASE the port is an ephemeral one, and the
+            // other tests of this process (which do not take `on_ports`) bind
+            // ephemeral ports too: a port freed by `drop` can be handed to one
+            // of them at once, and then it really is listened on. So the port
+            // is held, bound but never listening (it refuses every
+            // connection), from the instant the listener is gone: nobody else
+            // can take it, and "nobody listens here" is true by construction.
+            // If someone else wins the port in between, bind fails: start over.
+            let mut held = None;
+            for _ in 0..50 {
+                let server = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, test_port(9)))
+                    .await
+                    .unwrap();
+                let port = server.local_addr().unwrap().port();
+                assert_eq!(listening(&[port, 0, port]).await, [port]);
+                assert_eq!(reach(port).await, Some(at(port)));
+                drop(server);
+                let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                if socket
+                    .bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
+                    .is_ok()
+                {
+                    held = Some((socket, port));
+                    break;
+                }
+            }
+            let (_held, port) = held.expect("no port could be freed and kept");
             assert!(listening(&[port]).await.is_empty());
             assert_eq!(reach(port).await, None);
         });
