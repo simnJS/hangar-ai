@@ -18,6 +18,7 @@ mod mcp_scope;
 mod memory;
 mod model;
 mod notify;
+mod open_editor;
 mod orchestrator;
 mod path_env;
 mod preview;
@@ -172,6 +173,7 @@ pub fn run() {
             git_clone::git_clone,
             git_clone::git_clone_cancel,
             git_clone::git_clone_discard,
+            open_editor::open_in_vscode,
             delivery::delivery_preflight,
             delivery::delivery_run,
             delivery::delivery_cleanup,
