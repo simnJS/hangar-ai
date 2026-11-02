@@ -23,6 +23,9 @@ use tokio::sync::oneshot;
 /// window is bothered with it.
 pub const OPERATIONS: &[&str] = &[
     "workspace_list",
+    // a repository to a workspace and its orchestrator (lib/workspaceFromGit)
+    "workspace_create",
+    "workspace_set_check",
     "pane_list",
     "pane_create",
     "pane_close",
@@ -76,8 +79,16 @@ const WORKER_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
 /// pane operation, far short of a worktree.
 const PROJECT_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// workspace_create waits for the person to decide (3 minutes, in
+/// src/lib/workspaceFromGit.ts), then for a clone, which git_clone.rs gives up
+/// on after 30 minutes. The window answers before this does; it only runs out
+/// when the window has stopped answering.
+const WORKSPACE_CREATE_ANSWER_TIMEOUT: Duration = Duration::from_secs(35 * 60);
+
 fn answer_timeout(op: &str) -> Duration {
-    if op.starts_with("model_") || op.starts_with("preview_") {
+    if op == "workspace_create" {
+        WORKSPACE_CREATE_ANSWER_TIMEOUT
+    } else if op.starts_with("model_") || op.starts_with("preview_") {
         MODEL_ANSWER_TIMEOUT
     } else if op.starts_with("worker_") {
         WORKER_ANSWER_TIMEOUT
@@ -326,6 +337,23 @@ mod tests {
             assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
             assert_eq!(answer_timeout(op), Duration::from_secs(60), "{op}");
         }
+    }
+
+    #[test]
+    fn a_repository_to_a_workspace_waits_for_the_person_and_the_clone() {
+        for op in ["workspace_create", "workspace_set_check"] {
+            assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
+        }
+        assert_eq!(
+            answer_timeout("workspace_create"),
+            Duration::from_secs(35 * 60)
+        );
+        // Setting a field is as quick as a pane operation.
+        assert_eq!(
+            answer_timeout("workspace_set_check"),
+            Duration::from_secs(20)
+        );
+        assert_eq!(answer_timeout("workspace_list"), Duration::from_secs(20));
     }
 
     #[test]

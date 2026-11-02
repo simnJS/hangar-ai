@@ -8,6 +8,7 @@ import {
   type ControlDeps,
 } from "./control";
 import type { Worktree } from "./git";
+import type { FromGitDeps } from "./workspaceFromGit";
 import type { KitInfo } from "./kits";
 import { createRootGrants, localModelHost, type ModelHost } from "./modelHost";
 import {
@@ -320,7 +321,9 @@ function setup(overrides: Partial<ControlDeps> = {}) {
     },
     reattach: (id) => log.push(`reattach:${id}`),
     announce: (event) =>
-      log.push(`announce:${event.kind}:${"pane" in event ? event.pane : event.file}:${event.by}`),
+      log.push(
+        `announce:${event.kind}:${"pane" in event ? event.pane : "file" in event ? event.file : event.command}:${event.by}`,
+      ),
     sleep: async () => undefined,
     modelAllowRoots: async (workspaceId, roots) => {
       allowed = roots;
@@ -1635,5 +1638,161 @@ describe("readLines", () => {
     ).buffer.active;
     expect(readLines(buffer, 10)).toEqual(["first", "a very long line that wrapped"]);
     expect(readLines(buffer, 1)).toEqual(["a very long line that wrapped"]);
+  });
+});
+
+/** `workspace_create` and `workspace_set_check`: what the window decides before and after the flow. */
+describe("workspace_create", () => {
+  const fakeFromGit = (seen: string[] = [], owned = true): FromGitDeps => ({
+    parse: async (input) => ({
+      status: "ok",
+      url: `https://github.com/${input}.git`,
+      host: "github.com",
+      owner: input.split("/")[0],
+      name: input.split("/")[1],
+    }),
+    ownership: async () => ({ mine: owned, reason: owned ? "yours" : "someone else's" }),
+    projectsFolder: () => null,
+    findWorkspace: (folder) =>
+      folder === "C:\\dev\\octo" ? { id: "w9", name: "Octo", cwd: folder, orchestrator: null } : null,
+    consent: async (request) => {
+      seen.push(`consent:${request.by}:${request.destination}`);
+      return "allow";
+    },
+    clone: async (url, parent, name) => {
+      seen.push(`clone:${url}:${parent}:${name}`);
+      return { status: "cloned", path: `${parent}\\${name}`, reused: false, branch: "main" };
+    },
+    newJobId: () => "job",
+    newConsentId: () => "consent",
+    createWorkspace: ({ name, cwd, activate }) => {
+      seen.push(`workspace:${name}:${cwd}:${activate}`);
+      const orchestrator = { id: "p50", name: "Kai" };
+      return { workspace: { id: "w50", name, cwd, orchestrator }, orchestrator };
+    },
+    removeWorkspace: (id) => seen.push(`remove:${id}`),
+    sendFirstMessage: async (paneId) => {
+      seen.push(`message:${paneId}`);
+    },
+    openWorkspace: (id) => seen.push(`open:${id}`),
+    showWorkspace: (id) => seen.push(`show:${id}`),
+  });
+
+  it("clones next to the asking workspace, as an agent's request, and says what it made", async () => {
+    const seen: string[] = [];
+    const { deps, log } = setup({ fromGit: fakeFromGit(seen) });
+    const answer = (await runControl("workspace_create", { ...fromAva, repo: " acme/shop " }, deps)) as any;
+    expect(answer).toMatchObject({
+      created: true,
+      workspace: { name: "shop", folder: "C:\\dev\\shop", orchestrator: "Kai" },
+      yours: true,
+      cloned: true,
+    });
+    // "Hangar" lives in C:\dev\hangar: the clone goes beside it, and the person stays where they were.
+    expect(seen).toEqual([
+      "clone:https://github.com/acme/shop.git:C:\\dev:shop",
+      "workspace:shop:C:\\dev\\shop:false",
+      "message:p50",
+      "open:w50",
+    ]);
+    expect(log).toContain("announce:workspaceCreated:Kai:Ava");
+  });
+
+  it("shows a workspace already on the folder and clones nothing", async () => {
+    const seen: string[] = [];
+    const { deps, log } = setup({ fromGit: fakeFromGit(seen) });
+    const answer = (await runControl("workspace_create", { ...fromAva, repo: "me/octo" }, deps)) as any;
+    expect(answer).toMatchObject({ created: false, workspace: { name: "Octo", id: "w9" } });
+    expect(seen).toEqual([]);
+    expect(log.some((entry) => entry.startsWith("announce:"))).toBe(false);
+  });
+
+  it("asks the person about a repository that is not theirs, naming the pane that asked", async () => {
+    const seen: string[] = [];
+    const { deps } = setup({ fromGit: fakeFromGit(seen, false) });
+    await runControl("workspace_create", { ...fromAva, repo: "evil/tool" }, deps);
+    expect(seen[0]).toBe("consent:Ava:C:\\dev\\tool");
+  });
+
+  it("tells a model why not, in words, and refuses what is not a repository", async () => {
+    const { deps } = setup({
+      fromGit: {
+        ...fakeFromGit(),
+        parse: async () => ({ status: "refused", reason: "not a repository address" }),
+      },
+    });
+    await expect(runControl("workspace_create", { ...fromAva, repo: "x y" }, deps)).rejects.toThrow(
+      "not a repository address",
+    );
+    await expect(runControl("workspace_create", { ...fromAva }, deps)).rejects.toThrow(/Give repo/);
+    await expect(runControl("workspace_create", { ...fromAva, repo: 3 }, deps)).rejects.toThrow(/must be a string/);
+    await expect(runControl("workspace_create", { ...fromAva, repo: "a/b", name: 4 }, deps)).rejects.toThrow(
+      /name must be a string/,
+    );
+  });
+
+  it("is turned off with the rest of the pane control", async () => {
+    const { deps } = setup({ fromGit: fakeFromGit(), enabled: () => false });
+    await expect(runControl("workspace_create", { ...fromAva, repo: "a/b" }, deps)).rejects.toThrow(DISABLED);
+  });
+
+  it("needs a window that can clone", async () => {
+    const { deps } = setup();
+    await expect(runControl("workspace_create", { ...fromAva, repo: "a/b" }, deps)).rejects.toThrow(
+      /cannot create a workspace/,
+    );
+  });
+});
+
+describe("workspace_set_check", () => {
+  const withOrchestrator = () => {
+    const patches: string[] = [];
+    const made = setup({
+      updateWorkspace: (id, patch) => patches.push(`${id}:${JSON.stringify(patch.orchestration)}`),
+    });
+    made.patch("w1", {
+      panes: [{ ...pane("p1", "Ava", "claude"), role: "orchestrator" }, pane("p2", "Max", "shell")],
+    });
+    return { ...made, patches };
+  };
+
+  it("sets the check command of the orchestrator's own workspace, and says so on screen", async () => {
+    const { deps, log, patches } = withOrchestrator();
+    const answer = (await runControl(
+      "workspace_set_check",
+      { ...fromAva, command: "  pnpm build && pnpm test " },
+      deps,
+    )) as any;
+    expect(answer).toMatchObject({ workspace: "Hangar", checkCommand: "pnpm build && pnpm test", previous: null });
+    expect(patches).toHaveLength(1);
+    expect(patches[0].startsWith("w1:")).toBe(true);
+    expect(JSON.parse(patches[0].slice(3))).toMatchObject({ checkCommand: "pnpm build && pnpm test", maxWorkers: 3 });
+    expect(log).toContain("announce:checkSet:pnpm build && pnpm test:Ava");
+  });
+
+  it("is the orchestrator's alone, and for its own workspace only", async () => {
+    const { deps, patches } = withOrchestrator();
+    const command = "pnpm test";
+    // A shell pane of the same workspace, a pane of another workspace, a caller Hangar does not know.
+    for (const caller of [
+      { paneId: "p2", paneName: "Max", cwd: "C:\\dev\\hangar" },
+      { paneId: "p3", paneName: "Ava", cwd: "C:\\dev\\shop" },
+      { paneId: null, paneName: null, cwd: "C:\\elsewhere" },
+    ]) {
+      await expect(runControl("workspace_set_check", { caller, command }, deps)).rejects.toThrow(
+        /for a workspace's orchestrator/,
+      );
+    }
+    // Naming another workspace changes nothing about whose it is.
+    await runControl("workspace_set_check", { ...fromAva, workspace: "Shop", command }, deps);
+    expect(patches.map((entry) => entry.slice(0, 3))).toEqual(["w1:"]);
+  });
+
+  it("keeps a command that is one line of reasonable length", async () => {
+    const { deps, patches } = withOrchestrator();
+    for (const command of ["", "   ", "a\nb", "a\u0007b", "x".repeat(501), 7]) {
+      await expect(runControl("workspace_set_check", { ...fromAva, command }, deps)).rejects.toThrow(/Give command/);
+    }
+    expect(patches).toEqual([]);
   });
 });

@@ -182,7 +182,7 @@ One memory entry, titled exactly "${plan}", tagged "${PLAN_TAG}". Rewrite it who
 Hangar hands you the board, your plan and the latest events. Trust them over what you remember and carry on from there; never restart work that is already running.
 
 ## Your tools
-board_list_tasks, board_create_task {title, description, priority, depends_on, owns, labels}, board_update_task {id, title, description, column, labels, depends_on, owns, release}, board_comment_task {id, text}; memory_write {title, content, tags}, memory_read, memory_search; worker_spawn {task, name?, model?}, worker_list, worker_stop {worker${git ? ", keepWorktree?" : ""}}; pane_send {pane, text, when_idle: true} and pane_read {pane} on a worker's pane; AskUserQuestion for the person.`;
+board_list_tasks, board_create_task {title, description, priority, depends_on, owns, labels}, board_update_task {id, title, description, column, labels, depends_on, owns, release}, board_comment_task {id, text}; memory_write {title, content, tags}, memory_read, memory_search; workspace_set_check {command} (the check command of your own workspace, when the person asked you to get a repository ready); worker_spawn {task, name?, model?}, worker_list, worker_stop {worker${git ? ", keepWorktree?" : ""}}; pane_send {pane, text, when_idle: true} and pane_read {pane} on a worker's pane; AskUserQuestion for the person.`;
 }
 
 /** The manager's tracker, or null: the entry of that title, tagged for the manager. */

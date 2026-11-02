@@ -14,6 +14,7 @@ import { StatsView } from "./components/StatsView";
 import { McpPanel } from "./components/McpPanel";
 import { McpServersPanel } from "./components/McpServersPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { GitCloneConsent } from "./components/GitCloneConsent";
 import { VoiceHud } from "./components/VoiceHud";
 import { Toolbar, type View } from "./components/Toolbar";
 import { StatusBar } from "./components/StatusBar";
@@ -44,7 +45,7 @@ import { deliveryDeps, landDelivery } from "./lib/deliveryControl";
 import { stopAllWorkers } from "./lib/workerControl";
 import { beginDelivery } from "./lib/deliveryRuns";
 import { isOrchestrated, useNeedsYou, useNeedsYouNotices } from "./lib/needsYou";
-import { orchestratorOf, workersOf } from "./lib/orchestration";
+import { orchestrationOf, orchestratorOf, workersOf } from "./lib/orchestration";
 import {
   canCreateOrchestrator,
   pinRefusal,
@@ -121,6 +122,13 @@ import {
   type ShortcutHandlers,
 } from "./lib/useShortcuts";
 import { liveWorkerDeps } from "./lib/workerControl";
+import { gitClone, gitRepoOwnership, gitRepoParse, newCloneJobId } from "./lib/gitClone";
+import {
+  gitCloneConsent,
+  projectsFolderOf,
+  sameFolder,
+  type FromGitDeps,
+} from "./lib/workspaceFromGit";
 import { useT } from "./i18n";
 import { useStore } from "./store";
 import { applyThemeToDocument, getTheme } from "./themes";
@@ -159,6 +167,8 @@ export default function App() {
     snapshot,
     hydrated,
     activeWorkspace: storeActiveWorkspace,
+    addWorkspace,
+    removeWorkspace,
     updateWorkspace,
     respawnPane,
     applyPreset,
@@ -755,6 +765,57 @@ export default function App() {
   // Defined further down, with the rest of the window handling.
   const detachRef = useRef<(workspaceId: string) => Promise<void>>(async () => undefined);
   const reattachRef = useRef<(workspaceId: string) => void>(() => undefined);
+  // « Créer un workspace depuis un dépôt »: what lib/workspaceFromGit reaches.
+  // Hangar cannot delete a folder from here, so `discardClone` is left out: a
+  // clone that outlives a failed start is reported with its path instead.
+  const fromGitDeps: FromGitDeps = {
+    parse: gitRepoParse,
+    ownership: gitRepoOwnership,
+    projectsFolder: () => projectsFolderOf(snapshot().settings),
+    findWorkspace: (folder) => {
+      const ws = snapshot().workspaces.find((entry) => sameFolder(entry.cwd, folder));
+      const orchestrator = ws ? orchestratorOf(ws) : null;
+      return ws
+        ? {
+            id: ws.id,
+            name: ws.name,
+            cwd: ws.cwd,
+            orchestrator: orchestrator ? { id: orchestrator.id, name: orchestrator.name } : null,
+          }
+        : null;
+    },
+    consent: (request) => gitCloneConsent.ask(request),
+    clone: gitClone,
+    newJobId: newCloneJobId,
+    newConsentId: newCloneJobId,
+    createWorkspace: ({ name, cwd, activate }) => {
+      const before = snapshot().activeWorkspaceId;
+      const id = addWorkspace({ name, cwd, layout: 1, agents: ["claude"], shellId: null });
+      const ws = snapshot().workspaces.find((entry) => entry.id === id);
+      const pane = ws?.panes[0];
+      if (!ws || !pane) {
+        removeWorkspace(id);
+        throw new Error("Hangar could not create the workspace.");
+      }
+      // Same tick as the add: the pane mounts, and launches, as the
+      // orchestrator it was created to be, so it holds Hangar's server.
+      updatePane(id, pane.id, {
+        role: "orchestrator",
+        model: orchestrationOf(ws).orchestratorModel,
+      });
+      // An agent asked: the person stays where they were.
+      if (!activate && before) setActiveWorkspace(before);
+      const orchestrator = { id: pane.id, name: pane.name };
+      return { workspace: { id, name: ws.name, cwd: ws.cwd, orchestrator }, orchestrator };
+    },
+    removeWorkspace,
+    sendFirstMessage: async (paneId, text) => {
+      await bridgeEnqueue(paneId, text, "hangar");
+    },
+    openWorkspace: (id) =>
+      setOpenedIds((current) => (current.includes(id) ? current : [...current, id])),
+    showWorkspace: setActiveWorkspace,
+  };
   const controlDeps: ControlDeps | null =
     hydrated
       ? {
@@ -806,6 +867,8 @@ export default function App() {
           // A detached workspace's preview is drawn by its own window.
           modelHost: async (workspaceId, detached) =>
             detached ? remoteModelHost(workspaceId) : localModelHost(workspaceId),
+          updateWorkspace,
+          fromGit: fromGitDeps,
           // orchestration: workers deps
           workers: liveWorkerDeps(updatePane),
           // orchestration: delivery deps
@@ -1423,6 +1486,8 @@ export default function App() {
     >
       {/* One update banner and one sidebar, both the main window's. */}
       {isMainWindow && <UpdateBanner />}
+      {/* Beside the window, never over a terminal's keyboard (components/GitCloneConsent). */}
+      {isMainWindow && <GitCloneConsent />}
       {navigatorShown && (
         <Sidebar
           onOpenSettings={() => openSettings()}

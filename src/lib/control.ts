@@ -26,6 +26,8 @@ import { workerControl, type WorkerDeps } from "./workerControl";
 import { deliveryControl } from "./deliveryControl";
 import { managerControl } from "./managerControl";
 import type { ProjectsDeps } from "./projects";
+import { orchestrationOf, orchestratorOf } from "./orchestration";
+import { workspaceFromGit, type FromGitDeps } from "./workspaceFromGit";
 
 /**
  * Agents driving the panes through the MCP server (see src-tauri/src/control.rs).
@@ -54,6 +56,8 @@ export interface Caller {
 
 export type ControlEvent =
   | { kind: "created" | "closed" | "restarted" | "reset"; by: string | null; pane: string; workspace: string }
+  | { kind: "workspaceCreated"; by: string | null; pane: string; workspace: string }
+  | { kind: "checkSet"; by: string | null; workspace: string; command: string }
   | {
       /** "Elsewhere": in a workspace that is not the one on screen, which the line names. */
       kind: "modelShown" | "modelClosed" | "modelShownElsewhere" | "modelClosedElsewhere";
@@ -121,6 +125,10 @@ export interface ControlDeps {
   previewInspect?: (path: string) => Promise<unknown>;
   /** The kits installed on this machine: the real command unless a test hands in its own. */
   kits?: () => Promise<KitInfo[]>;
+  /** What `workspace_create` reaches: git, the store and the person's consent (lib/workspaceFromGit). */
+  fromGit?: FromGitDeps;
+  /** Patches a workspace's own fields: its check command is one (`workspace_set_check`). */
+  updateWorkspace?: (workspaceId: string, patch: Partial<Workspace>) => void;
   // orchestration: workers deps
   /** What starting and stopping workers reaches beyond the panes (lib/workerControl). */
   workers?: WorkerDeps;
@@ -919,6 +927,109 @@ async function kitTabClose(ws: Workspace, args: Record<string, unknown>, by: str
   return { closed: closing.map((entry) => entry.params), open: left };
 }
 
+/** The longest check command Hangar keeps: a command, not a script. */
+const CHECK_MAX = 500;
+
+/**
+ * `workspace_create`: an agent hands Hangar a repository, and Hangar clones it,
+ * makes the workspace and starts an orchestrator in it (lib/workspaceFromGit).
+ * It answers once the workspace exists, or says why not.
+ */
+async function workspaceCreate(
+  args: Record<string, unknown>,
+  caller: Caller,
+  state: AppState,
+  deps: ControlDeps,
+): Promise<unknown> {
+  if (!deps.fromGit) throw new Error("This Hangar window cannot create a workspace from a repository.");
+  if (args.repo !== undefined && typeof args.repo !== "string") {
+    throw new Error("repo must be a string: owner/repo, or the repository's https or ssh address.");
+  }
+  if (args.name !== undefined && args.name !== null && typeof args.name !== "string") {
+    throw new Error("name must be a string.");
+  }
+  const repo = text(args.repo);
+  if (!repo) throw new Error("Give repo: owner/repo, or the repository's https or ssh address.");
+
+  const asker = callerWorkspace(state, caller);
+  const outcome = await workspaceFromGit(
+    {
+      repo,
+      name: text(args.name),
+      origin: { kind: "agent", pane: caller.paneName },
+      askerCwd: asker?.cwd ?? caller.cwd,
+    },
+    deps.fromGit,
+  );
+  if (outcome.status === "refused") throw new Error(outcome.reason);
+
+  const { workspace } = outcome;
+  const shown = {
+    name: workspace.name,
+    folder: workspace.cwd,
+    id: workspace.id,
+    orchestrator: workspace.orchestrator?.name ?? null,
+  };
+  if (outcome.status === "existing") {
+    return { created: false, workspace: shown, note: outcome.notes.join(" ") };
+  }
+  deps.announce({
+    kind: "workspaceCreated",
+    by: caller.paneName,
+    pane: workspace.orchestrator?.name ?? workspace.name,
+    workspace: workspace.name,
+  });
+  return {
+    created: true,
+    workspace: shown,
+    repository: outcome.repo.url,
+    yours: outcome.mine,
+    cloned: !outcome.reusedFolder,
+    firstMessage:
+      "queued for the orchestrator: it reads the repository, installs its dependencies, sets the check command, " +
+      "runs the tests once and reports. It then waits for an objective, which the person gives it or you pass on with pane_send.",
+    note: outcome.notes.join(" "),
+  };
+}
+
+/**
+ * `workspace_set_check`: the orchestrator sets the check command of its own
+ * workspace. The panel shows the field, and the window says on screen that it
+ * was set and by whom.
+ */
+async function workspaceSetCheck(
+  args: Record<string, unknown>,
+  caller: Caller,
+  state: AppState,
+  deps: ControlDeps,
+): Promise<unknown> {
+  const ws = callerWorkspace(state, caller);
+  const orchestrator = ws ? orchestratorOf(ws) : null;
+  if (!ws || !orchestrator || orchestrator.id !== caller.paneId) {
+    throw new Error(
+      "workspace_set_check is for a workspace's orchestrator, and only for its own workspace. " +
+        "If you are not the orchestrator, say in a comment on your task which command checks the work.",
+    );
+  }
+  if (!deps.updateWorkspace) throw new Error("This Hangar window cannot change a workspace's settings.");
+  const command = text(args.command);
+  // eslint-disable-next-line no-control-regex
+  if (!command || command.length > CHECK_MAX || /[\u0000-\u001f\u007f]/.test(command)) {
+    throw new Error(
+      `Give command: one line of at most ${CHECK_MAX} characters, the one a change has to pass (build and tests).`,
+    );
+  }
+  const settings = orchestrationOf(ws);
+  deps.updateWorkspace(ws.id, { orchestration: { ...settings, checkCommand: command } });
+  deps.announce({ kind: "checkSet", by: caller.paneName, workspace: ws.name, command });
+  return {
+    workspace: ws.name,
+    checkCommand: command,
+    previous: settings.checkCommand,
+    note: "Workers' deliveries are checked with it from now on; the person sees it in the workspace's orchestration panel.",
+  };
+}
+
 export async function runControl(
   op: string,
   args: Record<string, unknown>,
@@ -948,6 +1059,8 @@ export async function runControl(
   // The project manager works across workspaces: lib/managerControl finds its own.
   if (op.startsWith("project_")) return managerControl(op, args, caller, deps);
   if (op.startsWith("kit_tab_")) return kitTabControl(op, args, caller, deps);
+  if (op === "workspace_create") return workspaceCreate(args, caller, state, deps);
+  if (op === "workspace_set_check") return workspaceSetCheck(args, caller, state, deps);
 
   const ws = workspaceFor(state, args, caller);
   // What an agent does to a workspace's panes counts as using it, like typing
