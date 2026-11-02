@@ -1698,6 +1698,48 @@ describe("workspace_create", () => {
     expect(log).toContain("announce:workspaceCreated:Kai:Ava");
   });
 
+  describe("the trust question of a new orchestrator", () => {
+    const settle = async () => {
+      for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    const toAva = (log: string[]) => log.filter((entry) => entry.startsWith("enqueue:p1:The orchestrator"));
+
+    it("tells the asking agent when the pane waits for the person on it", async () => {
+      const { deps, log } = setup({ fromGit: fakeFromGit([], false) });
+      deps.activity = (paneId) =>
+        paneId === "p50" ? { workspaceId: "w50", activity: "waiting", bridged: false } : undefined;
+      await runControl("workspace_create", { ...fromAva, repo: "evil/tool" }, deps);
+      await settle();
+      const told = toAva(log);
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/waiting for the person.*trust the cloned folder.*Only they can answer/);
+    });
+
+    it("says nothing when the session is up and reported by the mod, or the pane never waits", async () => {
+      for (const seen of [
+        { workspaceId: "w50", activity: "waiting" as const, bridged: true },
+        { workspaceId: "w50", activity: "working" as const, bridged: false },
+      ]) {
+        const { deps, log } = setup({ fromGit: fakeFromGit([], false) });
+        deps.activity = (paneId) => (paneId === "p50" ? seen : undefined);
+        await runControl("workspace_create", { ...fromAva, repo: "evil/tool" }, deps);
+        await settle();
+        expect(toAva(log)).toEqual([]);
+      }
+    });
+
+    it("does not watch a folder Claude Code was told to trust", async () => {
+      const { deps, log } = setup({
+        fromGit: { ...fakeFromGit([], true), trustFolder: async () => undefined },
+      });
+      deps.activity = () => ({ workspaceId: "w50", activity: "waiting", bridged: false });
+      const answer = (await runControl("workspace_create", { ...fromAva, repo: "me/tool" }, deps)) as any;
+      await settle();
+      expect(answer.note).toMatch(/without the trust question/);
+      expect(toAva(log)).toEqual([]);
+    });
+  });
+
   it("shows a workspace already on the folder and clones nothing", async () => {
     const seen: string[] = [];
     const { deps, log } = setup({ fromGit: fakeFromGit(seen) });

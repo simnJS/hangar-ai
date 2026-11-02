@@ -122,6 +122,8 @@ export type FromGitOutcome =
       workspace: WorkspaceRef;
       repo: RepoRef;
       mine: boolean;
+      /** Claude Code was told to trust the folder: the orchestrator starts without the question. */
+      trusted: boolean;
       /** The person said yes to the clone. */
       consented: boolean;
       /** The folder was already a clone of this repository. */
@@ -463,7 +465,7 @@ async function proceed(
   } else {
     notes.push(
       "The repository is not the person's own, so Claude Code asks them to trust this folder, and only they can answer. " +
-        "The orchestrator waits on that prompt, shown as waiting for the person in its pane, and reads its first message once they have.",
+        "The orchestrator waits on that prompt (its pane is marked as waiting for the person, and Hangar tells you when it is), and reads its first message once they have.",
     );
   }
   return {
@@ -471,6 +473,7 @@ async function proceed(
     workspace: made.workspace,
     repo,
     mine: ownership.mine,
+    trusted: trustSet,
     consented,
     reusedFolder: cloned.reused,
     notes,

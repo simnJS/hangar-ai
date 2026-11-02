@@ -860,8 +860,6 @@ pub fn mcp_scope_clear(app: AppHandle, workspace_id: String) -> Result<(), Strin
 }
 
 /// What `trust_folder` did.
-// Not yet in lib.rs's invoke handler (a file this change does not own).
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Trusted {
@@ -884,7 +882,6 @@ pub enum Trusted {
 /// Claude Code rewrites this file under a lock Hangar does not take: the
 /// result goes to a temporary file renamed over it only when the file has not
 /// moved since it was read, and is read again otherwise.
-#[allow(dead_code)]
 fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
     if !folder.is_absolute() || !folder.is_dir() {
         return Err("the folder to trust must be an existing absolute path".into());
@@ -958,7 +955,6 @@ fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
 /// Starts a workspace's Claude Code on `folder` without the trust question,
 /// for a repository that is the person's own. `account` is the workspace's
 /// Claude account (main when absent).
-#[allow(dead_code)]
 #[tauri::command]
 pub fn claude_trust_folder(folder: String, account: Option<String>) -> Result<Trusted, String> {
     let files = ClaudeFiles::locate(account.as_deref(), true).ok_or("no home directory")?;

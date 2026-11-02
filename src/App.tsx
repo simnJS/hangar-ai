@@ -129,6 +129,8 @@ import {
   gitRepoParse,
   newCloneJobId,
 } from "./lib/gitClone";
+import { launchAccount, MAIN_ACCOUNT } from "./lib/accounts";
+import { claudeTrustFolder } from "./lib/mcpScope";
 import {
   gitCloneConsent,
   projectsFolderOf,
@@ -800,6 +802,12 @@ export default function App() {
     },
     newJobId: newCloneJobId,
     newConsentId: newCloneJobId,
+    // The account the new workspace's panes will start on: nothing is chosen
+    // for it yet, so the settings' default, as `launchAccount` decides.
+    trustFolder: async (path) => {
+      const account = await launchAccount(snapshot().settings, null, null);
+      await claudeTrustFolder(path, account.id === MAIN_ACCOUNT ? null : account.id);
+    },
     createWorkspace: ({ name, cwd, activate }) => {
       const before = snapshot().activeWorkspaceId;
       const id = addWorkspace({ name, cwd, layout: 1, agents: ["claude"], shellId: null });

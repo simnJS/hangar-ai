@@ -568,13 +568,13 @@ export function TerminalPane({
         // for the person, not done.
         const buffer = term.buffer.active;
         const rows: string[] = [];
-        for (let y = buffer.baseY; y < buffer.baseY + term.rows; y++) {
+        for (let y = buffer.viewportY; y < buffer.viewportY + term.rows; y++) {
           rows.push(buffer.getLine(y)?.translateToString(true) ?? "");
         }
         if (isTrustPrompt(rows.join("\n"))) {
           if (activityRef.current !== "waiting") {
             setActivity("waiting");
-            announce(tRef.current("notify.permission", { tool: "trust this folder" }));
+            announce(tRef.current("notify.trustFolder"));
           }
           return;
         }

@@ -190,6 +190,7 @@ pub fn run() {
             mcp_scope::mcp_servers,
             mcp_scope::mcp_scope_write,
             mcp_scope::mcp_scope_clear,
+            mcp_scope::claude_trust_folder,
             kits::kits_list,
             kits::kit_add_folder,
             kits::kit_add_git,

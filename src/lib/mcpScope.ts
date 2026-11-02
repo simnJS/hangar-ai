@@ -83,6 +83,15 @@ export const mcpScopeWrite = (args: {
   account?: string | null;
 }) => invoke<McpScopeFile>("mcp_scope_write", args);
 
+/**
+ * Tells Claude Code that this folder is trusted, so it starts there without
+ * the "Do you trust the files in this folder?" question. Only for the clone of
+ * a repository that is the person's own. `account`: the one the workspace's
+ * panes run on; absent, main.
+ */
+export const claudeTrustFolder = (folder: string, account?: string | null) =>
+  invoke<"added" | "already">("claude_trust_folder", { folder, account: account ?? null });
+
 export const mcpScopeClear = (workspaceId: string) =>
   invoke<void>("mcp_scope_clear", { workspaceId });
 

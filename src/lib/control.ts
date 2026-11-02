@@ -930,6 +930,43 @@ async function kitTabClose(ws: Workspace, args: Record<string, unknown>, by: str
 /** The longest check command Hangar keeps: a command, not a script. */
 const CHECK_MAX = 500;
 
+/** How often, and for how long, a new orchestrator's pane is watched for a question. */
+const TRUST_WATCH_MS = 2_000;
+const TRUST_WATCH_TICKS = 300;
+
+/**
+ * Tells the agent that asked for a workspace when the new orchestrator's pane
+ * stops waiting for the person — on Claude Code's question about trusting the
+ * folder, which only they answer. Once, and never an error for the caller: it
+ * runs after the answer was given.
+ */
+async function tellWhenWaiting(
+  deps: ControlDeps,
+  askerPaneId: string,
+  orchestratorId: string,
+  workspaceName: string,
+): Promise<void> {
+  try {
+    for (let tick = 0; tick < TRUST_WATCH_TICKS; tick++) {
+      await deps.sleep(TRUST_WATCH_MS);
+      const seen = deps.activity(orchestratorId);
+      // The mod reports the session: it is past the question, whatever it waits on now.
+      if (seen?.bridged) return;
+      if (seen?.activity !== "waiting") continue;
+      await deps.enqueue(
+        askerPaneId,
+        `The orchestrator of the new workspace "${workspaceName}" is waiting for the person: Claude Code asks them to trust the cloned folder ` +
+          "(\"Do you trust the files in this folder?\"). Only they can answer it, in that pane. Do not answer it for them; " +
+          "the orchestrator reads its first message once they have.",
+        "hangar",
+      );
+      return;
+    }
+  } catch {
+    // The asker is gone, or the queue is: nobody is left to tell.
+  }
+}
+
 /**
  * `workspace_create`: an agent hands Hangar a repository, and Hangar clones it,
  * makes the workspace and starts an orchestrator in it (lib/workspaceFromGit).
@@ -979,6 +1016,11 @@ async function workspaceCreate(
     pane: workspace.orchestrator?.name ?? workspace.name,
     workspace: workspace.name,
   });
+  // A folder Claude Code was not told to trust: its question comes before any
+  // event of the mod, so Hangar watches the pane and tells the asker.
+  if (!outcome.trusted && workspace.orchestrator && caller.paneId) {
+    void tellWhenWaiting(deps, caller.paneId, workspace.orchestrator.id, workspace.name);
+  }
   return {
     created: true,
     workspace: shown,

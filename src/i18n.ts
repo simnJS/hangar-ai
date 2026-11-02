@@ -281,6 +281,7 @@ const en = {
   "notify.aborted": "Interrupted",
   "notify.dropped": "Did not take the prompt held for it: {text}",
   "notify.permission": "Waiting for your permission: {tool}",
+  "notify.trustFolder": "Waiting for you: Claude Code asks whether to trust this folder",
 
   "settings.notifications": "Notifications",
   "settings.notifyOnIdle": "When a pane finishes",
@@ -1803,6 +1804,7 @@ const fr: Record<Key, string> = {
   "notify.aborted": "Interrompu",
   "notify.dropped": "N'a pas pris le prompt gardé pour lui : {text}",
   "notify.permission": "Attend ta permission : {tool}",
+  "notify.trustFolder": "Attend toi : Claude Code demande s'il doit faire confiance à ce dossier",
 
   "settings.notifications": "Notifications",
   "settings.notifyOnIdle": "Quand un panneau a terminé",
