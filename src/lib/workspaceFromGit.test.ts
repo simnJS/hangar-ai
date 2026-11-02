@@ -745,7 +745,7 @@ describe("the trace of each consent answer", () => {
   });
 
   it("names the repository, the folder's name and how it ended, never the path", () => {
-    const request = asked("C:\\Users\\simnJS\\Documents\\projects\\theirs");
+    const request = asked("C:\\Users\\me\\Documents\\projects\\theirs");
     const lines = (["allow", "refuse", "timeout"] as const).map((answer) => consentTrace(request, answer, "en", 5));
     expect(lines.map((line) => line.text)).toEqual([
       'Clone of https://github.com/evil/theirs.git into the folder "theirs": you clicked Clone',
@@ -754,7 +754,8 @@ describe("the trace of each consent answer", () => {
     ]);
     for (const line of lines) {
       expect(line).toMatchObject({ at: 5, workspace: "", kind: "gitConsent" });
-      expect(line.text).not.toContain("simnJS");
+      expect(line.text).not.toContain("Users");
+      expect(line.text).not.toContain("Documents");
     }
     expect(consentTrace(request, "allow", "fr", 5).text).toContain("tu as cliqué sur Cloner");
   });
