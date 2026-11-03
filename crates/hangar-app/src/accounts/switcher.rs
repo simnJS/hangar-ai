@@ -22,7 +22,6 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::WindowKind;
 use crate::state::WsId;
 
 use super::model::{AccountId, ClaudeAccount, resolve_account};
@@ -53,12 +52,11 @@ pub enum Menu {
 }
 
 /// The workspace the toolbar belongs to: its own window's, else the one in
-/// front.
+/// front. Nothing when the one in front is shown in a window of its own, as
+/// for every other part of the toolbar: the bar is about the workspace its
+/// window draws.
 fn toolbar_workspace(ctx: Ctx<'_>) -> Option<&WsId> {
-    match ctx.model.live.windows.get(&ctx.window) {
-        Some(WindowKind::Workspace(id)) => Some(id),
-        _ => ctx.model.state().active_workspace_id.as_ref(),
-    }
+    ctx.workspace().map(|ws| &ws.id)
 }
 
 fn press(msg: Msg) -> Message {
@@ -112,7 +110,11 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     .on_press(press(Msg::ToggleMenu));
     let anchor = tip::bottom(t, anchor, title);
 
+    // The menu is open for the app, not for a window (its state is one value
+    // and its messages carry no window): it hangs off the button of the window
+    // the person is in, where they pressed it, and not off every window's.
     let content = match &st.switcher {
+        _ if !ctx.model.is_focused_window(ctx.window) => None,
         Menu::Closed => None,
         Menu::Open => Some(menu::panel(
             t,

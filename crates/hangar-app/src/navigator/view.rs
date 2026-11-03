@@ -22,14 +22,14 @@ use hangar_ui::{Icon, button as ui_button, glyph, icon, keys, tip};
 use super::drag::{self, Drag, DragItem, DragKind, DropTarget, Hit};
 use super::model::{NavFolder, NavInput, RowKind, build_nav_tree, namesake_hints, row_key};
 use super::{
-    MenuState, Msg, State, clock, filter_id, geometry, list_id, menu, plan, reads, rename_id, skin,
-    status,
+    MenuState, Msg, State, filter_id, geometry, list_id, menu, plan, reads, rename_id, skin, status,
 };
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::shell::{Focus, Region};
-use crate::state::roles::orchestrator_of;
+use crate::inspector::format::prose_time;
+use crate::state::roles::{orchestrator_of, workers_of};
 use crate::state::types::Workspace;
 use crate::state::{AgentActivity, WsId};
 
@@ -201,7 +201,7 @@ pub fn sidebar<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     ]
     .width(Length::Fill)
     .height(Length::Fill);
-    if let Some(block) = plan::view(st.plan.as_ref(), ctx) {
+    if let Some(block) = plan::view(reads::plan(model), ctx) {
         body = body.push(block);
     }
     body = body.push(filter_bar(&frame));
@@ -595,11 +595,7 @@ fn workspace_row<'a>(f: &Frame<'a>, ws: &'a Workspace) -> Element<'a, Message> {
                 end = end.push(crate::accounts::badge(f.ctx, &ws.id));
             }
             if let Some(orchestrator) = orchestrator_of(ws) {
-                let workers = ws
-                    .panes
-                    .iter()
-                    .filter(|pane| pane.role == Some(crate::state::types::PaneRole::Worker))
-                    .count();
+                let workers = workers_of(ws).len();
                 let words = if workers > 0 {
                     tr.t_with(
                         Key::OrchNavMarkWorkers,
@@ -620,10 +616,10 @@ fn workspace_row<'a>(f: &Frame<'a>, ws: &'a Workspace) -> Element<'a, Message> {
                     tr.t(Key::WindowInOwnWindow).into_owned(),
                 ));
             }
-            if let Some(at) = reads::asleep_at(model, ws).and_then(clock::local) {
+            if let Some(at) = reads::asleep_at(model, ws) {
                 let words = tr.t_with(
                     Key::SidebarAsleep,
-                    &args!("time" => clock::prose_time(at, tr.locale())),
+                    &args!("time" => prose_time(at, tr.locale())),
                 );
                 end = end.push(mark(t, Icon::Moon, words.into_owned()));
             }
@@ -839,6 +835,9 @@ fn filter_bar<'a>(f: &Frame<'a>) -> Element<'a, Message> {
         }
         _ => None,
     });
+    // The keymap goes first: Ctrl+Shift+Enter typed in the filter splits the
+    // pane, and must not also type or submit here.
+    let input = crate::keymap::guard(f.ctx, input);
 
     // The waiting state's own diamond: this keeps only what waits.
     let on = st.attention_only;

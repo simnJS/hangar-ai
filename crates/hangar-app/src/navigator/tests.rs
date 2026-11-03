@@ -499,3 +499,18 @@ fn a_global_release_that_no_row_followed_leaves_nothing_to_drag_with() {
     }
     assert!(!st.drag.as_ref().unwrap().active);
 }
+
+#[test]
+fn the_workspace_menu_sets_off_the_claude_account_block_with_one_heading() {
+    use crate::shell::MenuEntry;
+    use crate::workspace_dialog::testing::Harness;
+    let harness = Harness::new(hangar_i18n::Locale::En, "graphite");
+    // The accounts package starts its block with its own separator and
+    // heading; the menu adopts it as it is, not under a second pair.
+    let block = crate::accounts::menu_items(harness.ctx(), &"w1".to_string(), None);
+    assert!(matches!(
+        block.as_slice(),
+        [MenuEntry::Separator, MenuEntry::Heading(_), ..]
+    ));
+    assert_eq!(menu::set_off(block.clone()).len(), block.len());
+}

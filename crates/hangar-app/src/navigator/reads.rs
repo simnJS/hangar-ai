@@ -2,77 +2,43 @@
 //!
 //! The navigator, the toolbar, the status bar and Needs-you all say what the
 //! agents are doing (`useWorkspaceActivity`, `useAgentsIn`), and every one of
-//! those reads goes through here, so that the day P4's `Live` holds activity
-//! as a table of its own, one function changes and not four views.
+//! those reads goes through here, so that a change of provider is one
+//! function and not four views.
 //!
-//! TODO(P4): `panes_logic::Live` is an empty struct today and its stub answers
-//! only `state_glyph_state`. A pane's activity is read from that glyph: a pane
-//! whose shell is starting or has exited counts as idle here, where the TS
-//! counted whatever activity the pane last reported. The two differ only for a
-//! pane that dies mid-turn, which the glyph is more right about. When P4 lands
-//! a `Live::activity(pane)`, read it here instead.
+//! Activity, the sleeping workspaces and the plan's limits are `panes_logic`'s
+//! (`Model.live.panes_logic`), the shortcuts are the keymap's, the kits are
+//! `kits::Live`'s, and the preview button reads what the frame itself reads
+//! to place the preview panel. Nothing here keeps a copy.
 
-use crate::panes_logic;
+use crate::commands::CommandId;
+use crate::ctx::Ctx;
+use crate::state::layout;
+use crate::state::live::{PlanLimits, WorkspaceActivity};
 use crate::state::types::Workspace;
-use crate::state::{AgentActivity, GlyphState, Model, PaneId};
+use crate::state::{AgentActivity, Model, PaneId};
 
-use super::model::reading_order;
-
-/// A pane's activity: `working`, `waiting`, `yours` or `idle`.
+/// A pane's activity: `working`, `waiting`, `yours` or `idle`
+/// (`getPaneActivity(id)?.activity ?? "idle"`).
+///
+/// Read from the pane logic's published activity, as the TS did, not from the
+/// pane's glyph: a pane that reports none (a plain shell, an agent that never
+/// started) is idle, whatever its shell is doing.
 pub fn activity(m: &Model, pane: &PaneId) -> AgentActivity {
-    if let Some(forced) = dev_activity(pane) {
-        return forced;
-    }
-    match panes_logic::state_glyph_state(m, pane) {
-        GlyphState::Working => AgentActivity::Working,
-        GlyphState::Waiting => AgentActivity::Waiting,
-        GlyphState::Yours => AgentActivity::Yours,
-        GlyphState::Starting | GlyphState::Exited | GlyphState::Idle => AgentActivity::Idle,
-    }
+    m.live.panes_logic.activity_or_idle(pane)
 }
 
-/// The glyph a pane wears: its shell's life until it runs, then its agent's
-/// activity (`paneGlyphState`).
-pub fn glyph(m: &Model, pane: &PaneId) -> hangar_ui::glyph::GlyphState {
-    use hangar_ui::glyph::GlyphState as Ui;
-    if let Some(forced) = dev_activity(pane) {
-        return activity_glyph(forced);
-    }
-    match panes_logic::state_glyph_state(m, pane) {
-        GlyphState::Starting => Ui::Starting,
-        GlyphState::Exited => Ui::Exited,
-        GlyphState::Working => Ui::Working,
-        GlyphState::Waiting => Ui::Waiting,
-        GlyphState::Yours => Ui::Yours,
-        GlyphState::Idle => Ui::Idle,
-    }
-}
-
-/// The glyph of an agent's activity alone, for a count of panes in that state.
+/// The glyph of an agent's activity, for a state word or a count of panes in
+/// that state.
 pub fn activity_glyph(activity: AgentActivity) -> hangar_ui::glyph::GlyphState {
     hangar_ui::glyph::GlyphState::from(hangar_theme::AgentState::from(activity))
 }
 
 /// How many of a workspace's agents are working, waiting, or done
 /// (`WorkspaceActivity`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Counts {
-    pub working: usize,
-    pub waiting: usize,
-    pub yours: usize,
-}
+pub type Counts = WorkspaceActivity;
 
 pub fn counts(m: &Model, ws: &Workspace) -> Counts {
-    let mut counts = Counts::default();
-    for pane in &ws.panes {
-        match activity(m, &pane.id) {
-            AgentActivity::Working => counts.working += 1,
-            AgentActivity::Waiting => counts.waiting += 1,
-            AgentActivity::Yours => counts.yours += 1,
-            AgentActivity::Idle => {}
-        }
-    }
-    counts
+    m.live.panes_logic.workspace_activity(&ws.id)
 }
 
 /// The states a workspace's summary counts, the one that needs you first
@@ -94,7 +60,11 @@ pub fn agents_in<'a>(
 ) -> Vec<(&'a Workspace, &'a crate::state::Pane)> {
     workspaces
         .iter()
-        .flat_map(|ws| reading_order(ws).into_iter().map(move |pane| (*ws, pane)))
+        .flat_map(|ws| {
+            layout::reading_order(&ws.panes, ws.tree.as_ref())
+                .into_iter()
+                .map(move |pane| (*ws, pane))
+        })
         .filter(|(_, pane)| activity(m, &pane.id) == state)
         .collect()
 }
@@ -108,20 +78,26 @@ pub fn wants_you(m: &Model, pane: &PaneId) -> bool {
     )
 }
 
+/// The plan's rate-limit windows, from whichever session reported last
+/// (`usePlanLimits`).
+pub fn plan(m: &Model) -> Option<&PlanLimits> {
+    m.live.panes_logic.plan_limits().or_else(dev_plan)
+}
+
 /// The shortcut of a command as the settings store it (`"Ctrl+Shift+P"`), for
 /// a tooltip or a menu line (`useShortcutLabel`). Empty when it has none, and
 /// the widgets that show it leave it out then.
 ///
-/// TODO(P7): `KeymapIndex` is a unit struct until P7 defines it, so no
-/// binding is known and none is shown. It answers here when it can: this is
-/// the one function the chrome asks.
-pub fn binding(ctx: &crate::ctx::Ctx<'_>, id: crate::commands::CommandId) -> String {
-    let _ = (ctx.keymap, id);
-    String::new()
+/// The binding is handed over as written, not as `KeymapIndex::label` spells
+/// it for the eye: hangar-ui's buttons, tips and menus format it themselves
+/// (`format_binding`), and a binding formatted twice reads differently on the
+/// platforms that write keys as symbols.
+pub fn binding(ctx: &Ctx<'_>, id: CommandId) -> String {
+    ctx.keymap.first_binding(id).unwrap_or_default().to_owned()
 }
 
 /// A tab of an enabled kit, for the toolbar's Kits menu (`KitMenuEntry`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KitTab {
     pub kit_id: String,
     pub tab_id: String,
@@ -135,12 +111,35 @@ pub struct KitTab {
 /// being read; `None` when no kit is enabled on it, and the button is not
 /// there (`kitTabs`, `kitsLoading`).
 ///
-/// TODO(P14, P16): the installed kits live in `kits::Live` and the tabs a
-/// workspace may open come from `kit_tabs`; both are empty stubs, so the
-/// Kits button stays out of the bar until they answer.
+/// The kits are the workspace's own and the ones enabled everywhere
+/// (`effectiveKits`). A tab is listed when its kit is installed and usable
+/// (readable, and its manifest names the id it is enabled by), in the order
+/// the kits were enabled (`workspaceKitTabs`). Opening one is the kit tabs
+/// package's, through `Intent::OpenKitTab`.
 pub fn kit_tabs(m: &Model, ws: &Workspace) -> Option<(Vec<KitTab>, bool)> {
-    let _ = (m, ws);
-    None
+    let enabled = crate::kits::model::effective_kits(Some(ws), Some(m.settings()));
+    if enabled.is_empty() {
+        return None;
+    }
+    let live = &m.live.kits;
+    let tabs = enabled
+        .iter()
+        .filter_map(|entry| {
+            let kit = live.find(&entry.id)?;
+            let manifest = kit
+                .manifest
+                .as_ref()
+                .filter(|manifest| kit.error.is_none() && manifest.id == entry.id)?;
+            Some(manifest.tabs.iter().map(|tab| KitTab {
+                kit_id: entry.id.clone(),
+                tab_id: tab.id.clone(),
+                title: tab.title.clone(),
+                kit: manifest.name.clone(),
+            }))
+        })
+        .flatten()
+        .collect();
+    Some((tabs, live.loading()))
 }
 
 /// What the toolbar's 3D button needs of the preview: some model is open,
@@ -153,78 +152,69 @@ pub struct Models {
     pub unseen: bool,
 }
 
-/// TODO(P15): the preview store is P15's and `preview::Live` holds nothing
-/// yet, so the 3D button is not drawn.
-pub fn models(m: &Model, ws: &Workspace) -> Models {
-    let _ = (m, ws);
-    Models::default()
+/// The preview of the workspace this window draws.
+///
+/// It reads what the frame reads to place the panel (`Panels::of`, over
+/// `live.signals.preview`, which the preview package keeps) rather than the
+/// preview's own `Live`: whether the panel is on screen depends on the room
+/// the window has (docked, a drawer, or over the terminals), and the button
+/// and the panel must never disagree about it. Something an agent opened that
+/// waits behind the button lights it (`models.unseen && !modelShown`).
+pub fn models(ctx: &Ctx<'_>, ws: &Workspace) -> Models {
+    let panels = ctx.panels();
+    let waiting = ctx
+        .model
+        .live
+        .signals
+        .preview
+        .get(&ws.id)
+        .is_some_and(|panel| panel.unseen);
+    Models {
+        open: panels.models_open,
+        shown: panels.model.shown,
+        unseen: waiting && !panels.model.shown,
+    }
 }
 
 /// When a workspace fell asleep (`useAsleep`), in ms since the epoch.
-///
-/// TODO(P4): hibernation is P4's (`hibernateStore.ts`) and its `Live` has
-/// nothing to ask yet, so no workspace is ever shown asleep. The moon and its
-/// tooltip are drawn and waiting for this one function.
 pub fn asleep_at(m: &Model, ws: &Workspace) -> Option<i64> {
-    let _ = (m, ws);
-    None
+    m.live
+        .panes_logic
+        .asleep()
+        .get(&ws.id)
+        .and_then(|asleep| i64::try_from(asleep.at).ok())
 }
 
 // ---- Development aids -----------------------------------------------------------------------------
 
-/// `HANGAR_DEV_ACTIVITY=pane-id:working,other-id:waiting` makes those panes
-/// look like that, to see the navigator, the toolbar and the status bar in
-/// every state before the panes' own logic (P4) can say it. Debug builds only:
-/// a release build never reads it.
-fn dev_activity(pane: &PaneId) -> Option<AgentActivity> {
-    use std::collections::HashMap;
-    use std::sync::OnceLock;
-    static FORCED: OnceLock<HashMap<String, AgentActivity>> = OnceLock::new();
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-    FORCED
-        .get_or_init(|| {
-            let spec = std::env::var("HANGAR_DEV_ACTIVITY").unwrap_or_default();
-            spec.split(',')
-                .filter_map(|pair| {
-                    let (id, state) = pair.split_once(':')?;
-                    let state = match state.trim() {
-                        "working" => AgentActivity::Working,
-                        "waiting" => AgentActivity::Waiting,
-                        "yours" => AgentActivity::Yours,
-                        _ => return None,
-                    };
-                    Some((id.trim().to_string(), state))
-                })
-                .collect()
-        })
-        .get(pane)
-        .copied()
-}
-
 /// `HANGAR_DEV_PLAN=five_hour:72:2026-11-04T20:01:00Z,seven_day:35` shows the
-/// plan block without a pane to report it. Debug builds only.
-pub fn dev_plan() -> Option<crate::state::live::PlanLimits> {
+/// plan block while no pane has reported one: the real report wins as soon as
+/// there is one. Debug builds only.
+fn dev_plan<'a>() -> Option<&'a PlanLimits> {
+    use std::sync::OnceLock;
+    static PLAN: OnceLock<Option<PlanLimits>> = OnceLock::new();
     if !cfg!(debug_assertions) {
         return None;
     }
-    let spec = std::env::var("HANGAR_DEV_PLAN").ok()?;
-    let limits: Vec<crate::state::live::RateLimit> = spec
-        .split(',')
-        .filter_map(|window| {
-            let mut parts = window.splitn(3, ':');
-            let kind = parts.next()?.trim().to_string();
-            let percent_used = parts.next()?.trim().parse().ok()?;
-            let resets_at = parts.next().map(|at| at.trim().to_string());
-            Some(crate::state::live::RateLimit {
-                kind,
-                percent_used,
-                resets_at,
+    PLAN.get_or_init(|| {
+        let spec = std::env::var("HANGAR_DEV_PLAN").ok()?;
+        let limits: Vec<crate::state::live::RateLimit> = spec
+            .split(',')
+            .filter_map(|window| {
+                let mut parts = window.splitn(3, ':');
+                let kind = parts.next()?.trim().to_string();
+                let percent_used = parts.next()?.trim().parse().ok()?;
+                let resets_at = parts.next().map(|at| at.trim().to_string());
+                Some(crate::state::live::RateLimit {
+                    kind,
+                    percent_used,
+                    resets_at,
+                })
             })
-        })
-        .collect();
-    super::plan::take(&limits)
+            .collect();
+        super::plan::take(&limits)
+    })
+    .as_ref()
 }
 
 /// `HANGAR_DEV_FOCUSED_PANE=p3` puts the toolbar's capsule on that pane while

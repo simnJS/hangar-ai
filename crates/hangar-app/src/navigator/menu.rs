@@ -78,6 +78,16 @@ fn agent_entries(ctx: Ctx<'_>, workspaces: &[&Workspace]) -> Vec<Entry<Message>>
     entries
 }
 
+/// A block of lines another package made, set off from the lines before it by
+/// exactly one separator. The accounts package starts its block with its own
+/// separator and heading; a menu that added a second pair drew them twice.
+pub fn set_off(block: Vec<MenuEntry>) -> Vec<MenuEntry> {
+    if matches!(block.first(), None | Some(MenuEntry::Separator)) {
+        return block;
+    }
+    std::iter::once(MenuEntry::Separator).chain(block).collect()
+}
+
 /// An entry another package made, as the menu draws it.
 fn adopt(entry: MenuEntry) -> Entry<Message> {
     match entry {
@@ -205,14 +215,11 @@ pub fn workspace_entries(ctx: Ctx<'_>, id: &str) -> Vec<Entry<Message>> {
 
     // The Claude account this workspace runs on: the same choice as the
     // toolbar's switcher, which is the accounts package's.
-    let accounts = crate::accounts::menu_items(ctx, &ws.id, None);
-    if !accounts.is_empty() {
-        entries.push(menu::separator());
-        if !matches!(accounts.first(), Some(MenuEntry::Heading(_))) {
-            entries.push(menu::heading(tr.t(Key::AccountsMenuTitle).into_owned()));
-        }
-        entries.extend(accounts.into_iter().map(adopt));
-    }
+    entries.extend(
+        set_off(crate::accounts::menu_items(ctx, &ws.id, None))
+            .into_iter()
+            .map(adopt),
+    );
 
     entries.push(menu::separator());
     // Dragging does the same, but a menu is the one way to find out folders
@@ -254,9 +261,13 @@ pub fn workspace_entries(ctx: Ctx<'_>, id: &str) -> Vec<Entry<Message>> {
     // Next to deleting it: the two ways to stop what it runs, for a while or
     // for good.
     //
-    // TODO(P4): the sleep verdict (`sleep.verdict`, `sleepRefusal`, and the
-    // shells probed as the menu opens) is P4's hibernation; until it lands the
-    // line is always live and the intent's handler refuses with a notice.
+    // TODO(panes_logic): the line should be greyed with its reason
+    // (`sleep.verdict`, `sleepRefusal`, and the shells probed as the menu
+    // opens). `panes_logic::hibernate` has the rules (`forced_sleep_verdict`,
+    // `sleep_refusal`) but no synchronous reading of a workspace that builds
+    // their input from the model (the live environment is private to the
+    // package), so the line is always live and the intent's handler refuses
+    // with a notice. The package owes the accessor; this line then reads it.
     entries.push(
         menu::item(tr.t(Key::SleepAction).into_owned())
             .icon(Icon::Moon)

@@ -19,9 +19,9 @@ use hangar_ui::palette::{Detail, Item};
 use crate::commands::{self, CommandId, Section};
 use crate::keymap::KeymapIndex;
 use crate::shell::WindowKind;
-use crate::state::layout::leaf_ids;
-use crate::state::types::{AgentId, AppState, Pane, Workspace};
-use crate::state::{AgentActivity, GlyphState, Model, PaneId, WsId};
+use crate::navigator::reads;
+use crate::state::types::{AgentId, Pane, Workspace};
+use crate::state::{AgentActivity, Model, PaneId, WsId, folders, layout};
 
 /// What running an entry does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,59 +194,16 @@ fn glyph(activity: AgentActivity) -> Glyph {
     agent_state(activity).into()
 }
 
-/// What a pane's agent is doing, as its glyph says (`getPaneActivity`, read
-/// through the pane logic's own answer); idle for a shell that is not up.
+/// What a pane's agent is doing (`getPaneActivity`), idle for one that
+/// reports none.
 pub fn activity(m: &Model, pane: &PaneId) -> AgentActivity {
-    match crate::panes_logic::state_glyph_state(m, pane) {
-        GlyphState::Working => AgentActivity::Working,
-        GlyphState::Waiting => AgentActivity::Waiting,
-        GlyphState::Yours => AgentActivity::Yours,
-        GlyphState::Idle | GlyphState::Starting | GlyphState::Exited => AgentActivity::Idle,
-    }
+    reads::activity(m, pane)
 }
 
 /// The panes of a workspace as they sit on screen, which is what Ctrl+N
-/// counts in (`readingOrder`). A tree that lost or doubled a pane reads as
-/// what it kept, then the panes it does not hold, as `normalizeTree` does;
-/// the shell's layout module will own that once it is ported (P0b).
+/// counts in (`readingOrder`).
 pub fn reading_order(ws: &Workspace) -> Vec<&Pane> {
-    let mut order: Vec<&Pane> = Vec::with_capacity(ws.panes.len());
-    if let Some(tree) = &ws.tree {
-        for id in leaf_ids(tree) {
-            if let Some(pane) = ws.panes.iter().find(|pane| pane.id == id)
-                && !order.iter().any(|seen| seen.id == id)
-            {
-                order.push(pane);
-            }
-        }
-    }
-    for pane in &ws.panes {
-        if !order.iter().any(|seen| seen.id == pane.id) {
-            order.push(pane);
-        }
-    }
-    order
-}
-
-/// The workspaces as the navigator lists them: those outside any folder,
-/// then each folder's (`sidebarOrder`, which the shell's folders module
-/// will own once it is ported, P0b).
-pub fn sidebar_order(state: &AppState) -> Vec<&Workspace> {
-    let filed = |ws: &Workspace| {
-        ws.folder_id
-            .as_ref()
-            .is_some_and(|id| state.folders.iter().any(|folder| &folder.id == id))
-    };
-    let mut order: Vec<&Workspace> = state.workspaces.iter().filter(|ws| !filed(ws)).collect();
-    for folder in &state.folders {
-        order.extend(
-            state
-                .workspaces
-                .iter()
-                .filter(|ws| ws.folder_id.as_deref() == Some(folder.id.as_str())),
-        );
-    }
-    order
+    layout::reading_order(&ws.panes, ws.tree.as_ref())
 }
 
 /// The workspace a pane belongs to.
@@ -265,7 +222,13 @@ pub fn window_workspaces(m: &Model, window: window::Id) -> (Vec<&Workspace>, Opt
             let ws = m.workspace(id);
             (ws.into_iter().collect(), ws)
         }
-        _ => (sidebar_order(m.state()), m.active_workspace()),
+        // The main window's active workspace is none for it while that
+        // workspace is shown in a window of its own (`activeWorkspace` was
+        // null there): its entry is then listed with the others.
+        _ => (
+            folders::sidebar_order(&m.state().workspaces, &m.state().folders),
+            m.window_workspace(window),
+        ),
     }
 }
 
@@ -559,6 +522,8 @@ fn workspace_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::navigator::testing::{detach, model_of};
+    use crate::state::AppState;
     use crate::state::types::{SplitDir, SplitNode, WorkspaceFolder};
 
     fn pane(id: &str) -> Pane {
@@ -624,37 +589,60 @@ mod tests {
         assert_eq!(order, ["x", "y"]);
     }
 
-    #[test]
-    fn the_navigator_lists_loose_workspaces_then_each_folder() {
-        let ws = |id: &str, folder: Option<&str>| Workspace {
+    fn filed(id: &str, folder: Option<&str>) -> Workspace {
+        Workspace {
             id: id.into(),
+            name: id.into(),
             folder_id: folder.map(str::to_string),
             ..Workspace::default()
+        }
+    }
+
+    /// Four workspaces, listed by the navigator as "loose, lost, in-a, in-b".
+    fn model() -> Model {
+        let folder = |id: &str| WorkspaceFolder {
+            id: id.into(),
+            ..WorkspaceFolder::default()
         };
-        let state = AppState {
+        model_of(AppState {
             workspaces: vec![
-                ws("in-b", Some("b")),
-                ws("loose", None),
-                ws("in-a", Some("a")),
-                ws("lost", Some("deleted")),
+                filed("in-b", Some("b")),
+                filed("loose", None),
+                filed("in-a", Some("a")),
+                filed("lost", Some("deleted")),
             ],
-            folders: vec![
-                WorkspaceFolder {
-                    id: "a".into(),
-                    ..WorkspaceFolder::default()
-                },
-                WorkspaceFolder {
-                    id: "b".into(),
-                    ..WorkspaceFolder::default()
-                },
-            ],
+            folders: vec![folder("a"), folder("b")],
+            active_workspace_id: Some("loose".into()),
             ..AppState::default()
-        };
-        let order: Vec<&str> = sidebar_order(&state)
-            .iter()
-            .map(|ws| ws.id.as_str())
-            .collect();
-        assert_eq!(order, ["loose", "lost", "in-a", "in-b"]);
+        })
+    }
+
+    fn ids(list: &[&Workspace]) -> Vec<String> {
+        list.iter().map(|ws| ws.id.clone()).collect()
+    }
+
+    #[test]
+    fn the_main_window_lists_loose_workspaces_then_each_folder() {
+        let m = model();
+        let main = m.main_window().unwrap();
+        let (listed, active) = window_workspaces(&m, main);
+        assert_eq!(ids(&listed), ["loose", "lost", "in-a", "in-b"]);
+        assert_eq!(active.map(|ws| ws.id.as_str()), Some("loose"));
+    }
+
+    #[test]
+    fn the_main_window_has_no_active_workspace_while_it_is_in_a_window_of_its_own() {
+        let mut m = model();
+        let own = detach(&mut m, "loose");
+        let main = m.main_window().unwrap();
+        // Still listed, to be opened, but none is in front of this window.
+        let (listed, active) = window_workspaces(&m, main);
+        assert!(ids(&listed).contains(&"loose".to_string()));
+        assert!(active.is_none());
+        // And the workspace window offers its own workspace alone.
+        let (offered, in_front) = window_workspaces(&m, own);
+        assert_eq!(ids(&offered), ["loose"]);
+        assert_eq!(in_front.map(|ws| ws.id.as_str()), Some("loose"));
     }
 
     #[test]

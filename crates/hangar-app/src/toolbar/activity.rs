@@ -5,8 +5,6 @@
 //! Read-only on purpose, except for the two counters, which take you to the
 //! pane they count.
 
-use std::collections::HashMap;
-
 use iced::widget::{Space, button, container, row, stack, text, tooltip};
 use iced::{Alignment, Element, Length, Padding};
 
@@ -18,77 +16,10 @@ use hangar_ui::glyph;
 use super::Msg;
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::navigator::model::reading_order_ids;
 use crate::navigator::{reads, skin};
-use crate::state::live::{BridgeEvent, ToolPhase, TurnPhase};
+use crate::state::layout;
+use crate::state::live::{PaneEventDetail, PaneInsight};
 use crate::state::{AgentActivity, Pane, PaneId, Workspace};
-
-/// What the capsule remembers of a pane's agent from its mod's reports: the
-/// little of `paneInsight` it draws.
-///
-/// TODO(P4): `panes_logic::Live` is to hold the insight of every pane
-/// (`PaneInsight`); until it does, this keeps these three fields itself, from
-/// the same reports, so the capsule is whole. Reading P4's would replace
-/// `Glance` and `State::glances` and nothing else.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Glance {
-    /// The context window used, 0 to 100.
-    pub context_pct: Option<u8>,
-    /// The first line of the agent's last answer.
-    pub last_answer: Option<String>,
-    /// The latest thing the agent did, if that was to ask for a permission:
-    /// the tool it asks about. Only the latest event can be the question, an
-    /// older one was answered.
-    pub asking: Option<Option<String>>,
-}
-
-impl Glance {
-    /// Takes one report of the mod in. Only what the pane's history records
-    /// moves `asking`: a tool starting or the usage report is not an event of
-    /// it.
-    pub fn note(&mut self, report: &BridgeEvent) {
-        match report {
-            BridgeEvent::Hello { .. } | BridgeEvent::Session { .. } => self.asking = None,
-            BridgeEvent::Turn(TurnPhase::Start) => self.asking = None,
-            BridgeEvent::Turn(TurnPhase::End { answer, .. }) => {
-                self.asking = None;
-                self.last_answer = first_line(answer);
-            }
-            BridgeEvent::Permission {
-                waiting: true,
-                tool,
-                ..
-            } => {
-                self.asking = Some(tool.clone().filter(|tool| !tool.is_empty()));
-            }
-            BridgeEvent::Permission { waiting: false, .. } => {}
-            BridgeEvent::Tool(ToolPhase::Start { .. } | ToolPhase::End { .. }) => {}
-            BridgeEvent::Usage { context, .. } => {
-                let pct = context.percent.or_else(|| {
-                    let tokens = context.tokens?;
-                    (context.window > 0).then(|| tokens as f64 / context.window as f64 * 100.0)
-                });
-                self.context_pct = pct.map(|pct| pct.round().clamp(0.0, 100.0) as u8);
-            }
-            BridgeEvent::Edit { .. } | BridgeEvent::Dropped { .. } => self.asking = None,
-            BridgeEvent::End { .. } => {
-                // Claude Code exited; whatever runs in the pane next is a
-                // shell.
-                self.asking = None;
-                self.context_pct = None;
-            }
-        }
-    }
-}
-
-/// The first line of an answer that says something.
-fn first_line(answer: &str) -> Option<String> {
-    answer
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
-}
 
 /// The detail after the state word.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,12 +38,17 @@ pub enum Detail {
 /// What the capsule adds to the state word (`ToolbarActivity.tsx`): the task
 /// it is on or just finished, what it is asking, or, for want of anything
 /// else, the last thing it said.
-pub fn detail(activity: AgentActivity, glance: &Glance, task_title: Option<&str>) -> Detail {
+///
+/// Only the latest event of the pane's history can be the question: an older
+/// one was answered.
+pub fn detail(activity: AgentActivity, insight: &PaneInsight, task_title: Option<&str>) -> Detail {
     match activity {
         // The state word already says it waits for you; what is left to say
         // is what for: the tool.
-        AgentActivity::Waiting => match &glance.asking {
-            Some(Some(tool)) => Detail::Tool(tool.clone()),
+        AgentActivity::Waiting => match insight.events.first().map(|event| &event.detail) {
+            Some(PaneEventDetail::Permission { tool: Some(tool) }) if !tool.is_empty() => {
+                Detail::Tool(tool.clone())
+            }
             _ => Detail::None,
         },
         AgentActivity::Working if task_title.is_some() => {
@@ -121,11 +57,19 @@ pub fn detail(activity: AgentActivity, glance: &Glance, task_title: Option<&str>
         AgentActivity::Yours if task_title.is_some() => {
             Detail::Done(task_title.unwrap_or_default().to_string())
         }
-        _ => match &glance.last_answer {
-            Some(answer) => Detail::LastAnswer(answer.clone()),
-            None => Detail::None,
+        _ => match &insight.last_answer {
+            Some(answer) if !answer.is_empty() => Detail::LastAnswer(answer.clone()),
+            _ => Detail::None,
         },
     }
+}
+
+/// The context window used, in whole percent held between 0 and 100.
+pub fn context_pct(insight: &PaneInsight) -> Option<u8> {
+    insight
+        .context
+        .as_ref()
+        .map(|gauge| gauge.pct.clamp(0.0, 100.0).round() as u8)
 }
 
 /// The next pane in `wanted` after `focused`, wrapping, in reading order: the
@@ -136,15 +80,16 @@ pub fn next_in<'a>(
     focused: Option<&PaneId>,
     wanted: impl Fn(&PaneId) -> bool,
 ) -> Option<&'a Pane> {
-    let ids: Vec<PaneId> = reading_order_ids(&ws.panes, ws.tree.as_ref())
+    let ids: Vec<&PaneId> = layout::reading_order(&ws.panes, ws.tree.as_ref())
         .into_iter()
+        .map(|pane| &pane.id)
         .filter(|id| wanted(id))
         .collect();
     if ids.is_empty() {
         return None;
     }
-    let at = focused.and_then(|focused| ids.iter().position(|id| id == focused));
-    let next = &ids[at.map_or(0, |at| at + 1) % ids.len()];
+    let at = focused.and_then(|focused| ids.iter().position(|id| *id == focused));
+    let next = ids[at.map_or(0, |at| at + 1) % ids.len()];
     ws.panes.iter().find(|pane| &pane.id == next)
 }
 
@@ -154,7 +99,6 @@ pub fn next_in<'a>(
 pub const EXTRAS_FROM_EM: f32 = 71.0;
 
 pub fn view<'a>(
-    glances: &'a HashMap<PaneId, Glance>,
     ctx: Ctx<'a>,
     ws: &'a Workspace,
     extras: bool,
@@ -172,16 +116,26 @@ pub fn view<'a>(
     let activity = pane.map_or(AgentActivity::Idle, |pane| {
         reads::activity(ctx.model, &pane.id)
     });
-    let glance = pane
-        .and_then(|pane| glances.get(&pane.id))
-        .cloned()
-        .unwrap_or_default();
+    // A pane that never reported has the empty insight; so does no pane.
+    let none = PaneInsight::default();
+    let insight = pane.map_or(&none, |pane| ctx.model.live.panes_logic.insight(&pane.id));
+    // The task the pane is on, as far as the board can tell (`taskForPane`):
+    // an open task whose assignee resolves to this pane. The workspace in
+    // front is the one this window draws.
+    let task = pane.and_then(|pane| {
+        ctx.model.live.board.task_for_pane(
+            ws,
+            &pane.id,
+            &ctx.model.state().workspaces,
+            Some(&ws.id),
+        )
+    });
     let counts = reads::counts(ctx.model, ws);
 
     // Who, and what they are doing.
     let who: Element<'a, Message> = match pane {
         Some(pane) => row![
-            glyph::state(t, reads::glyph(ctx.model, &pane.id), 7.0),
+            glyph::state(t, reads::activity_glyph(activity), 7.0),
             text(pane.name.as_str())
                 .size(font_size::UI)
                 .font(fonts::ui_semibold())
@@ -220,12 +174,11 @@ pub fn view<'a>(
             // With no room for a few words the state word stands alone, rather
             // than trailing off as "Travaille su…".
             if room >= 30.0 * font_size::UI {
-                // TODO(P4, P12): the task a pane is on (`taskForPane`) needs the
-                // board cache (P12's `board::Live`) and the resolver of an
-                // assignee to a pane (P4's `agent_pane`), neither of which
-                // exists yet, so no pane has a task here and the capsule falls
-                // back on the last answer, as it does for a pane with none.
-                let (words, strong) = match detail(activity, &glance, None) {
+                let (words, strong) = match detail(
+                    activity,
+                    insight,
+                    task.map(|task| task.title.as_str()),
+                ) {
                     Detail::None => (None, false),
                     Detail::Tool(tool) => (Some(format!("· {tool}")), false),
                     Detail::Working(title) => (
@@ -279,7 +232,7 @@ pub fn view<'a>(
     .spacing(space::MD)
     .align_y(Alignment::Center);
 
-    let pct = glance.context_pct;
+    let pct = context_pct(insight);
     if extras && let Some(pct) = pct {
         capsule = capsule.push(tooltip(
             text(
@@ -340,7 +293,7 @@ pub fn view<'a>(
                 .padding([0.0, space::SM])
                 .height(22)
                 .style(style::button::icon(t))
-                .on_press(Message::Toolbar(Msg::GoTo(target.id.clone())));
+                .on_press(Message::Toolbar(Msg::GoTo(ws.id.clone(), target.id.clone())));
             Some(Element::from(tooltip(
                 pressed,
                 tip_text(t, label.into_owned()),

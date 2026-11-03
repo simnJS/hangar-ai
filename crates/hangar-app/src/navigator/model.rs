@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 
 use hangar_ui::matching::fold;
 
-use crate::state::types::{AGENTS, Pane, SplitNode, Workspace, WorkspaceFolder};
-use crate::state::{PaneId, WsId, layout};
+use crate::state::WsId;
+use crate::state::types::{AGENTS, Pane, Workspace, WorkspaceFolder};
 
 /// A folder with what the filter lets through of its workspaces.
 #[derive(Debug)]
@@ -80,64 +80,6 @@ fn agent_label(pane: &Pane) -> &'static str {
         .iter()
         .find(|agent| agent.id == pane.agent)
         .map_or(pane.agent.as_str(), |agent| agent.label)
-}
-
-/// A workspace's panes as the grid shows them, left to right then top to
-/// bottom, which is the order people read them in (`readingOrder`). The split
-/// tree only lists ids; an empty workspace would otherwise come back as one
-/// nameless leaf.
-pub fn reading_order(ws: &Workspace) -> Vec<&Pane> {
-    let by_id: HashMap<&str, &Pane> = ws
-        .panes
-        .iter()
-        .map(|pane| (pane.id.as_str(), pane))
-        .collect();
-    reading_order_ids(&ws.panes, ws.tree.as_ref())
-        .iter()
-        .filter_map(|id| by_id.get(id.as_str()).copied())
-        .collect()
-}
-
-/// The ids of `panes` in reading order: the tree's leaves when it still
-/// covers exactly these panes, otherwise the order `normalizeTree` repairs it
-/// to, which keeps the leaves that are still panes and appends the new ones.
-///
-/// TODO(P0b): this is `layout.ts`'s `readingOrder` and belongs with the rest
-/// of `state::layout`, which P0b ports; the navigator, the toolbar and the
-/// preset confirmation need it before then. Only the order is needed here, not
-/// the rebuilt tree: `presetTree` lays ids out in the order it is given.
-pub fn reading_order_ids(panes: &[Pane], tree: Option<&SplitNode>) -> Vec<PaneId> {
-    let ids: Vec<&PaneId> = panes.iter().map(|pane| &pane.id).collect();
-    if ids.is_empty() {
-        return Vec::new();
-    }
-    let Some(tree) = tree else {
-        return ids.into_iter().cloned().collect();
-    };
-    let known: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
-    let leaves = layout::leaf_ids(tree);
-    let mut seen: HashSet<&str> = HashSet::new();
-    let mut kept: Vec<PaneId> = Vec::new();
-    for id in &leaves {
-        if !known.contains(id.as_str()) || !seen.insert(id.as_str()) {
-            continue;
-        }
-        kept.push(id.clone());
-    }
-    if kept.len() == leaves.len() && kept.len() == ids.len() {
-        return kept;
-    }
-    let missing = ids
-        .into_iter()
-        .filter(|id| !seen.contains(id.as_str()))
-        .cloned();
-    kept.into_iter().chain(missing).collect()
-}
-
-/// The panes a preset of `count` closes, in reading order (`closedByPreset`).
-pub fn closed_by_preset(ws: &Workspace, count: u8) -> Vec<&Pane> {
-    let size = usize::from(count).clamp(1, crate::state::types::MAX_PANES);
-    reading_order(ws).into_iter().skip(size).collect()
 }
 
 fn segments(path: &str) -> Vec<&str> {
@@ -314,33 +256,10 @@ pub fn build_nav_tree<'a>(input: &NavInput<'a, '_>) -> NavTree<'a> {
     }
 }
 
-/// The workspaces the way the sidebar lists them: the ones at the top level,
-/// then each folder's in folder order (`sidebarOrder`).
-///
-/// Shortcuts that step through workspaces follow this rather than the stored
-/// order, so Ctrl+3 is the third row on screen. A collapsed folder still
-/// counts: numbering that shifted every time one was folded would be no use.
-///
-/// TODO(P0b): `state::folders` ports this module for the shortcuts; the
-/// navigator and Needs-you need it before then.
-pub fn sidebar_order<'a>(
-    workspaces: &'a [Workspace],
-    folders: &[WorkspaceFolder],
-) -> Vec<&'a Workspace> {
-    let known: HashSet<&str> = folders.iter().map(|folder| folder.id.as_str()).collect();
-    let mut ordered: Vec<&Workspace> = workspaces
-        .iter()
-        .filter(|ws| ws.folder_id.as_deref().is_none_or(|id| !known.contains(id)))
-        .collect();
-    for folder in folders {
-        ordered.extend(
-            workspaces
-                .iter()
-                .filter(|ws| ws.folder_id.as_deref() == Some(folder.id.as_str())),
-        );
-    }
-    ordered
-}
+// The order the sidebar lists workspaces in is `state::folders::sidebar_order`
+// (`lib/folders.ts`). Needs-you still reaches it through here, so the name
+// stays until that package asks `state::folders` itself.
+pub use crate::state::folders::sidebar_order;
 
 #[cfg(test)]
 mod tests;

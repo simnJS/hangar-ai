@@ -18,6 +18,7 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::navigator::reads;
 use crate::state::AgentActivity;
+use crate::state::roles::workers_of;
 use crate::state::types::{AgentId, MAX_PANES, Workspace};
 
 /// The layout presets the toolbar offers (`LAYOUTS`).
@@ -179,10 +180,7 @@ pub fn restart_all(ws: &Workspace) -> Intent {
 
 /// Panes with a worker role (`workersOf`).
 pub fn worker_count(ws: &Workspace) -> usize {
-    ws.panes
-        .iter()
-        .filter(|pane| pane.role == Some(crate::state::types::PaneRole::Worker))
-        .count()
+    workers_of(ws).len()
 }
 
 /// A question asked in a popover: a title, a sentence, and the two answers,

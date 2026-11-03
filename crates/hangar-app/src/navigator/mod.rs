@@ -17,7 +17,6 @@
 //! a text field reports no blur, so a rename is settled by Enter, Escape, or a
 //! press that nothing else took.
 
-pub mod clock;
 pub mod drag;
 pub mod editor;
 pub mod geometry;
@@ -41,7 +40,6 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Focus, Region};
-use crate::state::live::{BridgeEvent, PlanLimits};
 use crate::state::types::Workspace;
 use crate::state::{FolderPatch, Model, StoreAction, WorkspacePatch};
 
@@ -102,12 +100,6 @@ pub struct State {
     /// expiry names.
     note: Option<(u64, String)>,
     note_serial: u64,
-    /// The plan's windows, from whichever session reported last.
-    ///
-    /// TODO(P4): `panes_logic::Live` is to hold the bridge reports' plan limits
-    /// (`setPlanLimits`); the navigator is their only reader, so it keeps the
-    /// latest report itself until that lands, and `State::plan` then goes.
-    plan: Option<PlanLimits>,
     /// Where the list is scrolled to and how tall it is.
     scroll: (f32, f32),
 }
@@ -124,7 +116,6 @@ impl Default for State {
             drag: None,
             note: None,
             note_serial: 0,
-            plan: reads::dev_plan(),
             scroll: (0.0, 0.0),
         }
         .with_dev_view()
@@ -900,19 +891,14 @@ pub fn on_intent(
     None
 }
 
-/// The mod's usage reports carry the plan's windows.
+/// Nothing in the core's events is the navigator's: the plan's windows come
+/// from the pane logic, which reads the same reports.
 pub fn on_event(
-    st: &mut State,
+    _st: &mut State,
     _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    if let CoreEvent::Bridge { event, .. } = event
-        && let Some(BridgeEvent::Usage { rate_limits, .. }) = BridgeEvent::parse(event)
-        && let Some(report) = plan::take(&rate_limits)
-    {
-        st.plan = Some(report);
-    }
     None
 }
 
