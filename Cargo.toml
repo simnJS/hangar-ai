@@ -52,6 +52,10 @@ tao = "0.37"
 unicode-normalization = "0.1"
 usvg = { version = "0.45", default-features = false }
 iced_test = "0.14"
+# The versions hangar-core already builds. hangar-app's orchestration engine
+# reads plans with regex and writes the briefings' wall-clock times with chrono.
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # The ids the store gives new workspaces, panes, folders and saved commands,
 # as `crypto.randomUUID()` gave them (v4); hangar-core already builds it.
 uuid = { version = "1.24.0", features = ["v4"] }
