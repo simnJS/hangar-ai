@@ -1282,15 +1282,19 @@ impl<'a, Message, Theme, Renderer> TerminalView<'a, Message, Theme, Renderer> {
                 publish(Action::Copy);
                 true
             }
-            Binding::Paste => {
-                if let Some(text) = clipboard
-                    .read(clipboard::Kind::Standard)
-                    .filter(|t| !t.is_empty())
-                {
+            // With no text on the clipboard the key is the program's, typed as
+            // `^V`: what is there may be an image, which a program like
+            // Claude Code fetches itself when it sees Ctrl+V.
+            Binding::Paste => match clipboard
+                .read(clipboard::Kind::Standard)
+                .filter(|t| !t.is_empty())
+            {
+                Some(text) => {
                     publish(Action::Paste(text));
+                    true
                 }
-                true
-            }
+                None => false,
+            },
             Binding::PastePrimary => {
                 let text = clipboard
                     .read(clipboard::Kind::Primary)

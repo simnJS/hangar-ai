@@ -300,8 +300,13 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         },
         Msg::FlushDrops => flush_drops(st, m),
         Msg::Paste(pane, text) => {
-            if let (Some(rt), Some(text)) = (st.panes.get(&pane), text) {
-                let bytes = rt.link.lock().paste_bytes(&text);
+            if let Some(rt) = st.panes.get(&pane) {
+                // No text: `^V`, as the pane's own Ctrl+V sends then, for a
+                // Claude Code to read the image that is on the clipboard.
+                let bytes = match text.filter(|t| !t.is_empty()) {
+                    Some(text) => rt.link.lock().paste_bytes(&text),
+                    None => vec![0x16],
+                };
                 rt.link.write(bytes);
             }
             Task::none()

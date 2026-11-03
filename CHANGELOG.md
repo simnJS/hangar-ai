@@ -64,6 +64,9 @@ around the terminals, and needs a fraction of the memory and processor it did.
   rounded tile with room around it, the shape GNOME and KDE give their own app icons,
   instead of a square from edge to edge; the packages carry it from 16 to 512 px and as an
   SVG.
+- **Images paste into Claude Code.** With an image on the clipboard (a screenshot), Ctrl+V
+  in a pane now reaches Claude Code, which attaches the image as it does in any other
+  terminal; before, Hangar took the key to paste text and, finding none, did nothing.
 - **Agents' panes are laid out, not stacked.** A pane an agent opens or closes (through
   Hangar's MCP server, or the orchestrator's workers) no longer halves the pane beside it,
   which ended in a row of slivers: the workspace is laid out again, with the orchestrator

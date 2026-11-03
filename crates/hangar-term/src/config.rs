@@ -60,7 +60,9 @@ pub struct Config {
     /// Whether Ctrl+V (and Cmd+V on macOS) pastes, as it does everywhere else
     /// on the machine, instead of sending `^V` to the program. The price is
     /// readline's quoted-insert, which is the bargain Windows Terminal makes
-    /// and the old Hangar terminal made. Ctrl+Shift+V pastes either way.
+    /// and the old Hangar terminal made. Ctrl+Shift+V pastes either way. When
+    /// the clipboard holds no text (an image), both send `^V` to the program,
+    /// which is how Claude Code knows to read the image itself.
     pub ctrl_v_pastes: bool,
     /// Whether bold text in the eight dark ANSI colours is drawn in the bright
     /// ones, which is what xterm and the old Hangar terminal did.

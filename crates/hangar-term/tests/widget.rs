@@ -394,6 +394,40 @@ fn ctrl_shift_c_and_v_are_copy_and_paste_and_ctrl_v_only_if_configured() {
 }
 
 #[test]
+fn with_no_text_on_the_clipboard_the_paste_keys_type_ctrl_v_for_the_program() {
+    // An image on the clipboard reads as no text. Claude Code fetches it
+    // itself when it sees ^V, as it does in any other terminal.
+    let terminal = focused_terminal(Config {
+        ctrl_v_pastes: true,
+        ..Config::default()
+    });
+    let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
+    h.clipboard = Clip(None);
+    let ctrl_v = h.send(key(
+        Key::Character("v".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL,
+    ));
+    let ctrl_shift_v = h.send(key(
+        Key::Character("V".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL | Modifiers::SHIFT,
+    ));
+    assert_eq!(typed(&ctrl_v.actions), b"\x16");
+    assert!(ctrl_v.captured);
+    assert_eq!(typed(&ctrl_shift_v.actions), b"\x16");
+
+    // An empty string is no text either.
+    h.clipboard = Clip(Some(String::new()));
+    let again = h.send(key(
+        Key::Character("v".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL,
+    ));
+    assert_eq!(typed(&again.actions), b"\x16");
+}
+
+#[test]
 fn shift_page_up_scrolls_the_history_but_not_on_the_alternate_screen() {
     let mut terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
