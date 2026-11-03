@@ -37,3 +37,6 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+# The local clock: the navigator words a plan window's reset ("remise à zéro à
+# 20 h 01") as the web app's `Intl` did. Same features as hangar-core's.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
