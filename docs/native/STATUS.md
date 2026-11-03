@@ -13,6 +13,8 @@ The log of the port: newest entries at the top of each section. The plan is in
 | W1.kits — kit-ui, kit-sdk, kit-host, example | running | agent worktree |
 | W1.webview — `hangar-webview` | running | agent worktree |
 | W1.inventory — inventory-frontend.md | running | writes in place |
+| W1.i18n — `hangar-i18n` | running | agent worktree |
+| W1.update — `hangar-update` | running | agent worktree |
 | W2.ui, W2.shell | waiting on W1.theme, W1.core | |
 | Wave 3 surfaces | waiting on W2 and the inventory | |
 
