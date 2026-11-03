@@ -1,43 +1,17 @@
 //! The shapes the engine shares with the control bus (P18): who calls an op,
-//! what a model write from an engine carries, what an op tells the person on
-//! screen.
+//! what an op tells the person on screen, and what a worker's pane is added
+//! with.
 //!
-//! P18 owns these in `control/port.rs` and `control/types.rs` (inventory A6,
-//! WP0: `Caller`, `ControlEvent`, `ModelCmd`). They were not written when this
-//! package was, so the engine defines the few it needs here, under the same
-//! names and with the same fields; when the two packages meet, these become
-//! re-exports of P18's, or P18's are built from them.
+//! `Caller` and the announcements are P18's (`control::types`), re-exported
+//! here so the engine's code names them where it always did; there is one of
+//! each. A new pane stays described here as data (`NewPane`, `WorkerInit`),
+//! which the engine's tests read back, and becomes P18's
+//! `ModelCmd::AddPane` in live.rs.
 
 use serde::Serialize;
 
+pub use crate::control::types::{Caller, ControlEvent as Announcement};
 use crate::state::types::{AgentId, PaneId, PaneRole};
-
-/// Who calls a control op (`Caller` of lib/control.ts): from the agent's
-/// `HANGAR_PANE_ID`/`HANGAR_PANE_NAME`, with its folder as a fallback.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Caller {
-    pub pane_id: Option<PaneId>,
-    pub pane_name: Option<String>,
-    pub cwd: Option<String>,
-}
-
-/// The two kinds of `ControlEvent` the worker ops announce.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnnounceKind {
-    Created,
-    Closed,
-}
-
-/// A line on screen about a pane an op opened or closed (`ControlEvent`):
-/// `control.created` / `control.closed`, with `by` (an agent's name, or the
-/// person: `None`), the pane and its workspace.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Announcement {
-    pub kind: AnnounceKind,
-    pub by: Option<String>,
-    pub pane: String,
-    pub workspace: String,
-}
 
 /// What a worker pane is created with, before its shell starts: its role,
 /// its task, its model and its ports, which its terminal needs from the first

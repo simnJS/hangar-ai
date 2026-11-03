@@ -302,7 +302,15 @@ impl App {
             self.iced_theme = (theme.id, hangar_theme::to_iced(theme));
         }
         let revision = self.model.revision();
-        if revision == self.published || !self.model.live.hydrated {
+        if !self.model.live.hydrated {
+            return Task::none();
+        }
+        if revision == self.published {
+            // Nothing to save, but what the engines and hibernation read
+            // beside the state (deliveries, activity, sleep) may have moved.
+            if self.snapshot.borrow().is_stale(&self.model) {
+                self.publish_snapshot();
+            }
             return Task::none();
         }
         self.published = revision;
