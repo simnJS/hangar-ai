@@ -27,7 +27,9 @@ fn lay_out_as(st: &State, stem: Option<&str>) {
     // crashed the test process now and then with SIGSEGV after every test
     // had passed, and never one at a time: they take turns.
     static DRAWING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _turn = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _turn = DRAWING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut model = Model::default();
     model.hydrate(AppState {
         workspaces: vec![Workspace {
