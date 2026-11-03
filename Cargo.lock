@@ -3027,6 +3027,7 @@ dependencies = [
 name = "hangar-app"
 version = "1.12.1"
 dependencies = [
+ "chrono",
  "hangar-core",
  "hangar-i18n",
  "hangar-kit-host",

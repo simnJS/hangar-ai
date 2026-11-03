@@ -37,3 +37,6 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+# Local days, weeks and hours for the statistics page (the build hangar-core
+# reads its transcripts' hours with).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
