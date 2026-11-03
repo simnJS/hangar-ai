@@ -37,3 +37,5 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+# Local dates for what the interface dates (hangar-core's own build of it).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
