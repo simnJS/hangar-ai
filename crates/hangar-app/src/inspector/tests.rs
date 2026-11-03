@@ -138,12 +138,23 @@ mod width {
         assert_eq!(dragged_width(296.0, 600.0, 900.0, max), 240.0);
     }
 
+    /// The width the frame is told to draw the column at while the grip is
+    /// held, if it is the inspector's grip.
+    fn held(m: &Model) -> Option<f32> {
+        m.live
+            .signals
+            .panel_drag
+            .filter(|drag| drag.panel == Drawer::Inspector)
+            .map(|drag| drag.width)
+    }
+
     #[test]
     fn a_drag_follows_the_pointer_only_between_the_press_and_the_release() {
         let mut st = State::default();
         let mut m = model();
         send(&mut st, &mut m, Msg::GripMoved(500.0));
         assert!(st.drag.is_none(), "moving without pressing starts nothing");
+        assert_eq!(held(&m), None);
 
         send(
             &mut st,
@@ -159,13 +170,83 @@ mod width {
             (600.0, 296.0, 440.0)
         );
 
+        let revision = m.revision();
+        send(&mut st, &mut m, Msg::GripMoved(580.0));
         send(&mut st, &mut m, Msg::GripMoved(560.0));
-        assert_eq!(m.settings().inspector_width, 336.0);
+        // The frame draws the column where the pointer is; nothing is saved.
+        assert_eq!(held(&m), Some(336.0));
+        assert_eq!(Panels::of(&m, main(&m)).inspector.width, 336.0);
+        assert_eq!(m.settings().inspector_width, 296.0);
+        assert_eq!(m.revision(), revision, "no store action while it is held");
 
         send(&mut st, &mut m, Msg::GripReleased);
         assert!(st.drag.is_none());
+        assert_eq!(held(&m), None);
+        assert_eq!(m.settings().inspector_width, 336.0);
+        assert_eq!(m.revision(), revision + 1, "written once, on release");
         send(&mut st, &mut m, Msg::GripMoved(500.0));
+        assert_eq!(held(&m), None);
         assert_eq!(m.settings().inspector_width, 336.0, "released: it stays");
+    }
+
+    #[test]
+    fn a_release_where_the_press_was_writes_nothing() {
+        let mut st = State::default();
+        let mut m = model();
+        let revision = m.revision();
+        send(
+            &mut st,
+            &mut m,
+            Msg::GripPressed {
+                x: 600.0,
+                max: 440.0,
+            },
+        );
+        send(&mut st, &mut m, Msg::GripMoved(560.0));
+        send(&mut st, &mut m, Msg::GripMoved(600.0));
+        send(&mut st, &mut m, Msg::GripReleased);
+        assert_eq!(m.revision(), revision);
+        assert_eq!(held(&m), None);
+    }
+
+    #[test]
+    fn escape_drops_the_drag_and_the_column_keeps_its_width() {
+        let mut st = State::default();
+        let mut m = model();
+        let revision = m.revision();
+        send(
+            &mut st,
+            &mut m,
+            Msg::GripPressed {
+                x: 600.0,
+                max: 440.0,
+            },
+        );
+        send(&mut st, &mut m, Msg::GripMoved(500.0));
+        assert_eq!(held(&m), Some(396.0));
+        send(&mut st, &mut m, Msg::GripCancelled);
+        assert!(st.drag.is_none());
+        assert_eq!(held(&m), None);
+        assert_eq!(Panels::of(&m, main(&m)).inspector.width, 296.0);
+        assert_eq!(m.revision(), revision);
+        // The release that follows is nobody's.
+        send(&mut st, &mut m, Msg::GripReleased);
+        assert_eq!(m.settings().inspector_width, 296.0);
+    }
+
+    #[test]
+    fn letting_go_leaves_another_panel_s_held_grip_alone() {
+        let mut st = State::default();
+        let mut m = model();
+        let dock = crate::state::PanelDrag {
+            panel: Drawer::Dock,
+            width: 500.0,
+        };
+        m.live.signals.panel_drag = Some(dock);
+        send(&mut st, &mut m, Msg::GripReleased);
+        send(&mut st, &mut m, Msg::GripCancelled);
+        send(&mut st, &mut m, Msg::ResetWidth);
+        assert_eq!(m.live.signals.panel_drag, Some(dock));
     }
 
     #[test]
@@ -181,8 +262,10 @@ mod width {
             },
         );
         send(&mut st, &mut m, Msg::GripMoved(100.0));
-        assert_eq!(m.settings().inspector_width, 330.0);
+        assert_eq!(held(&m), Some(330.0));
         send(&mut st, &mut m, Msg::GripMoved(900.0));
+        assert_eq!(held(&m), Some(240.0));
+        send(&mut st, &mut m, Msg::GripReleased);
         assert_eq!(m.settings().inspector_width, 240.0);
     }
 
@@ -205,6 +288,8 @@ mod width {
         );
         assert_eq!(st.drag.expect("pressed").from_width, 300.0);
         send(&mut st, &mut m, Msg::GripMoved(610.0));
+        assert_eq!(held(&m), Some(290.0));
+        send(&mut st, &mut m, Msg::GripReleased);
         assert_eq!(m.settings().inspector_width, 290.0);
     }
 
@@ -223,6 +308,7 @@ mod width {
         send(&mut st, &mut m, Msg::GripMoved(500.0));
         send(&mut st, &mut m, Msg::ResetWidth);
         assert!(st.drag.is_none());
+        assert_eq!(held(&m), None);
         assert_eq!(
             m.settings().inspector_width,
             Settings::default().inspector_width
@@ -243,9 +329,13 @@ mod width {
                 max: 440.0,
             },
         );
+        send(&mut st, &mut m, Msg::GripMoved(500.0));
         send(&mut st, &mut m, Msg::Focus(w, false));
         assert!(st.drag.is_none());
         assert!(st.away);
+        // As Escape: dropped, not saved.
+        assert_eq!(held(&m), None);
+        assert_eq!(m.settings().inspector_width, 296.0);
     }
 
     #[test]
@@ -717,6 +807,7 @@ mod requests {
             Msg::Clock,
             Msg::Focus(window::Id::unique(), true),
             Msg::GripReleased,
+            Msg::GripCancelled,
             Msg::Toggle(SectionId::Files),
             Msg::CancelQueued("a".into(), "q1".into()),
         ] {

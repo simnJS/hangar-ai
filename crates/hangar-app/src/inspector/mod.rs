@@ -17,10 +17,13 @@
 //! over the terminals.
 //!
 //! The width, the folded sections and whether the column is open are
-//! settings and change through `Model::apply`; the grip writes the width as
-//! it is dragged, so the shell's frame (which sizes the column from the
-//! setting) follows the pointer. The widest it may be is what the frame
-//! placed for the window the grip was pressed in.
+//! settings and change through `Model::apply`. While the grip is held, the
+//! width it has reached goes to `live.signals.panel_drag`, which the shell's
+//! frame (`Panels::of`) draws the column at; the setting is written once, when
+//! the grip is let go, as the TS did, instead of a save and a snapshot for
+//! every move of the pointer. Escape, or the app going to the back, drops the
+//! drag and the column keeps the width it had. The widest it may be is what
+//! the frame placed for the window the grip was pressed in.
 
 mod files;
 pub mod files_model;
@@ -45,7 +48,7 @@ use crate::services::{CoreEvent, Services};
 use crate::shell::side_panels::{INSPECTOR_MAX, INSPECTOR_MIN, Panels};
 use crate::shell::{Drawer, Focus, Region, View};
 use crate::state::types::Settings;
-use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
+use crate::state::{Model, PaneId, PanelDrag, Patch, StoreAction, WsId};
 
 pub use view::view;
 
@@ -107,6 +110,8 @@ struct Drag {
     from_width: f64,
     /// The widest the room let the column be in that window then, in points.
     max: f32,
+    /// The width the pointer has reached, which the release saves.
+    to: f64,
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -135,6 +140,8 @@ pub enum Msg {
     },
     GripMoved(f32),
     GripReleased,
+    /// Escape while the grip is held: the width stays as it was.
+    GripCancelled,
     /// A double click on the grip.
     ResetWidth,
     /// An arrow key while the column has the keyboard: left grows it.
@@ -203,6 +210,28 @@ fn fold(collapsed: &mut Vec<String>, id: &str) {
             collapsed.remove(at);
         }
         None => collapsed.push(id.to_string()),
+    }
+}
+
+/// The column is drawn at `width` while the grip is held, with no setting
+/// written.
+fn show_drag(m: &mut Model, width: f64) {
+    m.live.signals.panel_drag = Some(PanelDrag {
+        panel: Drawer::Inspector,
+        width: width as f32,
+    });
+}
+
+/// The column goes back to being drawn at its setting. Another panel's held
+/// grip is not the inspector's to let go.
+fn end_drag(st: &mut State, m: &mut Model) {
+    st.drag = None;
+    if m.live
+        .signals
+        .panel_drag
+        .is_some_and(|drag| drag.panel == Drawer::Inspector)
+    {
+        m.live.signals.panel_drag = None;
     }
 }
 
@@ -287,29 +316,39 @@ fn reduce(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             }
         }
         Msg::GripPressed { x, max } => {
+            let from_width = drawn_width(m.settings().inspector_width, max);
             st.drag = Some(Drag {
                 from_x: x,
-                from_width: drawn_width(m.settings().inspector_width, max),
+                from_width,
                 max,
+                to: from_width,
             });
             Task::none()
         }
         Msg::GripMoved(x) => {
-            if let Some(drag) = st.drag {
-                set_width(
-                    m,
-                    dragged_width(drag.from_width, drag.from_x, x, drag.max),
-                    drag.max,
-                );
+            if let Some(drag) = st.drag.as_mut() {
+                drag.to = dragged_width(drag.from_width, drag.from_x, x, drag.max);
+                let to = drag.to;
+                show_drag(m, to);
             }
             Task::none()
         }
         Msg::GripReleased => {
-            st.drag = None;
+            let held = st.drag;
+            end_drag(st, m);
+            // A release where the press was writes nothing (`set_width`
+            // skips an unchanged width).
+            if let Some(drag) = held {
+                set_width(m, drag.to, drag.max);
+            }
+            Task::none()
+        }
+        Msg::GripCancelled => {
+            end_drag(st, m);
             Task::none()
         }
         Msg::ResetWidth => {
-            st.drag = None;
+            end_drag(st, m);
             set_width(m, Settings::default().inspector_width, INSPECTOR_MAX);
             Task::none()
         }
@@ -347,7 +386,7 @@ fn reduce(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                 // One window handing the focus to another is not leaving.
                 if st.focused.is_empty() {
                     st.away = true;
-                    st.drag = None;
+                    end_drag(st, m);
                 }
             }
             Task::none()

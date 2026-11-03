@@ -44,6 +44,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
             pressed: Box::new(move |x| Message::Inspector(Msg::GripPressed { x, max })),
             moved: Box::new(|x| Message::Inspector(Msg::GripMoved(x))),
             released: Message::Inspector(Msg::GripReleased),
+            cancelled: Message::Inspector(Msg::GripCancelled),
             reset: Message::Inspector(Msg::ResetWidth),
         },
     );
