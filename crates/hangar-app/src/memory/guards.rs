@@ -89,20 +89,30 @@ pub fn search_terms(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Same rule as the MCP search: every term has to appear somewhere in the
-/// title, the content or the tags.
-pub fn matches(entry: &MemoryEntry, terms: &[String]) -> bool {
-    if terms.is_empty() {
-        return true;
-    }
-    let haystack = format!(
+/// What a search looks through for one entry: the title, the content and the
+/// tags, lowercased. Built once when the entries load (`State::haystacks`), so
+/// typing in the search field does not lowercase the whole memory per key.
+pub fn haystack(entry: &MemoryEntry) -> String {
+    format!(
         "{}\n{}\n{}",
         entry.title,
         entry.content,
         entry.tags.join(" ")
     )
-    .to_lowercase();
+    .to_lowercase()
+}
+
+/// Same rule as the MCP search: every term has to appear somewhere in the
+/// haystack of the entry.
+pub fn matches_haystack(haystack: &str, terms: &[String]) -> bool {
     terms.iter().all(|term| haystack.contains(term.as_str()))
+}
+
+/// `matches_haystack` of an entry's own haystack, for the tests and the
+/// callers with no index at hand.
+#[cfg(test)]
+pub fn matches(entry: &MemoryEntry, terms: &[String]) -> bool {
+    matches_haystack(&haystack(entry), terms)
 }
 
 #[cfg(test)]

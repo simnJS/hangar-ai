@@ -82,6 +82,8 @@ pub struct State {
     /// `None` until the first read answers: a slow read is not an empty
     /// memory.
     pub entries: Option<Vec<MemoryEntry>>,
+    /// What a search looks through, one per entry, in the same order.
+    pub haystacks: Vec<String>,
     /// A failed read or a refused write. Never cleared by the passing of time:
     /// a successful load or the next action retires it.
     pub error: Option<String>,
@@ -97,6 +99,53 @@ pub struct State {
     pub editing: Option<Editing>,
     /// Delete asks twice, like the destructive actions in the settings do.
     pub armed: Option<String>,
+}
+
+/// What the composer would write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewEntry {
+    pub title: String,
+    pub content: String,
+    pub tags: Vec<String>,
+}
+
+/// What a press of the composer's button does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateStep {
+    /// A title or a content is blank: the button is disabled, nothing to do.
+    Nothing,
+    /// The title is taken and the person has not said to replace it yet: the
+    /// button now says "Replace", and the next press writes.
+    Asked,
+    Write(NewEntry),
+}
+
+impl State {
+    /// Decides a press of "Create".
+    ///
+    /// Creating is an upsert: a taken title would overwrite that entry. Ask
+    /// inline first, with the entries already loaded: no native dialog.
+    pub fn create_step(&mut self) -> CreateStep {
+        let title = self.draft.title.trim().to_owned();
+        let content = self.draft.content.text().trim().to_owned();
+        if title.is_empty() || content.is_empty() {
+            return CreateStep::Nothing;
+        }
+        let clash = self
+            .entries
+            .as_deref()
+            .and_then(|entries| find_title_clash(entries, &title));
+        if clash.is_some() && !self.confirming_replace {
+            self.confirming_replace = true;
+            return CreateStep::Asked;
+        }
+        self.confirming_replace = false;
+        CreateStep::Write(NewEntry {
+            title,
+            content,
+            tags: parse_tags(&self.draft.tags),
+        })
+    }
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -185,6 +234,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Loaded(result) => {
             match result {
                 Ok(entries) => {
+                    st.haystacks = entries.iter().map(guards::haystack).collect();
                     st.entries = Some(entries);
                     // A load that works retires the failure of the last one:
                     // without this, one transient lock leaves its banner over
@@ -195,6 +245,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 // cannot be read; showing it keeps an unreadable memory from
                 // looking like an empty one.
                 Err(error) => {
+                    st.haystacks.clear();
                     st.entries = Some(Vec::new());
                     st.error = Some(error);
                 }
@@ -264,25 +315,10 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Create => {
-            let title = st.draft.title.trim().to_owned();
-            let content = st.draft.content.text().trim().to_owned();
-            if title.is_empty() || content.is_empty() {
+            let CreateStep::Write(entry) = st.create_step() else {
                 return Task::none();
-            }
-            // Creating is an upsert: a taken title would overwrite that
-            // entry. Ask inline first, with the entries already loaded: no
-            // native dialog.
-            let clash = st
-                .entries
-                .as_deref()
-                .and_then(|entries| find_title_clash(entries, &title));
-            if clash.is_some() && !st.confirming_replace {
-                st.confirming_replace = true;
-                return Task::none();
-            }
-            st.confirming_replace = false;
+            };
             st.error = None;
-            let tags = parse_tags(&st.draft.tags);
             let workspace = m
                 .active_workspace()
                 .map(|ws| ws.cwd.clone())
@@ -291,9 +327,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 memory::memory_create(
                     host,
                     NewMemory {
-                        title,
-                        content,
-                        tags,
+                        title: entry.title,
+                        content: entry.content,
+                        tags: entry.tags,
                         workspace,
                         agent: "user".into(),
                     },
@@ -441,4 +477,81 @@ pub fn on_event(
 /// Region `main` in the memory view.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     view::view(st, ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(title: &str) -> MemoryEntry {
+        MemoryEntry {
+            id: title.into(),
+            title: title.into(),
+            content: "body".into(),
+            tags: Vec::new(),
+            workspace: String::new(),
+            agent: String::new(),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn composing(title: &str, content: &str, taken: &[&str]) -> State {
+        State {
+            entries: Some(taken.iter().map(|title| entry(title)).collect()),
+            composing: true,
+            draft: Draft {
+                title: title.into(),
+                content: text_editor::Content::with_text(content),
+                tags: "ci, Rust, ci".into(),
+            },
+            ..State::default()
+        }
+    }
+
+    #[test]
+    fn writes_nothing_while_the_title_or_the_text_is_blank() {
+        assert_eq!(
+            composing("  ", "text", &[]).create_step(),
+            CreateStep::Nothing
+        );
+        assert_eq!(
+            composing("Title", " \n ", &[]).create_step(),
+            CreateStep::Nothing
+        );
+    }
+
+    #[test]
+    fn writes_at_once_when_the_title_is_free() {
+        let mut st = composing("  Build steps ", " run it ", &["Other"]);
+        assert_eq!(
+            st.create_step(),
+            CreateStep::Write(NewEntry {
+                title: "Build steps".into(),
+                content: "run it".into(),
+                tags: vec!["ci".into(), "Rust".into()],
+            })
+        );
+        assert!(!st.confirming_replace);
+    }
+
+    #[test]
+    fn asks_before_replacing_a_taken_title_and_writes_on_the_second_press() {
+        let mut st = composing("build STEPS", "new text", &["Build steps"]);
+        assert_eq!(st.create_step(), CreateStep::Asked);
+        assert!(st.confirming_replace);
+        assert!(matches!(st.create_step(), CreateStep::Write(_)));
+        assert!(!st.confirming_replace);
+    }
+
+    #[test]
+    fn editing_the_title_takes_the_question_back() {
+        let mut st = composing("Build steps", "text", &["Build steps"]);
+        assert_eq!(st.create_step(), CreateStep::Asked);
+        // The title changes: the message handler lowers the flag, as the TS
+        // `onChange` did, and the clash is asked about afresh.
+        st.draft.title = "Build steps 2".into();
+        st.confirming_replace = false;
+        assert!(matches!(st.create_step(), CreateStep::Write(_)));
+    }
 }

@@ -18,7 +18,8 @@ use hangar_ui::{Icon, button as btn, empty, icon, input, keys, text as typograph
 
 use super::format::{ShortDay, compact_path, full_date, short_day, signer_name, was_updated};
 use super::guards::{
-    MEMORY_CAP, MemorySort, find_title_clash, matches, near_cap, search_terms, sort_entries,
+    MEMORY_CAP, MemorySort, find_title_clash, matches_haystack, near_cap, search_terms,
+    sort_entries,
 };
 use super::{Draft, Msg, State, composer_id, search_id};
 use crate::ctx::Ctx;
@@ -60,7 +61,13 @@ pub(super) fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let loaded = st.entries.is_some();
     let all: &[MemoryEntry] = st.entries.as_deref().unwrap_or(&[]);
     let terms = search_terms(&st.query);
-    let visible = sort_entries(all.iter().filter(|entry| matches(entry, &terms)), st.sort);
+    let visible = sort_entries(
+        all.iter()
+            .zip(&st.haystacks)
+            .filter(|(_, haystack)| matches_haystack(haystack, &terms))
+            .map(|(entry, _)| entry),
+        st.sort,
+    );
     let narrow = ctx.metrics.body_width < NARROW;
 
     let mut page = column![bar(st, ctx, &visible, all.len(), narrow)];
@@ -445,7 +452,8 @@ fn reading<'a>(
                 .color(t.colors.fg_subtle),
                 text(entry.title.as_str())
                     .size(tokens::font_size::UI_LG)
-                    .font(fonts::ui_semibold()),
+                    .font(fonts::ui_semibold())
+                    .style(style::text::primary(t)),
             ]
             .spacing(tokens::space::SM)
             .align_y(Alignment::Center),
