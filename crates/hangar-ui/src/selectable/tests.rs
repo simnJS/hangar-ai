@@ -14,6 +14,7 @@ enum Msg {
     Selected(String),
     Copied,
     Link(String),
+    Pressed,
 }
 
 const PAINT: Color = Color::from_rgb(1.0, 0.0, 0.0);
@@ -495,4 +496,40 @@ fn a_view_scrolled_down_selects_what_is_under_the_pointer_not_what_was_there() {
     assert_eq!(doc.selected_text(), "row 24");
     let messages = said(ui);
     assert_eq!(messages.last(), Some(&Msg::Selected("row 24".into())));
+}
+
+#[test]
+fn a_press_in_the_view_is_said_whatever_was_under_it_and_one_outside_is_not() {
+    let doc = Doc::new(PAINT);
+    doc.begin();
+    let mut spans: Vec<Span<'static, String, Font>> = vec![span("go "), span("there")];
+    spans[1].link = Some("here".into());
+    let block = doc
+        .block::<String, Msg>(spans)
+        .size(14)
+        .on_link_click(Msg::Link);
+    let page = iced::widget::row![
+        iced::widget::container(selectable(&doc, block).on_press(|| Msg::Pressed)).width(300),
+        iced::widget::Space::new().width(300).height(100)
+    ];
+    let mut ui = simulate(page);
+    ui.move_to(1.0, 5.0);
+    let (on_text, y, _) = across(&doc, 0, 0, 2);
+    let (on_link, ..) = across(&doc, 0, 3, 8);
+    for x in [on_text, on_link, on_text + 3.0] {
+        ui.move_to(x, y);
+        ui.press(mouse::Button::Left);
+        ui.release(mouse::Button::Left);
+    }
+    // Outside the view: nothing.
+    ui.move_to(500.0, 50.0);
+    ui.press(mouse::Button::Left);
+    ui.release(mouse::Button::Left);
+    let messages = said(ui);
+    assert_eq!(
+        messages.iter().filter(|m| **m == Msg::Pressed).count(),
+        3,
+        "{messages:?}"
+    );
+    assert!(messages.contains(&Msg::Link("here".into())));
 }

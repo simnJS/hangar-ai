@@ -828,6 +828,7 @@ pub fn selectable<'a, M: 'a>(doc: &Doc, content: impl Into<Element<'a, M>>) -> S
         content: content.into(),
         on_select: None,
         on_copy: None,
+        on_press: None,
     }
 }
 
@@ -836,6 +837,7 @@ pub struct Selectable<'a, M> {
     content: Element<'a, M>,
     on_select: Option<Box<dyn Fn(String) -> M + 'a>>,
     on_copy: Option<Box<dyn Fn() -> M + 'a>>,
+    on_press: Option<Box<dyn Fn() -> M + 'a>>,
 }
 
 impl<'a, M> Selectable<'a, M> {
@@ -851,6 +853,14 @@ impl<'a, M> Selectable<'a, M> {
     /// thanks.
     pub fn on_copy(mut self, on_copy: impl Fn() -> M + 'a) -> Self {
         self.on_copy = Some(Box::new(on_copy));
+        self
+    }
+
+    /// Said each time the left button goes down in the view, whatever was
+    /// under it (a link, text, nothing): the keyboard is this view's from
+    /// then on, and whatever else had it, a terminal for one, is to be told.
+    pub fn on_press(mut self, on_press: impl Fn() -> M + 'a) -> Self {
+        self.on_press = Some(Box::new(on_press));
         self
     }
 }
@@ -961,6 +971,9 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Selectable<'_, M> {
                     // shown, as it does in a page.
                     state.focused = false;
                     return;
+                }
+                if let Some(on_press) = &self.on_press {
+                    shell.publish(on_press());
                 }
                 if shell.is_event_captured() {
                     return;
