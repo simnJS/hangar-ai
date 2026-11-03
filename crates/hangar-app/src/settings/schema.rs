@@ -14,6 +14,8 @@
 //! Nothing is ever disabled (the hibernate delay stays enabled when
 //! hibernation is off).
 
+use std::borrow::Cow;
+
 use hangar_i18n::{Key, Locale, Translator, args};
 use hangar_ui::Icon;
 use hangar_ui::shortcut::Platform as KeyboardPlatform;
@@ -30,18 +32,39 @@ use crate::state::types::{
 };
 
 /// A choice of a select or a segmented control.
+///
+/// The label of a segmented control's choice is always a plain entry of the
+/// dictionary or a constant, which the translator hands out borrowed for
+/// `'static`: the control wants text that outlives the frame it is drawn in
+/// (the schema is rebuilt for every frame and cannot lend it), and this is the
+/// text that does. A select owns its items, so its labels may be formatted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
     pub value: String,
-    pub label: String,
+    pub label: Cow<'static, str>,
 }
 
 impl Choice {
-    fn new(value: impl Into<String>, label: impl Into<String>) -> Choice {
+    fn new(value: impl Into<String>, label: impl Into<Cow<'static, str>>) -> Choice {
         Choice {
             value: value.into(),
             label: label.into(),
         }
+    }
+
+    /// The label for a control that borrows it. Empty for a label that was
+    /// made on the fly, which a segmented control never has.
+    pub fn static_label(&self) -> &'static str {
+        match &self.label {
+            Cow::Borrowed(label) => label,
+            Cow::Owned(_) => "",
+        }
+    }
+}
+
+impl std::fmt::Display for Choice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
 }
 
@@ -61,7 +84,9 @@ pub enum Block {
     /// The path field and its Browse button.
     ProjectsFolder,
     /// The theme cards, `active` being the one the window shows.
-    Themes { active: String },
+    Themes {
+        active: String,
+    },
     TerminalPreview,
     Fonts,
     Mobile,
@@ -96,7 +121,9 @@ pub enum Kind {
     /// from.
     Input {
         value: String,
-        placeholder: String,
+        /// A constant or a plain dictionary entry, for the same reason as a
+        /// segmented choice's label.
+        placeholder: Cow<'static, str>,
         target: Target,
     },
     Slider {
@@ -109,7 +136,9 @@ pub enum Kind {
         target: Target,
     },
     /// A read-only line: a version, a keyboard shortcut.
-    Text { value: String },
+    Text {
+        value: String,
+    },
     Action {
         label: String,
         /// Set to require a second click, for anything not worth undoing by
@@ -121,7 +150,10 @@ pub enum Kind {
     /// Drawn full width. `bare`: straight on the page rather than inside a
     /// grouped box, for a block that is a box of its own (a preview, the
     /// shortcut editor).
-    Custom { bare: bool, block: Block },
+    Custom {
+        bare: bool,
+        block: Block,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,7 +242,11 @@ pub const FONT_STACKS: [(&str, &str); 7] = [
 /// the one that makes the cloud fallback cost nothing worth noticing, and
 /// dictation is too short for the accuracy gap to show.
 pub const CLOUD_MODELS: [(&str, &str, &str); 2] = [
-    ("whisper-large-v3-turbo", "Whisper large-v3 turbo", "$0.04/h"),
+    (
+        "whisper-large-v3-turbo",
+        "Whisper large-v3 turbo",
+        "$0.04/h",
+    ),
     ("whisper-large-v3", "Whisper large-v3", "$0.111/h"),
 ];
 
@@ -340,7 +376,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
         }
     };
 
-    let shell_choices = || shells.iter().map(|s| Choice::new(&s.id, &s.label));
+    let shell_choices = || shells.iter().map(|s| Choice::new(&s.id, s.label.clone()));
 
     vec![
         general(ctx, locale),
@@ -591,7 +627,7 @@ fn general(ctx: &Context, locale: Locale) -> Category {
     }
     delays.sort_by(f64::total_cmp);
 
-    let mut language_choices = vec![Choice::new("", tx(Key::SettingsLocaleAuto))];
+    let mut language_choices = vec![Choice::new("", t.t(Key::SettingsLocaleAuto))];
     language_choices.extend(
         hangar_i18n::LOCALES
             .iter()
@@ -742,7 +778,7 @@ fn general(ctx: &Context, locale: Locale) -> Category {
                                 // The default as the placeholder, so an empty
                                 // field reads as "starts with this" rather
                                 // than as nothing at all.
-                                placeholder: default_agent_command(agent.id).to_string(),
+                                placeholder: default_agent_command(agent.id).into(),
                                 target: Target::AgentCommand(agent.id),
                             },
                         )
@@ -858,15 +894,15 @@ fn terminal(ctx: &Context, locale: Locale) -> Category {
                             choices: vec![
                                 Choice::new(
                                     cursor_style_id(CursorStyle::Bar),
-                                    tx(Key::SettingsCursorBar),
+                                    t.t(Key::SettingsCursorBar),
                                 ),
                                 Choice::new(
                                     cursor_style_id(CursorStyle::Block),
-                                    tx(Key::SettingsCursorBlock),
+                                    t.t(Key::SettingsCursorBlock),
                                 ),
                                 Choice::new(
                                     cursor_style_id(CursorStyle::Underline),
-                                    tx(Key::SettingsCursorUnderline),
+                                    t.t(Key::SettingsCursorUnderline),
                                 ),
                             ],
                             target: Target::CursorStyle,
@@ -956,11 +992,11 @@ fn voice(ctx: &Context, keymap: &super::shortcuts::keymap::Keymap) -> Category {
                 choices: vec![
                     Choice::new(
                         voice_engine_id(VoiceEngine::Local),
-                        tx(Key::SettingsVoiceEngineLocal),
+                        t.t(Key::SettingsVoiceEngineLocal),
                     ),
                     Choice::new(
                         voice_engine_id(VoiceEngine::Groq),
-                        tx(Key::SettingsVoiceEngineCloud),
+                        t.t(Key::SettingsVoiceEngineCloud),
                     ),
                 ],
                 target: Target::VoiceEngine,
@@ -1081,7 +1117,7 @@ fn voice(ctx: &Context, keymap: &super::shortcuts::keymap::Keymap) -> Category {
                         Some(tx(Key::SettingsVoiceCleanupModel)),
                         Kind::Input {
                             value: settings.voice_cleanup_model.clone(),
-                            placeholder: DEFAULT_CLEANUP_MODEL.to_string(),
+                            placeholder: DEFAULT_CLEANUP_MODEL.into(),
                             target: Target::VoiceCleanupModel,
                         },
                     )
@@ -1094,7 +1130,7 @@ fn voice(ctx: &Context, keymap: &super::shortcuts::keymap::Keymap) -> Category {
                         Some(tx(Key::SettingsVoiceVocabulary)),
                         Kind::Input {
                             value: settings.voice_cleanup_hint.clone(),
-                            placeholder: tx(Key::SettingsVoiceVocabularyPlaceholder),
+                            placeholder: t.t(Key::SettingsVoiceVocabularyPlaceholder),
                             target: Target::VoiceCleanupHint,
                         },
                     )
@@ -1167,7 +1203,7 @@ fn discord(ctx: &Context) -> Category {
                         Some(tx(Key::SettingsDiscordAppId)),
                         Kind::Input {
                             value: settings.discord_app_id.clone(),
-                            placeholder: tx(Key::SettingsDiscordAppIdPlaceholder),
+                            placeholder: t.t(Key::SettingsDiscordAppIdPlaceholder),
                             target: Target::DiscordAppId,
                         },
                     )

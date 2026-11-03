@@ -314,7 +314,11 @@ mod tests {
     fn the_shipped_registry_has_unique_dash_separated_ids() {
         let mut seen = std::collections::HashSet::new();
         for experiment in EXPERIMENTS {
-            assert!(seen.insert(experiment.id), "{} is registered twice", experiment.id);
+            assert!(
+                seen.insert(experiment.id),
+                "{} is registered twice",
+                experiment.id
+            );
             let well_formed = !experiment.id.is_empty()
                 && experiment.id.split('-').all(|word| {
                     !word.is_empty()

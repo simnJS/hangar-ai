@@ -76,9 +76,9 @@ pub fn step_category(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::change::Target;
     use crate::settings::schema::Kind;
     use crate::settings::schema::{Block, Choice};
-    use crate::settings::change::Target;
     use hangar_ui::Icon;
 
     fn row(id: &str, label: &str, hint: Option<&str>, keywords: &str) -> Item {

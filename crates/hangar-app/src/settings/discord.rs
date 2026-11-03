@@ -163,6 +163,11 @@ impl Publisher {
         Some(wanted)
     }
 
+    /// Whether core has been told anything yet.
+    pub fn has_sent(&self) -> bool {
+        self.sent.is_some()
+    }
+
     /// Whether anything has been sent that a later call could take down.
     pub fn is_showing(&self) -> bool {
         matches!(self.sent, Some(Some(_)))

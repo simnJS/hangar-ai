@@ -236,11 +236,7 @@ pub enum AppPortProblem {
 }
 
 /// The port typed, if the person may add it to `list`; why not otherwise.
-pub fn check_app_port(
-    text: &str,
-    list: &[u16],
-    reserved: &[u16],
-) -> Result<u16, AppPortProblem> {
+pub fn check_app_port(text: &str, list: &[u16], reserved: &[u16]) -> Result<u16, AppPortProblem> {
     let typed = text.trim();
     // `^\d{1,6}$`: digits only, so a sign, a dot, an exponent or a space inside
     // is not a port.
@@ -271,7 +267,10 @@ pub fn with_app_port(list: &[u16], port: u16) -> Vec<u16> {
 }
 
 pub fn without_app_port(list: &[u16], port: u16) -> Vec<u16> {
-    list.iter().copied().filter(|entry| *entry != port).collect()
+    list.iter()
+        .copied()
+        .filter(|entry| *entry != port)
+        .collect()
 }
 
 // ---- Tailscale, pairing, devices ---------------------------------------------------------------
@@ -532,10 +531,7 @@ mod tests {
     #[test]
     fn hangars_own_ports_are_never_taken() {
         let reserved = hangar_ports(Some(&remote(|r| r.port = 47821)), Some(&slots()));
-        assert_eq!(
-            reserved,
-            [47821, 47822, 47823, 47824, 47825, 47826, 47827]
-        );
+        assert_eq!(reserved, [47821, 47822, 47823, 47824, 47825, 47826, 47827]);
         assert_eq!(
             check_app_port("47821", &[], &reserved),
             Err(AppPortProblem::Hangar)

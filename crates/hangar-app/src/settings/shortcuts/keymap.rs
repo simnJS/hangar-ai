@@ -363,7 +363,11 @@ fn display_of(keymap: &Keymap, id: CommandId, serial: &str) -> Binding {
 }
 
 /// Commands already answering to a keystroke, `except` aside.
-pub fn commands_for(keymap: &Keymap, chords: &[Chord], except: Option<CommandId>) -> Vec<CommandId> {
+pub fn commands_for(
+    keymap: &Keymap,
+    chords: &[Chord],
+    except: Option<CommandId>,
+) -> Vec<CommandId> {
     let serial = serialize_chords(chords);
     index(keymap)
         .exact
@@ -551,7 +555,9 @@ mod tests {
 
     #[test]
     fn two_commands_on_one_keystroke_are_a_conflict() {
-        let keymap = resolve(&overrides(json!({"pane.split": ["F9"], "pane.close": ["f9"]})));
+        let keymap = resolve(&overrides(
+            json!({"pane.split": ["F9"], "pane.close": ["f9"]}),
+        ));
         assert_eq!(
             find_conflicts(&keymap),
             [Conflict {
@@ -577,7 +583,9 @@ mod tests {
 
     #[test]
     fn the_owners_of_a_keystroke_are_named_leaving_out_the_one_being_edited() {
-        let keymap = resolve(&overrides(json!({"pane.split": ["F9"], "pane.close": ["F9"]})));
+        let keymap = resolve(&overrides(
+            json!({"pane.split": ["F9"], "pane.close": ["F9"]}),
+        ));
         let chords = parse_binding("F9").unwrap();
         assert_eq!(
             commands_for(&keymap, &chords, None),

@@ -84,7 +84,10 @@ fn find<'a>(built: &'a [Category], item_id: &str) -> &'a Item {
 }
 
 fn ids(category: &Category) -> Vec<&str> {
-    items(category).iter().map(|item| item.id.as_str()).collect()
+    items(category)
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect()
 }
 
 /// One line per row: its control, what it edits and the value it shows.
@@ -97,7 +100,7 @@ fn describe(item: &Item) -> String {
             value,
             placeholder,
             target,
-        } => format!("input {target:?} = {value:?} ({placeholder:?})"),
+        } => format!("input {target:?} = {value:?} ({:?})", &**placeholder),
         Kind::Slider {
             value,
             min,
@@ -281,10 +284,7 @@ fn the_cloud_engine_swaps_the_model_card_for_a_model_choice_and_drops_the_unload
         panic!("not a select");
     };
     assert_eq!(
-        choices
-            .iter()
-            .map(|c| c.label.as_str())
-            .collect::<Vec<_>>(),
+        choices.iter().map(|c| &*c.label).collect::<Vec<_>>(),
         [
             "Whisper large-v3 turbo — $0.04/h",
             "Whisper large-v3 — $0.111/h"
@@ -303,7 +303,9 @@ fn the_voice_language_offers_auto_then_eleven_codes() {
     let values: Vec<&str> = choices.iter().map(|c| c.value.as_str()).collect();
     assert_eq!(
         values,
-        ["", "en", "fr", "de", "es", "it", "pt", "nl", "pl", "ru", "uk", "sv"]
+        [
+            "", "en", "fr", "de", "es", "it", "pt", "nl", "pl", "ru", "uk", "sv"
+        ]
     );
     assert_eq!(choices[1].label, "en");
 }
@@ -362,7 +364,13 @@ fn the_rows_that_need_a_workspace_exist_only_with_one() {
     let with = world.build();
     assert_eq!(
         ids(category(&with, SettingsCategory::Appearance)),
-        ["uiScale", "navigatorOpen", "inspectorOpen", "themeScope", "themePick"]
+        [
+            "uiScale",
+            "navigatorOpen",
+            "inspectorOpen",
+            "themeScope",
+            "themePick"
+        ]
     );
     assert_eq!(
         ids(category(&with, SettingsCategory::Shell)),
@@ -431,7 +439,7 @@ fn the_shell_lists_what_was_detected_with_auto_first() {
     assert_eq!(
         choices
             .iter()
-            .map(|c| (c.value.as_str(), c.label.as_str()))
+            .map(|c| (c.value.as_str(), &*c.label))
             .collect::<Vec<_>>(),
         [("", "Auto (Bash)"), ("bash", "Bash"), ("zsh", "Zsh")]
     );
@@ -476,7 +484,7 @@ fn the_hibernate_delay_lists_the_usual_ones_and_the_current_value() {
     assert_eq!(
         choices
             .iter()
-            .map(|c| (c.value.as_str(), c.label.as_str()))
+            .map(|c| (c.value.as_str(), &*c.label))
             .collect::<Vec<_>>(),
         [
             ("5", "5 min"),
@@ -537,10 +545,10 @@ fn a_hint_that_names_a_key_follows_the_rebinding() {
         hint(&built, "navigatorOpen")
     );
     assert!(hint(&built, "inspectorOpen").ends_with(" · Ctrl+Alt+I"));
-    world.settings.keybindings.insert(
-        "view.navigator".into(),
-        serde_json::json!(["Ctrl+Shift+J"]),
-    );
+    world
+        .settings
+        .keybindings
+        .insert("view.navigator".into(), serde_json::json!(["Ctrl+Shift+J"]));
     world
         .settings
         .keybindings
@@ -566,7 +574,10 @@ fn the_voice_shortcut_row_is_the_live_binding_and_empty_when_unbound() {
         .settings
         .keybindings
         .insert("voice.dictate".into(), serde_json::json!([]));
-    assert_eq!(describe(find(&world.build(), "voiceShortcut")), r#"text """#);
+    assert_eq!(
+        describe(find(&world.build(), "voiceShortcut")),
+        r#"text """#
+    );
 }
 
 #[test]
@@ -624,13 +635,13 @@ fn every_text_is_a_sentence_in_both_languages_with_no_placeholder_left() {
                         texts.extend(item.hint.clone());
                         match &item.kind {
                             Kind::Select { choices, .. } | Kind::Segmented { choices, .. } => {
-                                texts.extend(choices.iter().map(|c| c.label.clone()))
+                                texts.extend(choices.iter().map(|c| c.label.to_string()))
                             }
                             Kind::Action { label, confirm, .. } => {
                                 texts.push(label.clone());
                                 texts.extend(confirm.clone());
                             }
-                            Kind::Input { placeholder, .. } => texts.push(placeholder.clone()),
+                            Kind::Input { placeholder, .. } => texts.push(placeholder.to_string()),
                             _ => {}
                         }
                     }
@@ -719,7 +730,10 @@ fn experimental_sits_before_about_once_something_is_registered() {
 fn an_experiment_is_turned_on_and_off_through_the_settings() {
     let built = with_experiments(Settings::default(), &[OPEN_DEMO]);
     let row = find(&built, "experiment.demo-feature");
-    assert_eq!(describe(row), r#"toggle Experiment("demo-feature") = false"#);
+    assert_eq!(
+        describe(row),
+        r#"toggle Experiment("demo-feature") = false"#
+    );
     let Kind::Toggle { target, .. } = &row.kind else {
         panic!("not a toggle");
     };
@@ -729,10 +743,9 @@ fn an_experiment_is_turned_on_and_off_through_the_settings() {
         theme_id: "graphite",
     };
     let mut settings = Settings::default();
-    let Some(StoreAction::UpdateSettings(patch)) = action(
-        scope,
-        &Change::Set(target.clone(), Value::Bool(true)),
-    ) else {
+    let Some(StoreAction::UpdateSettings(patch)) =
+        action(scope, &Change::Set(target.clone(), Value::Bool(true)))
+    else {
         panic!("not a settings patch");
     };
     patch.apply(&mut settings);
@@ -746,10 +759,9 @@ fn an_experiment_is_turned_on_and_off_through_the_settings() {
     let row = find(&on, "experiment.demo-feature");
     assert_eq!(describe(row), r#"toggle Experiment("demo-feature") = true"#);
     let mut after = other;
-    let Some(StoreAction::UpdateSettings(patch)) = action(
-        scope,
-        &Change::Set(target.clone(), Value::Bool(false)),
-    ) else {
+    let Some(StoreAction::UpdateSettings(patch)) =
+        action(scope, &Change::Set(target.clone(), Value::Bool(false)))
+    else {
         panic!("not a settings patch");
     };
     patch.apply(&mut after);

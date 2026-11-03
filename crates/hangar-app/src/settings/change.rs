@@ -368,7 +368,10 @@ mod tests {
     #[test]
     fn toggles_write_their_flag() {
         for (target, read) in [
-            (Target::AutoResume, (|s: &Settings| s.auto_resume) as fn(&Settings) -> bool),
+            (
+                Target::AutoResume,
+                (|s: &Settings| s.auto_resume) as fn(&Settings) -> bool,
+            ),
             (Target::ClaudeBridge, |s| s.claude_bridge),
             (Target::HibernateIdle, |s| s.hibernate_idle),
             (Target::AgentPaneControl, |s| s.agent_pane_control),
@@ -394,14 +397,29 @@ mod tests {
 
     #[test]
     fn sliders_write_their_number() {
-        assert_eq!(set(Target::LaunchDelayMs, Value::Number(1500.0)).launch_delay_ms, 1500);
+        assert_eq!(
+            set(Target::LaunchDelayMs, Value::Number(1500.0)).launch_delay_ms,
+            1500
+        );
         assert_eq!(set(Target::UiScale, Value::Number(115.0)).ui_scale, 115.0);
         assert_eq!(set(Target::FontSize, Value::Number(15.0)).font_size, 15.0);
-        assert_eq!(set(Target::LineHeight, Value::Number(1.45)).line_height, 1.45);
-        assert_eq!(set(Target::LetterSpacing, Value::Number(-0.5)).letter_spacing, -0.5);
+        assert_eq!(
+            set(Target::LineHeight, Value::Number(1.45)).line_height,
+            1.45
+        );
+        assert_eq!(
+            set(Target::LetterSpacing, Value::Number(-0.5)).letter_spacing,
+            -0.5
+        );
         assert_eq!(set(Target::Padding, Value::Number(4.0)).padding, 4.0);
-        assert_eq!(set(Target::Scrollback, Value::Number(20_000.0)).scrollback, 20_000);
-        assert_eq!(set(Target::NotifyIdleMs, Value::Number(5000.0)).notify_idle_ms, 5000);
+        assert_eq!(
+            set(Target::Scrollback, Value::Number(20_000.0)).scrollback,
+            20_000
+        );
+        assert_eq!(
+            set(Target::NotifyIdleMs, Value::Number(5000.0)).notify_idle_ms,
+            5000
+        );
     }
 
     #[test]
@@ -423,7 +441,10 @@ mod tests {
         );
         assert!(
             action(
-                Scope { workspace: None, theme_id: "graphite" },
+                Scope {
+                    workspace: None,
+                    theme_id: "graphite"
+                },
                 &Change::text(Target::HibernateAfterMin, "soon")
             )
             .is_none()
@@ -432,8 +453,14 @@ mod tests {
 
     #[test]
     fn a_launch_command_is_kept_as_typed_and_dropped_when_blank() {
-        let typed = set(Target::AgentCommand(AgentId::Claude), Value::Text(" claude --verbose".into()));
-        assert_eq!(typed.agent_commands["claude"], Json::String(" claude --verbose".into()));
+        let typed = set(
+            Target::AgentCommand(AgentId::Claude),
+            Value::Text(" claude --verbose".into()),
+        );
+        assert_eq!(
+            typed.agent_commands["claude"],
+            Json::String(" claude --verbose".into())
+        );
         let cleared = applied(
             typed,
             Change::text(Target::AgentCommand(AgentId::Claude), "   "),
@@ -441,7 +468,10 @@ mod tests {
         assert!(cleared.agent_commands.is_empty());
         // The other agents' commands stay.
         let two = applied(
-            set(Target::AgentCommand(AgentId::Codex), Value::Text("codex".into())),
+            set(
+                Target::AgentCommand(AgentId::Codex),
+                Value::Text("codex".into()),
+            ),
             Change::text(Target::AgentCommand(AgentId::Claude), "c"),
         );
         let none = applied(two, Change::text(Target::AgentCommand(AgentId::Claude), ""));
@@ -462,7 +492,10 @@ mod tests {
         assert_eq!(cursor_style_id(CursorStyle::Underline), "underline");
         assert!(
             action(
-                Scope { workspace: None, theme_id: "graphite" },
+                Scope {
+                    workspace: None,
+                    theme_id: "graphite"
+                },
                 &Change::text(Target::CursorStyle, "blob")
             )
             .is_none()
@@ -482,17 +515,28 @@ mod tests {
         let s = set(Target::VoiceEngine, Value::Text("groq".into()));
         assert_eq!(s.voice_engine, VoiceEngine::Groq);
         assert_eq!(
-            set(Target::VoiceCloudModel, Value::Text("whisper-large-v3".into())).voice_cloud_model,
+            set(
+                Target::VoiceCloudModel,
+                Value::Text("whisper-large-v3".into())
+            )
+            .voice_cloud_model,
             "whisper-large-v3"
         );
-        assert_eq!(set(Target::VoiceLanguage, Value::Text("fr".into())).voice_language, "fr");
+        assert_eq!(
+            set(Target::VoiceLanguage, Value::Text("fr".into())).voice_language,
+            "fr"
+        );
         // The model name is trimmed on every change; the vocabulary is not.
         assert_eq!(
             set(Target::VoiceCleanupModel, Value::Text("  llama  ".into())).voice_cleanup_model,
             "llama"
         );
         assert_eq!(
-            set(Target::VoiceCleanupHint, Value::Text(" Hangar, Tauri ".into())).voice_cleanup_hint,
+            set(
+                Target::VoiceCleanupHint,
+                Value::Text(" Hangar, Tauri ".into())
+            )
+            .voice_cleanup_hint,
             " Hangar, Tauri "
         );
     }
@@ -520,12 +564,18 @@ mod tests {
             voice_api_key: Some("gsk_old".into()),
             ..Settings::default()
         };
-        assert_eq!(applied(legacy, Change::DropLegacyVoiceKey).voice_api_key, None);
+        assert_eq!(
+            applied(legacy, Change::DropLegacyVoiceKey).voice_api_key,
+            None
+        );
     }
 
     #[test]
     fn a_reset_is_the_stores() {
-        let scope = Scope { workspace: None, theme_id: "graphite" };
+        let scope = Scope {
+            workspace: None,
+            theme_id: "graphite",
+        };
         assert!(matches!(
             action(scope, &Change::Reset),
             Some(StoreAction::ResetSettings)
@@ -534,7 +584,10 @@ mod tests {
 
     #[test]
     fn a_value_of_the_wrong_kind_changes_nothing() {
-        let scope = Scope { workspace: None, theme_id: "graphite" };
+        let scope = Scope {
+            workspace: None,
+            theme_id: "graphite",
+        };
         assert!(action(scope, &Change::text(Target::AutoResume, "yes")).is_none());
         assert!(action(scope, &Change::toggle(Target::FontSize, true)).is_none());
     }
@@ -545,7 +598,10 @@ mod tests {
         assert_eq!(s.theme_id, "nord");
         // A workspace that follows the global theme changes the global one.
         let ws = workspace(None);
-        let scope = Scope { workspace: Some(&ws), theme_id: "graphite" };
+        let scope = Scope {
+            workspace: Some(&ws),
+            theme_id: "graphite",
+        };
         assert!(matches!(
             action(scope, &Change::text(Target::Theme, "nord")),
             Some(StoreAction::UpdateSettings(_))
@@ -562,10 +618,18 @@ mod tests {
     #[test]
     fn pinning_the_theme_pins_the_one_the_window_shows() {
         let follows = workspace(None);
-        let pinned = workspace_after(&follows, "graphite", Change::toggle(Target::ThemeScope, true));
+        let pinned = workspace_after(
+            &follows,
+            "graphite",
+            Change::toggle(Target::ThemeScope, true),
+        );
         assert_eq!(pinned.theme_id.as_deref(), Some("graphite"));
         // Unpinning goes back to following the global theme.
-        let released = workspace_after(&pinned, "graphite", Change::toggle(Target::ThemeScope, false));
+        let released = workspace_after(
+            &pinned,
+            "graphite",
+            Change::toggle(Target::ThemeScope, false),
+        );
         assert_eq!(released.theme_id, None);
         // Pinning when the workspace already shows its own keeps that one.
         let own = workspace(Some("dracula"));
@@ -578,13 +642,20 @@ mod tests {
         let ws = workspace(None);
         let chosen = workspace_after(&ws, "graphite", Change::text(Target::ShellWorkspace, "zsh"));
         assert_eq!(chosen.shell_id.as_deref(), Some("zsh"));
-        let follow = workspace_after(&chosen, "graphite", Change::text(Target::ShellWorkspace, ""));
+        let follow = workspace_after(
+            &chosen,
+            "graphite",
+            Change::text(Target::ShellWorkspace, ""),
+        );
         assert_eq!(follow.shell_id, None);
     }
 
     #[test]
     fn a_workspace_row_with_no_workspace_changes_nothing() {
-        let scope = Scope { workspace: None, theme_id: "graphite" };
+        let scope = Scope {
+            workspace: None,
+            theme_id: "graphite",
+        };
         assert!(action(scope, &Change::toggle(Target::ThemeScope, true)).is_none());
         assert!(action(scope, &Change::text(Target::ShellWorkspace, "zsh")).is_none());
     }
