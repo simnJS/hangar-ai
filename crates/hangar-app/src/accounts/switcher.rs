@@ -95,14 +95,19 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
             .wrapping(Wrapping::None),
     )
     .max_width(120.0);
+    // Centred in the button's height, level with the toolbar's other
+    // buttons: a button lays its content out from the top.
     let anchor = button(
-        row![
-            icon(Icon::Bolt, tokens::size::ICON),
-            label,
-            icon(Icon::ChevronDown, 12.0),
-        ]
-        .spacing(tokens::space::SM)
-        .align_y(Alignment::Center),
+        container(
+            row![
+                icon(Icon::Bolt, tokens::size::ICON),
+                label,
+                icon(Icon::ChevronDown, 12.0),
+            ]
+            .spacing(tokens::space::SM)
+            .align_y(Alignment::Center),
+        )
+        .center_y(Length::Fill),
     )
     .padding(Padding::from([0.0, tokens::space::MD]))
     .height(tokens::size::CONTROL_HEIGHT)
@@ -349,6 +354,22 @@ mod tests {
         let mut main = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
         assert!(main.find("Perso").is_err());
         assert!(main.find("Principal").is_err());
+    }
+
+    /// The button's name sits in the middle of its height, level with the
+    /// toolbar's other buttons, not at its top.
+    #[test]
+    fn the_buttons_name_is_centred_in_its_height() {
+        let h = harness();
+        let st = State::default();
+        let mut ui = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
+        let name = ui.find("Principal").expect("the name").bounds();
+        let middle = name.y + name.height / 2.0;
+        let button = tokens::size::CONTROL_HEIGHT / 2.0;
+        assert!(
+            (middle - button).abs() <= 1.0,
+            "the name's middle is at {middle}, the button's at {button}"
+        );
     }
 
     /// The restart button's label wraps onto two lines in the menu's width:
