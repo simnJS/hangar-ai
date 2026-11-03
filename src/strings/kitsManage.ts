@@ -91,6 +91,13 @@ export const en = {
   "kitsManage.actAgents": "Agents",
   "kitsManage.actMcp": "MCP servers",
   "kitsManage.actTabs": "Tabs",
+  // How a tab is made: the native Hangar runs a WebAssembly module itself, and
+  // keeps an HTML page for what a browser engine must show.
+  "kitsManage.tabKindHtml": "HTML",
+  "kitsManage.tabKindNative": "Native",
+  "kitsManage.tabKindNativeFallback": "Native, with an HTML page as a fallback",
+  "kitsManage.tabKindHint":
+    "A native tab is a WebAssembly module that Hangar draws itself. An HTML tab is a web page, shown in a window of its own. Both are held to the permissions below.",
   "kitsManage.actPerms": "What its tabs ask for",
   "kitsManage.actNoPerms": "It asks for no permission.",
   "kitsManage.actPermsFor": "{tab} may:",
@@ -321,6 +328,11 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsManage.actAgents": "Agents",
   "kitsManage.actMcp": "Serveurs MCP",
   "kitsManage.actTabs": "Onglets",
+  "kitsManage.tabKindHtml": "HTML",
+  "kitsManage.tabKindNative": "Natif",
+  "kitsManage.tabKindNativeFallback": "Natif, avec une page HTML en secours",
+  "kitsManage.tabKindHint":
+    "Un onglet natif est un module WebAssembly que Hangar dessine lui-même. Un onglet HTML est une page web, affichée dans une fenêtre à part. Les deux sont soumis aux permissions ci-dessous.",
   "kitsManage.actPerms": "Ce que ses onglets demandent",
   "kitsManage.actNoPerms": "Il ne demande aucune autorisation.",
   "kitsManage.actPermsFor": "{tab} pourra :",

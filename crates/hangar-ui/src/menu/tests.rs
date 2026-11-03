@@ -64,6 +64,47 @@ fn messages(ui: Simulator<'_, Msg>) -> Vec<Msg> {
 
 use iced_test::Simulator;
 
+mod lines {
+    use super::*;
+
+    #[test]
+    fn a_detail_and_a_mono_label_widen_the_line_that_carries_them() {
+        let t = default_theme();
+        let plain = menu::<Msg>(t, vec![item("Deploy").into()]).width_between(0.0, 1000.0);
+        let with_detail = menu::<Msg>(
+            t,
+            vec![item("Deploy").detail("pnpm run deploy --prod").into()],
+        )
+        .width_between(0.0, 1000.0);
+        assert!(with_detail.natural_width() > plain.natural_width());
+        // An empty detail is no detail.
+        let empty =
+            menu::<Msg>(t, vec![item("Deploy").detail("").into()]).width_between(0.0, 1000.0);
+        assert_eq!(empty.natural_width(), plain.natural_width());
+        let mono = menu::<Msg>(t, vec![item("pnpm test").mono().into()]).width_between(0.0, 1000.0);
+        assert!(mono.natural_width() > 0.0);
+    }
+
+    #[test]
+    fn a_line_with_a_detail_is_still_picked_by_a_click() {
+        let t = default_theme();
+        let content = menu(
+            t,
+            vec![
+                heading("Pane"),
+                item("First").detail("ls -la").on_select(Msg::First).into(),
+            ],
+        )
+        .into();
+        let open: Element<'_, Msg> = layer::dropdown(anchor(), Some(content))
+            .on_dismiss(Msg::Dismiss)
+            .into();
+        let mut ui = simulate(open);
+        ui.click_at(FIRST_LINE.0, FIRST_LINE.1);
+        assert_eq!(messages(ui), [Msg::First]);
+    }
+}
+
 mod pointer {
     use super::*;
 

@@ -14,13 +14,12 @@
 //! The frame gives each region its size and its surface (the theme's chrome
 //! colours, the hairlines between them); the region's content is its owner's
 //! view. A workspace window is the same frame without the navigator. Where
-//! each side panel goes (docked, drawer, hidden) is `ctx.panels`
+//! each side panel goes (docked, drawer, hidden) is `ctx.panels()`
 //! (side_panels.rs).
 
-use iced::widget::{Space, column, container, mouse_area, opaque, row, rule, stack, text};
+use iced::widget::{Space, column, container, mouse_area, opaque, row, rule, stack};
 use iced::{Alignment, Element, Length};
 
-use hangar_i18n::Key;
 use hangar_theme::{style, tokens};
 
 use crate::ctx::Ctx;
@@ -34,13 +33,13 @@ pub fn main<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
         return window_surface(ctx, placeholder::boot(ctx));
     }
     let p = ctx.pkg;
-    let body: Element<'a, Message> = match (ctx.workspace, ctx.model.active_workspace()) {
+    let body: Element<'a, Message> = match (ctx.workspace(), ctx.model.active_workspace()) {
         (Some(ws), _) => workspace_body(ctx, ws),
         (None, Some(ws)) if ws.detached == Some(true) => placeholder::elsewhere(ctx, ws),
         _ => placeholder::no_workspace(ctx),
     };
     let mut frame = row![].height(Length::Fill);
-    if ctx.panels.navigator {
+    if ctx.panels().navigator {
         frame = frame
             .push(
                 container(crate::navigator::view(&p.navigator, ctx))
@@ -76,7 +75,7 @@ pub fn body_width(width: f32, navigator: bool) -> f32 {
 /// Toolbar, main area with its side panels, status bar.
 fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
-    let panels = ctx.panels;
+    let panels = ctx.panels();
     // The toolbar's buttons open and close the drawers themselves: the
     // pointer over it is not "outside" a drawer (shell/drawer.rs).
     let toolbar = mouse_area(
@@ -124,8 +123,8 @@ fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
 /// over it as drawers.
 fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
-    let panels = ctx.panels;
-    let terminals = ctx.view == View::Terminals;
+    let panels = ctx.panels();
+    let terminals = ctx.view() == View::Terminals;
 
     // Every workspace opened once stays drawn, hidden, whatever the view:
     // the grids keep their place in the tree, so their widgets keep their
@@ -155,7 +154,7 @@ fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
             ));
         }
     }
-    match ctx.view {
+    match ctx.view() {
         View::Terminals => {}
         View::Board => main = main.push(crate::board::view(&p.board, ctx, BoardVariant::Full)),
         View::Memory => main = main.push(crate::memory::view(&p.memory, ctx)),
@@ -281,8 +280,8 @@ fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message
         if let Some(notice) = crate::shell::notice::view(ctx) {
             bottom = bottom.push(notice);
         }
-        if !ctx.model.ui.pending_chords.is_empty() {
-            bottom = bottom.push(chord_hint(ctx));
+        if let Some(hint) = crate::keymap::chord_hint(ctx) {
+            bottom = bottom.push(hint);
         }
         layers = layers.push(
             container(column![
@@ -300,28 +299,6 @@ fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message
         layers = layers.push(overlay::view(ctx, overlay));
     }
     layers.into()
-}
-
-/// A half-typed shortcut sequence is held for a moment: saying so is the only
-/// way to tell it from a keystroke that did nothing. The chords are P7's,
-/// already formatted as the keymap shows them.
-fn chord_hint<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
-    let keys = ctx.model.ui.pending_chords.join(" ");
-    container(
-        row![
-            text(keys)
-                .size(tokens::font_size::UI)
-                .font(hangar_theme::fonts::mono()),
-            text(ctx.t(Key::KeymapPending))
-                .size(tokens::font_size::UI)
-                .style(style::text::muted(ctx.theme)),
-        ]
-        .spacing(tokens::space::MD)
-        .align_y(Alignment::Center),
-    )
-    .padding([tokens::space::XS, tokens::space::MD])
-    .style(style::container::tooltip(ctx.theme))
-    .into()
 }
 
 /// The page under everything, in the theme's colours.

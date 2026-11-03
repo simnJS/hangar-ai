@@ -37,22 +37,34 @@ pub struct Ctx<'a> {
     pub window: window::Id,
     /// The frame's clock, for relative times and animations.
     pub now: Instant,
-    /// The workspace this window draws (App.tsx's `activeWorkspace`): a
-    /// workspace window's own; the main window's active one, unless that one
-    /// is in a window of its own. What the toolbar, the status bar, the
-    /// inspector and the board are about.
-    pub workspace: Option<&'a Workspace>,
-    /// What this window's main area shows. Each window has its own: read
-    /// this rather than `model.ui.view`, which is the focused window's.
-    pub view: View,
-    /// Where this window's side panels go, and which are shown.
-    pub panels: Panels,
 }
 
+// What depends on the window is asked for rather than carried, so a `Ctx`
+// built by hand (a package's snapshot test) needs no more than the fields
+// above.
 impl<'a> Ctx<'a> {
     /// A translated label, as a view wants it: `text(ctx.t(Key::SidebarNew))`.
     pub fn t(&self, key: impl hangar_i18n::AsKey) -> std::borrow::Cow<'static, str> {
         self.i18n.t(key)
+    }
+
+    /// The workspace this window draws (App.tsx's `activeWorkspace`): a
+    /// workspace window's own; the main window's active one, unless that one
+    /// is in a window of its own. What the toolbar, the status bar, the
+    /// inspector and the board are about.
+    pub fn workspace(&self) -> Option<&'a Workspace> {
+        self.model.window_workspace(self.window)
+    }
+
+    /// What this window's main area shows. Each window has its own: read
+    /// this rather than `model.ui.view`, which is the focused window's.
+    pub fn view(&self) -> View {
+        self.model.view_in(self.window)
+    }
+
+    /// Where this window's side panels go, and which are shown.
+    pub fn panels(&self) -> Panels {
+        Panels::of(self.model, self.window)
     }
 }
 

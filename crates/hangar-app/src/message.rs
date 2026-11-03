@@ -205,6 +205,16 @@ pub enum Intent {
     Notice(Notice),
     Notify(Notification),
     CreateWorkspaceFromGit(GitRequest),
+    /// A pane was given a role (`previous: None`) or lost one (`previous` is
+    /// the role it had): the session is told once, by a message queued for it
+    /// (`announceRole` of lib/orchestratorBrief.ts). Sent by
+    /// `orchestration_ui::actions` after a pin or an unpin; handled by P19
+    /// (`orchestration`), which owns the briefing.
+    AnnounceRole {
+        ws: WsId,
+        pane: PaneId,
+        previous: Option<crate::state::types::PaneRole>,
+    },
     /// The `terminal.*` commands on a pane's terminal (App.tsx's handlers on
     /// `getTerminal(focused)`): clear, copy the selection, paste through the
     /// terminal (bracketed), select all, scroll to either end. Sent by the

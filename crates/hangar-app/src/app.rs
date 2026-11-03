@@ -29,7 +29,7 @@ use crate::message::{Intent, Message};
 use crate::services::events::Bus;
 use crate::services::inbox::InboxReceiver;
 use crate::services::{self, CoreEvent, CoreHandles, Services};
-use crate::shell::{Panels, WindowKind, windows};
+use crate::shell::{WindowKind, windows};
 use crate::state::{Model, Snapshot, persist};
 
 /// Every package, once: its directory (module and field name) and its route
@@ -482,9 +482,6 @@ impl App {
             keymap: &self.model.live.keymap.index,
             window,
             now: Instant::now(),
-            workspace: self.model.window_workspace(window),
-            view: self.model.view_in(window),
-            panels: Panels::of(&self.model, window),
         }
     }
 
@@ -530,13 +527,19 @@ impl App {
             services::events::subscription(&self.bus),
             services::inbox::subscription(&self.inbox),
             window::events().map(|(id, event)| Message::Window(id, event)),
-            // Only the keys nothing used: Escape a field or a menu took for
-            // itself is not the shell's (a layer takes it to close itself).
-            // Shortcuts are the keymap's, in its own subscription (P7).
+            // Escape alone, and only when nothing used it: one a field or a
+            // hangar-ui layer took (a layer dismisses on it and captures it)
+            // is not the shell's, so a layer and the shell never both close
+            // an overlay on one press. Shortcuts are the keymap's, in its own
+            // subscription (P7); a message per key here would only double
+            // the work of every keystroke.
             iced::event::listen_with(|event, status, window| match event {
-                iced::Event::Keyboard(event) if status == iced::event::Status::Ignored => {
-                    Some(Message::Key(window, event))
-                }
+                iced::Event::Keyboard(
+                    event @ keyboard::Event::KeyPressed {
+                        key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                        ..
+                    },
+                ) if status == iced::event::Status::Ignored => Some(Message::Key(window, event)),
                 _ => None,
             }),
         ];
