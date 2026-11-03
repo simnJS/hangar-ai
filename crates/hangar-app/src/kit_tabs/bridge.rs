@@ -12,9 +12,12 @@
 //! own, opened the first time its tab is in front of a panel on screen
 //! (opening a window for a tab an agent added out of sight would take the
 //! keyboard from whoever is typing, which a frame never did), and kept open
-//! while the tab is, whichever is in front. A reload is a new window and a
-//! new host; a page that leaves for another document of its kit is closed,
-//! and the tab says so (`kitsTab.left`).
+//! while the tab is, whichever is in front: on screen while its tab is in
+//! front of a panel that is, hidden otherwise, with the same rules for the
+//! keyboard as the preview's windows (`preview::webview`, "A window follows
+//! what the person sees"). A reload is a new window and a new host; a page
+//! that leaves for another document of its kit is closed, and the tab says so
+//! (`kitsTab.left`).
 
 use std::time::Instant;
 
@@ -24,7 +27,7 @@ use serde_json::Value;
 use super::api::{PageHost, Post};
 use super::tabs::ThemeSender;
 use crate::preview::store::WatchId;
-use crate::preview::webview::WinState;
+use crate::preview::webview::{Arrival, Presence, WinState};
 
 /// What this package's windows are called.
 pub const PREFIX: &str = "kit-";
@@ -46,6 +49,12 @@ pub struct PageTab {
     /// The title the window was last given.
     title: String,
     pub watch: Option<WatchId>,
+    /// Where the window is, and where it should be (`Presence`).
+    presence: Presence,
+    /// The window is not opened by itself: the window system would give the
+    /// keyboard to any window it maps, and an agent opened the tab
+    /// (`Arrival::Held`). The panel offers the window.
+    pub held: bool,
 }
 
 impl std::fmt::Debug for PageTab {
@@ -80,7 +89,23 @@ impl PageTab {
             theme: ThemeSender::default(),
             title: title.to_owned(),
             watch: None,
+            presence: Presence::new(true),
+            held: false,
         }
+    }
+
+    /// How the window may come up by itself: `agent`, an agent or a hook
+    /// opened the tab and the person has not asked for its window since;
+    /// `unfocused_open`, a window can be opened without the keyboard here
+    /// (`hangar_webview::opens_unfocused`). A held page is not opened; it
+    /// reads as a closed window, and the panel offers it.
+    pub fn arriving(mut self, agent: bool, unfocused_open: bool) -> PageTab {
+        self.presence = Presence::new(!agent);
+        if Arrival::of(agent, unfocused_open) == Arrival::Held {
+            self.held = true;
+            self.state = WinState::Closed;
+        }
+        self
     }
 
     pub fn window(&self) -> &str {
@@ -89,24 +114,49 @@ impl PageTab {
 
     /// The window to open: the page, served by the kit scheme, with the
     /// bridge that gives it `window.hangar` as a frame did, and nowhere to go
-    /// but the kit's own files.
+    /// but the kit's own files. It does not ask for the keyboard unless the
+    /// person asked for the tab, and stays hidden while the tab is not seen.
     pub fn open_command(&self, background: [u8; 3]) -> OpenWindow {
         let [red, green, blue] = background;
-        OpenWindow::new(self.window(), Content::url(self.url.clone()))
+        let open = OpenWindow::new(self.window(), Content::url(self.url.clone()))
             .title(self.title.clone())
             .size(1000, 720)
             .scheme(kit_relay::SCHEME)
             .kit_bridge()
             .allow_navigation(kit_relay::kit_prefixes(&self.kit_id))
-            .background(red, green, blue)
+            .background(red, green, blue);
+        self.presence.opening(open)
     }
 
     /// Opens the window, now that the helper runs.
     pub fn open(&mut self, client: &Client, background: [u8; 3]) {
         self.state = match client.open(self.open_command(background)) {
-            Ok(()) => WinState::Opening,
+            Ok(()) => {
+                self.presence.opened();
+                WinState::Opening
+            }
             Err(_) => WinState::Failed("the helper stopped".into()),
         };
+    }
+
+    /// Ties the window to the tab: on screen while the tab is in front of a
+    /// panel on screen, hidden otherwise (its page and what it was doing are
+    /// kept; what plays is paused), and back without the keyboard.
+    pub fn set_seen(&mut self, client: Option<&Client>, seen: bool) {
+        self.presence.set_seen(seen);
+        if let Some(client) = client
+            && self.state == WinState::Open
+        {
+            self.presence.place(client, self.host.window());
+        }
+    }
+
+    /// The panel's button: raises the window with the keyboard, putting it on
+    /// screen first if it is hidden.
+    pub fn bring_forward(&mut self, client: &Client) {
+        if self.state == WinState::Open {
+            self.presence.bring_forward(client, self.host.window());
+        }
     }
 
     /// Names the window as the tab is named, when that changed.
@@ -148,6 +198,7 @@ impl PageTab {
             }
             Event::WindowClosed { .. } => {
                 self.host.close();
+                self.presence.gone();
                 if !self.left {
                     self.state = WinState::Closed;
                 }

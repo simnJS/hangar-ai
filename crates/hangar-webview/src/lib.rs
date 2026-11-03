@@ -103,6 +103,7 @@ mod client;
 pub mod kit_relay;
 mod protocol;
 mod scheme;
+mod session;
 
 pub use client::{Client, Closed, Events, SpawnOptions, Stderr, find_helper};
 pub use protocol::{
@@ -112,6 +113,7 @@ pub use protocol::{
 pub use scheme::{
     Navigation, file_url, file_url_for, scheme_base, scheme_base_for, scheme_url, valid_scheme_name,
 };
+pub use session::opens_unfocused;
 
 /// The script the helper installs for a window opened with `kit_bridge`, for a
 /// parent that would rather pass it as an `init_script` itself.

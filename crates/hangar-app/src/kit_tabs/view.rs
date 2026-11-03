@@ -277,6 +277,9 @@ fn ready<'a>(st: &'a State, ctx: Ctx<'a>, entry: &'a Entry) -> Element<'a, Messa
             );
         }
         return match &page.state {
+            // An agent opened the tab, and the window waits for the person's
+            // click (`bridge::PageTab::held`): not a window that was closed.
+            WinState::Closed if page.held => shown_apart(ctx, entry, open()),
             WinState::Waiting | WinState::Opening => parts::loading(
                 ctx,
                 &entry.title,

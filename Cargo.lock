@@ -3326,9 +3326,12 @@ dependencies = [
 name = "hangar-webview"
 version = "1.12.1"
 dependencies = [
+ "hangar-core",
+ "http",
  "serde",
  "serde_json",
  "tao",
+ "tokio",
  "wry",
 ]
 

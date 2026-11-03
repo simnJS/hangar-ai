@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
+use std::time::Duration;
 
 use hangar_webview::{
     CloseReason, Command, Content, ErrorCode, Event, Header, KIT_BRIDGE, Navigation, OpenWindow,
@@ -32,11 +33,18 @@ use crate::output::Emitter;
 /// meant for a tab of Hangar's.
 const DEFAULT_SIZE: (u32, u32) = (1000, 720);
 
+/// How long a window shown "without the keyboard" refuses it. Long enough for
+/// the window system to have mapped the window and decided, short enough that
+/// a person who goes to the window with the pointer is not turned away.
+const REFUSE_FOCUS_FOR: Duration = Duration::from_millis(400);
+
 /// What the loop is woken for.
 enum UserEvent {
     Command(Command),
     /// Standard input ended, or the parent said `quit`.
     Quit,
+    /// A window shown without the keyboard may take it again.
+    Focusable(String),
 }
 
 /// A window and its webview. The webview is the first field because fields drop
@@ -56,6 +64,7 @@ type Pending = Arc<Mutex<HashMap<u64, Waiting>>>;
 
 struct Engine {
     emitter: Emitter,
+    proxy: EventLoopProxy<UserEvent>,
     windows: HashMap<String, Open>,
     by_loop_id: HashMap<WindowId, String>,
     pending: Pending,
@@ -89,6 +98,7 @@ pub fn run(emitter: Emitter) -> ! {
 
     let mut engine = Engine {
         emitter,
+        proxy: event_loop.create_proxy(),
         windows: HashMap::new(),
         by_loop_id: HashMap::new(),
         pending: Arc::default(),
@@ -105,6 +115,12 @@ pub fn run(emitter: Emitter) -> ! {
                 *flow = ControlFlow::Exit;
             }
             LoopEvent::UserEvent(UserEvent::Command(command)) => engine.command(command, target),
+            LoopEvent::UserEvent(UserEvent::Focusable(id)) => {
+                // The window may have gone in the meantime.
+                if let Some(open) = engine.windows.get(&id) {
+                    open.window.set_focusable(true);
+                }
+            }
             LoopEvent::WindowEvent {
                 window_id,
                 event: WindowEvent::CloseRequested,
@@ -112,6 +128,15 @@ pub fn run(emitter: Emitter) -> ! {
             } => {
                 if let Some(id) = engine.by_loop_id.get(&window_id).cloned() {
                     engine.close(&id, CloseReason::User);
+                }
+            }
+            LoopEvent::WindowEvent {
+                window_id,
+                event: WindowEvent::Focused(focused),
+                ..
+            } => {
+                if let Some(window) = engine.by_loop_id.get(&window_id).cloned() {
+                    engine.emitter.emit(Event::Focused { window, focused });
                 }
             }
             LoopEvent::LoopDestroyed => engine.emitter.flush(),
@@ -200,6 +225,11 @@ impl Engine {
                     let _ = open.webview.focus();
                 }
             }
+            Command::SetVisible {
+                window,
+                visible,
+                focus,
+            } => self.set_visible(&window, visible, focus),
             Command::Close { window } => {
                 if self.window(&window).is_some() {
                     self.close(&window, CloseReason::Command);
@@ -209,6 +239,35 @@ impl Engine {
             // Taken by the loop itself, which has to leave.
             Command::Quit => {}
         }
+    }
+
+    /// Show or hide a window. Shown without the keyboard, it is made unable to
+    /// take it for the moment it is mapped: a window system that honours that
+    /// (X11 does, through the window's input hint; Windows and macOS have the
+    /// same in their own terms) leaves the keyboard where it is, and the
+    /// window may take it again once it is up, as a window opened with
+    /// `focus: false` does in tao. Wayland has no such request, and its
+    /// compositor decides (GNOME gives a window it maps the keyboard, which
+    /// is why the parent decides what to map by itself with
+    /// [`hangar_webview::opens_unfocused`]).
+    fn set_visible(&self, id: &str, visible: bool, focus: bool) {
+        let Some(open) = self.window(id) else { return };
+        if !visible {
+            open.window.set_visible(false);
+            return;
+        }
+        if focus {
+            open.window.set_focusable(true);
+            open.window.set_visible(true);
+            return;
+        }
+        open.window.set_focusable(false);
+        open.window.set_visible(true);
+        let (proxy, id) = (self.proxy.clone(), id.to_string());
+        thread::spawn(move || {
+            thread::sleep(REFUSE_FOCUS_FOR);
+            let _ = proxy.send_event(UserEvent::Focusable(id));
+        });
     }
 
     /// The window, or an error to the parent if there is none.
@@ -299,6 +358,8 @@ impl Engine {
         let window = WindowBuilder::new()
             .with_title(open.title.as_str())
             .with_inner_size(LogicalSize::new(f64::from(width), f64::from(height)))
+            .with_visible(open.visible)
+            .with_focused(open.focus)
             .build(target)
             .map_err(|error| error.to_string())?;
 
@@ -307,6 +368,7 @@ impl Engine {
             .with_id(id)
             .with_devtools(open.devtools)
             .with_incognito(open.ephemeral)
+            .with_focused(open.focus)
             // A page asks for none of these on its own account: a window of its
             // own, a file on disk, the camera. The parent is told of the first,
             // and the rest are refused.

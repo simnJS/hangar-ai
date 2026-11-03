@@ -62,6 +62,12 @@ fn yes() -> bool {
     true
 }
 
+/// For `skip_serializing_if`: a flag that is on by default is written only when
+/// it is off, so the common `open` stays the short line it was.
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 /// A window to open: `{"type":"open", "window":"w1", "content":{…}, …}`.
 ///
 /// Only `window` and `content` are required; everything else has the default
@@ -113,6 +119,20 @@ pub struct OpenWindow {
     /// when left out. A dark window should not flash white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<[u8; 3]>,
+    /// Ask the window system to give the window the keyboard as it opens. On by
+    /// default, for a window a person asked for. A window opened for what an
+    /// agent showed turns it off, so that it does not take the keyboard from
+    /// whoever is typing in a terminal of the app: it opens beside, unfocused.
+    /// A request, not a promise: the window system has the last word, and it
+    /// is told (a [`Event::Focused`]) when it gives the keyboard anyway.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub focus: bool,
+    /// Show the window as it opens. Off for a window that is not to be seen yet
+    /// (a PDF that waits to know the engine can draw it, a tab that is behind
+    /// another): it loads its page all the same, and [`Command::SetVisible`]
+    /// shows it.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub visible: bool,
 }
 
 impl OpenWindow {
@@ -129,6 +149,8 @@ impl OpenWindow {
             ephemeral: true,
             allow_navigation: None,
             background: None,
+            focus: true,
+            visible: true,
         }
     }
 
@@ -172,6 +194,18 @@ impl OpenWindow {
 
     pub fn background(mut self, red: u8, green: u8, blue: u8) -> Self {
         self.background = Some([red, green, blue]);
+        self
+    }
+
+    /// Open without asking for the keyboard (see [`focus`](Self::focus)).
+    pub fn unfocused(mut self) -> Self {
+        self.focus = false;
+        self
+    }
+
+    /// Open without showing (see [`visible`](Self::visible)).
+    pub fn hidden(mut self) -> Self {
+        self.visible = false;
         self
     }
 }
@@ -268,6 +302,20 @@ pub enum Command {
     SetTitle { window: String, title: String },
     /// Raise the window and give its page the keyboard.
     Focus { window: String },
+    /// Show or hide the window. A hidden window keeps its page, with what it
+    /// was playing or reading, and runs as before, so the parent pauses what
+    /// should not go on while nobody sees it. Hiding is how a window follows
+    /// the tab it belongs to: closing would lose the page's place and load it
+    /// again on the way back. Showing asks for the keyboard only when `focus`
+    /// is set, as `open` does ([`OpenWindow::focus`]), and not by default,
+    /// since a window comes back because a tab did, not because a person
+    /// went to it.
+    SetVisible {
+        window: String,
+        visible: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        focus: bool,
+    },
     /// Close the window. Answered by [`Event::WindowClosed`].
     Close { window: String },
     /// Answer a scheme request.
@@ -412,6 +460,10 @@ pub enum Event {
         url: String,
         new_window: bool,
     },
+    /// The window system gave the window the keyboard, or took it away. The
+    /// parent hears of it to know whether a window it opened for an agent's
+    /// file holds the keyboard after all.
+    Focused { window: String, focused: bool },
     /// The window is gone.
     WindowClosed { window: String, reason: CloseReason },
     /// Something failed. `window` says which window it concerns, if one.
@@ -506,6 +558,18 @@ mod tests {
         round_trip_command(Command::Focus {
             window: "w1".into(),
         });
+        for (visible, focus) in [(true, false), (true, true), (false, false)] {
+            round_trip_command(Command::SetVisible {
+                window: "w1".into(),
+                visible,
+                focus,
+            });
+        }
+        round_trip_command(Command::Open(
+            OpenWindow::new("w3", Content::url("file:///a.pdf"))
+                .unfocused()
+                .hidden(),
+        ));
         round_trip_command(Command::Close {
             window: "w1".into(),
         });
@@ -567,6 +631,12 @@ mod tests {
             url: "https://x.test".into(),
             new_window: true,
         });
+        for focused in [true, false] {
+            round_trip_event(Event::Focused {
+                window: "w1".into(),
+                focused,
+            });
+        }
         for reason in [CloseReason::User, CloseReason::Command, CloseReason::Quit] {
             round_trip_event(Event::WindowClosed {
                 window: "w1".into(),
@@ -594,6 +664,59 @@ mod tests {
                 "content": { "kind": "url", "url": "https://example.com" },
                 "ephemeral": true,
             })
+        );
+        // A window asked for the keyboard and for the screen is the short line:
+        // only what is turned off is written.
+        let quiet = Command::Open(
+            OpenWindow::new("w2", Content::html("<p>"))
+                .unfocused()
+                .hidden(),
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&quiet.to_line()).unwrap(),
+            json!({
+                "type": "open",
+                "window": "w2",
+                "title": "",
+                "content": { "kind": "html", "html": "<p>" },
+                "ephemeral": true,
+                "focus": false,
+                "visible": false,
+            })
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &Command::SetVisible {
+                    window: "w".into(),
+                    visible: false,
+                    focus: false,
+                }
+                .to_line()
+            )
+            .unwrap(),
+            json!({ "type": "set_visible", "window": "w", "visible": false })
+        );
+        assert_eq!(
+            Command::from_line(
+                r#"{"type":"set_visible","window":"w","visible":true,"focus":true}"#
+            )
+            .unwrap(),
+            Command::SetVisible {
+                window: "w".into(),
+                visible: true,
+                focus: true
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &Event::Focused {
+                    window: "w".into(),
+                    focused: true
+                }
+                .to_line()
+            )
+            .unwrap(),
+            json!({ "type": "focused", "window": "w", "focused": true })
         );
         let response = Command::SchemeResponse(SchemeResponse::ok(9, "text/plain", b"hi".to_vec()));
         assert_eq!(
@@ -654,6 +777,10 @@ mod tests {
         };
         assert!(open.ephemeral, "a page stores nothing unless asked");
         assert!(!open.devtools && !open.kit_bridge);
+        assert!(
+            open.focus && open.visible,
+            "a window a person asked for is shown, and asks for the keyboard"
+        );
         assert_eq!(open.allow_navigation, None);
         assert!(open.schemes.is_empty() && open.title.is_empty() && open.size.is_none());
         assert_eq!(open, OpenWindow::new("w", Content::html("<p>")));
