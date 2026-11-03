@@ -202,12 +202,6 @@ pub enum Intent {
     Notice(Notice),
     Notify(Notification),
     CreateWorkspaceFromGit(GitRequest),
-    /// The shortcut recorder of Settings › Shortcuts holds the keyboard
-    /// (`true`) or lets it go (`false`): while it does, the dispatcher must not
-    /// run a command, since every key pressed is the shortcut being recorded
-    /// (`suspendShortcuts()` of `useShortcuts.ts`). Handled by `keymap` (P7),
-    /// which counts the suspensions; sent by `settings`.
-    SuspendShortcuts(bool),
     /// A pane was given a role (`previous: None`) or lost one (`previous` is
     /// the role it had): the session is told once, by a message queued for it
     /// (`announceRole` of lib/orchestratorBrief.ts). Sent by
