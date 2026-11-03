@@ -23,6 +23,7 @@ pub mod panel;
 pub mod section;
 pub mod shortcut;
 pub mod shortcut_field;
+pub mod split;
 pub mod tabs;
 pub mod text;
 pub mod tip;
