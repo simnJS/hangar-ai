@@ -10,13 +10,17 @@
 //!
 //! - the boundaries: dragged to resize (live, from this widget's state, with
 //!   one store write on release, as `paintLayout` painted the DOM and
-//!   committed once), double-clicked to even out;
+//!   committed once), double-clicked to even out, and resized by the keyboard
+//!   once one is selected (a click that goes nowhere, or `Mod+Alt+R`): see
+//!   [`BoundaryKey`];
 //! - a pane dragged by its header onto another: a ghost with its name, a hint
 //!   over the half it would take (or the whole pane for a swap), the move on
 //!   release; a cancelled gesture (the window losing the focus) moves
 //!   nothing;
 //! - a double click on a header, which zooms;
-//! - a file dragged from the desktop, over the pane it would land on;
+//! - a file dragged from the desktop, over the pane it would land on: the one
+//!   under the pointer where the pointer is known, else the focused one (the
+//!   window system reports no position during a drag: see [`Grid::drop_target`]);
 //! - the press anywhere in a pane, which gives it the focus;
 //! - the zoom: one pane over the whole grid under the zoom bar, the others
 //!   kept, not drawn, not resized, and given no events.
@@ -31,6 +35,8 @@ use iced::advanced::renderer::{self, Quad};
 use iced::advanced::text::{self as core_text, Paragraph as _, Renderer as _, Text};
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell, Widget};
+use iced::keyboard::key::{Named, Physical};
+use iced::keyboard::{self, Key, Modifiers};
 use iced::{
     Background, Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Size, Vector,
     alignment, window,
@@ -49,6 +55,10 @@ const GRAB: f32 = 4.5;
 const DRAG_ARM: f32 = 6.0;
 /// The smallest a pane may be dragged to.
 const MIN_PANE: f32 = crate::state::layout::MIN_PANE_PX;
+/// How far an arrow key moves a selected boundary (`KEY_STEP_PX`), and how
+/// many times that with Shift held.
+const KEY_STEP: f32 = 24.0;
+const KEY_STEP_SHIFT: f32 = 5.0;
 
 /// One pane's slot.
 pub struct Slot<'a> {
@@ -79,7 +89,14 @@ pub struct Grid<'a> {
     /// The size the panes' state last heard of, to tell it when it changes.
     known: Option<Size>,
     drop_label: Box<dyn Fn(usize) -> String + 'a>,
+    /// What names a boundary on screen while the keyboard has it ("Resize
+    /// Ava ↔ Leo"), when the keyboard may have one at all: the grid is where
+    /// the keys go (no dialog open, no field with them).
+    boundary_label: Option<BoundaryLabel<'a>>,
 }
+
+/// What names a boundary: the panes on its two sides, in words.
+type BoundaryLabel<'a> = Box<dyn Fn(&Handle) -> String + 'a>;
 
 impl<'a> Grid<'a> {
     #[allow(clippy::too_many_arguments)]
@@ -111,6 +128,7 @@ impl<'a> Grid<'a> {
             focused,
             known,
             drop_label: Box::new(drop_label),
+            boundary_label: None,
         };
         for slot in slots {
             grid.keys.push(slot.id.clone());
@@ -126,6 +144,14 @@ impl<'a> Grid<'a> {
             grid.children.push(bar);
         }
         grid
+    }
+
+    /// Lets the keyboard select a boundary and resize it (`Mod+Alt+R`, or a
+    /// click on it), with `label` naming it on screen. Off by default: the
+    /// grid takes keys only when the app says it is where they go.
+    pub fn boundary_keys(mut self, label: impl Fn(&Handle) -> String + 'a) -> Self {
+        self.boundary_label = Some(Box::new(label));
+        self
     }
 
     fn slots(&self) -> usize {
@@ -146,6 +172,8 @@ impl<'a> Grid<'a> {
 struct Resize {
     path: Path,
     dir: SplitDir,
+    /// Where the boundary was, to tell a click from a drag.
+    start: f64,
     latest: f64,
 }
 
@@ -169,8 +197,105 @@ struct State {
     /// which pane. Only the first hover event of a drag carries a file, one
     /// per event, so they are counted.
     files: Option<(usize, Option<usize>)>,
-    cursor: Option<Point>,
     sent: Option<Size>,
+    /// The boundary the keyboard has: it takes the arrows, Home, End, Enter
+    /// and Tab until another key, a click elsewhere, Escape or the chord
+    /// again gives the keyboard back.
+    selected: Option<Path>,
+}
+
+/// What a key does while the keyboard has a boundary (`resizeByKey` of
+/// `PaneGrid.tsx`, which a focused separator answered). The old terminal made
+/// every separator a tab stop; iced has no focus for them, so the keyboard
+/// reaches one with the chord [`ENTER_BOUNDARY`] or a click, and gives it
+/// back with Escape, the chord again, or any key that is not one of these:
+/// that one goes on to the terminal as if nothing had happened.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BoundaryKey {
+    /// Take the keyboard for the boundary nearest the focused pane, or give it
+    /// back.
+    Toggle,
+    /// Move the boundary by this many pixels, negative toward the top or
+    /// left.
+    Nudge(f32),
+    /// As far as the panes allow, up or left (Home), down or right (End).
+    Min,
+    Max,
+    /// Evenly (Enter).
+    Even,
+    /// The next or the previous boundary of the grid (Tab, Shift+Tab).
+    Step(isize),
+    /// Escape: the keyboard goes back to the terminal, and the key is spent.
+    Leave,
+}
+
+/// The chord that gives the keyboard to a boundary: Mod+Alt+R, for resize.
+/// Mod is Ctrl, or Cmd on a Mac, as everywhere in the keymap; the letter is
+/// the Latin one of the physical key, so it works on every layout.
+fn is_boundary_chord(key: &Key, physical: Physical, modifiers: Modifiers) -> bool {
+    modifiers == Modifiers::COMMAND | Modifiers::ALT
+        && key
+            .to_latin(physical)
+            .is_some_and(|c| c.eq_ignore_ascii_case(&'r'))
+}
+
+/// What `key` means to a boundary that runs in direction `dir` and has the
+/// keyboard; `None` for the keys that are not for it.
+fn boundary_key(
+    key: &Key,
+    physical: Physical,
+    modifiers: Modifiers,
+    dir: SplitDir,
+) -> Option<BoundaryKey> {
+    if is_boundary_chord(key, physical, modifiers) {
+        return Some(BoundaryKey::Toggle);
+    }
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+    let step = if modifiers.shift() {
+        KEY_STEP * KEY_STEP_SHIFT
+    } else {
+        KEY_STEP
+    };
+    // A boundary between side by side panes (a row split) moves along the
+    // row; one between stacked panes, along the column.
+    let (less, more) = match dir {
+        SplitDir::Row => (Named::ArrowLeft, Named::ArrowRight),
+        SplitDir::Col => (Named::ArrowUp, Named::ArrowDown),
+    };
+    let Key::Named(named) = key else {
+        return None;
+    };
+    Some(match *named {
+        n if n == less => BoundaryKey::Nudge(-step),
+        n if n == more => BoundaryKey::Nudge(step),
+        // The arrows across it are the terminal's own.
+        Named::Home => BoundaryKey::Min,
+        Named::End => BoundaryKey::Max,
+        Named::Enter => BoundaryKey::Even,
+        Named::Tab => BoundaryKey::Step(if modifiers.shift() { -1 } else { 1 }),
+        Named::Escape => BoundaryKey::Leave,
+        _ => return None,
+    })
+}
+
+/// Where a boundary goes for `key`: the ratio, kept so that no pane gets
+/// narrower than `MIN_PANE` (the same floor a drag has), or `None` when it
+/// would not move. `span` is the size in pixels of what the boundary divides
+/// along its axis.
+fn ratio_after(current: f64, span: f32, key: BoundaryKey) -> Option<f64> {
+    let span = span.max(1.0);
+    let min = f64::from((MIN_PANE / span).min(0.45));
+    let next = match key {
+        BoundaryKey::Nudge(px) => current + f64::from(px / span),
+        BoundaryKey::Min => min,
+        BoundaryKey::Max => 1.0 - min,
+        BoundaryKey::Even => 0.5,
+        _ => return None,
+    }
+    .clamp(min, 1.0 - min);
+    ((next - current).abs() > 1e-9).then_some(next)
 }
 
 /// A fraction of the grid in pixels, snapped to whole pixels so that panes
@@ -220,6 +345,79 @@ fn ratio_for(handle: &Handle, bounds: Rectangle, position: Point) -> f64 {
 }
 
 impl Grid<'_> {
+    /// Gives a key to the boundary the keyboard has, or takes the keyboard
+    /// for one if that is what the key asks. Whether the key was spent.
+    fn boundary_key_pressed(
+        &self,
+        state: &mut State,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+        key: &Key,
+        physical: Physical,
+        modifiers: Modifiers,
+    ) -> bool {
+        // Which boundary the key is about, and what it means to it.
+        let current = state
+            .selected
+            .as_ref()
+            .and_then(|path| self.handles.iter().find(|h| &h.path == path));
+        let Some(handle) = current else {
+            // The keyboard has none: only the chord takes one, the boundary
+            // beside the focused pane.
+            if !is_boundary_chord(key, physical, modifiers) {
+                return false;
+            }
+            let beside = |handle: &&Handle| {
+                self.focused
+                    .is_some_and(|pane| handle.before.contains(pane) || handle.after.contains(pane))
+            };
+            let chosen = self
+                .handles
+                .iter()
+                .find(beside)
+                .or_else(|| self.handles.first());
+            state.selected = chosen.map(|handle| handle.path.clone());
+            shell.request_redraw();
+            return state.selected.is_some();
+        };
+        let Some(action) = boundary_key(key, physical, modifiers, handle.dir) else {
+            // Any other key is the terminal's, and ends this.
+            state.selected = None;
+            shell.request_redraw();
+            return false;
+        };
+        match action {
+            BoundaryKey::Toggle | BoundaryKey::Leave => {
+                state.selected = None;
+            }
+            BoundaryKey::Step(by) => {
+                let at = self
+                    .handles
+                    .iter()
+                    .position(|h| h.path == handle.path)
+                    .unwrap_or(0) as isize;
+                let next = (at + by).rem_euclid(self.handles.len() as isize) as usize;
+                state.selected = Some(self.handles[next].path.clone());
+            }
+            moving => {
+                let area = to_px(handle.bounds, bounds);
+                let span = match handle.dir {
+                    SplitDir::Row => area.width,
+                    SplitDir::Col => area.height,
+                };
+                let current = geometry::ratio_at(&self.tree, &handle.path);
+                if let Some(ratio) = ratio_after(current, span, moving) {
+                    self.publish(
+                        shell,
+                        Msg::SetRatio(self.ws.clone(), handle.path.clone(), ratio),
+                    );
+                }
+            }
+        }
+        shell.request_redraw();
+        true
+    }
+
     /// The rectangles, with a boundary being dragged at its live ratio.
     fn live_rects(&self, state: &State) -> Vec<Rect> {
         let Some(resize) = &state.resize else {
@@ -248,6 +446,27 @@ impl Grid<'_> {
                 .handles
             }
             None => self.handles.clone(),
+        }
+    }
+
+    /// The pane a file dragged from the desktop is over, or would land on.
+    ///
+    /// The window systems report no position while a file is dragged over a
+    /// window: winit gives `FileHovered` once and `FileDropped` at the end,
+    /// and no pointer movement between them (the system holds the pointer),
+    /// so the pointer iced knows is the one from before the drag, if it is
+    /// known at all; a drag that began in a file manager finds it gone. When
+    /// the pointer is over the grid, the pane under it takes the file; when
+    /// it is not known, the focused pane does, which is where the person is
+    /// working; when it is known to be elsewhere (over a side panel), no
+    /// pane does.
+    fn drop_target(&self, layout: Layout<'_>, cursor: mouse::Cursor) -> Option<usize> {
+        match cursor.position() {
+            Some(at) => self.slot_at(layout, at),
+            None => self
+                .focused
+                .and_then(|focused| self.ids.iter().position(|id| *id == focused))
+                .filter(|index| !self.behind(*index)),
         }
     }
 
@@ -392,20 +611,14 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
 
         {
             let state = tree.state.downcast_mut::<State>();
-            match event {
-                // The panes' headers fold their details by width: they are
-                // told the grid's size whenever it changes.
-                Event::Window(window::Event::RedrawRequested(_)) => {
-                    let size = bounds.size();
-                    if state.sent != Some(size) && self.known != Some(size) {
-                        state.sent = Some(size);
-                        self.publish(shell, Msg::GridSized(self.ws.clone(), size));
-                    }
+            // The panes' headers fold their details by width: they are told
+            // the grid's size whenever it changes.
+            if let Event::Window(window::Event::RedrawRequested(_)) = event {
+                let size = bounds.size();
+                if state.sent != Some(size) && self.known != Some(size) {
+                    state.sent = Some(size);
+                    self.publish(shell, Msg::GridSized(self.ws.clone(), size));
                 }
-                Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    state.cursor = Some(*position)
-                }
-                _ => {}
             }
 
             // A boundary being dragged takes the pointer until it is let go.
@@ -425,10 +638,22 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                     Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                     | Event::Window(window::Event::Unfocused) => {
                         let done = state.resize.take().expect("a resize");
-                        self.publish(
-                            shell,
-                            Msg::SetRatio(self.ws.clone(), done.path, done.latest),
-                        );
+                        if (done.latest - done.start).abs() < 1e-9
+                            && self.boundary_label.is_some()
+                            && matches!(
+                                event,
+                                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                            )
+                        {
+                            // A click that went nowhere moved nothing, so it
+                            // writes nothing: the keyboard has the boundary.
+                            state.selected = Some(done.path);
+                        } else {
+                            self.publish(
+                                shell,
+                                Msg::SetRatio(self.ws.clone(), done.path, done.latest),
+                            );
+                        }
                         shell.invalidate_layout();
                         shell.request_redraw();
                         shell.capture_event();
@@ -504,6 +729,61 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                 }
             }
 
+            // The keyboard: a boundary it has takes its keys before the
+            // terminal under the pointer can type them.
+            if self.boundary_label.is_some() {
+                if zoomed || state.resize.is_some() {
+                    state.selected = None;
+                }
+                if state
+                    .selected
+                    .as_ref()
+                    .is_some_and(|path| !self.handles.iter().any(|h| &h.path == path))
+                {
+                    // The boundary went (a pane closed, a preset applied).
+                    state.selected = None;
+                    shell.request_redraw();
+                }
+                match event {
+                    Event::Keyboard(keyboard::Event::KeyPressed {
+                        key,
+                        physical_key,
+                        modifiers,
+                        ..
+                    }) if !zoomed => {
+                        if self.boundary_key_pressed(
+                            state,
+                            bounds,
+                            shell,
+                            key,
+                            *physical_key,
+                            *modifiers,
+                        ) {
+                            shell.capture_event();
+                            return;
+                        }
+                    }
+                    // A click elsewhere gives the keyboard back.
+                    Event::Mouse(mouse::Event::ButtonPressed(_)) => {
+                        let on_it = cursor.position_over(bounds).is_some_and(|at| {
+                            self.handles.iter().any(|handle| {
+                                Some(&handle.path) == state.selected.as_ref()
+                                    && grab_area(handle, bounds).contains(at)
+                            })
+                        });
+                        if state.selected.is_some() && !on_it {
+                            state.selected = None;
+                            shell.request_redraw();
+                        }
+                    }
+                    Event::Window(window::Event::Unfocused) if state.selected.is_some() => {
+                        state.selected = None;
+                        shell.request_redraw();
+                    }
+                    _ => {}
+                }
+            }
+
             // A press on a boundary starts a resize; a double click evens it.
             if !zoomed
                 && let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event
@@ -525,10 +805,13 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                         Msg::SetRatio(self.ws.clone(), handle.path.clone(), 0.5),
                     );
                 } else {
+                    let at = geometry::ratio_at(&self.tree, &handle.path);
+                    state.selected = None;
                     state.resize = Some(Resize {
                         path: handle.path.clone(),
                         dir: handle.dir,
-                        latest: geometry::ratio_at(&self.tree, &handle.path),
+                        start: at,
+                        latest: at,
                     });
                 }
                 shell.capture_event();
@@ -553,7 +836,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
             // A file from the desktop, over the pane it would land on.
             match event {
                 Event::Window(window::Event::FileHovered(_)) => {
-                    let over = state.cursor.and_then(|at| self.slot_at(layout, at));
+                    let over = self.drop_target(layout, cursor);
                     let count = state.files.map_or(0, |(count, _)| count) + 1;
                     state.files = Some((count, over));
                     shell.request_redraw();
@@ -561,6 +844,25 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                 Event::Window(window::Event::FilesHoveredLeft) => {
                     state.files = None;
                     shell.request_redraw();
+                }
+                // The grid says which pane the file is for, as it has said
+                // which one the hint is over, so the panes do not each decide
+                // by a pointer that may not be known. Where there is none, the
+                // terminal under it takes the drop as it did.
+                Event::Window(window::Event::FileDropped(path)) => {
+                    if let Some(index) = self.drop_target(layout, cursor) {
+                        self.publish(
+                            shell,
+                            Msg::Term(
+                                self.ids[index].clone(),
+                                hangar_term::Action::FileDropped(path.clone()),
+                            ),
+                        );
+                        state.files = None;
+                        shell.request_redraw();
+                        shell.capture_event();
+                        return;
+                    }
                 }
                 _ => {}
             }
@@ -753,6 +1055,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                 .resize
                 .as_ref()
                 .map(|resize| &resize.path)
+                .or(state.selected.as_ref())
                 .or(state.hovered_handle.as_ref());
             if let Some(path) = lit
                 && let Some(handle) = self
@@ -761,14 +1064,35 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                     .find(|h| &h.path == path)
             {
                 let line = to_px(handle.rect, bounds);
+                // The one the keyboard has is thicker, to be told from a
+                // boundary that is only hovered.
+                let held = state.selected.as_ref() == Some(path) && state.resize.is_none();
+                let thickness = if held { 3.0 } else { 1.0 };
                 let hairline = match handle.dir {
-                    SplitDir::Row => Rectangle { width: 1.0, ..line },
+                    SplitDir::Row => Rectangle {
+                        x: line.x - (thickness - 1.0) / 2.0,
+                        width: thickness,
+                        ..line
+                    },
                     SplitDir::Col => Rectangle {
-                        height: 1.0,
+                        y: line.y - (thickness - 1.0) / 2.0,
+                        height: thickness,
                         ..line
                     },
                 };
                 fill(renderer, hairline, c.accent, None);
+                // And named, so that it is known which two sides the arrows
+                // move (the separator's `aria-label` of the old grid).
+                if held && let Some(label) = &self.boundary_label {
+                    chip(
+                        renderer,
+                        self.theme,
+                        &label(&handle),
+                        to_px(handle.rect, bounds).center(),
+                        true,
+                        c.accent,
+                    );
+                }
             }
 
             // Where a pane being dragged would land.
@@ -1139,5 +1463,391 @@ mod tests {
                 .iter()
                 .any(|msg| matches!(msg, Msg::SetRatio(..) | Msg::Move { .. }))
         );
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+    use iced::keyboard::key::Code;
+    use iced::widget::Space;
+    use iced::{Point, Settings};
+    use iced_test::Simulator;
+
+    const WINDOW: Size = Size::new(800.0, 600.0);
+
+    fn leaf(id: &str) -> SplitNode {
+        SplitNode::Pane { id: id.into() }
+    }
+
+    /// Two panes side by side, `a` focused, with the keyboard allowed (or
+    /// not) to reach the boundary between them.
+    fn grid<'a>(
+        ws: &'a WsId,
+        ids: &'a [PaneId; 2],
+        zoomed: Option<&PaneId>,
+        keys: bool,
+    ) -> Grid<'a> {
+        let tree = SplitNode::Split {
+            dir: SplitDir::Row,
+            ratio: 0.5,
+            a: Box::new(leaf(&ids[0])),
+            b: Box::new(leaf(&ids[1])),
+        };
+        let layout = geometry::compute_layout(&tree);
+        let slots = ids
+            .iter()
+            .map(|id| Slot {
+                id,
+                name: id,
+                rect: layout.rects[id],
+                element: Space::new().width(Length::Fill).height(Length::Fill).into(),
+                ring: None,
+            })
+            .collect();
+        let grid = Grid::new(
+            ws,
+            hangar_theme::default_theme(),
+            tree,
+            slots,
+            zoomed,
+            None,
+            Some(&ids[0]),
+            Some(WINDOW),
+            |count| count.to_string(),
+        );
+        if keys {
+            grid.boundary_keys(|handle| format!("{:?} | {:?}", handle.before, handle.after))
+        } else {
+            grid
+        }
+    }
+
+    fn ids() -> (WsId, [PaneId; 2]) {
+        ("ws".into(), ["a".into(), "b".into()])
+    }
+
+    fn key(key: Key, physical: Physical, modifiers: Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: physical,
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    fn unidentified() -> Physical {
+        Physical::Unidentified(keyboard::key::NativeCode::Unidentified)
+    }
+
+    fn named(named: Named, modifiers: Modifiers) -> Event {
+        key(Key::Named(named), unidentified(), modifiers)
+    }
+
+    fn chord() -> Event {
+        key(
+            Key::Character("r".into()),
+            Physical::Code(Code::KeyR),
+            Modifiers::COMMAND | Modifiers::ALT,
+        )
+    }
+
+    fn ratios(ui: Simulator<'_, Message>) -> Vec<f64> {
+        ui.into_messages()
+            .filter_map(|message| match message {
+                Message::Panes(Msg::SetRatio(_, _, ratio)) => Some(ratio),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn simulate(grid: Grid<'_>) -> Simulator<'_, Message> {
+        Simulator::with_size(Settings::default(), WINDOW, grid)
+    }
+
+    fn arrow(key_: Named) -> Event {
+        named(key_, Modifiers::empty())
+    }
+
+    // The pure part.
+
+    #[test]
+    fn an_arrow_along_the_boundary_moves_it_a_step_and_shift_five() {
+        let on = |named: Named, mods: Modifiers, dir: SplitDir| {
+            boundary_key(&Key::Named(named), unidentified(), mods, dir)
+        };
+        let none = Modifiers::empty();
+        assert_eq!(
+            on(Named::ArrowRight, none, SplitDir::Row),
+            Some(BoundaryKey::Nudge(24.0))
+        );
+        assert_eq!(
+            on(Named::ArrowLeft, Modifiers::SHIFT, SplitDir::Row),
+            Some(BoundaryKey::Nudge(-120.0))
+        );
+        assert_eq!(
+            on(Named::ArrowDown, none, SplitDir::Col),
+            Some(BoundaryKey::Nudge(24.0))
+        );
+        assert_eq!(
+            on(Named::ArrowUp, none, SplitDir::Col),
+            Some(BoundaryKey::Nudge(-24.0))
+        );
+        // The arrows across it, and any with Ctrl, Alt or Cmd, are not its.
+        assert_eq!(on(Named::ArrowUp, none, SplitDir::Row), None);
+        assert_eq!(on(Named::ArrowLeft, none, SplitDir::Col), None);
+        assert_eq!(on(Named::ArrowRight, Modifiers::ALT, SplitDir::Row), None);
+        assert_eq!(on(Named::ArrowRight, Modifiers::CTRL, SplitDir::Row), None);
+        assert_eq!(on(Named::Home, none, SplitDir::Row), Some(BoundaryKey::Min));
+        assert_eq!(on(Named::End, none, SplitDir::Row), Some(BoundaryKey::Max));
+        assert_eq!(
+            on(Named::Enter, none, SplitDir::Row),
+            Some(BoundaryKey::Even)
+        );
+        assert_eq!(
+            on(Named::Tab, none, SplitDir::Row),
+            Some(BoundaryKey::Step(1))
+        );
+        assert_eq!(
+            on(Named::Tab, Modifiers::SHIFT, SplitDir::Row),
+            Some(BoundaryKey::Step(-1))
+        );
+        assert_eq!(
+            on(Named::Escape, none, SplitDir::Row),
+            Some(BoundaryKey::Leave)
+        );
+        assert_eq!(on(Named::PageUp, none, SplitDir::Row), None);
+    }
+
+    #[test]
+    fn the_chord_is_mod_alt_r_on_any_layout() {
+        let mods = Modifiers::COMMAND | Modifiers::ALT;
+        let r = Physical::Code(Code::KeyR);
+        assert!(is_boundary_chord(&Key::Character("r".into()), r, mods));
+        // A Russian layout names the key `к`; the physical key is R.
+        assert!(is_boundary_chord(&Key::Character("к".into()), r, mods));
+        // Not with another modifier, nor on another key.
+        assert!(!is_boundary_chord(
+            &Key::Character("r".into()),
+            r,
+            mods | Modifiers::SHIFT
+        ));
+        assert!(!is_boundary_chord(
+            &Key::Character("r".into()),
+            r,
+            Modifiers::COMMAND
+        ));
+        assert!(!is_boundary_chord(
+            &Key::Character("t".into()),
+            Physical::Code(Code::KeyT),
+            mods
+        ));
+    }
+
+    #[test]
+    fn a_boundary_moves_by_the_step_and_stops_where_the_panes_do() {
+        // An 800 px split: 24 px is 0.03.
+        let next = ratio_after(0.5, 800.0, BoundaryKey::Nudge(24.0)).unwrap();
+        assert!((next - 0.53).abs() < 1e-6);
+        // No pane gets under 150 px: 0.1875 of 800.
+        let min = 150.0 / 800.0;
+        assert!((ratio_after(0.5, 800.0, BoundaryKey::Min).unwrap() - min).abs() < 1e-6);
+        assert!((ratio_after(0.5, 800.0, BoundaryKey::Max).unwrap() - (1.0 - min)).abs() < 1e-6);
+        assert!((ratio_after(0.2, 800.0, BoundaryKey::Nudge(-120.0)).unwrap() - min).abs() < 1e-6);
+        // At the floor, pushing on moves nothing, so nothing is written.
+        assert_eq!(ratio_after(min, 800.0, BoundaryKey::Nudge(-24.0)), None);
+        assert_eq!(ratio_after(0.5, 800.0, BoundaryKey::Even), None);
+        assert!((ratio_after(0.3, 800.0, BoundaryKey::Even).unwrap() - 0.5).abs() < 1e-9);
+        // A split too small for two minimum panes is held at 0.45.
+        let tight = ratio_after(0.5, 200.0, BoundaryKey::Min).unwrap();
+        assert!((tight - 0.45).abs() < 1e-6, "{tight}");
+    }
+
+    // Through the widget.
+
+    #[test]
+    fn the_chord_takes_the_boundary_and_the_arrows_move_it() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        ui.simulate([chord()]);
+        ui.simulate([arrow(Named::ArrowRight)]);
+        ui.simulate([named(Named::ArrowRight, Modifiers::SHIFT)]);
+        let moved = ratios(ui);
+        // 24 px, then 120 px, of the 800 px split. The app rebuilds the grid
+        // between two keys; here it is not, so each is measured from the half.
+        assert_eq!(moved.len(), 2, "{moved:?}");
+        assert!((moved[0] - 0.53).abs() < 1e-6, "{moved:?}");
+        assert!((moved[1] - 0.65).abs() < 1e-6, "{moved:?}");
+    }
+
+    #[test]
+    fn home_end_and_enter_go_to_the_ends_and_the_middle() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        ui.simulate([chord()]);
+        ui.simulate([arrow(Named::Home)]);
+        ui.simulate([arrow(Named::End)]);
+        // Even, but the boundary is at the half: nothing to write.
+        ui.simulate([arrow(Named::Enter)]);
+        let moved = ratios(ui);
+        assert_eq!(moved.len(), 2, "{moved:?}");
+        assert!((moved[0] - 150.0 / 800.0).abs() < 1e-6);
+        assert!((moved[1] - (1.0 - 150.0 / 800.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn escape_and_the_chord_again_give_the_keyboard_back() {
+        let (ws, ids) = ids();
+        for leave in [arrow(Named::Escape), chord()] {
+            let mut ui = simulate(grid(&ws, &ids, None, true));
+            ui.simulate([chord()]);
+            ui.simulate([leave]);
+            ui.simulate([arrow(Named::ArrowRight)]);
+            assert!(ratios(ui).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_key_that_is_not_the_boundarys_ends_it_and_goes_to_the_terminal() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        ui.simulate([chord()]);
+        // The arrow across the boundary is the terminal's: it ends this.
+        ui.simulate([arrow(Named::ArrowUp)]);
+        ui.simulate([arrow(Named::ArrowRight)]);
+        assert!(ratios(ui).is_empty());
+    }
+
+    #[test]
+    fn without_the_keyboard_allowed_the_grid_takes_no_key() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, false));
+        ui.simulate([chord()]);
+        ui.simulate([arrow(Named::ArrowRight)]);
+        assert!(ratios(ui).is_empty());
+        // And a zoomed grid has no boundary to take.
+        let zoomed: PaneId = "a".into();
+        let mut ui = simulate(grid(&ws, &ids, Some(&zoomed), true));
+        ui.simulate([chord()]);
+        ui.simulate([arrow(Named::ArrowRight)]);
+        assert!(ratios(ui).is_empty());
+    }
+
+    #[test]
+    fn a_click_that_goes_nowhere_selects_the_boundary_and_writes_nothing() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        let position = Point::new(400.0, 300.0);
+        ui.point_at(position);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position })]);
+        ui.simulate([Event::Mouse(mouse::Event::ButtonPressed(
+            mouse::Button::Left,
+        ))]);
+        ui.simulate([Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left,
+        ))]);
+        ui.simulate([arrow(Named::ArrowLeft)]);
+        let moved = ratios(ui);
+        assert_eq!(
+            moved.len(),
+            1,
+            "the click wrote nothing, the arrow one move"
+        );
+        assert!((moved[0] - 0.47).abs() < 1e-6, "{moved:?}");
+    }
+
+    #[test]
+    fn a_drag_still_commits_its_ratio_with_the_keyboard_allowed() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        let position = Point::new(400.0, 300.0);
+        ui.point_at(position);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position })]);
+        ui.simulate([Event::Mouse(mouse::Event::ButtonPressed(
+            mouse::Button::Left,
+        ))]);
+        let dragged = Point::new(600.0, 300.0);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved {
+            position: dragged,
+        })]);
+        ui.simulate([Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left,
+        ))]);
+        // The drag is the write; it does not leave the keyboard on the
+        // boundary.
+        ui.simulate([arrow(Named::ArrowLeft)]);
+        let moved = ratios(ui);
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert!((moved[0] - 0.75).abs() < 0.01, "{moved:?}");
+    }
+
+    fn drops(ui: Simulator<'_, Message>) -> Vec<(String, std::path::PathBuf)> {
+        ui.into_messages()
+            .filter_map(|message| match message {
+                Message::Panes(Msg::Term(pane, hangar_term::Action::FileDropped(path))) => {
+                    Some((pane, path))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn drop_file(ui: &mut Simulator<'_, Message>, name: &str) {
+        ui.simulate([Event::Window(window::Event::FileDropped(name.into()))]);
+    }
+
+    #[test]
+    fn a_file_dropped_where_the_pointer_is_unknown_goes_to_the_focused_pane() {
+        // The window systems give no position during a drag, and a drag from
+        // a file manager leaves the pointer unknown: the focused pane takes it.
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, false));
+        drop_file(&mut ui, "/tmp/a.png");
+        assert_eq!(drops(ui), [("a".to_string(), "/tmp/a.png".into())]);
+    }
+
+    #[test]
+    fn a_file_dropped_over_a_pane_goes_to_that_pane_once() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, false));
+        let over_b = Point::new(700.0, 300.0);
+        ui.point_at(over_b);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: over_b })]);
+        drop_file(&mut ui, "/tmp/b.png");
+        drop_file(&mut ui, "/tmp/c.png");
+        assert_eq!(
+            drops(ui),
+            [
+                ("b".to_string(), "/tmp/b.png".into()),
+                ("b".to_string(), "/tmp/c.png".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_dropped_on_a_zoomed_grid_goes_to_the_pane_in_front() {
+        let (ws, ids) = ids();
+        let zoomed: PaneId = "a".into();
+        let mut ui = simulate(grid(&ws, &ids, Some(&zoomed), false));
+        drop_file(&mut ui, "/tmp/a.png");
+        assert_eq!(drops(ui), [("a".to_string(), "/tmp/a.png".into())]);
+    }
+
+    #[test]
+    fn a_click_elsewhere_gives_the_boundary_back() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        ui.simulate([chord()]);
+        let away = Point::new(100.0, 300.0);
+        ui.point_at(away);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: away })]);
+        ui.simulate([Event::Mouse(mouse::Event::ButtonPressed(
+            mouse::Button::Left,
+        ))]);
+        ui.simulate([arrow(Named::ArrowRight)]);
+        assert!(ratios(ui).is_empty());
     }
 }

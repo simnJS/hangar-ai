@@ -5,7 +5,9 @@
 //! draws nothing, and its panes go on running and parsing their output all
 //! the same, since they live in the package's state and not in a widget.
 
-use hangar_i18n::Key;
+use std::collections::HashMap;
+
+use hangar_i18n::{Key, args};
 use iced::widget::Space;
 use iced::{Element, Size};
 
@@ -14,9 +16,10 @@ use crate::message::Message;
 use crate::panes::grid::{Grid, Slot};
 use crate::panes::header::PADDING_X;
 use crate::panes::zoom_bar::{self, Other};
-use crate::panes::{State, focused_pane, terminal_pane, zoomed_pane};
+use crate::panes::{State, focused_pane, keyboard_free, terminal_pane, zoomed_pane};
 use crate::state::Workspace;
 use crate::state::layout as geometry;
+use crate::state::types::SplitDir;
 
 /// A grid width to fold headers by before the grid has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
@@ -107,7 +110,12 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
     });
 
     let tr = ctx.i18n;
-    Grid::new(
+    let names: HashMap<&str, &str> = ws
+        .panes
+        .iter()
+        .map(|pane| (pane.id.as_str(), pane.name.as_str()))
+        .collect();
+    let mut grid = Grid::new(
         &ws.id,
         t,
         tree,
@@ -120,6 +128,71 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
             .map(|p| &p.id),
         size,
         move |count| tr.tn(Key::DropPaste, count, &[]).into_owned(),
+    );
+    // The boundaries take keys only where the keyboard is the grid's: no
+    // dialog open over it, no field holding it.
+    if keyboard_free(ctx.model) {
+        grid = grid.boundary_keys(move |handle| boundary_name(tr, &names, handle));
+    }
+    grid.into()
+}
+
+/// What names a boundary on screen, once the keyboard has it, after the
+/// panes on its two sides ("Resize Ava ↔ Leo": the separator's `aria-label`
+/// of the old grid).
+fn boundary_name(
+    tr: hangar_i18n::Translator,
+    names: &HashMap<&str, &str>,
+    handle: &geometry::Handle,
+) -> String {
+    let side = |ids: &[String]| {
+        ids.iter()
+            .map(|id| names.get(id.as_str()).copied().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let key = match handle.dir {
+        SplitDir::Row => Key::GridResizeColumns,
+        SplitDir::Col => Key::GridResizeRows,
+    };
+    tr.t_with(
+        key,
+        &args!("before" => side(&handle.before), "after" => side(&handle.after)),
     )
-    .into()
+    .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hangar_i18n::{Locale, Translator};
+
+    fn handle(dir: SplitDir, before: &[&str], after: &[&str]) -> geometry::Handle {
+        geometry::Handle {
+            key: "k".into(),
+            path: Vec::new(),
+            dir,
+            rect: geometry::Rect::FULL,
+            bounds: geometry::Rect::FULL,
+            before: before.iter().map(|id| (*id).to_string()).collect(),
+            after: after.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_boundary_is_named_after_the_panes_on_its_two_sides_in_both_languages() {
+        let names: HashMap<&str, &str> = [("a", "Ava"), ("b", "Leo"), ("c", "Mia")]
+            .into_iter()
+            .collect();
+        let side_by_side = handle(SplitDir::Row, &["a"], &["b", "c"]);
+        assert_eq!(
+            boundary_name(Translator::new(Locale::En), &names, &side_by_side),
+            "Resize Ava ↔ Leo, Mia"
+        );
+        let stacked = handle(SplitDir::Col, &["a", "b"], &["c"]);
+        assert_eq!(
+            boundary_name(Translator::new(Locale::Fr), &names, &stacked),
+            "Redimensionner Ava, Leo ↕ Mia"
+        );
+    }
 }
