@@ -703,16 +703,39 @@ where
     V: Clone + PartialEq,
     M: Clone + 'a,
 {
-    let segments = options.iter().map(|(value, label)| {
-        let chosen = value == selected;
+    segmented_labels(
+        t,
+        options
+            .iter()
+            .map(|(value, label)| (value.clone(), (*label).to_string()))
+            .collect(),
+        selected,
+        on_select,
+    )
+}
+
+/// [`segmented`] for labels the view builds as it goes ("Since main"), which
+/// it owns and so cannot lend for as long as the element lives.
+pub fn segmented_labels<'a, V, M>(
+    t: &'a Theme,
+    options: Vec<(V, String)>,
+    selected: &V,
+    on_select: impl Fn(V) -> M,
+) -> Element<'a, M>
+where
+    V: Clone + PartialEq,
+    M: Clone + 'a,
+{
+    let segments = options.into_iter().map(|(value, label)| {
+        let chosen = &value == selected;
         let segment = button(
-            container(text(*label).size(font_size::UI).font(fonts::ui_medium()))
+            container(text(label).size(font_size::UI).font(fonts::ui_medium()))
                 .center_y(Length::Fill),
         )
         .padding(Padding::from([0.0, space::LG]))
         .height(Length::Fill)
         .style(style::button::tab(t, chosen))
-        .on_press(on_select(value.clone()));
+        .on_press(on_select(value));
         Element::from(segment)
     });
     container(row(segments).spacing(space::XXS))
