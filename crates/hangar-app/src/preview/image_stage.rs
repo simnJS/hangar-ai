@@ -9,7 +9,6 @@
 //! to the frame is the view's, with `model::zoom_around`.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use iced::advanced::image::Renderer as _;
 use iced::advanced::layout::{self, Layout};
@@ -26,7 +25,7 @@ use iced::{
     window,
 };
 
-use super::decode::Animation;
+use super::decode::{Animation, Clock};
 use super::model::{ImageFrame, Size as FrameSize};
 
 /// A picture the stage can hold: a raster the renderer decodes, a vector
@@ -181,12 +180,8 @@ struct State {
     measured: Option<(Pic, Measured)>,
     reported_measure: bool,
     reported_stage: Option<Size>,
-    /// When an animation began to play, on the clock of the redraws: its
-    /// frame is the one that time has reached. It begins when the stage is
-    /// first drawn, and again for another picture.
-    started: Option<Instant>,
-    /// The frame of an animation showing.
-    frame: usize,
+    /// Where an animation is; it begins again for another picture.
+    clock: Clock,
 }
 
 impl Focusable for State {
@@ -270,8 +265,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
         if !known {
             state.measured = Some((self.pic.clone(), measure(renderer, self.pic)));
             state.reported_measure = false;
-            state.started = None;
-            state.frame = 0;
+            state.clock.reset();
         }
         layout::Node::new(limits.max())
     }
@@ -326,12 +320,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
                 // tab, a hidden panel, a minimised window), so an animation
                 // out of sight costs nothing.
                 if let Pic::Animated(animation) = self.pic {
-                    let start = *state.started.get_or_insert(*now);
-                    let (frame, left) = animation.timeline.at(now.saturating_duration_since(start));
-                    if frame != state.frame {
-                        state.frame = frame;
-                    }
-                    shell.request_redraw_at(*now + left);
+                    shell.request_redraw_at(state.clock.tick(*now, &animation.timeline));
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -569,7 +558,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
                     renderer.draw_svg(svg_core::Svg::new(handle.clone()), rect, bounds)
                 }
                 Pic::Animated(animation) => {
-                    let frame = &animation.frames[state.frame.min(animation.frames.len() - 1)];
+                    let frame =
+                        &animation.frames[state.clock.frame.min(animation.frames.len() - 1)];
                     renderer.draw_image(
                         iced::advanced::image::Image::new(frame.handle.clone()).filter_method(
                             if self.pixelated {

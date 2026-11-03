@@ -17,7 +17,7 @@
 use std::io::{Cursor, Read};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ::image::{AnimationDecoder, ImageDecoder};
 use iced::widget::image::Handle;
@@ -122,6 +122,35 @@ impl Timeline {
             .partition_point(|end| *end <= into)
             .min(self.ends.len() - 1);
         (frame, self.ends[frame] - into)
+    }
+}
+
+/// Where an animation is on the clock of the redraws, kept by whichever
+/// widget draws it. It starts when the widget is first drawn and runs for as
+/// long as the widget is in the window: a widget that is not drawn is not
+/// told the time, so an animation out of sight does not run.
+#[derive(Debug, Default)]
+pub struct Clock {
+    started: Option<Instant>,
+    /// The frame showing.
+    pub frame: usize,
+}
+
+impl Clock {
+    /// Begins again, for another animation.
+    pub fn reset(&mut self) {
+        *self = Clock::default();
+    }
+
+    /// Moves to the frame `now` has reached, and says when to be drawn next:
+    /// when that frame ends.
+    pub fn tick(&mut self, now: Instant, timeline: &Timeline) -> Instant {
+        let start = *self.started.get_or_insert(now);
+        let (frame, left) = timeline.at(now.saturating_duration_since(start));
+        self.frame = frame;
+        // An hour is as good as never for a frame, and keeps the sum from
+        // overflowing the clock.
+        now + left.min(Duration::from_secs(3600))
     }
 }
 

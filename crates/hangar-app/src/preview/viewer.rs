@@ -73,6 +73,8 @@ pub enum ViewerMsg {
     Copy,
     Image(image::Msg),
     Markdown(markdown::Msg),
+    /// The pictures of a Markdown page that were read from the disk.
+    MarkdownImages(Vec<(String, markdown::Resolved)>),
     Window(Action),
 }
 

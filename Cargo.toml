@@ -63,8 +63,9 @@ usvg = { version = "0.45", default-features = false }
 # The frames of an animated GIF or WebP, which the preview plays itself: iced
 # draws still pictures only. The crate and both decoders are already built
 # for iced's `image` feature and hangar-model3d; only the animation API of
-# them is used here, and the PNG encoder for the tests' fixtures.
-image = { version = "0.25", default-features = false, features = ["gif", "webp", "png"] }
+# them is used here, and the headers of the other formats the preview shows
+# (PNG, JPEG, BMP), to size a picture before the renderer decodes it.
+image = { version = "0.25", default-features = false, features = ["gif", "webp", "png", "jpeg", "bmp"] }
 # AVIF, which the preview reads itself (iced's image feature has no AV1
 # decoder): the container by `avif-parse`, the pictures by `re_rav1d`, a Rust
 # port of dav1d. Its assembly is off, so no `nasm` is needed to build the

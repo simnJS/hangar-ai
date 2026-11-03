@@ -55,6 +55,7 @@
 //! `Helper::route`.
 
 pub mod access;
+pub mod animated;
 pub mod avif;
 pub mod code_lines;
 pub mod decode;
@@ -799,6 +800,22 @@ fn read_image(id: &str, revision: u64, path: &str) -> Task<Message> {
     )
 }
 
+/// Reads the pictures a Markdown page names from the disk, off the UI thread
+/// and through the checks of `markdown::load_images`.
+fn markdown_images(
+    id: &str,
+    revision: u64,
+    wanted: Vec<(String, std::path::PathBuf)>,
+) -> Task<Message> {
+    if wanted.is_empty() {
+        return Task::none();
+    }
+    let id = id.to_string();
+    Task::perform(markdown::load_images(wanted), move |found| {
+        viewer_message(&id, revision, ViewerMsg::MarkdownImages(found))
+    })
+}
+
 /// Colours a text off the UI thread: the grammars take a moment to load and
 /// a long file longer.
 fn colour(
@@ -874,14 +891,26 @@ fn viewer_update(
                 kind == FileKind::Text && language == Some("json"),
                 generation,
             );
+            let mut images = Task::none();
             if kind == FileKind::Markdown {
-                viewer.rendered = Some(markdown::Rendered::parse(&ready.text, &entry.path));
+                let rendered = markdown::Rendered::parse(&ready.text, &entry.path);
+                images = markdown_images(id, revision, rendered.wanted());
+                viewer.rendered = Some(rendered);
             }
             viewer.generation = generation;
             let (body, path) = (ready.text.clone(), entry.path.clone());
             viewer.load = Some(Load::Ready(Box::new(ready)));
             // A page's source is HTML to colour; its path says `.html`.
-            colour(id, revision, generation, body, path, language)
+            Task::batch([
+                colour(id, revision, generation, body, path, language),
+                images,
+            ])
+        }
+        ViewerMsg::MarkdownImages(found) => {
+            if let Some(rendered) = st.viewers.get_mut(id).and_then(|v| v.rendered.as_mut()) {
+                rendered.resolve(found);
+            }
+            Task::none()
         }
         ViewerMsg::Coloured(generation, lines) => {
             if let Some(viewer) = st.viewers.get_mut(id)
