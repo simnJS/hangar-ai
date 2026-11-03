@@ -39,3 +39,7 @@ open.workspace = true
 png.workspace = true
 # Local dates for what the interface dates (hangar-core's own build of it).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+# Draws a view without a window, to look at it and to check it lays out.
+iced_test.workspace = true
