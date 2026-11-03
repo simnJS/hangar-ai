@@ -1,0 +1,3 @@
+# Built by build.sh from tab/. A kit published from its own repository
+# commits it instead: Hangar runs the .wasm a kit ships, and never builds one.
+/tabs/*.wasm
