@@ -216,14 +216,19 @@ pub struct ContextGauge {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaneEventDetail {
     /// `id` is the short form the pane header shows.
-    Session { id: String, resumed: bool },
+    Session {
+        id: String,
+        resumed: bool,
+    },
     TurnStart,
     TurnEnd {
         outcome: TurnOutcome,
         /// First line of the answer, when it had one.
         answer: Option<String>,
     },
-    Permission { tool: Option<String> },
+    Permission {
+        tool: Option<String>,
+    },
     /// The file's base name, which is all a line of history has room for, and
     /// the pane that had edited it just before, when one had.
     Edit {
@@ -231,10 +236,17 @@ pub enum PaneEventDetail {
         overlap: Option<String>,
     },
     /// `from`: who queued it when it was not the person (`queued_by`).
-    Queued { text: String, from: Option<String> },
-    Dropped { text: String },
+    Queued {
+        text: String,
+        from: Option<String>,
+    },
+    Dropped {
+        text: String,
+    },
     /// Claude Code quit back to its shell, or the shell itself ended.
-    Exit { what: ExitWhat },
+    Exit {
+        what: ExitWhat,
+    },
 }
 
 impl PaneEventDetail {
