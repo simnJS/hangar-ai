@@ -3,14 +3,11 @@
 
    Small jobs around a static page; the page reads fine without them.
 
-     1. themes: repaint the page, and the demo with it
-     2. the demo: load it when there is room for it, drop the
-        loading state once the app inside says it has mounted
-     3. the prompt chips, which type into the demo's first pane
-     4. the section bar, which marks where you are
-     5. the download for the system you are on
-     6. the delivery, which plays its four stages once
-     7. the short lists, folded to their titles on a phone
+     1. themes: repaint the page
+     2. the section bar, which marks where you are
+     3. the download for the system you are on
+     4. the delivery, which plays its four stages once
+     5. the short lists, folded to their titles on a phone
    ═══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -19,8 +16,9 @@
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ── 1. themes ─────────────────────────────────────────────────
-     Eight of the app's 33, with the chrome tokens deriveChromeTokens()
-     in src/themes.ts computes for them, copied as they come out. */
+     Eight of the app's 33, with the chrome tokens the web app's
+     deriveChromeTokens() computed for them, copied as they came out
+     (crates/hangar-theme holds them now, with the same values). */
 
   var THEMES = [
     {id:"graphite",name:"Graphite",light:false,bg:"#121316",sunken:"#0c0c0e",chrome:"#1b1c1f",bar:"#202124",raised:"#232426",border:"#2c2d30",borderStrong:"#414245",sep:"#090a0b",line:"rgba(255, 255, 255, 0.07)",lineStrong:"rgba(255, 255, 255, 0.12)",fg:"#c8c9ce",fg2:"#9c9da2",fg3:"#8c8d91",accent:"#3e8bff",accentHi:"#68a5ff",accentFg:"#0b192e",accentSoft:"rgba(62, 139, 255, 0.14)",working:"#5fd27f",waiting:"#e7c06b",yours:"#6fd4df",danger:"#ff7b72",segTrack:"#121316",segThumb:"#3d3e41",shadow:"rgba(0,0,0,0.45)",fgHi:"#ecedf0"},
@@ -53,7 +51,6 @@
     currentTheme = theme.id;
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', theme.bar);
-    toDemo({ type: 'hangar-demo:theme', id: theme.id });
   }
 
   (function swatches() {
@@ -84,93 +81,7 @@
     });
   })();
 
-  /* ── 2. the demo ───────────────────────────────────────────────
-     Three megabytes of app: fetched only once the frame is near and
-     the screen is wide enough to use it. Below that width the stage
-     offers a new tab instead (see .stage__small). */
-
-  var stage = document.getElementById('stage');
-  var frame = document.getElementById('demoframe');
-  var boot = document.getElementById('stageboot');
-  var ready = false;
-  var wide = window.matchMedia('(min-width: 1000px)');
-  var near = false;
-
-  function toDemo(message) {
-    if (!frame || !frame.getAttribute('src') || !frame.contentWindow) return;
-    var origin = window.location.origin;
-    frame.contentWindow.postMessage(message, origin && origin !== 'null' ? origin : '*');
-  }
-
-  function markReady() {
-    if (ready || !stage) return;
-    ready = true;
-    stage.classList.add('is-ready');
-    if (currentTheme !== 'graphite') toDemo({ type: 'hangar-demo:theme', id: currentTheme });
-  }
-
-  function say(html) {
-    if (!ready && boot) boot.innerHTML = html;
-  }
-
-  function loadDemo() {
-    if (!frame || frame.getAttribute('src') || !near || !wide.matches) return;
-    frame.setAttribute('src', frame.dataset.src);
-    frame.addEventListener('load', function () {
-      // A build without the bridge would otherwise sit behind the
-      // loading state for good, which is worse than showing it early.
-      setTimeout(markReady, 3000);
-    });
-    setTimeout(function () {
-      say('<span class="spin" aria-hidden="true"></span><span>Still starting.</span>' +
-        '<a href="demo/index.html" target="_blank" rel="noopener">Open it in a new tab</a>');
-    }, 7000);
-    setTimeout(function () {
-      say('<span>The demo did not start here.</span>' +
-        '<a href="demo/index.html" target="_blank" rel="noopener">Open it in a new tab</a>');
-    }, 20000);
-  }
-
-  window.addEventListener('message', function (event) {
-    if (!frame || event.source !== frame.contentWindow) return;
-    var data = event.data;
-    if (data && data.type === 'hangar-demo:ready') markReady();
-  });
-
-  if (stage && frame) {
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(function (entries) {
-        if (entries.some(function (e) { return e.isIntersecting; })) {
-          near = true;
-          loadDemo();
-        }
-      }, { rootMargin: '800px 0px' }).observe(stage);
-    } else {
-      near = true;
-      loadDemo();
-    }
-    var onWidth = function () { loadDemo(); };
-    if (wide.addEventListener) wide.addEventListener('change', onWidth);
-    else if (wide.addListener) wide.addListener(onWidth);
-  }
-
-  /* ── 3. prompt chips ─────────────────────────────────────────── */
-
-  var prompts = document.getElementById('prompts');
-  if (prompts) {
-    prompts.addEventListener('click', function (event) {
-      var chip = event.target.closest ? event.target.closest('.chip') : null;
-      if (!chip) return;
-      toDemo({ type: 'hangar-demo:type', text: chip.dataset.send });
-      // Said, not only shown: the chip's flash is the only sign it went.
-      var status = document.getElementById('prompts-status');
-      if (status) status.textContent = ready ? 'Sent to Ava: ' + chip.dataset.send + '.' : 'The demo is still starting.';
-      chip.classList.add('is-sent');
-      setTimeout(function () { chip.classList.remove('is-sent'); }, 900);
-    });
-  }
-
-  /* ── 4. the section bar ──────────────────────────────────────── */
+  /* ── 2. the section bar ──────────────────────────────────────── */
 
   var links = {};
   Array.prototype.forEach.call(document.querySelectorAll('#nav a'), function (a) {
@@ -201,7 +112,7 @@
   window.addEventListener('hashchange', openTarget);
   openTarget();
 
-  /* ── 5. the download for this system ─────────────────────────── */
+  /* ── 3. the download for this system ─────────────────────────── */
 
   (function platform() {
     var ua = navigator.userAgent;
@@ -242,7 +153,7 @@
     }
   })();
 
-  /* ── 6. the delivery ───────────────────────────────────────────
+  /* ── 4. the delivery ───────────────────────────────────────────
      Written in its final state, so nothing moves without script or
      for anyone who asked for less motion. */
 
@@ -272,7 +183,7 @@
     watch.observe(box);
   })();
 
-  /* ── 7. the short lists ────────────────────────────────────────
+  /* ── 5. the short lists ────────────────────────────────────────
      The facts under the orchestrator and the list under "Everything
      else" are written open. On a phone they fold to their titles, a
      tap away each; they open again when the screen grows. */

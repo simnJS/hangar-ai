@@ -71,7 +71,6 @@
     <nav class="seg" id="nav" aria-label="Sections">
       <a class="seg__btn" href="#orchestrator">Orchestrator</a>
       <a class="seg__btn" href="#mobile">Mobile</a>
-      <a class="seg__btn" href="#demo">Demo</a>
       <a class="seg__btn" href="#features">Features</a>
       <a class="seg__btn" href="#download">Download</a>
       <a class="seg__btn" href="#faq">FAQ</a>
@@ -114,7 +113,7 @@
 
     <div class="hero__cta">
       <a class="btn btn--primary btn--lg" id="get" href="#download">Download</a>
-      <a class="btn btn--lg" href="#demo">Try it in the browser</a>
+      <a class="btn btn--lg" href="https://github.com/hangar-ai/hangar">View the source</a>
     </div>
     <p class="hero__fine" id="getnote">
       Free and open source under the MIT license. No account, no telemetry.
@@ -493,53 +492,6 @@
   </div>
 </section>
 
-<!-- Demo ─────────────────────────────────────────────────────────── -->
-<section class="demo" id="demo" aria-labelledby="demo-title">
-  <div class="wrap">
-    <header class="head head--split">
-      <h2 class="head__title" id="demo-title">The real app, in your browser.</h2>
-      <p class="head__lede">
-        This is Hangar.AI built for the web: the same interface, terminals, board and statistics.
-        The agents answer from a script, no model runs, and nothing is saved. Open
-        <b>checkout-v2</b> in the navigator to find an orchestrator and its workers.
-      </p>
-    </header>
-  </div>
-
-  <div class="wrap-wide">
-    <div class="stage" id="stage">
-      <div class="stage__bar">
-        <span class="stage__title">Hangar.AI demo</span>
-        <span class="stage__note">Scripted replies</span>
-        <a class="stage__out" href="demo/index.html" target="_blank" rel="noopener">Open in a new tab</a>
-      </div>
-      <div class="stage__body">
-        <div class="stage__boot" id="stageboot" role="status">
-          <span class="spin" aria-hidden="true"></span>
-          <span>Starting the app…</span>
-        </div>
-        <iframe class="stage__frame" id="demoframe" data-src="demo/index.html" title="Hangar.AI running in the browser"></iframe>
-        <noscript><iframe class="stage__frame" src="demo/index.html" title="Hangar.AI running in the browser"></iframe></noscript>
-      </div>
-      <div class="stage__small">
-        <p>The demo is the full desktop interface and needs a wider screen.</p>
-        <a class="btn" href="demo/index.html" target="_blank" rel="noopener">Open the demo anyway</a>
-      </div>
-    </div>
-
-    <div class="prompts js-only" id="prompts">
-      <p class="prompts__label" id="prompts-label">Type into Ava, the Claude Code pane of <b>hangar-ai</b>:</p>
-      <div class="prompts__row" role="group" aria-labelledby="prompts-label">
-        <button type="button" class="chip" data-send="take the next task on the board">take the next task on the board</button>
-        <button type="button" class="chip" data-send="show the 3d model">show the 3D model</button>
-        <button type="button" class="chip" data-send="write the tests for atomic claims">write the tests</button>
-        <button type="button" class="chip" data-send="what can you do here?">what can you do?</button>
-      </div>
-      <p class="vh" id="prompts-status" role="status"></p>
-    </div>
-  </div>
-</section>
-
 <!-- Features ─────────────────────────────────────────────────────── -->
 <section class="features" id="features" aria-labelledby="features-title">
   <div class="wrap">
@@ -564,7 +516,7 @@
           default, where colour only marks an agent's state, a diff or the focus.</span>
           <span class="js-only">Try a few on this page:</span>
         </p>
-        <div class="swatches" id="swatches" role="group" aria-label="Preview a theme on this page and in the demo"></div>
+        <div class="swatches" id="swatches" role="group" aria-label="Preview a theme on this page"></div>
       </div>
       <figure class="show__art wide-only">
         <div class="crop">

@@ -1,8 +1,5 @@
-.git
-node_modules
-src-tauri
-dist
-site/demo
-.hangar
-.iabench
-!src-tauri/kit-sdk/tokens.json
+# The image is the site and the server's configuration (Dockerfile): nothing
+# else is sent to the builder.
+*
+!site/
+!sws.toml

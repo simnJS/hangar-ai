@@ -7,44 +7,37 @@ loaded from another origin.
 ```
 index.html            the page
 styles.css            every colour is a token; Graphite unless main.js swaps them
-main.js               themes, the demo frame, prompt chips, section bar, download per OS
+main.js               themes, section bar, download per OS, the delivery, folds
 img/                  crops of captures of the app, AVIF + WebP, cut as img/crops.json says
 fonts/                Inter (latin, variable, with optical sizes) and its OFL licence
 og.png                the 1200×630 share image for X, Open Graph and the rest
 favicon.ico           16/32/48 px, for whatever still asks for /favicon.ico
 apple-touch-icon.png  180 px
 logo.svg              copied from ../assets/logo.svg
-demo/                 built output, see ../demo. Do not edit by hand
 ```
 
 ## Preview
 
 ```bash
-pnpm demo:build          # fills site/demo
 npx serve site           # or: python -m http.server -d site 8080
 ```
 
-`site/demo/index.html` is build output: one self-contained file, no assets
-folder, Inter included. It is ignored by git and built by the `Dockerfile`.
-
-It is a single file on purpose. The demo loads in an iframe, and relative asset
-paths depend on how the host spells the URL: `serve` alone rewrites
-`/demo/index.html` → `/demo/index` → `/demo`, after which `./assets/x.js`
-resolves against the root and 404s. With nothing to resolve, `/demo`, `/demo/`
-and `/demo/index.html` all work, on any host, under any base path. The frame
-needs `X-Frame-Options: SAMEORIGIN`, which `sws.toml` sends.
+The page used to carry a browser demo, the React app built for the web with a
+scripted backend. The app is native now, so there is no web build of it to show:
+the demo went with the React sources (it is at tag `v1.12.1`, under `demo/`).
 
 ## The page
 
 One story, in order: what Hangar.AI is (hero), the orchestrator in four steps,
-the live demo, everything else, downloads, questions.
+Hangar Mobile, everything else, downloads, questions.
 
 Every claim on it comes from the code. When a feature changes, check the copy
-against `src/i18n.ts` (the English strings say what the app does in plain
-words) and against the file the claim names: `src/lib/orchestration.ts` for the
-orchestration defaults (3 workers, 2 attempts, merge by itself, Opus plans,
-Sonnet works and reviews), `src-tauri/src/delivery.rs` for the delivery
-stages, `src/lib/orchestratorBrief.ts` for what the orchestrator is told.
+against `crates/hangar-i18n/dict/en.json` (the English strings say what the app
+does in plain words) and against the file the claim names:
+`crates/hangar-app/src/state/types.rs` for the orchestration defaults (3
+workers, 2 attempts, merge by itself, Opus plans, Sonnet works and reviews),
+`crates/hangar-core/src/delivery.rs` for the delivery stages,
+`crates/hangar-app/src/orchestration/brief.rs` for what the orchestrator is told.
 
 On a phone (below 600 px) the page keeps every point and drops detail: the
 words wrapped in `.wide-only` are left out there, so read them with the rest
@@ -60,10 +53,9 @@ page that moves by itself, and it says it is an illustration.
 ## Design
 
 The page wears the app's own chrome tokens. `styles.css` holds Graphite, the
-default theme, exactly as `deriveChromeTokens()` in `src/themes.ts` computes
-it; `main.js` holds the same tokens for seven more themes, two of them light,
-and the swatches in "An interface built like an IDE" repaint the page and post
-the theme to the demo, which switches with it.
+default theme, exactly as `crates/hangar-theme` has it; `main.js` holds the same
+tokens for seven more themes, two of them light, and the swatches in "An
+interface built like an IDE" repaint the page.
 
 Graphite keeps colour for meaning, and so does the page: green is an agent at
 work, amber one waiting on you, cyan your turn, blue the focus and the thing to
@@ -75,22 +67,17 @@ terminal would print.
 Every text token clears 4.5:1 on every surface it sits on, in all eight themes.
 
 To add a theme to the swatches, take its tokens from the app rather than
-picking them by eye. A throwaway vitest file in `src/` can print them:
+picking them by eye. The theme crate prints them:
 
-```ts
-import { THEMES, deriveChromeTokens } from "./themes";
-import { test } from "vitest";
-test("tokens", () => {
-  const t = THEMES.find((x) => x.id === "kanagawa")!;
-  console.log(JSON.stringify(deriveChromeTokens(t), null, 1));
-});
+```bash
+cargo run -q -p hangar-theme --example kit-tokens -- kanagawa
 ```
 
 then map the `--*` names to the keys `TOKENS` lists in `main.js`.
 
 ## Captures
 
-Everything in `img/` is the real app, not the demo: Hangar.AI 1.0 on Windows,
+Everything in `img/` is the real app: Hangar.AI 1.0 on Windows,
 with real Claude Code agents (the orchestrator on Opus, workers and reviewer on
 Sonnet) orchestrating **checkout-v2**, a small sample repository, over one
 afternoon. The captures are lossless PNGs of the window's client area:
@@ -193,10 +180,10 @@ and "Every file of the latest release" always points at `/releases/latest`.
 ## Deploy
 
 Static, served by [static-web-server](https://static-web-server.net) behind
-Cloudflare. The `Dockerfile` at the root runs `pnpm demo:build` and copies
-`site/` into the server's image; `sws.toml` is its configuration: compression,
-and on every response `X-Content-Type-Options: nosniff`, `X-Frame-Options:
-SAMEORIGIN` (the demo's frame), a referrer policy and a permissions policy.
+Cloudflare. The `Dockerfile` at the root copies `site/` as it is into the
+server's image; `sws.toml` is its configuration: compression, and on every
+response `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` (no
+other site may frame the page), a referrer policy and a permissions policy.
 
 static-web-server picks the `Content-Type` from the extension, and gets every one
 the page uses right (`image/avif`, `image/webp`, `font/woff2`, `image/x-icon`,
