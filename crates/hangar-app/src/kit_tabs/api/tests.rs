@@ -1951,6 +1951,23 @@ mod panes_send_reaches_the_workspaces_claude_code_agents_only {
     }
 
     #[test]
+    fn says_so_when_the_queue_would_not_take_the_text() {
+        let mut s = setup();
+        s.fake
+            .answer_with("enqueue", Answer::Said("Ava's pane was closed".into()));
+        let answer = s.call(
+            "panes.send",
+            Some(json!({ "pane": "Ava", "text": "Build the place" })),
+        );
+        let error = error_body(answer);
+        assert_eq!(error["code"], "failed");
+        assert_eq!(error["message"], "Ava's pane was closed");
+        // It was tried: the call counted against the minute, as it did in the
+        // TypeScript, whose `await deps.enqueue` threw after the rate was taken.
+        assert_eq!(s.fake.calls_of("enqueue").len(), 1);
+    }
+
+    #[test]
     fn sends_at_most_ten_a_minute() {
         let mut s = setup();
         for i in 0..limits::WRITES_PER_MINUTE {
