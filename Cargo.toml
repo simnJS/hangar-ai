@@ -50,5 +50,7 @@ png = "0.18"
 wry = "0.57"
 tao = "0.37"
 unicode-normalization = "0.1"
+# Dates in the local time zone (hangar-core and hangar-update already use it).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 usvg = { version = "0.45", default-features = false }
 iced_test = "0.14"
