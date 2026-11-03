@@ -521,19 +521,69 @@ async fn a_pressed_tab_asks_for_the_keyboard_and_the_strip_gets_it_not_the_image
         super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
         "F6 puts the keyboard on the image in front"
     );
-    assert!(!h.st.strip_pressed.get());
+    assert!(h.st.strip_keys.get(), "and the strip's keys are on");
+    h.st.strip_keys.set(false);
     h.send(Msg::Activate(WORKSPACE.into(), id));
-    assert!(h.st.strip_pressed.get(), "the shell is about to ask");
+    assert!(h.st.skip_stage.get(), "the shell is about to ask");
+    assert!(h.st.strip_keys.get(), "the pressed tab has the arrows");
     let task = super::focus_entry(&h.st, &h.model, Region::Model).expect("a panel on screen");
     assert_eq!(
         task.units(),
         0,
         "nothing is focused: the tabs have the keys"
     );
-    assert!(!h.st.strip_pressed.get(), "once");
+    assert!(!h.st.skip_stage.get(), "once");
     assert!(
         super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
         "F6 afterwards is F6 again"
+    );
+}
+
+#[tokio::test]
+async fn a_press_in_the_text_takes_the_keyboard_from_a_terminal_but_not_the_tabs_keys() {
+    let mut h = Harness::new("text-press");
+    let id = h.show(&h.write("notes.txt", "one\ntwo\n")).await;
+    h.read_text(&id);
+    h.shell_toggles(|panel| panel.open = true);
+    h.st.strip_keys.set(true);
+    // The keyboard is a terminal's: the press asks for it.
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(!super::tab_keys_listen(&h.st, &h.model));
+    h.viewer(&id, ViewerMsg::Pressed);
+    assert!(
+        !h.st.strip_keys.get(),
+        "Delete is not to close the tab read"
+    );
+    assert!(h.st.skip_stage.get(), "the shell is asked for the panel");
+    // Once the panel has it, a press asks for nothing more, and the strip
+    // still has no keys.
+    h.st.skip_stage.set(false);
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    h.viewer(&id, ViewerMsg::Pressed);
+    assert!(!h.st.skip_stage.get());
+    assert!(!super::tab_keys_listen(&h.st, &h.model));
+    // A press on an image is the same: the stage has the keyboard.
+    let shot = h.write("shot.png", b"\x89PNG\r\n\x1a\n");
+    let image = h.show(&shot).await;
+    h.st.strip_keys.set(true);
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    h.viewer(
+        &image,
+        ViewerMsg::Image(super::image::Msg::Gesture(
+            super::image_stage::Gesture::Pressed,
+        )),
+    );
+    assert!(!h.st.strip_keys.get());
+    assert!(h.st.skip_stage.get());
+    h.st.skip_stage.set(false);
+    // A pressed tab gives them back.
+    h.st.strip_keys.set(true);
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    assert!(super::tab_keys_listen(&h.st, &h.model));
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(
+        !super::tab_keys_listen(&h.st, &h.model),
+        "not in a terminal"
     );
 }
 

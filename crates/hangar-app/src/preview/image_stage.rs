@@ -64,6 +64,10 @@ pub enum Gesture {
         at: (f32, f32),
     },
     Key(StageKey),
+    /// The pointer went down on the stage, which has the keyboard from then
+    /// on: whatever else had it (a terminal) is to be told. Nothing to the
+    /// frame.
+    Pressed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,6 +351,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if over && let Some(point) = cursor.position() {
                     state.focused = true;
+                    shell.publish((self.on_gesture)(Gesture::Pressed));
                     state.last = Some(point);
                     let click = Click::new(point, mouse::Button::Left, state.last_click);
                     state.last_click = Some(click);

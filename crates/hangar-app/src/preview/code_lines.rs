@@ -82,6 +82,8 @@ pub struct Select<M> {
     pub on_select: fn(String) -> M,
     /// Ctrl+C copied the selection.
     pub on_copy: fn() -> M,
+    /// The pointer went down in the lines.
+    pub on_press: fn() -> M,
 }
 
 /// The lines of a text as the selection's source: a line is the text of its
@@ -200,7 +202,8 @@ pub fn view<'a, M: Clone + 'a>(
         });
     let body = selectable(&doc, body)
         .on_select(select.on_select)
-        .on_copy(select.on_copy);
+        .on_copy(select.on_copy)
+        .on_press(select.on_press);
     let direction = if wrap {
         scrollable::Direction::Vertical(scrollable::Scrollbar::default())
     } else {

@@ -167,6 +167,7 @@ impl Picture {
                 Gesture::Key(StageKey::ZoomOut) => self.update(Msg::ZoomOut),
                 Gesture::Key(StageKey::Fit) => self.update(Msg::Fit),
                 Gesture::Key(StageKey::ActualSize) => self.update(Msg::ActualSize),
+                Gesture::Pressed => {}
             },
         }
     }

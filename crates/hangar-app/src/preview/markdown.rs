@@ -65,6 +65,8 @@ pub enum Msg {
     Selected(String),
     /// Ctrl+C copied the selection.
     Copied,
+    /// The pointer went down in the page.
+    Pressed,
 }
 
 /// What a press on a link asks of the app.
@@ -903,7 +905,8 @@ pub fn view<'a>(
     iced::widget::scrollable(
         selectable(&rendered.doc, body)
             .on_select(Msg::Selected)
-            .on_copy(|| Msg::Copied),
+            .on_copy(|| Msg::Copied)
+            .on_press(|| Msg::Pressed),
     )
     .id(scroll)
     .on_scroll(|viewport| Msg::Scrolled(viewport.absolute_offset().y))

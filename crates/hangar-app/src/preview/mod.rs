@@ -165,11 +165,16 @@ pub struct State {
     agreed: HashMap<WsId, Agreed>,
     /// The hook for the control bus has been sent.
     hosted: bool,
-    /// A tab was pressed and the shell is about to give the panel the
-    /// keyboard: that is for the strip's keys, so `focus_entry` is not to put
-    /// it on the image in front. Read and cleared by `focus_entry`, which
-    /// only sees the state by reference.
-    strip_pressed: std::cell::Cell<bool>,
+    /// The shell is about to give the panel the keyboard because of a press
+    /// in it (a tab, the text of a file, the expand button): `focus_entry` is
+    /// not to put it on the image in front. Read and cleared by `focus_entry`,
+    /// which only sees the state by reference.
+    skip_stage: std::cell::Cell<bool>,
+    /// The arrows, Home, End and Delete are the tab strip's while the panel
+    /// has the keyboard: they are after a tab was pressed or F6 came in, and
+    /// are not after a press in the text of a file, where Delete closing the
+    /// tab would be a trap.
+    strip_keys: std::cell::Cell<bool>,
 }
 
 /// A workspace's panel as the shell's signals and the store both held it at
@@ -213,7 +218,8 @@ impl Default for State {
             fronts: HashMap::new(),
             agreed: HashMap::new(),
             hosted: false,
-            strip_pressed: std::cell::Cell::new(false),
+            skip_stage: std::cell::Cell::new(false),
+            strip_keys: std::cell::Cell::new(false),
         }
     }
 }
@@ -394,7 +400,8 @@ fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
             // A pressed tab has the keyboard, as it did in the TS: the arrows,
             // Home, End and Delete are the strip's from then on (the panel is
             // the focused region), until the keyboard goes elsewhere.
-            st.strip_pressed.set(true);
+            st.skip_stage.set(true);
+            st.strip_keys.set(true);
             Task::batch([
                 strip_to(st, &ws),
                 Task::done(Message::Intent(Intent::FocusRegion(Region::Model))),
@@ -998,6 +1005,7 @@ fn viewer_update(
             );
             Task::batch([iced::clipboard::write(text), done])
         }
+        ViewerMsg::Pressed => content_pressed(st, m),
         ViewerMsg::Selected(text) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.selection = text;
@@ -1009,15 +1017,31 @@ fn viewer_update(
             id,
             Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
         ),
+        ViewerMsg::Image(image::Msg::Gesture(image_stage::Gesture::Pressed)) => {
+            content_pressed(st, m)
+        }
         ViewerMsg::Image(msg) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.picture.update(msg);
             }
             Task::none()
         }
-        ViewerMsg::Markdown(msg) => markdown_update(st, id, revision, msg, locale),
+        ViewerMsg::Markdown(msg) => markdown_update(st, m, id, revision, msg, locale),
         ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
+}
+
+/// The pointer went down in the text of a file or a page: the keyboard is the
+/// panel's, which a terminal that had it has to be told (its Ctrl+C would
+/// interrupt what runs in it, where here it copies what is selected). The
+/// strip's keys are not: Delete would close the tab one is reading.
+fn content_pressed(st: &State, m: &Model) -> Task<Message> {
+    st.strip_keys.set(false);
+    if m.ui.focus == Some(Focus::Region(Region::Model)) {
+        return Task::none();
+    }
+    st.skip_stage.set(true);
+    Task::done(Message::Intent(Intent::FocusRegion(Region::Model)))
 }
 
 /// Brings the text of an entry back to its top: the lines and the rendered
@@ -1036,6 +1060,7 @@ fn to_top(id: &str) -> Task<Message> {
 
 fn markdown_update(
     st: &mut State,
+    m: &Model,
     id: &str,
     revision: u64,
     msg: markdown::Msg,
@@ -1047,6 +1072,7 @@ fn markdown_update(
         move |msg: markdown::Msg| viewer_message(&id, revision, ViewerMsg::Markdown(msg))
     };
     match msg {
+        markdown::Msg::Pressed => return content_pressed(st, m),
         markdown::Msg::Selected(text) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.selection = text;
@@ -1072,7 +1098,7 @@ fn markdown_update(
         }
         markdown::Msg::Found(y) => markdown::scroll_by(scroll, y).map(to_message),
         // Handled above, before the page is looked for.
-        markdown::Msg::Selected(_) | markdown::Msg::Copied => Task::none(),
+        markdown::Msg::Pressed | markdown::Msg::Selected(_) | markdown::Msg::Copied => Task::none(),
         markdown::Msg::Link(href) => {
             if let Some(anchor) = markdown::Rendered::anchor(&href) {
                 return markdown::scroll_to_heading(scroll, &anchor).map(to_message);
@@ -1390,6 +1416,12 @@ fn changes(shared: &Arc<Shared>) -> Subscription<Message> {
     })
 }
 
+/// Whether the strip's keys are being listened for: the panel has the keyboard
+/// and the keys are the strip's (see `State::strip_keys`).
+fn tab_keys_listen(st: &State, m: &Model) -> bool {
+    m.ui.focus == Some(Focus::Region(Region::Model)) && st.strip_keys.get()
+}
+
 /// The keys the tab strip answers while the panel has the keyboard.
 fn tab_keys(
     event: Event,
@@ -1472,7 +1504,7 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     if loading {
         subscriptions.push(iced::time::every(SPIN).map(|_| Message::Preview(Msg::Spin)));
     }
-    if m.ui.focus == Some(Focus::Region(Region::Model)) {
+    if tab_keys_listen(st, m) {
         subscriptions.push(iced::event::listen_with(tab_keys));
     }
     if escape_collapses_here(m) {
@@ -1485,15 +1517,18 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
 /// owns: the image in front, or the panel as a whole. Nothing when no panel
 /// is shown.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+    let pressed = st.skip_stage.replace(false);
     let window = m.focused_window()?;
     if !Panels::of(m, window).model.shown {
         return None;
     }
     let ws = m.window_workspace(window)?;
     let front = m.live.preview.scope(&ws.id)?.active()?;
-    if st.strip_pressed.replace(false) {
+    if pressed {
         return Some(Task::none());
     }
+    // F6: the keys of the strip, or the image's own.
+    st.strip_keys.set(true);
     if front.file_kind() == Some(FileKind::Image) {
         return Some(iced::widget::operation::focus(viewer::stage_id(&front.id)));
     }
@@ -1533,9 +1568,13 @@ fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Ta
         // Expanding takes the keyboard into the panel, as pressing its
         // button did in the TS (the focus was on the button, inside it), so
         // that Escape puts it back.
-        Intent::TogglePreviewExpand if escape_would_collapse(m) => Some(Task::done(
-            Message::Intent(Intent::FocusRegion(Region::Model)),
-        )),
+        Intent::TogglePreviewExpand if escape_would_collapse(m) => {
+            st.skip_stage.set(true);
+            st.strip_keys.set(false);
+            Some(Task::done(Message::Intent(Intent::FocusRegion(
+                Region::Model,
+            ))))
+        }
         Intent::ActivateWorkspace(ws) => {
             if m.live.hydrated {
                 st.shared.edit(|store| store.restore_kit_tabs(ws));

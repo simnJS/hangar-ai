@@ -77,6 +77,8 @@ pub enum ViewerMsg {
     Selected(String),
     /// Ctrl+C copied the selection, which the widget put on the clipboard.
     Copied,
+    /// The pointer went down in the lines.
+    Pressed,
     Image(image::Msg),
     Markdown(markdown::Msg),
     /// The pictures of a Markdown page that were read from the disk.
@@ -394,6 +396,7 @@ fn code_stage<'a>(
             doc,
             on_select: ViewerMsg::Selected,
             on_copy: || ViewerMsg::Copied,
+            on_press: || ViewerMsg::Pressed,
         };
         code_lines::view(
             t,
