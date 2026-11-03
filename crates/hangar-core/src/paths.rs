@@ -89,6 +89,14 @@ impl Paths {
         }
     }
 
+    /// Whether this run is one kept off the installed app's data
+    /// (`HANGAR_DATA_ROOT` set): what it must not write either, the files of
+    /// other programs that the installed Hangar writes to, such as Claude
+    /// Code's own config, it can ask here.
+    pub fn isolated() -> bool {
+        std::env::var_os("HANGAR_DATA_ROOT").is_some_and(|value| !value.is_empty())
+    }
+
     /// Every folder under `root`, each by its own name: for tests, and for a
     /// build that must not touch the installed app's data.
     pub fn rooted(root: &Path) -> Self {

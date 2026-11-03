@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "A native tab written in Rust: a form, a table of the workspace's panes, a note kept in the kit's data.",
   "author": "Hangar",
-  "hangar": ">=2.0.0",
+  "hangar": ">=1.12.1",
   "tabs": [
     {
       "id": "hello",

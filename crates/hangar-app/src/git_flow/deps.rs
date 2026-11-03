@@ -165,8 +165,11 @@ impl FromGitDeps for AppDeps {
         self.ask(|answer| Msg::Remove(id.to_string(), answer)).await
     }
 
+    /// Trusting writes the person's own Claude Code config (`~/.claude.json`),
+    /// which a run kept off the installed Hangar's data must not touch: there
+    /// Claude Code keeps its question, as where trust cannot be recorded.
     fn can_trust(&self) -> bool {
-        true
+        !hangar_core::paths::Paths::isolated()
     }
 
     // The account the new workspace's panes will start on: nothing is chosen

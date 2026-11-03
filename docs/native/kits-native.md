@@ -67,7 +67,9 @@ nothing else: a Hangar that reads it reads schema 1 as it always did.
 `schema: 2 needs a newer Hangar`, and the kit is unusable there, plugin included: the person is told
 why, rather than opening a tab that cannot run. A kit says what it needs the usual way too,
 `"hangar": ">=2.0.0"`. The native Hangar is taken to ship as 2.0.0; if it ships under another
-number, only that number changes here.
+number, only that number changes here. Until that release sets the version, the workspace is still
+1.12.1, so the example in this repository (`examples/kits/hello-native`) asks for `>=1.12.1` and
+runs in a build of this branch.
 
 **Both, for a kit that must still open on 1.x.** Stay at schema 1, keep an HTML `entry`, and add a
 `native` field to the tab:

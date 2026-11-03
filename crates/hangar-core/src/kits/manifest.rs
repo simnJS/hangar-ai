@@ -1642,7 +1642,9 @@ mod tests {
         kit.file("tabs/hello.wasm", "\0asm");
         let manifest = parse(&text, &kit.root).unwrap();
         assert_eq!((manifest.schema, manifest.id.as_str()), (2, "hello-native"));
-        assert_eq!(manifest.hangar.as_deref(), Some(">=2.0.0"));
+        // The version this branch builds, so the example runs in it
+        // (kits-native.md, "On an older Hangar").
+        assert_eq!(manifest.hangar.as_deref(), Some(">=1.12.1"));
         let tab = &manifest.tabs[0];
         assert_eq!((tab.id.as_str(), tab.kind()), ("hello", TabKind::Native));
         assert_eq!(tab.module(), Some("tabs/hello.wasm"));
