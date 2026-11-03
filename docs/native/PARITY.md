@@ -80,7 +80,7 @@ Most of the 6 missing and about half of the 18 partial rows among the first 690 
 | Native kits are WebAssembly only | none | `hangar-kit-host` | A new capability, not graded against the old app |
 | The MCP install and the login item refuse whenever `HANGAR_DATA_ROOT` is set; an isolated run leaves Claude Code's trust list alone | wrote the real files | `hangar-core/src/install.rs:170`, `autostart.rs:67`, `Paths::isolated()` | Closes the dev-machine risks of §6. Release builds never set it |
 | Links open only for `http` and `https`, on Ctrl or Cmd plus click (integration pass, in the log only) | xterm's web-links addon opened any matching URL on a plain click | `panes/mod.rs:471`, `hangar-term/src/links.rs:188`, `pointer.rs:140-148` | The consent hole is closed; the modifier is a difference to decide (row "Web links", §7 WP-H) |
-| The old app stays on the branch until wave 5; the native release number is the owner's call (`examples/kits/hello-native` asks for `>=1.12.1`, kits-native.md assumes 2.0.0) | – | – | No row |
+| The old app stays on the branch until wave 5 (done); the native app ships as **Hangar 2.0.0** (owner's decision): the workspace is 2.0.0, `examples/kits/hello-native` asks for `>=2.0.0` | – | – | No row |
 
 ### 0.4 The top gaps now, most harmful first
 
@@ -549,7 +549,7 @@ Verify: hangar-term tests; the widget tests of `panes::`.
 1. `preview.show`: the 256 MB cap and its message (`deps.rs:319`); `panes.send` reports a failed `bridge_enqueue` (`deps.rs:345`); `panes.changed` driven by activity events, not the 1 s tick (`mod.rs:642`).
 2. Cache compiled wasm modules on disk; draw a native tab's text inputs, selects, tables and trees with hangar-ui widgets (the kit-host renderer).
 3. Tests for the `unloadable` fallback, the StageMessages, "left" detection, `reconcile`.
-4. Decide the release number for kits with `schema: 2` (kits-native.md says 2.0.0; the branch is 1.12.1).
+4. ~~Decide the release number for kits with `schema: 2`.~~ Decided by the owner: the native Hangar is 2.0.0, and the workspace carries it.
 
 Verify: `cargo test -p hangar-app kit_tabs:: -p hangar-kit-host`; the `hello-native` example kit still opens.
 
@@ -565,7 +565,7 @@ Verify: the whole workspace builds with no `allow(dead_code)`.
 
 ### Decisions the owner should make
 
-- Native release number (kits-native.md assumes 2.0.0).
+- ~~Native release number.~~ 2.0.0 (owner's decision): it ships once the owner has used it for a day or two, and `feat/native-rust` then replaces `main`.
 - Plain click or Ctrl/Cmd+click for terminal links; kitty keyboard protocol on or off by default.
 - Whether PDF, HTML, video and audio should stay in their own window or be drawn in the panel (a native PDF renderer, a bundled pdf.js); the helper-window behaviour of WP-C holds either way.
 - Whether web images in Markdown should be fetched.

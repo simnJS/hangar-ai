@@ -278,4 +278,25 @@ mod tests {
         // Build metadata does not make a version newer.
         assert!(!release("1.12.1+abc").is_newer_than(&running));
     }
+
+    /// 2.0.0, the native Hangar, is offered to every 1.x install through the
+    /// same feed, and nothing of 1.x is ever offered back to it: a feed that
+    /// still said 1.12.1, the last 1.x release, is not an update.
+    #[test]
+    fn the_native_release_replaces_1_x_and_is_never_downgraded() {
+        let release = |v: &str| {
+            Manifest::parse(&format!(r#"{{ "version": "{v}", "platforms": {{}} }}"#)).unwrap()
+        };
+        let native = Version::new(2, 0, 0);
+
+        for old in ["1.0.0", "1.9.1", "1.12.0", "1.12.1"] {
+            let old = Version::parse(old).unwrap();
+            assert!(release("2.0.0").is_newer_than(&old), "{old} updates to 2.0.0");
+        }
+        for old in ["1.12.1", "1.99.0", "2.0.0-beta.1", "2.0.0"] {
+            assert!(!release(old).is_newer_than(&native), "2.0.0 is not offered {old}");
+        }
+        assert!(release("2.0.1").is_newer_than(&native));
+        assert!(release("2.1.0").is_newer_than(&native));
+    }
 }
