@@ -137,9 +137,10 @@ impl Default for Host {
 }
 
 impl Host {
-    /// The installed app's folders, the ones Tauri used (paths.rs).
+    /// The installed app's folders, the ones Tauri used (paths.rs), unless
+    /// `HANGAR_DATA_ROOT` names another place (`Paths::from_env`).
     pub fn new() -> Self {
-        Self::with_paths(Paths::system())
+        Self::with_paths(Paths::from_env())
     }
 
     /// Folders of the caller's choosing: tests, mostly.

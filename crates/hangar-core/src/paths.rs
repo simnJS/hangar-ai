@@ -73,6 +73,22 @@ impl Paths {
         }
     }
 
+    /// `HANGAR_DATA_ROOT`'s folders when it is set and not empty, the
+    /// system's otherwise.
+    ///
+    /// The native app is being written on machines where the released Hangar
+    /// is installed and in use, and both read the same `state.json`: a build
+    /// started to try something must not rewrite the person's workspaces. Set
+    /// it with `HANGAR_ENDPOINT_FILE` (endpoint.rs), which moves the endpoint,
+    /// the mods, the kits and the accounts beside it, and nothing of the
+    /// installed app is touched.
+    pub fn from_env() -> Self {
+        match std::env::var_os("HANGAR_DATA_ROOT").filter(|value| !value.is_empty()) {
+            Some(root) => Self::rooted(Path::new(&root)),
+            None => Self::system(),
+        }
+    }
+
     /// Every folder under `root`, each by its own name: for tests, and for a
     /// build that must not touch the installed app's data.
     pub fn rooted(root: &Path) -> Self {
