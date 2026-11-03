@@ -63,6 +63,10 @@ pub enum Placement {
     /// At a point of the widget the layer wraps, given as an offset from its
     /// top-left corner: where a context menu was asked for.
     At(Vector),
+    /// In the window's bottom-right corner, `margin` from its edges: a panel
+    /// that stands aside from the work (a setup command's question while its
+    /// pane is being watched).
+    BottomEnd,
 }
 
 /// What a press outside the content does.
@@ -76,6 +80,9 @@ pub enum Outside {
     /// The veil of a modal layer: nothing outside is reachable, and the
     /// layer is dismissed by a press and release that both land outside.
     Block,
+    /// Nothing: the window stays as reachable as it was, and a press on it is
+    /// not the layer's business ([`dock`]).
+    Ignore,
 }
 
 /// The window's margin that content is kept out of.
@@ -233,6 +240,23 @@ pub fn context<'a, M: Clone + 'a>(
         spare_anchor: false,
     };
     layer.tab_dismisses = true;
+    layer
+}
+
+/// A panel in the window's bottom-right corner that leaves the rest of the
+/// window as it is: no veil, no key trap, and a press elsewhere does nothing.
+/// Escape still dismisses it. The window under it stays interactive, which is
+/// what a question about something the person is watching in another pane
+/// needs.
+pub fn dock<'a, M: Clone + 'a>(
+    base: impl Into<Element<'a, M>>,
+    content: Option<Element<'a, M>>,
+) -> Layer<'a, M> {
+    let mut layer = Layer::new(base.into(), content, Placement::BottomEnd);
+    layer.outside = Outside::Ignore;
+    layer.margin = 16.0;
+    // Over a popover, under a dialog.
+    layer.index = 9.0;
     layer
 }
 
@@ -567,6 +591,16 @@ pub fn position(
             clamp(anchor.x + offset.x, bounds.width - size.width),
             clamp(anchor.y + offset.y, bounds.height - size.height),
         ),
+        Placement::BottomEnd => Point::new(
+            clamp(
+                bounds.width - size.width - margin,
+                bounds.width - size.width,
+            ),
+            clamp(
+                bounds.height - size.height - margin,
+                bounds.height - size.height,
+            ),
+        ),
     }
 }
 
@@ -788,6 +822,7 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
                         self.state.pressed_outside = true;
                         shell.capture_event();
                     }
+                    Outside::Ignore => {}
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(_)) => self.state.pressed_outside = false,

@@ -1326,6 +1326,14 @@ pub enum Key {
     KitsManageStepRunning,
     /// `kitsManage.stepTodo`
     KitsManageStepTodo,
+    /// `kitsManage.tabKindHint`
+    KitsManageTabKindHint,
+    /// `kitsManage.tabKindHtml`
+    KitsManageTabKindHtml,
+    /// `kitsManage.tabKindNative`
+    KitsManageTabKindNative,
+    /// `kitsManage.tabKindNativeFallback`
+    KitsManageTabKindNativeFallback,
     /// `kitsManage.title`
     KitsManageTitle,
     /// `kitsManage.toggle`
@@ -3437,7 +3445,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1710;
+pub const KEY_COUNT: usize = 1714;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4098,6 +4106,10 @@ impl Key {
         Key::KitsManageStepRunNeedsWs,
         Key::KitsManageStepRunning,
         Key::KitsManageStepTodo,
+        Key::KitsManageTabKindHint,
+        Key::KitsManageTabKindHtml,
+        Key::KitsManageTabKindNative,
+        Key::KitsManageTabKindNativeFallback,
         Key::KitsManageTitle,
         Key::KitsManageToggle,
         Key::KitsManageUpToDate,
@@ -5813,6 +5825,10 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "kitsManage.stepRunNeedsWs", en: Text::plain("Available once the workspace exists."), fr: Text::plain("Disponible une fois le workspace créé.") },
     Message { id: "kitsManage.stepRunning", en: Text::plain("Opening the pane…"), fr: Text::plain("Ouverture du pane…") },
     Message { id: "kitsManage.stepTodo", en: Text::plain("Not run yet"), fr: Text::plain("Pas encore lancée") },
+    Message { id: "kitsManage.tabKindHint", en: Text::plain("A native tab is a WebAssembly module that Hangar draws itself. An HTML tab is a web page, shown in a window of its own. Both are held to the permissions below."), fr: Text::plain("Un onglet natif est un module WebAssembly que Hangar dessine lui-même. Un onglet HTML est une page web, affichée dans une fenêtre à part. Les deux sont soumis aux permissions ci-dessous.") },
+    Message { id: "kitsManage.tabKindHtml", en: Text::plain("HTML"), fr: Text::plain("HTML") },
+    Message { id: "kitsManage.tabKindNative", en: Text::plain("Native"), fr: Text::plain("Natif") },
+    Message { id: "kitsManage.tabKindNativeFallback", en: Text::plain("Native, with an HTML page as a fallback"), fr: Text::plain("Natif, avec une page HTML en secours") },
     Message { id: "kitsManage.title", en: Text::plain("Kits"), fr: Text::plain("Kits") },
     Message { id: "kitsManage.toggle", en: Text::plain("Enable {name} on this workspace"), fr: Text::plain("Activer {name} sur ce workspace") },
     Message { id: "kitsManage.upToDate", en: Text::plain("Up to date (v{version})."), fr: Text::plain("À jour (v{version}).") },
