@@ -472,6 +472,11 @@ impl Live {
             },
         );
     }
+
+    /// The pane has reported this much about its agent.
+    pub(crate) fn seed_insight(&mut self, pane: &str, edit: impl FnOnce(&mut PaneInsight)) {
+        self.insights.update(pane, edit);
+    }
 }
 
 /// The glyph a pane shows: its shell's life until it runs, then its agent's
@@ -624,8 +629,9 @@ fn info_of(ws: &Workspace, pane: &Pane) -> PaneInfo {
     }
 }
 
-/// The folder a pane's shell opens in.
-fn folder_of(ws: &Workspace, pane: &Pane) -> String {
+/// The folder a pane's shell opens in: its own, else its workspace's. Public
+/// so that the terminals' package asks here rather than keeping a copy.
+pub fn folder_of(ws: &Workspace, pane: &Pane) -> String {
     pane.cwd
         .as_deref()
         .filter(|cwd| !cwd.is_empty())

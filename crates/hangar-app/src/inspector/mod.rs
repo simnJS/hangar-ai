@@ -8,13 +8,19 @@
 //!
 //! It reads only. What the pane reported, the plan's limits and the board
 //! come from other packages and are read in one place, `sources`; git's view
-//! of the working tree is polled here (`poll`), only while the section is
-//! unfolded and the window is in front.
+//! of the working tree is polled here (`poll`), for each window that shows the
+//! column, only while its Files section is unfolded and the app is in front.
+//!
+//! Each window has its own column: it speaks about the workspace that window
+//! draws (`Ctx::workspace`, `Model::window_workspace`) and is on screen or not
+//! as the frame placed it (`Panels::of`), docked by its setting or as a drawer
+//! over the terminals.
 //!
 //! The width, the folded sections and whether the column is open are
 //! settings and change through `Model::apply`; the grip writes the width as
 //! it is dragged, so the shell's frame (which sizes the column from the
-//! setting) follows the pointer.
+//! setting) follows the pointer. The widest it may be is what the frame
+//! placed for the window the grip was pressed in.
 
 mod files;
 pub mod files_model;
@@ -26,6 +32,7 @@ pub mod sources;
 mod view;
 mod widgets;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use iced::keyboard::{self, key::Named};
@@ -35,7 +42,7 @@ use hangar_core::git::Changes;
 
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::side_panels::{INSPECTOR_MAX, INSPECTOR_MIN};
+use crate::shell::side_panels::{INSPECTOR_MAX, INSPECTOR_MIN, Panels};
 use crate::shell::{Drawer, Focus, Region, View};
 use crate::state::types::Settings;
 use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
@@ -80,20 +87,26 @@ impl SectionId {
 pub struct State {
     /// The grip, while it is held.
     drag: Option<Drag>,
-    /// The window is not in front (another application has the focus, or it
-    /// is minimised): git is not asked, as the web app did not while its
-    /// page was hidden.
+    /// The app is not in front (another application has the focus, or its
+    /// windows are minimised): git is not asked, as the web app did not while
+    /// its page was hidden.
     away: bool,
-    /// git's last answer for a folder, until the next one or a failure.
-    changes: Option<(String, Arc<Changes>)>,
+    /// The windows that have the system's focus, which is how `away` is told
+    /// from one window handing the focus to another.
+    focused: HashSet<window::Id>,
+    /// git's last answer for each folder some window looks at, until the next
+    /// one or a failure.
+    changes: HashMap<String, Arc<Changes>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Drag {
     /// Where the pointer was when the grip was pressed.
     from_x: f32,
-    /// The width then.
+    /// The width then, as drawn.
     from_width: f64,
+    /// The widest the room let the column be in that window then, in points.
+    max: f32,
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -114,7 +127,12 @@ pub enum Msg {
     OpenDiff(WsId, PaneId),
     /// The × of a queued prompt.
     CancelQueued(PaneId, String),
-    GripPressed(f32),
+    /// The grip was pressed at this x. `max` is the widest its window's room
+    /// lets the column be (`Panels::of`).
+    GripPressed {
+        x: f32,
+        max: f32,
+    },
     GripMoved(f32),
     GripReleased,
     /// A double click on the grip.
@@ -123,29 +141,59 @@ pub enum Msg {
     Nudge(i16),
     /// git answered for this key (poll.rs).
     Changes(poll::PollKey, Result<Arc<Changes>, String>),
-    /// The window went to the back or came to the front.
-    Away(bool),
+    /// A window of the app gained or lost the system's focus.
+    Focus(window::Id, bool),
     /// The half-minute clock: nothing to do but be drawn again.
     Clock,
 }
 
-/// Whether the column is on screen: docked by its setting, or opened as a
-/// drawer over the terminals.
-pub fn shown(m: &Model) -> bool {
-    m.settings().inspector_open || m.ui.drawer == Some(Drawer::Inspector)
+/// Whether window `w` shows the column: docked by its setting while the room
+/// leaves the terminals theirs, otherwise opened as a drawer over them
+/// (`Panels::of`). A column the setting calls open but the room turned into a
+/// closed drawer is not on screen, and nothing about it is worth polling or
+/// counting.
+pub fn shown_in(m: &Model, w: window::Id) -> bool {
+    Panels::of(m, w).inspector.shown
 }
 
-/// The width the settings can hold, in interface points (`clampInspector`).
-fn clamp_width(width: f64) -> f64 {
-    width
-        .round()
-        .clamp(f64::from(INSPECTOR_MIN), f64::from(INSPECTOR_MAX))
+/// The windows that show the column now, in a fixed order.
+fn windows_showing(m: &Model) -> Vec<window::Id> {
+    let mut windows: Vec<window::Id> = m
+        .live
+        .windows
+        .keys()
+        .copied()
+        .filter(|w| shown_in(m, *w))
+        .collect();
+    windows.sort();
+    windows
+}
+
+/// The widest the focused window lets the column be, in points: the frame's
+/// answer, never over the setting's own bound.
+fn focused_max(m: &Model) -> f32 {
+    m.focused_window()
+        .map_or(INSPECTOR_MAX, |w| Panels::of(m, w).inspector.max)
+}
+
+/// The width the settings can hold, in interface points (`clampInspector`),
+/// and no more than `max`, the room the window has: `Math.min(INSPECTOR_MAX,
+/// maxWidth)` of the TS. The minimum wins over a room too small for it.
+fn clamp_width(width: f64, max: f32) -> f64 {
+    let max = f64::from(max).min(f64::from(INSPECTOR_MAX));
+    width.min(max).max(f64::from(INSPECTOR_MIN)).round()
+}
+
+/// The width the column is drawn at, which is what a drag or a nudge starts
+/// from: the saved width, in bounds, cut to the room (`shown` of the TS).
+fn drawn_width(saved: f64, max: f32) -> f64 {
+    clamp_width(saved, INSPECTOR_MAX).min(f64::from(max))
 }
 
 /// The width a drag has reached: the column grows leftwards, into the work
 /// area, by as far as the pointer went that way from where it was pressed.
-fn dragged_width(from_width: f64, from_x: f32, x: f32) -> f64 {
-    clamp_width(from_width + f64::from(from_x - x))
+fn dragged_width(from_width: f64, from_x: f32, x: f32, max: f32) -> f64 {
+    clamp_width(from_width + f64::from(from_x - x), max)
 }
 
 /// A section id added to the folded ones, or taken out if it is there.
@@ -158,8 +206,8 @@ fn fold(collapsed: &mut Vec<String>, id: &str) {
     }
 }
 
-fn set_width(m: &mut Model, width: f64) {
-    let width = clamp_width(width);
+fn set_width(m: &mut Model, width: f64, max: f32) {
+    let width = clamp_width(width, max);
     if (m.settings().inspector_width - width).abs() < 0.5 {
         return;
     }
@@ -238,16 +286,21 @@ fn reduce(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                 None => Task::none(),
             }
         }
-        Msg::GripPressed(x) => {
+        Msg::GripPressed { x, max } => {
             st.drag = Some(Drag {
                 from_x: x,
-                from_width: m.settings().inspector_width,
+                from_width: drawn_width(m.settings().inspector_width, max),
+                max,
             });
             Task::none()
         }
         Msg::GripMoved(x) => {
             if let Some(drag) = st.drag {
-                set_width(m, dragged_width(drag.from_width, drag.from_x, x));
+                set_width(
+                    m,
+                    dragged_width(drag.from_width, drag.from_x, x, drag.max),
+                    drag.max,
+                );
             }
             Task::none()
         }
@@ -257,25 +310,45 @@ fn reduce(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
         Msg::ResetWidth => {
             st.drag = None;
-            set_width(m, Settings::default().inspector_width);
+            set_width(m, Settings::default().inspector_width, INSPECTOR_MAX);
             Task::none()
         }
         Msg::Nudge(delta) => {
-            set_width(m, m.settings().inspector_width + f64::from(delta));
+            let max = focused_max(m);
+            let from = drawn_width(m.settings().inspector_width, max);
+            set_width(m, from + f64::from(delta), max);
             Task::none()
         }
         Msg::Changes(key, answer) => {
-            // An answer for a look that is no longer the current one (the
-            // pane or its folder changed meanwhile) is dropped.
-            if poll_key(st, m).as_ref() == Some(&key) {
-                st.changes = answer.ok().map(|changes| (key.folder, changes));
+            // An answer for a look that is no longer a current one (the pane
+            // or its folder changed meanwhile) is dropped.
+            if poll_keys(st, m).contains(&key) {
+                match answer {
+                    Ok(changes) => {
+                        st.changes.insert(key.folder, changes);
+                    }
+                    Err(_) => {
+                        st.changes.remove(&key.folder);
+                    }
+                }
             }
+            // What no window looks at any more is let go.
+            let looked_at = looks(m);
+            st.changes
+                .retain(|folder, _| looked_at.iter().any(|look| &look.folder == folder));
             Task::none()
         }
-        Msg::Away(away) => {
-            st.away = away;
-            if away {
-                st.drag = None;
+        Msg::Focus(window, focused) => {
+            if focused {
+                st.focused.insert(window);
+                st.away = false;
+            } else {
+                st.focused.remove(&window);
+                // One window handing the focus to another is not leaving.
+                if st.focused.is_empty() {
+                    st.away = true;
+                    st.drag = None;
+                }
             }
             Task::none()
         }
@@ -292,22 +365,10 @@ fn intent(intent: Intent) -> Task<Message> {
     Task::done(Message::Intent(intent))
 }
 
-/// The subscription of git's look at the pane's folder, or `None` when
-/// nothing should be asked: the column is hidden, the Files section is
-/// folded (it shows nothing that needs git), the window is away, or no pane
-/// is in focus.
-fn poll_key(st: &State, m: &Model) -> Option<poll::PollKey> {
-    if st.away || !shown(m) {
-        return None;
-    }
-    if m.settings()
-        .inspector_collapsed
-        .iter()
-        .any(|id| id == SectionId::Files.as_str())
-    {
-        return None;
-    }
-    let ws = m.active_workspace()?;
+/// git's look at the focused pane's folder, in the window `w` that shows the
+/// column; `None` when that window has no pane in focus.
+fn look_in(m: &Model, w: window::Id) -> Option<poll::PollKey> {
+    let ws = m.window_workspace(w)?;
     let (pane, _) = sources::focused_pane(m, ws)?;
     let insight = sources::insight(m, &pane.id);
     Some(poll::PollKey {
@@ -315,6 +376,35 @@ fn poll_key(st: &State, m: &Model) -> Option<poll::PollKey> {
         folder: pane.cwd.clone().unwrap_or_else(|| ws.cwd.clone()),
         trigger: poll::trigger(&insight.edited_files, insight.turn_started_at),
     })
+}
+
+/// What every window that shows the column looks at, whether or not git is
+/// being asked now.
+fn looks(m: &Model) -> Vec<poll::PollKey> {
+    let mut looks: Vec<poll::PollKey> = Vec::new();
+    for window in windows_showing(m) {
+        if let Some(look) = look_in(m, window)
+            && !looks.contains(&look)
+        {
+            looks.push(look);
+        }
+    }
+    looks
+}
+
+/// The subscriptions of git's look at each pane's folder: one for each window
+/// that shows the column, none while the app is away or the Files section is
+/// folded (it shows nothing that needs git).
+fn poll_keys(st: &State, m: &Model) -> Vec<poll::PollKey> {
+    let folded = m
+        .settings()
+        .inspector_collapsed
+        .iter()
+        .any(|id| id == SectionId::Files.as_str());
+    if st.away || folded {
+        return Vec::new();
+    }
+    looks(m)
 }
 
 /// The look itself: `git_changes` against HEAD.
@@ -326,11 +416,16 @@ fn look(key: &poll::PollKey) -> impl iced::futures::Stream<Item = Message> + use
     .map(|(key, answer)| Message::Inspector(Msg::Changes(key, answer.map(Arc::new))))
 }
 
-/// Focus coming and going, for the polling.
-fn window_focus(event: iced::Event, _status: event::Status, _id: window::Id) -> Option<Message> {
+/// Focus coming and going, for the polling. A window that closes has the
+/// focus no more, whether or not it said so first.
+fn window_focus(event: iced::Event, _status: event::Status, id: window::Id) -> Option<Message> {
     match event {
-        iced::Event::Window(window::Event::Focused) => Some(Message::Inspector(Msg::Away(false))),
-        iced::Event::Window(window::Event::Unfocused) => Some(Message::Inspector(Msg::Away(true))),
+        iced::Event::Window(window::Event::Focused) => {
+            Some(Message::Inspector(Msg::Focus(id, true)))
+        }
+        iced::Event::Window(window::Event::Unfocused | window::Event::Closed) => {
+            Some(Message::Inspector(Msg::Focus(id, false)))
+        }
         _ => None,
     }
 }
@@ -357,13 +452,16 @@ fn arrows(event: iced::Event, status: event::Status, _id: window::Id) -> Option<
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let mut all = vec![event::listen_with(window_focus)];
-    if let Some(key) = poll_key(st, m) {
+    for key in poll_keys(st, m) {
         all.push(Subscription::run_with(key, look));
     }
-    if sections::counts_time(m) {
+    if windows_showing(m)
+        .into_iter()
+        .any(|w| sections::counts_time(m, w))
+    {
         all.push(time::every(CLOCK).map(|_| Message::Inspector(Msg::Clock)));
     }
-    if shown(m) && m.ui.focus == Some(Focus::Region(Region::Inspector)) {
+    if focused_shows(m) && m.ui.focus == Some(Focus::Region(Region::Inspector)) {
         all.push(event::listen_with(arrows));
     }
     Subscription::batch(all)
@@ -375,7 +473,12 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
 /// marks the region focused, and the arrows then resize.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
     let _ = st;
-    (region == Region::Inspector && shown(m)).then(Task::none)
+    (region == Region::Inspector && focused_shows(m)).then(Task::none)
+}
+
+/// Whether the window the person is in shows the column.
+fn focused_shows(m: &Model) -> bool {
+    m.focused_window().is_some_and(|w| shown_in(m, w))
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
@@ -392,7 +495,7 @@ pub fn on_intent(
         // idempotent, so it does not matter that the shell may also have
         // opened it.
         Intent::FocusInspector => {
-            if !shown(m) {
+            if !focused_shows(m) {
                 m.apply(StoreAction::UpdateSettings(Patch::new(
                     |settings: &mut Settings| settings.inspector_open = true,
                 )));
