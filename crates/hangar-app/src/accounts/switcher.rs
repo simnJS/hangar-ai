@@ -350,4 +350,57 @@ mod tests {
         assert!(main.find("Perso").is_err());
         assert!(main.find("Principal").is_err());
     }
+
+    /// The restart button's label wraps onto two lines in the menu's width:
+    /// the button grows with it, and its text stays above the next button.
+    /// Drawn to `<folder>/switcher-ask-<scope>-<locale>.png` when
+    /// `HANGAR_ACCOUNTS_SNAPSHOTS` names a folder.
+    #[test]
+    fn the_question_keeps_a_label_that_wraps_inside_its_button() {
+        for locale in Locale::ALL {
+            for (scope, restart, name) in [
+                (
+                    SwitchScope::Workspace,
+                    Key::AccountsSwitcherRestartHere,
+                    "here",
+                ),
+                (
+                    SwitchScope::Default,
+                    Key::AccountsSwitcherRestartEverywhere,
+                    "everywhere",
+                ),
+            ] {
+                let h = Harness::new(locale, "graphite");
+                let ctx = h.ctx();
+                let accounts = live(ctx).accounts.as_deref().expect("the accounts");
+                let ws: WsId = "w1".into();
+                let mut ui = simulate(menu::panel(
+                    ctx.theme,
+                    ask(ctx, accounts, &ws, &"perso".to_string(), scope),
+                ));
+                let label = ctx.t(restart).into_owned();
+                let restart = ui.find(label.as_str()).expect("the restart label");
+                let next = ui
+                    .find(ctx.t(Key::AccountsSwitcherNextLaunch).as_ref())
+                    .expect("the next-launch label");
+                let (restart, next) = (restart.bounds(), next.bounds());
+                assert!(
+                    restart.height > next.height * 1.5,
+                    "{label:?} fits on one line; the test needs one that wraps"
+                );
+                assert!(
+                    restart.y + restart.height + tokens::space::MD <= next.y,
+                    "{label:?} runs into the button under it: {restart:?} and {next:?}"
+                );
+                if let Some(folder) = std::env::var_os("HANGAR_ACCOUNTS_SNAPSHOTS") {
+                    let folder = std::path::PathBuf::from(folder);
+                    std::fs::create_dir_all(&folder).expect("the folder");
+                    ui.snapshot(&hangar_theme::to_iced(ctx.theme))
+                        .expect("the question can be drawn")
+                        .matches_image(folder.join(format!("switcher-ask-{name}-{}", locale.id())))
+                        .expect("the picture can be written");
+                }
+            }
+        }
+    }
 }

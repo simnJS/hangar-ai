@@ -25,11 +25,15 @@
 
 use hangar_theme::tokens::{font_size, size, space};
 use hangar_theme::{Theme, fonts, style};
-use iced::widget::{button, container, row, text};
-use iced::{Alignment, Element, Length, Padding};
+use iced::widget::{Space, button, container, row, text};
+use iced::{Alignment, Element, Length, Padding, alignment};
 
 use crate::icon::{Icon, icon};
 use crate::tip;
+
+/// The space above and below the label of a [`Btn`]: what is left around a
+/// label that wraps onto a second line.
+const PADDING_Y: f32 = 4.0;
 
 /// Which of the web app's `.btn` variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -164,7 +168,10 @@ impl<'a, M: Clone + 'a> From<Btn<'a, M>> for Element<'a, M> {
             } else {
                 fonts::ui_medium()
             };
-            text(label).size(b.size.text()).font(font)
+            text(label)
+                .size(b.size.text())
+                .font(font)
+                .align_x(alignment::Horizontal::Center)
         });
         match (glyph, label, b.icon_after) {
             (Some(glyph), Some(label), false) => content = content.push(glyph).push(label),
@@ -174,7 +181,13 @@ impl<'a, M: Clone + 'a> From<Btn<'a, M>> for Element<'a, M> {
             (None, None, _) => {}
         }
 
-        let mut centred = container(content).center_y(Length::Fill);
+        // The strut keeps the button at its size's height; a label that wraps
+        // in a narrow button makes it taller instead of spilling out of it.
+        let strut = Space::new()
+            .width(0)
+            .height(b.size.height() - 2.0 * PADDING_Y);
+        let content = row![strut, content].align_y(Alignment::Center);
+        let mut centred = container(content);
         if b.width == Length::Fill {
             centred = centred.center_x(Length::Fill);
         }
@@ -186,9 +199,8 @@ impl<'a, M: Clone + 'a> From<Btn<'a, M>> for Element<'a, M> {
             Kind::Danger => style::button::danger(t)(theme, status),
         };
         let built = button(centred)
-            .padding(Padding::from([0.0, b.size.padding_x()]))
+            .padding(Padding::from([PADDING_Y, b.size.padding_x()]))
             .width(b.width)
-            .height(b.size.height())
             .style(look)
             .on_press_maybe(b.on_press);
         match b.tip {
