@@ -32,9 +32,11 @@ use hangar_core::git::{
 
 use super::events::{JournalEntry, OrchestratorEvent};
 use super::port::{Announcement, Caller, NewPane, WorkerInit};
-use super::roles::{all_pane_names, orchestration_of, orchestrator, pick_pane_name, workers_of};
 use crate::state::PaneActivity;
-use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
+use crate::state::pane_names::{all_pane_names, pick_pane_name};
+use crate::state::roles::{
+    NEEDS_YOU_LABEL, READY_TO_LAND_LABEL, orchestration_of, orchestrator_of, workers_of,
+};
 use crate::state::types::{AgentId, AppState, MAX_PANES, Pane, PaneId, PaneRole, Workspace, WsId};
 
 /// How many ports a worker gets: `HANGAR_PORT_COUNT` (pty.rs).
@@ -550,7 +552,7 @@ fn orchestrator_calling<'a>(
     caller: &Caller,
     op: &str,
 ) -> Result<&'a Pane, String> {
-    let orchestrator = orchestrator(ws);
+    let orchestrator = orchestrator_of(ws);
     let me = caller
         .pane_id
         .as_deref()
@@ -610,8 +612,8 @@ fn name_arg(
     let Some(wanted) = wanted else {
         let taken = all_pane_names(&state.workspaces)
             .into_iter()
-            .chain(starting.names.iter().map(String::as_str))
-            .chain(recent.iter().map(String::as_str));
+            .chain(starting.names.iter().cloned())
+            .chain(recent.iter().cloned());
         return Ok(pick_pane_name(taken));
     };
     if wanted.contains(['"', '`', '$', '\r', '\n']) || wanted.chars().count() > 40 {
@@ -943,7 +945,7 @@ async fn start_steps(
     let near = others
         .last()
         .copied()
-        .or_else(|| orchestrator(current))
+        .or_else(|| orchestrator_of(current))
         .map(|pane| pane.id.clone());
     let pane = NewPane {
         agent: AgentId::Claude,

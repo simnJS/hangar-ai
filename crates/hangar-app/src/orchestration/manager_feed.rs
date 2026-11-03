@@ -28,10 +28,9 @@ use serde::{Deserialize, Serialize};
 use hangar_core::board::Task;
 
 use super::events::{EngineIo, timing::*};
-use super::roles::manager_of;
 use super::text::{MAX_TEXT, is_hangar_author, one_line, task_ref};
 use crate::state::AgentActivity;
-use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
+use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL, manager_of};
 use crate::state::types::{AppState, Pane, PaneId, PaneRole, Workspace, WsId};
 
 /// What waits for the person (`ManagerEvent`): the four things the phone's
@@ -677,6 +676,19 @@ impl ManagerFeed {
         }
         self.read_all(io, now);
         self.watch_panes(io, now);
+    }
+
+    /// The boards a tick or a timer of this feed reads: every project's but
+    /// the HQ's, while someone hears what waits for the person. The runtime
+    /// reads them before it locks the feed.
+    pub fn watched_boards(&self, io: &dyn EngineIo) -> Vec<String> {
+        if self.stopped || !self.listened(io) {
+            return Vec::new();
+        }
+        Self::watched(&io.state())
+            .into_iter()
+            .map(|ws| ws.cwd)
+            .collect()
     }
 
     /// An agent changed a board: they are read again shortly.

@@ -27,9 +27,9 @@ use super::brief_text::{
 use super::events::{JournalEntry, by_rank, describe_event};
 use super::manager_feed::{ManagerJournalEntry, ManagerNews, describe_manager_event};
 use super::projects::{ProjectSummary, render_overview};
-use super::roles::{orchestration_of, orchestrator, workers_of};
 use super::text::{ago, clip, clock, flat, same_name, task_ref};
 use crate::state::PaneActivity;
+use crate::state::roles::{orchestration_of, orchestrator_of, workers_of};
 use crate::state::types::{AgentId, AppState, Pane, PaneRole, Workspace};
 
 /// A pane's part in an orchestration, as its mod builds the session from it.
@@ -467,7 +467,7 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
 
 fn worker_briefing(ws: &Workspace, pane: &Pane, inputs: &BriefingInputs<'_>) -> Briefing {
     let settings = orchestration_of(ws);
-    let orchestrator = orchestrator(ws);
+    let orchestrator = orchestrator_of(ws);
     let task_id = pane.task_id.as_deref().filter(|id| !id.is_empty());
     let task = task_id.and_then(|id| inputs.tasks.iter().find(|task| task.id == id));
     let reference = match task_id {

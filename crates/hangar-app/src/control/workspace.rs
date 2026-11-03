@@ -5,13 +5,13 @@
 use serde_json::{Value, json};
 
 use crate::message::{GitOrigin, GitRequest};
-use crate::state::roles::orchestrator_of;
+use crate::state::roles::{orchestration_of, orchestrator_of};
 use crate::state::types::OrchestrationSettings;
 use crate::state::{AgentActivity, AppState, PaneId, Patch, Workspace};
 
 use super::panes::{announce, tell};
 use super::port::{FromGitOutcome, MadeWorkspace, ModelCmd, Port, activity_of};
-use super::run::{caller_workspace, orchestration_of};
+use super::run::caller_workspace;
 use super::types::{Caller, ControlEvent, text};
 
 /// The longest check command Hangar keeps: a command, not a script.
@@ -203,15 +203,20 @@ pub async fn set_check(
         ));
     };
     let settings = orchestration_of(ws);
-    let updated = OrchestrationSettings {
-        check_command: Some(command.clone()),
-        ..settings.clone()
-    };
+    // The patch sets the check command alone, on the workspace as it stands
+    // when the UI thread applies it. Built from the request's snapshot, a
+    // whole block would put back what the person changed in the panel in
+    // between (the workers, the models, automatic landing).
+    let saved = command.clone();
     tell(
         port,
         ModelCmd::UpdateWorkspace {
             ws: ws.id.clone(),
-            patch: Patch::new(move |ws: &mut Workspace| ws.orchestration = Some(updated.clone())),
+            patch: Patch::new(move |ws: &mut Workspace| {
+                ws.orchestration
+                    .get_or_insert_with(OrchestrationSettings::default)
+                    .check_command = Some(saved.clone());
+            }),
         },
     )
     .await;

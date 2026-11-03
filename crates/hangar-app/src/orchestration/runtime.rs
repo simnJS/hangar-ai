@@ -10,7 +10,8 @@
 //! Hangar Mobile plugs in runs (its activity log, P20). The engines are
 //! synchronous state machines over `EngineIo`; every call that may read a
 //! board goes to the blocking pool, so the async threads never wait on a
-//! file.
+//! file, and reads its boards before it locks the engines, so they never
+//! wait on one through the lock either.
 //!
 //! The rest of the app reaches the runtime through `OrchestrationHandle`,
 //! which `orchestration::Live` holds: P18's control bus for the `worker_*`
@@ -18,6 +19,7 @@
 //! journals, the projects and the push sink, this package for the person's
 //! « Arrêter les workers » and a role given or taken.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -27,7 +29,7 @@ use tokio::sync::{Notify, mpsc};
 use hangar_core::board::Task;
 
 use super::brief;
-use super::events::{JournalEntry, OrchestratorEngine, OrchestratorEvent};
+use super::events::{EngineIo, JournalEntry, OrchestratorEngine, OrchestratorEvent};
 use super::live::LivePort;
 use super::manager_feed::{ManagerFeed, ManagerJournalEntry, ManagerNewsEntry, ManagerSink};
 use super::port::Caller;
@@ -35,8 +37,9 @@ use super::projects::{self, ProjectSummary};
 use super::text::now_ms;
 use super::worker::{self, Starting};
 use crate::services::Services;
+use crate::state::PaneActivity;
 use crate::state::live::BridgeEvent;
-use crate::state::types::{PaneId, PaneRole, Workspace};
+use crate::state::types::{AppState, PaneId, PaneRole, Workspace};
 
 /// How often the watched boards are read and the workers looked at.
 const TICK: Duration = Duration::from_secs(10);
@@ -67,6 +70,69 @@ pub type Ticker = Box<dyn FnMut(&OrchestrationHandle, u64) + Send>;
 pub struct Engines {
     pub events: OrchestratorEngine,
     pub manager: ManagerFeed,
+}
+
+impl Engines {
+    /// Every board a tick or a timer of either engine reads, once each.
+    fn watched_boards(&self, io: &dyn EngineIo) -> Vec<String> {
+        let mut cwds = self.events.watched_boards(io);
+        for cwd in self.manager.watched_boards(io) {
+            if !cwds.contains(&cwd) {
+                cwds.push(cwd);
+            }
+        }
+        cwds
+    }
+}
+
+/// Whether a piece of the engines' work reads boards.
+#[derive(Debug, Clone, Copy)]
+enum Reads {
+    Nothing,
+    Boards,
+}
+
+/// The engines' io for one piece of their work: the boards it reads, read
+/// before the engines were locked, and the rest of `io` as it is. A board
+/// nobody expected (a workspace pinned an orchestrator in between) is read
+/// as before, under the lock: late, never missed.
+struct Prefetched<'a> {
+    io: &'a dyn EngineIo,
+    boards: HashMap<String, Result<Vec<Task>, String>>,
+}
+
+impl<'a> Prefetched<'a> {
+    fn read(io: &'a dyn EngineIo, cwds: Vec<String>) -> Self {
+        let mut boards = HashMap::new();
+        for cwd in cwds {
+            if let std::collections::hash_map::Entry::Vacant(entry) = boards.entry(cwd) {
+                let read = io.load_board(entry.key());
+                entry.insert(read);
+            }
+        }
+        Prefetched { io, boards }
+    }
+}
+
+impl EngineIo for Prefetched<'_> {
+    fn state(&self) -> Arc<AppState> {
+        self.io.state()
+    }
+
+    fn activity(&self, pane: &str) -> Option<PaneActivity> {
+        self.io.activity(pane)
+    }
+
+    fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
+        match self.boards.get(cwd) {
+            Some(read) => read.clone(),
+            None => self.io.load_board(cwd),
+        }
+    }
+
+    fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
+        self.io.enqueue(pane, text, from)
+    }
 }
 
 struct Shared {
@@ -176,13 +242,27 @@ impl OrchestrationHandle {
             .min()
     }
 
-    /// Runs `work` on the engines, on the blocking pool: it may read boards.
-    async fn with_engines(&self, work: impl FnOnce(&mut Engines, &LivePort, u64) + Send + 'static) {
+    /// Runs `work` on the engines, on the blocking pool. With `Reads::Boards`
+    /// the boards it reads are read first, with the engines' lock let go:
+    /// `post`, the journals and the briefings take that lock from the async
+    /// threads, and would otherwise wait out every board of every workspace
+    /// on each tick.
+    async fn with_engines(
+        &self,
+        reads: Reads,
+        work: impl FnOnce(&mut Engines, &dyn EngineIo, u64) + Send + 'static,
+    ) {
         let handle = self.clone();
         let done = tokio::task::spawn_blocking(move || {
             let port = handle.port();
+            let wanted = match reads {
+                // Asked under the lock, which reads nothing, and let go.
+                Reads::Boards => handle.engines().watched_boards(&port),
+                Reads::Nothing => Vec::new(),
+            };
+            let io = Prefetched::read(&port, wanted);
             let mut engines = handle.engines();
-            work(&mut engines, &port, now_ms());
+            work(&mut engines, &io, now_ms());
         })
         .await;
         if let Err(error) = done {
@@ -191,7 +271,8 @@ impl OrchestrationHandle {
     }
 
     async fn on_message(&self, message: EngineMsg) {
-        self.with_engines(move |engines, port, now| match message {
+        // A report or an exit posts events and sets timers; no board is read.
+        self.with_engines(Reads::Nothing, move |engines, port, now| match message {
             EngineMsg::Bridge { pane, event } => {
                 engines.events.bridge_event(port, &pane, &event, now)
             }
@@ -205,7 +286,7 @@ impl OrchestrationHandle {
     }
 
     async fn fire_due(&self) {
-        self.with_engines(|engines, port, now| {
+        self.with_engines(Reads::Boards, |engines, port, now| {
             for _ in 0..MAX_FIRED {
                 if !engines.events.fire_due(port, now) {
                     break;
@@ -223,7 +304,7 @@ impl OrchestrationHandle {
     /// Every 10 s: the orchestrators' boards and workers, then what waits
     /// for the person (`engine.tick()`, then `manager.tick`).
     async fn tick(&self) {
-        self.with_engines(|engines, port, now| {
+        self.with_engines(Reads::Boards, |engines, port, now| {
             engines.events.tick(port, now);
             engines.manager.tick(port, now);
         })
@@ -320,5 +401,109 @@ impl OrchestrationHandle {
     /// `remote_state`).
     pub async fn load_projects(&self) -> Vec<ProjectSummary> {
         projects::load_projects(&self.port()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::orchestration::testkit::{START, pane, task, workspace};
+    use crate::state::AgentActivity;
+
+    /// Boards on disk, counted as they are read.
+    struct Disk {
+        state: AppState,
+        reads: Cell<usize>,
+    }
+
+    impl EngineIo for Disk {
+        fn state(&self) -> Arc<AppState> {
+            Arc::new(self.state.clone())
+        }
+
+        /// The manager's session runs, so the feed listens.
+        fn activity(&self, pane: &str) -> Option<PaneActivity> {
+            (pane == "m").then(|| PaneActivity {
+                workspace_id: "hq".into(),
+                activity: AgentActivity::Idle,
+                bridged: true,
+            })
+        }
+
+        fn load_board(&self, _cwd: &str) -> Result<Vec<Task>, String> {
+            self.reads.set(self.reads.get() + 1);
+            Ok(vec![task("t1")])
+        }
+
+        fn enqueue(&self, _pane: &str, _text: &str, _from: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn disk() -> Disk {
+        let hq = Workspace {
+            hq: Some(true),
+            ..workspace("hq", "HQ", vec![pane("m", "Max", Some(PaneRole::Manager))])
+        };
+        Disk {
+            state: AppState {
+                workspaces: vec![
+                    workspace(
+                        "shop",
+                        "Shop",
+                        vec![pane("o", "Ava", Some(PaneRole::Orchestrator))],
+                    ),
+                    workspace("blog", "Blog", vec![pane("x", "Leo", None)]),
+                    hq,
+                ],
+                ..AppState::default()
+            },
+            reads: Cell::new(0),
+        }
+    }
+
+    #[test]
+    fn reads_every_board_a_tick_needs_before_the_engines_are_locked() {
+        let disk = disk();
+        let mut engines = Engines::default();
+        // The orchestrator's board and every project's but the HQ's, once.
+        let wanted = engines.watched_boards(&disk);
+        assert_eq!(wanted, ["C:\\dev\\shop", "C:\\dev\\blog"]);
+        let io = Prefetched::read(&disk, wanted);
+        assert_eq!(disk.reads.get(), 2);
+        // What runs with the engines locked reads nothing from the disk.
+        engines.events.tick(&io, START);
+        engines.manager.tick(&io, START);
+        engines.events.board_changed(START);
+        engines.manager.board_changed(&io, START);
+        let later = START + 60_000;
+        while engines.events.fire_due(&io, later) {}
+        while engines.manager.fire_due(&io, later) {}
+        assert_eq!(disk.reads.get(), 2);
+        // And the engines did read them.
+        assert_eq!(engines.events.tasks("shop").len(), 1);
+    }
+
+    #[test]
+    fn reads_a_board_nobody_expected_late_rather_than_never() {
+        let disk = disk();
+        let io = Prefetched::read(&disk, Vec::new());
+        assert_eq!(
+            io.load_board("C:\\dev\\shop").map(|tasks| tasks.len()),
+            Ok(1)
+        );
+        assert_eq!(disk.reads.get(), 1);
+    }
+
+    #[test]
+    fn a_stopped_engine_and_a_feed_nobody_hears_want_no_board() {
+        let mut disk = disk();
+        disk.state.workspaces.retain(|ws| ws.hq != Some(true));
+        let mut engines = Engines::default();
+        assert_eq!(engines.watched_boards(&disk), ["C:\\dev\\shop"]);
+        engines.events.stop();
+        assert!(engines.watched_boards(&disk).is_empty());
     }
 }

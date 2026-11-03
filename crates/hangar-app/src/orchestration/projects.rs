@@ -23,9 +23,8 @@ use hangar_core::memory::MemoryEntry;
 
 use super::brief::{find_plan, plan_title};
 use super::events::{JournalEntry, by_rank, describe_event};
-use super::roles::{orchestrator, workers_of};
 use super::text::{clip, clock, flat};
-use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
+use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL, orchestrator_of, workers_of};
 use crate::state::types::{AgentId, AppState, Workspace, WsId};
 use crate::state::{AgentActivity, PaneActivity};
 
@@ -290,7 +289,7 @@ fn summarize(
         open: port.is_open(&ws.id),
         asleep: port.asleep(&ws.id),
         git,
-        orchestrator: orchestrator(ws).map(|pane| ProjectPane {
+        orchestrator: orchestrator_of(ws).map(|pane| ProjectPane {
             name: pane.name.clone(),
             activity: activity_of(&pane.id),
         }),
