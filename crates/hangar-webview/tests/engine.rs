@@ -310,3 +310,72 @@ fn a_line_that_is_no_command_is_an_error_to_report_not_the_end_of_the_helper() {
     drop(input);
     assert!(helper.wait().unwrap().success());
 }
+
+#[test]
+#[ignore = "opens a window: needs a display"]
+fn a_window_made_hidden_loads_is_shown_and_hidden_by_command_and_keeps_its_page() {
+    let (client, events) = Client::spawn(HELPER).unwrap();
+    wait_for(&events, "ready", |event| {
+        matches!(event, Event::Ready { .. })
+    });
+
+    // Not shown, and not asking for the keyboard: a PDF that waits to be known
+    // drawable, a tab that is behind another.
+    client
+        .open(
+            OpenWindow::new("h", Content::html("<title>kept</title><p>page</p>"))
+                .size(300, 200)
+                .hidden()
+                .unfocused(),
+        )
+        .unwrap();
+    // It loads all the same.
+    wait_for(&events, "the page loading while hidden", |event| {
+        matches!(
+            event,
+            Event::PageLoad {
+                state: PageLoadState::Finished,
+                ..
+            }
+        )
+    });
+    let ask = |script: &str, token: &str| {
+        client.eval_with_token("h", script, token).unwrap();
+        match wait_for(
+            &events,
+            "a result",
+            |event| matches!(event, Event::EvalResult { token: t, .. } if t == token),
+        ) {
+            Event::EvalResult { result, .. } => result,
+            _ => unreachable!(),
+        }
+    };
+    // What the engine says of the window is what the page sees of it.
+    assert_eq!(ask("document.visibilityState", "a"), json!("hidden"));
+    ask("window.__kept = 42", "set");
+
+    client.set_visible("h", true, false).unwrap();
+    // The command is queued behind the window system's own: wait for the page
+    // to see it.
+    let deadline = Instant::now() + PATIENCE;
+    while ask("document.visibilityState", "b") != json!("visible") {
+        assert!(Instant::now() < deadline, "the window never became visible");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    client.set_visible("h", false, false).unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while ask("document.visibilityState", "c") != json!("hidden") {
+        assert!(Instant::now() < deadline, "the window never was hidden");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Hiding is not closing: the page is the one it was.
+    assert_eq!(ask("window.__kept", "kept"), json!(42));
+
+    client.close("h").unwrap();
+    wait_for(&events, "the window closing", |event| {
+        matches!(event, Event::WindowClosed { .. })
+    });
+    client.quit().unwrap();
+    assert!(client.wait(PATIENCE).is_some_and(|status| status.success()));
+}

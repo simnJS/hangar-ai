@@ -409,6 +409,16 @@ impl Client {
         })
     }
 
+    /// Show or hide a window, keeping its page (see [`Command::SetVisible`]).
+    /// `focus` asks for the keyboard when it is shown.
+    pub fn set_visible(&self, window: &str, visible: bool, focus: bool) -> Result<(), Closed> {
+        self.send(Command::SetVisible {
+            window: window.into(),
+            visible,
+            focus,
+        })
+    }
+
     pub fn close(&self, window: &str) -> Result<(), Closed> {
         self.send(Command::Close {
             window: window.into(),
