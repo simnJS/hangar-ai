@@ -94,6 +94,7 @@ demand. The main executable does not link a webview library at all.
 | `hangar-kit-host` | lib | Runs kit tabs in wasmtime with limits and declared permissions; renders `hangar-kit-ui` trees with iced; `KitApi` trait the app implements. | wasmtime, iced, hangar-kit-ui (then hangar-theme, hangar-ui) |
 | `hangar-webview` | lib + bin | Lib: protocol + client the app uses (serde only). Bin (feature `engine`): tao + wry window(s), custom-scheme requests answered by the parent, `window.hangar` bridge for HTML kits. | serde; wry, tao behind `engine` |
 | `hangar-i18n` | lib | The interface strings, English and French, generated from the old `src/i18n.ts` and `src/strings/*` with the same keys; plurals, placeholders, French typography. | none |
+| `hangar-model3d` | lib | The 3D model preview replacing three.js: glTF/GLB, OBJ, STL, PLY loaded off the UI thread, drawn with wgpu in an iced `shader` widget, orbit camera, framing, grid, PNG capture. | iced (its wgpu) |
 | `hangar-update` | lib | The self-updater replacing `tauri-plugin-updater`: same `latest.json`, same minisign key, per-platform install and relaunch. | ureq |
 | `hangar-app` | bin `hangar-ai` | The application: iced daemon (multi-window), global state (port of `store.tsx` and `src/lib/*`), every view (port of `src/components/*`), i18n, wiring to core events, PTYs to terminals, kits to kit-host or webview. `hangar-ai --mcp` stays the stdio MCP server. | all of the above |
 
@@ -162,6 +163,7 @@ worktree and branch, merged into `feat/native-rust` by the coordinator.
 | W1.inventory | `docs/native/inventory-frontend.md` | The porting map and wave 3's packages. |
 | W1.i18n | `hangar-i18n` | Strings generated from the TS dictionaries, translate API, ported tests. |
 | W1.update | `hangar-update` | Updater compatible with the releases' `latest.json`. |
+| W1.model3d | `hangar-model3d` | Native 3D preview (was three.js). |
 
 **Wave 2 — the shell (after W1.theme and W1.core)**
 
@@ -216,7 +218,7 @@ jobs = 16
 
 Working rules:
 
-- One package, one worktree, one branch off `feat/native-rust`; touch only the files your package owns, plus additions to the root `Cargo.toml` and `Cargo.lock`. Never a bare `cargo update`; keep `windows`/`windows-core` at 0.61 (see the cpal note in `crates/hangar-core/Cargo.toml`).
+- One package, one worktree, one branch off `feat/native-rust`. A worktree made by the agent tooling starts from `main`: check `git merge-base --is-ancestor 44cfd25 HEAD` and, if it fails, `git reset --hard feat/native-rust` before anything else. touch only the files your package owns, plus additions to the root `Cargo.toml` and `Cargo.lock`. Never a bare `cargo update`; keep `windows`/`windows-core` at 0.61 (see the cpal note in `crates/hangar-core/Cargo.toml`).
 - Before handing in: `cargo fmt`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `cargo test -p <crate>`.
 - The coordinator merges with `git merge --no-ff`, runs `cargo check --workspace && cargo test --workspace`, updates STATUS.md, pushes.
 - Reference for any behaviour: the TS in `src/` and its tests, the Rust in `crates/hangar-core`, `docs/kits.md`, `docs/kit-ui.md`, README.md.
