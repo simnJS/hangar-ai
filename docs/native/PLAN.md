@@ -12,6 +12,7 @@ Companion documents, in this folder:
 | [STATUS.md](STATUS.md) | The log: what has landed, what is running, decisions taken along the way, what is next. Updated after every merge. |
 | [inventory-frontend.md](inventory-frontend.md) | Every surface, state slice, logic module and setting of the React app, with the TS files they come from, and the work packages for porting them. |
 | [core-api.md](core-api.md) | Every former Tauri command and event, and the Rust function or `Event` variant that replaces it in `hangar-core`. |
+| [AGENT_BRIEF.md](AGENT_BRIEF.md) | The page every package agent reads first: setup, crates, rules, done criteria, report. |
 | [kits-native.md](kits-native.md) | The contract of native kit tabs: manifest, WebAssembly ABI, widget catalogue, host API, sandbox. |
 
 ## 1. The goal, in the owner's words
