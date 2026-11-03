@@ -321,6 +321,74 @@ fn the_loop_and_speed_are_kept_for_the_next_load() {
 }
 
 #[test]
+fn a_player_whose_media_raised_an_error_says_so_and_one_that_plays_does_not() {
+    let video = entry(FileKind::Video, "/work/app/clip.mp4");
+    let fake = Fake::new();
+    let mut windows = Windows::default();
+    windows.open(Some(&fake.client), &video, Kind::Video, theme());
+    let name = windows.get(&video.id).unwrap().name.clone();
+    windows.on_event(
+        Some(&fake.client),
+        &Event::Opened {
+            window: name.clone(),
+        },
+    );
+    // After its load, it is asked again in a moment.
+    let handled = windows.on_event(
+        Some(&fake.client),
+        &Event::PageLoad {
+            window: name.clone(),
+            state: PageLoadState::Finished,
+            url: "x".into(),
+        },
+    );
+    assert_eq!(handled.probe.as_deref(), Some(video.id.as_str()));
+    windows.probe_media(&fake.client, &video.id);
+    let sent = fake.commands(3);
+    assert_eq!(sent[2]["type"], "eval");
+    assert_eq!(sent[2]["token"], format!("media:{name}"));
+
+    let said = |windows: &mut Windows, result: Value| {
+        windows.on_event(
+            Some(&fake.client),
+            &Event::EvalResult {
+                window: name.clone(),
+                token: format!("media:{name}"),
+                result,
+            },
+        );
+        windows.get(&video.id).unwrap().media_error.clone()
+    };
+    // An engine without the codec raises an error with no reason to give.
+    assert_eq!(
+        said(&mut windows, serde_json::json!([0, null, ""])),
+        Some(String::new())
+    );
+    assert_eq!(
+        said(
+            &mut windows,
+            serde_json::json!([0, null, "MEDIA_ERR_SRC_NOT_SUPPORTED"])
+        ),
+        Some("MEDIA_ERR_SRC_NOT_SUPPORTED".into())
+    );
+    assert_eq!(said(&mut windows, serde_json::json!([4, 2.0, null])), None);
+    assert_eq!(said(&mut windows, Value::Null), None);
+    // A page that is not a player is not probed.
+    let page = entry(FileKind::Html, "/work/app/index.html");
+    windows.open(Some(&fake.client), &page, Kind::Html, theme());
+    let page_window = windows.get(&page.id).unwrap().name.clone();
+    let handled = windows.on_event(
+        Some(&fake.client),
+        &Event::PageLoad {
+            window: page_window,
+            state: PageLoadState::Finished,
+            url: "x".into(),
+        },
+    );
+    assert_eq!(handled, Handled::default());
+}
+
+#[test]
 fn a_link_the_window_was_stopped_from_following_is_handed_back() {
     let page = entry(FileKind::Html, "/work/app/index.html");
     let mut windows = Windows::default();
@@ -333,7 +401,7 @@ fn a_link_the_window_was_stopped_from_following_is_handed_back() {
             new_window: true,
         },
     );
-    assert_eq!(blocked.as_deref(), Some("https://example.com/"));
+    assert_eq!(blocked.link.as_deref(), Some("https://example.com/"));
 }
 
 #[test]
@@ -487,4 +555,163 @@ fn routes_hand_other_windows_events_to_whoever_asked() {
         Some("kit-a")
     );
     assert_eq!(event_window(&Event::Unknown), None);
+}
+
+/// The whole way a file takes to the helper's window and back, with the real
+/// helper: `cargo build -p hangar-webview --features engine`, then
+/// `HANGAR_WEBVIEW=target/debug/hangar-webview cargo test -p hangar-app
+/// an_html_page_runs -- --ignored --nocapture` on a machine with a display.
+#[tokio::test]
+#[ignore = "needs the helper built with --features engine, and a display"]
+async fn an_html_page_a_pdf_and_a_video_load_through_the_scheme_in_the_real_helper() {
+    let _turn = crate::preview::tests::ROOTS.lock().await;
+    let dir = std::env::temp_dir().join(format!("hangar-webview-real-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let page = dir.join("page.html");
+    std::fs::write(
+        &page,
+        "<!doctype html><title>start</title><body><script>document.title='ran'</script>",
+    )
+    .unwrap();
+    let pdf = dir.join("doc.pdf");
+    std::fs::write(
+        &pdf,
+        std::fs::read(std::env::var("HANGAR_TEST_PDF").unwrap()).unwrap(),
+    )
+    .unwrap();
+    hangar_core::model::model_allow_roots(vec![dir.to_string_lossy().into_owned()])
+        .await
+        .unwrap();
+
+    let helper = hangar_webview::find_helper().expect("HANGAR_WEBVIEW names the helper");
+    let (client, events) = Client::spawn(helper).expect("the helper starts");
+    let client = Arc::new(client);
+    let html = entry(FileKind::Html, &page.to_string_lossy());
+    let document = entry(FileKind::Pdf, &pdf.to_string_lossy());
+    client
+        .open(open_command("preview-html", &html, Kind::Html, theme()))
+        .unwrap();
+    client
+        .open(open_command("preview-pdf", &document, Kind::Pdf, theme()))
+        .unwrap();
+
+    let mut title = None;
+    let mut viewer = None;
+    let mut served = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while (title.is_none() || viewer.is_none()) && Instant::now() < deadline {
+        let Ok(event) = events.recv_timeout(Duration::from_secs(2)) else {
+            continue;
+        };
+        match &event {
+            Event::SchemeRequest(request) => {
+                let response = answer(request);
+                served.push((request.uri.clone(), response.status));
+                client.respond(response).unwrap();
+            }
+            Event::PageLoad {
+                window,
+                state: PageLoadState::Finished,
+                ..
+            } if window == "preview-html" => {
+                client
+                    .eval_with_token(window, "document.title", "html")
+                    .unwrap();
+            }
+            Event::PageLoad {
+                window,
+                state: PageLoadState::Finished,
+                ..
+            } if window == "preview-pdf" => {
+                client
+                    .eval_with_token(window, "navigator.pdfViewerEnabled", "pdf")
+                    .unwrap();
+            }
+            Event::EvalResult { token, result, .. } if token == "html" => {
+                title = Some(result.clone())
+            }
+            Event::EvalResult { token, result, .. } if token == "pdf" => {
+                viewer = Some(result.clone())
+            }
+            other => eprintln!("event: {other:?}"),
+        }
+    }
+    eprintln!("served: {served:#?}");
+    eprintln!("title: {title:?}, pdf viewer: {viewer:?}");
+    assert_eq!(
+        title,
+        Some(Value::String("ran".into())),
+        "the page's script ran"
+    );
+    assert!(served.iter().all(|(_, status)| *status < 400), "{served:?}");
+    assert!(viewer.is_some(), "the engine answered about its PDF viewer");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// And a video: the player asks for byte ranges, which `model::serve` answers
+/// in chunks (`HANGAR_TEST_VIDEO` names an MP4).
+#[tokio::test]
+#[ignore = "needs the helper built with --features engine, and a display"]
+async fn a_video_is_played_from_ranges_in_the_real_helper() {
+    let _turn = crate::preview::tests::ROOTS.lock().await;
+    let dir = std::env::temp_dir().join(format!("hangar-webview-video-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let clip = dir.join("clip.mp4");
+    std::fs::write(
+        &clip,
+        std::fs::read(std::env::var("HANGAR_TEST_VIDEO").unwrap()).unwrap(),
+    )
+    .unwrap();
+    hangar_core::model::model_allow_roots(vec![dir.to_string_lossy().into_owned()])
+        .await
+        .unwrap();
+    let helper = hangar_webview::find_helper().expect("HANGAR_WEBVIEW names the helper");
+    let (client, events) = Client::spawn(helper).expect("the helper starts");
+    let video = entry(FileKind::Video, &clip.to_string_lossy());
+    client
+        .open(open_command("preview-video", &video, Kind::Video, theme()))
+        .unwrap();
+    let mut served = Vec::new();
+    let mut state = None;
+    let started = Instant::now();
+    let mut asked = false;
+    while state.is_none() && started.elapsed() < Duration::from_secs(30) {
+        let Ok(event) = events.recv_timeout(Duration::from_millis(500)) else {
+            if started.elapsed() > Duration::from_secs(3) && !asked {
+                asked = true;
+                let script = "(()=>{const m=document.querySelector('video');\
+                              return m?[m.readyState,m.duration,m.error?m.error.message:null]:null})()";
+                client
+                    .eval_with_token("preview-video", script, "video")
+                    .unwrap();
+            }
+            continue;
+        };
+        match &event {
+            Event::SchemeRequest(request) => {
+                let response = answer(request);
+                let range = request
+                    .headers
+                    .iter()
+                    .find(|header| header.name.eq_ignore_ascii_case("range"))
+                    .map(|header| header.value.clone());
+                served.push((range, response.status, response.body.len()));
+                client.respond(response).unwrap();
+            }
+            Event::EvalResult { token, result, .. } if token == "video" => {
+                state = Some(result.clone())
+            }
+            other => eprintln!("event: {other:?}"),
+        }
+    }
+    eprintln!("served: {served:?}");
+    eprintln!("video: {state:?}");
+    assert!(!served.is_empty());
+    assert!(
+        served.iter().all(|(_, status, _)| *status < 400),
+        "{served:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

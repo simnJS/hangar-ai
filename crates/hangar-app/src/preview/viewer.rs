@@ -68,6 +68,8 @@ pub enum ViewerMsg {
     Bytes(Result<Bytes, String>),
     ToggleSource,
     ToggleWrap,
+    /// The lines scrolled: which rows to build next.
+    CodeScrolled(code_lines::Scroll),
     Copy,
     Image(image::Msg),
     Markdown(markdown::Msg),
@@ -87,6 +89,8 @@ pub struct ViewerState {
     pub rendered: Option<Rendered>,
     /// Which text a colouring is for.
     pub generation: u64,
+    /// Where the lines of the text are scrolled to.
+    pub scroll: code_lines::Scroll,
 }
 
 impl ViewerState {
@@ -99,6 +103,7 @@ impl ViewerState {
             picture: Picture::default(),
             rendered: None,
             generation: 0,
+            scroll: code_lines::Scroll::default(),
         }
     }
 
@@ -206,7 +211,7 @@ fn viewer_view<'a>(
             ];
             column![
                 parts::bar(t, tools, aside),
-                code_stage(st, ctx, load, entry),
+                code_stage(st, ctx, load, entry, viewer.scroll),
             ]
             .into()
         }
@@ -242,7 +247,7 @@ fn viewer_view<'a>(
                 .collect();
             let stage: Element<'a, ViewerMsg> =
                 if viewer.source {
-                    code_stage(st, ctx, load, entry)
+                    code_stage(st, ctx, load, entry, viewer.scroll)
                 } else {
                     reading::stage(ctx, load, &entry.title, ViewerMsg::Retry, |_| match &viewer
                         .rendered
@@ -289,7 +294,7 @@ fn viewer_view<'a>(
                     .collect();
                 return column![
                     parts::bar(t, tools, aside),
-                    code_stage(st, ctx, load, entry)
+                    code_stage(st, ctx, load, entry, viewer.scroll)
                 ]
                 .into();
             }
@@ -329,7 +334,7 @@ fn viewer_view<'a>(
             let bar = windowed::bar(ctx, &bar, ViewerMsg::Window, ViewerMsg::ToggleWrap, copy);
             let stage: Element<'a, ViewerMsg> = if kind == FileKind::Html && viewer.source {
                 let load = viewer.load.as_ref().unwrap_or(&Load::Loading);
-                code_stage(st, ctx, load, entry)
+                code_stage(st, ctx, load, entry, viewer.scroll)
             } else {
                 let card = windowed::card(ctx, entry, kind_of, win, ViewerMsg::Window);
                 if kind == FileKind::Html {
@@ -354,16 +359,23 @@ fn code_stage<'a>(
     ctx: Ctx<'a>,
     load: &'a Load,
     entry: &'a Entry,
+    scroll: code_lines::Scroll,
 ) -> Element<'a, ViewerMsg> {
     let t = ctx.theme;
     let wrap = st.wrap;
+    let id = code_id(&entry.id);
     reading::stage(ctx, load, &entry.title, ViewerMsg::Retry, move |ready| {
-        code_lines::view(t, &ready.lines, wrap)
+        code_lines::view(t, &ready.lines, wrap, scroll, ViewerMsg::CodeScrolled, id)
     })
 }
 
 pub fn scroll_id(entry: &str) -> iced::widget::Id {
     iced::widget::Id::from(format!("preview-page:{entry}"))
+}
+
+/// The scrollable of a text's lines.
+pub fn code_id(entry: &str) -> iced::widget::Id {
+    iced::widget::Id::from(format!("preview-code:{entry}"))
 }
 
 pub fn stage_id(entry: &str) -> iced::widget::Id {

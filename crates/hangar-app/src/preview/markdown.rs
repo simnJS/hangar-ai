@@ -584,9 +584,8 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
         .spacing(4);
         match level {
             HeadingLevel::H1 => {
-                words = words.push(
-                    iced::widget::rule::horizontal(1).style(style::rule::strong(self.t)),
-                );
+                words = words
+                    .push(iced::widget::rule::horizontal(1).style(style::rule::strong(self.t)));
             }
             HeadingLevel::H2 => {
                 words = words

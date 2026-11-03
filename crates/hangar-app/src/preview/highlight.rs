@@ -436,11 +436,23 @@ mod tests {
     fn the_names_of_a_mapping_are_attributes_and_its_values_are_what_they_are() {
         let json = highlight_file("{\"key\": \"text\"}", "a.json", Some("json")).unwrap();
         assert!(has(&json, 0, "key", Class::Attr), "{:?}", classes(&json, 0));
-        assert!(has(&json, 0, "text", Class::String), "{:?}", classes(&json, 0));
+        assert!(
+            has(&json, 0, "text", Class::String),
+            "{:?}",
+            classes(&json, 0)
+        );
         let yaml = highlight_file("name: hangar\n", "a.yml", Some("yaml")).unwrap();
-        assert!(has(&yaml, 0, "name", Class::Attr), "{:?}", classes(&yaml, 0));
+        assert!(
+            has(&yaml, 0, "name", Class::Attr),
+            "{:?}",
+            classes(&yaml, 0)
+        );
         let toml = highlight_file("name = \"hangar\"\n", "a.toml", Some("ini")).unwrap();
-        assert!(has(&toml, 0, "hangar", Class::String), "{:?}", classes(&toml, 0));
+        assert!(
+            has(&toml, 0, "hangar", Class::String),
+            "{:?}",
+            classes(&toml, 0)
+        );
     }
 
     #[test]

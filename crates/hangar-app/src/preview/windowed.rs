@@ -215,6 +215,28 @@ pub fn card<'a, M: Clone + 'a>(
             &entry.title,
             Some(ctx.t(Key::PreviewWindowStarting).into_owned()),
         ),
+        // The engine could not play it (no codec): the TS said so in place of
+        // the player, with a way to find the file.
+        Some(WinState::Open) if win.is_some_and(|win| win.media_error.is_some()) => {
+            let reason = win
+                .and_then(|win| win.media_error.clone())
+                .unwrap_or_default();
+            parts::stage_message(
+                t,
+                mark_of(kind),
+                Feel::Warning,
+                ctx.t(Key::PreviewMediaFailed),
+                Some(if reason.is_empty() {
+                    ctx.t(Key::PreviewMediaFailedHint).into_owned()
+                } else {
+                    format!("{} ({reason})", ctx.t(Key::PreviewMediaFailedHint))
+                }),
+                Some((
+                    ctx.t(Key::PreviewShowInFolder).into_owned(),
+                    act(Action::ShowInFolder),
+                )),
+            )
+        }
         Some(WinState::Open) => shown_apart(
             ctx,
             entry,

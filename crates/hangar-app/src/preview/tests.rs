@@ -156,13 +156,20 @@ impl Harness {
             .preview
             .entry(id)
             .map_or(0, |entry| entry.revision);
-        let _ = viewer_update(&mut self.st, &mut self.model, &self.env, id, revision, msg);
+        let _ = viewer_update(&mut self.st, &self.model, &self.env, id, revision, msg);
         self.tick();
     }
 
     /// What the reading and colouring tasks of a text file end with.
     fn read_text(&mut self, id: &str) {
-        let path = self.model.live.preview.entry(id).expect("open").path.clone();
+        let path = self
+            .model
+            .live
+            .preview
+            .entry(id)
+            .expect("open")
+            .path
+            .clone();
         let head = text::read_head(Path::new(&path)).expect("readable");
         self.viewer(id, ViewerMsg::Text(Ok(Loaded(Arc::new(head)))));
         let (generation, body, language) = {
@@ -183,7 +190,14 @@ impl Harness {
     }
 
     fn read_image(&mut self, id: &str, stage: (f32, f32)) {
-        let path = self.model.live.preview.entry(id).expect("open").path.clone();
+        let path = self
+            .model
+            .live
+            .preview
+            .entry(id)
+            .expect("open")
+            .path
+            .clone();
         let bytes: Bytes = super::image::read(Path::new(&path)).expect("readable");
         self.viewer(id, ViewerMsg::Bytes(Ok(bytes)));
         // What the stage tells once the renderer has the picture.
@@ -201,7 +215,13 @@ impl Harness {
         );
     }
 
-    fn ctx<'a>(&'a self, window: window::Id, pkg: &'a Packages, locale: Locale, theme: &str) -> Ctx<'a> {
+    fn ctx<'a>(
+        &'a self,
+        window: window::Id,
+        pkg: &'a Packages,
+        locale: Locale,
+        theme: &str,
+    ) -> Ctx<'a> {
         Ctx {
             model: &self.model,
             pkg,
@@ -245,8 +265,20 @@ async fn a_text_file_an_agent_shows_is_read_coloured_and_found_again_when_rewrit
     let viewer = h.st.viewers.get(&id).unwrap();
     let ready = viewer.text().unwrap();
     assert_eq!(ready.text, "fn main() {\n    let answer = 42; // note\n}\n");
-    assert!(ready.lines.iter().flatten().any(|run| run.class == highlight::Class::Keyword));
-    assert!(ready.lines.iter().flatten().any(|run| run.class == highlight::Class::Comment));
+    assert!(
+        ready
+            .lines
+            .iter()
+            .flatten()
+            .any(|run| run.class == highlight::Class::Keyword)
+    );
+    assert!(
+        ready
+            .lines
+            .iter()
+            .flatten()
+            .any(|run| run.class == highlight::Class::Comment)
+    );
 
     // The file is rewritten: the store hears of it, the viewer is built again.
     h.write("main.rs", "// new\n");
@@ -260,13 +292,19 @@ async fn a_text_file_an_agent_shows_is_read_coloured_and_found_again_when_rewrit
 #[tokio::test]
 async fn a_markdown_file_is_rendered_and_its_source_is_a_toggle_away() {
     let mut h = Harness::new("markdown");
-    let path = h.write("NOTES.md", "# Title\n\nText with `code`.\n\n## Setting up\n\nSee [it](#setting-up).\n");
+    let path = h.write(
+        "NOTES.md",
+        "# Title\n\nText with `code`.\n\n## Setting up\n\nSee [it](#setting-up).\n",
+    );
     let id = h.show(&path).await;
     h.read_text(&id);
     let viewer = h.st.viewers.get(&id).unwrap();
     let rendered = viewer.rendered.as_ref().expect("parsed");
     assert_eq!(
-        super::markdown::heading_ids(&rendered.content, hangar_theme::by_id_or_default("graphite")),
+        super::markdown::heading_ids(
+            &rendered.content,
+            hangar_theme::by_id_or_default("graphite")
+        ),
         ["title", "setting-up"]
     );
     assert!(!viewer.source);
@@ -296,10 +334,12 @@ async fn an_image_is_framed_to_fit_and_the_wheel_takes_it_over() {
     assert!(picture.chosen.is_none());
     h.viewer(
         &id,
-        ViewerMsg::Image(super::image::Msg::Gesture(super::image_stage::Gesture::Zoom {
-            factor: 2.0,
-            at: (0.0, 0.0),
-        })),
+        ViewerMsg::Image(super::image::Msg::Gesture(
+            super::image_stage::Gesture::Zoom {
+                factor: 2.0,
+                at: (0.0, 0.0),
+            },
+        )),
     );
     let picture = &h.st.viewers.get(&id).unwrap().picture;
     assert_eq!(picture.frame().zoom, 2.0);
@@ -372,7 +412,8 @@ async fn the_unseen_dot_goes_out_once_the_panel_is_on_screen() {
     // The panel is open in the terminals view: it is on screen.
     assert!(!h.model.live.preview.unseen(WORKSPACE));
     h.send(Msg::SetPanel(WORKSPACE.into(), Some(false), None));
-    h.shared.edit(|store| store.reload_model(&only_entry(&h), 5, None));
+    h.shared
+        .edit(|store| store.reload_model(&only_entry(&h), 5, None));
     h.tick();
     assert!(h.model.live.preview.unseen(WORKSPACE), "closed, it is news");
     h.send(Msg::SetPanel(WORKSPACE.into(), Some(true), None));
@@ -459,11 +500,11 @@ async fn the_status_of_a_file_is_ready_at_once_and_a_model_waits_for_its_viewer(
     let mut h = Harness::new("status");
     let path = h.write("notes.txt", "plain\n");
     let id = h.show(&path).await;
-    assert_eq!(h.model.live.preview.entry(&id).unwrap().status, Status::Ready);
     assert_eq!(
-        h.st.viewers.get(&id).map(|v| v.kind),
-        Some(FileKind::Text)
+        h.model.live.preview.entry(&id).unwrap().status,
+        Status::Ready
     );
+    assert_eq!(h.st.viewers.get(&id).map(|v| v.kind), Some(FileKind::Text));
 }
 
 /* ── the views ─────────────────────────────────────────────────── */
@@ -502,7 +543,10 @@ async fn the_panel_draws_every_viewer_and_a_tab_press_asks_to_bring_it_forward()
     }
     // Pressing the tab of the first file asks for it.
     let ctx = h.ctx(window, &pkg, Locale::En, "graphite");
-    let mut ui = simulate(super::view_panel(&h.st, ctx, PanelMode::Docked { width: 440.0 }), Size::new(900.0, 600.0));
+    let mut ui = simulate(
+        super::view_panel(&h.st, ctx, PanelMode::Docked { width: 440.0 }),
+        Size::new(900.0, 600.0),
+    );
     ui.click("notes.txt").expect("the tab is there to press");
     let messages: Vec<Message> = ui.into_messages().collect();
     assert!(
@@ -522,7 +566,37 @@ async fn the_panel_of_a_workspace_with_nothing_open_says_so() {
     let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
     let view = super::view_panel(&h.st, ctx, PanelMode::Docked { width: 440.0 });
     let mut ui = simulate(view, Size::new(900.0, 600.0));
-    assert!(ui.find(hangar_i18n::t(Locale::En, Key::ModelEmpty).as_ref()).is_ok());
+    assert!(
+        ui.find(hangar_i18n::t(Locale::En, Key::ModelEmpty).as_ref())
+            .is_ok()
+    );
+}
+
+/// How long a file of the longest the viewer draws takes: read, coloured, laid
+/// out and drawn. Printed with `--nocapture`, for whoever tunes it.
+#[tokio::test]
+async fn a_long_file_is_drawn_in_a_moment() {
+    let mut h = Harness::new("long");
+    let source: String = (0..super::model::TEXT_HEAD_LINES + 1000)
+        .map(|i| format!("    let v{i} = f({i}); // {i}\n"))
+        .collect();
+    let path = h.write("big.rs", &source);
+    let id = h.show(&path).await;
+    let started = Instant::now();
+    h.read_text(&id);
+    let read = started.elapsed();
+    let ready = h.st.viewers.get(&id).unwrap().text().unwrap();
+    assert_eq!(ready.lines.len(), super::model::TEXT_HEAD_LINES);
+    assert!(ready.truncated);
+
+    let pkg = Packages::default();
+    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+    let started = Instant::now();
+    let view = super::view_panel(&h.st, ctx, PanelMode::Docked { width: 480.0 });
+    let mut ui = simulate(view, Size::new(480.0, 620.0));
+    let _ = ui.snapshot(&to_iced(ctx.theme)).expect("it draws");
+    let drawn = started.elapsed();
+    eprintln!("read and coloured in {read:?}, laid out and drawn in {drawn:?}");
 }
 
 /// The scenes, as pictures, when `HANGAR_PREVIEW_SNAPSHOTS` names a folder.
@@ -542,8 +616,15 @@ async fn snapshots() {
         .collect();
     let locales = [Locale::En, Locale::Fr];
     let scenes = [
-        "main.rs", "data.json", "NOTES.md", "shot.png", "logo.svg", "page.html", "doc.pdf",
-        "clip.mp4", "notes.txt",
+        "main.rs",
+        "data.json",
+        "NOTES.md",
+        "shot.png",
+        "logo.svg",
+        "page.html",
+        "doc.pdf",
+        "clip.mp4",
+        "notes.txt",
     ];
     for scene in scenes {
         let mut h = Harness::new("snap");

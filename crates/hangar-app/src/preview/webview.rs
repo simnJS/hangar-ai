@@ -244,6 +244,8 @@ pub enum WebMsg {
     /// The helper started, or could not.
     Started(Result<HelperHandle, StartError>),
     Event(Event),
+    /// Time to ask a player's window, by its entry, whether its media plays.
+    Probe(String),
     /// The helper's output ended.
     Gone,
 }
@@ -285,7 +287,24 @@ pub struct Win {
     /// The player's loop and speed, applied again after each load.
     pub looping: bool,
     pub speed: f32,
+    /// What the player's element said when it could not play the file; empty
+    /// when the engine gave no reason.
+    pub media_error: Option<String>,
 }
+
+/// What an event of a window asks of the app.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Handled {
+    /// A link the window was stopped from following, to open outside.
+    pub link: Option<String>,
+    /// A player's entry, to ask again in a moment whether it plays.
+    pub probe: Option<String>,
+}
+
+/// The state of a player's media element: ready state, duration, and the
+/// message of its error, `null` without one.
+const MEDIA_CHECK: &str = "(()=>{const m=document.querySelector('video,audio');\
+                           return m?[m.readyState,m.duration,m.error?m.error.message:null]:null})()";
 
 /// The windows of the entries, by entry id.
 #[derive(Debug, Default)]
@@ -398,6 +417,7 @@ impl Windows {
             kind,
             looping: previous.as_ref().is_some_and(|win| win.looping),
             speed: previous.as_ref().map_or(1.0, |win| win.speed),
+            media_error: None,
         };
         self.wins.insert(entry.id.clone(), win);
         if let Some(client) = client {
@@ -533,9 +553,21 @@ impl Windows {
         }
     }
 
-    /// An event of the helper about one of the windows. Answers a link the
-    /// window was stopped from following, for the caller to open outside.
-    pub fn on_event(&mut self, client: Option<&Client>, event: &Event) -> Option<String> {
+    /// Asks a player's window whether its media failed to load: an engine
+    /// without the codec says nothing of it but an error on the element.
+    pub fn probe_media(&mut self, client: &Client, entry: &str) {
+        if let Some(win) = self
+            .wins
+            .get(entry)
+            .filter(|win| win.state == WinState::Open)
+        {
+            let _ = client.eval_with_token(&win.name, MEDIA_CHECK, &format!("media:{}", win.name));
+        }
+    }
+
+    /// An event of the helper about one of the windows.
+    pub fn on_event(&mut self, client: Option<&Client>, event: &Event) -> Handled {
+        let mut handled = Handled::default();
         match event {
             Event::Opened { window } => {
                 if let Some(win) = self.by_window(window) {
@@ -547,9 +579,12 @@ impl Windows {
                 state: hangar_webview::PageLoadState::Finished,
                 ..
             } => {
-                let win = self.by_window(window)?;
+                let Some(win) = self.wins.values().find(|win| win.name == *window) else {
+                    return handled;
+                };
                 let (name, kind, looping, speed) =
                     (win.name.clone(), win.kind, win.looping, win.speed);
+                let entry = self.entry_of(window).map(str::to_string);
                 if let Some(client) = client {
                     match kind {
                         Kind::Pdf => {
@@ -558,9 +593,27 @@ impl Windows {
                         }
                         Kind::Video | Kind::Audio => {
                             let _ = client.eval(&name, &player_script(looping, speed));
+                            // An engine without the codec raises an error on
+                            // the element a moment after the load.
+                            handled.probe = entry;
                         }
                         _ => {}
                     }
+                }
+            }
+            Event::EvalResult {
+                window,
+                token,
+                result,
+            } if token.starts_with("media:") => {
+                if let Some(win) = self.by_window(window) {
+                    win.media_error = match result {
+                        Value::Array(state) => match state.get(2) {
+                            Some(Value::String(message)) => Some(message.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
                 }
             }
             Event::EvalResult {
@@ -600,11 +653,11 @@ impl Windows {
                 }
             }
             Event::NavigationBlocked { url, .. } => {
-                return Some(url.clone());
+                handled.link = Some(url.clone());
             }
             _ => {}
         }
-        None
+        handled
     }
 
     fn by_window(&mut self, window: &str) -> Option<&mut Win> {

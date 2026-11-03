@@ -46,6 +46,7 @@
 
 pub mod access;
 pub mod code_lines;
+pub mod dev;
 pub mod glyph;
 pub mod grip;
 pub mod highlight;
@@ -99,6 +100,10 @@ const WATCH: Duration = Duration::from_millis(1500);
 const SETTLE: Duration = Duration::from_millis(300);
 /// How often a spinner turns a step.
 const SPIN: Duration = Duration::from_millis(100);
+/// How long after a player loads the engine is asked whether it plays.
+const PROBE: Duration = Duration::from_millis(1500);
+/// How often the package looks for the state to have been read.
+const HYDRATION: Duration = Duration::from_millis(250);
 
 /// A drag of the grip: the width it started from, in points.
 #[derive(Debug, Clone, Copy)]
@@ -133,6 +138,8 @@ pub struct State {
     helper_starting: bool,
     /// The workspaces as of the last look, to see one go.
     known: Vec<WsId>,
+    /// `HANGAR_DEV_PREVIEW` has been looked at (dev.rs).
+    dev_done: bool,
     /// The tab in front of each workspace as of the last look.
     fronts: HashMap<WsId, Option<String>>,
 }
@@ -154,6 +161,7 @@ impl Default for State {
             grip: None,
             helper_starting: false,
             known: Vec::new(),
+            dev_done: false,
             fronts: HashMap::new(),
         }
     }
@@ -489,6 +497,17 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     m.live.preview.sync();
     let mut tasks = Vec::new();
 
+    // A debug build asked to show files, once the workspace is known.
+    if !st.dev_done && m.live.hydrated {
+        st.dev_done = true;
+        let paths = dev::requested();
+        if !paths.is_empty()
+            && let Some(ws) = m.state().active_workspace_id.clone()
+        {
+            tasks.push(dev::show(st.shared.clone(), ws, paths));
+        }
+    }
+
     // Kit tabs come back the first time their workspace is opened, and what a
     // deleted workspace left goes with it.
     if m.live.hydrated {
@@ -680,7 +699,7 @@ fn translate(m: &Model, key: Key) -> String {
 
 fn viewer_update(
     st: &mut State,
-    m: &mut Model,
+    m: &Model,
     env: &Env,
     id: &str,
     revision: u64,
@@ -757,6 +776,16 @@ fn viewer_update(
         }
         ViewerMsg::ToggleWrap => {
             st.wrap = !st.wrap;
+            // The lines are laid out anew: from the top, as the TS's were.
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.scroll = code_lines::Scroll::default();
+            }
+            to_top(id)
+        }
+        ViewerMsg::CodeScrolled(scroll) => {
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.scroll = scroll;
+            }
             Task::none()
         }
         ViewerMsg::ToggleSource | ViewerMsg::Image(image::Msg::ToggleSource) => {
@@ -764,12 +793,13 @@ fn viewer_update(
                 return Task::none();
             };
             viewer.source = !viewer.source;
+            viewer.scroll = code_lines::Scroll::default();
             // A source is read the first time it is asked for.
             if viewer.source && viewer.load.is_none() {
                 viewer.load = Some(Load::Loading);
-                return read_text(id, revision, &entry.path);
+                return Task::batch([read_text(id, revision, &entry.path), to_top(id)]);
             }
-            Task::none()
+            to_top(id)
         }
         ViewerMsg::Copy => {
             let Some(text) = st
@@ -796,6 +826,20 @@ fn viewer_update(
         ViewerMsg::Markdown(msg) => markdown_update(st, id, revision, msg, locale),
         ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
+}
+
+/// Brings the text of an entry back to its top: the lines and the rendered
+/// page are scrollables of their own, which keep their place across a change
+/// of what they hold.
+fn to_top(id: &str) -> Task<Message> {
+    let top = iced::widget::scrollable::RelativeOffset {
+        x: Some(0.0),
+        y: Some(0.0),
+    };
+    Task::batch([
+        iced::widget::operation::snap_to(viewer::code_id(id), top),
+        iced::widget::operation::snap_to(viewer::scroll_id(id), top),
+    ])
 }
 
 fn markdown_update(
@@ -908,13 +952,24 @@ fn web_update(st: &mut State, m: &mut Model, env: &Env, msg: WebMsg) -> Task<Mes
         WebMsg::Event(event) => {
             let client = st.shared.helper().client();
             let mut tasks = Vec::new();
-            if let Some(url) = st.windows.on_event(client.as_deref(), &event) {
+            let handled = st.windows.on_event(client.as_deref(), &event);
+            if let Some(url) = handled.link {
                 // A link the window may not follow opens in the browser; a
                 // page cannot make a window of its own.
                 if hangar_core::opener::open_url(&url).is_err() {
                     tasks.push(Task::done(Message::Intent(Intent::Notice(
                         crate::shell::Notice::Problem(url),
                     ))));
+                }
+            }
+            if let Some(entry) = handled.probe {
+                // Asked twice: a codec the engine lacks says so a moment after
+                // the load, a slow file a little later.
+                for after in [PROBE, PROBE * 3] {
+                    let entry = entry.clone();
+                    tasks.push(Task::perform(tokio::time::sleep(after), move |()| {
+                        Message::Preview(Msg::Web(WebMsg::Probe(entry.clone())))
+                    }));
                 }
             }
             if let hangar_webview::Event::Error {
@@ -928,6 +983,12 @@ fn web_update(st: &mut State, m: &mut Model, env: &Env, msg: WebMsg) -> Task<Mes
                 ))));
             }
             Task::batch(tasks)
+        }
+        WebMsg::Probe(entry) => {
+            if let Some(client) = st.shared.helper().client() {
+                st.windows.probe_media(&client, &entry);
+            }
+            Task::none()
         }
         WebMsg::Gone => {
             st.windows.lost();
@@ -972,18 +1033,14 @@ fn window_action(
                 .set_player(client.as_deref(), &entry.id, None, Some(speed));
             Task::none()
         }
-        windowed::Action::ToggleSource => {
-            let revision = entry.revision;
-            let Some(viewer) = st.viewers.get_mut(&entry.id) else {
-                return Task::none();
-            };
-            viewer.source = !viewer.source;
-            if viewer.source && viewer.load.is_none() {
-                viewer.load = Some(Load::Loading);
-                return read_text(&entry.id, revision, &entry.path);
-            }
-            Task::none()
-        }
+        windowed::Action::ToggleSource => viewer_update(
+            st,
+            m,
+            env,
+            &entry.id,
+            entry.revision,
+            ViewerMsg::ToggleSource,
+        ),
         windowed::Action::OpenExternally => {
             let words = match hangar_core::opener::open_path(&entry.path) {
                 Ok(()) => Notice::info(translate(m, Key::PreviewOpened)),
@@ -1171,6 +1228,12 @@ fn escape_collapses(
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let mut subscriptions = vec![changes(&st.shared)];
     let live = &m.live.preview;
+    if !m.live.hydrated || !st.dev_done {
+        // Nothing tells this package that the state has been read, and the
+        // kit tabs of the workspace on screen come back with it: it looks
+        // until it has.
+        subscriptions.push(iced::time::every(HYDRATION).map(|_| Message::Preview(Msg::Changed)));
+    }
     if live.any_open() {
         subscriptions.push(iced::time::every(WATCH).map(|_| Message::Preview(Msg::Tick)));
     }
