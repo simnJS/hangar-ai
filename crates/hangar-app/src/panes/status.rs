@@ -6,29 +6,15 @@
 //! insight, which is P4's: they are in `panes_logic::bridge_events`, with
 //! their cases. `gaugeLevel` (amber from 70 %, red from 90 %) is the ring's
 //! own, hangar-ui's `glyph::gauge_level`, with the "warms the gauge" case.
-//! What the header itself draws with is here.
+//! `paneGlyphState` is P4's `panes_logic::state_glyph_state`, with its cases,
+//! over P4's copy of the shell's life. What the header itself draws with is
+//! here.
 
 use hangar_i18n::Key;
 
 use crate::state::live::PaneStatus;
 use crate::state::types::ShellInfo;
 use crate::state::{AgentActivity, GlyphState};
-
-/// The shell's own life until it runs; then, for a pane that reports one, the
-/// agent's state. A plain shell has nothing to report and rests as idle
-/// (`paneGlyphState`).
-pub fn pane_glyph_state(status: PaneStatus, activity: Option<AgentActivity>) -> GlyphState {
-    match status {
-        PaneStatus::Starting => GlyphState::Starting,
-        PaneStatus::Exited => GlyphState::Exited,
-        PaneStatus::Running => match activity.unwrap_or(AgentActivity::Idle) {
-            AgentActivity::Working => GlyphState::Working,
-            AgentActivity::Waiting => GlyphState::Waiting,
-            AgentActivity::Yours => GlyphState::Yours,
-            AgentActivity::Idle => GlyphState::Idle,
-        },
-    }
-}
 
 /// A shell as the header names it: the program, without its folder or its
 /// `.exe` (`pwsh`, `bash`, `wsl`), which is what a terminal user calls it and
@@ -84,27 +70,6 @@ pub fn ui_glyph(state: GlyphState) -> hangar_ui::glyph::GlyphState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn shows_the_shells_life_before_the_agents_state() {
-        assert_eq!(
-            pane_glyph_state(PaneStatus::Starting, Some(AgentActivity::Working)),
-            GlyphState::Starting
-        );
-        assert_eq!(
-            pane_glyph_state(PaneStatus::Exited, Some(AgentActivity::Waiting)),
-            GlyphState::Exited
-        );
-        assert_eq!(
-            pane_glyph_state(PaneStatus::Running, Some(AgentActivity::Waiting)),
-            GlyphState::Waiting
-        );
-        // A plain shell reports nothing and rests as idle.
-        assert_eq!(
-            pane_glyph_state(PaneStatus::Running, None),
-            GlyphState::Idle
-        );
-    }
 
     #[test]
     fn warms_the_gauge_from_70_and_heats_it_from_90() {
