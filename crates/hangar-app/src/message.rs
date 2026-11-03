@@ -205,6 +205,28 @@ pub enum Intent {
     Notice(Notice),
     Notify(Notification),
     CreateWorkspaceFromGit(GitRequest),
+    /// The `terminal.*` commands on a pane's terminal (App.tsx's handlers on
+    /// `getTerminal(focused)`): clear, copy the selection, paste through the
+    /// terminal (bracketed), select all, scroll to either end. Sent by the
+    /// command table; handled by P5 (`panes`), which holds the terminals.
+    TerminalAction {
+        pane: PaneId,
+        action: TerminalAction,
+    },
+}
+
+/// What `Intent::TerminalAction` asks of a pane's terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TerminalAction {
+    Clear,
+    /// The selection to the clipboard, when there is one.
+    Copy,
+    /// The clipboard's text through the terminal, which brackets it, so a
+    /// multi-line paste lands as text instead of running line by line.
+    Paste,
+    SelectAll,
+    ScrollTop,
+    ScrollBottom,
 }
 
 /// « From a Git repository » (`FromGitRequest` of lib/workspaceFromGit.ts).
