@@ -106,9 +106,20 @@ impl Metrics {
         (v / self.pixel).round() * self.pixel
     }
 
+    /// Snaps a horizontal coordinate, except the cell's own right edge.
+    ///
+    /// A cell is a fraction of a pixel wider than a whole number of them, and
+    /// the next cell starts exactly there. A line that ran to the snapped
+    /// edge instead would stop short of its neighbour by the difference, and
+    /// once the renderer rounds both to pixels, a pixel-wide gap would show
+    /// in the line at every cell where the roundings disagree.
+    fn snap_x(&self, v: f32) -> f32 {
+        if (v - self.width).abs() < 1e-3 { self.width } else { self.snap(v) }
+    }
+
     /// A rectangle given by its edges, snapped.
     fn span(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
-        let (x0, y0, x1, y1) = (self.snap(x0), self.snap(y0), self.snap(x1), self.snap(y1));
+        let (x0, y0, x1, y1) = (self.snap_x(x0), self.snap(y0), self.snap_x(x1), self.snap(y1));
         Rect {
             x: x0,
             y: y0,
@@ -473,6 +484,19 @@ mod tests {
         let left = r.iter().map(|r| r.x).fold(f32::MAX, f32::min);
         let right = r.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
         assert_eq!((left, right), (0.0, 8.0));
+    }
+
+    #[test]
+    fn a_line_runs_to_the_exact_edge_of_a_cell_that_is_not_a_whole_number_of_pixels_wide() {
+        // The advance of a real font: the next cell starts at 8.43, so a line
+        // that stopped at 8 would leave a gap that rounding turns into a
+        // missing pixel in some cells.
+        let m = Metrics::new(8.43, 18.0, 14.0, 1.0);
+        let Some(Shape::Rects(r)) = shape('─', m) else { panic!("not rects") };
+        let right = r.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+        assert_eq!(right, 8.43);
+        let Some(Shape::Rects(r)) = shape('█', m) else { panic!("not rects") };
+        assert_eq!(r[0].x + r[0].w, 8.43);
     }
 
     #[test]

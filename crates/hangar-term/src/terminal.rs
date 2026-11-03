@@ -76,7 +76,7 @@ pub(crate) struct CursorView {
 /// It owns no process. The app reads the bytes the process prints, passes
 /// them to [`feed`](Self::feed), and writes back the bytes that come out of
 /// the returned [`Event`]s. Everything else, drawing and input, goes through
-/// the widget in [`widget`](crate::widget).
+/// the widget, [`TerminalView`](crate::TerminalView).
 pub struct Terminal {
     pub(crate) term: Term<Listener>,
     parser: Processor,

@@ -126,7 +126,7 @@ const SCREEN: &str = concat!(
     "\x1b[4munderline\x1b[0m \x1b[21mdouble\x1b[0m \x1b[4:3m\x1b[58;2;255;80;80mcurly red\x1b[0m \x1b[4:4mdotted\x1b[0m \x1b[4:5mdashed\x1b[0m \x1b[31;1;4mbold red underline\x1b[0m\r\n\r\n",
     "\x1b[36m┌───────────────┐\x1b[0m \x1b[33m╭───────────────╮\x1b[0m \x1b[35m╔═══════════════╗\x1b[0m \x1b[32m┏━━━━━━━━━━━━━━━┓\x1b[0m\r\n",
     "\x1b[36m│\x1b[0m selected text \x1b[36m│\x1b[0m \x1b[33m│\x1b[0m  rounded box  \x1b[33m│\x1b[0m \x1b[35m║\x1b[0m  double box   \x1b[35m║\x1b[0m \x1b[32m┃\x1b[0m   heavy box   \x1b[32m┃\x1b[0m\r\n",
-    "\x1b[36m├───────┬───────┤\x1b[0m \x1b[33m│\x1b[0m    a needle   \x1b[33m│\x1b[0m \x1b[35m╠═══════╦═══════╣\x1b[0m \x1b[32m┣━━━━━━━╋━━━━━━━┫\x1b[0m\r\n",
+    "\x1b[36m├───────┬───────┤\x1b[0m \x1b[33m│\x1b[0m    a needle   \x1b[33m│\x1b[0m \x1b[35m╠═══════╦═══════╣\x1b[0m \x1b[32m┣━━━━━━━┳━━━━━━━┫\x1b[0m\r\n",
     "\x1b[36m│ cell  │ cell  │\x1b[0m \x1b[33m│\x1b[0m    needle     \x1b[33m│\x1b[0m \x1b[35m║ cell  ║ cell  ║\x1b[0m \x1b[32m┃ cell  ┃ cell  ┃\x1b[0m\r\n",
     "\x1b[36m└───────┴───────┘\x1b[0m \x1b[33m╰───────────────╯\x1b[0m \x1b[35m╚═══════╩═══════╝\x1b[0m \x1b[32m┗━━━━━━━┻━━━━━━━┛\x1b[0m\r\n\r\n",
     "blocks \x1b[36m▀▄█▌▐ ▁▂▃▄▅▆▇█ ░▒▓ ▖▗▘▙▚▛▜▝▞▟\x1b[0m  braille \x1b[33m⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ⣿ ⡇\x1b[0m\r\n",

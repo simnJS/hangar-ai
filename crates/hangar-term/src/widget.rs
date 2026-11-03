@@ -982,11 +982,18 @@ where
             let metrics_for = shapes::Metrics::new(cell.width, cell.height, measured.font.size, scale);
             for (row, slot) in cache.plans.iter().enumerate() {
                 let Some((_, plan)) = slot else { continue };
+                // The rectangles of a row's lines, with the ones that touch
+                // side by side joined: a border of twenty cells is one quad,
+                // which no renderer can leave a seam in.
+                let mut lines: Vec<(Rectangle, Color)> = Vec::new();
                 for shape_cell in &plan.shapes {
                     if shape_cell.column >= columns {
                         continue;
                     }
-                    draw_shape(renderer, shape_cell.glyph, shape_cell.color, at(shape_cell.column, row), metrics_for, background);
+                    draw_shape(renderer, &mut lines, shape_cell.glyph, shape_cell.color, at(shape_cell.column, row), metrics_for);
+                }
+                for (rect, color) in lines {
+                    renderer.fill_quad(quad(rect), color);
                 }
                 for span in &plan.decorations {
                     draw_decoration(renderer, span.kind, span.color, cells(span.first, span.end.min(columns), row), metrics_for);
@@ -1317,13 +1324,29 @@ fn draw_decoration<Renderer>(
     }
 }
 
+/// Adds a rectangle to a row's lines, extending the previous one if this one
+/// starts where it ends and is the same height and colour.
+fn push_joined(lines: &mut Vec<(Rectangle, Color)>, rect: Rectangle, color: Color) {
+    for (last, last_color) in lines.iter_mut().rev().take(4) {
+        if *last_color == color
+            && (last.y - rect.y).abs() < 1e-3
+            && (last.height - rect.height).abs() < 1e-3
+            && (last.x + last.width - rect.x).abs() < 1e-3
+        {
+            last.width = rect.x + rect.width - last.x;
+            return;
+        }
+    }
+    lines.push((rect, color));
+}
+
 fn draw_shape<Renderer>(
     renderer: &mut Renderer,
+    lines: &mut Vec<(Rectangle, Color)>,
     glyph: char,
     color: Color,
     origin: Point,
     metrics: shapes::Metrics,
-    _background: Color,
 ) where
     Renderer: text::Renderer<Font = iced::Font>,
 {
@@ -1334,7 +1357,7 @@ fn draw_shape<Renderer>(
     match shape {
         Shape::Rects(rects) => {
             for rect in rects {
-                renderer.fill_quad(quad(shift(rect)), color);
+                push_joined(lines, shift(rect), color);
             }
         }
         Shape::Shade(alpha) => {

@@ -265,6 +265,19 @@ mod tests {
     }
 
     #[test]
+    fn a_key_held_down_repeats_faster_than_the_duplicate_window() {
+        let mut state = InputState::default();
+        let t0 = Instant::now();
+        let l = press(Key::Character("l".into()), Some("l"));
+        // Repeats 20 ms apart, well inside the window: all of them are typed,
+        // because the window only pairs a key event with an input-method one.
+        for i in 0..5 {
+            let at = t0 + Duration::from_millis(20 * i);
+            assert_eq!(type_key(&mut state, &l, at).as_deref(), Some("l"), "repeat {i}");
+        }
+    }
+
+    #[test]
     fn a_typed_key_ends_a_composition_that_was_left_open() {
         let mut state = InputState::default();
         let t0 = Instant::now();
