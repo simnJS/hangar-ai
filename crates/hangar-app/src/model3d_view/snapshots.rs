@@ -164,22 +164,37 @@ impl Registry {
     }
 }
 
+/// How a snapshot asks the view to load a model: the app sends `Msg::Ensure`
+/// through the inbox.
+pub type Ask = Arc<dyn Fn(String) + Send + Sync>;
+
 /// What `model_snapshot` renders with, registered with the preview store.
 pub struct Snapshots {
     registry: Arc<Registry>,
     shared: Arc<Shared>,
-    inbox: Inbox,
+    ask: Ask,
     wait: Duration,
 }
 
 impl Snapshots {
-    pub fn new(registry: Arc<Registry>, shared: Arc<Shared>, inbox: Inbox) -> Snapshots {
+    pub fn new(registry: Arc<Registry>, shared: Arc<Shared>, ask: Ask) -> Snapshots {
         Snapshots {
             registry,
             shared,
-            inbox,
+            ask,
             wait: LOAD_WAIT,
         }
+    }
+
+    /// The snapshotter of the app: models are asked for through the inbox.
+    pub fn through(registry: Arc<Registry>, shared: Arc<Shared>, inbox: Inbox) -> Snapshots {
+        Snapshots::new(
+            registry,
+            shared,
+            Arc::new(move |id| {
+                inbox.send(Message::Model3d(Msg::Ensure(id)));
+            }),
+        )
     }
 
     #[cfg(test)]
@@ -213,8 +228,7 @@ impl Snapshots {
                     // tells the registry when it has.
                     if asked != Some(revision) {
                         asked = Some(revision);
-                        self.inbox
-                            .send(Message::Model3d(Msg::Ensure(id.to_string())));
+                        (self.ask)(id.to_string());
                     }
                 }
             }
@@ -233,7 +247,7 @@ impl Snapshots {
 }
 
 /// The crate's angle for the app's.
-fn angle_of(angle: SnapshotAngle) -> hangar_model3d::SnapshotAngle {
+pub(super) fn angle_of(angle: SnapshotAngle) -> hangar_model3d::SnapshotAngle {
     match angle {
         SnapshotAngle::Front => hangar_model3d::SnapshotAngle::Front,
         SnapshotAngle::Back => hangar_model3d::SnapshotAngle::Back,
@@ -255,7 +269,7 @@ impl Snapshotter for Snapshots {
         let me = Snapshots {
             registry: self.registry.clone(),
             shared: self.shared.clone(),
-            inbox: self.inbox.clone(),
+            ask: self.ask.clone(),
             wait: self.wait,
         };
         let id = id.to_string();

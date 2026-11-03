@@ -62,7 +62,7 @@ pub struct Facts {
 /// The strip's items for a model that has been read, in the order of the web
 /// app: triangles, size, materials, vertices.
 pub fn facts(ctx: Ctx<'_>, format_name: &str, info: Option<&ModelInfo>) -> Facts {
-    let locale = ctx.model.locale();
+    let locale = ctx.i18n.locale();
     let mut items = Vec::new();
     if let Some(info) = info {
         let counted = |value: u64, noun: Key, hide_below: f32| Item {

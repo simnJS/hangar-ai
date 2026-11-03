@@ -60,6 +60,23 @@ pub fn view<'a>(ctx: Ctx<'a>, bar: Bar<'a>) -> Element<'a, Message> {
             None,
             ready.then(|| to(Msg::Recenter(id.to_string()))),
         ),
+        // The zoom buttons of hangar-model3d (`ModelViewer::zoom`): a fifth
+        // closer or further, as the + and - keys do. The web app's bar had
+        // only the wheel and the keys.
+        parts::icon_tool(
+            t,
+            Icon::Plus,
+            ctx.t(Key::PreviewZoomIn),
+            None,
+            ready.then(|| to(Msg::Zoom(id.to_string(), 1))),
+        ),
+        parts::icon_tool(
+            t,
+            Icon::Minus,
+            ctx.t(Key::PreviewZoomOut),
+            None,
+            ready.then(|| to(Msg::Zoom(id.to_string(), -1))),
+        ),
         parts::separator(t),
         toggle(
             Toggle::Wireframe,

@@ -86,6 +86,15 @@ pub fn view<'a>(
 
     // Something to know about the model on screen, without taking it away.
     let mut notes = column![].width(Length::Fill);
+    // What the file holds that the preview could not use (a texture it cannot
+    // decode, a KTX2 picture), in the crate's own words: the model opens
+    // without it, and a grey model is otherwise a puzzle.
+    if let Some(words) = content
+        .and_then(|slot| slot.viewer.model())
+        .and_then(|model| warnings_text(&model.warnings))
+    {
+        notes = notes.push(parts::note(t, words, false));
+    }
     if entry.status == Status::Error && has_content {
         notes = notes.push(parts::banner(
             t,
@@ -136,6 +145,22 @@ pub fn view<'a>(
         };
     }
     layers.into()
+}
+
+/// How many of the loader's warnings are written out; the rest are counted.
+const WARNINGS_SHOWN: usize = 3;
+
+/// The loader's warnings as the lines of a note: the first few, then how many
+/// more there are. `None` when it had nothing to say.
+pub fn warnings_text(warnings: &[String]) -> Option<String> {
+    if warnings.is_empty() {
+        return None;
+    }
+    let mut lines: Vec<String> = warnings.iter().take(WARNINGS_SHOWN).cloned().collect();
+    if warnings.len() > WARNINGS_SHOWN {
+        lines.push(format!("… +{}", warnings.len() - WARNINGS_SHOWN));
+    }
+    Some(lines.join("\n"))
 }
 
 /// The thin bar and the chip over a model that is being replaced by a newer
@@ -239,7 +264,7 @@ fn bytes_line(ctx: Ctx<'_>, progress: Option<LoadProgress>) -> Option<String> {
 
 /// A size as the card says it: "2.5 MB".
 fn megabytes(ctx: Ctx<'_>, bytes: u64) -> String {
-    let size = format::megabytes(bytes, ctx.model.locale());
+    let size = format::megabytes(bytes, ctx.i18n.locale());
     ctx.i18n
         .t_with(Key::ModelMegabytes, &args!("size" => size))
         .into_owned()
@@ -327,6 +352,25 @@ mod tests {
         assert_eq!(read_ratio(reading(0, 100)), Some(0.0));
         assert_eq!(read_ratio(reading(25, 100)), Some(0.25));
         assert_eq!(read_ratio(reading(120, 100)), Some(1.0));
+    }
+
+    #[test]
+    fn a_model_with_nothing_to_warn_of_has_no_note() {
+        assert_eq!(warnings_text(&[]), None);
+    }
+
+    #[test]
+    fn the_first_warnings_are_written_out_and_the_rest_counted() {
+        let some = |n: usize| -> Vec<String> { (1..=n).map(|i| format!("warning {i}")).collect() };
+        assert_eq!(warnings_text(&some(1)).unwrap(), "warning 1");
+        assert_eq!(
+            warnings_text(&some(3)).unwrap(),
+            "warning 1\nwarning 2\nwarning 3"
+        );
+        assert_eq!(
+            warnings_text(&some(5)).unwrap(),
+            "warning 1\nwarning 2\nwarning 3\n… +2"
+        );
     }
 
     #[test]

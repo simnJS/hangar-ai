@@ -36,7 +36,7 @@ pub struct Clips<'a> {
 
 pub fn view<'a>(ctx: Ctx<'a>, clips: Clips<'a>) -> Element<'a, Message> {
     let t = ctx.theme;
-    let locale = ctx.model.locale();
+    let locale = ctx.i18n.locale();
     let reason = ctx.t(Key::ModelAnimationsLater).into_owned();
     let first = clips.lines.first();
 

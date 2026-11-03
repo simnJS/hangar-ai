@@ -164,6 +164,8 @@ pub enum Msg {
     Viewer(String, hangar_model3d::Event),
     Toggle(Toggle),
     Recenter(String),
+    /// A step closer (positive) or further (negative) with the bar's buttons.
+    Zoom(String, i32),
     CaptureMenu(String, bool),
     ClipsMenu(String, bool),
     Capture(String, Destination),
@@ -193,7 +195,7 @@ fn register(st: &mut State, inbox: &Inbox) {
     if std::mem::replace(&mut st.registered, true) {
         return;
     }
-    let snapshots = Snapshots::new(st.registry.clone(), st.shared.clone(), inbox.clone());
+    let snapshots = Snapshots::through(st.registry.clone(), st.shared.clone(), inbox.clone());
     st.shared.register_snapshotter(Some(Arc::new(snapshots)));
 }
 
@@ -221,6 +223,12 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::Recenter(id) => {
             if let Some(slot) = st.slots.get(&id) {
                 slot.viewer.recenter();
+            }
+            Task::none()
+        }
+        Msg::Zoom(id, steps) => {
+            if let Some(slot) = st.slots.get(&id) {
+                slot.viewer.zoom(steps);
             }
             Task::none()
         }
@@ -359,7 +367,8 @@ fn notify(st: &mut State, id: &str, notice: Notice) -> Task<Message> {
     let lasts = notice.lasts();
     slot.notice = Some((seq, notice));
     let id = id.to_string();
-    Task::perform(tokio::time::sleep(lasts), move |()| {
+    // The timer is made when the task is polled, on the runtime, not here.
+    Task::perform(async move { tokio::time::sleep(lasts).await }, move |()| {
         Message::Model3d(Msg::NoticeGone(id.clone(), seq))
     })
 }

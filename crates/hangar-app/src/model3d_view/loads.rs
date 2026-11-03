@@ -93,13 +93,23 @@ pub fn info_of(model: &Model) -> ModelInfo {
 /// Brings the slots in line with the store: loads what is to be loaded, lets
 /// go of what is closed or asleep, keeps the registry the snapshots read in
 /// step.
-pub fn reconcile(st: &mut State, m: &mut AppModel) -> Task<Message> {
+pub fn reconcile(st: &mut State, m: &AppModel) -> Task<Message> {
     let wants = wants(&st.shared);
     let asleep: HashSet<&str> = wants
         .iter()
         .filter(|want| m.live.panes_logic.is_asleep(&want.ws))
         .map(|want| want.ws.as_str())
         .collect();
+    settle(st, m, &wants, &asleep)
+}
+
+/// `reconcile`, given which workspaces are asleep.
+pub(super) fn settle(
+    st: &mut State,
+    m: &AppModel,
+    wants: &[Want],
+    asleep: &HashSet<&str>,
+) -> Task<Message> {
     let awake: Vec<&Want> = wants
         .iter()
         .filter(|want| !asleep.contains(want.ws.as_str()))
