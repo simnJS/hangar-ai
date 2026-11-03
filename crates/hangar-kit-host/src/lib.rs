@@ -27,7 +27,7 @@ pub use api::{CallFuture, HostCall, KitApi, LoopbackCall, ready};
 pub use gate::Gate;
 pub use message::{KitMessage, Local};
 pub use render::{KitStyle, Palette};
-pub use runtime::{KitModule, KitRuntime, Limits, LoadError};
+pub use runtime::{CacheStats, KitModule, KitRuntime, Limits, LoadError};
 pub use tab::{Dispatch, Effects, Failure, FailureKind, KitTab, LogEntry, TabStart};
 
 pub use hangar_kit_ui as ui;

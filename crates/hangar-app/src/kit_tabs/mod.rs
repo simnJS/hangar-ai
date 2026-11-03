@@ -504,6 +504,8 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             if !loads {
                 continue;
             }
+            st.runtime
+                .cache_in(native::cache_dir(sv.core().host().paths()));
             match st.runtime.module(&path) {
                 Ok(module) => {
                     let runtime = match st.runtime.runtime() {
