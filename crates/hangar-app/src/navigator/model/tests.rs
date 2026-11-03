@@ -2,7 +2,8 @@
 //! workspaces and the same expectations.
 
 use super::*;
-use crate::state::types::{AgentId, SplitDir};
+use crate::state::layout;
+use crate::state::types::{AgentId, SplitDir, SplitNode};
 
 fn pane(id: &str, name: &str, agent: AgentId) -> Pane {
     Pane {
@@ -107,6 +108,17 @@ fn strs(list: &[&str]) -> Vec<String> {
 }
 
 // ---- readingOrder -----------------------------------------------------------------------------
+//
+// The order is `state::layout`'s; these keep the cases the navigator and the
+// toolbar rely on from `NavigatorModel.test.ts`, asked of the real function.
+
+fn reading_order(ws: &Workspace) -> Vec<&Pane> {
+    layout::reading_order(&ws.panes, ws.tree.as_ref())
+}
+
+fn closed_by_preset(ws: &Workspace, count: u8) -> Vec<&Pane> {
+    layout::closed_by_preset(&ws.panes, ws.tree.as_ref(), usize::from(count))
+}
 
 #[test]
 fn reading_order_follows_the_split_tree_rather_than_the_stored_order() {
@@ -387,74 +399,4 @@ fn attention_combines_with_the_query() {
 fn does_not_keep_a_folder_for_its_name_alone() {
     let w = world();
     assert!(keys_wanting(&w, "clients", &|_| false).is_empty());
-}
-
-// ---- sidebarOrder (lib/folders.test.ts) ----------------------------------------------------------
-
-fn filed(id: &str, folder: Option<&str>) -> Workspace {
-    ws(id, vec![], folder)
-}
-
-fn ids(list: &[&Workspace]) -> Vec<String> {
-    list.iter().map(|w| w.id.clone()).collect()
-}
-
-fn f(id: &str) -> WorkspaceFolder {
-    folder(id, false)
-}
-
-#[test]
-fn sidebar_order_lists_the_loose_workspaces_then_each_folders_in_folder_order() {
-    let list = [
-        filed("loose1", None),
-        filed("b1", Some("B")),
-        filed("a1", Some("A")),
-        filed("loose2", None),
-        filed("a2", Some("A")),
-    ];
-    assert_eq!(
-        ids(&sidebar_order(&list, &[f("A"), f("B")])),
-        strs(&["loose1", "loose2", "a1", "a2", "b1"])
-    );
-}
-
-#[test]
-fn sidebar_order_follows_the_folders_when_they_are_reordered() {
-    let list = [filed("a1", Some("A")), filed("b1", Some("B"))];
-    assert_eq!(
-        ids(&sidebar_order(&list, &[f("B"), f("A")])),
-        strs(&["b1", "a1"])
-    );
-}
-
-#[test]
-fn sidebar_order_keeps_a_workspace_whose_folder_is_gone_with_the_loose_ones() {
-    let list = [
-        filed("orphan", Some("deleted")),
-        filed("a1", Some("A")),
-        filed("loose", None),
-    ];
-    assert_eq!(
-        ids(&sidebar_order(&list, &[f("A")])),
-        strs(&["orphan", "loose", "a1"])
-    );
-}
-
-#[test]
-fn sidebar_order_lists_every_workspace_exactly_once() {
-    let list = [
-        filed("a1", Some("A")),
-        filed("x", Some("gone")),
-        filed("y", None),
-        filed("b1", Some("B")),
-    ];
-    let mut ordered = ids(&sidebar_order(&list, &[f("A"), f("B"), f("empty")]));
-    ordered.sort();
-    assert_eq!(ordered, strs(&["a1", "b1", "x", "y"]));
-}
-
-#[test]
-fn sidebar_order_is_the_stored_order_when_there_are_no_folders() {
-    let list = [filed("c", None), filed("a", None), filed("b", None)];
-    assert_eq!(ids(&sidebar_order(&list, &[])), strs(&["c", "a", "b"]));
 }

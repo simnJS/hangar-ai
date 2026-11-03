@@ -17,7 +17,6 @@
 //! a text field reports no blur, so a rename is settled by Enter, Escape, or a
 //! press that nothing else took.
 
-pub mod clock;
 pub mod drag;
 pub mod editor;
 pub mod geometry;
@@ -26,6 +25,7 @@ pub mod model;
 pub mod plan;
 pub mod reads;
 pub mod skin;
+pub mod sleep;
 pub mod status;
 mod view;
 
@@ -41,9 +41,8 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Focus, Region};
-use crate::state::live::{BridgeEvent, PlanLimits};
 use crate::state::types::Workspace;
-use crate::state::{FolderPatch, Model, StoreAction, WorkspacePatch};
+use crate::state::{FolderPatch, Model, PaneId, StoreAction, WorkspacePatch, WsId};
 
 use drag::{Drag, DragItem, DragKind, Hit};
 use model::{NavInput, NavRow, RowKind, build_nav_tree, row_key};
@@ -102,12 +101,9 @@ pub struct State {
     /// expiry names.
     note: Option<(u64, String)>,
     note_serial: u64,
-    /// The plan's windows, from whichever session reported last.
-    ///
-    /// TODO(P4): `panes_logic::Live` is to hold the bridge reports' plan limits
-    /// (`setPlanLimits`); the navigator is their only reader, so it keeps the
-    /// latest report itself until that lands, and `State::plan` then goes.
-    plan: Option<PlanLimits>,
+    /// What the system said of the shells of the workspace whose menu is open,
+    /// for its « Put to sleep » line.
+    probe: Option<sleep::Probe>,
     /// Where the list is scrolled to and how tall it is.
     scroll: (f32, f32),
 }
@@ -124,7 +120,7 @@ impl Default for State {
             drag: None,
             note: None,
             note_serial: 0,
-            plan: reads::dev_plan(),
+            probe: None,
             scroll: (0.0, 0.0),
         }
         .with_dev_view()
@@ -264,6 +260,13 @@ pub enum Msg {
     ClearMcpScope(String),
     EditorDone(Option<String>),
     NoteExpired(u64),
+    /// The system said which of `asked` shells, in the workspace whose menu is
+    /// open, run something.
+    SleepProbed {
+        ws: WsId,
+        asked: Vec<PaneId>,
+        answer: Result<Vec<PaneId>, String>,
+    },
 }
 
 // ---- What the list is -------------------------------------------------------------------------
@@ -430,8 +433,45 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 |()| Message::Noop,
             )
         }
-        msg => step(st, m, msg),
+        msg => {
+            let before = st.menu.clone();
+            let task = step(st, m, msg);
+            if st.menu == before {
+                return task;
+            }
+            // A menu opened, moved or closed: what was asked of the system for
+            // the last one is of no use to this one.
+            st.probe = None;
+            match &st.menu {
+                Some(MenuState {
+                    kind: RowKind::Ws,
+                    id,
+                    ..
+                }) => match sleep::request(m, id) {
+                    Some(shells) => Task::batch([task, ask_shells(sv, id.clone(), shells)]),
+                    None => task,
+                },
+                _ => task,
+            }
+        }
     }
+}
+
+/// Asks the system which of a workspace's shells run something, as its menu
+/// opens (`sleep.check`); the answer comes back as `Msg::SleepProbed`.
+fn ask_shells(sv: &Services, ws: WsId, shells: Vec<PaneId>) -> Task<Message> {
+    let manager = sv.core().pty().clone();
+    let asked = shells.clone();
+    Task::perform(
+        hangar_core::pty::pty_has_children(manager, shells),
+        move |answer| {
+            Message::Navigator(Msg::SleepProbed {
+                ws: ws.clone(),
+                asked: asked.clone(),
+                answer,
+            })
+        },
+    )
 }
 
 /// Everything else a message does, which touches only the model and the
@@ -622,6 +662,17 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::NoteExpired(id) => {
             if st.note.as_ref().is_some_and(|(shown, _)| *shown == id) {
                 st.note = None;
+            }
+            Task::none()
+        }
+        Msg::SleepProbed { ws, asked, answer } => {
+            // An answer for a menu that has closed, or moved on, is old.
+            let open = matches!(
+                &st.menu,
+                Some(MenuState { kind: RowKind::Ws, id, .. }) if *id == ws
+            );
+            if open {
+                st.probe = Some(sleep::Probe::answered(ws, &asked, answer));
             }
             Task::none()
         }
@@ -900,19 +951,14 @@ pub fn on_intent(
     None
 }
 
-/// The mod's usage reports carry the plan's windows.
+/// Nothing in the core's events is the navigator's: the plan's windows come
+/// from the pane logic, which reads the same reports.
 pub fn on_event(
-    st: &mut State,
+    _st: &mut State,
     _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    if let CoreEvent::Bridge { event, .. } = event
-        && let Some(BridgeEvent::Usage { rate_limits, .. }) = BridgeEvent::parse(event)
-        && let Some(report) = plan::take(&rate_limits)
-    {
-        st.plan = Some(report);
-    }
     None
 }
 

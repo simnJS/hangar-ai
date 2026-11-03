@@ -21,11 +21,13 @@ use hangar_ui::{button, layer, menu};
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
+use crate::navigator::menu::set_off;
+use crate::orchestration_ui::actions::pin_refusal;
 use crate::palette::sources::workspace_of;
 use crate::services::{CoreEvent, Services};
 use crate::shell::{MenuEntry, Region};
-use crate::state::types::{AgentId, PaneRole};
-use crate::state::{Model, PaneId, Patch, SplitDir, Workspace};
+use crate::state::types::{Pane, PaneRole, Workspace};
+use crate::state::{Model, PaneId, Patch, SplitDir};
 
 /// The menu's width bounds (`.pane-menu`).
 const MIN_WIDTH: f32 = 232.0;
@@ -134,19 +136,25 @@ pub fn on_event(
     None
 }
 
-/// Why a pane cannot be the workspace's orchestrator, or `None` when it can
-/// (`pinRefusal` of lib/orchestrationActions.ts: one per workspace, Claude
-/// Code only, never a worker, never the manager, never in the HQ). The
-/// orchestration panels' package owns the rule; it is read here until that
-/// package exposes it (P10).
-fn can_pin(ws: &Workspace, pane: &PaneId) -> bool {
-    let Some(entry) = ws.panes.iter().find(|entry| &entry.id == pane) else {
-        return false;
-    };
-    entry.role.is_none()
-        && ws.hq != Some(true)
-        && entry.agent == AgentId::Claude
-        && crate::state::roles::orchestrator_of(ws).is_none()
+/// What a pane is to the orchestration of its workspace, for the last group
+/// of its menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    /// It is the workspace's orchestrator: the menu offers to let go, and its
+    /// settings.
+    Orchestrator,
+    /// It may become the orchestrator: the menu offers to pin it.
+    Free,
+}
+
+/// The pane's part, by the orchestration panels' own rule (`pinRefusal`: one
+/// orchestrator per workspace, Claude Code only, never a worker, never the
+/// manager, never in the HQ). `None` for a pane the menu says nothing about.
+pub fn part_in_orchestration(ws: &Workspace, pane: &Pane) -> Option<Part> {
+    if pane.role == Some(PaneRole::Orchestrator) {
+        return Some(Part::Orchestrator);
+    }
+    pin_refusal(ws, &pane.id).is_none().then_some(Part::Free)
 }
 
 /// A line that closes the menu, gives the terminal the keyboard back, then
@@ -288,7 +296,8 @@ pub fn entries(ctx: Ctx<'_>, pane: &PaneId, folded: Folded) -> Vec<menu::Entry<M
 
     // Last, a group of its own: what the pane is to the workspace rather
     // than what it does.
-    if entry.role == Some(PaneRole::Orchestrator) {
+    let part = part_in_orchestration(ws, entry);
+    if part == Some(Part::Orchestrator) {
         entries.push(menu::separator());
         entries.push(line(
             ctx,
@@ -310,7 +319,7 @@ pub fn entries(ctx: Ctx<'_>, pane: &PaneId, folded: Folded) -> Vec<menu::Entry<M
             Some(CommandId::WorkspaceOrchestration),
             intent(Intent::OpenOrchestration(ws_id.clone())),
         ));
-    } else if can_pin(ws, pane) {
+    } else if part == Some(Part::Free) {
         entries.push(menu::separator());
         entries.push(line(
             ctx,
@@ -327,12 +336,14 @@ pub fn entries(ctx: Ctx<'_>, pane: &PaneId, folded: Folded) -> Vec<menu::Entry<M
     }
 
     // The Claude account of the pane, which says nothing for a pane that
-    // does not run Claude Code.
-    let accounts = crate::accounts::menu_items(ctx, &ws.id, Some(pane));
-    if !accounts.is_empty() {
-        entries.push(menu::separator());
-        entries.extend(accounts.into_iter().map(|entry| account_line(pane, entry)));
-    }
+    // does not run Claude Code. The accounts package starts its block with its
+    // own separator and heading, so none is added here: a second one would
+    // draw twice.
+    entries.extend(
+        set_off(crate::accounts::menu_items(ctx, &ws.id, Some(pane)))
+            .into_iter()
+            .map(|entry| account_line(pane, entry)),
+    );
     entries
 }
 
@@ -413,46 +424,4 @@ pub fn view_folded<'a>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::types::Pane;
-
-    fn pane(id: &str, agent: AgentId, role: Option<PaneRole>) -> Pane {
-        Pane {
-            id: id.into(),
-            agent,
-            role,
-            ..Pane::default()
-        }
-    }
-
-    #[test]
-    fn only_a_free_claude_code_pane_can_become_the_orchestrator() {
-        let ws = Workspace {
-            panes: vec![
-                pane("claude", AgentId::Claude, None),
-                pane("codex", AgentId::Codex, None),
-                pane("worker", AgentId::Claude, Some(PaneRole::Worker)),
-                pane("manager", AgentId::Claude, Some(PaneRole::Manager)),
-            ],
-            ..Workspace::default()
-        };
-        assert!(can_pin(&ws, &"claude".to_string()));
-        assert!(!can_pin(&ws, &"codex".to_string()));
-        assert!(!can_pin(&ws, &"worker".to_string()));
-        assert!(!can_pin(&ws, &"manager".to_string()));
-        assert!(!can_pin(&ws, &"missing".to_string()));
-
-        let mut taken = ws.clone();
-        taken
-            .panes
-            .push(pane("lead", AgentId::Claude, Some(PaneRole::Orchestrator)));
-        assert!(!can_pin(&taken, &"claude".to_string()));
-
-        let hq = Workspace {
-            hq: Some(true),
-            ..ws
-        };
-        assert!(!can_pin(&hq, &"claude".to_string()));
-    }
-}
+mod tests;

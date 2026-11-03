@@ -76,7 +76,7 @@ pub enum Msg {
     Dialog(DialogMsg),
 }
 
-pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::ToggleMenu(pane) => {
             let open = OpenMenu {
@@ -96,21 +96,16 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         }
         Msg::CloseMenu => close_menu(st, m),
         Msg::Run { pane, scope, id } => {
+            let request = run_request(m, &pane, scope, &id);
             let back = close_menu(st, m);
-            let Some(ws) = crate::palette::sources::workspace_of(m, &pane) else {
-                return back;
-            };
-            let Some(command) = find(ws, m.settings(), scope, &id).cloned() else {
-                return back;
-            };
-            // A broadcast command goes to the whole workspace, which is the
-            // broadcast field's target spelled once and kept.
-            let panes = if command.broadcast {
-                ws.panes.iter().map(|pane| pane.id.clone()).collect()
-            } else {
-                vec![pane]
-            };
-            Task::batch([back, run(sv, &command, panes)])
+            match request {
+                // Through the intent, as `command.runN` goes: the pane logic
+                // counts it as the workspace being used, which a command run
+                // from the menu is as much as one run from the keyboard
+                // (hibernation must not put the workspace to sleep under it).
+                Some(intent) => back.chain(Task::done(Message::Intent(intent))),
+                None => back,
+            }
         }
         Msg::Edit { pane, id } => {
             st.menu = None;
@@ -172,6 +167,24 @@ pub fn merged<'a>(ws: &'a Workspace, settings: &'a Settings) -> Vec<&'a SavedCom
         .iter()
         .chain(settings.saved_commands.iter())
         .collect()
+}
+
+/// What picking a command in a pane's menu asks for: `command.runN` of its
+/// place in what the pane offers ([`merged`]), for the workspace the pane is
+/// in. `None` when the pane or the command is gone.
+fn run_request(m: &Model, pane: &PaneId, scope: CommandScope, id: &str) -> Option<Intent> {
+    let ws = crate::palette::sources::workspace_of(m, pane)?;
+    // The workspace's commands come first, then the global ones.
+    let (list, before) = match scope {
+        CommandScope::Workspace => (&ws.saved_commands, 0),
+        CommandScope::Global => (&m.settings().saved_commands, ws.saved_commands.len()),
+    };
+    let at = list.iter().position(|command| command.id == id)?;
+    Some(Intent::RunSavedCommand {
+        ws: ws.id.clone(),
+        from: pane.clone(),
+        index: before + at,
+    })
 }
 
 /// A saved command where it is kept.
@@ -425,5 +438,72 @@ mod tests {
             Some(CommandScope::Workspace)
         );
         assert!(locate(&ws, &settings, "x").is_none());
+    }
+
+    /// A model with a workspace `w` holding saved commands `w1`, `w2` and
+    /// global ones `g1`, `g2`; the pane `p` is in `w`.
+    fn model_with_commands() -> Model {
+        use crate::state::types::{AgentId, AppState, Pane};
+        let command = |id: &str| SavedCommand {
+            id: id.into(),
+            command: format!("run {id}"),
+            ..SavedCommand::default()
+        };
+        let mut state = AppState {
+            workspaces: vec![Workspace {
+                id: "w".into(),
+                saved_commands: vec![command("w1"), command("w2")],
+                panes: vec![Pane {
+                    id: "p".into(),
+                    agent: AgentId::Shell,
+                    ..Pane::default()
+                }],
+                ..Workspace::default()
+            }],
+            active_workspace_id: Some("w".into()),
+            ..AppState::default()
+        };
+        state.settings.saved_commands = vec![command("g1"), command("g2")];
+        let mut model = Model::default();
+        model.hydrate(state);
+        model
+    }
+
+    #[test]
+    fn a_command_picked_in_the_menu_is_run_as_the_intent_of_its_place() {
+        let model = model_with_commands();
+        let pane = "p".to_string();
+        // The workspace's commands come first, then the global ones: the same
+        // places `command.runN` counts through.
+        for (scope, id, index) in [
+            (CommandScope::Workspace, "w1", 0),
+            (CommandScope::Workspace, "w2", 1),
+            (CommandScope::Global, "g1", 2),
+            (CommandScope::Global, "g2", 3),
+        ] {
+            match run_request(&model, &pane, scope, id) {
+                Some(Intent::RunSavedCommand {
+                    ws,
+                    from,
+                    index: at,
+                }) => {
+                    assert_eq!((ws.as_str(), from.as_str(), at), ("w", "p", index));
+                    let ws = model.workspace("w").unwrap();
+                    assert_eq!(merged(ws, model.settings())[index].id, id);
+                }
+                other => panic!("expected a run of {id}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_command_or_a_pane_that_is_gone_runs_nothing() {
+        let model = model_with_commands();
+        let pane = "p".to_string();
+        assert!(run_request(&model, &pane, CommandScope::Workspace, "g1").is_none());
+        assert!(run_request(&model, &pane, CommandScope::Global, "w1").is_none());
+        assert!(run_request(&model, &pane, CommandScope::Global, "nope").is_none());
+        let ghost = "ghost".to_string();
+        assert!(run_request(&model, &ghost, CommandScope::Global, "g1").is_none());
     }
 }

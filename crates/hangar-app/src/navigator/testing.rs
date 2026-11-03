@@ -13,6 +13,7 @@ use iced_test::Simulator;
 use crate::app::Packages;
 use crate::ctx::{Ctx, Metrics};
 use crate::message::Message;
+use crate::shell::WindowKind;
 use crate::state::Model;
 use crate::state::types::{AgentId, AppState, Pane, Workspace, WorkspaceFolder};
 
@@ -31,19 +32,26 @@ pub fn simulate<'a>(element: impl Into<Element<'a, Message>>) -> Simulator<'a, M
     Simulator::with_size(settings, WINDOW, element)
 }
 
-/// What the views are drawn with, for a model and the packages' states.
+/// What the views are drawn with, for a model and the packages' states: the
+/// model's main window's.
 pub fn ctx<'a>(model: &'a Model, pkg: &'a Packages) -> Ctx<'a> {
+    let window = model.main_window().unwrap_or_else(window::Id::unique);
+    ctx_in(model, pkg, window)
+}
+
+/// The same, for another window of the model.
+pub fn ctx_in<'a>(model: &'a Model, pkg: &'a Packages, window: window::Id) -> Ctx<'a> {
     Ctx {
         model,
         pkg,
         i18n: hangar_i18n::Translator::new(hangar_i18n::Locale::En),
-        theme: model.theme(),
+        theme: model.theme_in(window),
         metrics: Metrics {
             scale: 1.0,
             body_width: WINDOW.width,
         },
         keymap: &model.live.keymap.index,
-        window: window::Id::unique(),
+        window,
         now: Instant::now(),
     }
 }
@@ -77,11 +85,33 @@ pub fn folder(id: &str, name: &str, collapsed: bool) -> WorkspaceFolder {
     }
 }
 
-/// A model that has loaded `state`.
+/// A model that has loaded `state`, with its main window open.
 pub fn model_of(state: AppState) -> Model {
     let mut model = Model::default();
     model.hydrate(state);
     model
+        .live
+        .windows
+        .insert(window::Id::unique(), WindowKind::Main);
+    model
+}
+
+/// Opens a window of its own for workspace `ws`, as detaching it does: the
+/// workspace is flagged, and the window is the one that draws it.
+pub fn detach(model: &mut Model, ws: &str) -> window::Id {
+    let mut state = model.state().clone();
+    for entry in &mut state.workspaces {
+        if entry.id == ws {
+            entry.detached = Some(true);
+        }
+    }
+    model.hydrate(state);
+    let window = window::Id::unique();
+    model
+        .live
+        .windows
+        .insert(window, WindowKind::Workspace(ws.to_string()));
+    window
 }
 
 /// What a test does with the window, besides what the simulator already does.

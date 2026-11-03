@@ -10,9 +10,10 @@ use hangar_i18n::{Key, Locale, Translator, args};
 use hangar_theme::tokens::{font_size, space};
 use hangar_theme::{Theme, fonts, style};
 
-use super::clock::{local_now, parse_reset, percent, reset_when};
 use crate::ctx::Ctx;
+use crate::inspector::format::{format_percent, reset_when, resets_at_ms};
 use crate::message::Message;
+use crate::panes_logic::wall_clock_ms;
 use crate::state::live::{PlanLimits, RateLimit};
 
 /// Past these, a window is close enough to its limit to say so in colour.
@@ -52,25 +53,29 @@ pub fn window_label(tr: Translator, kind: &str) -> String {
     }
 }
 
-/// When the plan next frees up something: the soonest reset still to come,
-/// which is what a pane about to hit its limit is waiting for.
-pub fn next_reset(
-    limits: &[RateLimit],
-    now: chrono::NaiveDateTime,
-) -> Option<chrono::NaiveDateTime> {
+/// When the plan next frees up something: the soonest reset still to come
+/// (in ms since the epoch), which is what a pane about to hit its limit is
+/// waiting for.
+pub fn next_reset(limits: &[RateLimit], now: i64) -> Option<i64> {
     limits
         .iter()
-        .filter_map(|limit| limit.resets_at.as_deref().and_then(parse_reset))
+        .filter_map(resets_at_ms)
         .filter(|at| *at > now)
         .min()
 }
 
+/// A reset as the end of a sentence, in the language of `tr`
+/// (`resetWhen`; the inspector says it the same way).
+fn reset_text(tr: Translator, at: i64, now: i64) -> String {
+    reset_when(at, now, tr.locale()).text(tr)
+}
+
 /// The tooltip: what the block is, then one line per window that says when it
 /// resets.
-pub fn hint(tr: Translator, limits: &[RateLimit], now: chrono::NaiveDateTime) -> String {
+pub fn hint(tr: Translator, limits: &[RateLimit], now: i64) -> String {
     let mut lines = vec![tr.t(Key::SidebarPlanHint).into_owned()];
     for limit in limits {
-        let Some(at) = limit.resets_at.as_deref().and_then(parse_reset) else {
+        let Some(at) = resets_at_ms(limit) else {
             continue;
         };
         lines.push(
@@ -78,7 +83,7 @@ pub fn hint(tr: Translator, limits: &[RateLimit], now: chrono::NaiveDateTime) ->
                 Key::SidebarPlanResets,
                 &args!(
                     "window" => window_label(tr, &limit.kind),
-                    "reset" => reset_when(at, now, tr)
+                    "reset" => reset_text(tr, at, now)
                 ),
             )
             .into_owned(),
@@ -105,7 +110,7 @@ pub fn view<'a>(plan: Option<&'a PlanLimits>, ctx: Ctx<'a>) -> Option<Element<'a
     let t = ctx.theme;
     let tr = ctx.i18n;
     let locale: Locale = tr.locale();
-    let now = local_now();
+    let now = i64::try_from(wall_clock_ms()).unwrap_or_default();
 
     let mut head = row![
         text(tr.t(Key::SidebarPlan).into_owned())
@@ -118,7 +123,7 @@ pub fn view<'a>(plan: Option<&'a PlanLimits>, ctx: Ctx<'a>) -> Option<Element<'a
     .align_y(Alignment::Center);
     if let Some(next) = next_reset(&plan.limits, now) {
         head = head.push(
-            text(reset_when(next, now, tr))
+            text(reset_text(tr, next, now))
                 .size(font_size::CAPTION)
                 .color(t.colors.fg_subtle)
                 .wrapping(text::Wrapping::None),
@@ -157,7 +162,7 @@ pub fn view<'a>(plan: Option<&'a PlanLimits>, ctx: Ctx<'a>) -> Option<Element<'a
                 .width(24),
                 container(bar).width(Length::Fill).center_y(Length::Fill),
                 container(
-                    text(percent(pct, locale))
+                    text(format_percent(f64::from(pct), locale))
                         .size(font_size::LABEL)
                         .font(fonts::mono())
                         .color(if level == Level::Ok {

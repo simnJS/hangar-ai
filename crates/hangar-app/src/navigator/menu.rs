@@ -11,9 +11,11 @@ use hangar_ui::{Icon, glyph::GlyphState};
 use super::Msg;
 use super::model::RowKind;
 use super::reads;
+use super::sleep;
 use super::status;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
+use crate::panes_logic::SleepLine;
 use crate::shell::MenuEntry;
 use crate::state::types::Workspace;
 use crate::state::{AgentActivity, PaneId, WsId};
@@ -76,6 +78,16 @@ fn agent_entries(ctx: Ctx<'_>, workspaces: &[&Workspace]) -> Vec<Entry<Message>>
     }
     entries.push(menu::separator());
     entries
+}
+
+/// A block of lines another package made, set off from the lines before it by
+/// exactly one separator. The accounts package starts its block with its own
+/// separator and heading; a menu that added a second pair drew them twice.
+pub fn set_off(block: Vec<MenuEntry>) -> Vec<MenuEntry> {
+    if matches!(block.first(), None | Some(MenuEntry::Separator)) {
+        return block;
+    }
+    std::iter::once(MenuEntry::Separator).chain(block).collect()
 }
 
 /// An entry another package made, as the menu draws it.
@@ -205,14 +217,11 @@ pub fn workspace_entries(ctx: Ctx<'_>, id: &str) -> Vec<Entry<Message>> {
 
     // The Claude account this workspace runs on: the same choice as the
     // toolbar's switcher, which is the accounts package's.
-    let accounts = crate::accounts::menu_items(ctx, &ws.id, None);
-    if !accounts.is_empty() {
-        entries.push(menu::separator());
-        if !matches!(accounts.first(), Some(MenuEntry::Heading(_))) {
-            entries.push(menu::heading(tr.t(Key::AccountsMenuTitle).into_owned()));
-        }
-        entries.extend(accounts.into_iter().map(adopt));
-    }
+    entries.extend(
+        set_off(crate::accounts::menu_items(ctx, &ws.id, None))
+            .into_iter()
+            .map(adopt),
+    );
 
     entries.push(menu::separator());
     // Dragging does the same, but a menu is the one way to find out folders
@@ -252,17 +261,17 @@ pub fn workspace_entries(ctx: Ctx<'_>, id: &str) -> Vec<Entry<Message>> {
     entries.push(menu::separator());
 
     // Next to deleting it: the two ways to stop what it runs, for a while or
-    // for good.
-    //
-    // TODO(P4): the sleep verdict (`sleep.verdict`, `sleepRefusal`, and the
-    // shells probed as the menu opens) is P4's hibernation; until it lands the
-    // line is always live and the intent's handler refuses with a notice.
-    entries.push(
-        menu::item(tr.t(Key::SleepAction).into_owned())
-            .icon(Icon::Moon)
-            .on_select(intent(Intent::Sleep(ws.id.clone())))
-            .into(),
-    );
+    // for good. The sleep line is greyed with its reason when a rule says no;
+    // the click asks everything again whatever it said.
+    let sleep = menu::item(tr.t(Key::SleepAction).into_owned()).icon(Icon::Moon);
+    match sleep::line(ctx.model, ctx.pkg.navigator.probe.as_ref(), id) {
+        // The workspace is gone: nothing to put to sleep.
+        None => {}
+        Some(SleepLine::Refused(reason)) => entries.push(sleep.disabled_because(reason).into()),
+        Some(SleepLine::Ready | SleepLine::Ask(_)) => {
+            entries.push(sleep.on_select(intent(Intent::Sleep(ws.id.clone()))).into());
+        }
+    }
     entries.push(
         menu::item(tr.t(Key::SidebarRemove).into_owned())
             .icon(Icon::Trash)

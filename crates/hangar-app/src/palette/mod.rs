@@ -23,7 +23,7 @@ use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Focus, Overlay, Region, View, WindowKind};
+use crate::shell::{Focus, Overlay, Region, View};
 use crate::state::Model;
 
 pub use sources::Target;
@@ -67,11 +67,15 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             let Some(open) = st.open.take() else {
                 return task;
             };
-            Task::batch([task, close(m).chain(give_back(m, open.opener))])
+            Task::batch([
+                task,
+                close(m).chain(give_back(m, open.window, open.opener)),
+            ])
         }
         Event::Run(target) => {
+            let window = open.window;
             st.open = None;
-            Task::batch([task, close(m).chain(run(m, target))])
+            Task::batch([task, close(m).chain(run(m, window, target))])
         }
     }
 }
@@ -87,21 +91,23 @@ fn close(m: &Model) -> Task<Message> {
 }
 
 /// Dismissed without running anything: the keyboard goes back where it was,
-/// else to the terminal of the focused pane.
-fn give_back(m: &Model, opener: Option<Focus>) -> Task<Message> {
+/// else to the terminal of the focused pane of the workspace its window draws.
+fn give_back(m: &Model, window: window::Id, opener: Option<Focus>) -> Task<Message> {
     match opener {
         Some(Focus::Terminal(pane)) => focus_terminal(m, pane),
         Some(Focus::Widget(id)) => iced::widget::operation::focus(id),
         Some(Focus::Region(region)) => Task::done(Message::Intent(Intent::FocusRegion(region))),
-        None => match focused_pane(m) {
+        None => match focused_pane(m, window) {
             Some(pane) => focus_terminal(m, pane),
             None => Task::none(),
         },
     }
 }
 
-fn focused_pane(m: &Model) -> Option<String> {
-    let ws = m.active_workspace()?;
+/// The focused pane of the workspace `window` draws: a palette opened in a
+/// workspace's window is about that window's panes, not the main window's.
+fn focused_pane(m: &Model, window: window::Id) -> Option<String> {
+    let ws = m.window_workspace(window)?;
     m.ui.focus_by_workspace.get(&ws.id).cloned()
 }
 
@@ -120,11 +126,11 @@ fn focus_terminal(m: &Model, pane: String) -> Task<Message> {
 /// the palette, or be closed with it. A command that does not take the
 /// keyboard somewhere of its own hands it back to the terminal first, so
 /// that one which focuses another pane still wins.
-fn run(m: &Model, target: Target) -> Task<Message> {
+fn run(m: &Model, window: window::Id, target: Target) -> Task<Message> {
     let intent = |intent| Task::done(Message::Intent(intent));
     match target {
         Target::Command(id) => {
-            let back = match focused_pane(m) {
+            let back = match focused_pane(m, window) {
                 Some(pane) if !sources::owns_focus(id) => focus_terminal(m, pane),
                 _ => Task::none(),
             };
@@ -196,22 +202,12 @@ fn translator(m: &Model) -> Translator {
     Translator::new(m.locale())
 }
 
-/// The window commands run in: the one with the system's focus, else the
-/// main one.
-fn window_of(m: &Model) -> Option<window::Id> {
-    m.ui.focused_window.or_else(|| {
-        m.live
-            .windows
-            .iter()
-            .find(|(_, kind)| **kind == WindowKind::Main)
-            .map(|(id, _)| *id)
-    })
-}
-
 fn open(m: &Model) -> Open {
     let i18n = translator(m);
     let index = &m.live.keymap.index;
-    let window = window_of(m).unwrap_or_else(window::Id::unique);
+    // Where commands run: the window with the system's focus, else the main
+    // one.
+    let window = m.focused_window().unwrap_or_else(window::Id::unique);
     let keys = index.label(CommandId::ViewPalette);
     Open {
         palette: Palette::new(sources::items(m, window, i18n, index)),
@@ -245,10 +241,14 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         return Space::new().into();
     }
     let t = ctx.theme;
-    let content = open
-        .palette
-        .view(t, &open.labels)
-        .map(|msg| Message::Palette(Msg::Ui(msg)));
+    // The keymap goes first: a shortcut typed in the search field acts, and is
+    // not also typed there.
+    let content = crate::keymap::guard(
+        ctx,
+        open.palette
+            .view(t, &open.labels)
+            .map(|msg| Message::Palette(Msg::Ui(msg))),
+    );
     panel::over(
         t,
         Space::new().width(Length::Fill).height(Length::Fill),

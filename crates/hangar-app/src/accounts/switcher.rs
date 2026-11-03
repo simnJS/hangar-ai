@@ -22,7 +22,6 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::WindowKind;
 use crate::state::WsId;
 
 use super::model::{AccountId, ClaudeAccount, resolve_account};
@@ -53,12 +52,11 @@ pub enum Menu {
 }
 
 /// The workspace the toolbar belongs to: its own window's, else the one in
-/// front.
+/// front. Nothing when the one in front is shown in a window of its own, as
+/// for every other part of the toolbar: the bar is about the workspace its
+/// window draws.
 fn toolbar_workspace(ctx: Ctx<'_>) -> Option<&WsId> {
-    match ctx.model.live.windows.get(&ctx.window) {
-        Some(WindowKind::Workspace(id)) => Some(id),
-        _ => ctx.model.state().active_workspace_id.as_ref(),
-    }
+    ctx.workspace().map(|ws| &ws.id)
 }
 
 fn press(msg: Msg) -> Message {
@@ -112,7 +110,11 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     .on_press(press(Msg::ToggleMenu));
     let anchor = tip::bottom(t, anchor, title);
 
+    // The menu is open for the app, not for a window (its state is one value
+    // and its messages carry no window): it hangs off the button of the window
+    // the person is in, where they pressed it, and not off every window's.
     let content = match &st.switcher {
+        _ if !ctx.model.is_focused_window(ctx.window) => None,
         Menu::Closed => None,
         Menu::Open => Some(menu::panel(
             t,
@@ -303,4 +305,49 @@ fn ask<'a>(
     .spacing(tokens::space::MD)
     .width(Length::Fixed(320.0))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    //! The toolbar's account button is about the workspace of its own window.
+
+    use hangar_i18n::Locale;
+
+    use super::*;
+    use crate::navigator::testing::{ctx_in, detach, simulate};
+    use crate::workspace_dialog::testing::Harness;
+
+    /// `w1` follows the default account, `w2` is on « Perso ».
+    fn harness() -> Harness {
+        Harness::new(Locale::En, "graphite")
+    }
+
+    #[test]
+    fn a_workspace_windows_button_names_the_account_of_its_own_workspace() {
+        let mut h = harness();
+        let own = detach(&mut h.model, "w2");
+        let st = State::default();
+
+        let mut mine = simulate(view(&st, ctx_in(&h.model, &h.pkg, own)));
+        assert!(mine.find("Perso").is_ok());
+        assert!(mine.find("Principal").is_err());
+        drop(mine);
+
+        let mut main = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
+        assert!(main.find("Principal").is_ok());
+        assert!(main.find("Perso").is_err());
+    }
+
+    #[test]
+    fn the_main_window_has_no_button_while_its_workspace_is_in_a_window_of_its_own() {
+        let mut h = harness();
+        let mut state = h.model.state().clone();
+        state.active_workspace_id = Some("w2".into());
+        h.model.hydrate(state);
+        detach(&mut h.model, "w2");
+        let st = State::default();
+        let mut main = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
+        assert!(main.find("Perso").is_err());
+        assert!(main.find("Principal").is_err());
+    }
 }

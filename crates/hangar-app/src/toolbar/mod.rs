@@ -18,10 +18,8 @@
 pub mod activity;
 pub mod menus;
 
-use std::collections::HashMap;
-
 use iced::widget::{Space, container, responsive, row, text};
-use iced::{Alignment, Element, Length, Padding, Subscription, Task};
+use iced::{Alignment, Element, Length, Padding, Subscription, Task, window};
 
 use hangar_i18n::{Key, args};
 use hangar_theme::tokens::{font_size, space};
@@ -33,15 +31,13 @@ use hangar_ui::{Icon, button as ui_button, icon, tip};
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
-use crate::navigator::model::closed_by_preset;
 use crate::navigator::reads;
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Region, View, WindowKind};
-use crate::state::live::BridgeEvent;
+use crate::state::layout;
 use crate::state::types::{MAX_PANES, Workspace};
 use crate::state::{AgentActivity, Model, PaneId, WsId};
 
-use activity::Glance;
 use menus::LAYOUTS;
 
 /// One em of the toolbar's own font (`.toolbar { font-size: 12px }`), the unit
@@ -68,15 +64,21 @@ impl PresetAsk {
 }
 
 /// The package's UI state; lives in `App.pkg.toolbar`.
+///
+/// Each window has a toolbar of its own, so everything open in one is
+/// remembered with the window it is open in: a menu opened in a workspace's
+/// window must not open in the main window's bar as well.
 #[derive(Debug, Default)]
 pub struct State {
-    /// What the capsule says of each pane's agent.
-    glances: HashMap<PaneId, Glance>,
-    /// The « … » menu is open, from its button.
-    more_open: bool,
-    /// The workspace whose Kits menu is open: another workspace's kits are
-    /// another menu.
-    kits_for: Option<WsId>,
+    /// The window whose « … » menu is open, from its button.
+    more_open: Option<window::Id>,
+    /// The window and the workspace whose Kits menu is open: another
+    /// workspace's kits are another menu.
+    kits_for: Option<(window::Id, WsId)>,
+    /// The window a reset or a stop is being asked in. The shell arms the
+    /// question for the whole app (`Model.ui`); this says whose bar draws it,
+    /// so that it never asks about the wrong window's workspace.
+    asking_in: Option<window::Id>,
     preset: Option<PresetAsk>,
 }
 
@@ -86,23 +88,26 @@ pub struct State {
 pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::Toolbar(Msg)`.
+///
+/// A message names the window or the workspace of the bar it came from: when
+/// it is handled, the focused window may be another.
 #[derive(Debug, Clone)]
 pub enum Msg {
-    ToggleMore,
-    ToggleKits,
+    ToggleMore(window::Id),
+    ToggleKits(window::Id, WsId),
     /// Escape, Tab or a press elsewhere on the « … » menu or one of its
     /// questions.
     CloseMenus,
     /// A menu line: the menus close, then the intents run (an entry runs once
     /// the menu is gone, so it never fights it for the keyboard).
     Pick(Vec<Intent>),
-    /// A layout preset was pressed.
-    Preset(u8),
+    /// A layout preset of this workspace was pressed.
+    Preset(WsId, u8),
     PresetConfirm,
     PresetCancel,
-    /// A counter of the capsule: the terminals, and the next pane in that
-    /// state.
-    GoTo(PaneId),
+    /// A counter of the capsule: the terminals of this workspace, and the
+    /// next pane in that state.
+    GoTo(WsId, PaneId),
 }
 
 fn intents(list: Vec<Intent>) -> Task<Message> {
@@ -113,13 +118,20 @@ fn intents(list: Vec<Intent>) -> Task<Message> {
 }
 
 pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
-    let active = m.active_workspace().map(|ws| ws.id.clone());
+    step(st, m, msg)
+}
+
+/// Everything a message does, which needs nothing from the services.
+fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
     match msg {
-        Msg::ToggleMore | Msg::CloseMenus => {
-            let opening = matches!(msg, Msg::ToggleMore)
-                && !st.more_open
-                && !m.ui.confirm_reset
-                && !m.ui.confirm_stop_workers;
+        Msg::ToggleMore(_) | Msg::CloseMenus => {
+            let opening = match msg {
+                Msg::ToggleMore(window) => {
+                    (st.more_open != Some(window) && !m.ui.confirm_reset && !m.ui.confirm_stop_workers)
+                        .then_some(window)
+                }
+                _ => None,
+            };
             // A question the menu was showing is called off with it.
             let mut asked = Vec::new();
             if m.ui.confirm_reset {
@@ -131,46 +143,28 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             st.more_open = opening;
             intents(asked)
         }
-        Msg::ToggleKits => {
-            st.kits_for = match (&st.kits_for, active) {
-                (Some(open), Some(now)) if *open == now => None,
-                (_, now) => now,
+        Msg::ToggleKits(window, ws) => {
+            let open = (window, ws);
+            st.kits_for = if st.kits_for.as_ref() == Some(&open) {
+                None
+            } else {
+                Some(open)
             };
             Task::none()
         }
         Msg::Pick(list) => {
-            st.more_open = false;
+            st.more_open = None;
             st.kits_for = None;
             intents(list)
         }
-        Msg::Preset(size) => {
-            let Some(ws) = m.active_workspace() else {
-                return Task::none();
-            };
-            let closing: Vec<(PaneId, String)> = closed_by_preset(ws, size)
-                .iter()
-                .map(|pane| (pane.id.clone(), pane.name.clone()))
-                .collect();
-            // A smaller preset closes the panes read last. When one of them
-            // still has an agent at work, waiting on you or with an answer you
-            // have not read, the control, which looks like a harmless view
-            // switch, asks first.
-            let busy = busy_among(&closing, |id| reads::activity(m, id));
-            if busy.is_empty() {
-                return intents(vec![Intent::ApplyPreset {
-                    ws: ws.id.clone(),
-                    size,
-                }]);
+        Msg::Preset(ws, size) => match preset_step(m, &ws, size) {
+            Some(PresetStep::Apply(intent)) => intents(vec![intent]),
+            Some(PresetStep::Ask(ask)) => {
+                st.preset = Some(ask);
+                Task::none()
             }
-            st.preset = Some(PresetAsk {
-                ws: ws.id.clone(),
-                view: m.ui.view,
-                size,
-                closing,
-                busy,
-            });
-            Task::none()
-        }
+            None => Task::none(),
+        },
         Msg::PresetConfirm => match st.preset.take() {
             Some(ask) => intents(vec![Intent::ApplyPreset {
                 ws: ask.ws,
@@ -182,22 +176,66 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             st.preset = None;
             Task::none()
         }
-        Msg::GoTo(pane) => {
-            let Some(ws) = active else {
-                return Task::none();
-            };
-            let mut list = Vec::new();
-            if m.ui.view != View::Terminals {
-                list.push(Intent::SetView(View::Terminals));
-            }
-            list.push(Intent::FocusPane {
-                ws,
-                pane,
-                terminal: true,
-            });
-            intents(list)
-        }
+        Msg::GoTo(ws, pane) => intents(go_to(m, ws, pane)),
     }
+}
+
+/// What a layout preset does once pressed.
+#[derive(Debug, Clone)]
+pub enum PresetStep {
+    /// It closes nothing that is busy: apply it.
+    Apply(Intent),
+    /// It would stop an agent mid-work: ask first.
+    Ask(PresetAsk),
+}
+
+/// What pressing the preset of `size` panes on workspace `ws` comes to. The
+/// workspace is the one the pressed bar belongs to, which is not always the
+/// main window's active one. `None` when it is gone.
+pub fn preset_step(m: &Model, ws: &str, size: u8) -> Option<PresetStep> {
+    let ws = m.workspace(ws)?;
+    let closing: Vec<(PaneId, String)> =
+        layout::closed_by_preset(&ws.panes, ws.tree.as_ref(), usize::from(size))
+            .iter()
+            .map(|pane| (pane.id.clone(), pane.name.clone()))
+            .collect();
+    // A smaller preset closes the panes read last. When one of them still has
+    // an agent at work, waiting on you or with an answer you have not read,
+    // the control, which looks like a harmless view switch, asks first.
+    let busy = busy_among(&closing, |id| reads::activity(m, id));
+    if busy.is_empty() {
+        return Some(PresetStep::Apply(Intent::ApplyPreset {
+            ws: ws.id.clone(),
+            size,
+        }));
+    }
+    Some(PresetStep::Ask(PresetAsk {
+        ws: ws.id.clone(),
+        view: view_of(m, &ws.id),
+        size,
+        closing,
+        busy,
+    }))
+}
+
+/// What a counter of the capsule does: the terminals of that workspace come
+/// forward if its window shows something else, then the pane takes the focus.
+pub fn go_to(m: &Model, ws: WsId, pane: PaneId) -> Vec<Intent> {
+    let mut list = Vec::new();
+    if view_of(m, &ws) != View::Terminals {
+        list.push(Intent::SetView(View::Terminals));
+    }
+    list.push(Intent::FocusPane {
+        ws,
+        pane,
+        terminal: true,
+    });
+    list
+}
+
+/// What the window that draws workspace `ws` shows in its main area.
+fn view_of(m: &Model, ws: &str) -> View {
+    m.window_of(ws).map_or(m.ui.view, |window| m.view_in(window))
 }
 
 /// The panes among `closing` with something going on, and what: the ones a
@@ -229,35 +267,50 @@ pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Mess
 /// Every intent, after the shell's own handling of it.
 pub fn on_intent(
     st: &mut State,
-    _m: &mut Model,
+    m: &mut Model,
     _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
-    // A question about a workspace's panes goes with a change of workspace.
-    if matches!(intent, Intent::ActivateWorkspace(_) | Intent::SetView(_)) {
-        st.preset = None;
+    match intent {
+        // A question about a workspace's panes goes with a change of
+        // workspace, and so does a menu about its kits.
+        Intent::ActivateWorkspace(_) | Intent::SetView(_) => {
+            st.preset = None;
+            if matches!(intent, Intent::ActivateWorkspace(_)) {
+                st.kits_for = None;
+            }
+        }
+        // The shell armed a question for the window the command ran in.
+        Intent::ArmResetAgents(true) | Intent::ArmStopWorkers(true) => {
+            st.asking_in = m.focused_window();
+        }
+        Intent::ArmResetAgents(false) | Intent::ArmStopWorkers(false)
+            if !m.ui.confirm_reset && !m.ui.confirm_stop_workers =>
+        {
+            st.asking_in = None;
+        }
+        _ => {}
     }
     None
 }
 
-/// The mod's reports feed the capsule.
+/// Nothing in the core's events is the toolbar's: what the capsule says of a
+/// pane is the pane logic's insight (`panes_logic`), which reads the same
+/// reports.
 pub fn on_event(
-    st: &mut State,
+    _st: &mut State,
     _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    if let CoreEvent::Bridge { pane, event } = event
-        && let Some(report) = BridgeEvent::parse(event)
-    {
-        st.glances.entry(pane.clone()).or_default().note(&report);
-    }
     None
 }
 
 /// Region `toolbar`. Embeds `needs_you::button` and `accounts::switcher`.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
-    let Some(ws) = ctx.model.active_workspace() else {
+    // The workspace this window draws: a workspace window's own, never the
+    // main window's active one.
+    let Some(ws) = ctx.workspace() else {
         return Space::new().into();
     };
     responsive(move |size| bar(st, ctx, ws, size.width)).into()
@@ -269,7 +322,7 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     let tr = ctx.i18n;
     let model = ctx.model;
     let settings = model.settings();
-    let view = model.ui.view;
+    let view = ctx.view();
     let terminals = view == View::Terminals;
     let kind = model.live.windows.get(&ctx.window);
     let is_main = kind == Some(&WindowKind::Main);
@@ -314,7 +367,7 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
 
     // ---- The centre: what the focused pane is doing.
     let room = (width - 2.0 * 24.0).max(0.0) * 0.4;
-    let centre = container(activity::view(&st.glances, ctx, ws, extras, room))
+    let centre = container(activity::view(ctx, ws, extras, room))
         .max_width(520)
         .width(Length::Fill);
 
@@ -364,9 +417,9 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     if let Some(kits) = kits_button(st, ctx, ws) {
         trail = trail.push(kits);
     }
-    // TODO(P15): the 3D toggle (`reads::models`) waits for the preview store;
-    // `Intent::TogglePreview` is what it sends.
-    let models = reads::models(model, ws);
+    // The preview's button: `Intent::TogglePreview` decides between the
+    // docked panel and a drawer, as the room the window has allows.
+    let models = reads::models(&ctx, ws);
     if models.open {
         trail = trail.push(
             ui_button::toggle_button(t, Icon::Cube, models.shown)
@@ -505,7 +558,7 @@ fn presets<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Me
     let t = ctx.theme;
     let tr = ctx.i18n;
     let asking = st.preset.as_ref().filter(|ask| {
-        ask.ws == ws.id && ask.view == ctx.model.ui.view && !ctx.model.ui.confirm_reset
+        ask.ws == ws.id && ask.view == ctx.view() && !ctx.model.ui.confirm_reset
     });
     let buttons = LAYOUTS.map(|size| {
         let words = tr
@@ -519,7 +572,7 @@ fn presets<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Me
         .width(28)
         .height(22)
         .style(style::button::tab(t, on))
-        .on_press(Message::Toolbar(Msg::Preset(size)));
+        .on_press(Message::Toolbar(Msg::Preset(ws.id.clone(), size)));
         let segment = tip::bottom(t, segment, words);
         let content = asking
             .filter(|ask| ask.size == size)
@@ -536,7 +589,8 @@ fn presets<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Me
 }
 
 /// The « … » button, with the menu or the question that hangs off it. An armed
-/// reset or stop opens its question from anywhere (the shortcut, the palette).
+/// reset or stop opens its question from anywhere (the shortcut, the palette),
+/// in the window it was asked in.
 fn more<'a>(
     st: &'a State,
     ctx: Ctx<'a>,
@@ -549,28 +603,32 @@ fn more<'a>(
     let t = ctx.theme;
     let tr = ctx.i18n;
     let ui = &ctx.model.ui;
-    let confirming = ui.confirm_reset || ui.confirm_stop_workers;
-    let shown = st.more_open || confirming;
+    let asked_here = st
+        .asking_in
+        .or_else(|| ctx.model.focused_window())
+        .is_some_and(|window| window == ctx.window);
+    let confirming_reset = ui.confirm_reset && asked_here;
+    let confirming_stop = ui.confirm_stop_workers && asked_here;
+    let shown = st.more_open == Some(ctx.window) || confirming_reset || confirming_stop;
     let button = ui_button::toggle_button(t, Icon::More, shown)
         .tip(tr.t(Key::ToolbarMore).into_owned())
-        .on_press(Message::Toolbar(Msg::ToggleMore));
+        .on_press(Message::Toolbar(Msg::ToggleMore(ctx.window)));
 
-    if ui.confirm_reset {
+    if confirming_reset {
         return layer::dropdown(button, Some(menus::reset_question(ctx, ws)))
             .align_end()
             .tab_inside()
             .on_dismiss(Message::Toolbar(Msg::CloseMenus))
             .into();
     }
-    if ui.confirm_stop_workers {
+    if confirming_stop {
         return layer::dropdown(button, Some(menus::stop_question(ctx, ws)))
             .align_end()
             .tab_inside()
             .on_dismiss(Message::Toolbar(Msg::CloseMenus))
             .into();
     }
-    let entries = st
-        .more_open
+    let entries = (st.more_open == Some(ctx.window))
         .then(|| menus::more_entries(ctx, ws, terminals, folded, can_detach, in_own_window));
     ui_menu::dropdown(t, button, entries)
         .align_end()
@@ -583,20 +641,23 @@ fn kits_button<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Option<Ele
     let t = ctx.theme;
     let tr = ctx.i18n;
     let (tabs, loading) = reads::kit_tabs(ctx.model, ws)?;
-    let open = st.kits_for.as_ref() == Some(&ws.id);
+    let me = (ctx.window, ws.id.clone());
+    let open = st.kits_for.as_ref() == Some(&me);
     let button = ui_button::toggle_button(t, Icon::Window, open)
         .tip(tr.t(Key::KitsTabMenuHint).into_owned())
-        .on_press(Message::Toolbar(Msg::ToggleKits));
+        .on_press(Message::Toolbar(Msg::ToggleKits(me.0, me.1.clone())));
     let entries = open.then(|| menus::kits_entries(ctx, ws, &tabs, loading));
     Some(
         ui_menu::dropdown(t, button, entries)
             .align_end()
-            .on_dismiss(Message::Toolbar(Msg::ToggleKits))
+            .on_dismiss(Message::Toolbar(Msg::ToggleKits(me.0, me.1)))
             .into(),
     )
 }
 
 #[cfg(test)]
 mod interaction;
+#[cfg(test)]
+mod per_window;
 #[cfg(test)]
 mod tests;

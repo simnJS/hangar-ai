@@ -2,7 +2,7 @@
 //! window turns amber and red, how it is worded, and which reset the heading
 //! names.
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Local, NaiveDate, TimeZone};
 use hangar_i18n::Locale;
 
 use super::*;
@@ -10,11 +10,23 @@ use super::*;
 const EN: Translator = Translator::new(Locale::En);
 const FR: Translator = Translator::new(Locale::Fr);
 
-fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(2026, 11, day)
+/// A moment of November 2026 on this machine's clock, in ms since the epoch.
+fn at(day: u32, hour: u32, minute: u32) -> i64 {
+    let local = NaiveDate::from_ymd_opt(2026, 11, day)
         .unwrap()
         .and_hms_opt(hour, minute, 0)
+        .unwrap();
+    Local
+        .from_local_datetime(&local)
+        .earliest()
         .unwrap()
+        .timestamp_millis()
+}
+
+fn iso_ms(iso: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .unwrap()
+        .timestamp_millis()
 }
 
 fn limit(kind: &str, used: f64, resets_at: Option<&str>) -> RateLimit {
@@ -69,7 +81,7 @@ fn the_heading_names_the_window_that_frees_up_first() {
         limit("five_hour", 71.0, Some("2999-01-01T00:00:00Z")),
     ];
     let soonest = next_reset(&limits, now).unwrap();
-    assert_eq!(soonest, parse_reset("2030-01-01T00:00:00Z").unwrap());
+    assert_eq!(soonest, iso_ms("2030-01-01T00:00:00Z"));
 }
 
 #[test]
@@ -87,9 +99,8 @@ fn a_reset_already_past_names_nothing() {
 #[test]
 fn the_tooltip_says_what_the_block_is_then_when_each_window_resets() {
     let now = at(3, 9, 0);
-    // A reset a minute from `now`'s own day is "today", whatever the zone: use
-    // the moment the clock module turns into local time.
-    let soon = now.and_local_timezone(chrono::Local).unwrap();
+    // A reset two hours on is "today", whatever the zone.
+    let soon = Local.timestamp_millis_opt(now).unwrap();
     let iso = (soon + chrono::Duration::hours(2)).to_rfc3339();
     let words = hint(
         EN,

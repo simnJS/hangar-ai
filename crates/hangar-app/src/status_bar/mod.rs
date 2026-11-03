@@ -10,10 +10,14 @@
 //! in another program is the likeliest thing to have moved meanwhile. A window
 //! nobody is looking at asks nothing at all: one git process every 20 seconds
 //! for a bar nobody can see is not nothing.
+//!
+//! Every window has a bar of its own, about its own workspace: the line typed
+//! in one is not the other's, and a broadcast reaches the panes of the
+//! workspace its window draws, never the main window's active one.
 
 pub mod tail;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use iced::widget::{Id, Space, container, responsive, row, text, text_input};
@@ -31,16 +35,16 @@ use crate::message::{Intent, Message};
 use crate::navigator::{reads, skin};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Focus, Region, View};
-use crate::state::live::BridgeEvent;
-use crate::state::{AgentActivity, Model, PaneId};
+use crate::state::{AgentActivity, Model, WsId};
 
 /// Often enough to follow an agent switching branches, rarely enough to cost
 /// nothing.
 const GIT_REFRESH: Duration = Duration::from_secs(20);
 
-/// The broadcast field, which the `view.broadcast` shortcut focuses.
-fn input_id() -> Id {
-    Id::new("hangar-status-broadcast")
+/// The broadcast field of a window, which the `view.broadcast` shortcut
+/// focuses: one per window, so that focusing it in one never lands in another.
+fn input_id(window: window::Id) -> Id {
+    Id::from(format!("hangar-status-broadcast-{window:?}"))
 }
 
 /// What the bar shows of the repository the workspace folder is in.
@@ -68,61 +72,43 @@ impl Repo {
 }
 
 /// The package's UI state; lives in `App.pkg.status_bar`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct State {
-    /// The folder `repo` was read for, so an answer for the workspace shown
-    /// before is not taken for this one's.
-    repo_cwd: String,
-    repo: Option<Repo>,
-    /// The window has the system's focus; only then is git asked.
-    focused: bool,
-    /// Panes whose agent has the hangar-bridge mod, which can hold a line
-    /// until it is free (`useBridgedCount`).
-    bridged: HashSet<PaneId>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State {
-            repo_cwd: String::new(),
-            repo: None,
-            focused: true,
-            bridged: HashSet::new(),
-        }
-    }
+    /// What git said of each folder a bar was asked about, so an answer for
+    /// the workspace shown before is not taken for this one's, and two
+    /// windows on two folders each read their own. `None`: no repository.
+    repos: HashMap<String, Option<Repo>>,
+    /// The windows that lost the system's focus. Git is only asked for a
+    /// window that has it; one that never said it lost it counts as having
+    /// it, as every window does at start.
+    unfocused: HashSet<window::Id>,
+    /// What each window's broadcast field holds. Not persisted, and not shared
+    /// between windows: each one's App had its own (`useState("")`).
+    broadcast: HashMap<window::Id, String>,
 }
 
 impl State {
     /// A repository read in; the same branch, head and root keep the object
     /// that was there. Returns whether anything changed.
     fn take_repo(&mut self, cwd: &str, repo: Option<Repo>) -> bool {
-        if self.repo_cwd == cwd && self.repo == repo {
+        if self.repos.get(cwd) == Some(&repo) {
             return false;
         }
-        self.repo_cwd = cwd.to_string();
-        self.repo = repo;
+        self.repos.insert(cwd.to_string(), repo);
         true
     }
 
-    /// A report of a pane's mod: the pane has one, until it says it ended.
-    fn note_bridge(&mut self, pane: &PaneId, report: &serde_json::Value) {
-        match BridgeEvent::parse(report) {
-            Some(BridgeEvent::End { .. }) => {
-                self.bridged.remove(pane);
-            }
-            Some(_) => {
-                self.bridged.insert(pane.clone());
-            }
-            None => {}
-        }
+    /// What the window's broadcast field holds.
+    pub fn broadcast_text(&self, window: window::Id) -> &str {
+        self.broadcast.get(&window).map_or("", String::as_str)
     }
 
-    /// How many of `panes` can hold a line until their agent is free.
-    fn bridged_among(&self, panes: &[crate::state::Pane]) -> usize {
-        panes
-            .iter()
-            .filter(|pane| self.bridged.contains(&pane.id))
-            .count()
+    fn set_broadcast_text(&mut self, window: window::Id, text: String) {
+        if text.is_empty() {
+            self.broadcast.remove(&window);
+        } else {
+            self.broadcast.insert(window, text);
+        }
     }
 }
 
@@ -132,43 +118,59 @@ impl State {
 pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::StatusBar(Msg)`.
+///
+/// A message names the window it came from, and a send the workspace that
+/// window drew: when it is handled, the focused window or the main window's
+/// active workspace may be others.
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// The broadcast field was typed in (`Model.ui.broadcast`).
-    Input(String),
+    /// The broadcast field of a window was typed in.
+    Input(window::Id, String),
     /// Enter sends; Alt+Enter, and the *When free* button, hold the line until
     /// each agent is done.
     Send {
+        window: window::Id,
+        ws: WsId,
         when_free: bool,
     },
     /// Time to ask git about this folder.
     Poll(String),
     Repo(String, Option<Repo>),
-    /// The window gained or lost the system's focus.
-    Focus(bool),
+    /// A window gained or lost the system's focus.
+    Focus(window::Id, bool),
+}
+
+/// What a send comes to: the line the window holds, for the workspace that
+/// window drew when the button was pressed, which must still exist. The field
+/// empties; a line with nothing in it, or for a workspace that is gone, sends
+/// nothing and leaves the field as it is.
+fn send(st: &mut State, m: &Model, window: window::Id, ws: WsId, when_free: bool) -> Option<Intent> {
+    let text = st.broadcast_text(window).trim().to_string();
+    if text.is_empty() || m.workspace(&ws).is_none() {
+        return None;
+    }
+    st.set_broadcast_text(window, String::new());
+    Some(Intent::Broadcast {
+        ws,
+        text,
+        when_free,
+    })
 }
 
 pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
-        Msg::Input(value) => {
-            m.ui.broadcast = value;
+        Msg::Input(window, value) => {
+            st.set_broadcast_text(window, value);
             Task::none()
         }
-        Msg::Send { when_free } => {
-            let text = m.ui.broadcast.trim().to_string();
-            let Some(ws) = m.active_workspace().map(|ws| ws.id.clone()) else {
-                return Task::none();
-            };
-            if text.is_empty() {
-                return Task::none();
-            }
-            m.ui.broadcast.clear();
-            Task::done(Message::Intent(Intent::Broadcast {
-                ws,
-                text,
-                when_free,
-            }))
-        }
+        Msg::Send {
+            window,
+            ws,
+            when_free,
+        } => match send(st, m, window, ws, when_free) {
+            Some(intent) => Task::done(Message::Intent(intent)),
+            None => Task::none(),
+        },
         Msg::Poll(cwd) => {
             Task::perform(hangar_core::git::git_repo_info(cwd.clone()), move |info| {
                 Message::StatusBar(Msg::Repo(cwd.clone(), Repo::of(info)))
@@ -178,27 +180,51 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             st.take_repo(&cwd, repo);
             Task::none()
         }
-        Msg::Focus(on) => {
-            st.focused = on;
+        Msg::Focus(window, on) => {
+            if on {
+                st.unfocused.remove(&window);
+            } else {
+                st.unfocused.insert(window);
+            }
             Task::none()
         }
     }
 }
 
-/// The git beat of the workspace on screen (an immediate read, then every 20
-/// seconds), and the window's focus. The beat is a subscription of its own for
-/// each folder and each focus, so a change of workspace restarts it, which is
-/// the read the TS did when `cwd` changed.
+/// The git beat of the workspace of each window that has the focus (an
+/// immediate read, then every 20 seconds), and the windows' focus. The beat is
+/// a subscription of its own for each folder, so a change of workspace
+/// restarts it, which is the read the TS did when `cwd` changed. Two windows
+/// on one folder share a beat.
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    let focus = iced::event::listen_with(|event, _status, _window| match event {
-        Event::Window(window::Event::Focused) => Some(Message::StatusBar(Msg::Focus(true))),
-        Event::Window(window::Event::Unfocused) => Some(Message::StatusBar(Msg::Focus(false))),
+    let focus = iced::event::listen_with(|event, _status, window| match event {
+        Event::Window(window::Event::Focused) => {
+            Some(Message::StatusBar(Msg::Focus(window, true)))
+        }
+        Event::Window(window::Event::Unfocused) => {
+            Some(Message::StatusBar(Msg::Focus(window, false)))
+        }
         _ => None,
     });
-    let Some(ws) = m.active_workspace().filter(|_| st.focused) else {
-        return focus;
-    };
-    Subscription::batch([focus, Subscription::run_with(ws.cwd.clone(), beat)])
+    Subscription::batch(
+        std::iter::once(focus).chain(
+            beats(st, m)
+                .into_iter()
+                .map(|cwd| Subscription::run_with(cwd, beat)),
+        ),
+    )
+}
+
+/// The folders to ask git about: those of the workspaces the windows with the
+/// system's focus draw, each once.
+fn beats(st: &State, m: &Model) -> BTreeSet<String> {
+    m.live
+        .windows
+        .keys()
+        .filter(|window| !st.unfocused.contains(window))
+        .filter_map(|window| m.window_workspace(*window))
+        .map(|ws| ws.cwd.clone())
+        .collect()
 }
 
 // `Subscription::run_with` hands the builder a reference to its data, which
@@ -217,15 +243,18 @@ fn beat(cwd: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
     })
 }
 
-/// F6 reaches the broadcast field, which is only there over the terminals.
+/// F6 reaches the broadcast field of the window the person is in, which is
+/// only there over the terminals.
 pub fn focus_entry(_st: &State, m: &Model, _region: Region) -> Option<Task<Message>> {
-    (m.ui.view == View::Terminals).then(|| iced::widget::operation::focus(input_id()))
+    let window = m.focused_window()?;
+    (m.view_in(window) == View::Terminals)
+        .then(|| iced::widget::operation::focus(input_id(window)))
 }
 
 /// A dictation lands in the broadcast field when that is where the keyboard
 /// is, joined to what is already typed.
 pub fn on_intent(
-    _st: &mut State,
+    st: &mut State,
     m: &mut Model,
     _sv: &Services,
     intent: &Intent,
@@ -233,41 +262,43 @@ pub fn on_intent(
     let Intent::InsertTranscript(words) = intent else {
         return None;
     };
-    if m.ui.focus != Some(Focus::Region(Region::Status)) || m.ui.view != View::Terminals {
+    let window = m.focused_window()?;
+    if m.ui.focus != Some(Focus::Region(Region::Status)) || m.view_in(window) != View::Terminals {
         return None;
     }
-    if m.ui.broadcast.is_empty() {
-        m.ui.broadcast = words.clone();
+    let typed = st.broadcast_text(window);
+    let joined = if typed.is_empty() {
+        words.clone()
     } else {
-        m.ui.broadcast = format!("{} {words}", m.ui.broadcast);
-    }
+        format!("{typed} {words}")
+    };
+    st.set_broadcast_text(window, joined);
     Some(Task::none())
 }
 
-/// What the hangar-bridge mod says of a pane tells the bar it can hold a line
-/// for that pane; its end says it no longer can.
+/// Nothing in the core's events is the bar's: which panes can hold a line
+/// until their agent is free is the pane logic's (`bridged_count`).
 pub fn on_event(
-    st: &mut State,
+    _st: &mut State,
     _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    if let CoreEvent::Bridge { pane, event } = event {
-        st.note_bridge(pane, event);
-    }
     None
 }
 
 /// Region `status`: the broadcast input and the bar's readouts.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
-    let Some(ws) = ctx.model.active_workspace() else {
+    // The workspace this window draws: a workspace window's own, never the
+    // main window's active one.
+    let Some(ws) = ctx.workspace() else {
         return Space::new().into();
     };
     let t = ctx.theme;
     let tr = ctx.i18n;
     let pane_count = ws.panes.len();
 
-    let lead: Element<'a, Message> = if ctx.model.ui.view == View::Terminals {
+    let lead: Element<'a, Message> = if ctx.view() == View::Terminals {
         broadcast(st, ctx, ws)
     } else {
         info(ctx, ws)
@@ -276,9 +307,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     // The repository, the dictation keys, the panes: what is true of the whole
     // workspace, mono and quiet.
     let mut items = row![].spacing(2).align_y(Alignment::Center);
-    if st.repo_cwd == ws.cwd
-        && let Some(repo) = &st.repo
-    {
+    if let Some(Some(repo)) = st.repos.get(&ws.cwd) {
         let root = repo.root.as_deref().unwrap_or(&ws.cwd);
         let hint = match &repo.branch {
             Some(branch) => tr.t_with(
@@ -402,29 +431,41 @@ fn broadcast<'a>(
 ) -> Element<'a, Message> {
     let t = ctx.theme;
     let tr = ctx.i18n;
-    let value = ctx.model.ui.broadcast.as_str();
+    let value = st.broadcast_text(ctx.window);
     let empty = value.trim().is_empty();
+    let send = |when_free: bool| {
+        Message::StatusBar(Msg::Send {
+            window: ctx.window,
+            ws: ws.id.clone(),
+            when_free,
+        })
+    };
     let placeholder = tr
         .t_with(Key::BroadcastPlaceholder, &args!("n" => ws.panes.len()))
         .into_owned();
     let hint = reads::binding(&ctx, CommandId::ViewBroadcast);
 
+    let window = ctx.window;
     let input = text_input("", value)
-        .id(input_id())
+        .id(input_id(window))
         .size(font_size::UI)
         .padding(0)
         .width(Length::Fill)
-        .on_input(|value| Message::StatusBar(Msg::Input(value)))
-        .on_submit(Message::StatusBar(Msg::Send { when_free: false }))
+        .on_input(move |value| Message::StatusBar(Msg::Input(window, value)))
+        .on_submit(send(false))
         .style(style::text_input::bare(t));
     // Alt+Enter holds the line until each agent is done. The key is spent here
     // so the field's own Enter does not also send it at once.
-    let input = keys::on_key(input, |key, modifiers| match key {
+    let held = send(true);
+    let input = keys::on_key(input, move |key, modifiers| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) if modifiers.alt() => {
-            Some(Message::StatusBar(Msg::Send { when_free: true }))
+            Some(held.clone())
         }
         _ => None,
     });
+    // The keymap goes first: Ctrl+Shift+Enter typed in the field splits the
+    // pane behind it, and must not also send the line.
+    let input = crate::keymap::guard(ctx, input);
     // The placeholder is drawn by hand, in the secondary grey the stylesheet
     // gave it, since the field's own is a step fainter.
     let shown: Element<'a, Message> = if value.is_empty() {
@@ -459,26 +500,30 @@ fn broadcast<'a>(
         .width(Length::Fill)
         .style(skin::field(t, false));
 
+    // The panes whose Claude Code loaded the mod, which can hold a line until
+    // it is free (`useBridgedCount`).
+    let bridged = ctx
+        .model
+        .live
+        .panes_logic
+        .bridged_count(ws.panes.iter().map(|pane| &pane.id));
     let when_free = button::secondary(t, tr.t(Key::BroadcastWhenFree).into_owned())
         .icon(Icon::Clock)
-        .on_press_maybe((!empty).then_some(Message::StatusBar(Msg::Send { when_free: true })))
+        .on_press_maybe((!empty).then(|| send(true)))
         .tip(
-            tr.t_with(
-                Key::BroadcastWhenFreeHint,
-                &args!("n" => st.bridged_among(&ws.panes)),
-            )
-            .into_owned(),
+            tr.t_with(Key::BroadcastWhenFreeHint, &args!("n" => bridged))
+                .into_owned(),
         );
-    let send = button::primary(t, tr.t(Key::BroadcastSend).into_owned())
+    let now = button::primary(t, tr.t(Key::BroadcastSend).into_owned())
         .icon(Icon::Send)
-        .on_press_maybe((!empty).then_some(Message::StatusBar(Msg::Send { when_free: false })))
+        .on_press_maybe((!empty).then(|| send(false)))
         .tip(tr.t(Key::StatusSendHint).into_owned());
 
     row![
         container(icon(Icon::Broadcast, 16.0).color(t.colors.fg_muted)).padding([0.0, 2.0]),
         field,
         when_free,
-        send,
+        now,
     ]
     .spacing(space::SM)
     .align_y(Alignment::Center)
