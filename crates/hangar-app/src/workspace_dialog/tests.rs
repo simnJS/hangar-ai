@@ -697,3 +697,192 @@ fn the_kits_dialog_opens_on_the_workspace_it_is_asked_for() {
     assert!(kits_dialog::KitsDialog::open(&m, &"gone".to_string()).is_none());
     let _ = &mut m;
 }
+
+// ── the fields: the keymap first, Return everywhere ───────────────────
+
+mod fields {
+    use iced::keyboard::key::Named;
+
+    use super::*;
+    use crate::settings::guard_testing::Fixture;
+
+    #[test]
+    fn every_field_of_the_folder_form_leaves_the_shortcut_to_the_keymap() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = State::default();
+        // The folder, the name, and the two commands of the worktrees.
+        assert_eq!(
+            Fixture::new().split_chord(view(&st, h.ctx())),
+            ["Noop", "Noop", "Noop", "Noop"]
+        );
+    }
+
+    #[test]
+    fn every_field_of_the_git_form_leaves_it_too() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = git_state("acme/shop", Some(parsed_ok("acme/shop", "shop")));
+        // The address, the destination and the name.
+        assert_eq!(
+            Fixture::new().split_chord(view(&st, h.ctx())),
+            ["Noop", "Noop", "Noop"]
+        );
+    }
+
+    #[test]
+    fn the_hooks_of_the_kits_dialog_leave_it_too() {
+        let h = Harness::new(Locale::En, "graphite");
+        let mut st = State::default();
+        st.kits = kits_dialog::KitsDialog::open(&h.model, &"w2".to_string());
+        let ws = "w2".to_string();
+        let said = Fixture::new().split_chord(kits_dialog_view(&st, h.ctx(), &ws));
+        assert_eq!(said, ["Noop", "Noop"]);
+    }
+
+    /// What Return says in the field that shows `placeholder`.
+    fn return_in(st: &State, placeholder: &str) -> Vec<Message> {
+        let h = Harness::new(Locale::En, "graphite");
+        let mut ui = h.show(view(st, h.ctx()));
+        ui.click(placeholder).expect("the field is drawn");
+        ui.tap_key(Named::Enter);
+        messages(ui)
+    }
+
+    #[test]
+    fn return_in_the_folder_field_sends_the_form() {
+        let mut st = State::default();
+        st.folder.cwd = "/home/me/dev/shop".into();
+        let said = return_in(&st, "/home/me/dev/shop");
+        assert!(sent(&said, |msg| matches!(msg, Msg::Submit(_))), "{said:?}");
+    }
+
+    #[test]
+    fn return_in_the_clone_folder_field_sends_the_form() {
+        let mut st = git_state("acme/shop", Some(parsed_ok("acme/shop", "shop")));
+        st.git.parent = "/home/me/dev".into();
+        let said = return_in(&st, "/home/me/dev");
+        assert!(sent(&said, |msg| matches!(msg, Msg::Submit(_))), "{said:?}");
+    }
+
+    #[test]
+    fn return_in_a_hook_field_says_what_the_form_asked() {
+        // Far down a scrolled form the field is out of the simulator's reach,
+        // so the section is shown alone, with a message of its own to send.
+        let h = Harness::new(Locale::En, "graphite");
+        let mut draft = hooks::HooksDraft::default();
+        draft.set(hooks::HookField::PostCreate, "pnpm i".into());
+        let mut ui = h.show(hooks::view(
+            h.ctx(),
+            &draft,
+            Some(Message::WorkspaceDialog(Msg::Cancel)),
+            |field, text| Message::WorkspaceDialog(Msg::Hook(field, text)),
+        ));
+        ui.click("pnpm i").expect("the field is drawn");
+        ui.tap_key(Named::Enter);
+        assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Cancel)));
+    }
+
+    #[test]
+    fn return_in_the_kits_dialog_s_hooks_sends_nothing() {
+        // It saves as it goes: there is no form to send.
+        let h = Harness::new(Locale::En, "graphite");
+        let mut st = State::default();
+        st.kits = kits_dialog::KitsDialog::open(&h.model, &"w2".to_string());
+        st.kits
+            .as_mut()
+            .expect("opened")
+            .hooks
+            .set(hooks::HookField::PostCreate, "make".into());
+        let ws = "w2".to_string();
+        let mut ui = h.show(kits_dialog_view(&st, h.ctx(), &ws));
+        ui.click("make").expect("the field is drawn");
+        ui.tap_key(Named::Enter);
+        assert!(!sent(&messages(ui), |msg| matches!(msg, Msg::Submit(_))));
+    }
+}
+
+// ── the clone's bar ───────────────────────────────────────────────────
+
+mod bar {
+    use super::*;
+
+    fn clone_with(phase: Option<(&str, Option<u8>)>) -> State {
+        let mut st = running("job-1");
+        st.git.progress = phase.map(|(phase, percent)| CloneProgress {
+            job_id: "job-1".into(),
+            phase: phase.into(),
+            percent,
+        });
+        st
+    }
+
+    #[test]
+    fn a_clone_with_no_percentage_yet_has_a_bar_that_cannot_say_how_far_it_is() {
+        assert!(clone_with(None).git.indeterminate());
+        // Git printed a phase but no number, or one the bar has no share for.
+        assert!(
+            clone_with(Some(("Receiving objects", None)))
+                .git
+                .indeterminate()
+        );
+        assert!(
+            clone_with(Some(("Counting objects", Some(50))))
+                .git
+                .indeterminate()
+        );
+    }
+
+    #[test]
+    fn a_clone_with_a_percentage_has_a_bar_that_measures() {
+        assert!(
+            !clone_with(Some(("Receiving objects", Some(45))))
+                .git
+                .indeterminate()
+        );
+        assert!(
+            !clone_with(Some(("Resolving deltas", Some(0))))
+                .git
+                .indeterminate()
+        );
+        // Nothing runs: nothing to measure or to wait for.
+        assert!(!State::default().git.indeterminate());
+    }
+
+    #[test]
+    fn the_tick_that_moves_the_bar_runs_only_while_it_is_on_show() {
+        let mut m = on_top();
+        let waiting = clone_with(None);
+        assert_eq!(subscription(&waiting, &m).units(), 1);
+        // The bar measures: no frames are needed for it.
+        let measured = clone_with(Some(("Receiving objects", Some(45))));
+        assert_eq!(subscription(&measured, &m).units(), 0);
+        // The dialog was closed with the clone running: nobody looks.
+        m.ui.overlays.clear();
+        assert_eq!(subscription(&waiting, &m).units(), 0);
+    }
+
+    #[test]
+    fn the_tick_moves_the_bar_along() {
+        let mut st = clone_with(None);
+        let began = Instant::now();
+        st.git.began = Some(began);
+        let mut m = on_top();
+        let _ = form(
+            &mut st,
+            &mut m,
+            Msg::Tick(began + Duration::from_millis(400)),
+        );
+        assert_eq!(st.git.sweep_elapsed(), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn the_form_draws_both_bars() {
+        let h = Harness::new(Locale::En, "graphite");
+        let waiting = clone_with(None);
+        let mut ui = h.show(view(&waiting, h.ctx()));
+        assert!(ui.find("Starting the clone…").is_ok());
+        h.shot(&mut ui, "dialog-git-waiting-en-graphite");
+        let measured = clone_with(Some(("Receiving objects", Some(45))));
+        let mut ui = h.show(view(&measured, h.ctx()));
+        assert!(ui.find("Receiving objects 45 %").is_ok());
+    }
+}
