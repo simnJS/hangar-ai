@@ -59,7 +59,10 @@ around the terminals, and needs a fraction of the memory and processor it did.
 - **On Linux, Hangar draws its own title bar.** The toolbar is the window's title bar, in
   your theme, with the buttons your desktop shows, on its side (GNOME's button layout). Drag
   it to move the window, double-click it to maximise, right-click it for the window menu;
-  the edges resize the window, and its corners are rounded as GNOME's own windows are. **Appearance › Use the system's title bar** brings the
+  the edges resize the window, and its corners are rounded as GNOME's own windows are.
+- **A shorter toolbar.** The four layouts are one button with a menu, and the activity
+  capsule in the middle is gone: the pane's own header and the inspector say what it is
+  doing. **Appearance › Use the system's title bar** brings the
   system's back. macOS and Windows keep theirs.
 - **Not there yet.**
   - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux

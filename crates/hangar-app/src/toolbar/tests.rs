@@ -129,7 +129,6 @@ fn restarting_all_names_every_pane() {
 fn the_toolbars_breakpoints_are_in_em_of_its_font() {
     // 80 em of 12 px: the width under which the name goes.
     assert_eq!(80.0 * EM, 960.0);
-    assert_eq!(activity::EXTRAS_FROM_EM * EM, 852.0);
     assert_eq!(64.0 * EM, 768.0);
     assert_eq!(46.0 * EM, 552.0);
 }

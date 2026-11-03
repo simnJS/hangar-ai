@@ -216,22 +216,6 @@ fn a_preset_of_a_workspace_window_applies_to_that_workspace() {
     assert!(preset_step(&model, "gone", 1).is_none());
 }
 
-#[test]
-fn a_counter_brings_the_terminals_of_its_own_windows_forward() {
-    let (mut model, main, own) = two_windows();
-    // The workspace window shows the board; the main window the terminals.
-    model.ui.parked.get_mut(&own).unwrap().view = View::Board;
-    let from_own = go_to(&model, "b".into(), "b1".into());
-    assert!(matches!(from_own.as_slice(), [
-        Intent::SetView(View::Terminals),
-        Intent::FocusPane { ws, pane, .. },
-    ] if ws == "b" && pane == "b1"));
-    // Its own window's view decides, not the focused window's.
-    let from_main = go_to(&model, "a".into(), "a1".into());
-    assert!(matches!(from_main.as_slice(), [Intent::FocusPane { ws, .. }] if ws == "a"));
-    let _ = main;
-}
-
 // ---- The shortcut hints ------------------------------------------------------------------------
 
 #[test]

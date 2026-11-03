@@ -1,27 +1,29 @@
-//! P6: Toolbar (`Toolbar.tsx`, `ToolbarActivity.tsx`, `ToolbarMenu.tsx`).
+//! P6: Toolbar (`Toolbar.tsx`, `ToolbarMenu.tsx`).
 //!
 //! The bar over the workspace: which view, how the panes are laid out, and the
 //! actions on all of them at once. Everything it does is the app's: it lays
 //! the controls out and turns their clicks into intents.
 //!
+//! Kept short: the layouts are one button with a menu, and the web toolbar's
+//! activity capsule (`ToolbarActivity.tsx`, what the focused pane is doing)
+//! is gone, since the pane's own header and the inspector say it.
+//!
 //! The web toolbar was narrowed by container queries written in em of its own
 //! font; here the same steps are taken from the width the toolbar is given
 //! (`responsive`), in the same units: under 80 em the workspace's name goes,
-//! under 71 em the capsule drops its context chip and counters, under 64 em
-//! the views are icons, and under 46 em the terminal actions fold into the
-//! « … » menu.
+//! under 64 em the views are icons, and under 46 em the terminal actions fold
+//! into the « … » menu.
 //!
 //! Gap: iced 0.14's buttons take no keyboard focus, so the view switcher's
 //! arrow-key walk (a radio group) is not here; the `view.*` shortcuts do the
 //! same from anywhere.
 
-pub mod activity;
 pub mod menus;
 
 use iced::widget::{Space, container, responsive, row, text};
 use iced::{Alignment, Element, Length, Padding, Subscription, Task, window};
 
-use hangar_i18n::{Key, args};
+use hangar_i18n::Key;
 use hangar_theme::tokens::{font_size, space};
 use hangar_theme::{Theme, fonts, style};
 use hangar_ui::layer;
@@ -72,6 +74,8 @@ impl PresetAsk {
 pub struct State {
     /// The window whose « … » menu is open, from its button.
     more_open: Option<window::Id>,
+    /// The window whose layouts menu is open.
+    layouts_open: Option<window::Id>,
     /// The window and the workspace whose Kits menu is open: another
     /// workspace's kits are another menu.
     kits_for: Option<(window::Id, WsId)>,
@@ -94,9 +98,10 @@ pub struct Live;
 #[derive(Debug, Clone)]
 pub enum Msg {
     ToggleMore(window::Id),
+    ToggleLayouts(window::Id),
     ToggleKits(window::Id, WsId),
-    /// Escape, Tab or a press elsewhere on the « … » menu or one of its
-    /// questions.
+    /// Escape, Tab or a press elsewhere on the « … » menu, the layouts menu
+    /// or one of their questions.
     CloseMenus,
     /// A menu line: the menus close, then the intents run (an entry runs once
     /// the menu is gone, so it never fights it for the keyboard).
@@ -105,9 +110,6 @@ pub enum Msg {
     Preset(WsId, u8),
     PresetConfirm,
     PresetCancel,
-    /// A counter of the capsule: the terminals of this workspace, and the
-    /// next pane in that state.
-    GoTo(WsId, PaneId),
 }
 
 fn intents(list: Vec<Intent>) -> Task<Message> {
@@ -141,7 +143,14 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                 asked.push(Intent::ArmStopWorkers(false));
             }
             st.more_open = opening;
+            st.layouts_open = None;
             intents(asked)
+        }
+        Msg::ToggleLayouts(window) => {
+            st.layouts_open = (st.layouts_open != Some(window)).then_some(window);
+            st.more_open = None;
+            st.preset = None;
+            Task::none()
         }
         Msg::ToggleKits(window, ws) => {
             let open = (window, ws);
@@ -154,17 +163,21 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
         Msg::Pick(list) => {
             st.more_open = None;
+            st.layouts_open = None;
             st.kits_for = None;
             intents(list)
         }
-        Msg::Preset(ws, size) => match preset_step(m, &ws, size) {
-            Some(PresetStep::Apply(intent)) => intents(vec![intent]),
-            Some(PresetStep::Ask(ask)) => {
-                st.preset = Some(ask);
-                Task::none()
+        Msg::Preset(ws, size) => {
+            st.layouts_open = None;
+            match preset_step(m, &ws, size) {
+                Some(PresetStep::Apply(intent)) => intents(vec![intent]),
+                Some(PresetStep::Ask(ask)) => {
+                    st.preset = Some(ask);
+                    Task::none()
+                }
+                None => Task::none(),
             }
-            None => Task::none(),
-        },
+        }
         Msg::PresetConfirm => match st.preset.take() {
             Some(ask) => intents(vec![Intent::ApplyPreset {
                 ws: ask.ws,
@@ -176,7 +189,6 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             st.preset = None;
             Task::none()
         }
-        Msg::GoTo(ws, pane) => intents(go_to(m, ws, pane)),
     }
 }
 
@@ -216,21 +228,6 @@ pub fn preset_step(m: &Model, ws: &str, size: u8) -> Option<PresetStep> {
         closing,
         busy,
     }))
-}
-
-/// What a counter of the capsule does: the terminals of that workspace come
-/// forward if its window shows something else, then the pane takes the focus.
-pub fn go_to(m: &Model, ws: WsId, pane: PaneId) -> Vec<Intent> {
-    let mut list = Vec::new();
-    if view_of(m, &ws) != View::Terminals {
-        list.push(Intent::SetView(View::Terminals));
-    }
-    list.push(Intent::FocusPane {
-        ws,
-        pane,
-        terminal: true,
-    });
-    list
 }
 
 /// What the window that draws workspace `ws` shows in its main area.
@@ -295,9 +292,7 @@ pub fn on_intent(
     None
 }
 
-/// Nothing in the core's events is the toolbar's: what the capsule says of a
-/// pane is the pane logic's insight (`panes_logic`), which reads the same
-/// reports.
+/// Nothing in the core's events is the toolbar's.
 pub fn on_event(
     _st: &mut State,
     _m: &mut Model,
@@ -337,7 +332,6 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     let keys = |id: CommandId| reads::binding(&ctx, id);
 
     let show_title = width >= 80.0 * EM;
-    let extras = width >= activity::EXTRAS_FROM_EM * EM;
     let icon_views = width < 64.0 * EM;
     let folded = width < 46.0 * EM;
 
@@ -376,18 +370,16 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     }
     lead = lead.push(views(ctx, view, icon_views));
 
-    // ---- The centre: what the focused pane is doing.
-    let room = (width - 2.0 * 24.0).max(0.0) * 0.4;
-    let centre = container(activity::view(ctx, ws, extras, room))
-        .max_width(520)
-        .width(Length::Fill);
+    // ---- The room between the two ends, which moves the window too when
+    // Hangar draws its title bar.
+    let centre = Space::new().width(Length::Fill);
 
     // ---- The trail.
     let mut trail = row![].spacing(2).align_y(Alignment::Center);
     trail = trail.push(crate::needs_you::button(&ctx.pkg.needs_you, ctx));
     trail = trail.push(crate::accounts::switcher(&ctx.pkg.accounts, ctx));
     if terminals {
-        trail = trail.push(presets(st, ctx, ws));
+        trail = trail.push(layouts(st, ctx, ws));
         if !folded {
             trail = trail.push(
                 row![
@@ -566,42 +558,67 @@ fn views<'a>(ctx: Ctx<'a>, current: View, icons_only: bool) -> Element<'a, Messa
         .into()
 }
 
-/// The layout presets as a segmented control of icons: the pane count says
-/// which is on. A smaller one that would stop a busy agent asks first, from
-/// the button that was pressed.
-fn presets<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
+/// The layouts: one button showing the one the panes are in, with a menu of
+/// the even layouts. A layout that would close a busy pane asks under the
+/// button first.
+fn layouts<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let t = ctx.theme;
     let tr = ctx.i18n;
     let asking = st
         .preset
         .as_ref()
         .filter(|ask| ask.ws == ws.id && ask.view == ctx.view() && !ctx.model.ui.confirm_reset);
-    let buttons = LAYOUTS.map(|size| {
-        let words = tr
-            .t_with(Key::TopbarPresetHint, &args!("n" => size))
-            .into_owned();
-        let on = ws.panes.len() == usize::from(size);
-        let segment = iced::widget::button(
-            container(icon(menus::layout_icon(size), 16.0)).center(Length::Fill),
+    let open = st.layouts_open == Some(ctx.window);
+    let panes = ws.panes.len();
+    // The panes in an even layout show it; any other count, the smallest
+    // layout that holds them.
+    let current = LAYOUTS
+        .into_iter()
+        .find(|&size| usize::from(size) >= panes)
+        .unwrap_or(LAYOUTS[LAYOUTS.len() - 1]);
+    let button = iced::widget::button(
+        container(
+            row![
+                icon(menus::layout_icon(current), 16.0),
+                icon(Icon::ChevronDown, 12.0),
+            ]
+            .spacing(space::XS)
+            .align_y(Alignment::Center),
         )
-        .padding(0)
-        .width(28)
-        .height(22)
-        .style(style::button::tab(t, on))
-        .on_press(Message::Toolbar(Msg::Preset(ws.id.clone(), size)));
-        let segment = tip::bottom(t, segment, words);
-        let content = asking
-            .filter(|ask| ask.size == size)
-            .map(|ask| menus::preset_question(ctx, ask));
-        layer::dropdown(segment, content)
+        .center_y(Length::Fill),
+    )
+    .padding(Padding::from([0.0, space::SM]))
+    .height(hangar_theme::tokens::size::CONTROL_HEIGHT)
+    .style(style::button::toggle(t, open || asking.is_some()))
+    .on_press(Message::Toolbar(Msg::ToggleLayouts(ctx.window)));
+    let button = tip::bottom(t, button, tr.t(Key::TopbarLayout).into_owned());
+
+    if let Some(ask) = asking {
+        return layer::dropdown(button, Some(menus::preset_question(ctx, ask)))
             .tab_inside()
             .on_dismiss(Message::Toolbar(Msg::PresetCancel))
-            .into()
-    });
-    container(row(buttons).spacing(2).align_y(Alignment::Center))
-        .padding(2)
-        .style(style::container::segmented_track(t))
+            .into();
+    }
+    let entries = open.then(|| layout_entries(ctx, ws));
+    ui_menu::dropdown(t, button, entries)
+        .on_dismiss(Message::Toolbar(Msg::CloseMenus))
         .into()
+}
+
+/// The lines of the layouts menu: the even layouts, the one the panes are in
+/// checked.
+fn layout_entries(ctx: Ctx<'_>, ws: &Workspace) -> Vec<ui_menu::Entry<Message>> {
+    LAYOUTS
+        .into_iter()
+        .map(|size| {
+            let n = usize::from(size);
+            ui_menu::item(ctx.i18n.tn(Key::TopbarPresetHint, n, &[]).into_owned())
+                .icon(menus::layout_icon(size))
+                .checked(ws.panes.len() == n)
+                .on_select(Message::Toolbar(Msg::Preset(ws.id.clone(), size)))
+                .into()
+        })
+        .collect()
 }
 
 /// The « … » button, with the menu or the question that hangs off it. An armed

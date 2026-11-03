@@ -92,26 +92,39 @@ fn the_toolbar_names_the_workspace() {
 }
 
 #[test]
-fn the_capsule_names_the_focused_pane_and_its_state() {
+fn the_layouts_are_one_button_whose_menu_offers_the_four() {
     let mut model = model();
-    model
-        .ui
-        .focus_by_workspace
-        .insert("w".into(), "p2".to_string());
     let pkg = Packages::default();
-    let st = State::default();
-    let mut ui = simulate(view(&st, ctx(&model, &pkg)));
-    assert!(ui.find("Ben").is_ok());
-    assert!(ui.find("Idle").is_ok());
-}
+    let window = model.main_window().expect("the main window");
+    let mut st = State::default();
+    drop(step(&mut st, &mut model, Msg::ToggleLayouts(window)));
+    assert_eq!(st.layouts_open, Some(window));
 
-#[test]
-fn with_no_pane_in_front_the_capsule_says_the_workspace_is_quiet() {
-    let model = model();
-    let pkg = Packages::default();
-    let st = State::default();
-    let mut ui = simulate(view(&st, ctx(&model, &pkg)));
-    assert!(ui.find("No agent at work").is_ok());
+    // Its lines, one per even layout; the third is four panes. Five pixels
+    // of padding, then 26 per line.
+    let ctx = ctx(&model, &pkg);
+    let ws = model.active_workspace().unwrap();
+    let entries = layout_entries(ctx, ws);
+    assert_eq!(entries.len(), LAYOUTS.len());
+    let mut ui = simulate(ui_menu::menu(ctx.theme, entries));
+    ui.move_to(40.0, 5.0 + 26.0 * 2.0 + 13.0);
+    ui.press(iced::mouse::Button::Left);
+    ui.release(iced::mouse::Button::Left);
+    let picked: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        toolbar(
+            &picked,
+            |msg| matches!(msg, Msg::Preset(ws, 4) if ws == "w")
+        ),
+        "{picked:?}"
+    );
+
+    // Picking closes it, and so does the button again.
+    drop(step(&mut st, &mut model, Msg::Preset("w".into(), 4)));
+    assert_eq!(st.layouts_open, None);
+    drop(step(&mut st, &mut model, Msg::ToggleLayouts(window)));
+    drop(step(&mut st, &mut model, Msg::ToggleLayouts(window)));
+    assert_eq!(st.layouts_open, None);
 }
 
 /// The « … » menu on its own at the window's corner, which a click picks a
