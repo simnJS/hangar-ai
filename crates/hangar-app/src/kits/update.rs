@@ -51,14 +51,6 @@ pub fn read_installed() -> Task<Message> {
     })
 }
 
-/// Whether the workspace was put to sleep: its panes unmounted, its agents
-/// stopped. Hibernation is P4's (`panes_logic`), whose read-model does not hold
-/// the set yet; until it does no workspace reads as asleep, and the only thing
-/// lost is the extra deselect that wakes one already selected.
-fn is_asleep(_m: &Model, _ws: &WsId) -> bool {
-    false
-}
-
 fn target_of(ws: Option<WsId>) -> Target {
     match ws {
         Some(ws) => Target::Workspace(ws),
@@ -678,7 +670,10 @@ fn run(st: &mut State, m: &mut Model, step: String) -> Task<Message> {
     let _ = t;
 
     let active = m.state().active_workspace_id.clone();
-    let selections = show_workspace_selections(&ws, active.as_deref(), is_asleep(m, &ws));
+    // Asleep (its panes unmounted, its agents stopped), as the pane logic's
+    // hibernation tells: one already selected is selected again to wake.
+    let asleep = m.live.panes_logic.is_asleep(&ws);
+    let selections = show_workspace_selections(&ws, active.as_deref(), asleep);
     let wake = selections.len() > 1;
     let first = if wake {
         m.apply(StoreAction::SetActiveWorkspace(None));
