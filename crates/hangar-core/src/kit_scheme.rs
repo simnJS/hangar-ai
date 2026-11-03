@@ -105,7 +105,7 @@ const BASES: [&str; 3] = [
 ];
 
 /// The largest kit file served: each is read whole into memory.
-const MAX_BYTES: u64 = 64 * MEGABYTE;
+pub(crate) const MAX_BYTES: u64 = 64 * MEGABYTE;
 
 /// What a kit may serve, by extension, with the Content-Type it goes out as.
 /// Anything else stays on disk.
@@ -155,6 +155,10 @@ pub(crate) struct KitRoot {
     pub id: String,
     /// Canonical.
     pub root: PathBuf,
+    /// The modules of the kit's native tabs (a `.wasm` `entry`), canonical:
+    /// Hangar runs them itself, so none is served as the page of a tab. Any
+    /// other `.wasm` file of the kit is served, since a page may load its own.
+    pub modules: Vec<PathBuf>,
 }
 
 /// The policy every file of the kit `id` goes out with.
@@ -363,6 +367,15 @@ pub(crate) fn answer(
     if !path.starts_with(&kit.root) {
         return refuse(StatusCode::FORBIDDEN, "leads outside the kit folder".into());
     }
+    // A tab whose entry is a module has no page: handing the module to a
+    // browser engine as one would only show a download or an error.
+    if kit.modules.contains(&path) {
+        return refuse(
+            StatusCode::FORBIDDEN,
+            "this is a native tab's module, which Hangar runs itself and does not serve as a page"
+                .into(),
+        );
+    }
     let Ok(metadata) = std::fs::metadata(&path) else {
         return refuse(StatusCode::NOT_FOUND, "not found in the kit".into());
     };
@@ -439,11 +452,31 @@ fn usable_kits() -> Vec<KitRoot> {
         .into_iter()
         .filter(|kit| kit.error.is_none() && kit.manifest.is_some())
         .filter_map(|kit| {
+            let root = dunce::canonicalize(&kit.dir).ok()?;
+            let modules = kit
+                .manifest
+                .as_ref()
+                .map(|manifest| entry_modules(manifest, &root))
+                .unwrap_or_default();
             Some(KitRoot {
-                root: dunce::canonicalize(&kit.dir).ok()?,
+                root,
                 id: kit.id,
+                modules,
             })
         })
+        .collect()
+}
+
+/// The modules a manifest's native tabs run as their `entry`, canonical, for
+/// `root` (itself canonical). A `native` module beside an HTML entry is left
+/// out: that tab has a page, and the module is only what a native Hangar
+/// prefers to it.
+fn entry_modules(manifest: &crate::kits::Manifest, root: &Path) -> Vec<PathBuf> {
+    manifest
+        .tabs
+        .iter()
+        .filter(|tab| tab.page().is_none())
+        .filter_map(|tab| dunce::canonicalize(root.join(&tab.entry)).ok())
         .collect()
 }
 
@@ -498,11 +531,64 @@ mod tests {
         KitRoot {
             id: id.to_string(),
             root,
+            modules: Vec::new(),
         }
     }
 
     fn status(response: &Response<Vec<u8>>) -> StatusCode {
         response.status()
+    }
+
+    #[test]
+    fn a_native_tab_s_module_is_never_served_as_a_page() {
+        let folder = crate::kits::testing::Folder::new("scheme-module");
+        folder
+            .file("tabs/native.wasm", "\0asm")
+            .file("lib/other.wasm", "\0asm")
+            .file("tabs/both.wasm", "\0asm")
+            .file("tabs/both.html", "<!doctype html>");
+        let manifest = folder
+            .parse(&serde_json::json!({
+                "schema": 2,
+                "id": "hello-kit",
+                "name": "Hello",
+                "version": "1.0.0",
+                "description": "A test kit.",
+                "tabs": [
+                    { "id": "native", "title": "N", "entry": "tabs/native.wasm", "permissions": [] },
+                    { "id": "both", "title": "B", "entry": "tabs/both.html", "native": "tabs/both.wasm", "permissions": [] }
+                ]
+            }))
+            .expect("manifest");
+        let hello = KitRoot {
+            id: "hello-kit".to_string(),
+            root: folder.root.clone(),
+            modules: entry_modules(&manifest, &folder.root),
+        };
+        assert_eq!(hello.modules.len(), 1, "only the entry that is a module");
+
+        let response = answer(
+            &get("/hello-kit/tabs/native.wasm", None),
+            std::slice::from_ref(&hello),
+        );
+        assert_eq!(status(&response), StatusCode::FORBIDDEN);
+        let reason = String::from_utf8_lossy(response.body()).into_owned();
+        assert!(reason.contains("native tab"), "{reason}");
+        // Any other module is a file a page may load, and the page of a tab
+        // that has a native module beside it is still served.
+        for served in ["/hello-kit/lib/other.wasm", "/hello-kit/tabs/both.wasm"] {
+            let response = answer(&get(served, None), std::slice::from_ref(&hello));
+            assert_eq!(status(&response), StatusCode::OK, "{served}");
+            assert_eq!(
+                header_of(&response, header::CONTENT_TYPE),
+                "application/wasm"
+            );
+        }
+        let response = answer(
+            &get("/hello-kit/tabs/both.html", None),
+            std::slice::from_ref(&hello),
+        );
+        assert_eq!(status(&response), StatusCode::OK);
     }
 
     #[test]

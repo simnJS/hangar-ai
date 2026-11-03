@@ -27,7 +27,7 @@ mod setup;
 mod source;
 mod store;
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -41,7 +41,7 @@ use crate::host::{Event, Host};
 // Named here for the app, which reads what the commands answer with.
 pub use hooks::Hook;
 pub use manifest::{
-    CommandArg, CommandRun, DeclaredCommand, Manifest, SetupRun, SetupStep, Tab, TabParam,
+    CommandArg, CommandRun, DeclaredCommand, Manifest, SetupRun, SetupStep, Tab, TabKind, TabParam,
 };
 pub use plugin::{Inspection, PluginInfo, RunKind, Running, SetupCommand};
 pub use setup::StepStatus;

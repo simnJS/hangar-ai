@@ -86,10 +86,11 @@ beside an HTML `entry` with the same meaning.
 on GitHub commits its built module, or the release tag it is pinned to holds it. The kit scheme's
 rules hold for it as for any file of the kit: inside the kit's folder, not hidden, 64 MB at most.
 
-**Hangar's part, not done yet.** `crates/hangar-core/src/kits/manifest.rs` reads schema 1 and an
-`.html` entry only; schema 2 and `native` are to add there, with these rules (the crate is being
-reworked by another change, so it is not touched here). `hangar_kit_host::KitRuntime::compile` is
-what the app calls on the file the manifest names.
+**Hangar's part.** `crates/hangar-core/src/kits/manifest.rs` reads schemas 1 and 2 with these
+rules: `Tab::module()` is the file to run, `Tab::page()` the HTML the kit scheme serves, and the
+kit scheme refuses a `.wasm` entry as a page (types in `docs/native/core-api.md`).
+`hangar_kit_host::KitRuntime::compile` is what the app calls on the file the manifest names, and
+the fallback to the page when it fails is the app's.
 
 ## Building a tab
 
