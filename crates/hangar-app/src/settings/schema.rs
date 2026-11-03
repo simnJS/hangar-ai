@@ -23,8 +23,8 @@ use hangar_ui::shortcut::Platform as KeyboardPlatform;
 use super::change::{Target, cursor_style_id, voice_engine_id};
 use super::experiments::{Experiment, Platform, available_experiments};
 use super::format::{num, plain};
-use super::shortcuts::keymap::{resolve, shortcut_label};
 use crate::commands::CommandId;
+use crate::keymap::KeymapIndex;
 use crate::shell::SettingsCategory;
 use crate::state::types::{
     AGENTS, AgentId, CursorStyle, Settings, ShellInfo, UI_SCALE_MAX, UI_SCALE_MIN, VoiceEngine,
@@ -206,7 +206,9 @@ pub struct Context<'a> {
     /// pass their own.
     pub experiments: &'a [Experiment],
     pub platform: Option<Platform>,
-    pub keyboard: KeyboardPlatform,
+    /// The resolved keymap (`Model.live.keymap.index`): the keys the hints
+    /// name, and the platform they are spelled for.
+    pub keymap: &'a KeymapIndex,
 }
 
 /// The delays the settings offer for hibernation, in minutes.
@@ -366,9 +368,9 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
     // The keymap as the person has it, so a hint that names a key stays true
     // after the command has been rebound, and says nothing once it is
     // unbound.
-    let keymap = resolve(&settings.keybindings);
+    let keymap = ctx.keymap;
     let with_key = |hint: String, id: CommandId| {
-        let keys = shortcut_label(&keymap, id);
+        let keys = keymap.label(id);
         if keys.is_empty() {
             hint
         } else {
@@ -574,7 +576,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
             "claude account accounts compte comptes abonnement subscription login".to_string(),
             Block::Accounts,
         ),
-        voice(ctx, &keymap),
+        voice(ctx, keymap),
         discord(ctx),
         Category {
             id: SettingsCategory::Shortcuts,
@@ -606,7 +608,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
                 // spelled the way this platform spells it.
                 .hint(t.t_with(
                     Key::SettingsShortcutsHint,
-                    &args!("mod" => if ctx.keyboard == KeyboardPlatform::Mac { "Cmd" } else { "Ctrl" }),
+                    &args!("mod" => if keymap.platform() == KeyboardPlatform::Mac { "Cmd" } else { "Ctrl" }),
                 )),
             ],
         },
@@ -960,7 +962,7 @@ fn entry_point(
     }
 }
 
-fn voice(ctx: &Context, keymap: &super::shortcuts::keymap::Keymap) -> Category {
+fn voice(ctx: &Context, keymap: &KeymapIndex) -> Category {
     let Context { t, settings, .. } = *ctx;
     let tx = |key: Key| t.t(key).into_owned();
     let local = settings.voice_engine == VoiceEngine::Local;
@@ -981,7 +983,7 @@ fn voice(ctx: &Context, keymap: &super::shortcuts::keymap::Keymap) -> Category {
             "voiceShortcut",
             Some(tx(Key::SettingsVoiceShortcut)),
             Kind::Text {
-                value: shortcut_label(keymap, CommandId::VoiceDictate),
+                value: keymap.label(CommandId::VoiceDictate).to_string(),
             },
         ),
         item(

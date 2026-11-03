@@ -2,6 +2,7 @@
 //! field is given.
 
 use super::*;
+use crate::keymap::KeymapIndex;
 use crate::settings::experiments::Platform;
 use crate::settings::schema::{Context, build_categories};
 use crate::state::types::AgentId;
@@ -41,6 +42,7 @@ fn every_text_field_of_the_schema_shows_what_its_row_holds() {
     settings.voice_cleanup_model = "llama".into();
     settings.voice_cleanup_hint = "Hangar, Tauri".into();
     settings.discord_app_id = "1234".into();
+    let keymap = KeymapIndex::on(KeyboardPlatform::Other, &settings.keybindings);
     let categories = build_categories(&Context {
         t: Translator::new(Locale::En),
         settings: &settings,
@@ -49,7 +51,7 @@ fn every_text_field_of_the_schema_shows_what_its_row_holds() {
         version: "1",
         experiments: &[],
         platform: Some(Platform::Linux),
-        keyboard: KeyboardPlatform::Other,
+        keymap: &keymap,
     });
     let mut seen = 0;
     for item in categories

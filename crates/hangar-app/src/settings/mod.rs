@@ -222,7 +222,7 @@ fn build_for(m: &Model, t: Translator) -> Vec<Category> {
         version: VERSION,
         experiments: experiments::EXPERIMENTS,
         platform: experiments::Platform::current(),
-        keyboard: hangar_ui::shortcut::Platform::current(),
+        keymap: &m.live.keymap.index,
     })
 }
 
@@ -293,7 +293,6 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         st.chosen = current;
     }
     collapse_sheets(m);
-    st.shortcuts.refresh(m.settings());
 
     let shown = follow_search(st, m);
     if st.shown == shown {
@@ -541,9 +540,6 @@ pub fn on_event(
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    // The shortcut editor draws from a resolved keymap it keeps; it follows the
-    // settings whenever anything has happened.
-    st.shortcuts.refresh(m.settings());
     match event {
         CoreEvent::RemoteChanged if st.shown == Some(SettingsCategory::Mobile) => {
             Some(st.mobile.remote_changed(sv))
@@ -708,7 +704,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
 
     // Escape belongs to the sheet: the search first, then the sheet, and never
     // while a shortcut is recording, which spends it itself.
-    let recording = st.shortcuts.is_recording();
+    let recording = st.shortcuts.is_recording() || crate::keymap::suspended(ctx.model);
     let sheet = keys::on_key(sheet, move |key, _| match key {
         KeyboardKey::Named(Named::Escape) if !recording => Some(Message::Settings(Msg::Escape)),
         _ => None,

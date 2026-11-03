@@ -63,9 +63,9 @@ pub fn text_of<'a>(settings: &'a Settings, target: &Target) -> &'a str {
 }
 
 /// A placeholder from the schema, which holds it borrowed for `'static`.
-fn placeholder(item: &std::borrow::Cow<'static, str>) -> &'static str {
+fn placeholder(item: std::borrow::Cow<'static, str>) -> &'static str {
     match item {
-        std::borrow::Cow::Borrowed(words) => *words,
+        std::borrow::Cow::Borrowed(words) => words,
         std::borrow::Cow::Owned(_) => "",
     }
 }
@@ -128,7 +128,7 @@ fn control<'a>(
             let shown = text_of(settings, &target);
             (
                 input::text_field(t, shown)
-                    .placeholder(placeholder(&hint))
+                    .placeholder(placeholder(hint))
                     .on_input(move |text| changed(&target, Value::Text(text)))
                     .into(),
                 false,

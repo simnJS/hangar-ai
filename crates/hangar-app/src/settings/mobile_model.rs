@@ -337,7 +337,7 @@ pub fn new_devices<'a>(
 /// Most recently paired first.
 pub fn sort_devices(devices: &[RemoteDevice]) -> Vec<RemoteDevice> {
     let mut sorted = devices.to_vec();
-    sorted.sort_by(|a, b| b.created.cmp(&a.created));
+    sorted.sort_by_key(|device| std::cmp::Reverse(device.created));
     sorted
 }
 

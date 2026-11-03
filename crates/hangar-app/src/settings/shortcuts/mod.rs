@@ -1,21 +1,26 @@
 //! The keyboard shortcut editor of Settings › Shortcuts
 //! (`ShortcutsSettings.tsx`).
 //!
-//! Deliberately self-contained: it reads the settings and nothing else, so it
-//! drops into the page as one block among controls that are all
-//! label-plus-widget rows and could not describe this one.
+//! The keymap is P7's (`crate::keymap`): the editor reads the resolved
+//! `KeymapIndex` the shell publishes (every command's keys, what the person
+//! changed, the conflicts, the rivals of a keystroke) and asks the keymap to
+//! write, with its `Bind`, `Unbind`, `Free`, `Reset` and `ResetAll` messages.
+//! What is left here is the editor itself: the search, the recorder, and the
+//! rows.
 //!
-//! Recording a shortcut takes the whole keyboard: the field that records
+//! Recording a shortcut takes the whole keyboard. The field that records
 //! (hangar-ui's `shortcut_field`) listens to every key and spends it, and the
 //! dispatcher is told to stand down for as long as one is recording
-//! (`Intent::SuspendShortcuts`), since its keys are the shortcut being
-//! recorded and not commands to run. Escape is the recorder's then, and not
-//! the page's (`Layer::escape(false)` around the sheet, and the page's own
-//! Escape ignoring it while `State::recording` holds).
+//! (`Msg::Suspend`), since the keys are the shortcut being recorded and not
+//! commands to run. Escape is the recorder's then, and not the page's
+//! (`Layer::escape(false)` around the sheet, and the page's own Escape
+//! standing down while `State::is_recording` holds).
 
 use hangar_i18n::{Key, args};
 use hangar_ui::matching::fold;
-use hangar_ui::shortcut::{Input, Outcome, Recorder, format_binding, parse_binding, write_binding};
+use hangar_ui::shortcut::{
+    Input, Outcome, Recorder, format_binding_on, parse_binding_on, write_binding,
+};
 use hangar_ui::shortcut_field::{Labels, shortcut_field};
 use hangar_ui::{badge, button, input, text as typography, tip};
 use iced::widget::{column, container, mouse_area, row};
@@ -24,16 +29,10 @@ use iced::{Alignment, Element, Length, Padding, Task};
 use hangar_theme::style;
 use hangar_theme::tokens::space;
 
-pub mod keymap;
-
-use self::keymap::{
-    Keymap, Overrides, bindings_of, commands_for, find_conflicts, is_customized, reset_command,
-    resolve, with_binding, without_binding,
-};
 use crate::commands::{CommandId, id::Section};
 use crate::ctx::Ctx;
-use crate::message::{Intent, Message};
-use crate::state::{Model, Patch, Settings, StoreAction};
+use crate::keymap::{self, KeymapIndex};
+use crate::message::Message;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -58,21 +57,16 @@ pub enum Msg {
     ResetAll,
 }
 
+/// The token the page holds the dispatcher's suspension by: any, as long as
+/// it is the same one for the suspension and its release.
+const RECORDING: u64 = 0x5e77_1465;
+
 #[derive(Debug, Default)]
 pub struct State {
     query: String,
     /// The command being recorded for, and the recorder.
     recording: Option<(CommandId, Recorder)>,
     confirm_reset: bool,
-    /// What the rows are drawn from. Held here and not made in the view
-    /// because the controls borrow the keys for as long as the frame lives.
-    cache: Option<Cache>,
-}
-
-#[derive(Debug)]
-struct Cache {
-    overrides: Overrides,
-    keymap: Keymap,
 }
 
 impl State {
@@ -82,173 +76,127 @@ impl State {
         self.recording.is_some()
     }
 
-    /// Makes the keymap the rows are drawn from match the settings. Called
-    /// after every message of the page, so a change made anywhere shows.
-    pub fn refresh(&mut self, settings: &Settings) {
-        if self
-            .cache
-            .as_ref()
-            .is_some_and(|cache| cache.overrides == settings.keybindings)
-        {
-            return;
-        }
-        self.cache = Some(Cache {
-            keymap: resolve(&settings.keybindings),
-            overrides: settings.keybindings.clone(),
-        });
-    }
-
     /// The page is left (closed, or another category shown): a recording
     /// ends and lets go of the keyboard.
     pub fn leave(&mut self) -> Task<Message> {
         let was_recording = self.recording.is_some();
         *self = State::default();
         if was_recording {
-            release()
+            send(keymap::Msg::Release(RECORDING))
         } else {
             Task::none()
         }
     }
 
-    /// Ends a recording, if there is one: whether the dispatcher is to be let
-    /// go of.
-    fn stop_recording(&mut self) -> Option<bool> {
-        self.recording.take().map(|_| false)
+    /// Ends a recording, if there is one: the dispatcher is to be let go of.
+    fn stop_recording(&mut self) -> Vec<keymap::Msg> {
+        self.recording
+            .take()
+            .map(|_| keymap::Msg::Release(RECORDING))
+            .into_iter()
+            .collect()
     }
 }
 
-fn suspend(on: bool) -> Task<Message> {
-    Task::done(Message::Intent(Intent::SuspendShortcuts(on)))
-}
-
-fn release() -> Task<Message> {
-    suspend(false)
+fn send(msg: keymap::Msg) -> Task<Message> {
+    Task::done(Message::Keymap(msg))
 }
 
 fn wrap(msg: Msg) -> Message {
     Message::Settings(super::Msg::Shortcuts(msg))
 }
 
-/// What a message of the editor asks of the outside: new overrides to write,
-/// and the dispatcher to suspend (`true`) or let go (`false`).
-#[derive(Debug, Default, PartialEq)]
-pub struct Effect {
-    pub write: Option<Overrides>,
-    pub suspend: Option<bool>,
-}
+/// What a message of the editor asks of the keymap, in order.
+pub type Effect = Vec<keymap::Msg>;
 
-impl Effect {
-    fn write(next: Overrides) -> Effect {
-        Effect {
-            write: Some(next),
-            suspend: None,
-        }
-    }
-
-    fn suspend(on: Option<bool>) -> Effect {
-        Effect {
-            write: None,
-            suspend: on,
-        }
-    }
-}
-
-/// What a message does to the editor, given the overrides and the keymap
-/// resolved from them. Pure, so that the whole of the editor's behaviour can
+/// What a message does to the editor, given the keymap as it stands. Pure
+/// apart from the editor's own state, so that the whole of its behaviour can
 /// be driven without a window.
-pub fn step(st: &mut State, overrides: &Overrides, keymap: &Keymap, msg: Msg) -> Effect {
+pub fn step(st: &mut State, index: &KeymapIndex, msg: Msg) -> Effect {
     match msg {
         Msg::Query(query) => {
             st.query = query;
-            Effect::suspend(st.stop_recording())
+            st.stop_recording()
         }
         Msg::ClearQuery => {
             st.query.clear();
-            Effect::default()
+            Vec::new()
         }
-        Msg::SearchPressed => Effect::suspend(st.stop_recording()),
+        Msg::SearchPressed => st.stop_recording(),
         Msg::Record(id) => {
             let was_recording = st.recording.is_some();
             st.recording = Some((id, Recorder::new()));
             // Moving the recorder from one row to another keeps the one
             // suspension it holds.
-            Effect::suspend((!was_recording).then_some(true))
+            if was_recording {
+                Vec::new()
+            } else {
+                vec![keymap::Msg::Suspend(RECORDING)]
+            }
         }
         Msg::Input(input) => {
             let Some((id, recorder)) = &mut st.recording else {
-                return Effect::default();
+                return Vec::new();
             };
             let id = *id;
             match recorder.input(input) {
-                Outcome::Pending => Effect::default(),
-                Outcome::Cancelled => Effect::suspend(st.stop_recording()),
-                Outcome::Done(chords) => Effect {
-                    write: Some(with_binding(overrides, keymap, id, &write_binding(&chords))),
-                    suspend: st.stop_recording(),
-                },
+                Outcome::Pending => Vec::new(),
+                Outcome::Cancelled => st.stop_recording(),
+                Outcome::Done(chords) => bind(st, id, write_binding(&chords)),
             }
         }
         Msg::Confirm => {
             let Some((id, recorder)) = &st.recording else {
-                return Effect::default();
+                return Vec::new();
             };
             let id = *id;
             match recorder.confirm() {
-                Some(chords) => Effect {
-                    write: Some(with_binding(overrides, keymap, id, &write_binding(&chords))),
-                    suspend: st.stop_recording(),
-                },
-                None => Effect::default(),
+                Some(chords) => bind(st, id, write_binding(&chords)),
+                None => Vec::new(),
             }
         }
-        Msg::Cancel => Effect::suspend(st.stop_recording()),
-        Msg::Remove(id, at) => match bindings_of(keymap, id).get(at) {
-            Some(binding) => Effect::write(without_binding(overrides, keymap, id, binding)),
-            None => Effect::default(),
+        Msg::Cancel => st.stop_recording(),
+        Msg::Remove(id, at) => match index.bindings(id).get(at) {
+            Some(binding) => vec![keymap::Msg::Unbind {
+                command: id,
+                binding: binding.clone(),
+            }],
+            None => Vec::new(),
         },
-        Msg::Reset(id) => Effect::write(reset_command(overrides, id)),
+        Msg::Reset(id) => vec![keymap::Msg::Reset(id)],
         Msg::Free(id, at) => {
-            let Some(binding) = bindings_of(keymap, id).get(at) else {
-                return Effect::default();
+            let Some(binding) = index.bindings(id).get(at) else {
+                return Vec::new();
             };
-            let Some(chords) = parse_binding(binding) else {
-                return Effect::default();
+            let Some(chords) = parse_binding_on(index.platform(), binding) else {
+                return Vec::new();
             };
-            let mut next = overrides.clone();
-            for rival in commands_for(keymap, &chords, Some(id)) {
-                next = without_binding(&next, keymap, rival, binding);
-            }
-            Effect::write(next)
+            vec![keymap::Msg::Free {
+                binding: binding.clone(),
+                commands: index.commands_for(&chords, Some(id)),
+            }]
         }
         Msg::AskResetAll(ask) => {
             st.confirm_reset = ask;
-            Effect::default()
+            Vec::new()
         }
         Msg::ResetAll => {
             st.confirm_reset = false;
-            Effect::write(Overrides::new())
+            vec![keymap::Msg::ResetAll]
         }
     }
 }
 
-pub fn update(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
-    st.refresh(m.settings());
-    let Some(cache) = &st.cache else {
-        return Task::none();
-    };
-    let (overrides, keymap) = (cache.overrides.clone(), cache.keymap.clone());
-    let effect = step(st, &overrides, &keymap, msg);
-    if let Some(next) = effect.write {
-        m.apply(StoreAction::UpdateSettings(Patch::new(
-            move |settings: &mut Settings| settings.keybindings = next.clone(),
-        )));
-        // What the rows are drawn from follows the write at once.
-        st.refresh(m.settings());
-    }
-    match effect.suspend {
-        Some(on) => suspend(on),
-        None => Task::none(),
-    }
+/// A recorded key added to a command, and the recorder let go of.
+fn bind(st: &mut State, command: CommandId, binding: String) -> Effect {
+    let mut asked = vec![keymap::Msg::Bind { command, binding }];
+    asked.extend(st.stop_recording());
+    asked
+}
+
+pub fn update(st: &mut State, m: &crate::state::Model, msg: Msg) -> Task<Message> {
+    let index = m.live.keymap.index.clone();
+    Task::batch(step(st, &index, msg).into_iter().map(send))
 }
 
 // ---- What the rows say ----------------------------------------------------------------------------
@@ -267,15 +215,16 @@ pub fn command_label(ctx: Ctx<'_>, id: CommandId) -> String {
 
 /// Whether a command is shown for a query: its label, its keys and its
 /// section's name are searched, ignoring case and accents.
-pub fn matches(ctx: Ctx<'_>, keymap: &Keymap, id: CommandId, needle: &str) -> bool {
+pub fn matches(ctx: Ctx<'_>, index: &KeymapIndex, id: CommandId, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
     let haystack = [
         command_label(ctx, id),
-        bindings_of(keymap, id)
+        index
+            .bindings(id)
             .iter()
-            .map(|binding| format_binding(binding))
+            .map(|binding| format_binding_on(index.platform(), binding))
             .collect::<Vec<_>>()
             .join(" "),
         ctx.t(id.section().label_key()).into_owned(),
@@ -286,7 +235,7 @@ pub fn matches(ctx: Ctx<'_>, keymap: &Keymap, id: CommandId, needle: &str) -> bo
 
 /// The commands the editor lists for a query, by section in the order of the
 /// page (`groups`).
-pub fn groups(ctx: Ctx<'_>, keymap: &Keymap, query: &str) -> Vec<(Section, Vec<CommandId>)> {
+pub fn groups(ctx: Ctx<'_>, index: &KeymapIndex, query: &str) -> Vec<(Section, Vec<CommandId>)> {
     let needle = fold(query.trim());
     Section::ALL
         .iter()
@@ -294,7 +243,7 @@ pub fn groups(ctx: Ctx<'_>, keymap: &Keymap, query: &str) -> Vec<(Section, Vec<C
             let commands: Vec<CommandId> = CommandId::ALL
                 .iter()
                 .copied()
-                .filter(|id| id.section() == *section && matches(ctx, keymap, *id, &needle))
+                .filter(|id| id.section() == *section && matches(ctx, index, *id, &needle))
                 .collect();
             (*section, commands)
         })
@@ -304,13 +253,14 @@ pub fn groups(ctx: Ctx<'_>, keymap: &Keymap, query: &str) -> Vec<(Section, Vec<C
 
 /// Other commands answering to the same keystrokes as this one, by the
 /// position of the key in its list.
-pub fn rivals(keymap: &Keymap, id: CommandId) -> Vec<(usize, Vec<CommandId>)> {
-    bindings_of(keymap, id)
+pub fn rivals(index: &KeymapIndex, id: CommandId) -> Vec<(usize, Vec<CommandId>)> {
+    index
+        .bindings(id)
         .iter()
         .enumerate()
         .filter_map(|(at, binding)| {
-            let chords = parse_binding(binding)?;
-            let others = commands_for(keymap, &chords, Some(id));
+            let chords = parse_binding_on(index.platform(), binding)?;
+            let others = index.commands_for(&chords, Some(id));
             (!others.is_empty()).then_some((at, others))
         })
         .collect()
@@ -334,13 +284,10 @@ fn labels(ctx: Ctx<'_>) -> Labels {
 
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let t = ctx.theme;
-    // The cache is made by the page's update, before anything is drawn; a
-    // frame before the first update shows the editor empty rather than wrong.
-    let Some(cache) = &st.cache else {
-        return column![].into();
-    };
-    let keymap = &cache.keymap;
-    let conflicts = find_conflicts(keymap);
+    // The keymap the shell publishes: its keys live as long as the frame, so
+    // the controls can borrow them.
+    let index = ctx.keymap;
+    let conflicts = index.conflicts();
 
     let search = mouse_area(
         input::search_field(t, &st.query, placeholder(ctx, Key::KeymapSearch))
@@ -355,7 +302,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     } else {
         let all: Vec<String> = conflicts
             .iter()
-            .map(|conflict| format_binding(&conflict.binding))
+            .map(|conflict| format_binding_on(index.platform(), &conflict.binding))
             .collect();
         tip::over(
             t,
@@ -369,9 +316,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         )
     };
 
-    let customized = CommandId::ALL
-        .iter()
-        .any(|id| is_customized(&cache.overrides, *id));
+    let customized = !index.overrides().is_empty();
     let reset: Element<'a, Message> = if st.confirm_reset {
         row![
             button::ghost(t, ctx.t(Key::CreateCancel).into_owned())
@@ -395,7 +340,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         .align_y(Alignment::Center);
 
     let mut stack = column![bar].spacing(space::XXL);
-    let groups = groups(ctx, keymap, &st.query);
+    let groups = groups(ctx, index, &st.query);
     if groups.is_empty() {
         stack = stack.push(
             container(typography::label(t, ctx.t(Key::KeymapEmpty).into_owned()))
@@ -403,10 +348,10 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         );
     }
     for (section, commands) in groups {
-        let mut rows = Vec::new();
-        for id in commands {
-            rows.push(command_row(st, ctx, cache, id));
-        }
+        let rows = commands
+            .into_iter()
+            .map(|id| command_row(st, ctx, id))
+            .collect();
         stack = stack.push(
             column![
                 container(typography::heading(
@@ -422,16 +367,12 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     stack.into()
 }
 
-fn command_row<'a>(
-    st: &'a State,
-    ctx: Ctx<'a>,
-    cache: &'a Cache,
-    id: CommandId,
-) -> Element<'a, Message> {
+fn command_row<'a>(st: &'a State, ctx: Ctx<'a>, id: CommandId) -> Element<'a, Message> {
     let t = ctx.theme;
-    let bindings = bindings_of(&cache.keymap, id);
-    let custom = is_customized(&cache.overrides, id);
-    let rival_list = rivals(&cache.keymap, id);
+    let index = ctx.keymap;
+    let bindings = index.bindings(id);
+    let custom = index.overrides().is_customized(id);
+    let rival_list = rivals(index, id);
     let recording = st
         .recording
         .as_ref()
@@ -466,8 +407,9 @@ fn command_row<'a>(
     ]
     .spacing(space::SM);
 
+    let conflicted = !rival_list.is_empty();
     for (at, others) in rival_list {
-        let keys = format_binding(&bindings[at]);
+        let keys = format_binding_on(index.platform(), &bindings[at]);
         let names: Vec<String> = others
             .iter()
             .map(|other| command_label(ctx, *other))
@@ -494,7 +436,6 @@ fn command_row<'a>(
         );
     }
 
-    let conflicted = !rivals_empty(&cache.keymap, id);
     let body = container(stack)
         .padding(Padding::from([space::LG, space::XL]))
         .width(Length::Fill);
@@ -503,10 +444,6 @@ fn command_row<'a>(
     } else {
         body.into()
     }
-}
-
-fn rivals_empty(keymap: &Keymap, id: CommandId) -> bool {
-    rivals(keymap, id).is_empty()
 }
 
 /// A plain entry of the dictionary, which the translator lends for the whole

@@ -43,6 +43,7 @@ impl World {
     }
 
     fn build(&self) -> Vec<Category> {
+        let keymap = KeymapIndex::on(self.keyboard, &self.settings.keybindings);
         build_categories(&Context {
             t: Translator::new(self.locale),
             settings: &self.settings,
@@ -51,7 +52,7 @@ impl World {
             version: &self.version,
             experiments: &self.experiments,
             platform: self.platform,
-            keyboard: self.keyboard,
+            keymap: &keymap,
         })
     }
 }
