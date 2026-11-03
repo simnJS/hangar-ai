@@ -147,7 +147,7 @@ pub struct PreviewState {
     pub active: Option<String>,
     /// The workspace the last host was asked for.
     pub workspace: WsId,
-    /// Its workspace on screen, and its panel with it.
+    /// Its workspace on screen, and its grid with it.
     pub on_screen: bool,
     pub shown: bool,
     pub settle: Settle,

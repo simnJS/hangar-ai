@@ -1,7 +1,9 @@
 //! What is open in the previews, one preview per workspace: the files each
 //! workspace has open (3D models, images, videos, sounds, text, Markdown,
-//! PDF, web pages) and the tabs of its kits, which one is in front, whether
-//! its panel shows and whether it fills the work area (`lib/modelStore.ts`).
+//! PDF, web pages) and the tabs of its kits, and which one was brought
+//! forward last (`lib/modelStore.ts`). Each entry is a pane of its
+//! workspace's grid (`panes.rs`): 1.x's panel, whether it showed and whether
+//! it filled the work area, is gone.
 //! Switching workspaces switches previews; a file an agent shows in a
 //! workspace that is not on screen waits there.
 //!
@@ -188,13 +190,9 @@ impl Entry {
 pub struct Scope {
     /// Every tab, in order: models and the other kinds together.
     pub entries: Vec<Entry>,
+    /// The entry brought forward last (shown, revealed, opened): the model an
+    /// agent's `model_snapshot` takes without a path.
     pub active_id: Option<String>,
-    pub panel_open: bool,
-    /// The panel takes the whole work area instead of sitting beside it.
-    pub expanded: bool,
-    /// An agent opened or changed something here that has not been on screen
-    /// since.
-    pub unseen: bool,
 }
 
 impl Scope {
@@ -238,7 +236,7 @@ pub struct KitTabToOpen {
     pub singleton: bool,
     /// The pane of the agent or hook that asks; `None` when the person does.
     pub opened_by: Option<String>,
-    /// Opens the panel, the tab in front. False adds it without either.
+    /// Makes it the entry brought forward last. False adds it without.
     pub reveal: bool,
 }
 
@@ -437,9 +435,6 @@ fn now_ms() -> u64 {
 pub static EMPTY: Scope = Scope {
     entries: Vec::new(),
     active_id: None,
-    panel_open: false,
-    expanded: false,
-    unseen: false,
 };
 
 impl Default for Store {
@@ -580,16 +575,14 @@ impl Store {
 
     /// Opens a file in its workspace's preview, or brings it forward and
     /// reloads it when that workspace has it open already: an agent showing
-    /// the same file again has usually just rewritten it. Opens that
-    /// workspace's panel, and only that one. Returns the entry's id
-    /// (`showPreview`).
+    /// the same file again has usually just rewritten it. Returns the entry's
+    /// id (`showPreview`).
     pub fn show_file(&mut self, file: ShowFile) -> String {
         self.show_file_with(file, true)
     }
 
-    /// `show_file`; without `reveal` the file is only added, the panel and
-    /// what is in front as they were (the news still waits behind the
-    /// toolbar's button), as a kit's tab is.
+    /// `show_file`; without `reveal` the file is only added, the entry
+    /// brought forward last as it was, as a kit's tab is.
     pub fn show_file_with(&mut self, file: ShowFile, reveal: bool) -> String {
         let scope = self.scope(&file.workspace_id).clone();
         let title = file
@@ -619,9 +612,7 @@ impl Store {
             });
             if reveal {
                 next.active_id = Some(id.clone());
-                next.panel_open = true;
             }
-            next.unseen = true;
             self.set(vec![(file.workspace_id, Some(next))]);
             return id;
         }
@@ -644,9 +635,7 @@ impl Store {
         if reveal || next.active_id.is_none() {
             next.active_id = Some(id.clone());
         }
-        next.panel_open = reveal || next.panel_open;
         next.entries.push(entry);
-        next.unseen = true;
         self.set(vec![(file.workspace_id, Some(next))]);
         id
     }
@@ -680,11 +669,9 @@ impl Store {
     /// as it does of new params. The person bringing it forward changes
     /// neither: the agent that asked is still the one waiting.
     ///
-    /// With `reveal`, the default, it opens that workspace's panel with the
-    /// tab in front; without, it is only added, the panel and what is in front
-    /// as they were. Neither ever moves the keyboard. What an agent or a hook
-    /// opens is news to the person, which the toolbar's button says; what they
-    /// open themselves is not. Returns the entry's id (`openKitTab`).
+    /// With `reveal`, the default, it is the entry brought forward last;
+    /// without, that stays as it was. Neither ever moves the keyboard.
+    /// Returns the entry's id (`openKitTab`).
     pub fn open_kit_tab(&mut self, tab: KitTabToOpen) -> String {
         self.restore_kit_tabs(&tab.workspace_id);
         let scope = self.scope(&tab.workspace_id).clone();
@@ -732,9 +719,7 @@ impl Store {
             });
             if tab.reveal {
                 next.active_id = Some(existing.id.clone());
-                next.panel_open = true;
             }
-            next.unseen = scope.unseen || (opened_by.is_some() && (tab.reveal || replaced));
             self.set(vec![(tab.workspace_id.clone(), Some(next))]);
             if replaced || opened_by.is_some() {
                 self.tell_watchers(&existing.id);
@@ -773,8 +758,6 @@ impl Store {
         if tab.reveal || scope.active_id.is_none() {
             next.active_id = Some(id.clone());
         }
-        next.panel_open = tab.reveal || scope.panel_open;
-        next.unseen = scope.unseen || opened_by.is_some();
         self.set(vec![(tab.workspace_id, Some(next))]);
         id
     }
@@ -954,10 +937,10 @@ impl Store {
 
     /// Brings back the kit tabs a workspace had open when the app last closed,
     /// with their params, once. Called when the workspace is first opened, so
-    /// no page runs for a workspace nobody opened. They come back behind a
-    /// closed panel: a restart does not put anything in front of anyone, and
-    /// is not news. What is open already stays, and is not opened twice
-    /// (`restoreKitTabs`).
+    /// no page runs for a workspace nobody opened, each under the id it was
+    /// saved with, which is its view pane's (`panes.rs`), when no entry has it.
+    /// A restored tab's page waits for its pane to be on screen. What is open
+    /// already stays, and is not opened twice (`restoreKitTabs`).
     pub fn restore_kit_tabs(&mut self, workspace: &str) {
         if !self.restored.insert(workspace.to_string()) {
             return;
@@ -1019,9 +1002,9 @@ impl Store {
 
     /* ── closing ─────────────────────────────────────────────────── */
 
-    /// Closes entries, wherever they are open. A workspace left with none has
-    /// its panel closed; one that still has some keeps its panel as it was, the
-    /// last of them in front if the one in front went (`closeModels`).
+    /// Closes entries, wherever they are open. A workspace that still has some
+    /// has the last of them brought forward if the one brought forward last
+    /// went (`closeModels`).
     pub fn close_models(&mut self, ids: &[String]) -> usize {
         let closing: HashSet<&str> = ids.iter().map(String::as_str).collect();
         let mut patch = Vec::new();
@@ -1156,54 +1139,20 @@ impl Store {
             return;
         };
         let workspace = entry.workspace_id.clone();
-        let mut next =
-            Store::with_entry(self.scope(&workspace), id, |entry| match &mut entry.body {
-                Body::Model { .. } => {
-                    entry.modified_ms = modified_ms;
-                    entry.revision += 1;
-                    entry.status = Status::Loading;
-                }
-                Body::File { size: held, .. } => {
-                    entry.modified_ms = modified_ms;
-                    entry.revision += 1;
-                    *held = size.unwrap_or(*held);
-                }
-                Body::Kit(_) => {}
-            });
-        next.unseen = true;
+        let next = Store::with_entry(self.scope(&workspace), id, |entry| match &mut entry.body {
+            Body::Model { .. } => {
+                entry.modified_ms = modified_ms;
+                entry.revision += 1;
+                entry.status = Status::Loading;
+            }
+            Body::File { size: held, .. } => {
+                entry.modified_ms = modified_ms;
+                entry.revision += 1;
+                *held = size.unwrap_or(*held);
+            }
+            Body::Kit(_) => {}
+        });
         self.set(vec![(workspace, Some(next))]);
-    }
-
-    /// Opens, closes, expands or collapses a workspace's panel. Nothing to
-    /// show, nothing to open (`setModelPanel`).
-    pub fn set_model_panel(&mut self, workspace: &str, open: Option<bool>, expanded: Option<bool>) {
-        let Some(scope) = self.scopes.get(workspace) else {
-            return;
-        };
-        let panel_open = open.unwrap_or(scope.panel_open);
-        let is_expanded = if panel_open {
-            expanded.unwrap_or(scope.expanded)
-        } else {
-            false
-        };
-        if panel_open == scope.panel_open && is_expanded == scope.expanded {
-            return;
-        }
-        let mut next = scope.clone();
-        next.panel_open = panel_open;
-        next.expanded = is_expanded;
-        self.set(vec![(workspace.to_string(), Some(next))]);
-    }
-
-    /// The workspace's preview has been on screen since its last change
-    /// (`markModelsSeen`).
-    pub fn mark_models_seen(&mut self, workspace: &str) {
-        let Some(scope) = self.scopes.get(workspace).filter(|scope| scope.unseen) else {
-            return;
-        };
-        let mut next = scope.clone();
-        next.unseen = false;
-        self.set(vec![(workspace.to_string(), Some(next))]);
     }
 
     /// Whether an entry has loaded or failed, for a caller waiting on it

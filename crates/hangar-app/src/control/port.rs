@@ -379,7 +379,7 @@ pub struct PreviewListing {
     pub active_id: Option<String>,
     /// Its workspace is the one its window shows.
     pub on_screen: bool,
-    /// Its panel is drawn, there.
+    /// Its grid is drawn there, with the panes of what it shows.
     pub shown: bool,
 }
 

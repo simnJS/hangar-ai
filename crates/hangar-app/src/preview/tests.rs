@@ -826,23 +826,39 @@ async fn the_status_of_a_file_is_ready_at_once_and_a_model_waits_for_its_viewer(
 
 /// A triple click on the text `target` of the only entry's pane: the
 /// messages the viewer was told, in order.
+///
+/// Three clicks are a triple click only within the double-click delay
+/// (300 ms between presses), and each press lays the text out again: on a
+/// machine busy with the other tests the delay can pass, and the clicks read
+/// as a double one. The gesture is tried again, a few times, until the
+/// viewer is told `target` was selected; the last try is answered whatever
+/// it gave.
 fn click_thrice(h: &Harness, target: &str, size: Size) -> Vec<ViewerMsg> {
     let pkg = Packages::default();
-    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
     let id = only_entry(h);
-    let mut ui = simulate(h.body(ctx, &id), size);
-    // The second and third clicks in one go, where the pointer went for the
-    // first: three clicks are a triple click only within the double-click
-    // delay, which a machine busy with the other tests could otherwise let
-    // pass between two lookups of the text.
-    ui.click(target).expect("the text is on screen");
-    let _ = ui.simulate(iced_test::simulator::click().chain(iced_test::simulator::click()));
-    ui.into_messages()
-        .filter_map(|message| match message {
-            Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
-            _ => None,
-        })
-        .collect()
+    let mut told = Vec::new();
+    for _ in 0..5 {
+        let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+        let mut ui = simulate(h.body(ctx, &id), size);
+        ui.click(target).expect("the text is on screen");
+        let _ = ui.simulate(iced_test::simulator::click().chain(iced_test::simulator::click()));
+        told = ui
+            .into_messages()
+            .filter_map(|message| match message {
+                Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
+                _ => None,
+            })
+            .collect();
+        let whole = told.iter().any(|msg| {
+            matches!(msg, ViewerMsg::Selected(text) if text == target)
+                || matches!(msg,
+                    ViewerMsg::Markdown(super::markdown::Msg::Selected(text)) if text == target)
+        });
+        if whole {
+            break;
+        }
+    }
+    told
 }
 
 #[tokio::test]

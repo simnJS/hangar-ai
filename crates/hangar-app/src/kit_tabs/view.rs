@@ -1,4 +1,4 @@
-//! A kit's tab in the preview panel (`KitTabView`): its bar (reload, and the
+//! A kit's tab in its view pane (`KitTabView`): its bar (reload, and the
 //! chip saying it runs isolated, with what the workspace granted it in
 //! words), then its page: drawn here for a native tab, the card of its
 //! window for an HTML one, or why it cannot run.

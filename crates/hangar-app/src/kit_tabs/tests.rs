@@ -271,7 +271,7 @@ fn a_module_that_does_not_load_gives_way_to_the_tabs_page_and_says_so() {
     assert!(st.natives.is_empty());
     assert!(
         st.pages.contains_key(&id),
-        "the tab has a page, shown in front of a panel on screen"
+        "the tab has a page, shown while its pane is on screen"
     );
 
     // The bar says it is a page that is shown, and why on hover; the body is
@@ -439,7 +439,7 @@ fn a_page_opens_only_in_front_of_a_panel_on_screen() {
     // The module is tried at once, shown or not.
     assert!(h.st().unloadable.contains_key(&id));
     // The page it falls back to would take a window, and so the keyboard:
-    // it waits for the tab to be in front of a panel on screen.
+    // it waits for the tab's pane to be on screen.
     assert!(!h.st().pages.contains_key(&id));
 }
 

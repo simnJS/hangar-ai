@@ -114,8 +114,8 @@ check your own work with `model_snapshot`, which returns a picture of it.
 ### Showing a file, or sending it to the phone
 
 To show the user a render, screenshot, recording, report, Markdown, PDF or HTML page, open
-it with `preview_show {{path, title?}}` rather than giving them a path: it appears in the
-workspace's "Aperçu" panel. An HTML page runs isolated, so inline its scripts and styles
+it with `preview_show {{path, title?}}` rather than giving them a path: it opens as a pane
+of the workspace's grid, beside the terminals. An HTML page runs isolated, so inline its scripts and styles
 (its own `.js` and `.css` files do not load). Call `preview_close` once you are done, so it
 does not keep a part of their screen.
 
@@ -126,7 +126,7 @@ they ask for it or a result is clearly worth it, never for routine output.
 
 A kit enabled on this workspace can bring small tabs that take params, such as one showing a
 CI run for its id. `kit_tab_list` says which there are, `kit_tab_open {{kit, tab, params?, reveal?}}`
-opens one in the same panel without taking the keyboard from anyone, and
+opens one as a pane of the grid too, without taking the keyboard from anyone, and
 `kit_tab_close {{kit, tab, params?}}` closes it.
 
 ## Global memory
@@ -373,7 +373,7 @@ mod tests {
         assert!(block.contains("model_snapshot"));
     }
 
-    /// Same again for the preview panel and the phone.
+    /// Same again for the previews and the phone.
     #[test]
     fn the_generated_block_names_the_preview_and_phone_tools() {
         let block = playbook();

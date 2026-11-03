@@ -1,4 +1,4 @@
-//! What the engines may do with a workspace's preview panel (the
+//! What the engines may do with a workspace's previews (the
 //! `PreviewHost` of control.ts, inventory A6): list, show, reveal, reload,
 //! close, wait for an entry to settle, render a model off screen, list kit
 //! tabs. The preview implements it over its store (`preview/access.rs`, with

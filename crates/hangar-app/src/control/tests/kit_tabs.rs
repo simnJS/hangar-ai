@@ -93,7 +93,7 @@ impl KitTabCatalog for CiKit {
     }
 }
 
-/// "Hangar" with the kit enabled, the panel on screen.
+/// "Hangar" with the kit enabled, its grid on screen.
 fn kit_setup() -> Arc<Fake> {
     let fake = Fake::setup();
     fake.patch("w1", |ws| {
@@ -149,7 +149,7 @@ fn active(fake: &Fake) -> Option<String> {
     lock(&fake.preview.state).active.clone()
 }
 
-/// `noteModelView(ws, true)`: that workspace on screen with its panel.
+/// `noteModelView(ws, true)`: that workspace on screen with its grid.
 fn on_screen(fake: &Fake, here: bool, shown: bool) {
     let mut preview = lock(&fake.preview.state);
     preview.on_screen = here;

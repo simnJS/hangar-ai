@@ -87,14 +87,12 @@ fn first<'a>(store: &'a Store, workspace: &str) -> &'a Entry {
 /* ── the store ─────────────────────────────────────────────────── */
 
 #[test]
-fn opens_the_panel_on_a_model_and_puts_it_in_front() {
+fn opens_a_model_and_brings_it_forward() {
     let mut store = store();
     let id = model(&mut store, "C:/m/chair.glb");
     let scope = store.scope("ws");
-    assert!(scope.panel_open);
     assert_eq!(scope.active_id.as_deref(), Some(id.as_str()));
     assert_eq!(scope.entries[0].title, "chair.glb");
-    assert!(scope.unseen);
 }
 
 #[test]
@@ -114,17 +112,13 @@ fn reloads_a_model_shown_again_instead_of_opening_it_twice() {
 }
 
 #[test]
-fn closes_the_panel_with_the_last_model() {
+fn closes_the_last_model_and_brings_the_one_before_forward() {
     let mut store = store();
     let a = model(&mut store, "C:/m/a.glb");
     let b = model(&mut store, "C:/m/b.glb");
-    store.set_model_panel("ws", None, Some(true));
     store.close_model(&b);
     assert_eq!(store.scope("ws").active_id.as_deref(), Some(a.as_str()));
-    assert!(store.scope("ws").expanded);
     store.close_model(&a);
-    assert!(!store.scope("ws").panel_open);
-    assert!(!store.scope("ws").expanded);
     assert!(store.models().is_empty());
 }
 
@@ -144,20 +138,17 @@ fn tells_a_waiting_caller_how_the_load_ended() {
 /* ── one preview per workspace ─────────────────────────────────── */
 
 #[test]
-fn keeps_each_workspaces_models_tab_in_front_and_panel_apart() {
+fn keeps_each_workspaces_models_and_entry_in_front_apart() {
     let mut store = store();
     let chair = show(&mut store, "C:/a/chair.glb", Some("Ava"), "A");
     let table = show(&mut store, "C:/a/table.glb", Some("Ava"), "A");
     let car = show(&mut store, "C:/b/car.glb", Some("Ben"), "B");
     store.activate_model(&chair);
-    store.set_model_panel("B", Some(false), None);
 
     assert_eq!(ids(&store, "A"), vec![chair.clone(), table.clone()]);
     assert_eq!(store.scope("A").active_id.as_deref(), Some(chair.as_str()));
-    assert!(store.scope("A").panel_open);
     assert_eq!(ids(&store, "B"), vec![car.clone()]);
     assert_eq!(store.scope("B").active_id.as_deref(), Some(car.as_str()));
-    assert!(!store.scope("B").panel_open);
     // The window's viewer holds them all.
     let mut held: Vec<String> = store.models().iter().map(|m| m.id.clone()).collect();
     held.sort();
@@ -167,12 +158,10 @@ fn keeps_each_workspaces_models_tab_in_front_and_panel_apart() {
 }
 
 #[test]
-fn has_nothing_for_a_workspace_no_model_was_shown_in_and_its_panel_stays_shut() {
+fn has_nothing_for_a_workspace_no_model_was_shown_in() {
     let mut store = store();
     show(&mut store, "C:/a/chair.glb", Some("Ava"), "A");
     assert_eq!(store.scope("B"), &Scope::default());
-    store.set_model_panel("B", Some(true), None);
-    assert!(!store.scope("B").panel_open);
     assert!(store.scope("nobody").entries.is_empty());
 }
 
@@ -192,14 +181,9 @@ fn closes_in_one_workspace_without_touching_the_other() {
     let mut store = store();
     let chair = show(&mut store, "C:/a/chair.glb", Some("Ava"), "A");
     let car = show(&mut store, "C:/b/car.glb", Some("Ben"), "B");
-    store.set_model_panel("B", None, Some(true));
     store.close_model(&chair);
-    assert!(!store.scope("A").panel_open);
     let b = store.scope("B");
     assert_eq!(b.active_id.as_deref(), Some(car.as_str()));
-    assert!(b.panel_open);
-    // Expanding opens nothing by itself: the panel was open already.
-    assert!(b.expanded);
     show(&mut store, "C:/a/lamp.glb", Some("Ava"), "A");
     store.close_workspace_models("B");
     assert!(store.scope("B").entries.is_empty());
@@ -215,18 +199,6 @@ fn brings_a_tab_forward_in_its_own_workspace_only() {
     store.activate_model(&chair);
     assert_eq!(store.scope("A").active_id.as_deref(), Some(chair.as_str()));
     assert_eq!(store.scope("B").active_id.as_deref(), Some(car.as_str()));
-}
-
-#[test]
-fn marks_what_an_agent_changed_as_unseen_until_the_workspaces_panel_is_on_screen() {
-    let mut store = store();
-    let chair = show(&mut store, "C:/a/chair.glb", Some("Ava"), "A");
-    show(&mut store, "C:/b/car.glb", Some("Ben"), "B");
-    store.mark_models_seen("A");
-    assert!(!store.scope("A").unseen);
-    assert!(store.scope("B").unseen);
-    store.reload_model(&chair, 5, None);
-    assert!(store.scope("A").unseen);
 }
 
 #[test]
@@ -275,7 +247,6 @@ fn opens_each_kind_as_a_tab_of_its_workspace_the_latest_in_front() {
         ]
     );
     assert_eq!(scope.active_id.as_deref(), Some(notes.as_str()));
-    assert!(scope.panel_open);
     // A file is ready at once; only a model waits for the 3D viewer.
     let statuses: Vec<Status> = scope.entries.iter().map(|entry| entry.status).collect();
     assert_eq!(
@@ -360,7 +331,7 @@ fn brings_a_file_shown_again_forward_once_with_a_new_revision_for_its_viewer() {
 }
 
 #[test]
-fn closes_one_kind_or_another_and_the_last_one_shuts_its_panel() {
+fn closes_one_kind_or_another_and_the_last_one_takes_the_preview_with_it() {
     let mut store = store();
     let chair = model(&mut store, "C:/a/chair.glb");
     let clip = file(
@@ -382,7 +353,6 @@ fn closes_one_kind_or_another_and_the_last_one_shuts_its_panel() {
     store.close_models(&[chair, clip]);
     let scope = store.scope("ws");
     assert!(scope.entries.is_empty());
-    assert!(!scope.panel_open);
     assert_eq!(store.entries().count(), 0);
 }
 
@@ -438,7 +408,6 @@ fn settles_models_only_and_has_a_rewritten_file_read_again_ready_all_along() {
     let entry = first(&store, "ws");
     assert_eq!((entry.status, entry.revision), (Status::Ready, 0));
     assert_eq!(entry.error, None);
-    store.mark_models_seen("ws");
     store.reload_model(&shot, 99, Some(2048));
     let entry = first(&store, "ws");
     assert_eq!(
@@ -446,7 +415,6 @@ fn settles_models_only_and_has_a_rewritten_file_read_again_ready_all_along() {
         (Status::Ready, 1, 99)
     );
     assert!(matches!(entry.body, Body::File { size: 2048, .. }));
-    assert!(store.scope("ws").unseen);
 }
 
 /* ── kit tabs beside the files ─────────────────────────────────── */
@@ -456,13 +424,11 @@ fn kit_tab(store: &mut Store, tab_id: &str, workspace: &str, title: &str) -> Str
 }
 
 #[test]
-fn opens_a_kits_tab_in_front_its_panel_open_as_the_persons_own_doing() {
+fn opens_a_kits_tab_in_front_as_the_persons_own_doing() {
     let mut store = store();
     let id = kit_tab(&mut store, "status", "ws", "Status");
     let scope = store.scope("ws");
     assert_eq!(scope.active_id.as_deref(), Some(id.as_str()));
-    assert!(scope.panel_open);
-    assert!(!scope.unseen);
     let entry = &scope.entries[0];
     let kit = entry.kit().expect("a kit tab");
     assert_eq!(
@@ -547,7 +513,6 @@ fn closes_like_any_tab() {
     store.close_models(&[status]);
     let scope = store.scope("ws");
     assert!(scope.entries.is_empty());
-    assert!(!scope.panel_open);
 }
 
 mod with_params {
@@ -612,20 +577,6 @@ mod with_params {
         let entry = first(&store, "ws");
         assert!(entry.is_kit_tab());
         assert_eq!(entry.opened_by.as_deref(), Some("Ava"));
-    }
-
-    #[test]
-    fn is_news_when_an_agent_opens_it_not_when_the_person_does() {
-        let mut store = store();
-        run(&mut store, "1");
-        assert!(!store.scope("ws").unseen);
-        store.close_all_models();
-        store.open_kit_tab(
-            KitTabToOpen::new("ws", "ci", "run", "Run")
-                .params(&[("run", "1")])
-                .opened_by("Ava"),
-        );
-        assert!(store.scope("ws").unseen);
     }
 }
 
@@ -841,56 +792,37 @@ mod reveal {
     }
 
     #[test]
-    fn opens_the_panel_by_default_the_tab_in_front() {
+    fn brings_the_tab_forward_by_default() {
         let mut store = store();
         let first = tab(&mut store, None, "run");
         let scope = store.scope("ws");
-        assert!(scope.panel_open);
         assert_eq!(scope.active_id.as_deref(), Some(first.as_str()));
-        store.set_model_panel("ws", Some(false), None);
         let second = tab(&mut store, Some(true), "other");
         let scope = store.scope("ws");
-        assert!(scope.panel_open);
         assert_eq!(scope.active_id.as_deref(), Some(second.as_str()));
     }
 
     #[test]
-    fn false_adds_the_tab_without_opening_the_panel_and_says_it_is_there() {
+    fn false_adds_the_tab_and_lists_it() {
         let mut store = store();
         let id = tab(&mut store, Some(false), "run");
         let scope = store.scope("ws");
-        assert!(!scope.panel_open);
         assert_eq!(scope.active_id.as_deref(), Some(id.as_str()));
-        assert!(scope.unseen);
         let listed: Vec<String> = store.kit_tabs().iter().map(|e| e.id.clone()).collect();
         assert_eq!(listed, vec![id]);
     }
 
     #[test]
-    fn false_leaves_what_is_in_front_and_an_open_panel_as_they_are() {
+    fn false_leaves_what_was_brought_forward_as_it_is() {
         let mut store = store();
         let first = tab(&mut store, None, "run");
-        store.mark_models_seen("ws");
         tab(&mut store, Some(false), "other");
         let scope = store.scope("ws");
-        assert!(scope.panel_open);
         assert_eq!(scope.active_id.as_deref(), Some(first.as_str()));
         // Brought forward by nobody, and nothing changed: no news either.
         let again = tab(&mut store, Some(false), "other");
         assert_eq!(store.scope("ws").active_id.as_deref(), Some(first.as_str()));
         assert_ne!(again, first);
-    }
-
-    #[test]
-    fn false_asks_nothing_of_a_tab_already_there() {
-        let mut store = store();
-        tab(&mut store, None, "run");
-        store.set_model_panel("ws", Some(false), None);
-        store.mark_models_seen("ws");
-        tab(&mut store, Some(false), "run");
-        let scope = store.scope("ws");
-        assert!(!scope.panel_open);
-        assert!(!scope.unseen);
     }
 }
 
@@ -1015,7 +947,7 @@ mod across_a_restart {
     }
 
     #[test]
-    fn keeps_a_tabs_params_and_its_own_title_behind_a_closed_panel() {
+    fn keeps_a_tabs_params_and_its_own_title() {
         let saved = Memory::default();
         let mut before = start(&saved);
         let id = before.open_kit_tab(ci().params(&[("run", "4567")]).opened_by("Ava"));
@@ -1046,8 +978,6 @@ mod across_a_restart {
             entry.path,
             kit_tab_path("ci", "run", &params(&[("run", "4567")]))
         );
-        assert!(!scope.panel_open);
-        assert!(!scope.unseen);
         assert_eq!(scope.active_id.as_deref(), Some(entry.id.as_str()));
         assert_eq!(after.kit_tab_params(&entry.id), params(&[("run", "4567")]));
     }

@@ -59,8 +59,8 @@ pub struct ListView {
     pub active_id: Option<String>,
     /// The workspace is the one its window has on screen.
     pub on_screen: bool,
-    /// And its preview panel is on screen with it: the file in front can be
-    /// seen.
+    /// And its grid is drawn there (the terminals view, not the board or the
+    /// stats): the panes of what it shows can be seen.
     pub shown: bool,
 }
 
@@ -457,7 +457,6 @@ impl PreviewAccess for Shared {
                 return false;
             }
             store.activate_model(id);
-            store.set_model_panel(ws, Some(true), None);
             true
         })
     }

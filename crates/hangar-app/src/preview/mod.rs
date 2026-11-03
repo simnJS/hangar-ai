@@ -494,8 +494,8 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
 
     // The helper's windows: the ones whose file went are closed, the ones
     // whose file was rewritten load it again, each is on screen only while
-    // its entry is in front of a panel on screen (an awake workspace's, and
-    // drawn), and the file in front of such a panel opens its own once
+    // its entry's pane is on screen (in an awake workspace's grid, drawn),
+    // and the file of such a pane opens its own once
     // (webview.rs, `Windows`).
     let in_helper = |entry: &Entry| {
         entry

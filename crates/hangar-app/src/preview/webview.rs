@@ -372,7 +372,7 @@ impl Arrival {
 pub struct Presence {
     /// The helper has the window on screen, as far as the app knows.
     shown: bool,
-    /// Its entry is in front of a panel on screen.
+    /// Its entry's pane is on screen.
     seen: bool,
     /// The window asks for the keyboard the first time it is on screen,
     /// because the person asked for it.
@@ -383,7 +383,7 @@ pub struct Presence {
 }
 
 impl Presence {
-    /// For the window of an entry that is in front of a panel on screen.
+    /// For the window of an entry whose pane is on screen.
     /// `keyboard`: the person asked for the window, which may take the
     /// keyboard when it first shows; otherwise it never does.
     pub fn new(keyboard: bool) -> Presence {
@@ -434,7 +434,7 @@ impl Presence {
         self.shown = false;
     }
 
-    /// Whether the entry is in front of a panel on screen.
+    /// Whether the entry's pane is on screen.
     pub fn set_seen(&mut self, seen: bool) {
         self.seen = seen;
     }
@@ -623,10 +623,10 @@ impl Reload {
     }
 }
 
-/// The entries whose windows are to be on screen: the one in front of each
-/// workspace on screen, when its panel is drawn and the workspace is awake.
-/// `front` lists them: the workspace, its entry in front, and whether the
-/// panel is drawn.
+/// The entries whose windows are to be on screen: those whose pane is on
+/// screen, in a workspace that is awake. `front` lists the files of the
+/// workspaces on screen: the workspace, the entry, and whether its pane is
+/// on screen.
 pub fn seen_entries<'a>(
     front: impl IntoIterator<Item = (&'a str, &'a Entry, bool)>,
     asleep: impl Fn(&str) -> bool,
@@ -767,10 +767,10 @@ impl Windows {
     }
 
     /// The entries among `seen` that have no window and have not had one tried,
-    /// each with whether its window may ask for the keyboard: the file in front
-    /// of a panel on screen opens its own window once. An entry an agent
-    /// showed is left out where the window system would hand the keyboard to
-    /// the window (`Arrival::Held`): the panel offers the window instead.
+    /// each with whether its window may ask for the keyboard: a file whose
+    /// pane is on screen opens its own window once. An entry an agent showed
+    /// is left out where the window system would hand the keyboard to the
+    /// window (`Arrival::Held`): its pane offers the window instead.
     pub fn to_open(&self, seen: &HashMap<&str, &Entry>) -> Vec<(Entry, bool)> {
         let mut due: Vec<(Entry, bool)> = seen
             .values()
@@ -785,8 +785,8 @@ impl Windows {
         due
     }
 
-    /// Opens (or opens again) the window of an entry, which is in front of a
-    /// panel on screen: sent at once when the helper runs, kept waiting when it
+    /// Opens (or opens again) the window of an entry, whose pane is on
+    /// screen: sent at once when the helper runs, kept waiting when it
     /// is starting. `keyboard`: the window asks for the keyboard when it first
     /// shows, which is for a window the person asked for.
     ///
@@ -928,8 +928,8 @@ impl Windows {
         }
     }
 
-    /// Ties the windows to what the person sees: `seen` are the entries in
-    /// front of a panel on screen (`seen_entries`). A window of one of them is
+    /// Ties the windows to what the person sees: `seen` are the entries whose
+    /// pane is on screen (`seen_entries`). A window of one of them is
     /// put on screen, a window of any other is taken off it, with its media
     /// paused (`show`). A window comes back without the keyboard (`focus` is
     /// what asks for it).
@@ -956,8 +956,8 @@ impl Windows {
     /// Brings a window forward, with the keyboard: a window that is on screen
     /// is raised, one that is hidden (because its tab was behind, or because
     /// it is an agent's and waits for the person) is put on screen. This is
-    /// what the person asks for with the panel's button, so the entry is in
-    /// front of a panel on screen.
+    /// what the person asks for with the button of the entry's pane, so the
+    /// pane is on screen.
     pub fn focus(&mut self, client: &Client, entry: &str) {
         let Some(win) = self
             .wins

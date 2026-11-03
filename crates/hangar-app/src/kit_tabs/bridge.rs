@@ -9,7 +9,7 @@
 //! pages' requests answered here.
 //!
 //! What changes from a frame of the main window: a page is a window of its
-//! own, opened the first time its tab is in front of a panel on screen
+//! own, opened the first time its tab's pane is on screen
 //! (opening a window for a tab an agent added out of sight would take the
 //! keyboard from whoever is typing, which a frame never did), and kept open
 //! while the tab is, whichever is in front: on screen while its tab is in
@@ -139,8 +139,8 @@ impl PageTab {
         };
     }
 
-    /// Ties the window to the tab: on screen while the tab is in front of a
-    /// panel on screen, hidden otherwise (its page and what it was doing are
+    /// Ties the window to the tab: on screen while the tab's pane is on
+    /// screen, hidden otherwise (its page and what it was doing are
     /// kept; what plays is paused), and back without the keyboard.
     pub fn set_seen(&mut self, client: Option<&Client>, seen: bool) {
         self.presence.set_seen(seen);

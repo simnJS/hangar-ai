@@ -4,9 +4,9 @@
 //! The TS asked a `ModelHost` that was the window's own, or forwarded the call
 //! to the window that drew the workspace; in one process every workspace's
 //! host is a handle on the same store (`Shared`). What a host lists is richer
-//! than `PreviewAccess` (the shell's fallback adapter): the entry in front,
-//! whether the panel is drawn, a model's format and findings, a file's type
-//! and size, a kit tab's params.
+//! than `PreviewAccess` (the shell's fallback adapter): the entry brought
+//! forward last, whether the workspace's grid is drawn, a model's format and
+//! findings, a file's type and size, a kit tab's params.
 //!
 //! The control handlers have admitted the path (the folders granted, the file
 //! inspected) before they show it, so `show` only opens it.
@@ -80,7 +80,6 @@ impl PreviewHost for Host {
         self.shared.edit(|store| {
             if store.scope(&self.ws).entry(id).is_some() {
                 store.activate_model(id);
-                store.set_model_panel(&self.ws, Some(true), None);
             }
         });
         Box::pin(std::future::ready(()))
@@ -439,7 +438,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn showing_a_file_again_brings_it_forward_and_reveal_opens_the_panel() {
+    async fn showing_a_file_again_brings_it_forward_and_so_does_reveal() {
         let shared = Shared::new(None);
         let me = host(&shared, "w1");
         let a = me.show(page("/dev/a.html")).await.unwrap();
@@ -449,13 +448,11 @@ mod tests {
             me.list().await.unwrap().active_id.as_deref(),
             Some(a.as_str())
         );
-        shared.edit(|store| store.set_model_panel("w1", Some(false), None));
         me.reveal(&b).await;
         assert_eq!(
             me.list().await.unwrap().active_id.as_deref(),
             Some(b.as_str())
         );
-        assert!(shared.read(|store| store.scope("w1").panel_open));
     }
 
     #[tokio::test]

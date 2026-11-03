@@ -1,4 +1,4 @@
-//! Every file an agent can show the person in the preview panel: images,
+//! Every file an agent can show the person as a pane of the grid: images,
 //! video, audio, PDF, Markdown, HTML pages, text and source code, beside the
 //! 3D models of model.rs.
 //!
