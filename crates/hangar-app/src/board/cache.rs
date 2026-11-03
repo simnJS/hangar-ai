@@ -150,11 +150,11 @@ impl Live {
     /// A read answered. A failed read leaves the board as it was, but a first
     /// read that fails is an empty board, as the view showed it. Answers
     /// whether the board changed meanwhile, so it must be read again at once.
-    pub(super) fn answer(&mut self, cwd: &str, tasks: Option<Vec<Task>>) -> bool {
+    pub(super) fn answer(&mut self, cwd: &str, tasks: Option<Arc<Vec<Task>>>) -> bool {
         self.reading.remove(cwd);
         if let Some(slot) = self.boards.get_mut(cwd) {
             match tasks {
-                Some(tasks) => *slot = Some(Arc::new(tasks)),
+                Some(tasks) => *slot = Some(tasks),
                 None if slot.is_none() => *slot = Some(Arc::new(Vec::new())),
                 None => {}
             }
@@ -195,6 +195,11 @@ mod tests {
     use super::*;
     use crate::board::model::{Blocked, test_task};
 
+    /// A read that answered.
+    fn read(tasks: Vec<Task>) -> Option<Arc<Vec<Task>>> {
+        Some(Arc::new(tasks))
+    }
+
     fn folders(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
@@ -206,7 +211,7 @@ mod tests {
         assert!(live.tasks("/a").is_none());
         assert!(!live.is_loaded("/a"));
         assert!(live.request("/a"));
-        live.answer("/a", Some(vec![test_task("t")]));
+        live.answer("/a", read(vec![test_task("t")]));
         assert_eq!(live.tasks("/a").map(<[Task]>::len), Some(1));
         assert!(live.is_loaded("/a"));
     }
@@ -231,8 +236,8 @@ mod tests {
         assert!(!live.request("/a"));
         // The answer says to read again, once; that read is out now, and its
         // own answer asks for nothing more.
-        assert!(live.answer("/a", Some(vec![])));
-        assert!(!live.answer("/a", Some(vec![])));
+        assert!(live.answer("/a", read(vec![])));
+        assert!(!live.answer("/a", read(vec![])));
         // Nothing out any more: the next request starts a read.
         assert!(live.request("/a"));
     }
@@ -256,7 +261,7 @@ mod tests {
         assert_eq!(live.tasks("/a").map(<[Task]>::len), Some(0));
 
         live.request("/a");
-        live.answer("/a", Some(vec![test_task("t")]));
+        live.answer("/a", read(vec![test_task("t")]));
         live.request("/a");
         live.answer("/a", None);
         assert_eq!(live.tasks("/a").map(<[Task]>::len), Some(1));
@@ -268,7 +273,7 @@ mod tests {
         live.follow(&folders(&["/a"]));
         live.request("/a");
         live.follow(&folders(&[]));
-        assert!(!live.answer("/a", Some(vec![test_task("t")])));
+        assert!(!live.answer("/a", read(vec![test_task("t")])));
         assert!(live.tasks("/a").is_none());
         assert!(live.folders().is_empty());
     }
@@ -278,7 +283,7 @@ mod tests {
         let mut live = Live::default();
         live.follow(&folders(&["/a", "/b"]));
         live.request("/a");
-        live.answer("/a", Some(vec![test_task("t")]));
+        live.answer("/a", read(vec![test_task("t")]));
         let boards = live.boards_of(&folders(&["/a", "/b", "/nowhere"]));
         assert_eq!(boards["/a"].map(<[Task]>::len), Some(1));
         assert!(boards["/b"].is_none());
@@ -290,7 +295,7 @@ mod tests {
         let mut live = Live::default();
         live.follow(&folders(&["/a"]));
         live.request("/a");
-        live.answer("/a", Some(vec![test_task("plain")]));
+        live.answer("/a", read(vec![test_task("plain")]));
         assert!(!live.has_rechecks());
 
         let waiting = Task {
@@ -305,7 +310,7 @@ mod tests {
             ..test_task("waiting")
         };
         live.request("/a");
-        live.answer("/a", Some(vec![waiting]));
+        live.answer("/a", read(vec![waiting]));
         assert!(live.has_rechecks());
     }
 

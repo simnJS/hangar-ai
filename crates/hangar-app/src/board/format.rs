@@ -3,7 +3,8 @@
 //! `boardFormat.test.ts`). Pure, so the cards, the dock, the task dialog and
 //! the inspector all say the same thing, and so it tests without a window.
 
-use hangar_i18n::{Key, Translator, args};
+use chrono::{Local, NaiveDateTime, TimeZone};
+use hangar_i18n::{Key, Locale, Translator, args};
 
 /// The three steps a card shows for a task's numeric priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,10 +113,72 @@ pub fn elapsed_label(ms: i64, tr: Translator) -> String {
     }
 }
 
+/// How much of a date to write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateStyle {
+    /// `toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })`:
+    /// a comment's time, a block's date.
+    Short,
+    /// `toLocaleString(locale)`: down to the second.
+    Full,
+}
+
+/// A date and time in the person's language, as the platform wrote them.
+fn render_when(at: NaiveDateTime, locale: Locale, style: DateStyle) -> String {
+    let pattern = match (locale, style) {
+        (Locale::En, DateStyle::Short) => "%-m/%-d/%y, %-I:%M %p",
+        (Locale::En, DateStyle::Full) => "%-m/%-d/%Y, %-I:%M:%S %p",
+        (Locale::Fr, DateStyle::Short) => "%d/%m/%Y %H:%M",
+        (Locale::Fr, DateStyle::Full) => "%d/%m/%Y %H:%M:%S",
+    };
+    at.format(pattern).to_string()
+}
+
+/// A moment, in ms since the epoch, as local time in the person's language.
+pub fn when(ms: u64, locale: Locale, style: DateStyle) -> String {
+    let local = i64::try_from(ms)
+        .ok()
+        .and_then(|ms| Local.timestamp_millis_opt(ms).single());
+    match local {
+        Some(at) => render_when(at.naive_local(), locale, style),
+        None => String::new(),
+    }
+}
+
+/// The time now, in ms since the epoch: what `Date.now()` was.
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hangar_i18n::Locale;
+
+    #[test]
+    fn writes_a_date_the_way_each_language_does() {
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 3)
+            .and_then(|day| day.and_hms_opt(14, 5, 9))
+            .expect("a date");
+        assert_eq!(
+            render_when(at, Locale::En, DateStyle::Short),
+            "11/3/26, 2:05 PM"
+        );
+        assert_eq!(
+            render_when(at, Locale::En, DateStyle::Full),
+            "11/3/2026, 2:05:09 PM"
+        );
+        assert_eq!(
+            render_when(at, Locale::Fr, DateStyle::Short),
+            "03/11/2026 14:05"
+        );
+        assert_eq!(
+            render_when(at, Locale::Fr, DateStyle::Full),
+            "03/11/2026 14:05:09"
+        );
+    }
 
     #[test]
     fn reads_the_default_priority_as_medium() {

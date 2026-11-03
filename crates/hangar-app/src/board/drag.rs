@@ -16,6 +16,8 @@
 use iced::mouse::Button;
 use iced::{Point, Rectangle};
 
+use super::model::Column;
+
 /// How far the pointer has to travel before a press becomes a drag; below it,
 /// the press is a click and opens the card.
 pub const DRAG_THRESHOLD: f32 = 5.0;
@@ -47,10 +49,129 @@ pub fn starts_drag(button: Button, inside_control: bool) -> bool {
     button == Button::Left && !inside_control
 }
 
+/// A press on a card, from the press to the release: a click until the
+/// pointer has travelled, then a drag, which lands in the column the pointer
+/// is over when it is let go.
+#[derive(Debug, Clone)]
+pub struct Press {
+    pub task: String,
+    pub from: Column,
+    start: Point,
+    pub moved: bool,
+    /// The column under the pointer: the one it began in, until it leaves.
+    pub over: Option<Column>,
+}
+
+/// How a press ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ended {
+    /// It never became a drag: the card was clicked.
+    Click(String),
+    /// The card was let go over another column. No dependency check: the
+    /// backend decides what a blocked card may do.
+    Drop { task: String, to: Column },
+    /// A drag that ended where it began, or over no column.
+    Nothing,
+}
+
+impl Press {
+    pub fn new(task: String, from: Column, at: Point) -> Press {
+        Press {
+            task,
+            from,
+            start: at,
+            moved: false,
+            over: Some(from),
+        }
+    }
+
+    /// The pointer moved. Returns true the moment the press becomes a drag.
+    pub fn pointer_moved(&mut self, to: Point) -> bool {
+        if self.moved || !moved_beyond(self.start, to, DRAG_THRESHOLD) {
+            return false;
+        }
+        self.moved = true;
+        true
+    }
+
+    pub fn enter(&mut self, column: Column) {
+        self.over = Some(column);
+    }
+
+    /// Leaving a column the pointer is no longer in; entering the next one
+    /// may have been told first, which must not be undone.
+    pub fn leave(&mut self, column: Column) {
+        if self.over == Some(column) {
+            self.over = None;
+        }
+    }
+
+    pub fn release(self) -> Ended {
+        if !self.moved {
+            return Ended::Click(self.task);
+        }
+        match self.over {
+            Some(to) if to != self.from => Ended::Drop {
+                task: self.task,
+                to,
+            },
+            _ => Ended::Nothing,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use iced::Size;
+
+    fn press() -> Press {
+        Press::new("t".into(), Column::Todo, Point::new(10.0, 10.0))
+    }
+
+    #[test]
+    fn a_press_that_barely_moves_is_a_click() {
+        let mut press = press();
+        assert!(!press.pointer_moved(Point::new(12.0, 11.0)));
+        assert_eq!(press.release(), Ended::Click("t".into()));
+    }
+
+    #[test]
+    fn a_press_becomes_a_drag_once_and_lands_where_it_is_let_go() {
+        let mut press = press();
+        assert!(press.pointer_moved(Point::new(40.0, 10.0)));
+        // Already a drag: not told again.
+        assert!(!press.pointer_moved(Point::new(80.0, 10.0)));
+        press.leave(Column::Todo);
+        press.enter(Column::Review);
+        assert_eq!(
+            press.release(),
+            Ended::Drop {
+                task: "t".into(),
+                to: Column::Review
+            }
+        );
+    }
+
+    #[test]
+    fn a_drag_over_its_own_column_or_none_moves_nothing() {
+        let mut press = press();
+        press.pointer_moved(Point::new(40.0, 10.0));
+        assert_eq!(press.clone().release(), Ended::Nothing);
+        press.leave(Column::Todo);
+        assert_eq!(press.release(), Ended::Nothing);
+    }
+
+    #[test]
+    fn leaving_a_column_does_not_undo_entering_the_next() {
+        // The pointer crosses a shared edge: the next column may be told
+        // before the one it left.
+        let mut press = press();
+        press.pointer_moved(Point::new(40.0, 10.0));
+        press.enter(Column::Doing);
+        press.leave(Column::Todo);
+        assert_eq!(press.over, Some(Column::Doing));
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     enum Col {
