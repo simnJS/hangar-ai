@@ -2330,6 +2330,24 @@ pub enum Key {
     PreviewSpeed,
     /// `preview.tools`
     PreviewTools,
+    /// `preview.window.closed`
+    PreviewWindowClosed,
+    /// `preview.window.failed`
+    PreviewWindowFailed,
+    /// `preview.window.focus`
+    PreviewWindowFocus,
+    /// `preview.window.hint`
+    PreviewWindowHint,
+    /// `preview.window.missing`
+    PreviewWindowMissing,
+    /// `preview.window.missingHint`
+    PreviewWindowMissingHint,
+    /// `preview.window.open`
+    PreviewWindowOpen,
+    /// `preview.window.starting`
+    PreviewWindowStarting,
+    /// `preview.window.title`
+    PreviewWindowTitle,
     /// `preview.wrap`
     PreviewWrap,
     /// `preview.zoom`
@@ -3435,7 +3453,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1709;
+pub const KEY_COUNT: usize = 1718;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4598,6 +4616,15 @@ impl Key {
         Key::PreviewSourceHint,
         Key::PreviewSpeed,
         Key::PreviewTools,
+        Key::PreviewWindowClosed,
+        Key::PreviewWindowFailed,
+        Key::PreviewWindowFocus,
+        Key::PreviewWindowHint,
+        Key::PreviewWindowMissing,
+        Key::PreviewWindowMissingHint,
+        Key::PreviewWindowOpen,
+        Key::PreviewWindowStarting,
+        Key::PreviewWindowTitle,
         Key::PreviewWrap,
         Key::PreviewZoom,
         Key::PreviewZoomIn,
@@ -6312,6 +6339,15 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "preview.sourceHint", en: Text::plain("Show the source instead of the rendered page"), fr: Text::plain("Afficher la source plutôt que la page rendue") },
     Message { id: "preview.speed", en: Text::plain("Playback speed"), fr: Text::plain("Vitesse de lecture") },
     Message { id: "preview.tools", en: Text::plain("{kind} tools"), fr: Text::plain("Outils {kind}") },
+    Message { id: "preview.window.closed", en: Text::plain("The window was closed"), fr: Text::plain("La fenêtre a été fermée") },
+    Message { id: "preview.window.failed", en: Text::plain("The web viewer stopped"), fr: Text::plain("La visionneuse web s'est arrêtée") },
+    Message { id: "preview.window.focus", en: Text::plain("Bring the window forward"), fr: Text::plain("Ramener la fenêtre devant") },
+    Message { id: "preview.window.hint", en: Text::plain("A browser engine draws this kind of file, and it runs in a separate window so that it stays apart from Hangar."), fr: Text::plain("Un moteur de navigateur affiche ce type de fichier, dans une fenêtre à part pour rester séparé de Hangar.") },
+    Message { id: "preview.window.missing", en: Text::plain("The web viewer is not installed"), fr: Text::plain("La visionneuse web n'est pas installée") },
+    Message { id: "preview.window.missingHint", en: Text::plain("Hangar shows this file with its hangar-webview helper, which was not found next to the app."), fr: Text::plain("Hangar affiche ce fichier avec son assistant hangar-webview, introuvable à côté de l'application.") },
+    Message { id: "preview.window.open", en: Text::plain("Open in a window"), fr: Text::plain("Ouvrir dans une fenêtre") },
+    Message { id: "preview.window.starting", en: Text::plain("Starting the web viewer…"), fr: Text::plain("Démarrage de la visionneuse web…") },
+    Message { id: "preview.window.title", en: Text::plain("Shown in its own window"), fr: Text::plain("Affiché dans sa propre fenêtre") },
     Message { id: "preview.wrap", en: Text::plain("Wrap long lines"), fr: Text::plain("Retour à la ligne automatique") },
     Message { id: "preview.zoom", en: Text::plain("Zoom"), fr: Text::plain("Zoom") },
     Message { id: "preview.zoomIn", en: Text::plain("Zoom in"), fr: Text::plain("Zoomer") },

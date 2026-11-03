@@ -896,6 +896,16 @@ const en = {
   "preview.reload": "Reload the page",
   "preview.inlineOnly":
     "Scripts and styles must be inline: the page cannot load its own .js or .css files, nor fetch anything. Images, videos and sounds beside it load.",
+  "preview.window.title": "Shown in its own window",
+  "preview.window.hint":
+    "A browser engine draws this kind of file, and it runs in a separate window so that it stays apart from Hangar.",
+  "preview.window.open": "Open in a window",
+  "preview.window.focus": "Bring the window forward",
+  "preview.window.starting": "Starting the web viewer…",
+  "preview.window.closed": "The window was closed",
+  "preview.window.missing": "The web viewer is not installed",
+  "preview.window.missingHint": "Hangar shows this file with its hangar-webview helper, which was not found next to the app.",
+  "preview.window.failed": "The web viewer stopped",
 
   "diff.title": "Changes",
   "diff.loading": "Reading the changes…",
@@ -2453,6 +2463,17 @@ const fr: Record<Key, string> = {
   "preview.reload": "Recharger la page",
   "preview.inlineOnly":
     "Scripts et styles doivent être dans la page : elle ne peut charger ni ses fichiers .js ou .css voisins, ni rien par fetch. Ses images, vidéos et sons voisins se chargent.",
+  "preview.window.title": "Affiché dans sa propre fenêtre",
+  "preview.window.hint":
+    "Un moteur de navigateur affiche ce type de fichier, dans une fenêtre à part pour rester séparé de Hangar.",
+  "preview.window.open": "Ouvrir dans une fenêtre",
+  "preview.window.focus": "Ramener la fenêtre devant",
+  "preview.window.starting": "Démarrage de la visionneuse web…",
+  "preview.window.closed": "La fenêtre a été fermée",
+  "preview.window.missing": "La visionneuse web n'est pas installée",
+  "preview.window.missingHint":
+    "Hangar affiche ce fichier avec son assistant hangar-webview, introuvable à côté de l'application.",
+  "preview.window.failed": "La visionneuse web s'est arrêtée",
 
   "diff.title": "Modifications",
   "diff.loading": "Lecture des modifications…",
