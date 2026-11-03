@@ -61,8 +61,11 @@ pub fn view<'a>(
     if width > SENTENCE_MIN {
         bar = bar.push(
             row![
-                text("·").style(style::text::subtle(t)),
+                text("·")
+                    .size(tokens::font_size::CAPTION_LG)
+                    .style(style::text::subtle(t)),
                 text(ctx.i18n.tn(Key::ZoomOthers, others.len(), &[]))
+                    .size(tokens::font_size::CAPTION_LG)
                     .wrapping(text::Wrapping::None)
                     .style(style::text::muted(t)),
             ]
@@ -87,6 +90,7 @@ pub fn view<'a>(
             row![
                 glyph::state(t, ui_glyph(state), 7.0),
                 text(other.name)
+                    .size(tokens::font_size::CAPTION_LG)
                     .font(hangar_theme::fonts::ui_medium())
                     .wrapping(text::Wrapping::None),
             ]
@@ -105,11 +109,15 @@ pub fn view<'a>(
     bar = bar.push(chips);
     bar = bar.push(Space::new().width(Length::Fill));
     bar = bar.push(
-        iced::widget::button(text(ctx.t(Key::ZoomRestore)).font(hangar_theme::fonts::ui_medium()))
-            .padding(Padding::from([0.0, 9.0]))
-            .height(22)
-            .style(style::button::secondary(t))
-            .on_press(Message::Panes(Msg::Zoom(ws.clone(), None))),
+        iced::widget::button(
+            text(ctx.t(Key::ZoomRestore))
+                .size(tokens::font_size::CAPTION_LG)
+                .font(hangar_theme::fonts::ui_medium()),
+        )
+        .padding(Padding::from([0.0, 9.0]))
+        .height(22)
+        .style(style::button::secondary(t))
+        .on_press(Message::Panes(Msg::Zoom(ws.clone(), None))),
     );
 
     container(bar.height(Length::Fill))

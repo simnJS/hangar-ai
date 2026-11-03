@@ -935,3 +935,206 @@ impl<'a> From<Grid<'a>> for Element<'a, Message> {
         Element::new(grid)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::widget::Space;
+    use iced::{Event, Point, Settings};
+    use iced_test::Simulator;
+
+    const WINDOW: Size = Size::new(800.0, 600.0);
+
+    fn leaf(id: &str) -> SplitNode {
+        SplitNode::Pane { id: id.into() }
+    }
+
+    /// Two panes side by side, `a` focused, nothing in them but space.
+    fn grid<'a>(ws: &'a WsId, ids: &'a [PaneId; 2], zoomed: Option<&PaneId>) -> Grid<'a> {
+        let tree = SplitNode::Split {
+            dir: SplitDir::Row,
+            ratio: 0.5,
+            a: Box::new(leaf(&ids[0])),
+            b: Box::new(leaf(&ids[1])),
+        };
+        let layout = geometry::compute_layout(&tree);
+        let slots = ids
+            .iter()
+            .map(|id| Slot {
+                id,
+                name: id,
+                rect: layout.rect(id).unwrap(),
+                element: Space::new().width(Length::Fill).height(Length::Fill).into(),
+                ring: None,
+            })
+            .collect();
+        Grid::new(
+            ws,
+            hangar_theme::default_theme(),
+            tree,
+            slots,
+            zoomed,
+            None,
+            Some(&ids[0]),
+            Some(WINDOW),
+            |count| count.to_string(),
+        )
+    }
+
+    fn simulate(grid: Grid<'_>) -> Simulator<'_, Message> {
+        Simulator::with_size(Settings::default(), WINDOW, grid)
+    }
+
+    fn at(ui: &mut Simulator<'_, Message>, x: f32, y: f32) {
+        let position = Point::new(x, y);
+        ui.point_at(position);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position })]);
+    }
+
+    fn press(ui: &mut Simulator<'_, Message>) {
+        ui.simulate([Event::Mouse(mouse::Event::ButtonPressed(
+            mouse::Button::Left,
+        ))]);
+    }
+
+    fn release(ui: &mut Simulator<'_, Message>) {
+        ui.simulate([Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left,
+        ))]);
+    }
+
+    fn panes(ui: Simulator<'_, Message>) -> Vec<Msg> {
+        ui.into_messages()
+            .filter_map(|message| match message {
+                Message::Panes(msg) => Some(msg),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn ids() -> (WsId, [PaneId; 2]) {
+        ("ws".into(), ["a".into(), "b".into()])
+    }
+
+    #[test]
+    fn a_boundary_dragged_commits_its_ratio_once_on_release() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 400.0, 300.0);
+        press(&mut ui);
+        at(&mut ui, 500.0, 300.0);
+        at(&mut ui, 600.0, 300.0);
+        release(&mut ui);
+        let ratios: Vec<f64> = panes(ui)
+            .into_iter()
+            .filter_map(|msg| match msg {
+                Msg::SetRatio(_, path, ratio) if path.is_empty() => Some(ratio),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ratios.len(), 1, "one store write, on release");
+        assert!((ratios[0] - 0.75).abs() < 0.01, "{ratios:?}");
+    }
+
+    #[test]
+    fn a_boundary_keeps_each_pane_at_its_minimum() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 400.0, 300.0);
+        press(&mut ui);
+        at(&mut ui, 10.0, 300.0);
+        release(&mut ui);
+        let ratio = panes(ui).into_iter().find_map(|msg| match msg {
+            Msg::SetRatio(_, _, ratio) => Some(ratio),
+            _ => None,
+        });
+        // 150 px of an 800 px split.
+        assert!((ratio.unwrap() - 150.0 / 800.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_double_click_on_a_boundary_evens_it_out() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 400.0, 300.0);
+        press(&mut ui);
+        release(&mut ui);
+        press(&mut ui);
+        release(&mut ui);
+        assert!(
+            panes(ui)
+                .iter()
+                .any(|msg| matches!(msg, Msg::SetRatio(_, _, ratio) if *ratio == 0.5))
+        );
+    }
+
+    #[test]
+    fn a_header_dragged_onto_another_pane_moves_it_to_that_side() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 100.0, 10.0);
+        press(&mut ui);
+        at(&mut ui, 300.0, 200.0);
+        at(&mut ui, 750.0, 300.0);
+        release(&mut ui);
+        let moved = panes(ui).into_iter().find_map(|msg| match msg {
+            Msg::Move {
+                drag, target, zone, ..
+            } => Some((drag, target, zone)),
+            _ => None,
+        });
+        assert_eq!(moved, Some(("a".into(), "b".into(), DropZone::Right)));
+    }
+
+    #[test]
+    fn a_press_that_does_not_travel_moves_nothing() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 100.0, 10.0);
+        press(&mut ui);
+        at(&mut ui, 103.0, 12.0);
+        release(&mut ui);
+        assert!(!panes(ui).iter().any(|msg| matches!(msg, Msg::Move { .. })));
+    }
+
+    #[test]
+    fn a_double_click_on_a_header_zooms_and_a_press_focuses() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None));
+        at(&mut ui, 600.0, 10.0);
+        press(&mut ui);
+        release(&mut ui);
+        press(&mut ui);
+        release(&mut ui);
+        let msgs = panes(ui);
+        assert!(
+            msgs.iter()
+                .any(|msg| matches!(msg, Msg::Focus(_, pane) if pane == "b"))
+        );
+        assert!(
+            msgs.iter()
+                .any(|msg| matches!(msg, Msg::ToggleZoom(_, pane) if pane == "b"))
+        );
+    }
+
+    #[test]
+    fn a_zoomed_grid_has_no_boundary_and_no_move() {
+        let (ws, ids) = ids();
+        let zoomed: PaneId = "a".into();
+        let mut ui = simulate(grid(&ws, &ids, Some(&zoomed)));
+        at(&mut ui, 400.0, 300.0);
+        press(&mut ui);
+        at(&mut ui, 600.0, 300.0);
+        release(&mut ui);
+        at(&mut ui, 100.0, zoom_bar::HEIGHT + 10.0);
+        press(&mut ui);
+        at(&mut ui, 700.0, 300.0);
+        release(&mut ui);
+        let msgs = panes(ui);
+        assert!(
+            !msgs
+                .iter()
+                .any(|msg| matches!(msg, Msg::SetRatio(..) | Msg::Move { .. }))
+        );
+    }
+}

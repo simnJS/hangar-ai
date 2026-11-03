@@ -227,3 +227,94 @@ fn write(pty: &PtyManager, id: &str, bytes: Vec<u8>) {
     // web app's `ptyWrite` did.
     let _ = hangar_core::pty::pty_write(pty, id.to_owned(), text);
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use hangar_core::shells::ShellInfo;
+    use hangar_term::Config;
+
+    use super::*;
+
+    /// The whole path of a pane against a real shell: typing goes out through
+    /// the writer thread, the output is parsed on the reader thread into the
+    /// terminal, and the window is woken once, not once per chunk.
+    #[test]
+    fn a_shells_output_lands_in_the_terminal_on_its_own_thread() {
+        let pty = Arc::new(PtyManager::default());
+        let id = format!("p5-test-{}", std::process::id());
+        let link = PaneLink::new(
+            id.clone(),
+            Terminal::new(Config::default(), 80, 24),
+            pty.clone(),
+        );
+        let (hub, mut wakes) = tokio_mpsc::unbounded_channel();
+        let shell = ShellInfo {
+            id: "sh".into(),
+            label: "sh".into(),
+            program: "/bin/sh".into(),
+            args: vec![],
+        };
+        hangar_core::pty::pty_spawn(
+            &pty,
+            link.sink(hub),
+            id.clone(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(shell),
+            80,
+            24,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+            Some("shell".into()),
+            None,
+        )
+        .expect("a shell");
+        link.write(b"echo hello-$((40+2))\r".to_vec());
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut seen = false;
+        while Instant::now() < deadline {
+            if link
+                .lock()
+                .read_lines(50)
+                .iter()
+                .any(|line| line.contains("hello-42"))
+            {
+                seen = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(seen, "the echo reached the terminal");
+
+        // One wake-up stands until the window takes it.
+        let mut outputs = 0;
+        while let Ok(event) = wakes.try_recv() {
+            assert_eq!(event.pane, id);
+            if event.kind == HubKind::Output {
+                outputs += 1;
+            }
+        }
+        assert_eq!(outputs, 1);
+        link.take_wake();
+        link.write(b"echo again\r".to_vec());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut woken = false;
+        while Instant::now() < deadline && !woken {
+            woken = matches!(
+                wakes.try_recv(),
+                Ok(HubEvent {
+                    kind: HubKind::Output,
+                    ..
+                })
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(woken, "a taken wake-up is sent again");
+        let _ = hangar_core::pty::pty_kill(&pty, id, None);
+    }
+}

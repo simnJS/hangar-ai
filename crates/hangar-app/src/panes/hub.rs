@@ -133,3 +133,52 @@ impl HubChannel {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use hangar_core::pty::PtyManager;
+    use hangar_term::{Config, Terminal};
+
+    use super::*;
+
+    fn hub_with(id: &str) -> (Hub, Arc<PaneLink>) {
+        let hub = Hub::default();
+        let link = PaneLink::new(
+            id.into(),
+            Terminal::new(Config::default(), 40, 10),
+            Arc::new(PtyManager::default()),
+        );
+        hub.insert(link.clone());
+        (hub, link)
+    }
+
+    #[test]
+    fn the_engines_read_what_a_pane_shows() {
+        let (hub, link) = hub_with("a");
+        link.lock().feed(b"first\r\nsecond\r\n\r\n");
+        assert!(hub.has(&"a".to_string()));
+        assert!(!hub.has(&"b".to_string()));
+        assert_eq!(
+            hub.read_lines(&"a".to_string(), 2),
+            Some(vec!["first".to_string(), "second".to_string()])
+        );
+        assert_eq!(hub.read_lines(&"b".to_string(), 2), None);
+    }
+
+    #[test]
+    fn the_cursor_mode_follows_the_program() {
+        let (hub, link) = hub_with("a");
+        assert!(!hub.application_cursor(&"a".to_string()));
+        link.lock().feed(b"\x1b[?1h");
+        assert!(hub.application_cursor(&"a".to_string()));
+    }
+
+    #[test]
+    fn a_pane_gone_takes_no_paste() {
+        let (hub, _link) = hub_with("a");
+        assert!(hub.paste(&"a".to_string(), "x"));
+        hub.remove("a");
+        assert!(!hub.paste(&"a".to_string(), "x"));
+        assert!(!hub.has(&"a".to_string()));
+    }
+}
