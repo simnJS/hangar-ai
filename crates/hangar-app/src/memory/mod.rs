@@ -447,9 +447,11 @@ pub fn on_intent(
 ) -> Option<Task<Message>> {
     match intent {
         // Choosing the view that is already shown remounts nothing, so what
-        // the person typed stays.
-        Intent::SetView(View::Memory) => st.entries.is_none().then(|| load(sv)),
-        Intent::SetView(_) => {
+        // the person typed stays; the list is read again either way, since
+        // the view may have been left by a way that does not come through
+        // here (`OpenBoard`) and the memory changed meanwhile.
+        Intent::SetView(View::Memory) => Some(load(sv)),
+        Intent::SetView(_) | Intent::OpenBoard(_) => {
             *st = State::default();
             None
         }
