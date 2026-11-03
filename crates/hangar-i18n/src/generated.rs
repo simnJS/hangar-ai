@@ -2168,6 +2168,8 @@ pub enum Key {
     PaneActions,
     /// `pane.agent`
     PaneAgent,
+    /// `pane.agentRetired`
+    PaneAgentRetired,
     /// `pane.attention`
     PaneAttention,
     /// `pane.close`
@@ -3557,7 +3559,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1770;
+pub const KEY_COUNT: usize = 1771;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4639,6 +4641,7 @@ impl Key {
         Key::PaletteSuggestions,
         Key::PaneActions,
         Key::PaneAgent,
+        Key::PaneAgentRetired,
         Key::PaneAttention,
         Key::PaneClose,
         Key::PaneCloseLast,
@@ -6086,17 +6089,17 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "mcp.configured", en: Text::plain("already configured"), fr: Text::plain("déjà configuré") },
     Message { id: "mcp.install", en: Text::plain("Configure ({n})"), fr: Text::plain("Configurer ({n})") },
     Message { id: "mcp.installing", en: Text::plain("Installing…"), fr: Text::plain("Installation…") },
-    Message { id: "mcp.intro", en: Text::plain("Hangar.AI registers itself as an MCP server in each tool's configuration. The port and token are never written to those files: they are resolved at launch, so the configuration stays valid across restarts."), fr: Text::plain("Hangar.AI s'enregistre comme serveur MCP dans la configuration de chaque outil. Le port et le jeton ne sont jamais écrits dans ces fichiers\u{202f}: ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.") },
+    Message { id: "mcp.intro", en: Text::plain("Hangar.AI registers itself as an MCP server in this project's Claude Code configuration (.mcp.json). The port and token are never written to that file: they are resolved at launch, so the configuration stays valid across restarts."), fr: Text::plain("Hangar.AI s'enregistre comme serveur MCP dans la configuration Claude Code de ce projet (.mcp.json). Le port et le jeton ne sont jamais écrits dans ce fichier\u{202f}: ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.") },
     Message { id: "mcp.manual", en: Text::plain("Or do it manually"), fr: Text::plain("Ou à la main") },
     Message { id: "mcp.manualHint", en: Text::plain("if you prefer the CLI"), fr: Text::plain("si tu préfères passer par la CLI") },
     Message { id: "mcp.notDetected", en: Text::plain("not detected"), fr: Text::plain("non détecté") },
     Message { id: "mcp.playbook", en: Text::plain("Write the agent playbook"), fr: Text::plain("Écrire le mode d'emploi pour les agents") },
-    Message { id: "mcp.playbookHint", en: Text::plain("AGENTS.md + CLAUDE.md · adds .hangar/ to .gitignore"), fr: Text::plain("AGENTS.md + CLAUDE.md · ajoute .hangar/ au .gitignore") },
-    Message { id: "mcp.restartHint", en: Text::plain("Restart the affected agents so they load the server."), fr: Text::plain("Redémarre les agents concernés pour qu'ils chargent le serveur.") },
+    Message { id: "mcp.playbookHint", en: Text::plain("CLAUDE.md · adds .hangar/ to .gitignore"), fr: Text::plain("CLAUDE.md · ajoute .hangar/ au .gitignore") },
+    Message { id: "mcp.restartHint", en: Text::plain("Restart the Claude Code panes so they load the server."), fr: Text::plain("Redémarre les panneaux Claude Code pour qu'ils chargent le serveur.") },
     Message { id: "mcp.stale", en: Text::plain("broken — repair"), fr: Text::plain("cassé — à réparer") },
     Message { id: "mcp.staleHint", en: Text::plain("registered, but this executable is gone: {command}"), fr: Text::plain("configuré, mais cet exécutable n'existe plus\u{202f}: {command}") },
     Message { id: "mcp.staleHintNoCommand", en: Text::plain("registered, but names no executable"), fr: Text::plain("configuré, mais ne désigne aucun exécutable") },
-    Message { id: "mcp.title", en: Text::plain("Connect agents to the board"), fr: Text::plain("Connecter les agents au tableau") },
+    Message { id: "mcp.title", en: Text::plain("Connect Claude Code to the board"), fr: Text::plain("Connecter Claude Code au tableau") },
     Message { id: "mcpScope.all", en: Text::plain("All"), fr: Text::plain("Tous") },
     Message { id: "mcpScope.allHint", en: Text::plain("Every server Claude Code starts by itself in this folder"), fr: Text::plain("Tous les serveurs que Claude Code lance de lui-même dans ce dossier") },
     Message { id: "mcpScope.applies", en: Text::plain("Applies to agents launched from now on."), fr: Text::plain("S'applique aux agents lancés à partir de maintenant.") },
@@ -6414,6 +6417,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "palette.suggestions", en: Text::plain("Suggestions"), fr: Text::plain("Suggestions") },
     Message { id: "pane.actions", en: Text::plain("Actions of pane {name}"), fr: Text::plain("Actions du panneau {name}") },
     Message { id: "pane.agent", en: Text::plain("Agent running in this pane"), fr: Text::plain("Agent lancé dans ce panneau") },
+    Message { id: "pane.agentRetired", en: Text::plain("{agent} is no longer supported: Hangar now runs Claude Code only, so this pane is a plain shell in the same folder."), fr: Text::plain("{agent} n'est plus pris en charge\u{202f}: Hangar ne lance plus que Claude Code, ce panneau est donc un simple shell dans le même dossier.") },
     Message { id: "pane.attention", en: Text::plain("Finished while you were away"), fr: Text::plain("A terminé pendant ton absence") },
     Message { id: "pane.close", en: Text::plain("Close pane"), fr: Text::plain("Fermer le panneau") },
     Message { id: "pane.closeLast", en: Text::plain("The last pane cannot be closed"), fr: Text::plain("Le dernier panneau ne peut pas être fermé") },
@@ -6472,7 +6476,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "paneBranch.branchWorktree", en: Text::plain("Git branch {branch}, in a linked worktree"), fr: Text::plain("Branche git {branch}, dans un worktree lié") },
     Message { id: "paneBranch.detached", en: Text::plain("Detached HEAD on {head}"), fr: Text::plain("HEAD détachée sur {head}") },
     Message { id: "paneBranch.detachedMark", en: Text::plain("detached"), fr: Text::plain("détaché") },
-    Message { id: "placeholder.body", en: Text::plain("Create a workspace from the navigator: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time."), fr: Text::plain("Crée un workspace depuis le navigateur\u{202f}: choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.") },
+    Message { id: "placeholder.body", en: Text::plain("Create a workspace from the navigator: pick a project folder, then run Claude Code and shells in as many panes as you need — split, close and drag them around at any time."), fr: Text::plain("Crée un workspace depuis le navigateur\u{202f}: choisis un dossier de projet, puis lance Claude Code et des shells dans autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.") },
     Message { id: "placeholder.title", en: Text::plain("No workspace open"), fr: Text::plain("Aucun workspace ouvert") },
     Message { id: "preview.actualSize", en: Text::plain("Actual size (100%)"), fr: Text::plain("Taille réelle (100\u{202f}%)") },
     Message { id: "preview.bytes", en: Text::plain("{size} bytes"), fr: Text::plain("{size} octets") },
@@ -6569,8 +6573,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "sessions.note", en: Text::plain("The pane restarts to apply the chosen session."), fr: Text::plain("Le panneau redémarre pour appliquer la session choisie.") },
     Message { id: "sessions.title", en: Text::plain("{agent} sessions"), fr: Text::plain("Sessions de {agent}") },
     Message { id: "sessions.untitled", en: Text::plain("untitled"), fr: Text::plain("sans titre") },
-    Message { id: "settings.agentCommands", en: Text::plain("Launch commands"), fr: Text::plain("Commandes de lancement") },
-    Message { id: "settings.agentCommandsHint", en: Text::plain("What a pane types to start each agent. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default."), fr: Text::plain("Ce qu'un panneau tape pour démarrer chaque agent. C'est envoyé à un shell interactif\u{202f}: un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.") },
+    Message { id: "settings.agentCommands", en: Text::plain("Launch command"), fr: Text::plain("Commande de lancement") },
+    Message { id: "settings.agentCommandsHint", en: Text::plain("What a pane types to start Claude Code. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default."), fr: Text::plain("Ce qu'un panneau tape pour démarrer Claude Code. C'est envoyé à un shell interactif\u{202f}: un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.") },
     Message { id: "settings.agentControlSection", en: Text::plain("Agents and panes"), fr: Text::plain("Agents et panneaux") },
     Message { id: "settings.agentPaneControl", en: Text::plain("Let agents manage the panes"), fr: Text::plain("Laisser les agents gérer les panneaux") },
     Message { id: "settings.agentPaneControlHint", en: Text::plain("Through Hangar's MCP server, an agent can list, open, close, restart and type into the panes of your workspaces — to run other agents, for instance — and show you files in the preview: 3D models, images, videos, documents, web pages. Each of those calls still goes through the agent's own permission prompts."), fr: Text::plain("Via le serveur MCP de Hangar, un agent peut lister, ouvrir, fermer, relancer les panneaux de tes workspaces et y écrire — pour lancer d'autres agents, par exemple — et t'ouvrir des fichiers dans l'aperçu\u{202f}: modèles 3D, images, vidéos, documents, pages web. Chacun de ces appels passe quand même par les demandes d'autorisation de l'agent.") },
@@ -6614,7 +6618,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "settings.hibernate", en: Text::plain("Put idle workspaces to sleep"), fr: Text::plain("Mettre en veille les workspaces inactifs") },
     Message { id: "settings.hibernateDelay", en: Text::plain("Put to sleep after"), fr: Text::plain("Mettre en veille après") },
     Message { id: "settings.hibernateDelayHint", en: Text::plain("Without a keystroke, a click or an agent sending it anything"), fr: Text::plain("Sans frappe, clic ni envoi d'un agent") },
-    Message { id: "settings.hibernateHint", en: Text::plain("Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume (Gemini, OpenCode), nor while a shell runs a command. Right-click a workspace in the navigator to put it to sleep now."), fr: Text::plain("Arrête les agents d'un workspace laissé de côté pour libérer la mémoire\u{202f}; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session (Gemini, OpenCode), ni tant qu'un shell exécute une commande. Fais un clic droit sur un workspace du navigateur pour le mettre en veille tout de suite.") },
+    Message { id: "settings.hibernateHint", en: Text::plain("Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume its session, nor while a shell runs a command. Right-click a workspace in the navigator to put it to sleep now."), fr: Text::plain("Arrête les agents d'un workspace laissé de côté pour libérer la mémoire\u{202f}; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session, ni tant qu'un shell exécute une commande. Fais un clic droit sur un workspace du navigateur pour le mettre en veille tout de suite.") },
     Message { id: "settings.history", en: Text::plain("History"), fr: Text::plain("Historique") },
     Message { id: "settings.interface", en: Text::plain("Interface"), fr: Text::plain("Interface") },
     Message { id: "settings.language", en: Text::plain("Language"), fr: Text::plain("Langue") },
@@ -6798,7 +6802,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "stats.durationHoursOnly", en: Text::plain("{h}\u{a0}h"), fr: Text::plain("{h}\u{a0}h") },
     Message { id: "stats.durationMinutes", en: Text::plain("{m}\u{a0}min"), fr: Text::plain("{m}\u{a0}min") },
     Message { id: "stats.durationUnderMinute", en: Text::plain("<\u{a0}1\u{a0}min"), fr: Text::plain("<\u{a0}1\u{a0}min") },
-    Message { id: "stats.emptyBody", en: Text::plain("The statistics come from the transcripts Claude Code and Codex keep on this machine. Run one of them in a pane, then come back here."), fr: Text::plain("Les statistiques viennent des transcripts que Claude Code et Codex gardent sur cette machine. Lance l'un d'eux dans un panneau, puis reviens ici.") },
+    Message { id: "stats.emptyBody", en: Text::plain("The statistics come from the transcripts Claude Code keeps on this machine. Run it in a pane, then come back here."), fr: Text::plain("Les statistiques viennent des transcripts que Claude Code garde sur cette machine. Lance-le dans un panneau, puis reviens ici.") },
     Message { id: "stats.emptyTitle", en: Text::plain("No usage to show yet"), fr: Text::plain("Aucun usage à montrer pour l'instant") },
     Message { id: "stats.errorTitle", en: Text::plain("The transcripts could not be read"), fr: Text::plain("Impossible de lire les transcripts") },
     Message { id: "stats.fewerProjects", en: Text::plain("Show fewer"), fr: Text::plain("Afficher moins") },
@@ -6830,9 +6834,9 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "stats.measureHint.cost", en: Text::plain("Rank and draw by API-equivalent cost"), fr: Text::plain("Classer et tracer en coût équivalent API") },
     Message { id: "stats.measureHint.tokens", en: Text::plain("Rank and draw by tokens"), fr: Text::plain("Classer et tracer en tokens") },
     Message { id: "stats.methodActive", en: Text::plain("Active time adds up the gaps between the messages of a session, each capped at {cap}: a longer silence counts as {cap}. Agents working side by side each count."), fr: Text::plain("Le temps actif additionne les écarts entre les messages d'une session, chacun plafonné à {cap}\u{202f}: un silence plus long compte pour {cap}. Des agents qui travaillent en parallèle comptent chacun.") },
-    Message { id: "stats.methodCost", en: Text::plain("The API-equivalent cost prices every token at the providers' public API rates, cache and long context included. It is a measure of the work done, not what a Pro or Max subscription costs."), fr: Text::plain("Le coût équivalent API compte chaque token aux tarifs publics de l'API des fournisseurs, cache et long contexte compris. C'est une mesure du travail fait, pas ce que coûte un abonnement Pro ou Max.") },
+    Message { id: "stats.methodCost", en: Text::plain("The API-equivalent cost prices every token at Anthropic's public API rates, cache and long context included. It is a measure of the work done, not what a Pro or Max subscription costs."), fr: Text::plain("Le coût équivalent API compte chaque token aux tarifs publics de l'API d'Anthropic, cache et long contexte compris. C'est une mesure du travail fait, pas ce que coûte un abonnement Pro ou Max.") },
     Message { id: "stats.methodScan", en: Text::plain("{files} transcripts · {read} read this time in {ms}\u{a0}ms"), fr: Text::plain("{files} transcripts · {read} lus cette fois en {ms}\u{a0}ms") },
-    Message { id: "stats.methodSources", en: Text::plain("Read from the transcripts Claude Code and Codex keep on this machine, and nothing leaves it. Gemini CLI and OpenCode keep no usage that can be read."), fr: Text::plain("Lus dans les transcripts que Claude Code et Codex gardent sur cette machine, et rien n'en sort. Gemini CLI et OpenCode ne gardent aucun usage lisible.") },
+    Message { id: "stats.methodSources", en: Text::plain("Read from the transcripts Claude Code keeps on this machine, and nothing leaves it."), fr: Text::plain("Lus dans les transcripts que Claude Code garde sur cette machine, et rien n'en sort.") },
     Message { id: "stats.methodTitle", en: Text::plain("How these numbers are made"), fr: Text::plain("D'où viennent ces chiffres") },
     Message { id: "stats.modelsTitle", en: Text::plain("By model"), fr: Text::plain("Par modèle") },
     Message { id: "stats.moreProjects", en: Text::plural("{n} more project", "{n} more projects"), fr: Text::plural("{n} autre projet", "{n} autres projets") },
