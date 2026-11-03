@@ -335,4 +335,6 @@ pub fn button<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
 }
 
 #[cfg(test)]
+mod interaction;
+#[cfg(test)]
 mod tests;

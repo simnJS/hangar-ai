@@ -107,7 +107,7 @@ pub fn view<'a>(ctx: Ctx<'a>, workspaces: &[&'a Workspace]) -> Option<Element<'a
         ]
         .spacing(5)
         .align_y(Alignment::Center);
-        let pressed = button(face)
+        let pressed = button(iced::widget::container(face).center_y(Length::Fill))
             .padding(Padding::from([0.0, 5.0]))
             .height(18)
             .on_press_maybe(target.map(|(ws, pane)| {

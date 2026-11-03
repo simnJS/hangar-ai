@@ -458,8 +458,11 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
             .style(skin::capsule(t)),
     )
     .width(Length::Shrink)
+    // Just under the toolbar, which it must not cover: the web banner sat at
+    // the bottom corner, clear of the status bar; the shell gives this one the
+    // top centre, where the toolbar's capsule is.
     .padding(iced::Padding {
-        top: space::XL,
+        top: hangar_theme::tokens::size::TOOLBAR_HEIGHT + space::MD,
         ..iced::Padding::ZERO
     })
     .into()
@@ -473,7 +476,7 @@ fn pill_button<'a>(
     primary: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    button(text(label).size(font_size::UI))
+    button(container(text(label).size(font_size::UI)).center_y(Length::Fill))
         .padding([0.0, 12.0])
         .height(28)
         .style(move |theme: &iced::Theme, status| {
@@ -489,5 +492,7 @@ fn pill_button<'a>(
         .into()
 }
 
+#[cfg(test)]
+mod interaction;
 #[cfg(test)]
 mod tests;

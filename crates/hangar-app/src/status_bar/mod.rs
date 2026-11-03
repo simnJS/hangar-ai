@@ -551,4 +551,6 @@ fn info<'a>(ctx: Ctx<'a>, ws: &'a crate::state::Workspace) -> Element<'a, Messag
 }
 
 #[cfg(test)]
+mod interaction;
+#[cfg(test)]
 mod tests;

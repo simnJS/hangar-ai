@@ -84,7 +84,7 @@ pub fn voice_config(settings: &Settings) -> VoiceConfig {
 }
 
 /// The package's UI state; lives in `App.pkg.voice`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
     phase: Phase,
     /// The latest peak, 0 to 1.
@@ -100,6 +100,36 @@ pub struct State {
     starting: bool,
     /// The key came up while it was opening.
     aborted: bool,
+}
+
+impl Default for State {
+    /// `HANGAR_DEV_VOICE=recording` or `transcribing` shows the pill in that
+    /// phase, with a voice drawn on the meter, to see it in a theme and a
+    /// language (debug builds only).
+    fn default() -> Self {
+        let mut st = State {
+            phase: Phase::Idle,
+            level: 0.0,
+            bars: [0.0; BARS],
+            since: None,
+            starting: false,
+            aborted: false,
+        };
+        let forced = if cfg!(debug_assertions) {
+            std::env::var("HANGAR_DEV_VOICE").ok()
+        } else {
+            None
+        };
+        match forced.as_deref() {
+            Some("recording") => {
+                st.set_phase(Phase::Recording);
+                st.bars = [0.02, 0.1, 0.4, 0.8, 0.5, 0.9, 0.3, 0.1, 0.04];
+            }
+            Some("transcribing") => st.set_phase(Phase::Transcribing),
+            _ => {}
+        }
+        st
+    }
 }
 
 impl State {

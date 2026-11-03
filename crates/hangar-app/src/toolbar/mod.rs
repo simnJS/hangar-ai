@@ -597,4 +597,6 @@ fn kits_button<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Option<Ele
 }
 
 #[cfg(test)]
+mod interaction;
+#[cfg(test)]
 mod tests;

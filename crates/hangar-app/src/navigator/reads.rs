@@ -226,3 +226,21 @@ pub fn dev_plan() -> Option<crate::state::live::PlanLimits> {
         .collect();
     super::plan::take(&limits)
 }
+
+/// `HANGAR_DEV_FOCUSED_PANE=p3` puts the toolbar's capsule on that pane while
+/// the workspace has no focused pane of its own (the shell sets one once panes
+/// take the keyboard). Debug builds only.
+pub fn dev_focused_pane() -> Option<&'static PaneId> {
+    use std::sync::OnceLock;
+    static FOCUSED: OnceLock<Option<PaneId>> = OnceLock::new();
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    FOCUSED
+        .get_or_init(|| {
+            std::env::var("HANGAR_DEV_FOCUSED_PANE")
+                .ok()
+                .filter(|id| !id.is_empty())
+        })
+        .as_ref()
+}

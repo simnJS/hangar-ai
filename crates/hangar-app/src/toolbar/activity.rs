@@ -162,7 +162,12 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let t = ctx.theme;
     let tr = ctx.i18n;
-    let focused = ctx.model.ui.focus_by_workspace.get(&ws.id);
+    let focused = ctx
+        .model
+        .ui
+        .focus_by_workspace
+        .get(&ws.id)
+        .or_else(|| reads::dev_focused_pane());
     let pane = focused.and_then(|id| ws.panes.iter().find(|pane| &pane.id == id));
     let activity = pane.map_or(AgentActivity::Idle, |pane| {
         reads::activity(ctx.model, &pane.id)
@@ -326,7 +331,7 @@ pub fn view<'a>(
             ]
             .spacing(space::SM)
             .align_y(Alignment::Center);
-            let pressed = button(content)
+            let pressed = button(container(content).center_y(Length::Fill))
                 .padding([0.0, space::SM])
                 .height(22)
                 .style(style::button::icon(t))

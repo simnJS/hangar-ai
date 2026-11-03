@@ -38,7 +38,10 @@ pub fn entry<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     }
     let t = ctx.theme;
     let tr = ctx.i18n;
-    let open = ctx.model.ui.needs_you_open;
+    // `HANGAR_DEV_NEEDS_YOU_OPEN=1` shows the panel open, to see it in a theme
+    // and a language (debug builds only).
+    let open = ctx.model.ui.needs_you_open
+        || (cfg!(debug_assertions) && std::env::var_os("HANGAR_DEV_NEEDS_YOU_OPEN").is_some());
     let label = tr.t_with(Key::NeedsYouButton, &args!("n" => items.len()));
 
     // The toolbar is the window less the navigator when that is open.
@@ -67,7 +70,7 @@ pub fn entry<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
             .color(t.colors.state_waiting),
     );
 
-    let pressed = iced::widget::button(face)
+    let pressed = iced::widget::button(container(face).center_y(Length::Fill))
         .padding(Padding {
             top: 0.0,
             right: 8.0,

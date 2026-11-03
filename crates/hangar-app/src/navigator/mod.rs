@@ -119,6 +119,62 @@ impl Default for State {
             note_serial: 0,
             plan: reads::dev_plan(),
         }
+        .with_dev_view()
+    }
+}
+
+impl State {
+    /// `HANGAR_DEV_NAV_MENU=<workspace id>` opens that row's menu,
+    /// `HANGAR_DEV_NAV_RENAME=<workspace id>` puts it in rename, and
+    /// `HANGAR_DEV_NAV_DRAG=<dragged id>:<over id>:<before|after>` holds a drag
+    /// of one workspace over another, to see them in a theme and a language
+    /// without a pointer (debug builds only).
+    fn with_dev_view(mut self) -> State {
+        if !cfg!(debug_assertions) {
+            return self;
+        }
+        if let Ok(id) = std::env::var("HANGAR_DEV_NAV_MENU") {
+            self.cursor = Some(row_key(RowKind::Ws, &id));
+            self.menu = Some(MenuState {
+                kind: RowKind::Ws,
+                id,
+                at: Vector::new(24.0, view::ROW_HEIGHT + 2.0),
+                from_keyboard: true,
+            });
+        }
+        if let Ok(id) = std::env::var("HANGAR_DEV_NAV_RENAME") {
+            self.rename = Some(Rename {
+                kind: RowKind::Ws,
+                draft: id.clone(),
+                id,
+            });
+        }
+        if let Ok(spec) = std::env::var("HANGAR_DEV_NAV_DRAG") {
+            let mut parts = spec.split(':');
+            if let (Some(dragged), Some(over), Some(side)) =
+                (parts.next(), parts.next(), parts.next())
+            {
+                let mut drag = Drag::pressed(DragItem {
+                    kind: DragKind::Workspace,
+                    id: dragged.to_string(),
+                });
+                drag.moved(
+                    &row_key(RowKind::Ws, dragged),
+                    Point::new(0.0, 0.0),
+                    view::ROW_HEIGHT,
+                    None,
+                );
+                let y = if side == "after" { 20.0 } else { 3.0 };
+                drag.moved(
+                    &row_key(RowKind::Ws, over),
+                    Point::new(10.0, y),
+                    view::ROW_HEIGHT,
+                    Some(Hit::Workspace(over.to_string())),
+                );
+                self.drag = Some(drag);
+            }
+        }
+        self
     }
 }
 
@@ -803,5 +859,9 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     view::sidebar(st, ctx)
 }
 
+#[cfg(test)]
+mod interaction;
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
