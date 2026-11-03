@@ -14,6 +14,30 @@
 //! `queuedBy`, `paneEventText`, `resolveShell`). Each is a stand-in with the
 //! tests of its TS; when the owner's module lands, its function replaces the
 //! stand-in.
+//!
+//! # Wiring P4, P7 and P12 once they are in the tree
+//!
+//! This branch was cut before those packages merged, so the calls below are
+//! stand-ins. What replaces them, as those packages export it:
+//!
+//! - `insight`, `activity`, `plan_limits`: `m.live.panes_logic.insight(pane)`,
+//!   `.pane_activity(pane)`, `.plan_limits()`.
+//! - P4 gave the shared types real moments and typed history: `EpochMs`
+//!   (u64) replaces `Instant` in `session_since`, `turn_started_at` and
+//!   `PaneEvent::at`, so `wall_ms` goes (`poll::trigger` then takes
+//!   `Option<u64>`); an event is `PaneEvent { at, detail: PaneEventDetail }`,
+//!   so `event_text` becomes `panes_logic::pane_event_text(&event.detail, tr)`
+//!   and `sections::dot_color` keys on `event.detail.kind()`; `mcp` is a
+//!   `PaneMcp { mode: Inherit | Custom { servers }, .. }`, which
+//!   `sections::mcp_servers` reads instead of JSON.
+//! - `format_tokens`, `queued_by`, `resolve_shell`:
+//!   `panes_logic::{format_tokens, queued_by}` and `panes_logic::shells`.
+//! - `task_for_pane`: `m.live.board.task_for_pane(ws, &pane, &state.workspaces,
+//!   active_id)` and `TaskCard::of`; `elapsed_label`, `short_task_id` and
+//!   `priority_level` are `board::format::*` (the board also draws the
+//!   priority signal `sections::priority` copies).
+//! - `shortcut`: `ctx.keymap.first_binding(command)`, which is the text
+//!   `keycap::binding` and `IconBtn::keys` take.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
