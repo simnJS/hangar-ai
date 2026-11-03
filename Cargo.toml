@@ -52,3 +52,6 @@ tao = "0.37"
 unicode-normalization = "0.1"
 usvg = { version = "0.45", default-features = false }
 iced_test = "0.14"
+# The ids the store gives new workspaces, panes, folders and saved commands,
+# as `crypto.randomUUID()` gave them (v4); hangar-core already builds it.
+uuid = { version = "1.24.0", features = ["v4"] }
