@@ -919,3 +919,51 @@ fn the_rename_form_follows_what_is_typed_and_goes_on_cancel() {
     let _ = settings_page::step(&mut page, &mut h.model, Msg::RemoveCancel);
     assert!(page.removing.is_none());
 }
+
+// ── the strings (`strings.test.ts`, the cases that are not typography) ──
+//
+// The dictionary's own tests (`crates/hangar-i18n/tests/dictionary.rs`) hold
+// every French string, the accounts' included, to the glossary's typography
+// and both languages to the same placeholders. What is checked here is how
+// the accounts' strings come out.
+
+const NNBSP: char = '\u{202f}';
+
+#[test]
+fn the_running_agents_take_the_plural_of_the_language() {
+    use hangar_i18n::{Key, tn};
+    assert_eq!(
+        tn(Locale::En, Key::AccountsSwitcherRunning, 1, &[]),
+        "1 agent running."
+    );
+    assert_eq!(
+        tn(Locale::Fr, Key::AccountsSwitcherRunning, 3, &[]),
+        "3 agents en cours."
+    );
+}
+
+#[test]
+fn a_percentage_is_set_the_french_way() {
+    use hangar_i18n::{Key, args, t_with};
+    assert_eq!(
+        t_with(Locale::Fr, Key::AccountsSwitcherPercent, &args!("n" => 40)),
+        format!("40{NNBSP}%")
+    );
+    assert_eq!(
+        t_with(Locale::En, Key::AccountsSwitcherPercent, &args!("n" => 40)),
+        "40%"
+    );
+}
+
+#[test]
+fn what_fills_a_placeholder_is_never_touched() {
+    use hangar_i18n::{Key, args, t_with};
+    assert_eq!(
+        t_with(
+            Locale::Fr,
+            Key::AccountsSettingsRemoveAsk,
+            &args!("name" => "Perso : 2 ?")
+        ),
+        format!("Retirer «{NNBSP}Perso : 2 ?{NNBSP}»{NNBSP}?")
+    );
+}
