@@ -232,7 +232,9 @@ Working rules:
 ## 8. Parity checklist (the definition of done)
 
 The native app replaces the old one when all of these hold, on Linux first, then
-Windows and macOS:
+Windows and macOS. The item-by-item state of each (816 rows, with evidence) is in
+[PARITY.md](PARITY.md); this list is the summary to tick once PARITY.md's §7 is done
+and the app has been used for real beside the old one:
 
 - [ ] Opens on the same data: workspaces, panes, boards, memory, settings, theme, language, shortcuts.
 - [ ] Panes run Claude Code, Codex, Gemini CLI, OpenCode and every detected shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume.
