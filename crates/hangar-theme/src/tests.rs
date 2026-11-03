@@ -240,9 +240,10 @@ mod the_derivation_of_the_chrome_tokens {
     fn prints_an_entry_the_way_the_table_writes_it() {
         // What the test above prints is pasted into data.rs: it has to read
         // exactly as the entries already there.
-        const TABLE: &str = include_str!("data.rs");
+        // A Windows checkout may hold the file with CRLF line ends.
+        let table = include_str!("data.rs").replace("\r\n", "\n");
         for theme in themes() {
-            assert!(TABLE.contains(&rust_block(&theme.colors)), "{}", theme.id);
+            assert!(table.contains(&rust_block(&theme.colors)), "{}", theme.id);
         }
     }
 }
