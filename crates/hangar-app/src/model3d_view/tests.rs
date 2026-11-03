@@ -430,6 +430,54 @@ fn models_nobody_looks_at_are_dropped_past_the_budget_and_come_back_when_wanted(
 }
 
 #[test]
+fn a_snapshots_request_loads_a_model_that_was_dropped_without_telling_the_store() {
+    let mut h = Harness::new("ensure");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.land(&id);
+    let revision = h.entry(&id).revision;
+
+    // In memory, but the registry has let it go: it is handed back as it is.
+    h.st.registry.remove(&id);
+    h.send(Msg::Ensure(id.clone()));
+    assert!(matches!(
+        h.st.registry.look(&id, revision),
+        Look::Ready { .. }
+    ));
+    assert!(h.slot(&id).flight.is_none(), "nothing is read again");
+
+    // Dropped from memory to make room: read again, whoever is looking, and
+    // the store is not told it is loading (the entry is still ready).
+    h.st.slots.get_mut(&id).unwrap().drop_model();
+    h.st.registry.remove(&id);
+    h.send(Msg::Ensure(id.clone()));
+    assert!(h.slot(&id).loading(revision));
+    assert_eq!(h.entry(&id).status, Status::Ready);
+    // Asked twice, it is read once.
+    h.send(Msg::Ensure(id.clone()));
+    assert!(h.slot(&id).loading(revision));
+    h.land(&id);
+    assert!(matches!(
+        h.st.registry.look(&id, revision),
+        Look::Ready { .. }
+    ));
+}
+
+#[test]
+fn a_snapshots_request_for_what_is_closed_or_broken_does_nothing() {
+    let mut h = Harness::new("ensure-none");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.fail(&id, LoadError::Read("The file was not found.".into()));
+    // Broken: the registry already says why, and the read is not repeated.
+    h.send(Msg::Ensure(id.clone()));
+    assert!(h.slot(&id).flight.is_none());
+    // Not open at all.
+    h.send(Msg::Ensure("nothing".into()));
+    assert!(!h.st.slots.contains_key("nothing"));
+}
+
+#[test]
 fn a_workspace_put_to_sleep_lets_its_models_go_and_gets_them_back_on_waking() {
     let mut h = Harness::new("sleep");
     let id = h.show("cube.glb", &samples::cube_glb());
