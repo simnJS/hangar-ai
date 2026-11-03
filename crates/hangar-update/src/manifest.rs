@@ -291,10 +291,16 @@ mod tests {
 
         for old in ["1.0.0", "1.9.1", "1.12.0", "1.12.1"] {
             let old = Version::parse(old).unwrap();
-            assert!(release("2.0.0").is_newer_than(&old), "{old} updates to 2.0.0");
+            assert!(
+                release("2.0.0").is_newer_than(&old),
+                "{old} updates to 2.0.0"
+            );
         }
         for old in ["1.12.1", "1.99.0", "2.0.0-beta.1", "2.0.0"] {
-            assert!(!release(old).is_newer_than(&native), "2.0.0 is not offered {old}");
+            assert!(
+                !release(old).is_newer_than(&native),
+                "2.0.0 is not offered {old}"
+            );
         }
         assert!(release("2.0.1").is_newer_than(&native));
         assert!(release("2.1.0").is_newer_than(&native));
