@@ -4,7 +4,9 @@
 //! The module's text helpers (`firstLine`, `fileBaseName`, `shortSessionId`,
 //! `sessionIdLabel`, `newlyQueued`) word what a pane reports to its
 //! insight, which is P4's: they are in `panes_logic::bridge_events`, with
-//! their cases. What the header itself draws with is here.
+//! their cases. `gaugeLevel` (amber from 70 %, red from 90 %) is the ring's
+//! own, hangar-ui's `glyph::gauge_level`, with the "warms the gauge" case.
+//! What the header itself draws with is here.
 
 use hangar_i18n::Key;
 
@@ -25,29 +27,6 @@ pub fn pane_glyph_state(status: PaneStatus, activity: Option<AgentActivity>) -> 
             AgentActivity::Yours => GlyphState::Yours,
             AgentActivity::Idle => GlyphState::Idle,
         },
-    }
-}
-
-/// Where a context window starts to deserve a look, then a decision.
-pub const GAUGE_WARN: f64 = 70.0;
-pub const GAUGE_HOT: f64 = 90.0;
-
-/// How worrying a gauge's reading is (`gaugeLevel`). The ring draws its
-/// colour from hangar-ui's own copy of the same thresholds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GaugeLevel {
-    Ok,
-    Warn,
-    Hot,
-}
-
-pub fn gauge_level(pct: f64) -> GaugeLevel {
-    if pct >= GAUGE_HOT {
-        GaugeLevel::Hot
-    } else if pct >= GAUGE_WARN {
-        GaugeLevel::Warn
-    } else {
-        GaugeLevel::Ok
     }
 }
 
@@ -129,12 +108,13 @@ mod tests {
 
     #[test]
     fn warms_the_gauge_from_70_and_heats_it_from_90() {
-        assert_eq!(gauge_level(0.0), GaugeLevel::Ok);
-        assert_eq!(gauge_level(69.0), GaugeLevel::Ok);
-        assert_eq!(gauge_level(70.0), GaugeLevel::Warn);
-        assert_eq!(gauge_level(89.0), GaugeLevel::Warn);
-        assert_eq!(gauge_level(90.0), GaugeLevel::Hot);
-        assert_eq!(gauge_level(100.0), GaugeLevel::Hot);
+        use hangar_ui::glyph::{GaugeLevel, gauge_level};
+        assert_eq!(gauge_level(0), GaugeLevel::Ok);
+        assert_eq!(gauge_level(69), GaugeLevel::Ok);
+        assert_eq!(gauge_level(70), GaugeLevel::Warn);
+        assert_eq!(gauge_level(89), GaugeLevel::Warn);
+        assert_eq!(gauge_level(90), GaugeLevel::Hot);
+        assert_eq!(gauge_level(100), GaugeLevel::Hot);
     }
 
     #[test]

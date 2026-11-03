@@ -199,7 +199,14 @@ fn logic(msg: Logic) -> Task<Message> {
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    // Output is the hot path, many batches a second while agents stream:
+    // nothing other packages read changes with it.
+    let quiet =
+        matches!(&msg, Msg::Hub(events) if events.iter().all(|e| e.kind == HubKind::Output));
     let task = handle(st, m, sv, msg);
+    if quiet {
+        return task;
+    }
     let synced = sync_if_needed(st, m, sv);
     publish(st, m);
     Task::batch([task, synced])
@@ -1007,11 +1014,15 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
 /// Republishes what other packages read of the panes.
 fn publish(st: &State, m: &mut Model) {
     let mut reports = HashMap::with_capacity(st.panes.len());
+    let mut layouts: HashMap<&str, geometry::GridLayout> = HashMap::new();
     for (id, rt) in &st.panes {
         let Some(ws) = m.workspace(&rt.ws) else {
             continue;
         };
-        let width = pane_width(st, m, ws, id);
+        let layout = layouts.entry(ws.id.as_str()).or_insert_with(|| {
+            geometry::compute_layout(&geometry::normalize_tree(&ws.panes, ws.tree.as_ref()))
+        });
+        let width = pane_width(st, m, ws, layout, id);
         reports.insert(
             id.clone(),
             PaneReport {
@@ -1029,13 +1040,18 @@ fn publish(st: &State, m: &mut Model) {
 }
 
 /// A pane's width on screen, from its grid's last measured size.
-fn pane_width(st: &State, m: &Model, ws: &Workspace, pane: &str) -> f32 {
+fn pane_width(
+    st: &State,
+    m: &Model,
+    ws: &Workspace,
+    layout: &geometry::GridLayout,
+    pane: &str,
+) -> f32 {
     let size = st.grid_sizes.get(&ws.id).copied().unwrap_or(UNMEASURED);
     if zoomed_pane(m, ws).as_deref() == Some(pane) {
         return size.width;
     }
-    let tree = geometry::normalize_tree(&ws.panes, ws.tree.as_ref());
-    geometry::compute_layout(&tree)
+    layout
         .rect(pane)
         .map_or(size.width, |rect| rect.width * size.width)
 }
