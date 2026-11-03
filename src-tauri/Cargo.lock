@@ -1996,7 +1996,7 @@ dependencies = [
 
 [[package]]
 name = "hangar-ai"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "axum",
  "base64 0.22.1",

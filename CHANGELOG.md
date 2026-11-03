@@ -8,6 +8,20 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
+## [1.12.1] - 2026-11-03
+
+- **Terminals no longer lag on Linux.** On Linux the webview is WebKitGTK, where drawing a
+  terminal with WebGL was slow and, with some NVIDIA drivers, broken: typing, spaces and
+  deletions came late, and a dead key followed by a letter could leave the accent stuck
+  (`'` then `e` on a US International keyboard). Terminals are now drawn without WebGL
+  there. Windows and macOS are unchanged.
+  - To get WebGL back on a Linux machine where it is fast, run
+    `localStorage.setItem("hangar.webgl", "1")` in the developer tools; `"0"` turns it off
+    anywhere.
+- **An Experimental page in the settings.** A place for features that are not finished: off
+  until you turn them on, and free to change or disappear. The page stays hidden until a
+  version ships one, so nothing shows up yet.
+
 ## [1.12.0] - 2026-11-02
 
 - **Tell it where.** Ask any Claude to create a workspace from a repository and say where
