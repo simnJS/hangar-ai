@@ -24,11 +24,11 @@ mod data;
 
 use std::sync::LazyLock;
 
+use iced::advanced::Widget;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::svg;
 use iced::advanced::widget::Tree;
-use iced::advanced::Widget;
 use iced::mouse;
 use iced::{Color, Element, Length, Radians, Rectangle, Size};
 

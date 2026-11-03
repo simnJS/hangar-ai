@@ -43,6 +43,21 @@ pub fn field(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
     }
 }
 
+/// A field whose value is refused: the same field with the danger colour for
+/// its edge, kept while it has the keyboard so the error stays in view.
+pub fn field_invalid(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
+    move |theme, status| {
+        let style = field(t)(theme, status);
+        match status {
+            Status::Disabled => style,
+            _ => Style {
+                border: hairline(t.colors.danger, radius::SM),
+                ..style
+            },
+        }
+    }
+}
+
 /// A field with no box of its own, for one that sits inside another surface:
 /// the command palette's search, the status bar's broadcast field.
 pub fn bare(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {

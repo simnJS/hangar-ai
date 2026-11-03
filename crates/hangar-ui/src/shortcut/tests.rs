@@ -71,14 +71,8 @@ mod parse_chord {
 
     #[test]
     fn accepts_the_platform_names_of_the_modifiers() {
-        assert_eq!(
-            parse_chord("Cmd+Option+X"),
-            Some(chord("X").meta().alt())
-        );
-        assert_eq!(
-            parse_chord("Control+Win+Q"),
-            Some(chord("Q").ctrl().meta())
-        );
+        assert_eq!(parse_chord("Cmd+Option+X"), Some(chord("X").meta().alt()));
+        assert_eq!(parse_chord("Control+Win+Q"), Some(chord("Q").ctrl().meta()));
     }
 
     #[test]
@@ -289,8 +283,7 @@ mod key_from_press {
         );
         let page_down = Key::Named(Named::PageDown);
         assert_eq!(
-            key_from_press(&press(&page_down, Code::PageDown, Modifiers::empty(), None))
-                .as_deref(),
+            key_from_press(&press(&page_down, Code::PageDown, Modifiers::empty(), None)).as_deref(),
             Some("PageDown")
         );
     }
@@ -410,7 +403,10 @@ mod recorder {
     fn cancels_on_escape_on_its_own() {
         let mut recorder = Recorder::new();
         recorder.input(press_of(chord("K").ctrl()));
-        assert_eq!(recorder.input(press_of(chord("Escape"))), Outcome::Cancelled);
+        assert_eq!(
+            recorder.input(press_of(chord("Escape"))),
+            Outcome::Cancelled
+        );
     }
 
     #[test]
@@ -426,7 +422,10 @@ mod recorder {
         let mut recorder = Recorder::new();
         recorder.input(press_of(chord("Enter").ctrl().shift()));
         recorder.input(press_of(chord("Escape").alt()));
-        assert_eq!(recorder.binding().as_deref(), Some("Ctrl+Shift+Enter Alt+Escape"));
+        assert_eq!(
+            recorder.binding().as_deref(),
+            Some("Ctrl+Shift+Enter Alt+Escape")
+        );
     }
 
     #[test]

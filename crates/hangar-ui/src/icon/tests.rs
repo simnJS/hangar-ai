@@ -48,7 +48,12 @@ fn every_drawing_is_a_valid_svg_on_the_16_unit_grid() {
         let tree = usvg::Tree::from_str(&icon.svg(), &usvg::Options::default())
             .unwrap_or_else(|error| panic!("{}: {error}", icon.name()));
         let size = tree.size();
-        assert_eq!((size.width(), size.height()), (16.0, 16.0), "{}", icon.name());
+        assert_eq!(
+            (size.width(), size.height()),
+            (16.0, 16.0),
+            "{}",
+            icon.name()
+        );
     }
 }
 

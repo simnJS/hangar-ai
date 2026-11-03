@@ -38,7 +38,9 @@ pub mod pick_list;
 pub mod progress_bar;
 pub mod rule;
 pub mod scrollable;
+pub mod slider;
 pub mod text;
+pub mod text_editor;
 pub mod text_input;
 pub mod toggler;
 
@@ -48,6 +50,20 @@ mod tests;
 use iced::{Border, Color, Shadow, Vector};
 
 use crate::tokens::{BORDER_WIDTH, DISABLED_OPACITY};
+
+/// What a badge or a toast is about, so that a view names a meaning and the
+/// theme picks the colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Tone {
+    /// A count, a plain fact.
+    #[default]
+    Neutral,
+    /// What is selected or current.
+    Accent,
+    Success,
+    Warning,
+    Danger,
+}
 
 /// A hairline of this colour with these corners.
 pub(crate) fn hairline(color: Color, radius: f32) -> Border {

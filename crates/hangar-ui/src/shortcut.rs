@@ -592,7 +592,9 @@ pub fn input_from_event(event: &keyboard::Event) -> Option<Input> {
             held: Held::from(*modifiers),
         }),
         keyboard::Event::KeyReleased { .. } => Some(Input::Release),
-        keyboard::Event::ModifiersChanged(modifiers) => Some(Input::Modifiers(Held::from(*modifiers))),
+        keyboard::Event::ModifiersChanged(modifiers) => {
+            Some(Input::Modifiers(Held::from(*modifiers)))
+        }
     }
 }
 
@@ -603,7 +605,10 @@ pub fn input_from_event(event: &keyboard::Event) -> Option<Input> {
 pub enum Input {
     /// A key went down. `chord` is `None` for a modifier on its own, which
     /// still tells which modifiers are held.
-    Press { chord: Option<Chord>, held: Held },
+    Press {
+        chord: Option<Chord>,
+        held: Held,
+    },
     Modifiers(Held),
     Release,
 }

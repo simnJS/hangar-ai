@@ -300,7 +300,10 @@ pub struct PaletteGroup<'a, T> {
 /// entry overall comes first, so the top row, the one Enter runs, is always
 /// the best match there is. Ties keep the order given, which is the order the
 /// palette thinks most useful.
-pub fn filter_palette<'a, T: Searchable>(entries: &'a [T], query: &str) -> Vec<PaletteGroup<'a, T>> {
+pub fn filter_palette<'a, T: Searchable>(
+    entries: &'a [T],
+    query: &str,
+) -> Vec<PaletteGroup<'a, T>> {
     let mut groups: Vec<PaletteGroup<'a, T>> = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let Some(matched) = match_entry(entry.label(), entry.keywords(), query) else {
@@ -347,32 +350,144 @@ pub fn filter_palette<'a, T: Searchable>(entries: &'a [T], query: &str) -> Vec<P
 /// Keyed by the command's id (`"view.settings"`), as `COMMAND_SYNONYMS` is in
 /// the TypeScript.
 pub const COMMAND_SYNONYMS: &[(&str, &[&str])] = &[
-    ("view.settings", &["paramètres", "préférences", "options", "configuration", "preferences", "config"]),
-    ("view.shortcuts", &["clavier", "touches", "keyboard", "keybindings", "hotkeys"]),
+    (
+        "view.settings",
+        &[
+            "paramètres",
+            "préférences",
+            "options",
+            "configuration",
+            "preferences",
+            "config",
+        ],
+    ),
+    (
+        "view.shortcuts",
+        &["clavier", "touches", "keyboard", "keybindings", "hotkeys"],
+    ),
     ("view.terminals", &["grille", "grid"]),
     ("view.board", &["kanban", "tâches", "tasks", "todo"]),
     ("view.boardDock", &["kanban", "tâches", "tasks", "dock"]),
-    ("view.modelPreview", &["modèle", "model", "maillage", "mesh", "glb", "gltf", "fbx", "obj", "viewer"]),
+    (
+        "view.modelPreview",
+        &[
+            "modèle", "model", "maillage", "mesh", "glb", "gltf", "fbx", "obj", "viewer",
+        ],
+    ),
     ("view.closeModels", &["modèle", "model", "3d"]),
     ("view.memory", &["notes", "souvenirs", "knowledge"]),
-    ("view.stats", &["usage", "tokens", "coût", "cost", "dépenses", "spend", "temps", "time", "dashboard"]),
-    ("view.mcp", &["serveur", "server", "connecter", "connect", "intégration", "integration"]),
-    ("workspace.mcpServers", &["mémoire", "memory", "processus", "process", "ram", "strict"]),
-    ("view.broadcast", &["diffusion", "envoyer à tous", "send to all", "everyone"]),
-    ("view.navigator", &["barre latérale", "sidebar", "arborescence", "tree"]),
+    (
+        "view.stats",
+        &[
+            "usage",
+            "tokens",
+            "coût",
+            "cost",
+            "dépenses",
+            "spend",
+            "temps",
+            "time",
+            "dashboard",
+        ],
+    ),
+    (
+        "view.mcp",
+        &[
+            "serveur",
+            "server",
+            "connecter",
+            "connect",
+            "intégration",
+            "integration",
+        ],
+    ),
+    (
+        "workspace.mcpServers",
+        &["mémoire", "memory", "processus", "process", "ram", "strict"],
+    ),
+    (
+        "view.broadcast",
+        &["diffusion", "envoyer à tous", "send to all", "everyone"],
+    ),
+    (
+        "view.navigator",
+        &["barre latérale", "sidebar", "arborescence", "tree"],
+    ),
     ("view.inspector", &["détails", "details", "infos", "info"]),
-    ("pane.split", &["nouveau terminal", "new terminal", "ajouter", "add", "ouvrir", "open"]),
-    ("pane.splitRight", &["vertical", "côte à côte", "side by side"]),
+    (
+        "pane.split",
+        &[
+            "nouveau terminal",
+            "new terminal",
+            "ajouter",
+            "add",
+            "ouvrir",
+            "open",
+        ],
+    ),
+    (
+        "pane.splitRight",
+        &["vertical", "côte à côte", "side by side"],
+    ),
     ("pane.splitDown", &["horizontal"]),
-    ("pane.close", &["supprimer", "remove", "kill", "quitter", "quit"]),
+    (
+        "pane.close",
+        &["supprimer", "remove", "kill", "quitter", "quit"],
+    ),
     ("pane.restart", &["redémarrer", "relaunch", "reload"]),
     ("pane.restartAll", &["redémarrer", "relaunch", "reload"]),
-    ("pane.resetAll", &["conversation", "vider", "effacer", "clear", "remise à zéro"]),
-    ("pane.tidy", &["ranger", "aligner", "grille", "disposition", "arrange", "grid", "layout"]),
-    ("pane.sessions", &["reprendre", "historique", "conversation", "resume", "history", "transcript"]),
-    ("pane.zoom", &["agrandir", "maximiser", "plein écran", "maximize", "focus"]),
-    ("workspace.new", &["projet", "dossier", "créer", "ajouter", "project", "folder", "create", "add"]),
-    ("workspace.sleep", &["hiberner", "suspendre", "dormir", "libérer", "mémoire", "hibernate", "suspend", "free", "memory", "ram"]),
+    (
+        "pane.resetAll",
+        &["conversation", "vider", "effacer", "clear", "remise à zéro"],
+    ),
+    (
+        "pane.tidy",
+        &[
+            "ranger",
+            "aligner",
+            "grille",
+            "disposition",
+            "arrange",
+            "grid",
+            "layout",
+        ],
+    ),
+    (
+        "pane.sessions",
+        &[
+            "reprendre",
+            "historique",
+            "conversation",
+            "resume",
+            "history",
+            "transcript",
+        ],
+    ),
+    (
+        "pane.zoom",
+        &["agrandir", "maximiser", "plein écran", "maximize", "focus"],
+    ),
+    (
+        "workspace.new",
+        &[
+            "projet", "dossier", "créer", "ajouter", "project", "folder", "create", "add",
+        ],
+    ),
+    (
+        "workspace.sleep",
+        &[
+            "hiberner",
+            "suspendre",
+            "dormir",
+            "libérer",
+            "mémoire",
+            "hibernate",
+            "suspend",
+            "free",
+            "memory",
+            "ram",
+        ],
+    ),
     ("terminal.clear", &["cls", "vider", "nettoyer", "reset"]),
     ("terminal.find", &["chercher", "trouver", "find", "grep"]),
     ("app.zoomIn", &["taille", "plus grand", "size", "larger"]),

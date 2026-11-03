@@ -223,7 +223,10 @@ mod tests {
 
         #[test]
         fn has_nowhere_to_go_when_nothing_can_take_it() {
-            assert_eq!(step_selectable(None, &[false, false], Step::Next, true), None);
+            assert_eq!(
+                step_selectable(None, &[false, false], Step::Next, true),
+                None
+            );
             assert_eq!(
                 move_selectable(None, &[false, false], Move::First, true),
                 None
