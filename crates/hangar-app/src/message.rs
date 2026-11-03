@@ -218,6 +218,10 @@ pub enum Intent {
     /// enabled; handled by P6 (`voice`), which also watches for the key's
     /// release that ends the recording.
     Dictate,
+    /// `view.closeModels`: every entry of the workspace's preview closes
+    /// (`closeWorkspaceModels`). Sent by the command table, only while the
+    /// workspace has some; handled by P15 (`preview`).
+    ClosePreviews(WsId),
 }
 
 /// What `Intent::TerminalAction` asks of a pane's terminal.
