@@ -25,6 +25,7 @@ The log of the port: newest entries at the top of each section. The plan is in
 
 ### 2026-11-03
 
+- Merged **WP1** (`7bf5081`, pane launch safety): **the kit-hook consent hole is closed** — right before a pane's process starts, the app reads the kits on disk and keeps out any GitHub kit whose hooks the workspace has not accepted; only accepted ids reach `pty_spawn` and the MCP scope, and held kits show the warning in the pane (checked end to end in a dev app with an accepted and an unaccepted kit, EN dark and FR light). Permission mode and allowed tools from `state::roles` (an unknown mode falls back to the person's default); Ctrl+click opens only `http(s)` links; search field guarded; terminal actions other than resize/press no longer republish the snapshot.
 - Merged **P17's app view** (`55a638e`): the 3D viewer in the preview panel — loads off the UI thread with progress, Cancel and Retry; a newer revision of the file replaces the load and keeps the camera; at most 3 unseen models in memory; toolbar (recenter, zoom, wireframe, grid, axes, normals, capture to clipboard or PNG); clips listed, disabled with the reason (the crate cannot play them yet); the crate's error sentences (Draco, USDZ checked in the real window); `model_snapshot` renders off screen for agents at any angle and size (checked over the control endpoint: four angles, a file rewritten under the running app, six models at once, a corrupt file). Not live-checked: clipboard copy, save dialog, toolbar clicks. Note: `hangar_core::model::allowed_roots` is `pub(crate)`, so the view recomputes the roots; making it `pub` would share core's exact list.
 - Merged **WP6** (`4d1c5c9`): every board write carries its board's folder, so a detached window writes its own workspace's board; drafts keyed by folder and column; the dock's room from `Panels::of(..).dock.max`; the grip saves once on release (Escape cancels); `board/agent_pane.rs` replaced by `panes_logic::find_agent_pane`; orchestration UI reads `state::roles`; worker badges read titles from `board::Live`; every board text field guarded against shortcuts. App tests: 2640.
 - Merged **WP3** (`9a4f15d`): the needs-you count is written to `live.signals.needs_you` (400 ms refresh while relevant; Toggle computes before opening so the shell's "count is 0" rule cannot close it), boards from `board::Live`, Land disabled while `control.task_delivering` (plus a 10 s grace), `Intent::Dictate` → voice press, a microphone left open is released at start, the needs-you debug seed removed. Not driven by real keys: Mod+Alt+V and opening the panel by key. App tests: 2570.
@@ -81,6 +82,9 @@ The log of the port: newest entries at the top of each section. The plan is in
 ## Decisions taken without the owner
 
 Taken while the owner was away, each with its reason; revisit any of them freely.
+
+- **Programs in a pane cannot write or read the clipboard (OSC 52).** The old app ignored OSC 52 too; letting any program a pane runs read the clipboard silently would be a leak. Copy stays an explicit action.
+- **A pane opened to log in to an account starts with no kits**, as the old code's comment intended (its code passed the kits turned on everywhere).
 
 - **The old app stays on the branch until wave 5.** It is the reference for behaviour; deleting it early would make porting harder and gain nothing.
 - **`src-tauri/main.rs.legacy`** keeps the old entry point for reference; the native `main` lives in `crates/hangar-app/src/main.rs`.
