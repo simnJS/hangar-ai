@@ -147,7 +147,6 @@ impl Terminal {
         let at_or_above = search.matches.iter().rposition(|m| *m.start() <= bottom);
         search.current = at_or_above.or(search.matches.len().checked_sub(1));
         self.reveal_current_match();
-        self.bump_all_rows();
         Ok(self.search_status())
     }
 
@@ -182,20 +181,22 @@ impl Terminal {
         };
         search.current = Some(next);
         self.reveal_current_match();
-        self.bump_all_rows();
         self.search_status()
     }
 
     /// Ends the search and its highlights.
     pub fn clear_search(&mut self) {
-        if self.search.take().is_some() {
-            self.bump_all_rows();
-        }
+        self.search = None;
     }
 
     /// Whether a search is active.
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
+    }
+
+    /// The query of the active search, to reopen a search bar on it.
+    pub fn search_query(&self) -> Option<(&str, SearchOptions)> {
+        self.search.as_ref().map(|s| (s.query.as_str(), s.options))
     }
 
     pub fn search_status(&self) -> SearchStatus {
@@ -237,7 +238,6 @@ impl Terminal {
         let due = self.search.as_ref().and_then(|s| s.refresh_due());
         if due.is_some_and(|at| now >= at) {
             self.recompute_matches();
-            self.bump_all_rows();
         }
     }
 

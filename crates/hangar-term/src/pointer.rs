@@ -9,7 +9,6 @@
 
 use std::time::{Duration, Instant};
 
-use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Point, Side as EmulatorSide};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{TermMode, viewport_to_point};

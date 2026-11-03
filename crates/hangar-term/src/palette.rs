@@ -26,9 +26,6 @@ pub struct Palette {
     pub cursor_text: Color,
     /// The fill behind selected text.
     pub selection_background: Color,
-    /// Selected text, when the selection should recolour it; `None` keeps each
-    /// cell's own colour, which is what most themes want.
-    pub selection_foreground: Option<Color>,
     /// The sixteen ANSI colours: black, red, green, yellow, blue, magenta,
     /// cyan, white, then the same eight bright.
     pub ansi: [Color; 16],
@@ -55,7 +52,6 @@ impl Default for Palette {
             cursor: hex(0xd8d9dd),
             cursor_text: hex(0x121316),
             selection_background: hex(0x2a3954),
-            selection_foreground: None,
             ansi: [
                 hex(0x1b1c1f),
                 hex(0xff7b72),
@@ -91,12 +87,6 @@ impl Palette {
                 None => xterm_indexed(index),
             },
         }
-    }
-
-    /// The bright counterpart of an ANSI colour, for bold text drawn in bright
-    /// colours. Colours that are already bright come back unchanged.
-    pub(crate) fn brighten(&self, index: u8) -> u8 {
-        if index < 8 { index + 8 } else { index }
     }
 }
 

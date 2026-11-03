@@ -309,15 +309,6 @@ impl Terminal {
         }
     }
 
-    /// Marks every row as changed: for the overlays (search highlights) that
-    /// are drawn from the row cache's neighbours and need a redraw but not a
-    /// rebuild.
-    pub(crate) fn bump_all_rows(&mut self) {
-        self.generation += 1;
-        let generation = self.generation;
-        self.row_generation.iter_mut().for_each(|g| *g = generation);
-    }
-
     // ---- What the app can change ------------------------------------------
 
     pub fn palette(&self) -> &Palette {
@@ -683,6 +674,22 @@ impl Terminal {
             column,
             width: if wide { 2 } else { 1 },
         })
+    }
+
+    /// The text of the cell under the cursor and whether it is bold and
+    /// italic, if there is anything to draw there.
+    pub(crate) fn char_at_cursor(&self, cursor: CursorView) -> Option<(String, bool, bool)> {
+        let line = Line(cursor.row as i32 - self.display_offset() as i32);
+        let cell = &self.term.grid()[line][Column(cursor.column)];
+        let zerowidth = cell.zerowidth().filter(|z| !z.is_empty());
+        if matches!(cell.c, ' ' | '\0' | '\t') && zerowidth.is_none() {
+            return None;
+        }
+        let mut text = String::from(cell.c);
+        if let Some(extra) = zerowidth {
+            text.extend(extra.iter());
+        }
+        Some((text, cell.flags.contains(Flags::BOLD), cell.flags.contains(Flags::ITALIC)))
     }
 
     /// The colour of a palette index as the emulator numbers them: 0 to 255
