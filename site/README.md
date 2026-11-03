@@ -28,8 +28,10 @@ the demo went with the React sources (it is at tag `v1.12.1`, under `demo/`).
 
 ## The page
 
-One story, in order: what Hangar.AI is (hero), the orchestrator in four steps,
-Hangar Mobile, everything else, downloads, questions.
+One story, in order: what Hangar.AI is (hero), what 2.0 being native changes (the
+measures of 1.12.1 against 2.0, which come from `docs/native/BENCHMARK.md`), the
+orchestrator in four steps, Hangar Mobile, everything else, downloads, questions.
+Hangar runs Claude Code only since 2.0, and the page names no other agent.
 
 Every claim on it comes from the code. When a feature changes, check the copy
 against `crates/hangar-i18n/dict/en.json` (the English strings say what the app
@@ -77,7 +79,9 @@ then map the `--*` names to the keys `TOKENS` lists in `main.js`.
 
 ## Captures
 
-Everything in `img/` is the real app: Hangar.AI 1.0 on Windows,
+Everything in `img/` is the real app: Hangar.AI 1.0 on Windows, the web-view
+app that 2.0 replaced and whose interface it draws natively (new captures of 2.0
+are still to be taken, with the same care about what they show),
 with real Claude Code agents (the orchestrator on Opus, workers and reviewer on
 Sonnet) orchestrating **checkout-v2**, a small sample repository, over one
 afternoon. The captures are lossless PNGs of the window's client area:
@@ -161,9 +165,10 @@ line on the orchestrator, and the hero capture bleeding off the bottom.
 ## Releasing a new version
 
 The version is written into `index.html` by hand, so the download buttons point
-straight at the files. Replace `1.0.0` everywhere in the page (the brand, the
-release link, the download heading, the five asset links and the JSON-LD). The
-asset names follow what tauri-action uploads:
+straight at the files. Replace the version (`2.0.0` now) everywhere in the page
+(the brand, the download heading, the five asset links and the JSON-LD). The
+asset names are the ones the release workflow uploads, kept from the Tauri
+builds (`docs/native/PACKAGING.md`):
 
 ```
 Hangar.AI_<v>_x64-setup.exe
