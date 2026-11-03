@@ -46,6 +46,7 @@ pub struct Dialog<'a, M> {
     body: Element<'a, M>,
     actions: Vec<Element<'a, M>>,
     note: Option<String>,
+    lead: Option<Element<'a, M>>,
     width: f32,
     body_max_height: f32,
     body_padding: Padding,
@@ -66,6 +67,7 @@ pub fn dialog<'a, M: Clone + 'a>(
         body: body.into(),
         actions: Vec::new(),
         note: None,
+        lead: None,
         width: size::DIALOG_WIDTH,
         // Room for the head and the foot in a window of about 600.
         body_max_height: 420.0,
@@ -92,6 +94,14 @@ impl<'a, M: Clone + 'a> Dialog<'a, M> {
     /// A sentence at the left of the footer, away from the buttons.
     pub fn note(mut self, note: impl Into<String>) -> Self {
         self.note = Some(note.into());
+        self
+    }
+
+    /// Controls at the left of the footer, away from the buttons at the right:
+    /// the housekeeping of a dialog, with its way out kept where every dialog
+    /// has it.
+    pub fn lead(mut self, lead: impl Into<Element<'a, M>>) -> Self {
+        self.lead = Some(lead.into());
         self
     }
 
@@ -167,6 +177,9 @@ impl<'a, M: Clone + 'a> From<Dialog<'a, M>> for Element<'a, M> {
         .max_height(d.body_max_height);
 
         let mut foot = row![].spacing(space::MD).align_y(Alignment::Center);
+        if let Some(lead) = d.lead {
+            foot = foot.push(lead);
+        }
         if let Some(note) = d.note {
             foot = foot.push(typography::hint(t, note));
         }

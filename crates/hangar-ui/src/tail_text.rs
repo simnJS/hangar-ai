@@ -100,6 +100,11 @@ pub struct TailText {
     color: Option<Color>,
     width: Length,
     cut: Cut,
+    /// A last piece that is never cut while there is room for it, in a colour
+    /// of its own: the file name after its folder.
+    suffix: Option<(String, Color)>,
+    /// How wide what is shown of `content` came out, where the suffix starts.
+    head_width: f32,
 }
 
 /// `content` on one line, cut from its start when the room is short.
@@ -112,10 +117,20 @@ pub fn tail_text(content: impl Into<String>) -> TailText {
         color: None,
         width: Length::Fill,
         cut: Cut::Start,
+        suffix: None,
+        head_width: 0.0,
     }
 }
 
 impl TailText {
+    /// A piece that follows the text, in its own colour, and is the last to
+    /// give way: `tail_text(folder).suffix(name, ink)` keeps the file name
+    /// whole and shortens the folder before it (`.insp-file__path`).
+    pub fn suffix(mut self, suffix: impl Into<String>, color: Color) -> Self {
+        self.suffix = Some((suffix.into(), color));
+        self
+    }
+
     /// Gives up the end instead of the start: the ordinary ellipsis, for a
     /// cell that holds a name or an id and not a path.
     pub fn cut_end(mut self) -> Self {
@@ -181,7 +196,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
         limits: &layout::Limits,
     ) -> layout::Node {
         let height = self.line_height();
-        let natural = text_width(&self.content, self.size, self.font);
+        let (text_size, font) = (self.size, self.font);
+        let suffix_width = self
+            .suffix
+            .as_ref()
+            .map_or(0.0, |(suffix, _)| text_width(suffix, text_size, font));
+        let natural = text_width(&self.content, text_size, font) + suffix_width;
         let size = limits
             .width(self.width)
             .height(Length::Fixed(height))
@@ -190,13 +210,14 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
                 Length::Fixed(height),
                 Size::new(natural, height),
             );
-        let (text_size, font) = (self.size, self.font);
+        // The suffix keeps what it needs; the text gives way for the rest.
         self.shown = fit(
             &self.content,
-            size.width,
+            (size.width - suffix_width).max(0.0),
             |candidate| text_width(candidate, text_size, font),
             self.cut,
         );
+        self.head_width = text_width(&self.shown, text_size, font);
         layout::Node::new(size)
     }
 
@@ -214,22 +235,31 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
         let Some(clip) = bounds.intersection(viewport) else {
             return;
         };
+        let piece = |content: String| Text {
+            content,
+            bounds: bounds.size(),
+            size: Pixels(self.size),
+            line_height: text::LineHeight::default(),
+            font: self.font,
+            align_x: text::Alignment::Left,
+            align_y: alignment::Vertical::Center,
+            shaping: text::Shaping::Advanced,
+            wrapping: text::Wrapping::None,
+        };
         renderer.fill_text(
-            Text {
-                content: self.shown.clone(),
-                bounds: bounds.size(),
-                size: Pixels(self.size),
-                line_height: text::LineHeight::default(),
-                font: self.font,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Center,
-                shaping: text::Shaping::Advanced,
-                wrapping: text::Wrapping::None,
-            },
+            piece(self.shown.clone()),
             Point::new(bounds.x, bounds.center_y()),
             self.color.unwrap_or(style.text_color),
             clip,
         );
+        if let Some((suffix, color)) = &self.suffix {
+            renderer.fill_text(
+                piece(suffix.clone()),
+                Point::new(bounds.x + self.head_width, bounds.center_y()),
+                *color,
+                clip,
+            );
+        }
     }
 }
 
