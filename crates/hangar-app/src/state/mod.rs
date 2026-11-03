@@ -29,7 +29,15 @@ use std::sync::Arc;
 use iced::window;
 
 #[allow(unused_imports)]
-pub use lenient::{app_state as read_state, read as read_state_keeping};
+pub use lenient::{app_state as read_state, read as read_state_keeping, read_checked};
+
+/// What the boot read from `state.json`: the state, and the values it held
+/// that no field could read (`hydrate_read`).
+#[derive(Debug, Clone, Default)]
+pub struct Loaded {
+    pub state: AppState,
+    pub kept: Vec<unread::Kept>,
+}
 // What packages name most, at `crate::state::*`; some have no user until the
 // packages land.
 #[allow(unused_imports)]
@@ -213,5 +221,48 @@ impl Model {
     pub fn focused_pane<'a>(&self, ws: &'a Workspace) -> Option<&'a Pane> {
         let id = self.ui.focus_by_workspace.get(&ws.id)?;
         ws.panes.iter().find(|pane| &pane.id == id)
+    }
+
+    /// What window `w`'s broadcast field holds. Each window has its own, as
+    /// each Tauri window's App had its own `broadcast`: the focused one's is
+    /// `ui.broadcast`, the others' wait in `ui.parked`.
+    pub fn broadcast_in(&self, w: window::Id) -> &str {
+        if self.is_focused_window(w) {
+            &self.ui.broadcast
+        } else {
+            self.ui.parked.get(&w).map_or("", |p| p.broadcast.as_str())
+        }
+    }
+
+    /// Workspace `ws` is drawn from now on: it joins `ui.opened_ids`, so its
+    /// panes start and stay alive while it is hidden. The main window mounts
+    /// a workspace when it is first shown there (App.tsx's `openedIds`); a
+    /// workspace window mounts its own as it opens, as its own App did with
+    /// the one workspace it was opened for, whether the detach happened now
+    /// or before the app last quit.
+    pub fn mount(&mut self, ws: &str) {
+        if !self.ui.opened_ids.iter().any(|id| id == ws) {
+            self.ui.opened_ids.push(ws.to_string());
+        }
+    }
+
+    /// Window `id` now draws `kind`; a workspace window mounts its workspace.
+    pub fn window_opened(&mut self, id: window::Id, kind: WindowKind) {
+        if let WindowKind::Workspace(ws) = &kind {
+            let ws = ws.clone();
+            self.mount(&ws);
+        }
+        self.live.windows.insert(id, kind);
+    }
+
+    /// The workspaces that were in a window of their own when the app last
+    /// quit, whose windows open again at boot.
+    pub fn detached_workspaces(&self) -> Vec<WsId> {
+        self.state
+            .workspaces
+            .iter()
+            .filter(|ws| ws.detached == Some(true))
+            .map(|ws| ws.id.clone())
+            .collect()
     }
 }

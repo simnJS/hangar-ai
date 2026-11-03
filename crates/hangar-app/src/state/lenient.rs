@@ -41,24 +41,34 @@ pub fn app_state(value: Value) -> AppState {
 }
 
 /// `state.json`'s JSON as an `AppState`, and the values it held that no field
-/// could read, to be written back (`Unread`).
-pub fn read(mut value: Value) -> (AppState, Vec<Kept>) {
+/// could read, to be written back (`Unread`). A document `read_checked`
+/// turns down reads as the empty state.
+pub fn read(value: Value) -> (AppState, Vec<Kept>) {
+    read_checked(value).unwrap_or_else(|why| {
+        eprintln!("state.json could not be read ({why}); starting empty");
+        (AppState::default(), Vec::new())
+    })
+}
+
+/// `read`, or why the document could not be read at all: its root is not an
+/// object, or the cleaned document still failed to parse. Either way nothing
+/// of it reaches the model, so the boot must not let the next save write the
+/// empty state over it (the file is set aside first, services/core.rs).
+pub fn read_checked(mut value: Value) -> Result<(AppState, Vec<Kept>), String> {
+    if !value.is_object() {
+        return Err("its content is not an object".into());
+    }
     let mut kept = Vec::new();
     clean_app_state(&mut value, &mut kept);
-    let state: AppState = match serde_json::from_value(value.clone()) {
-        Ok(state) => state,
-        Err(err) => {
-            // Cleaning leaves only keys that parsed one by one, so this means
-            // a combination of them failed, which the derives here cannot
-            // produce.
-            eprintln!("state.json could not be read even leniently ({err}); starting empty");
-            return (AppState::default(), Vec::new());
-        }
-    };
+    // Cleaning leaves only keys that parsed one by one, so a failure here
+    // means a combination of them failed, which the derives here cannot
+    // produce; it is still answered rather than taken for an empty state.
+    let state: AppState = serde_json::from_value(value.clone())
+        .map_err(|err| format!("it could not be read even leniently: {err}"))?;
     if let Ok(written) = serde_json::to_value(&state) {
         explicit_nulls(&value, &written, &mut kept);
     }
-    (state, kept)
+    Ok((state, kept))
 }
 
 /// The `null`s of `?: T | null` fields (`taskId`, `model`, `portBase`,
@@ -335,6 +345,19 @@ mod tests {
     use super::*;
     use crate::state::types::{AgentId, SplitDir};
     use serde_json::json;
+
+    /// A document that holds no state at all is told apart from an empty
+    /// one: the boot sets the file aside rather than saving over it.
+    #[test]
+    fn a_document_that_is_not_an_object_is_turned_down_not_read_as_empty() {
+        for root in [json!([]), json!(null), json!("state"), json!(3)] {
+            assert!(read_checked(root.clone()).is_err(), "{root}");
+            assert_eq!(read(root).0, AppState::default());
+        }
+        let (state, kept) = read_checked(json!({})).expect("an empty state is a state");
+        assert_eq!(state, AppState::default());
+        assert!(kept.is_empty());
+    }
 
     #[test]
     fn a_file_written_by_the_old_app_round_trips_in_meaning() {

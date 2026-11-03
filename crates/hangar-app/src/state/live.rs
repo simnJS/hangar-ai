@@ -31,7 +31,8 @@ pub struct Ui {
     pub confirm_reset: bool,
     pub confirm_stop_workers: bool,
     pub needs_you_open: bool,
-    /// The status bar's broadcast input.
+    /// The focused window's broadcast input; the other windows' wait in
+    /// `parked` (`Model::broadcast_in`).
     pub broadcast: String,
     /// The one-line notice at the bottom, with the id its expiry names.
     pub notice: Option<(u64, Notice)>,
@@ -54,10 +55,10 @@ pub struct Ui {
     /// What had the keyboard when each overlay opened, parallel to
     /// `overlays`: closing one gives the keyboard back.
     pub overlay_openers: Vec<Option<Focus>>,
-    /// The view, drawer and focus of every window but the focused one. Each
-    /// window has its own, as each Tauri window had its own App: `view`,
-    /// `drawer` and `focus` above are the focused window's, and trade places
-    /// with these when the focus moves (`Model::view_in`).
+    /// The view, overlays, drawer, focus and broadcast text of every window
+    /// but the focused one. Each window has its own, as each Tauri window had
+    /// its own App: the fields above are the focused window's, and trade
+    /// places with these when the focus moves (`Model::view_in`).
     pub parked: HashMap<window::Id, WindowUi>,
     /// Where the pointer is, for the drawers' "a press outside closes it".
     pub pointer: Pointer,
@@ -72,6 +73,9 @@ pub struct WindowUi {
     pub drawer: Option<Drawer>,
     pub drawer_opener: Option<Focus>,
     pub focus: Option<Focus>,
+    /// What its broadcast field holds: a line typed in one window and left
+    /// there is not sent from, or shown in, another.
+    pub broadcast: String,
 }
 
 /// Over which of the frame's parts the pointer is, as their mouse areas

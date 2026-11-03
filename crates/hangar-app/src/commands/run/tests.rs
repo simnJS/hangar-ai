@@ -268,13 +268,13 @@ fn focus_and_zoom_commands_name_their_pane() {
         .collect();
     assert!(matches!(
         message(&m, w, PaneFocusRight),
-        Some(Message::Intent(Intent::FocusPane { pane, terminal: true, .. })) if pane == panes[1]
+        Some(Message::Intent(Intent::SelectPane { pane, .. })) if pane == panes[1]
     ));
     // Nothing on the left of the first pane: nothing to do.
     assert!(message(&m, w, PaneFocusLeft).is_none());
     assert!(matches!(
         message(&m, w, PanePrev),
-        Some(Message::Intent(Intent::FocusPane { pane, .. })) if pane == panes[1]
+        Some(Message::Intent(Intent::SelectPane { pane, .. })) if pane == panes[1]
     ));
     assert!(matches!(
         message(&m, w, PaneZoom),
@@ -301,6 +301,78 @@ fn zooming_the_text_stays_within_the_slider_s_bounds() {
     let mut settings = Settings::default();
     patch.apply(&mut settings);
     assert_eq!(settings.font_size, FONT_MAX);
+}
+
+/// Mod+, opens and closes the sheet through the intents the settings
+/// package follows, never behind its back.
+#[test]
+fn the_settings_key_goes_through_the_settings_intents() {
+    let (mut m, w) = model();
+    assert!(matches!(
+        message(&m, w, ViewSettings),
+        Some(Message::Intent(Intent::OpenSettings(None)))
+    ));
+    m.ui.overlays = vec![Overlay::Settings(SettingsCategory::Appearance)];
+    assert!(matches!(
+        message(&m, w, ViewSettings),
+        Some(Message::Shell(Action::CloseSettings))
+    ));
+    // With a kit's activation over the sheet, the key still closes it.
+    m.ui.overlays.push(Overlay::KitActivation {
+        kit: "k".into(),
+        ws: None,
+    });
+    assert!(matches!(
+        message(&m, w, ViewSettings),
+        Some(Message::Shell(Action::CloseSettings))
+    ));
+}
+
+/// Ctrl+Tab, Alt+arrows and Mod+1…9 move between the panes and nothing
+/// else: they are not the landing that closes every overlay.
+#[test]
+fn the_pane_keys_select_a_pane_without_the_full_landing() {
+    let (mut m, w) = model();
+    let ws = add(&mut m, &[AgentId::Shell, AgentId::Shell]);
+    let second = m.workspace(&ws).unwrap().panes[1].id.clone();
+    m.ui.overlays = vec![Overlay::Settings(SettingsCategory::General)];
+    for id in [PaneFocus2, PaneNext, PaneFocusRight] {
+        assert!(
+            matches!(
+                message(&m, w, id),
+                Some(Message::Intent(Intent::SelectPane { ws: at, pane })) if at == ws && pane == second
+            ),
+            "{id:?}"
+        );
+    }
+}
+
+/// A workspace without a pane (a hand-edited state.json) has no arrangement
+/// for the pane commands to act on: their keys reach nothing, the palette
+/// does not offer them, and the toolbar's presets are still there.
+#[test]
+fn the_pane_commands_need_a_pane_to_be_arranged() {
+    let (mut m, w) = model();
+    m.apply(StoreAction::AddWorkspace(WorkspaceDraft {
+        name: "empty".into(),
+        cwd: "/e".into(),
+        layout: 0,
+        ..WorkspaceDraft::default()
+    }));
+    assert!(m.active_workspace().is_some_and(|ws| ws.panes.is_empty()));
+    assert!(lacks(
+        &m,
+        w,
+        &[
+            PaneSplit,
+            PaneSplitRight,
+            PaneFocus1,
+            PaneRestartAll,
+            ViewBroadcast,
+            PaneNext
+        ]
+    ));
+    assert!(has(&m, w, &[ViewBoard, ViewTerminals, WorkspaceMcpServers]));
 }
 
 #[test]

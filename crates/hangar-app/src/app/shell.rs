@@ -18,7 +18,7 @@ use crate::shell::{
 use crate::state::folders::sidebar_order;
 use crate::state::layout::{compute_layout, normalize_tree, preferred_dir};
 use crate::state::types::{AgentId, WindowBounds};
-use crate::state::{PaneId, PanePatch, Patch, Settings, StoreAction, Workspace, WsId};
+use crate::state::{Model, PaneId, PanePatch, Patch, Settings, StoreAction, Workspace, WsId};
 
 impl App {
     /// The shell's part of an intent. Packages get the intent after this.
@@ -58,6 +58,7 @@ impl App {
             }
             Intent::ActivateWorkspace(ws) => return self.activate_workspace(ws),
             Intent::FocusPane { ws, pane, terminal } => return self.focus_pane(ws, pane, terminal),
+            Intent::SelectPane { ws, pane } => select_pane(&mut self.model, &ws, &pane),
             Intent::ToggleNavigator => {
                 self.update_settings(|s| s.navigator_open = !s.navigator_open)
             }
@@ -171,21 +172,7 @@ impl App {
                 }
             }
             Action::OpenNeedsYou => self.model.ui.needs_you_open = true,
-            Action::ToggleSettings => {
-                let ui = &mut self.model.ui;
-                if let Some(at) = ui
-                    .overlays
-                    .iter()
-                    .rposition(|overlay| matches!(overlay, Overlay::Settings(_)))
-                {
-                    ui.overlays.remove(at);
-                    if at < ui.overlay_openers.len() {
-                        ui.overlay_openers.remove(at);
-                    }
-                } else {
-                    self.open_overlay(Overlay::Settings(Default::default()));
-                }
-            }
+            Action::CloseSettings => return self.close_settings(),
             Action::ToggleFullscreen(w) => {
                 return window::mode(w).then(move |mode| {
                     window::set_mode(
@@ -201,11 +188,13 @@ impl App {
             Action::OpenWorkspaceWindow { ws, screen } => {
                 return self.open_workspace_window(ws, screen);
             }
+            Action::OpenTimedOut(w) => return self.open_timed_out(w),
             Action::BoundsSettled(w, seq) => {
                 if self.bounds_seq.get(&w) == Some(&seq) {
                     self.remember_bounds(w);
                 }
             }
+            Action::Quit => return self.quit(),
         }
         Task::none()
     }
@@ -228,6 +217,8 @@ impl App {
                 self.window_sizes.remove(&id);
                 self.window_positions.remove(&id);
                 self.bounds_seq.remove(&id);
+                self.unopened.remove(&id);
+                self.abandoned.remove(&id);
                 if self.model.ui.focused_window == Some(id) {
                     self.model.ui.focused_window = None;
                     self.load_window_ui(self.main_window);
@@ -248,6 +239,12 @@ impl App {
                 Task::none()
             }
             window::Event::Opened { size, position } => {
+                // Given up on (`open_timed_out`) and only now come: its
+                // workspace is back in the main window already.
+                if self.abandoned.remove(&id) {
+                    return window::close(id);
+                }
+                self.unopened.remove(&id);
                 self.window_sizes.insert(id, size * scale);
                 if let Some(at) = position {
                     self.window_positions
@@ -273,37 +270,14 @@ impl App {
     }
 
     /// The focus moves to window `to`: the window it leaves parks its view,
-    /// overlays, drawer and focus, and `to` takes its own back.
+    /// overlays, drawer, focus and broadcast text, and `to` takes its own
+    /// back.
     fn swap_focus(&mut self, to: window::Id) {
-        let from = self.focused_window();
-        if from == to {
-            self.model.ui.focused_window = Some(to);
-            return;
-        }
-        let ui = &mut self.model.ui;
-        let leaving = crate::state::WindowUi {
-            view: ui.view,
-            overlays: std::mem::take(&mut ui.overlays),
-            overlay_openers: std::mem::take(&mut ui.overlay_openers),
-            drawer: ui.drawer.take(),
-            drawer_opener: ui.drawer_opener.take(),
-            focus: ui.focus.take(),
-        };
-        ui.parked.insert(from, leaving);
-        ui.pointer = Default::default();
-        ui.focused_window = Some(to);
-        self.load_window_ui(to);
+        swap_window_ui(&mut self.model, to);
     }
 
     fn load_window_ui(&mut self, w: window::Id) {
-        let ui = &mut self.model.ui;
-        let mine = ui.parked.remove(&w).unwrap_or_default();
-        ui.view = mine.view;
-        ui.overlays = mine.overlays;
-        ui.overlay_openers = mine.overlay_openers;
-        ui.drawer = mine.drawer;
-        ui.drawer_opener = mine.drawer_opener;
-        ui.focus = mine.focus;
+        load_window_ui(&mut self.model.ui, w);
     }
 
     /// What follows a change (App.tsx's effects), run after every message.
@@ -323,10 +297,8 @@ impl App {
         // Workspaces stay opened once visited, so their panes live on while
         // hidden; nothing spawns for one never opened.
         let active = self.model.state().active_workspace_id.clone();
-        if let Some(id) = &active
-            && !self.model.ui.opened_ids.contains(id)
-        {
-            self.model.ui.opened_ids.push(id.clone());
+        if let Some(id) = &active {
+            self.model.mount(id);
         }
         if active != self.last_active {
             // A preview drawer of one workspace does not come over the next
@@ -464,6 +436,23 @@ impl App {
         let opener = ui.focus.clone();
         ui.overlays.push(overlay);
         ui.overlay_openers.push(opener);
+    }
+
+    /// `view.settings` with the sheet open: the overlays close from the top
+    /// down to the sheet, each as `Intent::CloseOverlay`, so the settings
+    /// package (and whatever was opened over the sheet) hears its own close
+    /// and lets go of what it loaded.
+    fn close_settings(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        // Each close takes one overlay off; the bound only guards against a
+        // package that would open one again as it hears a close.
+        for _ in 0..self.model.ui.overlays.len() {
+            if !has_settings(&self.model.ui.overlays) {
+                break;
+            }
+            tasks.push(self.intent(Intent::CloseOverlay));
+        }
+        Task::batch(tasks)
     }
 
     /// Closes the top overlay, and gives the keyboard back to what had it.
@@ -913,7 +902,7 @@ impl App {
             self.model
                 .apply(StoreAction::SetActiveWorkspace(Some(next)));
         }
-        self.ask_workspace_window(ws)
+        self.ask_workspace_window(ws, windows::Opening::Detach)
     }
 
     /// Either window: brings a workspace back into the main window, and
@@ -943,7 +932,11 @@ impl App {
 
     /// Workspace `ws`'s window: brought forward when it is open, else opened
     /// once the main window's screen is known (`windows::workspace_settings_at`).
-    pub(super) fn ask_workspace_window(&mut self, ws: WsId) -> Task<Message> {
+    pub(super) fn ask_workspace_window(
+        &mut self,
+        ws: WsId,
+        why: windows::Opening,
+    ) -> Task<Message> {
         if let Some(id) = self
             .model
             .live
@@ -954,9 +947,10 @@ impl App {
         {
             return window::gain_focus(id);
         }
-        if !self.opening.insert(ws.clone()) {
+        if self.opening.contains_key(&ws) {
             return Task::none();
         }
+        self.opening.insert(ws.clone(), why);
         window::monitor_size(self.main_window).map(move |screen| {
             Message::Shell(Action::OpenWorkspaceWindow {
                 ws: ws.clone(),
@@ -965,10 +959,12 @@ impl App {
         })
     }
 
+    /// The window is made, and its workspace mounted there: its panes start
+    /// now, whether the detach happened now or before the app last quit.
     fn open_workspace_window(&mut self, ws: WsId, screen: Option<Size>) -> Task<Message> {
-        if !self.opening.remove(&ws) {
+        let Some(why) = self.opening.remove(&ws) else {
             return Task::none();
-        }
+        };
         // Brought back, or gone, while the screen was being asked about.
         let Some(workspace) = self
             .model
@@ -984,10 +980,27 @@ impl App {
         );
         let (id, open) = windows::open_workspace(settings);
         self.model
-            .live
-            .windows
-            .insert(id, WindowKind::Workspace(ws));
-        Task::batch([open, window::gain_focus(id)])
+            .window_opened(id, WindowKind::Workspace(ws.clone()));
+        self.unopened.insert(id, (ws, why));
+        let watch = Task::perform(tokio::time::sleep(windows::OPEN_TIMEOUT), move |()| {
+            Message::Shell(Action::OpenTimedOut(id))
+        });
+        Task::batch([open, window::gain_focus(id), watch])
+    }
+
+    /// A workspace window that never reported itself open: its workspace
+    /// comes back to the main window (App.tsx's `detach`, on the error of
+    /// `openWorkspaceWindow`). Its panes keep running there; a detach the
+    /// person asked for is shown again and told about.
+    fn open_timed_out(&mut self, w: window::Id) -> Task<Message> {
+        let Some((ws, why)) = self.unopened.remove(&w) else {
+            return Task::none();
+        };
+        self.abandoned.insert(w);
+        match undo_open(&mut self.model, w, &ws, why) {
+            Some(text) => notice::show(&mut self.model, crate::shell::Notice::Problem(text)),
+            None => Task::none(),
+        }
     }
 
     /// A workspace window moved or was resized: its bounds are written once
@@ -1024,3 +1037,112 @@ impl App {
         }
     }
 }
+
+/// Whether the settings sheet is in the overlay stack.
+fn has_settings(overlays: &[Overlay]) -> bool {
+    overlays
+        .iter()
+        .any(|overlay| matches!(overlay, Overlay::Settings(_)))
+}
+
+/// The focus moves to window `to`: the window it leaves parks what is its
+/// own (`WindowUi`), and `to` takes its own back.
+fn swap_window_ui(m: &mut Model, to: window::Id) {
+    let from = m.focused_window();
+    let Some(from) = from.filter(|from| *from != to) else {
+        m.ui.focused_window = Some(to);
+        return;
+    };
+    let ui = &mut m.ui;
+    let leaving = crate::state::WindowUi {
+        view: ui.view,
+        overlays: std::mem::take(&mut ui.overlays),
+        overlay_openers: std::mem::take(&mut ui.overlay_openers),
+        drawer: ui.drawer.take(),
+        drawer_opener: ui.drawer_opener.take(),
+        focus: ui.focus.take(),
+        broadcast: std::mem::take(&mut ui.broadcast),
+    };
+    ui.parked.insert(from, leaving);
+    ui.pointer = Default::default();
+    ui.focused_window = Some(to);
+    load_window_ui(ui, to);
+}
+
+fn load_window_ui(ui: &mut crate::state::Ui, w: window::Id) {
+    let mine = ui.parked.remove(&w).unwrap_or_default();
+    ui.view = mine.view;
+    ui.overlays = mine.overlays;
+    ui.overlay_openers = mine.overlay_openers;
+    ui.drawer = mine.drawer;
+    ui.drawer_opener = mine.drawer_opener;
+    ui.focus = mine.focus;
+    ui.broadcast = mine.broadcast;
+}
+
+/// `Intent::SelectPane` (App.tsx's `focusPane`): the pane becomes its
+/// workspace's focused one, and the keyboard goes to its terminal. Nothing
+/// else moves: not the view, not the active workspace, and no overlay
+/// closes. While one is open in the window it keeps the keyboard, and what
+/// was typed in it; closing it gives the keyboard to the panes, which is to
+/// this pane (`restore_focus` enters them through the focused one).
+fn select_pane(m: &mut Model, ws: &str, pane: &str) {
+    let exists = m
+        .workspace(ws)
+        .is_some_and(|w| w.panes.iter().any(|p| p.id == pane));
+    if !exists {
+        return;
+    }
+    m.ui.focus_by_workspace.insert(ws.into(), pane.into());
+    let Some(w) = m
+        .window_of(ws)
+        .filter(|w| m.window_workspace(*w).is_some_and(|shown| shown.id == ws))
+    else {
+        return;
+    };
+    if !m.overlays_in(w).is_empty() || m.view_in(w) != View::Terminals {
+        return;
+    }
+    let focus = Focus::Terminal(pane.into());
+    if m.is_focused_window(w) {
+        // The keyboard moving on to a pane is leaving an open drawer, as a
+        // press outside it is: it stays where it went.
+        drawer::close(&mut m.ui, DrawerCloseReason::Outside);
+        m.ui.focus = Some(focus);
+    } else if let Some(parked) = m.ui.parked.get_mut(&w) {
+        parked.focus = Some(focus);
+    }
+}
+
+/// A workspace window `w` that never opened (`open_timed_out`): the window
+/// is forgotten and its workspace is attached again, its panes still
+/// running. A detach the person asked for also shows the workspace in the
+/// main window and answers the notice to show; one reopened at boot comes
+/// back quietly, as App.tsx's reopening did.
+fn undo_open(m: &mut Model, w: window::Id, ws: &str, why: windows::Opening) -> Option<String> {
+    m.live.windows.remove(&w);
+    m.ui.parked.remove(&w);
+    m.workspace(ws)?;
+    m.apply(StoreAction::UpdateWorkspace(
+        ws.into(),
+        Patch::new(|w: &mut Workspace| w.detached = Some(false)),
+    ));
+    match why {
+        windows::Opening::Boot => None,
+        windows::Opening::Detach => {
+            m.apply(StoreAction::SetActiveWorkspace(Some(ws.into())));
+            let t = hangar_i18n::Translator::new(m.locale());
+            let error = t.t(hangar_i18n::Key::WindowNoAnswer);
+            Some(
+                t.t_with(
+                    hangar_i18n::Key::WindowOpenFailed,
+                    &hangar_i18n::args!("error" => error.as_ref()),
+                )
+                .into_owned(),
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

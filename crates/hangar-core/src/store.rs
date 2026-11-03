@@ -316,7 +316,7 @@ mod tests {
         let err = load_state_checked(&host).expect_err("unreadable");
         assert!(matches!(err.rescue, Rescue::KeptAs(_)), "{err:?}");
         assert!(err.reason.contains("UTF-8"), "{}", err.reason);
-        assert_eq!(rescues(&path), [bytes.clone()]);
+        assert_eq!(rescues(&path), std::slice::from_ref(&bytes));
 
         // The empty state the window saves next lands on a fresh file.
         save_state(&host, json!({})).unwrap();

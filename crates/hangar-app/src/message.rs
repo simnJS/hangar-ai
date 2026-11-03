@@ -9,7 +9,6 @@
 use std::time::Instant;
 
 use iced::{keyboard, window};
-use serde_json::Value;
 
 use crate::commands::CommandId;
 use crate::services::{CoreEvent, PreviewRequest};
@@ -25,8 +24,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum Message {
     // The shell's own.
-    /// `load_state` answered: the raw JSON, `None` when there is no file yet.
-    Booted(Result<Option<Value>, String>),
+    /// `load_state` answered and the state is read; `None` when there is no
+    /// file yet. An error says what became of the file it could not use.
+    Booted(Result<Option<Box<crate::state::Loaded>>, hangar_core::store::LoadError>),
     /// The model has been still for 400 ms since this revision (persist.rs).
     SaveDue(u64),
     /// A save finished.
@@ -235,11 +235,15 @@ pub enum Intent {
     ClosePreviews(WsId),
     /// A pane was given a new id by `StoreAction::RespawnPane`, whoever
     /// applied it (a restart, an agent or session change, a control op): its
-    /// shell is to be killed and spawned again under `to`. `keeps_session`
-    /// unless the respawn dropped the session it had (a reset), which is when
-    /// a pane owed a resume while asleep keeps it (`carryResume`). Sent by the
-    /// shell after the update that respawned it; handled by P4
-    /// (`panes_logic`: hibernation) and P5 (`panes`: the PTY).
+    /// shell is killed and spawned again under `to`. `keeps_session` unless
+    /// the respawn dropped the session it had (a reset). Sent by the shell
+    /// after the update that respawned it, for whoever needs to hear of it;
+    /// nobody has to. P5 (`panes`) needs no message for the PTY: `from` gone
+    /// from the model and `to` come is what its sync unmounts and mounts.
+    /// The resume a pane owed while asleep is carried over to `to` by the
+    /// control op that respawned it (`control/writes.rs`,
+    /// `panes_logic::Live::carry_resume`), the one path the TS carried it
+    /// from (App.tsx's `carryResume`, in the control ops' `respawnPane`).
     PaneRespawned {
         ws: WsId,
         from: PaneId,
