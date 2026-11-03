@@ -2499,6 +2499,7 @@ version = "1.12.1"
 dependencies = [
  "iced",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
