@@ -1,0 +1,33 @@
+[package]
+name = "hangar-model3d"
+description = "The 3D model preview: loaders for glTF, OBJ, STL, PLY, FBX and USDZ, a wgpu renderer, and the iced widget that shows them"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+# The wgpu in use is the one iced re-exports (`iced::widget::shader::wgpu`), so
+# the widget and the offscreen capture share one set of types and no second
+# copy of wgpu is built.
+iced.workspace = true
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.25"
+# Textures. The formats are the ones a model's materials point at; the rest of
+# the crate's codecs are left out (iced turns on more of them for its own use).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tga", "gif", "webp"] }
+gltf = { version = "1.4", features = [
+    "KHR_materials_emissive_strength",
+    "KHR_materials_pbrSpecularGlossiness",
+    "KHR_materials_unlit",
+    "KHR_texture_transform",
+] }
+tobj = "4"
+stl_io = "0.11"
+ply-rs = "0.1"
+base64 = "0.22"
+pollster = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

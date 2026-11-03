@@ -24,6 +24,7 @@ hangar-term = { path = "crates/hangar-term" }
 hangar-kit-ui = { path = "crates/hangar-kit-ui" }
 hangar-kit-sdk = { path = "crates/hangar-kit-sdk" }
 hangar-kit-host = { path = "crates/hangar-kit-host" }
+hangar-model3d = { path = "crates/hangar-model3d" }
 
 iced = { version = "0.14", features = ["tokio", "advanced", "canvas", "image", "svg", "lazy", "markdown", "highlighter"] }
 alacritty_terminal = "0.26"
