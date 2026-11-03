@@ -2895,6 +2895,7 @@ version = "1.12.1"
 dependencies = [
  "hangar-core",
  "hangar-i18n",
+ "hangar-term",
  "hangar-theme",
  "iced",
  "open",
