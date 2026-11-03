@@ -31,6 +31,9 @@ hangar-webview.workspace = true
 hangar-model3d.workspace = true
 hangar-update.workspace = true
 iced.workspace = true
+# The development screenshot draws the main window's view off screen
+# (shell/dev_screenshot.rs).
+iced_runtime.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

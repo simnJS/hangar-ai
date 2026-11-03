@@ -3144,6 +3144,7 @@ dependencies = [
  "hangar-webview",
  "http",
  "iced",
+ "iced_runtime",
  "iced_test",
  "image",
  "open",
