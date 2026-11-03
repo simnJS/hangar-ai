@@ -37,3 +37,11 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+two-face.workspace = true
+syntect.workspace = true
+# The requests a page makes to the helper's scheme, served by hangar-core.
+http.workspace = true
+
+[dev-dependencies]
+# A headless window to drive the views with real events and to draw them.
+iced_test.workspace = true

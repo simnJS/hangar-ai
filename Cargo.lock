@@ -3037,13 +3037,17 @@ dependencies = [
  "hangar-ui",
  "hangar-update",
  "hangar-webview",
+ "http",
  "iced",
+ "iced_test",
  "open",
  "png 0.18.1",
  "rfd",
  "serde",
  "serde_json",
+ "syntect",
  "tokio",
+ "two-face",
 ]
 
 [[package]]
