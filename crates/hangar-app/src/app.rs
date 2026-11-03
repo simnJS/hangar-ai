@@ -7,24 +7,30 @@
 //! own handling, and batches every package's subscription. The list of
 //! packages is written once, in `packages!` below; a package never calls
 //! another package's `update` (PACKAGES.md, rule 4).
+//!
+//! The shell's own behaviour (App.tsx's, inventory §1.6–§1.11) is in
+//! `shell.rs` next to this file: what each intent does to the frame, the
+//! windows, the drawers and the focus.
 
+mod shell;
+
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::Space;
-use iced::{Element, Subscription, Task, keyboard, window};
+use iced::{Element, Point, Size, Subscription, Task, keyboard, window};
 use tokio::sync::watch;
 
 use hangar_i18n::Translator;
 
-use crate::commands;
 use crate::ctx::{Ctx, Metrics};
 use crate::message::{Intent, Message};
 use crate::services::events::Bus;
 use crate::services::inbox::InboxReceiver;
 use crate::services::{self, CoreEvent, CoreHandles, Services};
-use crate::shell::{self, Overlay, Region, View, WindowKind, notice, windows};
-use crate::state::{Model, Patch, Settings, Snapshot, StoreAction, persist};
+use crate::shell::{Panels, WindowKind, windows};
+use crate::state::{Model, Snapshot, persist};
 
 /// Every package, once: its directory (module and field name) and its route
 /// in `Message`. The callback macro gets the whole list.
@@ -143,20 +149,47 @@ pub fn run() -> iced::Result {
         .run()
 }
 
+/// What the snapshot was last published for: a change to any of these
+/// republishes it.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Published {
+    revision: u64,
+    version: u64,
+    opened: Vec<String>,
+}
+
 pub struct App {
     pub model: Model,
     pub pkg: Packages,
     services: Services,
-    /// The theme iced draws its own widgets in, rebuilt when the theme
-    /// changes (`to_iced` allocates).
-    iced_theme: (&'static str, iced::Theme),
+    /// The themes iced draws its own widgets in, one per theme in use, built
+    /// once each (`to_iced` allocates).
+    iced_themes: HashMap<&'static str, iced::Theme>,
     snapshot: watch::Sender<Arc<Snapshot>>,
-    /// The model revision the snapshot and the save follow.
-    published: u64,
+    published: Published,
+    /// The model revision last written to `state.json`.
     saved: u64,
+    writer: persist::Writer,
     bus: Bus,
     inbox: InboxReceiver,
     main_window: window::Id,
+    /// Each window's size and position as the system reports them, in
+    /// logical pixels before the interface size (iced reports them divided
+    /// by it).
+    window_sizes: HashMap<window::Id, Size>,
+    window_positions: HashMap<window::Id, Point>,
+    /// The last move or resize of each workspace window, for its debounced
+    /// bounds.
+    bounds_seq: HashMap<window::Id, u64>,
+    /// Workspaces whose window is asked for and not open yet.
+    opening: HashSet<String>,
+    /// The active workspace and the focused window's view as the last update
+    /// left them, for what follows a change of either.
+    last_active: Option<String>,
+    last_view: crate::shell::View,
+    /// A kit tab was opened by the person: once the panel is placed, a
+    /// preview without room opens as a drawer (App.tsx's `kitOpened`).
+    kit_opened: bool,
 }
 
 impl App {
@@ -180,26 +213,34 @@ impl App {
         let (main_window, open) = windows::open_main();
         model.live.windows.insert(main_window, WindowKind::Main);
 
-        let theme = model.theme();
-        let app = App {
+        let mut app = App {
             model,
             pkg,
             services,
-            iced_theme: (theme.id, hangar_theme::to_iced(theme)),
+            iced_themes: HashMap::new(),
             snapshot,
-            published: 0,
+            published: Published::default(),
             saved: 0,
+            writer: persist::Writer::default(),
             bus,
             inbox: inbox_receiver,
             main_window,
+            window_sizes: HashMap::new(),
+            window_positions: HashMap::new(),
+            bounds_seq: HashMap::new(),
+            opening: HashSet::new(),
+            last_active: None,
+            last_view: crate::shell::View::default(),
+            kit_opened: false,
         };
+        app.cache_themes();
         let host = core.host().clone();
         let load = Task::perform(services::core::load_state(host), Message::Booted);
         let detect = Task::perform(services::core::detect(), |(agents, shells)| {
             Message::Detected(agents, shells)
         });
-        let screenshot = match shell::dev_screenshot::requested() {
-            Some(_) => shell::dev_screenshot::capture(main_window),
+        let screenshot = match crate::shell::dev_screenshot::requested() {
+            Some(_) => crate::shell::dev_screenshot::capture(main_window),
             None => Task::none(),
         };
         (app, Task::batch([open, load, detect, screenshot]))
@@ -239,14 +280,17 @@ impl App {
                     self.saved = self.saved.max(revision);
                     Task::none()
                 }
-                Err(error) => notice::show(&mut self.model, shell::Notice::Problem(error)),
+                Err(error) => crate::shell::notice::show(
+                    &mut self.model,
+                    crate::shell::Notice::Problem(error),
+                ),
             },
             Message::Core(event) => self.core_event(event),
             Message::Window(id, event) => self.window_event(id, event),
             Message::Key(id, event) => self.key(id, event),
             Message::Command(command) => {
-                let window = self.model.ui.focused_window.unwrap_or(self.main_window);
-                commands::run(&self.model, window, command)
+                let window = self.focused_window();
+                crate::commands::run(&self.model, window, command)
             }
             Message::Intent(intent) => self.intent(intent),
             Message::Store(action) => {
@@ -254,60 +298,82 @@ impl App {
                 Task::none()
             }
             Message::NoticeExpired(id) => {
-                notice::expire(&mut self.model, id);
+                crate::shell::notice::expire(&mut self.model, id);
                 Task::none()
             }
             Message::DevScreenshot(shot) => {
-                if let Some(path) = shell::dev_screenshot::requested() {
-                    match shell::dev_screenshot::write(&path, &shot) {
+                if let Some(path) = crate::shell::dev_screenshot::requested() {
+                    match crate::shell::dev_screenshot::write(&path, &shot) {
                         Ok(()) => eprintln!("screenshot written to {}", path.display()),
                         Err(error) => eprintln!("screenshot failed: {error}"),
                     }
                 }
                 self.quit()
             }
+            Message::Shell(action) => self.shell_action(action),
             Message::Tick(_) | Message::Noop => Task::none(),
             // Routed above.
             _ => Task::none(),
         }
     }
 
-    /// The state is in: hydrate, and the gated work can start.
-    ///
-    /// TODO(P0b): reopen detached workspaces' windows, start the engines and
-    /// the subscriptions gated on hydration (§1.6 steps 7–8).
+    /// The state is in (§1.6 steps 5–7): hydrate, then the windows of the
+    /// workspaces that were detached when the app last closed open again.
+    /// What is gated on hydration (control, engines, hibernation, notices)
+    /// reads `live.hydrated`, which is now set.
     fn booted(&mut self, loaded: Result<Option<serde_json::Value>, String>) -> Task<Message> {
-        let (state, problem) = match loaded {
-            Ok(Some(value)) => (crate::state::read_state(value), None),
+        let ((state, kept), problem) = match loaded {
+            Ok(Some(value)) => (crate::state::read_state_keeping(value), None),
             Ok(None) => (Default::default(), None),
             // Core has already moved an unreadable file aside; start empty.
             Err(error) => (Default::default(), Some(error)),
         };
-        self.model.hydrate(state);
+        self.model.hydrate_read(state, kept);
         // Hydrating is not a change: nothing to save until something changes.
-        self.published = self.model.revision();
         self.saved = self.model.revision();
+        self.last_active = self.model.state().active_workspace_id.clone();
         self.publish_snapshot();
-        match problem {
-            Some(error) => notice::show(&mut self.model, shell::Notice::Problem(error)),
-            None => Task::none(),
+
+        let detached: Vec<String> = self
+            .model
+            .state()
+            .workspaces
+            .iter()
+            .filter(|ws| ws.detached == Some(true))
+            .map(|ws| ws.id.clone())
+            .collect();
+        let mut tasks: Vec<Task<Message>> = detached
+            .into_iter()
+            .map(|ws| self.ask_workspace_window(ws))
+            .collect();
+        if let Some(error) = problem {
+            tasks.push(crate::shell::notice::show(
+                &mut self.model,
+                crate::shell::Notice::Problem(error),
+            ));
         }
+        Task::batch(tasks)
     }
 
-    /// After every message: a changed model republishes the snapshot and
-    /// schedules its save; a changed theme rebuilds iced's.
+    /// After every message: what follows a change (App.tsx's effects), the
+    /// snapshot republished, the save scheduled, the themes in use built.
     fn after_update(&mut self) -> Task<Message> {
-        let theme = self.model.theme();
-        if theme.id != self.iced_theme.0 {
-            self.iced_theme = (theme.id, hangar_theme::to_iced(theme));
+        let mut tasks = self.follow_changes();
+        self.cache_themes();
+        let now = Published {
+            revision: self.model.revision(),
+            version: self.model.live.version,
+            opened: self.model.ui.opened_ids.clone(),
+        };
+        if now != self.published {
+            let saved_revision = self.published.revision;
+            self.published = now;
+            self.publish_snapshot();
+            if self.model.live.hydrated && self.model.revision() != saved_revision {
+                tasks.push(persist::schedule(self.model.revision()));
+            }
         }
-        let revision = self.model.revision();
-        if revision == self.published || !self.model.live.hydrated {
-            return Task::none();
-        }
-        self.published = revision;
-        self.publish_snapshot();
-        persist::schedule(revision)
+        Task::batch(tasks)
     }
 
     fn publish_snapshot(&self) {
@@ -322,20 +388,29 @@ impl App {
             return Task::none();
         }
         let host = self.services.core().host().clone();
-        let state = self.model.state_arc();
-        Task::perform(services::core::save_state(host, state), move |result| {
-            Message::Saved(revision, result)
-        })
+        let value = self.model.to_json();
+        let writer = self.writer.clone();
+        Task::perform(
+            services::core::save_state(host, value, writer, revision),
+            move |result| Message::Saved(revision, result),
+        )
     }
 
     fn core_event(&mut self, event: CoreEvent) -> Task<Message> {
         let own = match &event {
+            // The window the toast was about comes forward, then the pane
+            // (core-api.md, "A notification's click").
             CoreEvent::NotificationActivated { workspace, pane } => {
-                self.intent(Intent::FocusPane {
+                let raise = match self.model.window_of(workspace) {
+                    Some(w) => window::gain_focus(w),
+                    None => Task::none(),
+                };
+                let land = self.intent(Intent::FocusPane {
                     ws: workspace.clone(),
                     pane: pane.clone(),
                     terminal: true,
-                })
+                });
+                Task::batch([raise, land])
             }
             _ => Task::none(),
         };
@@ -344,57 +419,26 @@ impl App {
         Task::batch(tasks)
     }
 
-    fn window_event(&mut self, id: window::Id, event: window::Event) -> Task<Message> {
-        match event {
-            window::Event::CloseRequested if id == self.main_window => self.quit(),
-            // TODO(P0b): a workspace window's close is a reattach.
-            window::Event::CloseRequested => window::close(id),
-            window::Event::Closed => {
-                self.model.live.windows.remove(&id);
-                Task::none()
-            }
-            window::Event::Opened { size, .. } | window::Event::Resized(size) => {
-                self.model.ui.body_width.insert(id, size.width);
-                Task::none()
-            }
-            window::Event::Focused => {
-                self.model.ui.focused_window = Some(id);
-                Task::none()
-            }
-            _ => Task::none(),
-        }
-    }
-
     /// The main window's end is the app's (inventory §1.6, "On main-window
     /// close"): the last change saved, the core shut down, then exit.
     fn quit(&mut self) -> Task<Message> {
         if self.model.live.hydrated && self.model.revision() != self.saved {
             let host = self.services.core().host();
-            if let Err(error) = services::core::save_state_now(host, self.model.state()) {
-                eprintln!("the last change could not be saved: {error}");
+            let value = self.model.to_json();
+            let revision = self.model.revision();
+            match self
+                .writer
+                .write(revision, || hangar_core::store::save_state(host, value))
+            {
+                Ok(_) => self.saved = revision,
+                Err(error) => eprintln!("the last change could not be saved: {error}"),
             }
         }
         self.services.core().shutdown();
         iced::exit()
     }
 
-    /// Keys the shell answers itself. Shortcuts are the keymap's (P7, its own
-    /// subscription).
-    fn key(&mut self, window: window::Id, event: keyboard::Event) -> Task<Message> {
-        // TODO(P0b): Escape closes the top overlay only when the overlay did
-        // not use it (a popover inside it, a field's own Escape).
-        if let keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::Escape),
-            ..
-        } = event
-            && !self.model.ui.overlays.is_empty()
-        {
-            return self.intent(Intent::CloseOverlay);
-        }
-        Task::none()
-    }
-
-    /// The shell's part of an intent, then every package's.
+    /// The intent's shell part, then every package's.
     fn intent(&mut self, intent: Intent) -> Task<Message> {
         let own = self.own_intent(&intent);
         let mut tasks = self.offer_intent(&intent);
@@ -402,122 +446,17 @@ impl App {
         Task::batch(tasks)
     }
 
-    fn own_intent(&mut self, intent: &Intent) -> Task<Message> {
-        let ui = &mut self.model.ui;
-        let open = |ui: &mut crate::state::Ui, overlay: Overlay| {
-            if ui.overlays.last() != Some(&overlay) {
-                ui.overlays.push(overlay);
-            }
-        };
-        match intent.clone() {
-            Intent::OpenOverlay(overlay) => open(ui, overlay),
-            Intent::CloseOverlay => {
-                ui.overlays.pop();
-            }
-            Intent::TogglePalette => {
-                if ui.overlays.last() == Some(&Overlay::Palette) {
-                    ui.overlays.pop();
-                } else {
-                    open(ui, Overlay::Palette);
-                }
-            }
-            Intent::OpenSettings(category) => {
-                open(ui, Overlay::Settings(category.unwrap_or_default()))
-            }
-            Intent::OpenMcpInstall => open(ui, Overlay::McpInstall),
-            Intent::OpenMcpServers(ws) => open(ui, Overlay::McpServers(ws)),
-            Intent::OpenOrchestration(ws) => open(ui, Overlay::Orchestration(ws)),
-            Intent::OpenWorktrees(ws) => open(ui, Overlay::Worktrees(ws)),
-            Intent::OpenKitsDialog(ws) => open(ui, Overlay::KitsDialog(ws)),
-            Intent::OpenDiff { ws, pane } => open(ui, Overlay::Diff { ws, pane }),
-            Intent::OpenSessions { ws, pane } => open(ui, Overlay::SessionPicker { ws, pane }),
-            Intent::OpenTask { cwd, task } => open(ui, Overlay::Task { cwd, task }),
-            Intent::SetView(view) => ui.view = view,
-            Intent::OpenBoard(ws) => {
-                ui.view = View::Board;
-                return self.intent(Intent::ActivateWorkspace(ws));
-            }
-            Intent::ActivateWorkspace(ws) => {
-                // TODO(P0b): `activateRef` semantics (App.tsx:438).
-                if !ui.opened_ids.contains(&ws) {
-                    ui.opened_ids.push(ws.clone());
-                }
-                self.model.apply(StoreAction::SetActiveWorkspace(Some(ws)));
-            }
-            Intent::ToggleNavigator => {
-                self.model.apply(StoreAction::UpdateSettings(Patch::new(
-                    |s: &mut Settings| s.navigator_open = !s.navigator_open,
-                )));
-            }
-            Intent::ToggleInspector => {
-                self.model.apply(StoreAction::UpdateSettings(Patch::new(
-                    |s: &mut Settings| s.inspector_open = !s.inspector_open,
-                )));
-            }
-            Intent::ToggleDock => {
-                self.model.apply(StoreAction::UpdateSettings(Patch::new(
-                    |s: &mut Settings| s.board_dock_open = !s.board_dock_open,
-                )));
-            }
-            Intent::CycleRegion(step) => return self.cycle_region(step),
-            Intent::FocusRegion(region) => return self.focus_region(region),
-            Intent::Notice(text) => return notice::show(&mut self.model, text),
-            Intent::Notify(notification) => {
-                return services::notify::send(&self.services, notification);
-            }
-            // TODO(P0b): the shell's part of the others (focus, zoom, detach,
-            // reattach, presets…). Packages already get them below.
-            _ => {}
-        }
-        Task::none()
-    }
-
-    /// F6 and Shift+F6. A dialog keeps the keyboard.
-    ///
-    /// TODO(P0b): the regions shown in the focused window, and the region the
-    /// focus is in now.
-    fn cycle_region(&mut self, step: i8) -> Task<Message> {
-        if !self.model.ui.overlays.is_empty() {
-            return Task::none();
-        }
-        let from = match self.model.ui.focus {
-            Some(shell::Focus::Region(region)) => Some(region),
-            _ => None,
-        };
-        match shell::regions::next_region(&shell::regions::ORDER, from, step) {
-            Some(region) => self.focus_region(region),
-            None => Task::none(),
-        }
-    }
-
-    /// The focus to region `region`, as its owner says.
-    fn focus_region(&mut self, region: Region) -> Task<Message> {
-        self.model.ui.focus = Some(shell::Focus::Region(region));
-        let p = &self.pkg;
-        let m = &self.model;
-        let entry = match region {
-            Region::Navigator => crate::navigator::focus_entry(&p.navigator, m, region),
-            Region::Toolbar => crate::toolbar::focus_entry(&p.toolbar, m, region),
-            Region::Main => match m.ui.view {
-                View::Terminals => crate::panes::focus_entry(&p.panes, m, region),
-                View::Board => crate::board::focus_entry(&p.board, m, region),
-                View::Memory => crate::memory::focus_entry(&p.memory, m, region),
-                View::Stats => crate::stats::focus_entry(&p.stats, m, region),
-            },
-            Region::Model => crate::preview::focus_entry(&p.preview, m, region),
-            Region::Dock => crate::board::focus_entry(&p.board, m, region),
-            Region::Inspector => crate::inspector::focus_entry(&p.inspector, m, region),
-            Region::Status => crate::status_bar::focus_entry(&p.status_bar, m, region),
-        };
-        entry.unwrap_or_else(Task::none)
+    /// The window the person is in: where commands run and intents land.
+    fn focused_window(&self) -> window::Id {
+        self.model.focused_window().unwrap_or(self.main_window)
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
         let ctx = self.ctx(window);
         match self.model.live.windows.get(&window) {
-            Some(WindowKind::Main) => shell::frame::main(ctx),
+            Some(WindowKind::Main) => crate::shell::frame::main(ctx),
             Some(WindowKind::Workspace(id)) => match self.model.workspace(id) {
-                Some(ws) => shell::frame::workspace_window(ctx, ws),
+                Some(ws) => crate::shell::frame::workspace_window(ctx, ws),
                 None => Space::new().into(),
             },
             None => Space::new().into(),
@@ -529,7 +468,7 @@ impl App {
             model: &self.model,
             pkg: &self.pkg,
             i18n: Translator::new(self.model.locale()),
-            theme: self.model.theme(),
+            theme: self.model.theme_in(window),
             metrics: Metrics {
                 scale: self.model.settings().scale_factor(),
                 body_width: self
@@ -543,6 +482,9 @@ impl App {
             keymap: &self.model.live.keymap.index,
             window,
             now: Instant::now(),
+            workspace: self.model.window_workspace(window),
+            view: self.model.view_in(window),
+            panels: Panels::of(&self.model, window),
         }
     }
 
@@ -556,10 +498,29 @@ impl App {
         }
     }
 
-    fn theme(&self, _window: window::Id) -> iced::Theme {
-        self.iced_theme.1.clone()
+    /// Each window in its workspace's theme (inventory §1.11).
+    fn theme(&self, window: window::Id) -> iced::Theme {
+        let theme = self.model.theme_in(window);
+        self.iced_themes
+            .get(theme.id)
+            .cloned()
+            .unwrap_or_else(|| hangar_theme::to_iced(theme))
     }
 
+    /// The themes the windows are drawn in, built when first needed.
+    fn cache_themes(&mut self) {
+        let mut ids: Vec<window::Id> = self.model.live.windows.keys().copied().collect();
+        ids.push(self.main_window);
+        for w in ids {
+            let theme = self.model.theme_in(w);
+            self.iced_themes
+                .entry(theme.id)
+                .or_insert_with(|| hangar_theme::to_iced(theme));
+        }
+    }
+
+    /// `uiScale` as iced's scale factor: the whole window, the terminals
+    /// included, so views lay out in unscaled units.
     fn scale_factor(&self, _window: window::Id) -> f32 {
         self.model.settings().scale_factor()
     }
@@ -569,12 +530,54 @@ impl App {
             services::events::subscription(&self.bus),
             services::inbox::subscription(&self.inbox),
             window::events().map(|(id, event)| Message::Window(id, event)),
-            iced::event::listen_with(|event, _status, window| match event {
-                iced::Event::Keyboard(event) => Some(Message::Key(window, event)),
+            // Only the keys nothing used: Escape a field or a menu took for
+            // itself is not the shell's (a layer takes it to close itself).
+            // Shortcuts are the keymap's, in its own subscription (P7).
+            iced::event::listen_with(|event, status, window| match event {
+                iced::Event::Keyboard(event) if status == iced::event::Status::Ignored => {
+                    Some(Message::Key(window, event))
+                }
                 _ => None,
             }),
         ];
+        // A drawer is open somewhere: a press outside it closes it.
+        let drawer_open = self.model.ui.drawer.is_some()
+            || self
+                .model
+                .ui
+                .parked
+                .values()
+                .any(|parked| parked.drawer.is_some());
+        if drawer_open {
+            subscriptions.push(iced::event::listen_with(
+                |event, _status, window| match event {
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => {
+                        Some(Message::Shell(crate::shell::Action::Pressed(window)))
+                    }
+                    _ => None,
+                },
+            ));
+        }
         subscriptions.extend(self.package_subscriptions());
         Subscription::batch(subscriptions)
+    }
+
+    /// Keys the shell answers itself: Escape, when nothing used it, closes
+    /// the focused window's top overlay, else its drawer.
+    fn key(&mut self, window: window::Id, event: keyboard::Event) -> Task<Message> {
+        let keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        } = event
+        else {
+            return Task::none();
+        };
+        if !self.model.is_focused_window(window) {
+            return Task::none();
+        }
+        if !self.model.ui.overlays.is_empty() {
+            return self.intent(Intent::CloseOverlay);
+        }
+        self.close_drawer(crate::shell::DrawerCloseReason::Escape)
     }
 }

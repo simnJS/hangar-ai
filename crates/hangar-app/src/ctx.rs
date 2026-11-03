@@ -13,7 +13,8 @@ use hangar_theme::Theme;
 
 use crate::app::Packages;
 use crate::keymap::KeymapIndex;
-use crate::state::Model;
+use crate::shell::{Panels, View};
+use crate::state::{Model, Workspace};
 
 #[derive(Clone, Copy)]
 pub struct Ctx<'a> {
@@ -36,6 +37,16 @@ pub struct Ctx<'a> {
     pub window: window::Id,
     /// The frame's clock, for relative times and animations.
     pub now: Instant,
+    /// The workspace this window draws (App.tsx's `activeWorkspace`): a
+    /// workspace window's own; the main window's active one, unless that one
+    /// is in a window of its own. What the toolbar, the status bar, the
+    /// inspector and the board are about.
+    pub workspace: Option<&'a Workspace>,
+    /// What this window's main area shows. Each window has its own: read
+    /// this rather than `model.ui.view`, which is the focused window's.
+    pub view: View,
+    /// Where this window's side panels go, and which are shown.
+    pub panels: Panels,
 }
 
 impl<'a> Ctx<'a> {

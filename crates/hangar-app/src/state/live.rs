@@ -69,6 +69,8 @@ pub struct Ui {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowUi {
     pub view: View,
+    pub overlays: Vec<Overlay>,
+    pub overlay_openers: Vec<Option<Focus>>,
     pub drawer: Option<Drawer>,
     pub drawer_opener: Option<Focus>,
     pub focus: Option<Focus>,

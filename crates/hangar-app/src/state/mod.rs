@@ -28,6 +28,7 @@ use std::sync::Arc;
 
 use iced::window;
 
+#[allow(unused_imports)]
 pub use lenient::{app_state as read_state, read as read_state_keeping};
 // What packages name most, at `crate::state::*`; some have no user until the
 // packages land.
@@ -186,6 +187,16 @@ impl Model {
             self.ui.view
         } else {
             self.ui.parked.get(&w).map(|p| p.view).unwrap_or_default()
+        }
+    }
+
+    /// The overlays of window `w`, bottom first: the focused one's are
+    /// `ui.overlays`.
+    pub fn overlays_in(&self, w: window::Id) -> &[crate::shell::Overlay] {
+        if self.is_focused_window(w) {
+            &self.ui.overlays
+        } else {
+            self.ui.parked.get(&w).map_or(&[], |p| &p.overlays)
         }
     }
 

@@ -3,7 +3,7 @@
 //! (App.tsx:1740–1790), and the stand-in every package view draws until the
 //! package lands.
 
-use iced::widget::{button, center, column, container, text};
+use iced::widget::{button, center, column, container, row, text};
 use iced::{Element, Length};
 
 use hangar_i18n::{Key, args};
@@ -55,18 +55,32 @@ pub fn no_workspace<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
     center(content).into()
 }
 
-/// The active workspace is drawn by its own window.
+/// The active workspace is drawn by its own window: say so, with the way to
+/// that window (activating a detached workspace brings its window forward)
+/// and the way back.
 pub fn elsewhere<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
+    let title = ctx.i18n.t_with(
+        Key::WindowElsewhereTitle,
+        &args!("name" => ws.name.as_str()),
+    );
+    let actions = row![
+        button(text(ctx.t(Key::WindowShow)).size(tokens::font_size::UI))
+            .style(style::button::primary(ctx.theme))
+            .on_press(Message::Intent(Intent::ActivateWorkspace(ws.id.clone()))),
+        button(text(ctx.t(Key::WindowBringBack)).size(tokens::font_size::UI))
+            .style(style::button::secondary(ctx.theme))
+            .on_press(Message::Intent(Intent::Reattach(ws.id.clone()))),
+    ]
+    .spacing(tokens::space::MD);
     let content = column![
-        text(ctx.t(Key::WindowElsewhereTitle))
+        text(title)
             .size(tokens::font_size::TITLE)
             .font(hangar_theme::fonts::ui_semibold()),
         text(ctx.t(Key::WindowElsewhereBody))
             .size(tokens::font_size::BODY)
+            .align_x(iced::Center)
             .style(style::text::secondary(ctx.theme)),
-        button(text(ctx.t(Key::WindowBringBack)).size(tokens::font_size::UI))
-            .style(style::button::secondary(ctx.theme))
-            .on_press(Message::Intent(Intent::Reattach(ws.id.clone()))),
+        actions,
     ]
     .spacing(tokens::space::XL)
     .align_x(iced::Center)
