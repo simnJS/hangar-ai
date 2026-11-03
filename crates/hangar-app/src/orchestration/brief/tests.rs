@@ -15,7 +15,10 @@ use crate::state::types::{AgentId, AppState, OrchestrationSettings, Pane, PaneRo
 use crate::state::{AgentActivity, PaneActivity};
 
 fn now() -> u64 {
-    chrono::Local.with_ymd_and_hms(2026, 10, 27, 14, 5, 0).unwrap().timestamp_millis() as u64
+    chrono::Local
+        .with_ymd_and_hms(2026, 10, 27, 14, 5, 0)
+        .unwrap()
+        .timestamp_millis() as u64
 }
 
 fn memory(title: &str, content: &str) -> MemoryEntry {
@@ -44,7 +47,11 @@ struct Setup {
 }
 
 fn activity(id: &str) -> Option<PaneActivity> {
-    (id == "w1").then(|| PaneActivity { workspace_id: "shop".into(), activity: AgentActivity::Working, bridged: true })
+    (id == "w1").then(|| PaneActivity {
+        workspace_id: "shop".into(),
+        activity: AgentActivity::Working,
+        bridged: true,
+    })
 }
 
 fn setup() -> Setup {
@@ -53,9 +60,16 @@ fn setup() -> Setup {
         "Shop",
         vec![
             pane("o", "orch", Some(PaneRole::Orchestrator)),
-            Pane { task_id: Some("t1".into()), port_base: Some(41_000), ..pane("w1", "worker-1", Some(PaneRole::Worker)) },
+            Pane {
+                task_id: Some("t1".into()),
+                port_base: Some(41_000),
+                ..pane("w1", "worker-1", Some(PaneRole::Worker))
+            },
             pane("p", "plain", None),
-            Pane { role: Some(PaneRole::Worker), ..shell("s", "shell-ish") },
+            Pane {
+                role: Some(PaneRole::Worker),
+                ..shell("s", "shell-ish")
+            },
         ],
     );
     shop.orchestration = Some(OrchestrationSettings {
@@ -64,7 +78,10 @@ fn setup() -> Setup {
         ..OrchestrationSettings::default()
     });
     let state = AppState {
-        workspaces: vec![shop, workspace("blog", "Blog", vec![pane("b", "blogger", None)])],
+        workspaces: vec![
+            shop,
+            workspace("blog", "Blog", vec![pane("b", "blogger", None)]),
+        ],
         active_workspace_id: Some("shop".into()),
         ..AppState::default()
     };
@@ -76,7 +93,12 @@ fn setup() -> Setup {
             attempts: 1,
             owns: strings(&["src/login/**", "src/login.test.ts"]),
             description: "Goal: a login form.\nAcceptance:\n- submits\nCheck: pnpm test".into(),
-            comments: vec![comment("c1", "worker-1", "Form done,\ntests next", now() - 60_000)],
+            comments: vec![comment(
+                "c1",
+                "worker-1",
+                "Form done,\ntests next",
+                now() - 60_000,
+            )],
             ..task("t1")
         },
         Task {
@@ -85,14 +107,25 @@ fn setup() -> Setup {
             owns: strings(&["src/settings/**"]),
             ..task("t2")
         },
-        Task { title: "Docs".into(), priority: 3, ..task("t3") },
-        Task { title: "Scaffold".into(), column: "done".into(), ..task("t0") },
+        Task {
+            title: "Docs".into(),
+            priority: 3,
+            ..task("t3")
+        },
+        Task {
+            title: "Scaffold".into(),
+            column: "done".into(),
+            ..task("t0")
+        },
     ];
     let journal = vec![
         JournalEntry {
             at: now() - 5 * 60_000,
             quiet: true,
-            event: OrchestratorEvent::WorkerStarted { worker: "worker-1".into(), task_id: Some("t1".into()) },
+            event: OrchestratorEvent::WorkerStarted {
+                worker: "worker-1".into(),
+                task_id: Some("t1".into()),
+            },
         },
         JournalEntry {
             at: now() - 60_000,
@@ -136,7 +169,10 @@ fn build(setup: &Setup) -> Option<Briefing> {
 }
 
 fn with_pane(pane_id: &str) -> Setup {
-    Setup { pane_id: pane_id.into(), ..setup() }
+    Setup {
+        pane_id: pane_id.into(),
+        ..setup()
+    }
 }
 
 /// The deps of `briefingFor`, recording what was read.
@@ -269,8 +305,14 @@ fn is_only_a_claude_code_pane_with_a_role() {
     assert_eq!(build(&with_pane("s")), None);
     assert_eq!(build(&with_pane("b")), None);
     assert_eq!(build(&with_pane("gone")), None);
-    assert_eq!(build(&with_pane("o")).map(|b| b.role), Some(PaneRole::Orchestrator));
-    assert_eq!(build(&with_pane("w1")).map(|b| b.role), Some(PaneRole::Worker));
+    assert_eq!(
+        build(&with_pane("o")).map(|b| b.role),
+        Some(PaneRole::Orchestrator)
+    );
+    assert_eq!(
+        build(&with_pane("w1")).map(|b| b.role),
+        Some(PaneRole::Worker)
+    );
 }
 
 #[tokio::test]
@@ -278,12 +320,32 @@ async fn reads_no_board_and_no_memory_for_a_pane_without_a_role() {
     let deps = fake(setup());
     assert_eq!(briefing_for("p", &deps).await, Ok(None));
     assert!(reads(&deps).is_empty());
-    assert_eq!(briefing_for("w1", &deps).await.unwrap().map(|b| b.role), Some(PaneRole::Worker));
+    assert_eq!(
+        briefing_for("w1", &deps).await.unwrap().map(|b| b.role),
+        Some(PaneRole::Worker)
+    );
     assert_eq!(reads(&deps), ["board C:\\dev\\shop"]);
-    assert!(briefing_for("o", &deps).await.unwrap().unwrap().context.contains("let people log in"));
+    assert!(
+        briefing_for("o", &deps)
+            .await
+            .unwrap()
+            .unwrap()
+            .context
+            .contains("let people log in")
+    );
     // An unreadable memory is no plan, not a failed briefing.
-    let broken = Fake { memory_broken: true, ..fake(setup()) };
-    assert!(briefing_for("o", &broken).await.unwrap().unwrap().context.contains("Plan: none yet"));
+    let broken = Fake {
+        memory_broken: true,
+        ..fake(setup())
+    };
+    assert!(
+        briefing_for("o", &broken)
+            .await
+            .unwrap()
+            .unwrap()
+            .context
+            .contains("Plan: none yet")
+    );
 }
 
 /* ── the orchestrator's briefing ───────────────────────────────── */
@@ -333,12 +395,19 @@ fn hands_back_the_board_its_plan_and_the_latest_events() {
         assert!(context.contains(needed), "{needed}\n---\n{context}");
     }
     // Priority first within a column.
-    assert!(context.find("\"Docs\" [t3]").unwrap() < context.find("\"Settings page\" [t2]").unwrap());
+    assert!(
+        context.find("\"Docs\" [t3]").unwrap() < context.find("\"Settings page\" [t2]").unwrap()
+    );
 }
 
 #[test]
 fn says_where_the_plan_goes_when_there_is_none_yet() {
-    let context = build(&Setup { memory: Vec::new(), ..setup() }).unwrap().context;
+    let context = build(&Setup {
+        memory: Vec::new(),
+        ..setup()
+    })
+    .unwrap()
+    .context;
     assert!(context.contains(
         "Plan: none yet. Write it with memory_write, title \"Plan — Shop\", tag \"orchestration\", before creating tasks."
     ));
@@ -387,27 +456,83 @@ fn stays_compact_on_a_big_board_with_a_long_plan() {
 
 #[test]
 fn tells_the_orchestrator_its_workers_share_the_folder_rather_than_to_ask_for_a_repository() {
-    let briefing = build(&Setup { git: false, ..setup() }).unwrap();
-    assert!(briefing.system.contains("in the workspace's folder, beside the other workers"));
-    assert!(briefing.system.contains("do not ask the person to make it one"));
+    let briefing = build(&Setup {
+        git: false,
+        ..setup()
+    })
+    .unwrap();
+    assert!(
+        briefing
+            .system
+            .contains("in the workspace's folder, beside the other workers")
+    );
+    assert!(
+        briefing
+            .system
+            .contains("do not ask the person to make it one")
+    );
     assert!(briefing.system.contains("delivery is in"));
     assert!(briefing.system.contains("worker_stop {worker}"));
-    for absent in ["git worktree", "git log", "delivery landed", "merge branches", "keepWorktree"] {
+    for absent in [
+        "git worktree",
+        "git log",
+        "delivery landed",
+        "merge branches",
+        "keepWorktree",
+    ] {
         assert!(!briefing.system.contains(absent), "{absent}");
     }
-    assert!(briefing.context.contains("Not a git repository: workers share the workspace's folder"));
-    assert!(briefing.context.contains("check `pnpm test`, run by the workers"));
+    assert!(
+        briefing
+            .context
+            .contains("Not a git repository: workers share the workspace's folder")
+    );
+    assert!(
+        briefing
+            .context
+            .contains("check `pnpm test`, run by the workers")
+    );
 }
 
 #[tokio::test]
 async fn asks_only_for_the_orchestrator_and_takes_a_folder_it_cannot_tell_for_a_repository() {
-    let deps = Fake { is_repo: Some(Some(false)), ..fake(setup()) };
-    assert!(briefing_for("o", &deps).await.unwrap().unwrap().system.contains("## No git here"));
-    assert!(briefing_for("w1", &deps).await.unwrap().unwrap().system.contains("in a git worktree"));
-    let asked: Vec<String> = reads(&deps).into_iter().filter(|r| r.starts_with("repo ")).collect();
+    let deps = Fake {
+        is_repo: Some(Some(false)),
+        ..fake(setup())
+    };
+    assert!(
+        briefing_for("o", &deps)
+            .await
+            .unwrap()
+            .unwrap()
+            .system
+            .contains("## No git here")
+    );
+    assert!(
+        briefing_for("w1", &deps)
+            .await
+            .unwrap()
+            .unwrap()
+            .system
+            .contains("in a git worktree")
+    );
+    let asked: Vec<String> = reads(&deps)
+        .into_iter()
+        .filter(|r| r.starts_with("repo "))
+        .collect();
     assert_eq!(asked, ["repo C:\\dev\\shop"]);
-    let unknown = Fake { is_repo: Some(None), ..fake(setup()) };
-    assert!(!briefing_for("o", &unknown).await.unwrap().unwrap().system.contains("## No git here"));
+    let unknown = Fake {
+        is_repo: Some(None),
+        ..fake(setup())
+    };
+    assert!(
+        !briefing_for("o", &unknown)
+            .await
+            .unwrap()
+            .unwrap()
+            .system
+            .contains("## No git here")
+    );
 }
 
 #[test]
@@ -415,7 +540,9 @@ fn gives_a_worker_in_the_shared_folder_rules_that_keep_it_off_the_others_files()
     let mut inputs = with_pane("w1");
     inputs.state.workspaces[0].panes[1].shared_folder = Some(true);
     let system = build(&inputs).unwrap().system;
-    assert!(system.contains("The workspace is not a git repository: you work in its folder itself"));
+    assert!(
+        system.contains("The workspace is not a git repository: you work in its folder itself")
+    );
     assert!(system.contains("Never revert, move, reformat or delete a file that is not yours"));
     assert!(system.contains("Nothing is merged or reviewed here"));
     for absent in ["worktree", "branch", "Commit"] {
@@ -427,7 +554,9 @@ fn gives_a_worker_in_the_shared_folder_rules_that_keep_it_off_the_others_files()
 
 #[test]
 fn gives_it_its_task_its_files_its_check_and_its_ports() {
-    let Briefing { system, context, .. } = build(&with_pane("w1")).unwrap();
+    let Briefing {
+        system, context, ..
+    } = build(&with_pane("w1")).unwrap();
     for needed in [
         "to do one board task, \"Login form\" [t1]",
         "orchestrator (pane \"orch\")",
@@ -464,11 +593,24 @@ fn is_named_after_the_workspace_and_its_folder_when_another_has_that_name() {
 #[test]
 fn is_found_by_its_title_or_by_the_folder_it_was_written_from() {
     let ws = workspace("shop", "Shop", vec![]);
-    let renamed = MemoryEntry { workspace: "c:/dev/shop/".into(), ..memory("Plan — Old name", "old") };
-    let other = MemoryEntry { workspace: "C:\\dev\\blog".into(), ..memory("Plan — Elsewhere", "x") };
-    let untagged = MemoryEntry { tags: Vec::new(), ..memory("Plan — Notes", "n") };
-    let found = |entries: &[MemoryEntry]| find_plan(entries, "Plan — Shop", &ws).map(|e| e.content.clone());
-    assert_eq!(found(&[renamed.clone(), other.clone()]).as_deref(), Some("old"));
+    let renamed = MemoryEntry {
+        workspace: "c:/dev/shop/".into(),
+        ..memory("Plan — Old name", "old")
+    };
+    let other = MemoryEntry {
+        workspace: "C:\\dev\\blog".into(),
+        ..memory("Plan — Elsewhere", "x")
+    };
+    let untagged = MemoryEntry {
+        tags: Vec::new(),
+        ..memory("Plan — Notes", "n")
+    };
+    let found =
+        |entries: &[MemoryEntry]| find_plan(entries, "Plan — Shop", &ws).map(|e| e.content.clone());
+    assert_eq!(
+        found(&[renamed.clone(), other.clone()]).as_deref(),
+        Some("old")
+    );
     assert_eq!(found(&[other, untagged]), None);
     let exact = memory("Plan — Shop", "exact");
     assert_eq!(found(&[renamed, exact]).as_deref(), Some("exact"));
@@ -480,7 +622,9 @@ fn is_found_by_its_title_or_by_the_folder_it_was_written_from() {
 fn carries_the_role_and_the_state_in_one_message() {
     let briefing = build(&setup()).unwrap();
     let text = role_message(briefing.role, &briefing.system, &briefing.context, "Shop");
-    assert!(text.starts_with("Hangar has just pinned you as the orchestrator of workspace \"Shop\"."));
+    assert!(
+        text.starts_with("Hangar has just pinned you as the orchestrator of workspace \"Shop\".")
+    );
     assert!(text.contains(&briefing.system));
     assert!(text.contains(&briefing.context));
     assert!(release_message(PaneRole::Orchestrator, "Shop").contains("no longer the orchestrator"));
@@ -491,14 +635,25 @@ async fn announces_a_role_to_a_bridged_session_only() {
     let deps = fake(setup());
     // w1 is bridged in this world, and a worker.
     assert_eq!(announce_role("shop", "w1", None, &deps).await, Ok(true));
-    assert!(deps.sent.lock().unwrap()[0].1.starts_with("Hangar has just made you a worker in workspace \"Shop\"."));
+    assert!(
+        deps.sent.lock().unwrap()[0]
+            .1
+            .starts_with("Hangar has just made you a worker in workspace \"Shop\".")
+    );
     // The orchestrator has no bridged session here: its next one reads the role.
     assert_eq!(announce_role("shop", "o", None, &deps).await, Ok(false));
     let mut unpinned = setup();
     unpinned.state.workspaces[0].panes[1].role = None;
     let deps = fake(unpinned);
-    assert_eq!(announce_role("shop", "w1", Some(PaneRole::Worker), &deps).await, Ok(true));
-    assert!(deps.sent.lock().unwrap()[0].1.contains("no longer a worker"));
+    assert_eq!(
+        announce_role("shop", "w1", Some(PaneRole::Worker), &deps).await,
+        Ok(true)
+    );
+    assert!(
+        deps.sent.lock().unwrap()[0]
+            .1
+            .contains("no longer a worker")
+    );
     assert_eq!(announce_role("shop", "w1", None, &deps).await, Ok(false));
 }
 
@@ -506,7 +661,11 @@ async fn announces_a_role_to_a_bridged_session_only() {
 
 fn manager_setup() -> Setup {
     let mut inputs = setup();
-    let mut hq = workspace("hq", "HQ", vec![pane("m", "manager", Some(PaneRole::Manager))]);
+    let mut hq = workspace(
+        "hq",
+        "HQ",
+        vec![pane("m", "manager", Some(PaneRole::Manager))],
+    );
     hq.hq = Some(true);
     inputs.state.workspaces.insert(0, hq);
     inputs.pane_id = "m".into();
@@ -514,21 +673,34 @@ fn manager_setup() -> Setup {
 }
 
 fn manager_deps(inputs: Setup) -> Fake {
-    Fake { projects: true, ..fake(inputs) }
+    Fake {
+        projects: true,
+        ..fake(inputs)
+    }
 }
 
 #[test]
 fn gives_it_its_role_its_rules_and_its_tools() {
     let briefing = build(&manager_setup()).unwrap();
     assert_eq!(briefing.role, PaneRole::Manager);
-    for needed in ["project manager", "Never write code", "project_send", "project_list", "\"Projects — tracker\""] {
+    for needed in [
+        "project manager",
+        "Never write code",
+        "project_send",
+        "project_list",
+        "\"Projects — tracker\"",
+    ] {
         assert!(briefing.system.contains(needed), "{needed}");
     }
 }
 
 #[tokio::test]
-async fn hands_back_the_overview_without_the_hq_and_says_where_the_tracker_goes_when_there_is_none() {
-    let briefing = briefing_for("m", &manager_deps(manager_setup())).await.unwrap().unwrap();
+async fn hands_back_the_overview_without_the_hq_and_says_where_the_tracker_goes_when_there_is_none()
+{
+    let briefing = briefing_for("m", &manager_deps(manager_setup()))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(briefing.role, PaneRole::Manager);
     assert!(briefing.context.contains("# Hangar projects at 14:05"));
     assert!(briefing.context.contains("Shop"));
@@ -547,8 +719,15 @@ async fn hands_back_the_tracker_the_manager_wrote() {
         ..memory("Projects — tracker", "Shop: the person wants login first.")
     };
     inputs.memory.push(tracker);
-    let briefing = briefing_for("m", &manager_deps(inputs)).await.unwrap().unwrap();
-    assert!(briefing.context.contains("Tracker (memory \"Projects — tracker\""));
+    let briefing = briefing_for("m", &manager_deps(inputs))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        briefing
+            .context
+            .contains("Tracker (memory \"Projects — tracker\"")
+    );
     assert!(briefing.context.contains("the person wants login first"));
     assert!(!briefing.context.contains("Tracker: none yet"));
 }
@@ -558,30 +737,58 @@ async fn reads_no_board_for_itself_and_leaves_the_orchestrator_and_the_worker_al
     let deps = manager_deps(manager_setup());
     briefing_for("m", &deps).await.unwrap();
     assert!(!reads(&deps).contains(&"board C:\\dev\\hq".to_string()));
-    assert!(briefing_for("o", &deps).await.unwrap().unwrap().context.contains("let people log in"));
-    assert_eq!(briefing_for("w1", &deps).await.unwrap().map(|b| b.role), Some(PaneRole::Worker));
+    assert!(
+        briefing_for("o", &deps)
+            .await
+            .unwrap()
+            .unwrap()
+            .context
+            .contains("let people log in")
+    );
+    assert_eq!(
+        briefing_for("w1", &deps).await.unwrap().map(|b| b.role),
+        Some(PaneRole::Worker)
+    );
     let plain = build(&setup()).unwrap().system;
-    let with_projects = build(&Setup { projects: Vec::new(), ..setup() }).unwrap().system;
+    let with_projects = build(&Setup {
+        projects: Vec::new(),
+        ..setup()
+    })
+    .unwrap()
+    .system;
     assert_eq!(plain, with_projects);
 }
 
 #[tokio::test]
 async fn is_told_its_role_mid_session_and_when_it_loses_it() {
-    let briefing = briefing_for("m", &manager_deps(manager_setup())).await.unwrap().unwrap();
+    let briefing = briefing_for("m", &manager_deps(manager_setup()))
+        .await
+        .unwrap()
+        .unwrap();
     let text = role_message(briefing.role, &briefing.system, &briefing.context, "HQ");
     assert!(text.starts_with("Hangar has just pinned you as the person's project manager"));
     assert!(text.contains(&briefing.context));
-    assert!(release_message(PaneRole::Manager, "HQ").contains("no longer the person's project manager"));
+    assert!(
+        release_message(PaneRole::Manager, "HQ").contains("no longer the person's project manager")
+    );
 }
 
 #[tokio::test]
 async fn answers_the_internal_request_in_the_shape_core_checks() {
     let deps = fake(setup());
-    let answer = answer_briefing(&serde_json::json!({"paneId": "o"}), &deps).await.unwrap();
+    let answer = answer_briefing(&serde_json::json!({"paneId": "o"}), &deps)
+        .await
+        .unwrap();
     assert_eq!(answer["role"], "orchestrator");
     assert!(answer["system"].as_str().unwrap().contains("orchestrator"));
     assert!(answer["context"].as_str().unwrap().contains("Board:"));
-    let none = answer_briefing(&serde_json::json!({"paneId": "p"}), &deps).await.unwrap();
+    let none = answer_briefing(&serde_json::json!({"paneId": "p"}), &deps)
+        .await
+        .unwrap();
     assert_eq!(none, serde_json::Value::Null);
-    let _ = (HashMap::<String, String>::new(), AgentId::Claude, Workspace::default());
+    let _ = (
+        HashMap::<String, String>::new(),
+        AgentId::Claude,
+        Workspace::default(),
+    );
 }

@@ -128,9 +128,11 @@ pub trait ProjectsPort: Sync {
 const MAX_STATUS: usize = 300;
 
 static STATUS_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^\s*(?:[-*]\s+)?(?:#{1,6}\s+)?\*{0,2}status\*{0,2}\s*:\s*\*{0,2}\s*(.*)$").unwrap()
+    Regex::new(r"(?i)^\s*(?:[-*]\s+)?(?:#{1,6}\s+)?\*{0,2}status\*{0,2}\s*:\s*\*{0,2}\s*(.*)$")
+        .unwrap()
 });
-static STATUS_HEADING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\s*#{1,6}\s+status\s*$").unwrap());
+static STATUS_HEADING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*#{1,6}\s+status\s*$").unwrap());
 /// The other parts the orchestrator's role has the plan written in.
 static PLAN_PART: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*(?:objective|validation criteria|decisions|assumptions|open questions|tasks)\b[^:\n]{0,40}:")
@@ -141,7 +143,10 @@ static PLAN_PART: LazyLock<Regex> = LazyLock::new(|| {
 /// holding nothing else, the lines under it up to a blank one or the next
 /// part (`planStatusOf`).
 pub fn plan_status_of(content: &str) -> Option<String> {
-    let lines: Vec<&str> = content.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)).collect();
+    let lines: Vec<&str> = content
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
     for (at, line) in lines.iter().enumerate() {
         let inline = STATUS_LINE.captures(line);
         if inline.is_none() && !STATUS_HEADING.is_match(line) {
@@ -155,12 +160,19 @@ pub fn plan_status_of(content: &str) -> Option<String> {
         }
         let mut under = Vec::new();
         for line in &lines[at + 1..] {
-            if line.trim().is_empty() || line.trim_start().starts_with('#') || PLAN_PART.is_match(line) {
+            if line.trim().is_empty()
+                || line.trim_start().starts_with('#')
+                || PLAN_PART.is_match(line)
+            {
                 break;
             }
             under.push(line.trim());
         }
-        return if under.is_empty() { None } else { Some(flat(&under.join("\n"), MAX_STATUS)) };
+        return if under.is_empty() {
+            None
+        } else {
+            Some(flat(&under.join("\n"), MAX_STATUS))
+        };
     }
     None
 }
@@ -171,7 +183,9 @@ const EVENTS_KEPT: usize = 5;
 
 /// Two workspaces on one folder share its board and its repository.
 fn folder_key(cwd: &str) -> String {
-    cwd.trim_end_matches(['\\', '/']).replace('\\', "/").to_lowercase()
+    cwd.trim_end_matches(['\\', '/'])
+        .replace('\\', "/")
+        .to_lowercase()
 }
 
 #[derive(Debug, Clone)]
@@ -186,7 +200,11 @@ pub async fn load_projects(port: &impl ProjectsPort) -> Vec<ProjectSummary> {
     use iced::futures::future::join_all;
 
     let state = port.state();
-    let spaces: Vec<&Workspace> = state.workspaces.iter().filter(|ws| ws.hq != Some(true)).collect();
+    let spaces: Vec<&Workspace> = state
+        .workspaces
+        .iter()
+        .filter(|ws| ws.hq != Some(true))
+        .collect();
     let mut folders: Vec<(String, &str)> = Vec::new();
     for ws in &spaces {
         let key = folder_key(&ws.cwd);
@@ -201,7 +219,11 @@ pub async fn load_projects(port: &impl ProjectsPort) -> Vec<ProjectSummary> {
                 let error = error.strip_prefix("Error: ").unwrap_or(&error).to_string();
                 BoardRead {
                     tasks: Vec::new(),
-                    error: Some(if error.is_empty() { "unknown error".into() } else { error }),
+                    error: Some(if error.is_empty() {
+                        "unknown error".into()
+                    } else {
+                        error
+                    }),
                 }
             }
         };
@@ -244,10 +266,18 @@ fn summarize(
         found.sort_by(|a, b| by_rank(a, b));
         found
             .into_iter()
-            .map(|task| ProjectTask { id: task.id.clone(), title: task.title.clone() })
+            .map(|task| ProjectTask {
+                id: task.id.clone(),
+                title: task.title.clone(),
+            })
             .collect::<Vec<_>>()
     };
-    let titles = |id: &str| tasks.iter().find(|task| task.id == id).map(|task| task.title.clone());
+    let titles = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.title.clone())
+    };
     let plan = find_plan(memory, &plan_title(ws, workspaces), ws);
     let mut doing: Vec<&Task> = tasks.iter().filter(|task| task.column == "doing").collect();
     doing.sort_by(|a, b| by_rank(a, b));
@@ -260,7 +290,10 @@ fn summarize(
         open: port.is_open(&ws.id),
         asleep: port.asleep(&ws.id),
         git,
-        orchestrator: orchestrator(ws).map(|pane| ProjectPane { name: pane.name.clone(), activity: activity_of(&pane.id) }),
+        orchestrator: orchestrator(ws).map(|pane| ProjectPane {
+            name: pane.name.clone(),
+            activity: activity_of(&pane.id),
+        }),
         workers: workers_of(ws)
             .into_iter()
             .map(|pane| ProjectWorker {
@@ -272,22 +305,40 @@ fn summarize(
         waiting: ws
             .panes
             .iter()
-            .filter(|pane| pane.agent != AgentId::Shell && activity_of(&pane.id) == Some(AgentActivity::Waiting))
-            .map(|pane| WaitingPane { name: pane.name.clone(), agent: pane.agent })
+            .filter(|pane| {
+                pane.agent != AgentId::Shell
+                    && activity_of(&pane.id) == Some(AgentActivity::Waiting)
+            })
+            .map(|pane| WaitingPane {
+                name: pane.name.clone(),
+                agent: pane.agent,
+            })
             .collect(),
-        board: BoardCounts { todo: count("todo"), doing: count("doing"), review: count("review"), done: count("done") },
+        board: BoardCounts {
+            todo: count("todo"),
+            doing: count("doing"),
+            review: count("review"),
+            done: count("done"),
+        },
         board_error: board.error.clone(),
         needs_you: labelled(NEEDS_YOU_LABEL),
         ready_to_land: labelled(READY_TO_LAND_LABEL),
         doing: doing
             .into_iter()
-            .map(|task| DoingTask { id: task.id.clone(), title: task.title.clone(), assignee: task.assignee.clone() })
+            .map(|task| DoingTask {
+                id: task.id.clone(),
+                title: task.title.clone(),
+                assignee: task.assignee.clone(),
+            })
             .collect(),
         all_done: !tasks.is_empty() && tasks.iter().all(|task| task.column == "done"),
         plan_status: plan.and_then(|plan| plan_status_of(&plan.content)),
         last_events: journal[from..]
             .iter()
-            .map(|entry| LastEvent { at: entry.at, text: describe_event(&entry.event, &titles) })
+            .map(|entry| LastEvent {
+                at: entry.at,
+                text: describe_event(&entry.event, &titles),
+            })
             .collect(),
     }
 }
@@ -313,7 +364,12 @@ struct Form {
 }
 
 const FORMS: [Form; 3] = [
-    Form { titles: 3, title: 60, status: Some(160), note: None },
+    Form {
+        titles: 3,
+        title: 60,
+        status: Some(160),
+        note: None,
+    },
     Form {
         titles: 1,
         title: 40,
@@ -355,12 +411,21 @@ fn task_ref(id: &str, title: &str, max: usize) -> String {
 }
 
 fn plural(n: usize, one: &str) -> String {
-    format!("{n} {}", if n == 1 { one.to_string() } else { format!("{one}s") })
+    format!(
+        "{n} {}",
+        if n == 1 {
+            one.to_string()
+        } else {
+            format!("{one}s")
+        }
+    )
 }
 
 /// Something only the person can move: an answer, a landing, a pane held.
 fn for_the_person(project: &ProjectSummary) -> bool {
-    !project.needs_you.is_empty() || !project.ready_to_land.is_empty() || !project.waiting.is_empty()
+    !project.needs_you.is_empty()
+        || !project.ready_to_land.is_empty()
+        || !project.waiting.is_empty()
 }
 
 fn at_work(project: &ProjectSummary) -> bool {
@@ -400,7 +465,12 @@ fn board_state(project: &ProjectSummary) -> String {
     if let Some(error) = &project.board_error {
         return format!("could not be read ({})", flat(error, 120));
     }
-    let BoardCounts { todo, doing, review, done } = project.board;
+    let BoardCounts {
+        todo,
+        doing,
+        review,
+        done,
+    } = project.board;
     let total = todo + doing + review + done;
     if total == 0 {
         return "empty".into();
@@ -430,8 +500,15 @@ fn team_state(project: &ProjectSummary) -> String {
                 None => tally.push((what, 1)),
             }
         }
-        let counts: Vec<String> = tally.iter().map(|(what, n)| format!("{n} {what}")).collect();
-        parts.push(format!("{}: {}", plural(project.workers.len(), "worker"), counts.join(", ")));
+        let counts: Vec<String> = tally
+            .iter()
+            .map(|(what, n)| format!("{n} {what}"))
+            .collect();
+        parts.push(format!(
+            "{}: {}",
+            plural(project.workers.len(), "worker"),
+            counts.join(", ")
+        ));
     }
     parts.push(format!("board: {}", board_state(project)));
     parts.join(" · ")
@@ -469,10 +546,16 @@ fn waiting_list(project: &ProjectSummary, shown: usize) -> String {
 /// What waits for the person in a project, counted.
 fn tally(project: &ProjectSummary) -> Option<String> {
     let counts: Vec<String> = [
-        (!project.needs_you.is_empty()).then(|| format!("{} needing you", plural(project.needs_you.len(), "task"))),
-        (!project.ready_to_land.is_empty())
-            .then(|| format!("{} ready to land", plural(project.ready_to_land.len(), "task"))),
-        (!project.waiting.is_empty()).then(|| format!("{} waiting", plural(project.waiting.len(), "pane"))),
+        (!project.needs_you.is_empty())
+            .then(|| format!("{} needing you", plural(project.needs_you.len(), "task"))),
+        (!project.ready_to_land.is_empty()).then(|| {
+            format!(
+                "{} ready to land",
+                plural(project.ready_to_land.len(), "task")
+            )
+        }),
+        (!project.waiting.is_empty())
+            .then(|| format!("{} waiting", plural(project.waiting.len(), "pane"))),
     ]
     .into_iter()
     .flatten()
@@ -490,10 +573,16 @@ fn overview_block(project: &ProjectSummary, form: &Form) -> String {
             more.push(format!("Needs you: {}.", refs(&project.needs_you, form)));
         }
         if !project.ready_to_land.is_empty() {
-            more.push(format!("Ready to land: {}.", refs(&project.ready_to_land, form)));
+            more.push(format!(
+                "Ready to land: {}.",
+                refs(&project.ready_to_land, form)
+            ));
         }
         if !project.waiting.is_empty() {
-            more.push(format!("Waiting for the person: {}.", waiting_list(project, form.titles + 2)));
+            more.push(format!(
+                "Waiting for the person: {}.",
+                waiting_list(project, form.titles + 2)
+            ));
         }
     }
     if let (Some(max), Some(status)) = (form.status, &project.plan_status) {
@@ -519,8 +608,15 @@ pub fn render_overview(projects: &[ProjectSummary], now: u64) -> String {
     let mut ordered: Vec<&ProjectSummary> = projects.iter().collect();
     // Stable: the store's order within a rank.
     ordered.sort_by_key(|project| rank(project));
-    let person: Vec<&ProjectSummary> = ordered.iter().copied().filter(|p| for_the_person(p)).collect();
-    let working = ordered.iter().filter(|p| !for_the_person(p) && at_work(p)).count();
+    let person: Vec<&ProjectSummary> = ordered
+        .iter()
+        .copied()
+        .filter(|p| for_the_person(p))
+        .collect();
+    let working = ordered
+        .iter()
+        .filter(|p| !for_the_person(p) && at_work(p))
+        .count();
     let names = if person.is_empty() {
         String::new()
     } else {
@@ -541,8 +637,13 @@ pub fn render_overview(projects: &[ProjectSummary], now: u64) -> String {
             .flatten()
             .collect::<Vec<_>>()
             .join("\n");
-        blocks = ordered.iter().map(|project| overview_block(project, form)).collect();
-        let total = blocks.iter().fold(len(&head), |total, block| total + 2 + len(block));
+        blocks = ordered
+            .iter()
+            .map(|project| overview_block(project, form))
+            .collect();
+        let total = blocks
+            .iter()
+            .fold(len(&head), |total, block| total + 2 + len(block));
         if total <= MAX_OVERVIEW {
             break;
         }
@@ -551,7 +652,12 @@ pub fn render_overview(projects: &[ProjectSummary], now: u64) -> String {
     let mut text_len = len(&text);
     let mut shown = 0;
     for (index, block) in blocks.iter().enumerate() {
-        let room = MAX_OVERVIEW - if index < blocks.len() - 1 { FOOTER_ROOM } else { 0 };
+        let room = MAX_OVERVIEW
+            - if index < blocks.len() - 1 {
+                FOOTER_ROOM
+            } else {
+                0
+            };
         if text_len + 2 + len(block) > room {
             break;
         }
@@ -566,7 +672,11 @@ pub fn render_overview(projects: &[ProjectSummary], now: u64) -> String {
         let lead = format!(
             "…and {} not shown{}: ",
             plural(left.len(), "more project"),
-            if held > 0 { format!(", {held} of them with something for the person") } else { String::new() }
+            if held > 0 {
+                format!(", {held} of them with something for the person")
+            } else {
+                String::new()
+            }
         );
         let rest: Vec<&str> = left.iter().map(|p| p.name.as_str()).collect();
         let room = FOOTER_ROOM.saturating_sub(3 + len(&lead));
@@ -590,8 +700,18 @@ pub fn render_project(project: &ProjectSummary) -> String {
                         .doing
                         .iter()
                         .map(|t| (t.id.as_str(), t.title.as_str()))
-                        .chain(project.ready_to_land.iter().map(|t| (t.id.as_str(), t.title.as_str())))
-                        .chain(project.needs_you.iter().map(|t| (t.id.as_str(), t.title.as_str())))
+                        .chain(
+                            project
+                                .ready_to_land
+                                .iter()
+                                .map(|t| (t.id.as_str(), t.title.as_str())),
+                        )
+                        .chain(
+                            project
+                                .needs_you
+                                .iter()
+                                .map(|t| (t.id.as_str(), t.title.as_str())),
+                        )
                         .find(|(known, _)| *known == id);
                     match known {
                         Some((id, title)) => format!(" on {}", task_ref(id, title, 120)),
@@ -600,7 +720,11 @@ pub fn render_project(project: &ProjectSummary) -> String {
                 }
                 None => String::new(),
             };
-            lines.push(format!("- \"{}\"{on}: {}", worker.name, doing_words(worker.activity)));
+            lines.push(format!(
+                "- \"{}\"{on}: {}",
+                worker.name,
+                doing_words(worker.activity)
+            ));
         }
     }
     lines.push(format!("Board: {}.", board_state(project)));
@@ -613,24 +737,43 @@ pub fn render_project(project: &ProjectSummary) -> String {
                 .filter(|a| !a.is_empty())
                 .map(|a| format!(" · {a}"))
                 .unwrap_or_default();
-            lines.push(format!("- {}{assignee}", task_ref(&task.id, &task.title, 120)));
+            lines.push(format!(
+                "- {}{assignee}",
+                task_ref(&task.id, &task.title, 120)
+            ));
         }
         if project.doing.len() > MAX_DOING_IN_DETAIL {
-            lines.push(format!("…and {} more in doing.", project.doing.len() - MAX_DOING_IN_DETAIL));
+            lines.push(format!(
+                "…and {} more in doing.",
+                project.doing.len() - MAX_DOING_IN_DETAIL
+            ));
         }
     }
     if !project.needs_you.is_empty() {
         lines.push("Needs you:".into());
-        lines.extend(project.needs_you.iter().map(|t| format!("- {}", task_ref(&t.id, &t.title, 120))));
+        lines.extend(
+            project
+                .needs_you
+                .iter()
+                .map(|t| format!("- {}", task_ref(&t.id, &t.title, 120))),
+        );
     }
     if !project.ready_to_land.is_empty() {
         lines.push("Ready to land:".into());
-        lines.extend(project.ready_to_land.iter().map(|t| format!("- {}", task_ref(&t.id, &t.title, 120))));
+        lines.extend(
+            project
+                .ready_to_land
+                .iter()
+                .map(|t| format!("- {}", task_ref(&t.id, &t.title, 120))),
+        );
     }
     lines.push(if project.waiting.is_empty() {
         "No pane waits for the person.".into()
     } else {
-        format!("Waiting for the person: {}.", waiting_list(project, project.waiting.len()))
+        format!(
+            "Waiting for the person: {}.",
+            waiting_list(project, project.waiting.len())
+        )
     });
     lines.push(match &project.plan_status {
         Some(status) => format!("Plan status: {status}"),
@@ -638,7 +781,12 @@ pub fn render_project(project: &ProjectSummary) -> String {
     });
     if !project.last_events.is_empty() {
         lines.push("Latest events, oldest first:".into());
-        lines.extend(project.last_events.iter().map(|e| format!("- {} {}", clock(e.at), e.text)));
+        lines.extend(
+            project
+                .last_events
+                .iter()
+                .map(|e| format!("- {} {}", clock(e.at), e.text)),
+        );
     }
     lines.join("\n")
 }

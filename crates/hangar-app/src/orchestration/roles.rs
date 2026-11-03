@@ -86,11 +86,10 @@ pub fn hq_of(state: &AppState) -> Option<&Workspace> {
 /// sixteen are the ones panes were named with before names became unique
 /// across workspaces, kept first and in order.
 pub const PANE_NAMES: [&str; 48] = [
-    "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna",
-    "Jude", "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris",
-    "Jack", "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will",
-    "Yara", "Zack", "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby",
-    "Tess", "Vic",
+    "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna", "Jude",
+    "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris", "Jack",
+    "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will", "Yara", "Zack",
+    "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby", "Tess", "Vic",
 ];
 
 /// The first free name; "Ava 2" and so on once the list runs out

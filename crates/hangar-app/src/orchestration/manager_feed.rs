@@ -163,15 +163,39 @@ impl ManagerNews {
     /// workspace, and the pane or the task.
     fn key(&self) -> String {
         let (workspace_id, what) = match self {
-            ManagerNews::Event(ManagerEvent::PaneWaiting { workspace_id, pane_id, .. }) => (workspace_id, pane_id.as_str()),
+            ManagerNews::Event(ManagerEvent::PaneWaiting {
+                workspace_id,
+                pane_id,
+                ..
+            }) => (workspace_id, pane_id.as_str()),
             ManagerNews::Event(
-                ManagerEvent::TaskNeedsYou { workspace_id, task_id, .. }
-                | ManagerEvent::ReadyToLand { workspace_id, task_id, .. },
+                ManagerEvent::TaskNeedsYou {
+                    workspace_id,
+                    task_id,
+                    ..
+                }
+                | ManagerEvent::ReadyToLand {
+                    workspace_id,
+                    task_id,
+                    ..
+                },
             )
             | ManagerNews::Block(
-                BlockEvent::TaskBlocked { workspace_id, task_id, .. }
-                | BlockEvent::TaskUnblocked { workspace_id, task_id, .. }
-                | BlockEvent::TaskRecheckDue { workspace_id, task_id, .. },
+                BlockEvent::TaskBlocked {
+                    workspace_id,
+                    task_id,
+                    ..
+                }
+                | BlockEvent::TaskUnblocked {
+                    workspace_id,
+                    task_id,
+                    ..
+                }
+                | BlockEvent::TaskRecheckDue {
+                    workspace_id,
+                    task_id,
+                    ..
+                },
             ) => (workspace_id, task_id.as_str()),
             ManagerNews::Event(ManagerEvent::BoardDone { workspace_id, .. }) => (workspace_id, ""),
         };
@@ -208,15 +232,34 @@ const MAX_LINES: usize = 12;
 pub fn describe_manager_event(event: &ManagerNews) -> String {
     let place = format!("Workspace \"{}\"", event.workspace());
     match event {
-        ManagerNews::Block(BlockEvent::TaskBlocked { task_id, title, by, reason, .. }) => format!(
+        ManagerNews::Block(BlockEvent::TaskBlocked {
+            task_id,
+            title,
+            by,
+            reason,
+            ..
+        }) => format!(
             "{place}: {} blocked {} until a person lifts it: {reason}",
             if by == "user" { "the person" } else { by },
             task_ref(Some(title), task_id)
         ),
-        ManagerNews::Block(BlockEvent::TaskUnblocked { task_id, title, how, .. }) => {
-            format!("{place}: {} unblocked: {how}", task_ref(Some(title), task_id))
+        ManagerNews::Block(BlockEvent::TaskUnblocked {
+            task_id,
+            title,
+            how,
+            ..
+        }) => {
+            format!(
+                "{place}: {} unblocked: {how}",
+                task_ref(Some(title), task_id)
+            )
         }
-        ManagerNews::Block(BlockEvent::TaskRecheckDue { task_id, title, reason, .. }) => format!(
+        ManagerNews::Block(BlockEvent::TaskRecheckDue {
+            task_id,
+            title,
+            reason,
+            ..
+        }) => format!(
             "{place}: {}: its recheck day passed, it waits for a person ({reason})",
             task_ref(Some(title), task_id)
         ),
@@ -224,8 +267,16 @@ pub fn describe_manager_event(event: &ManagerNews) -> String {
             "{place}: pane \"{pane}\" has been waiting for the person for {} min (a permission or a question in its pane)",
             ((*for_ms as f64 / 60_000.0).round() as u64).max(1)
         ),
-        ManagerNews::Event(ManagerEvent::TaskNeedsYou { task_id, title, reason, .. }) => {
-            format!("{place}: {} needs the person: {reason}", task_ref(Some(title), task_id))
+        ManagerNews::Event(ManagerEvent::TaskNeedsYou {
+            task_id,
+            title,
+            reason,
+            ..
+        }) => {
+            format!(
+                "{place}: {} needs the person: {reason}",
+                task_ref(Some(title), task_id)
+            )
         }
         ManagerNews::Event(ManagerEvent::ReadyToLand { task_id, title, .. }) => format!(
             "{place}: the delivery of {} is ready to land, it waits for the person",
@@ -239,7 +290,10 @@ pub fn describe_manager_event(event: &ManagerNews) -> String {
 
 /// The events of a batch worth sending: repeats folded, waits that ended
 /// dropped, most pressing first (`settleManager`).
-pub fn settle_manager(batch: &[ManagerNewsEntry], is_waiting: &dyn Fn(&str) -> bool) -> Vec<ManagerNews> {
+pub fn settle_manager(
+    batch: &[ManagerNewsEntry],
+    is_waiting: &dyn Fn(&str) -> bool,
+) -> Vec<ManagerNews> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for entry in batch {
@@ -266,7 +320,9 @@ pub fn render_manager_delta(events: &[ManagerNews]) -> String {
         .collect();
     let hidden = events.len() - shown.len();
     if hidden > 0 {
-        lines.push(format!("- …and {hidden} more: the HQ overview has the rest."));
+        lines.push(format!(
+            "- …and {hidden} more: the HQ overview has the rest."
+        ));
     }
     let head = if events.len() == 1 {
         "1 thing waits for the person:".to_string()
@@ -329,7 +385,10 @@ impl std::fmt::Debug for ManagerFeed {
 
 impl ManagerFeed {
     pub fn new(push: Option<Box<dyn ManagerSink>>) -> Self {
-        ManagerFeed { push, ..ManagerFeed::default() }
+        ManagerFeed {
+            push,
+            ..ManagerFeed::default()
+        }
     }
 
     /// Puts the phone's push in (P20 installs it once it runs).
@@ -394,7 +453,11 @@ impl ManagerFeed {
         let t = now as i128;
         let gap = self.last_sent_at as i128 + MIN_GAP_MS as i128 - t;
         let deadline = self.first_pending_at.map_or(t, |at| at as i128) + MAX_WAIT_MS as i128 - t;
-        let wanted = if hold { HOLD_MS as i128 } else { (DEBOUNCE_MS as i128).min(deadline) };
+        let wanted = if hold {
+            HOLD_MS as i128
+        } else {
+            (DEBOUNCE_MS as i128).min(deadline)
+        };
         let delay = wanted.max(gap).max(0) as u64;
         self.timer = Some(self.timer(now + delay));
     }
@@ -410,7 +473,10 @@ impl ManagerFeed {
             return;
         };
         let activity = io.activity(&manager.id).map(|a| a.activity);
-        if matches!(activity, Some(AgentActivity::Working | AgentActivity::Waiting)) {
+        if matches!(
+            activity,
+            Some(AgentActivity::Working | AgentActivity::Waiting)
+        ) {
             self.schedule(true, now);
             return;
         }
@@ -426,7 +492,8 @@ impl ManagerFeed {
         if batch.is_empty() {
             return None;
         }
-        let waiting = |pane: &str| io.activity(pane).map(|a| a.activity) == Some(AgentActivity::Waiting);
+        let waiting =
+            |pane: &str| io.activity(pane).map(|a| a.activity) == Some(AgentActivity::Waiting);
         let events = settle_manager(&batch, &waiting);
         if events.is_empty() {
             return None;
@@ -440,7 +507,10 @@ impl ManagerFeed {
     fn read_board(&mut self, io: &dyn EngineIo, ws: &Workspace, now: u64) -> Result<(), String> {
         let tasks: Vec<Task> = io.load_board(&ws.cwd)?;
         let next = BoardWatch {
-            labels: tasks.iter().map(|task| (task.id.clone(), task.labels.clone())).collect(),
+            labels: tasks
+                .iter()
+                .map(|task| (task.id.clone(), task.labels.clone()))
+                .collect(),
             blocked: tasks
                 .iter()
                 .filter_map(|task| {
@@ -462,15 +532,23 @@ impl ManagerFeed {
             };
             let was_blocked = before.blocked.get(&task.id).copied();
             let human = task.blocked.as_ref().filter(|blocked| blocked.human_only);
-            let (workspace_id, workspace, task_id, title) =
-                (ws.id.clone(), ws.name.clone(), task.id.clone(), task.title.clone());
+            let (workspace_id, workspace, task_id, title) = (
+                ws.id.clone(),
+                ws.name.clone(),
+                task.id.clone(),
+                task.title.clone(),
+            );
             if let (Some(blocked), None) = (human, was_blocked) {
                 let event = BlockEvent::TaskBlocked {
                     workspace_id,
                     workspace,
                     task_id,
                     title,
-                    by: if blocked.by.is_empty() { "an agent".into() } else { blocked.by.clone() },
+                    by: if blocked.by.is_empty() {
+                        "an agent".into()
+                    } else {
+                        blocked.by.clone()
+                    },
                     reason: one_line(&blocked.reason, MAX_TEXT),
                 };
                 self.post(io, ManagerNews::Block(event), now);
@@ -479,7 +557,13 @@ impl ManagerFeed {
                     Some(last) if is_hangar_author(&last.author) => one_line(&last.text, MAX_TEXT),
                     _ => "unblocked".into(),
                 };
-                let event = BlockEvent::TaskUnblocked { workspace_id, workspace, task_id, title, how };
+                let event = BlockEvent::TaskUnblocked {
+                    workspace_id,
+                    workspace,
+                    task_id,
+                    title,
+                    how,
+                };
                 self.post(io, ManagerNews::Block(event), now);
             } else if let (Some(blocked), Some(false)) = (human, was_blocked)
                 && blocked.reminded.is_some_and(|at| at != 0)
@@ -529,7 +613,12 @@ impl ManagerFeed {
     }
 
     fn watched(state: &AppState) -> Vec<Workspace> {
-        state.workspaces.iter().filter(|ws| ws.hq != Some(true)).cloned().collect()
+        state
+            .workspaces
+            .iter()
+            .filter(|ws| ws.hq != Some(true))
+            .cloned()
+            .collect()
     }
 
     fn read_all(&mut self, io: &dyn EngineIo, now: u64) {
@@ -552,10 +641,10 @@ impl ManagerFeed {
                     continue;
                 }
                 present.insert(pane.id.clone());
-                let w = self
-                    .waits
-                    .entry(pane.id.clone())
-                    .or_insert(WaitWatch { since: now, sent: false });
+                let w = self.waits.entry(pane.id.clone()).or_insert(WaitWatch {
+                    since: now,
+                    sent: false,
+                });
                 if !w.sent && now.saturating_sub(w.since) >= WAITING_MS {
                     w.sent = true;
                     let event = ManagerEvent::PaneWaiting {
@@ -610,7 +699,10 @@ impl ManagerFeed {
         self.journal
             .iter()
             .filter_map(|entry| match &entry.event {
-                ManagerNews::Event(event) => Some(ManagerJournalEntry { at: entry.at, event: event.clone() }),
+                ManagerNews::Event(event) => Some(ManagerJournalEntry {
+                    at: entry.at,
+                    event: event.clone(),
+                }),
                 ManagerNews::Block(_) => None,
             })
             .collect()

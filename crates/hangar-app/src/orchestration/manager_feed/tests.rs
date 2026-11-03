@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use hangar_core::board::Task;
 
 use super::*;
-use crate::orchestration::testkit::{START, Timed, advance, blocked, comment, pane, strings, task, workspace};
+use crate::orchestration::testkit::{
+    START, Timed, advance, blocked, comment, pane, strings, task, workspace,
+};
 use crate::state::types::{AppState, PaneRole};
 use crate::state::{AgentActivity, PaneActivity};
 
@@ -62,7 +64,9 @@ impl EngineIo for World {
     }
 
     fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
-        self.sent.borrow_mut().push((pane.into(), text.into(), from.into()));
+        self.sent
+            .borrow_mut()
+            .push((pane.into(), text.into(), from.into()));
         Ok(())
     }
 }
@@ -142,7 +146,10 @@ fn rig_with(manager: bool, push: bool) -> Rig {
         active_workspace_id: Some("a".into()),
         ..AppState::default()
     };
-    let shared = Arc::new(Mutex::new(Push { on: push, ..Push::default() }));
+    let shared = Arc::new(Mutex::new(Push {
+        on: push,
+        ..Push::default()
+    }));
     Rig {
         feed: ManagerFeed::new(Some(Box::new(Sink(shared.clone())))),
         io: World {
@@ -152,9 +159,21 @@ fn rig_with(manager: bool, push: bool) -> Rig {
                 ("C:\\dev\\hq".to_string(), vec![task("h1")]),
                 (
                     "C:\\dev\\a".to_string(),
-                    vec![Task { column: "doing".into(), ..task("t1") }, task("t2")],
+                    vec![
+                        Task {
+                            column: "doing".into(),
+                            ..task("t1")
+                        },
+                        task("t2"),
+                    ],
                 ),
-                ("C:\\dev\\b".to_string(), vec![Task { column: "doing".into(), ..task("u1") }]),
+                (
+                    "C:\\dev\\b".to_string(),
+                    vec![Task {
+                        column: "doing".into(),
+                        ..task("u1")
+                    }],
+                ),
             ]),
             sent: RefCell::new(Vec::new()),
             reads: Cell::new(0),
@@ -169,7 +188,10 @@ fn rig() -> Rig {
 }
 
 fn labelled(id: &str, labels: &[&str]) -> Task {
-    Task { labels: strings(labels), ..task(id) }
+    Task {
+        labels: strings(labels),
+        ..task(id)
+    }
 }
 
 /* ── manager feed ──────────────────────────────────────────────── */
@@ -241,18 +263,32 @@ fn tells_a_task_that_gets_needs_you_a_delivery_ready_to_land_and_a_board_that_is
     r.board(
         "a",
         vec![
-            Task { column: "review".into(), ..labelled("t1", &["ready-to-land"]) },
-            Task { comments: vec![comment("c1", "orch", "Which db?", 1)], ..labelled("t2", &["needs-you"]) },
+            Task {
+                column: "review".into(),
+                ..labelled("t1", &["ready-to-land"])
+            },
+            Task {
+                comments: vec![comment("c1", "orch", "Which db?", 1)],
+                ..labelled("t2", &["needs-you"])
+            },
         ],
     );
-    r.board("b", vec![Task { column: "done".into(), ..task("u1") }]);
+    r.board(
+        "b",
+        vec![Task {
+            column: "done".into(),
+            ..task("u1")
+        }],
+    );
     r.tick();
     r.advance(MAX_WAIT_MS);
     let sent = r.sent();
     assert_eq!(sent.len(), 1);
     let text = &sent[0].1;
     assert!(text.contains("3 things wait for the person"));
-    assert!(text.contains("Workspace \"Shop\": \"Task t2\" [t2] needs the person: orch: Which db?"));
+    assert!(
+        text.contains("Workspace \"Shop\": \"Task t2\" [t2] needs the person: orch: Which db?")
+    );
     assert!(text.contains("Workspace \"Shop\": the delivery of \"Task t1\" [t1] is ready to land"));
     assert!(text.contains("Workspace \"Blog\": every task on the board is done (1)"));
     // Once: the same labels read again are no news.
@@ -276,7 +312,13 @@ fn says_nothing_of_what_the_boards_already_held_nor_an_empty_board() {
 fn says_nothing_of_the_hq() {
     let mut r = rig();
     r.tick();
-    r.board("hq", vec![Task { column: "done".into(), ..labelled("h1", &["needs-you", "ready-to-land"]) }]);
+    r.board(
+        "hq",
+        vec![Task {
+            column: "done".into(),
+            ..labelled("h1", &["needs-you", "ready-to-land"])
+        }],
+    );
     r.activity("hw", AgentActivity::Waiting);
     r.tick();
     r.advance(WAITING_MS);
@@ -292,8 +334,16 @@ fn says_nothing_else_moves_comments_worker_starts() {
     r.board(
         "a",
         vec![
-            Task { column: "review".into(), assignee: Some("worker-1".into()), ..task("t1") },
-            Task { column: "doing".into(), comments: vec![comment("c1", "worker-1", "done", 1)], ..task("t2") },
+            Task {
+                column: "review".into(),
+                assignee: Some("worker-1".into()),
+                ..task("t1")
+            },
+            Task {
+                column: "doing".into(),
+                comments: vec![comment("c1", "worker-1", "done", 1)],
+                ..task("t2")
+            },
             task("t3"),
         ],
     );
@@ -342,10 +392,22 @@ fn holds_the_batch_while_the_manager_is_in_a_turn() {
 fn batches_what_comes_together_keeps_a_journal() {
     let mut r = rig();
     r.tick();
-    r.board("a", vec![labelled("t1", &["needs-you"]), labelled("t2", &["ready-to-land"])]);
+    r.board(
+        "a",
+        vec![
+            labelled("t1", &["needs-you"]),
+            labelled("t2", &["ready-to-land"]),
+        ],
+    );
     r.tick();
     r.advance(DEBOUNCE_MS - 1_000);
-    r.board("b", vec![Task { column: "done".into(), ..task("u1") }]);
+    r.board(
+        "b",
+        vec![Task {
+            column: "done".into(),
+            ..task("u1")
+        }],
+    );
     r.tick();
     r.advance(MAX_WAIT_MS);
     assert_eq!(r.sent().len(), 1);
@@ -364,7 +426,15 @@ fn caps_the_lines_of_a_message_and_counts_the_rest() {
     let many: Vec<Task> = (0..20).map(|i| task(&format!("n{i}"))).collect();
     r.board("a", many.clone());
     r.tick();
-    r.board("a", many.iter().map(|t| Task { labels: strings(&["needs-you"]), ..t.clone() }).collect());
+    r.board(
+        "a",
+        many.iter()
+            .map(|t| Task {
+                labels: strings(&["needs-you"]),
+                ..t.clone()
+            })
+            .collect(),
+    );
     r.tick();
     r.advance(MAX_WAIT_MS);
     let sent = r.sent();
@@ -382,7 +452,10 @@ fn needs_you() -> Vec<Task> {
 }
 
 fn kinds(events: &[ManagerEvent]) -> Vec<&'static str> {
-    events.iter().map(|e| ManagerNews::Event(e.clone()).kind()).collect()
+    events
+        .iter()
+        .map(|e| ManagerNews::Event(e.clone()).kind())
+        .collect()
 }
 
 #[test]
@@ -417,7 +490,13 @@ fn gives_each_sink_every_event_the_push_at_once() {
     let mut r = rig_with(true, true);
     r.tick();
     r.board("a", needs_you());
-    r.board("b", vec![Task { column: "done".into(), ..task("u1") }]);
+    r.board(
+        "b",
+        vec![Task {
+            column: "done".into(),
+            ..task("u1")
+        }],
+    );
     r.tick();
     // The push is not held for the manager's batch…
     assert_eq!(kinds(&r.posted()), ["taskNeedsYou", "boardDone"]);
@@ -454,7 +533,13 @@ fn keeps_pushing_when_the_manager_stops_and_telling_it_when_the_phone_does() {
 
     r.activity("m", AgentActivity::Idle);
     r.push_on(false);
-    r.board("a", vec![labelled("t1", &["needs-you"]), labelled("t2", &["ready-to-land"])]);
+    r.board(
+        "a",
+        vec![
+            labelled("t1", &["needs-you"]),
+            labelled("t2", &["ready-to-land"]),
+        ],
+    );
     r.tick();
     r.advance(MAX_WAIT_MS);
     assert_eq!(r.posted().len(), 1);
@@ -501,7 +586,13 @@ fn starts_from_a_fresh_baseline_when_a_phone_subscribes() {
     r.tick();
     r.tick();
     assert!(r.posted().is_empty());
-    r.board("a", vec![labelled("t1", &["needs-you"]), labelled("t2", &["needs-you"])]);
+    r.board(
+        "a",
+        vec![
+            labelled("t1", &["needs-you"]),
+            labelled("t2", &["needs-you"]),
+        ],
+    );
     r.tick();
     let posted = r.posted();
     assert_eq!(posted.len(), 1);
@@ -515,7 +606,13 @@ fn starts_from_a_fresh_baseline_when_a_phone_subscribes() {
 fn pushes_nothing_of_the_hq() {
     let mut r = rig_with(false, true);
     r.tick();
-    r.board("hq", vec![Task { column: "done".into(), ..labelled("h1", &["needs-you", "ready-to-land"]) }]);
+    r.board(
+        "hq",
+        vec![Task {
+            column: "done".into(),
+            ..labelled("h1", &["needs-you", "ready-to-land"])
+        }],
+    );
     r.activity("hw", AgentActivity::Waiting);
     r.tick();
     r.advance(WAITING_MS);
@@ -542,7 +639,11 @@ fn waiting(pane: &str) -> ManagerNewsEntry {
 fn folds_repeats_and_ranks_the_waits_first() {
     let done = ManagerNewsEntry {
         at: 1,
-        event: ManagerNews::Event(ManagerEvent::BoardDone { workspace_id: "a".into(), workspace: "Shop".into(), tasks: 2 }),
+        event: ManagerNews::Event(ManagerEvent::BoardDone {
+            workspace_id: "a".into(),
+            workspace: "Shop".into(),
+            tasks: 2,
+        }),
     };
     let out = settle_manager(&[done, waiting("w1"), waiting("w1")], &|_| true);
     let kinds: Vec<&str> = out.iter().map(ManagerNews::kind).collect();
@@ -563,16 +664,28 @@ fn tells_a_block_only_the_person_can_lift_and_its_unblock_but_not_the_phone() {
     r.board(
         "a",
         vec![
-            Task { column: "doing".into(), ..task("t1") },
-            Task { blocked: Some(blocked("pick a license", "Eli", true)), ..task("t2") },
+            Task {
+                column: "doing".into(),
+                ..task("t1")
+            },
+            Task {
+                blocked: Some(blocked("pick a license", "Eli", true)),
+                ..task("t2")
+            },
         ],
     );
     r.tick();
     r.board(
         "a",
         vec![
-            Task { column: "doing".into(), ..task("t1") },
-            Task { comments: vec![comment("c", "hangar", "Unblocked by user", 2)], ..task("t2") },
+            Task {
+                column: "doing".into(),
+                ..task("t1")
+            },
+            Task {
+                comments: vec![comment("c", "hangar", "Unblocked by user", 2)],
+                ..task("t2")
+            },
         ],
     );
     r.tick();
@@ -581,7 +694,11 @@ fn tells_a_block_only_the_person_can_lift_and_its_unblock_but_not_the_phone() {
     assert!(r.feed.journal().is_empty());
     assert!(r.posted().is_empty());
     r.advance(MAX_WAIT_MS);
-    assert!(r.sent()[0].1.contains("Eli blocked \"Task t2\" [t2] until a person lifts it: pick a license"));
+    assert!(
+        r.sent()[0]
+            .1
+            .contains("Eli blocked \"Task t2\" [t2] until a person lifts it: pick a license")
+    );
 }
 
 #[test]
@@ -591,8 +708,14 @@ fn leaves_a_block_an_agent_can_lift_to_the_orchestrator() {
     r.board(
         "a",
         vec![
-            Task { column: "doing".into(), ..task("t1") },
-            Task { blocked: Some(blocked("pick a license", "Eli", false)), ..task("t2") },
+            Task {
+                column: "doing".into(),
+                ..task("t1")
+            },
+            Task {
+                blocked: Some(blocked("pick a license", "Eli", false)),
+                ..task("t2")
+            },
         ],
     );
     r.tick();

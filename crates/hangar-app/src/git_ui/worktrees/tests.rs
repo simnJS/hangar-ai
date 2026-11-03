@@ -819,14 +819,27 @@ mod around_it {
     }
 
     #[test]
-    fn no_pane_could_be_added_so_the_workspace_is_said_to_be_full() {
-        // The store's `AddPane` answers no id until P0b lands, as it does at
-        // sixteen panes: either way the panel says there is no room.
+    fn a_pane_opens_in_the_worktree_until_the_workspace_is_full() {
+        // The store adds a pane each time, and answers no id once the workspace
+        // holds `MAX_PANES`: the panel then says there is no room.
         let (mut panel, mut m) = panel();
         send(
             &mut panel,
             &mut m,
             WtMsg::OpenPane("/work/app-worktrees/feat-x".into()),
+        );
+        assert!(panel.error.is_none());
+        assert_eq!(m.state().workspaces[0].panes.len(), 2);
+        for _ in 0..crate::state::types::MAX_PANES {
+            send(
+                &mut panel,
+                &mut m,
+                WtMsg::OpenPane("/work/app-worktrees/feat-x".into()),
+            );
+        }
+        assert_eq!(
+            m.state().workspaces[0].panes.len(),
+            crate::state::types::MAX_PANES
         );
         assert!(panel.error.is_some());
     }

@@ -51,14 +51,18 @@ pub(crate) fn link_at<T>(term: &Term<T>, point: Point) -> Option<LinkHit> {
     let mut first = point.line;
     while first > term.topmost_line()
         && point.line.0 - first.0 < MAX_ROWS
-        && grid[Line(first.0 - 1)][Column(columns - 1)].flags.contains(Flags::WRAPLINE)
+        && grid[Line(first.0 - 1)][Column(columns - 1)]
+            .flags
+            .contains(Flags::WRAPLINE)
     {
         first = Line(first.0 - 1);
     }
     let mut last = point.line;
     while last < term.bottommost_line()
         && last.0 - point.line.0 < MAX_ROWS
-        && grid[last][Column(columns - 1)].flags.contains(Flags::WRAPLINE)
+        && grid[last][Column(columns - 1)]
+            .flags
+            .contains(Flags::WRAPLINE)
     {
         last = Line(last.0 + 1);
     }
@@ -72,10 +76,17 @@ pub(crate) fn link_at<T>(term: &Term<T>, point: Point) -> Option<LinkHit> {
     while line <= last {
         for column in 0..columns {
             let cell = &grid[line][Column(column)];
-            if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+            if cell
+                .flags
+                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+            {
                 continue;
             }
-            chars.push(if cell.c == '\0' || cell.c == '\t' { ' ' } else { cell.c });
+            chars.push(if cell.c == '\0' || cell.c == '\t' {
+                ' '
+            } else {
+                cell.c
+            });
             cells.push(Point::new(line, Column(column)));
             wide.push(cell.flags.contains(Flags::WIDE_CHAR));
         }
@@ -92,8 +103,8 @@ pub(crate) fn link_at<T>(term: &Term<T>, point: Point) -> Option<LinkHit> {
             p.column == point.column || (wide[i] && p.column.0 + 1 == point.column.0)
         })?;
 
-    let (range, link) = hyperlink_range(term, &cells, target)
-        .or_else(|| url_range(&chars, target))?;
+    let (range, link) =
+        hyperlink_range(term, &cells, target).or_else(|| url_range(&chars, target))?;
     Some(LinkHit {
         link,
         spans: spans_of(&cells[range.clone()], &wide[range]),
@@ -157,7 +168,9 @@ fn spans_of(cells: &[Point], wide: &[bool]) -> Vec<Span> {
 /// The schemes taken for links. Narrow on purpose: `foo://` followed by text
 /// is often a path or a pattern in output, and a link that opens nothing is
 /// worse than one that is not underlined.
-const SCHEMES: &[&str] = &["http", "https", "ftp", "ftps", "file", "ssh", "sftp", "git", "ws", "wss"];
+const SCHEMES: &[&str] = &[
+    "http", "https", "ftp", "ftps", "file", "ssh", "sftp", "git", "ws", "wss",
+];
 
 /// The ranges of `chars` that are URLs.
 pub(crate) fn find_urls(chars: &[char]) -> Vec<Range<usize>> {
@@ -167,11 +180,15 @@ pub(crate) fn find_urls(chars: &[char]) -> Vec<Range<usize>> {
         if chars[i] == ':' && chars[i + 1] == '/' && chars[i + 2] == '/' {
             let mut start = i;
             while start > 0
-                && (chars[start - 1].is_ascii_alphanumeric() || matches!(chars[start - 1], '+' | '-' | '.'))
+                && (chars[start - 1].is_ascii_alphanumeric()
+                    || matches!(chars[start - 1], '+' | '-' | '.'))
             {
                 start -= 1;
             }
-            let scheme: String = chars[start..i].iter().collect::<String>().to_ascii_lowercase();
+            let scheme: String = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .to_ascii_lowercase();
             if SCHEMES.contains(&scheme.as_str()) {
                 let mut end = i + 3;
                 while end < chars.len() && is_url_char(chars[end]) {
@@ -193,7 +210,10 @@ pub(crate) fn find_urls(chars: &[char]) -> Vec<Range<usize>> {
 fn is_url_char(c: char) -> bool {
     if c.is_ascii() {
         return c.is_ascii_graphic()
-            && !matches!(c, '"' | '\'' | '<' | '>' | '`' | '\\' | '^' | '{' | '}' | '|');
+            && !matches!(
+                c,
+                '"' | '\'' | '<' | '>' | '`' | '\\' | '^' | '{' | '}' | '|'
+            );
     }
     // Non-ASCII is allowed (internationalised addresses), except what only
     // ever delimits a URL in a terminal: the ellipsis that truncates long
@@ -249,8 +269,14 @@ mod tests {
 
     #[test]
     fn plain_urls() {
-        assert_eq!(urls("see https://hangar.ai/docs now"), ["https://hangar.ai/docs"]);
-        assert_eq!(urls("a http://localhost:3000/x?y=1#z b"), ["http://localhost:3000/x?y=1#z"]);
+        assert_eq!(
+            urls("see https://hangar.ai/docs now"),
+            ["https://hangar.ai/docs"]
+        );
+        assert_eq!(
+            urls("a http://localhost:3000/x?y=1#z b"),
+            ["http://localhost:3000/x?y=1#z"]
+        );
     }
 
     #[test]
@@ -273,7 +299,10 @@ mod tests {
         assert_eq!(urls("'https://hangar.ai/x'"), ["https://hangar.ai/x"]);
         assert_eq!(urls("\"https://hangar.ai/x\""), ["https://hangar.ai/x"]);
         assert_eq!(urls("│https://hangar.ai/x│"), ["https://hangar.ai/x"]);
-        assert_eq!(urls("https://hangar.ai/very/long…"), ["https://hangar.ai/very/long"]);
+        assert_eq!(
+            urls("https://hangar.ai/very/long…"),
+            ["https://hangar.ai/very/long"]
+        );
         assert_eq!(urls("<https://hangar.ai/x>"), ["https://hangar.ai/x"]);
     }
 

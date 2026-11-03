@@ -47,9 +47,9 @@ pub use runtime::{EngineMsg, OrchestrationHandle};
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Notice, Region};
+use crate::state::Model;
 use crate::state::live::BridgeEvent;
 use crate::state::types::{PaneId, PaneRole, WsId};
-use crate::state::Model;
 
 /// The package's UI state; lives in `App.pkg.orchestration`: the runtime,
 /// once started on hydration.
@@ -60,7 +60,9 @@ pub struct State {
 
 impl std::fmt::Debug for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("State").field("running", &self.runtime.is_some()).finish()
+        f.debug_struct("State")
+            .field("running", &self.runtime.is_some())
+            .finish()
     }
 }
 
@@ -81,7 +83,9 @@ impl Live {
 
 impl std::fmt::Debug for Live {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Live").field("running", &self.handle.is_some()).finish()
+        f.debug_struct("Live")
+            .field("running", &self.handle.is_some())
+            .finish()
     }
 }
 
@@ -141,7 +145,12 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 
 /// The intents this package acts on: the person's « Arrêter les workers »,
 /// and a pin or an unpin, whose session is told.
-pub fn on_intent(st: &mut State, m: &mut Model, sv: &Services, intent: &Intent) -> Option<Task<Message>> {
+pub fn on_intent(
+    st: &mut State,
+    m: &mut Model,
+    sv: &Services,
+    intent: &Intent,
+) -> Option<Task<Message>> {
     // Before hydration there is no runtime, and nothing to stop or tell.
     st.runtime.as_ref()?;
     match intent {
@@ -154,7 +163,12 @@ pub fn on_intent(st: &mut State, m: &mut Model, sv: &Services, intent: &Intent) 
                 async move { handle.stop_all_workers(&ws).await },
                 move |stopped| {
                     let text = if stopped > 0 {
-                        tn(locale, Key::OrchStopped, stopped, &args!("workspace" => &name))
+                        tn(
+                            locale,
+                            Key::OrchStopped,
+                            stopped,
+                            &args!("workspace" => &name),
+                        )
                     } else {
                         t_with(locale, Key::OrchStoppedNone, &args!("workspace" => &name))
                     };
@@ -191,14 +205,22 @@ pub fn on_intent(st: &mut State, m: &mut Model, sv: &Services, intent: &Intent) 
 
 /// The core events the engines watch: bridge reports, a pane's shell ending,
 /// a board written.
-pub fn on_event(st: &mut State, m: &mut Model, sv: &Services, event: &CoreEvent) -> Option<Task<Message>> {
+pub fn on_event(
+    st: &mut State,
+    m: &mut Model,
+    sv: &Services,
+    event: &CoreEvent,
+) -> Option<Task<Message>> {
     let handle = st.runtime.as_ref()?;
     match event {
         CoreEvent::Bridge { pane, event } => {
             // A kind this version does not know (a newer mod) is ignored, as
             // the TS ignored it.
             if let Some(event) = BridgeEvent::parse(event) {
-                handle.send(EngineMsg::Bridge { pane: pane.clone(), event });
+                handle.send(EngineMsg::Bridge {
+                    pane: pane.clone(),
+                    event,
+                });
             }
         }
         CoreEvent::PtyExit { pane } => handle.send(EngineMsg::PtyExit(pane.clone())),

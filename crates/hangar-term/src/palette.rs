@@ -43,9 +43,7 @@ impl Default for Palette {
     /// Hangar's graphite theme, which is also what a terminal looks like
     /// before the app has said anything about the theme.
     fn default() -> Self {
-        let hex = |rgb: u32| {
-            Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
-        };
+        let hex = |rgb: u32| Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
         Self {
             foreground: hex(0xc8c9ce),
             background: hex(0x121316),

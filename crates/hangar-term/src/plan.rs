@@ -108,7 +108,11 @@ fn resolve(terminal: &Terminal, cell: &Cell) -> Resolved {
         std::mem::swap(&mut fg, &mut bg);
     }
     if flags.contains(Flags::DIM) {
-        fg = mix(fg, terminal.color_of_index(NamedColor::Background as usize), 0.34);
+        fg = mix(
+            fg,
+            terminal.color_of_index(NamedColor::Background as usize),
+            0.34,
+        );
     }
     if flags.contains(Flags::HIDDEN) {
         fg = bg;
@@ -116,11 +120,20 @@ fn resolve(terminal: &Terminal, cell: &Cell) -> Resolved {
     Resolved { fg, bg }
 }
 
-pub(crate) fn resolve_color(terminal: &Terminal, color: AnsiColor, foreground: bool, brighten: bool) -> Color {
+pub(crate) fn resolve_color(
+    terminal: &Terminal,
+    color: AnsiColor,
+    foreground: bool,
+    brighten: bool,
+) -> Color {
     match color {
         AnsiColor::Spec(rgb) => Color::from_rgb8(rgb.r, rgb.g, rgb.b),
         AnsiColor::Indexed(index) => {
-            let index = if brighten && index < 8 { index + 8 } else { index };
+            let index = if brighten && index < 8 {
+                index + 8
+            } else {
+                index
+            };
             terminal.color_of_index(index as usize)
         }
         AnsiColor::Named(named) => {
@@ -169,15 +182,16 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
 
     let flush = |open: &mut Option<OpenRun>, plan: &mut RowPlan| {
         if let Some(run) = open.take()
-            && !run.text.is_empty() {
-                plan.runs.push(Run {
-                    column: run.start,
-                    columns: run.start_columns(),
-                    text: run.text,
-                    style: run.style,
-                    flowing: true,
-                });
-            }
+            && !run.text.is_empty()
+        {
+            plan.runs.push(Run {
+                column: run.start,
+                columns: run.start_columns(),
+                text: run.text,
+                style: run.style,
+                flowing: true,
+            });
+        }
     };
 
     for column in 0..terminal.columns {
@@ -192,7 +206,11 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
                     if let Some(span) = background.take() {
                         plan.backgrounds.push(span);
                     }
-                    background = Some(Background { first: column, end: column + 1, color: colors.bg });
+                    background = Some(Background {
+                        first: column,
+                        end: column + 1,
+                        color: colors.bg,
+                    });
                 }
             }
         } else if let Some(span) = background.take() {
@@ -206,7 +224,9 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
             .map(|c| resolve_color(terminal, c, true, false))
             .unwrap_or(colors.fg);
         match (kind, &mut decoration) {
-            (Some(kind), Some(span)) if span.kind == kind && span.color == deco_color && span.end == column => {
+            (Some(kind), Some(span))
+                if span.kind == kind && span.color == deco_color && span.end == column =>
+            {
                 span.end += 1;
             }
             (kind, _) => {
@@ -214,14 +234,23 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
                     plan.decorations.push(span);
                 }
                 if let Some(kind) = kind {
-                    decoration = Some(DecorationSpan { kind, first: column, end: column + 1, color: deco_color });
+                    decoration = Some(DecorationSpan {
+                        kind,
+                        first: column,
+                        end: column + 1,
+                        color: deco_color,
+                    });
                 }
             }
         }
         // Strikethrough can accompany an underline; it is a span of its own.
         if cell.flags.contains(Flags::STRIKEOUT) && kind != Some(Decoration::Strike) {
             match plan.decorations.last_mut() {
-                Some(span) if span.kind == Decoration::Strike && span.end == column && span.color == colors.fg => {
+                Some(span)
+                    if span.kind == Decoration::Strike
+                        && span.end == column
+                        && span.color == colors.fg =>
+                {
                     span.end += 1;
                 }
                 _ => plan.decorations.push(DecorationSpan {
@@ -235,7 +264,10 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
 
         // The second half of a wide character, or the filler before one that
         // wrapped, has no character of its own.
-        if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+        if cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
             continue;
         }
         let c = cell.c;
@@ -255,7 +287,11 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
         }
 
         if shapes::is_shape(c) {
-            plan.shapes.push(ShapeCell { column, glyph: c, color: colors.fg });
+            plan.shapes.push(ShapeCell {
+                column,
+                glyph: c,
+                color: colors.fg,
+            });
             // The shape stands where a space would, so it must not break the
             // run it sits in.
             if let Some(run) = &mut open {
@@ -351,7 +387,10 @@ mod tests {
     }
 
     fn runs(plan: &RowPlan) -> Vec<(usize, &str)> {
-        plan.runs.iter().map(|r| (r.column, r.text.as_str())).collect()
+        plan.runs
+            .iter()
+            .map(|r| (r.column, r.text.as_str()))
+            .collect()
     }
 
     #[test]
@@ -385,7 +424,10 @@ mod tests {
 
     #[test]
     fn background_spans_merge_neighbouring_cells() {
-        let plan = plan_row(&terminal("\x1b[44mab\x1b[42mcd\x1b[0m e\x1b[44m \x1b[44m ", 40, 3), 0);
+        let plan = plan_row(
+            &terminal("\x1b[44mab\x1b[42mcd\x1b[0m e\x1b[44m \x1b[44m ", 40, 3),
+            0,
+        );
         let spans: Vec<_> = plan.backgrounds.iter().map(|b| (b.first, b.end)).collect();
         assert_eq!(spans, [(0, 2), (2, 4), (6, 8)]);
     }
@@ -395,7 +437,10 @@ mod tests {
         // What a TUI does to paint a bar: set a colour and erase the line.
         let plan = plan_row(&terminal("\x1b[44m\x1b[2K", 20, 3), 0);
         assert_eq!(plan.backgrounds.len(), 1);
-        assert_eq!((plan.backgrounds[0].first, plan.backgrounds[0].end), (0, 20));
+        assert_eq!(
+            (plan.backgrounds[0].first, plan.backgrounds[0].end),
+            (0, 20)
+        );
     }
 
     #[test]
@@ -410,10 +455,23 @@ mod tests {
     #[test]
     fn bold_brightens_the_dark_ansi_colours_unless_told_not_to() {
         let term = terminal("\x1b[1;31mx", 20, 3);
-        assert_eq!(plan_row(&term, 0).runs[0].style.color, Palette::default().ansi[9]);
-        let mut term = Terminal::new(Config { bold_is_bright: false, ..Config::default() }, 20, 3);
+        assert_eq!(
+            plan_row(&term, 0).runs[0].style.color,
+            Palette::default().ansi[9]
+        );
+        let mut term = Terminal::new(
+            Config {
+                bold_is_bright: false,
+                ..Config::default()
+            },
+            20,
+            3,
+        );
         term.feed(b"\x1b[1;31mx");
-        assert_eq!(plan_row(&term, 0).runs[0].style.color, Palette::default().ansi[1]);
+        assert_eq!(
+            plan_row(&term, 0).runs[0].style.color,
+            Palette::default().ansi[1]
+        );
     }
 
     #[test]
@@ -442,7 +500,10 @@ mod tests {
     #[test]
     fn wide_characters_and_symbols_are_placed_one_by_one() {
         let plan = plan_row(&terminal("a日b❯c", 20, 3), 0);
-        assert_eq!(runs(&plan), [(0, "a"), (1, "日"), (3, "b"), (4, "❯"), (5, "c")]);
+        assert_eq!(
+            runs(&plan),
+            [(0, "a"), (1, "日"), (3, "b"), (4, "❯"), (5, "c")]
+        );
         assert!(!plan.runs[1].flowing);
         assert_eq!(plan.runs[1].columns, 2);
         assert!(plan.runs[0].flowing);
@@ -470,8 +531,15 @@ mod tests {
 
     #[test]
     fn underline_strikethrough_and_curly_are_spans() {
-        let plan = plan_row(&terminal("\x1b[4mab\x1b[0m\x1b[9mcd\x1b[0m\x1b[4:3mef", 20, 3), 0);
-        let spans: Vec<_> = plan.decorations.iter().map(|d| (d.kind, d.first, d.end)).collect();
+        let plan = plan_row(
+            &terminal("\x1b[4mab\x1b[0m\x1b[9mcd\x1b[0m\x1b[4:3mef", 20, 3),
+            0,
+        );
+        let spans: Vec<_> = plan
+            .decorations
+            .iter()
+            .map(|d| (d.kind, d.first, d.end))
+            .collect();
         assert!(spans.contains(&(Decoration::Underline, 0, 2)));
         assert!(spans.contains(&(Decoration::Strike, 2, 4)));
         assert!(spans.contains(&(Decoration::Curly, 4, 6)));

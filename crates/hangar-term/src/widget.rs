@@ -31,8 +31,8 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key, Modifiers};
 use iced::mouse;
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Pixels, Point, Rectangle, Shadow, Size, alignment,
-    window,
+    Border, Color, Element, Event, Length, Padding, Pixels, Point, Rectangle, Shadow, Size,
+    alignment, window,
 };
 
 use crate::config::CursorShape;
@@ -41,7 +41,7 @@ use crate::font::Font;
 use crate::ime::InputState;
 use crate::keys::{KeyEventKind, KeyPress};
 use crate::links::{self, LinkHit};
-use crate::plan::{Decoration, Run, RowPlan, plan_row};
+use crate::plan::{Decoration, RowPlan, Run, plan_row};
 use crate::shapes::{self, Shape};
 use crate::terminal::{BELL_FLASH, Terminal};
 
@@ -105,15 +105,51 @@ impl Bindings {
                 .bind(BindingKey::Char('a'), Modifiers::LOGO, Binding::SelectAll);
         }
         bindings
-            .bind(BindingKey::Char('c'), Modifiers::CTRL | Modifiers::SHIFT, Binding::Copy)
-            .bind(BindingKey::Char('v'), Modifiers::CTRL | Modifiers::SHIFT, Binding::Paste)
-            .bind(BindingKey::Char('a'), Modifiers::CTRL | Modifiers::SHIFT, Binding::SelectAll)
-            .bind(BindingKey::Named(Named::Insert), Modifiers::CTRL, Binding::Copy)
-            .bind(BindingKey::Named(Named::Insert), Modifiers::SHIFT, Binding::PastePrimary)
-            .bind(BindingKey::Named(Named::PageUp), Modifiers::SHIFT, Binding::ScrollPageUp)
-            .bind(BindingKey::Named(Named::PageDown), Modifiers::SHIFT, Binding::ScrollPageDown)
-            .bind(BindingKey::Named(Named::Home), Modifiers::SHIFT, Binding::ScrollTop)
-            .bind(BindingKey::Named(Named::End), Modifiers::SHIFT, Binding::ScrollBottom)
+            .bind(
+                BindingKey::Char('c'),
+                Modifiers::CTRL | Modifiers::SHIFT,
+                Binding::Copy,
+            )
+            .bind(
+                BindingKey::Char('v'),
+                Modifiers::CTRL | Modifiers::SHIFT,
+                Binding::Paste,
+            )
+            .bind(
+                BindingKey::Char('a'),
+                Modifiers::CTRL | Modifiers::SHIFT,
+                Binding::SelectAll,
+            )
+            .bind(
+                BindingKey::Named(Named::Insert),
+                Modifiers::CTRL,
+                Binding::Copy,
+            )
+            .bind(
+                BindingKey::Named(Named::Insert),
+                Modifiers::SHIFT,
+                Binding::PastePrimary,
+            )
+            .bind(
+                BindingKey::Named(Named::PageUp),
+                Modifiers::SHIFT,
+                Binding::ScrollPageUp,
+            )
+            .bind(
+                BindingKey::Named(Named::PageDown),
+                Modifiers::SHIFT,
+                Binding::ScrollPageDown,
+            )
+            .bind(
+                BindingKey::Named(Named::Home),
+                Modifiers::SHIFT,
+                Binding::ScrollTop,
+            )
+            .bind(
+                BindingKey::Named(Named::End),
+                Modifiers::SHIFT,
+                Binding::ScrollBottom,
+            )
     }
 
     /// Adds a binding.
@@ -127,7 +163,10 @@ impl Bindings {
         if press.kind == KeyEventKind::Release {
             return None;
         }
-        let character = press.key.to_latin(press.physical_key).map(|c| c.to_ascii_lowercase());
+        let character = press
+            .key
+            .to_latin(press.physical_key)
+            .map(|c| c.to_ascii_lowercase());
         self.0.iter().find_map(|(key, modifiers, binding)| {
             let same_key = match (key, &press.key) {
                 (BindingKey::Named(a), Key::Named(b)) => a == b,
@@ -354,9 +393,11 @@ impl State {
     {
         let font = terminal.font();
         if let Some(m) = &self.measured
-            && m.font == *font && m.scale == scale {
-                return m.cell;
-            }
+            && m.font == *font
+            && m.scale == scale
+        {
+            return m.cell;
+        }
         let fonts = Fonts::new(font);
         let cell = measure_cell::<Renderer>(font, fonts.regular, scale);
         self.measured = Some(Measured {
@@ -393,7 +434,11 @@ where
     });
     let width = paragraph.min_bounds().width / SAMPLE.len() as f32;
     CellSize {
-        width: if width.is_finite() && width > 0.5 { width } else { font.size * 0.6 },
+        width: if width.is_finite() && width > 0.5 {
+            width
+        } else {
+            font.size * 0.6
+        },
         height,
     }
 }
@@ -413,7 +458,11 @@ pub(crate) fn cell_at(position: Point, origin: Point, cell: CellSize) -> CellPos
     CellPos {
         column: x.floor() as i32,
         row: y.floor() as i32,
-        side: if x - x.floor() < 0.5 { Side::Left } else { Side::Right },
+        side: if x - x.floor() < 0.5 {
+            Side::Left
+        } else {
+            Side::Right
+        },
     }
 }
 
@@ -431,11 +480,15 @@ fn scrollbar(area: Rectangle, rows: usize, history: usize, offset: usize) -> Opt
         return None;
     }
     let track = Rectangle::new(
-        Point::new(area.x + area.width - SCROLLBAR_WIDTH - SCROLLBAR_MARGIN, area.y),
+        Point::new(
+            area.x + area.width - SCROLLBAR_WIDTH - SCROLLBAR_MARGIN,
+            area.y,
+        ),
         Size::new(SCROLLBAR_WIDTH, area.height),
     );
     let total = (history + rows) as f32;
-    let height = (track.height * rows as f32 / total).clamp(SCROLLBAR_MIN_THUMB.min(track.height), track.height);
+    let height = (track.height * rows as f32 / total)
+        .clamp(SCROLLBAR_MIN_THUMB.min(track.height), track.height);
     let travel = track.height - height;
     let top = track.y + travel * (1.0 - offset as f32 / history as f32);
     Some(Scrollbar {
@@ -480,7 +533,12 @@ where
         Size::new(Length::Fill, Length::Fill)
     }
 
-    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let state = tree.state.downcast_mut::<State>();
         let scale = state.scale(self.scale_factor);
         state.measure::<Renderer>(self.terminal, scale);
@@ -509,7 +567,9 @@ where
             return;
         };
         let terminal = self.terminal;
-        let publish = |shell: &mut Shell<'_, Message>, action: Action| shell.publish((self.on_action)(action));
+        let publish = |shell: &mut Shell<'_, Message>, action: Action| {
+            shell.publish((self.on_action)(action))
+        };
 
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
@@ -566,7 +626,9 @@ where
                 // A drag that left the widget keeps scrolling.
                 if let (Some(Button::Left), Some(position)) = (state.pressed, state.pointer) {
                     if !bounds.contains(position)
-                        && state.last_drag_tick.is_none_or(|t| *now - t >= DRAG_SCROLL_EVERY)
+                        && state
+                            .last_drag_tick
+                            .is_none_or(|t| *now - t >= DRAG_SCROLL_EVERY)
                     {
                         state.last_drag_tick = Some(*now);
                         publish(
@@ -656,7 +718,8 @@ where
                     return;
                 }
                 let binding = self.bindings.find(&press).or_else(|| {
-                    (terminal.config().ctrl_v_pastes && is_paste_key(&press)).then_some(Binding::Paste)
+                    (terminal.config().ctrl_v_pastes && is_paste_key(&press))
+                        .then_some(Binding::Paste)
                 });
                 if let Some(binding) = binding {
                     let handled = self.run_binding(binding, terminal, clipboard, shell);
@@ -705,7 +768,8 @@ where
 
                 let (rows, history, offset) = scroll_numbers(terminal);
                 let over_bar = self.scrollbar
-                    && scrollbar(area, rows, history, offset).is_some_and(|b| b.hot_zone().contains(*position));
+                    && scrollbar(area, rows, history, offset)
+                        .is_some_and(|b| b.hot_zone().contains(*position));
                 if over_bar != state.over_scrollbar {
                     state.over_scrollbar = over_bar;
                     shell.request_redraw();
@@ -754,27 +818,32 @@ where
 
                 // The scrollbar takes the press before the grid does.
                 let (rows, history, offset) = scroll_numbers(terminal);
-                if button == Button::Left && self.scrollbar
+                if button == Button::Left
+                    && self.scrollbar
                     && let Some(bar) = scrollbar(area, rows, history, offset)
-                        && bar.hot_zone().contains(position) {
-                            let grab = if bar.thumb.contains(position) {
-                                position.y - bar.thumb.y
-                            } else {
-                                // A click on the track puts the thumb's
-                                // middle there, and the drag goes on from it.
-                                bar.thumb.height / 2.0
-                            };
-                            state.thumb_grab = Some(grab);
-                            publish(
-                                shell,
-                                Action::Scroll(ScrollTo::Offset(bar.offset_at(position.y, grab, history))),
-                            );
-                            shell.capture_event();
-                            return;
-                        }
+                    && bar.hot_zone().contains(position)
+                {
+                    let grab = if bar.thumb.contains(position) {
+                        position.y - bar.thumb.y
+                    } else {
+                        // A click on the track puts the thumb's
+                        // middle there, and the drag goes on from it.
+                        bar.thumb.height / 2.0
+                    };
+                    state.thumb_grab = Some(grab);
+                    publish(
+                        shell,
+                        Action::Scroll(ScrollTo::Offset(bar.offset_at(position.y, grab, history))),
+                    );
+                    shell.capture_event();
+                    return;
+                }
 
                 if button == Button::Middle && !terminal.mouse_reporting(state.modifiers) {
-                    if let Some(text) = clipboard.read(clipboard::Kind::Primary).filter(|t| !t.is_empty()) {
+                    if let Some(text) = clipboard
+                        .read(clipboard::Kind::Primary)
+                        .filter(|t| !t.is_empty())
+                    {
                         publish(shell, Action::Paste(text));
                     }
                     shell.capture_event();
@@ -810,7 +879,10 @@ where
                 }
                 state.pressed = None;
                 state.last_drag_tick = None;
-                let position = cursor.position().or(state.pointer).unwrap_or(area.position());
+                let position = cursor
+                    .position()
+                    .or(state.pointer)
+                    .unwrap_or(area.position());
                 publish(
                     shell,
                     Action::Pointer(Pointer::Up {
@@ -845,7 +917,9 @@ where
                         // click is several; the terminal scales them.
                         notches: match delta {
                             mouse::ScrollDelta::Lines { .. } => notches,
-                            mouse::ScrollDelta::Pixels { .. } => notches / terminal.config().scroll_multiplier.max(1.0),
+                            mouse::ScrollDelta::Pixels { .. } => {
+                                notches / terminal.config().scroll_multiplier.max(1.0)
+                            }
                         },
                         at: cell_at(position, area.position(), cell),
                         modifiers: state.modifiers,
@@ -875,7 +949,8 @@ where
             return mouse::Interaction::Idle;
         }
         let link_modifier = state.modifiers.control() || state.modifiers.logo();
-        if state.hover.is_some() && link_modifier && !self.terminal.mouse_reporting(state.modifiers) {
+        if state.hover.is_some() && link_modifier && !self.terminal.mouse_reporting(state.modifiers)
+        {
             return mouse::Interaction::Pointer;
         }
         if self.terminal.mouse_reporting(state.modifiers) {
@@ -914,9 +989,17 @@ where
         let mut cache = state.rows.borrow_mut();
         cache.sync(terminal);
 
-        let at = |column: usize, row: usize| Point::new(area.x + column as f32 * cell.width, area.y + row as f32 * cell.height);
+        let at = |column: usize, row: usize| {
+            Point::new(
+                area.x + column as f32 * cell.width,
+                area.y + row as f32 * cell.height,
+            )
+        };
         let cells = |first: usize, end: usize, row: usize| {
-            Rectangle::new(at(first, row), Size::new((end - first) as f32 * cell.width, cell.height))
+            Rectangle::new(
+                at(first, row),
+                Size::new((end - first) as f32 * cell.width, cell.height),
+            )
         };
 
         renderer.with_layer(bounds, |renderer| {
@@ -926,7 +1009,10 @@ where
             for (row, slot) in cache.plans.iter().enumerate() {
                 let Some((_, plan)) = slot else { continue };
                 for span in &plan.backgrounds {
-                    renderer.fill_quad(quad(cells(span.first, span.end.min(columns), row)), span.color);
+                    renderer.fill_quad(
+                        quad(cells(span.first, span.end.min(columns), row)),
+                        span.color,
+                    );
                 }
             }
 
@@ -943,32 +1029,62 @@ where
                         (range.start.column.0, range.end.column.0)
                     } else {
                         (
-                            if line == range.start.line.0 { range.start.column.0 } else { 0 },
-                            if line == range.end.line.0 { range.end.column.0 } else { columns - 1 },
+                            if line == range.start.line.0 {
+                                range.start.column.0
+                            } else {
+                                0
+                            },
+                            if line == range.end.line.0 {
+                                range.end.column.0
+                            } else {
+                                columns - 1
+                            },
                         )
                     };
                     if first <= last {
-                        renderer.fill_quad(quad(cells(first, (last + 1).min(columns), row)), palette.selection_background);
+                        renderer.fill_quad(
+                            quad(cells(first, (last + 1).min(columns), row)),
+                            palette.selection_background,
+                        );
                     }
                 }
             }
             for (found, current) in terminal.visible_matches() {
-                let tint = if current { palette.search_active } else { palette.search_match };
-                let color = Color { a: if current { 0.55 } else { 0.35 }, ..tint };
+                let tint = if current {
+                    palette.search_active
+                } else {
+                    palette.search_match
+                };
+                let color = Color {
+                    a: if current { 0.55 } else { 0.35 },
+                    ..tint
+                };
                 for row in 0..rows {
                     let line = row as i32 - offset;
                     if line < found.start().line.0 || line > found.end().line.0 {
                         continue;
                     }
-                    let first = if line == found.start().line.0 { found.start().column.0 } else { 0 };
-                    let last = if line == found.end().line.0 { found.end().column.0 } else { columns - 1 };
+                    let first = if line == found.start().line.0 {
+                        found.start().column.0
+                    } else {
+                        0
+                    };
+                    let last = if line == found.end().line.0 {
+                        found.end().column.0
+                    } else {
+                        columns - 1
+                    };
                     let area = cells(first, (last + 1).min(columns), row);
                     renderer.fill_quad(quad(area), color);
                     if current {
                         renderer.fill_quad(
                             renderer::Quad {
                                 bounds: area,
-                                border: Border { color: tint, width: 1.0, radius: 0.0.into() },
+                                border: Border {
+                                    color: tint,
+                                    width: 1.0,
+                                    radius: 0.0.into(),
+                                },
                                 shadow: Shadow::default(),
                                 snap: true,
                             },
@@ -979,7 +1095,8 @@ where
             }
 
             // Shapes and decorations: lines that fill cells.
-            let metrics_for = shapes::Metrics::new(cell.width, cell.height, measured.font.size, scale);
+            let metrics_for =
+                shapes::Metrics::new(cell.width, cell.height, measured.font.size, scale);
             for (row, slot) in cache.plans.iter().enumerate() {
                 let Some((_, plan)) = slot else { continue };
                 // The rectangles of a row's lines, with the ones that touch
@@ -990,13 +1107,26 @@ where
                     if shape_cell.column >= columns {
                         continue;
                     }
-                    draw_shape(renderer, &mut lines, shape_cell.glyph, shape_cell.color, at(shape_cell.column, row), metrics_for);
+                    draw_shape(
+                        renderer,
+                        &mut lines,
+                        shape_cell.glyph,
+                        shape_cell.color,
+                        at(shape_cell.column, row),
+                        metrics_for,
+                    );
                 }
                 for (rect, color) in lines {
                     renderer.fill_quad(quad(rect), color);
                 }
                 for span in &plan.decorations {
-                    draw_decoration(renderer, span.kind, span.color, cells(span.first, span.end.min(columns), row), metrics_for);
+                    draw_decoration(
+                        renderer,
+                        span.kind,
+                        span.color,
+                        cells(span.first, span.end.min(columns), row),
+                        metrics_for,
+                    );
                 }
             }
             // The link under the pointer.
@@ -1062,25 +1192,38 @@ where
             // The visual bell: a short fade of the foreground over everything.
             if let Some(age) = terminal.bell_age(state.now.get().unwrap_or_else(Instant::now)) {
                 let strength = 0.18 * (1.0 - age.as_secs_f32() / BELL_FLASH.as_secs_f32());
-                renderer.fill_quad(quad(bounds), Color { a: strength.max(0.0), ..palette.foreground });
+                renderer.fill_quad(
+                    quad(bounds),
+                    Color {
+                        a: strength.max(0.0),
+                        ..palette.foreground
+                    },
+                );
             }
 
             // The scrollbar.
             if self.scrollbar {
                 let (rows_n, history, offset) = scroll_numbers(terminal);
                 if let Some(bar) = scrollbar(area, rows_n, history, offset)
-                    && (offset > 0 || state.over_scrollbar || state.thumb_grab.is_some()) {
-                        let active = state.over_scrollbar || state.thumb_grab.is_some();
-                        let radius = SCROLLBAR_WIDTH / 2.0;
-                        renderer.fill_quad(
-                            rounded(bar.track, radius),
-                            Color { a: 0.10, ..palette.foreground },
-                        );
-                        renderer.fill_quad(
-                            rounded(bar.thumb, radius),
-                            Color { a: if active { 0.50 } else { 0.30 }, ..palette.foreground },
-                        );
-                    }
+                    && (offset > 0 || state.over_scrollbar || state.thumb_grab.is_some())
+                {
+                    let active = state.over_scrollbar || state.thumb_grab.is_some();
+                    let radius = SCROLLBAR_WIDTH / 2.0;
+                    renderer.fill_quad(
+                        rounded(bar.track, radius),
+                        Color {
+                            a: 0.10,
+                            ..palette.foreground
+                        },
+                    );
+                    renderer.fill_quad(
+                        rounded(bar.thumb, radius),
+                        Color {
+                            a: if active { 0.50 } else { 0.30 },
+                            ..palette.foreground
+                        },
+                    );
+                }
             }
         });
     }
@@ -1129,7 +1272,10 @@ impl<'a, Message, Theme, Renderer> TerminalView<'a, Message, Theme, Renderer> {
             }
             // On the alternate screen there is no history, and these keys are
             // the program's (Shift+PageUp in a pager).
-            Binding::ScrollPageUp | Binding::ScrollPageDown | Binding::ScrollTop | Binding::ScrollBottom => {
+            Binding::ScrollPageUp
+            | Binding::ScrollPageDown
+            | Binding::ScrollTop
+            | Binding::ScrollBottom => {
                 if terminal.is_alt_screen() {
                     return false;
                 }
@@ -1164,9 +1310,16 @@ fn is_paste_key(press: &KeyPress) -> bool {
     if press.kind == KeyEventKind::Release {
         return false;
     }
-    let paste_modifier = if cfg!(target_os = "macos") { Modifiers::LOGO } else { Modifiers::CTRL };
+    let paste_modifier = if cfg!(target_os = "macos") {
+        Modifiers::LOGO
+    } else {
+        Modifiers::CTRL
+    };
     press.modifiers == paste_modifier
-        && press.key.to_latin(press.physical_key).is_some_and(|c| c.eq_ignore_ascii_case(&'v'))
+        && press
+            .key
+            .to_latin(press.physical_key)
+            .is_some_and(|c| c.eq_ignore_ascii_case(&'v'))
 }
 
 fn convert_button(button: mouse::Button) -> Option<Button> {
@@ -1194,7 +1347,10 @@ fn link_under(terminal: &Terminal, at: CellPos) -> Option<LinkHit> {
     }
     let point = alacritty_terminal::term::viewport_to_point(
         terminal.display_offset(),
-        alacritty_terminal::index::Point::new(at.row as usize, alacritty_terminal::index::Column(at.column as usize)),
+        alacritty_terminal::index::Point::new(
+            at.row as usize,
+            alacritty_terminal::index::Column(at.column as usize),
+        ),
     );
     links::link_at(&terminal.term, point)
 }
@@ -1211,7 +1367,10 @@ fn quad(bounds: Rectangle) -> Quad {
 fn rounded(bounds: Rectangle, radius: f32) -> Quad {
     Quad {
         bounds,
-        border: Border { radius: radius.into(), ..Border::default() },
+        border: Border {
+            radius: radius.into(),
+            ..Border::default()
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -1230,11 +1389,21 @@ fn fill_run<Renderer>(renderer: &mut Renderer, run: &Run, position: Point, setup
 where
     Renderer: text::Renderer<Font = iced::Font>,
 {
-    let TextSetup { cell, fonts, size, ligatures, clip } = *setup;
+    let TextSetup {
+        cell,
+        fonts,
+        size,
+        ligatures,
+        clip,
+    } = *setup;
     // `iced` anchors centred text at the middle of its bounds, not at their
     // left edge.
     let width = run.columns as f32 * cell.width;
-    let position = if run.flowing { position } else { Point::new(position.x + width / 2.0, position.y) };
+    let position = if run.flowing {
+        position
+    } else {
+        Point::new(position.x + width / 2.0, position.y)
+    };
     // iced 0.14's text cache lays every `fill_text` out with cosmic-text's
     // default wrapping, whatever `wrapping` says, so a run whose glyphs add
     // up to a hair more than `columns × cell.width` (the measured advance is
@@ -1242,7 +1411,11 @@ where
     // row below. A run laid out from its left edge gets a cell of room to
     // spare; the clip still stops it at the widget's edge. A centred one is
     // a single character, which cannot wrap.
-    let bounds = if run.flowing { width + cell.width } else { width };
+    let bounds = if run.flowing {
+        width + cell.width
+    } else {
+        width
+    };
     renderer.fill_text(
         Text {
             content: run.text.clone(),
@@ -1254,9 +1427,17 @@ where
             // placed alone is centred in the cells it owns, so that a glyph
             // from a fallback font with another advance still sits inside
             // them.
-            align_x: if run.flowing { text::Alignment::Left } else { text::Alignment::Center },
+            align_x: if run.flowing {
+                text::Alignment::Left
+            } else {
+                text::Alignment::Center
+            },
             align_y: alignment::Vertical::Top,
-            shaping: if run.flowing && !ligatures { text::Shaping::Basic } else { text::Shaping::Advanced },
+            shaping: if run.flowing && !ligatures {
+                text::Shaping::Basic
+            } else {
+                text::Shaping::Advanced
+            },
             wrapping: text::Wrapping::None,
         },
         position,
@@ -1287,7 +1468,13 @@ fn draw_decoration<Renderer>(
     let thickness = metrics.light.max(metrics.pixel);
     let base = span.y + baseline(span.height, metrics.size);
     let line = |renderer: &mut Renderer, y: f32, h: f32| {
-        renderer.fill_quad(quad(Rectangle::new(Point::new(span.x, y), Size::new(span.width, h))), color);
+        renderer.fill_quad(
+            quad(Rectangle::new(
+                Point::new(span.x, y),
+                Size::new(span.width, h),
+            )),
+            color,
+        );
     };
     match kind {
         Decoration::Underline => line(renderer, base + thickness, thickness),
@@ -1295,7 +1482,11 @@ fn draw_decoration<Renderer>(
             line(renderer, base + thickness, thickness);
             line(renderer, base + thickness * 3.0, thickness);
         }
-        Decoration::Strike => line(renderer, span.y + span.height * 0.5 - thickness / 2.0, thickness),
+        Decoration::Strike => line(
+            renderer,
+            span.y + span.height * 0.5 - thickness / 2.0,
+            thickness,
+        ),
         Decoration::Dotted | Decoration::Dashed | Decoration::Curly => {
             // Pieces of the line, one cell's width divided into a pattern.
             let y0 = base + thickness;
@@ -1324,7 +1515,10 @@ fn draw_decoration<Renderer>(
                 let mut x = span.x;
                 while x < span.x + span.width {
                     let w = on.min(span.x + span.width - x);
-                    renderer.fill_quad(quad(Rectangle::new(Point::new(x, y0), Size::new(w, thickness))), color);
+                    renderer.fill_quad(
+                        quad(Rectangle::new(Point::new(x, y0), Size::new(w, thickness))),
+                        color,
+                    );
                     x += on + off;
                 }
             }
@@ -1361,7 +1555,12 @@ fn draw_shape<Renderer>(
     let Some(shape) = shapes::shape(glyph, metrics) else {
         return;
     };
-    let shift = |r: shapes::Rect| Rectangle::new(Point::new(origin.x + r.x, origin.y + r.y), Size::new(r.w, r.h));
+    let shift = |r: shapes::Rect| {
+        Rectangle::new(
+            Point::new(origin.x + r.x, origin.y + r.y),
+            Size::new(r.w, r.h),
+        )
+    };
     match shape {
         Shape::Rects(rects) => {
             for rect in rects {
@@ -1405,7 +1604,10 @@ fn draw_shape<Renderer>(
                 renderer.fill_quad(
                     Quad {
                         bounds: dot,
-                        border: Border { radius: (diameter / 2.0).into(), ..Border::default() },
+                        border: Border {
+                            radius: (diameter / 2.0).into(),
+                            ..Border::default()
+                        },
                         shadow: Shadow::default(),
                         snap: false,
                     },
@@ -1442,7 +1644,11 @@ fn draw_cursor<Renderer>(
         renderer.fill_quad(
             Quad {
                 bounds: whole,
-                border: Border { color, width: pixel.max(1.0), radius: 0.0.into() },
+                border: Border {
+                    color,
+                    width: pixel.max(1.0),
+                    radius: 0.0.into(),
+                },
                 shadow: Shadow::default(),
                 snap: true,
             },
@@ -1479,7 +1685,10 @@ fn draw_cursor<Renderer>(
             });
         }
         CursorShape::Beam => {
-            renderer.fill_quad(quad(Rectangle::new(origin, Size::new(thickness, cell.height))), color);
+            renderer.fill_quad(
+                quad(Rectangle::new(origin, Size::new(thickness, cell.height))),
+                color,
+            );
         }
         CursorShape::Underline => {
             renderer.fill_quad(
@@ -1498,7 +1707,10 @@ mod tests {
     use super::*;
     use iced::keyboard::key::{Code, Physical};
 
-    const CELL: CellSize = CellSize { width: 8.0, height: 16.0 };
+    const CELL: CellSize = CellSize {
+        width: 8.0,
+        height: 16.0,
+    };
 
     #[test]
     fn the_grid_is_the_whole_cells_that_fit() {
@@ -1511,7 +1723,11 @@ mod tests {
     #[test]
     fn a_position_is_a_cell_and_a_half_of_it() {
         let origin = Point::new(10.0, 20.0);
-        let pos = cell_at(Point::new(10.0 + 8.0 * 3.0 + 1.0, 20.0 + 16.0 * 2.0 + 3.0), origin, CELL);
+        let pos = cell_at(
+            Point::new(10.0 + 8.0 * 3.0 + 1.0, 20.0 + 16.0 * 2.0 + 3.0),
+            origin,
+            CELL,
+        );
         assert_eq!((pos.column, pos.row, pos.side), (3, 2, Side::Left));
         let pos = cell_at(Point::new(10.0 + 8.0 * 3.0 + 6.0, 20.0), origin, CELL);
         assert_eq!((pos.column, pos.side), (3, Side::Right));
@@ -1591,7 +1807,10 @@ mod tests {
 
     #[test]
     fn bindings_follow_the_latin_letter_on_other_layouts() {
-        let mut p = press(Key::Character("с".into()), Modifiers::CTRL | Modifiers::SHIFT);
+        let mut p = press(
+            Key::Character("с".into()),
+            Modifiers::CTRL | Modifiers::SHIFT,
+        );
         p.physical_key = Physical::Code(Code::KeyC);
         assert_eq!(Bindings::standard().find(&p), Some(Binding::Copy));
     }
@@ -1599,17 +1818,30 @@ mod tests {
     #[test]
     fn ctrl_v_is_a_paste_only_when_the_configuration_says_so() {
         let v = Key::Character("v".into());
-        let paste_modifier = if cfg!(target_os = "macos") { Modifiers::LOGO } else { Modifiers::CTRL };
+        let paste_modifier = if cfg!(target_os = "macos") {
+            Modifiers::LOGO
+        } else {
+            Modifiers::CTRL
+        };
         assert!(is_paste_key(&press(v.clone(), paste_modifier)));
-        assert!(!is_paste_key(&press(v.clone(), paste_modifier | Modifiers::ALT)));
-        assert!(!is_paste_key(&press(Key::Character("b".into()), paste_modifier)));
+        assert!(!is_paste_key(&press(
+            v.clone(),
+            paste_modifier | Modifiers::ALT
+        )));
+        assert!(!is_paste_key(&press(
+            Key::Character("b".into()),
+            paste_modifier
+        )));
         // The standard bindings alone leave Ctrl+V to the program.
         assert_eq!(Bindings::standard().find(&press(v, Modifiers::CTRL)), None);
     }
 
     #[test]
     fn releases_trigger_nothing_and_an_empty_set_binds_nothing() {
-        let mut p = press(Key::Character("c".into()), Modifiers::CTRL | Modifiers::SHIFT);
+        let mut p = press(
+            Key::Character("c".into()),
+            Modifiers::CTRL | Modifiers::SHIFT,
+        );
         p.kind = KeyEventKind::Release;
         assert_eq!(Bindings::standard().find(&p), None);
         p.kind = KeyEventKind::Press;

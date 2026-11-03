@@ -106,10 +106,7 @@ pub enum Event {
     },
     /// A desktop notification the program asked for (`OSC 9` and `OSC 777`).
     /// Agents use it to say that a turn is over.
-    Notification {
-        title: Option<String>,
-        body: String,
-    },
+    Notification { title: Option<String>, body: String },
     /// The shell reported its working directory (`OSC 7`), as a path.
     WorkingDirectory(String),
     /// A link was clicked with Ctrl, or Cmd on macOS, held.

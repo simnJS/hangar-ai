@@ -21,8 +21,8 @@ use hangar_core::board::Task;
 use hangar_core::memory::MemoryEntry;
 
 use super::brief_text::{
-    PLAN_TAG, TRACKER_TAG, TRACKER_TITLE, manager_role, orchestrator_role, release_message, role_message,
-    worker_role,
+    PLAN_TAG, TRACKER_TAG, TRACKER_TITLE, manager_role, orchestrator_role, release_message,
+    role_message, worker_role,
 };
 use super::events::{JournalEntry, by_rank, describe_event};
 use super::manager_feed::{ManagerJournalEntry, ManagerNews, describe_manager_event};
@@ -45,7 +45,11 @@ pub struct Briefing {
 /* ── The plan document ─────────────────────────────────────────── */
 
 fn same_path(a: &str, b: &str) -> bool {
-    let norm = |p: &str| p.trim_end_matches(['\\', '/']).replace('\\', "/").to_lowercase();
+    let norm = |p: &str| {
+        p.trim_end_matches(['\\', '/'])
+            .replace('\\', "/")
+            .to_lowercase()
+    };
     norm(a) == norm(b)
 }
 
@@ -65,7 +69,11 @@ pub fn plan_title(ws: &Workspace, workspaces: &[Workspace]) -> String {
 
 /// The plan by its title, or — renamed workspace — the one written from its
 /// folder (`findPlan`).
-pub fn find_plan<'a>(memory: &'a [MemoryEntry], title: &str, ws: &Workspace) -> Option<&'a MemoryEntry> {
+pub fn find_plan<'a>(
+    memory: &'a [MemoryEntry],
+    title: &str,
+    ws: &Workspace,
+) -> Option<&'a MemoryEntry> {
     if let Some(exact) = memory.iter().find(|entry| entry.title == title) {
         return Some(exact);
     }
@@ -86,7 +94,9 @@ pub fn find_plan<'a>(memory: &'a [MemoryEntry], title: &str, ws: &Workspace) -> 
 pub fn find_tracker(memory: &[MemoryEntry]) -> Option<&MemoryEntry> {
     let mut mine: Vec<&MemoryEntry> = memory
         .iter()
-        .filter(|entry| entry.title == TRACKER_TITLE && entry.tags.iter().any(|tag| tag == TRACKER_TAG))
+        .filter(|entry| {
+            entry.title == TRACKER_TITLE && entry.tags.iter().any(|tag| tag == TRACKER_TAG)
+        })
         .collect();
     mine.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at));
     mine.first().copied()
@@ -135,7 +145,9 @@ fn settings_line(ws: &Workspace, git: bool) -> String {
     let landing = if settings.auto_merge {
         format!("deliveries land on {branch} by themselves once check and review pass")
     } else {
-        format!("deliveries that pass check and review wait for the person to land them on {branch}")
+        format!(
+            "deliveries that pass check and review wait for the person to land them on {branch}"
+        )
     };
     format!(
         "Settings: at most {} workers at once, {} attempts per task, {check}, {landing}; workers run {}. Nothing is ever pushed.",
@@ -215,13 +227,20 @@ fn board_section(tasks: &[Task], max_attempts: u32) -> Vec<String> {
             if let Some(last) = task.comments.last()
                 && column != "todo"
             {
-                lines.push(format!("  last comment, {}: \"{}\"", last.author, flat(&last.text, MAX_COMMENT)));
+                lines.push(format!(
+                    "  last comment, {}: \"{}\"",
+                    last.author,
+                    flat(&last.text, MAX_COMMENT)
+                ));
             }
         }
     }
     let open = tasks.len() - count("done");
     if open > listed {
-        lines.push(format!("…and {} more open tasks: board_list_tasks.", open - listed));
+        lines.push(format!(
+            "…and {} more open tasks: board_list_tasks.",
+            open - listed
+        ));
     }
     let mut done = ordered("done");
     done.sort_by_key(|task| std::cmp::Reverse(task.updated_at));
@@ -245,7 +264,10 @@ fn board_section(tasks: &[Task], max_attempts: u32) -> Vec<String> {
 fn document_body(entry: &MemoryEntry) -> String {
     let body = if entry.content.chars().count() > MAX_PLAN {
         let kept: String = entry.content.chars().take(MAX_PLAN).collect();
-        format!("{kept}\n…(cut here: memory_read {} for the rest, and shorten it)", entry.id)
+        format!(
+            "{kept}\n…(cut here: memory_read {} for the rest, and shorten it)",
+            entry.id
+        )
     } else {
         entry.content.clone()
     };
@@ -262,7 +284,12 @@ fn plan_section(plan: Option<&MemoryEntry>, title: &str, now: u64) -> Vec<String
             "Plan: none yet. Write it with memory_write, title \"{title}\", tag \"{PLAN_TAG}\", before creating tasks."
         )],
         Some(plan) => vec![
-            format!("Plan (memory \"{}\" [{}], updated {}):", plan.title, plan.id, since(now, plan.updated_at)),
+            format!(
+                "Plan (memory \"{}\" [{}], updated {}):",
+                plan.title,
+                plan.id,
+                since(now, plan.updated_at)
+            ),
             document_body(plan),
         ],
     }
@@ -289,14 +316,21 @@ fn events_section(journal: &[&JournalEntry], tasks: &[Task], max: usize) -> Vec<
     if journal.is_empty() {
         return Vec::new();
     }
-    let titles = |id: &str| tasks.iter().find(|task| task.id == id).map(|task| task.title.clone());
+    let titles = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.title.clone())
+    };
     let mut lines = vec!["Latest events, oldest first:".to_string()];
     let from = journal.len().saturating_sub(max);
-    lines.extend(
-        journal[from..]
-            .iter()
-            .map(|entry| format!("- {} {}", clock(entry.at), describe_event(&entry.event, &titles))),
-    );
+    lines.extend(journal[from..].iter().map(|entry| {
+        format!(
+            "- {} {}",
+            clock(entry.at),
+            describe_event(&entry.event, &titles)
+        )
+    }));
     lines
 }
 
@@ -339,7 +373,10 @@ pub struct BriefingInputs<'a> {
 
 fn pane_of<'a>(state: &'a AppState, pane_id: &str) -> Option<(&'a Workspace, &'a Pane)> {
     state.workspaces.iter().find_map(|ws| {
-        ws.panes.iter().find(|pane| pane.id == pane_id).map(|pane| (ws, pane))
+        ws.panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| (ws, pane))
     })
 }
 
@@ -360,9 +397,16 @@ pub fn build_briefing(inputs: &BriefingInputs<'_>) -> Option<Briefing> {
 
 fn manager_briefing(inputs: &BriefingInputs<'_>) -> Briefing {
     let mut context = vec![render_overview(inputs.projects, inputs.now), String::new()];
-    context.extend(manager_events_section(inputs.manager_events, EVENTS_IN_BRIEFING));
+    context.extend(manager_events_section(
+        inputs.manager_events,
+        EVENTS_IN_BRIEFING,
+    ));
     context.extend(tracker_section(find_tracker(inputs.memory), inputs.now));
-    Briefing { role: PaneRole::Manager, system: manager_role(), context: context.join("\n") }
+    Briefing {
+        role: PaneRole::Manager,
+        system: manager_role(),
+        context: context.join("\n"),
+    }
 }
 
 fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefing {
@@ -370,7 +414,12 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
     let settings = orchestration_of(ws);
     let workers = workers_of(ws);
     let mut lines = vec![
-        format!("# Hangar state at {}, workspace \"{}\" ({})", clock(inputs.now), ws.name, ws.cwd),
+        format!(
+            "# Hangar state at {}, workspace \"{}\" ({})",
+            clock(inputs.now),
+            ws.name,
+            ws.cwd
+        ),
         "This is current: trust it over what you remember.".to_string(),
         String::new(),
         settings_line(ws, inputs.git),
@@ -383,7 +432,11 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
     for worker in &workers {
         let on = match worker.task_id.as_deref().filter(|id| !id.is_empty()) {
             Some(id) => {
-                let title = inputs.tasks.iter().find(|task| task.id == id).map(|task| task.title.as_str());
+                let title = inputs
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == id)
+                    .map(|task| task.title.as_str());
                 format!(" on {}", task_ref(title, id))
             }
             None => String::new(),
@@ -394,7 +447,11 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
     lines.push(String::new());
     lines.extend(board_section(inputs.tasks, settings.max_attempts));
     lines.push(String::new());
-    lines.extend(plan_section(find_plan(inputs.memory, &title, ws), &title, inputs.now));
+    lines.extend(plan_section(
+        find_plan(inputs.memory, &title, ws),
+        &title,
+        inputs.now,
+    ));
     let journal: Vec<&JournalEntry> = inputs.journal.iter().collect();
     let events = events_section(&journal, inputs.tasks, EVENTS_IN_BRIEFING);
     if !events.is_empty() {
@@ -446,7 +503,10 @@ fn worker_briefing(ws: &Workspace, pane: &Pane, inputs: &BriefingInputs<'_>) -> 
     }
     let facts: Vec<String> = [
         orchestrator.map(|o| format!("Orchestrator: pane \"{}\".", o.name)),
-        settings.check_command.as_ref().map(|command| format!("Check: `{command}`.")),
+        settings
+            .check_command
+            .as_ref()
+            .map(|command| format!("Check: `{command}`.")),
         pane.port_base
             .filter(|base| *base != 0)
             .map(|base| format!("Ports: {base} to {} (HANGAR_PORT_BASE).", base + 19)),
@@ -460,7 +520,11 @@ fn worker_briefing(ws: &Workspace, pane: &Pane, inputs: &BriefingInputs<'_>) -> 
     if let Some(task) = task
         && !task.description.trim().is_empty()
     {
-        lines.extend([String::new(), "Description:".into(), clip(&task.description, MAX_DESCRIPTION)]);
+        lines.extend([
+            String::new(),
+            "Description:".into(),
+            clip(&task.description, MAX_DESCRIPTION),
+        ]);
     }
     let comments = task.map(|task| {
         let from = task.comments.len().saturating_sub(4);
@@ -469,7 +533,12 @@ fn worker_briefing(ws: &Workspace, pane: &Pane, inputs: &BriefingInputs<'_>) -> 
     if let Some(comments) = comments.filter(|c| !c.is_empty()) {
         lines.extend([String::new(), "Latest comments on it:".into()]);
         lines.extend(comments.iter().map(|c| {
-            format!("- {} {}: \"{}\"", clock(c.created_at), c.author, flat(&c.text, MAX_COMMENT * 2))
+            format!(
+                "- {} {}: \"{}\"",
+                clock(c.created_at),
+                c.author,
+                flat(&c.text, MAX_COMMENT * 2)
+            )
         }));
     }
     let mine: Vec<&JournalEntry> = inputs
@@ -518,7 +587,10 @@ pub trait BriefingPort: Sync {
 }
 
 /// Reads what a briefing needs, then writes it (`briefingFor`).
-pub async fn briefing_for(pane_id: &str, port: &impl BriefingPort) -> Result<Option<Briefing>, String> {
+pub async fn briefing_for(
+    pane_id: &str,
+    port: &impl BriefingPort,
+) -> Result<Option<Briefing>, String> {
     let state = port.state();
     let Some((ws, pane)) = pane_of(&state, pane_id) else {
         return Ok(None);
@@ -529,7 +601,11 @@ pub async fn briefing_for(pane_id: &str, port: &impl BriefingPort) -> Result<Opt
     let orchestrating = role == PaneRole::Orchestrator;
     let manager = role == PaneRole::Manager;
     // The manager follows every project's board, not the HQ's own.
-    let tasks = if manager { Vec::new() } else { port.load_board(&ws.cwd).await? };
+    let tasks = if manager {
+        Vec::new()
+    } else {
+        port.load_board(&ws.cwd).await?
+    };
     // A worker's briefing has no plan in it; an unreadable memory is no plan.
     let memory = if orchestrating || manager {
         port.load_memory().await.unwrap_or_default()
@@ -538,10 +614,22 @@ pub async fn briefing_for(pane_id: &str, port: &impl BriefingPort) -> Result<Opt
     };
     // Only the orchestrator's role depends on it; a worker's pane says it. A
     // folder that cannot be told is taken for a repository, as it always was.
-    let git = if orchestrating { port.is_repo(&ws.cwd).await.ok().flatten() } else { None };
+    let git = if orchestrating {
+        port.is_repo(&ws.cwd).await.ok().flatten()
+    } else {
+        None
+    };
     // An unreadable overview is an empty one, not a failed briefing.
-    let projects = if manager { port.load_projects().await.unwrap_or_default() } else { Vec::new() };
-    let manager_events = if manager { port.manager_journal() } else { Vec::new() };
+    let projects = if manager {
+        port.load_projects().await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let manager_events = if manager {
+        port.manager_journal()
+    } else {
+        Vec::new()
+    };
     let journal = port.journal(&ws.id);
     let activity = |pane: &str| port.activity(pane);
     Ok(build_briefing(&BriefingInputs {
@@ -561,7 +649,10 @@ pub async fn briefing_for(pane_id: &str, port: &impl BriefingPort) -> Result<Opt
 /// The answer to the internal request `orchestrator_briefing {paneId}`:
 /// `{role, system, context}`, or `null` for a pane with no role
 /// (`answerInternal`). Core checks and clips it (orchestrator.rs).
-pub async fn answer_briefing(args: &serde_json::Value, port: &impl BriefingPort) -> Result<serde_json::Value, String> {
+pub async fn answer_briefing(
+    args: &serde_json::Value,
+    port: &impl BriefingPort,
+) -> Result<serde_json::Value, String> {
     let pane = match args.get("paneId") {
         Some(serde_json::Value::String(pane)) => pane.clone(),
         Some(serde_json::Value::Null) | None => String::new(),
@@ -597,9 +688,9 @@ pub async fn announce_role(
         return Ok(false);
     }
     let text = match (pane.role, previous) {
-        (Some(_), _) => briefing_for(&pane.id, port)
-            .await?
-            .map(|briefing| role_message(briefing.role, &briefing.system, &briefing.context, &ws.name)),
+        (Some(_), _) => briefing_for(&pane.id, port).await?.map(|briefing| {
+            role_message(briefing.role, &briefing.system, &briefing.context, &ws.name)
+        }),
         (None, Some(previous)) => Some(release_message(previous, &ws.name)),
         (None, None) => None,
     };

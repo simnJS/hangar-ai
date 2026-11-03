@@ -49,7 +49,10 @@ const MAX_FIRED: usize = 64;
 /// What the package hands the runtime from the core events it is offered.
 #[derive(Debug, Clone)]
 pub enum EngineMsg {
-    Bridge { pane: PaneId, event: BridgeEvent },
+    Bridge {
+        pane: PaneId,
+        event: BridgeEvent,
+    },
     PtyExit(PaneId),
     /// An agent or a worker's claim wrote a board.
     BoardChanged,
@@ -121,7 +124,9 @@ async fn run(handle: OrchestrationHandle, mut rx: mpsc::UnboundedReceiver<Engine
         let wake = handle.next_wake();
         let deadline = async {
             match wake {
-                Some(at) => tokio::time::sleep(Duration::from_millis(at.saturating_sub(now_ms()))).await,
+                Some(at) => {
+                    tokio::time::sleep(Duration::from_millis(at.saturating_sub(now_ms()))).await
+                }
                 None => std::future::pending().await,
             }
         };
@@ -187,7 +192,9 @@ impl OrchestrationHandle {
 
     async fn on_message(&self, message: EngineMsg) {
         self.with_engines(move |engines, port, now| match message {
-            EngineMsg::Bridge { pane, event } => engines.events.bridge_event(port, &pane, &event, now),
+            EngineMsg::Bridge { pane, event } => {
+                engines.events.bridge_event(port, &pane, &event, now)
+            }
             EngineMsg::PtyExit(pane) => engines.events.pty_exited(port, &pane, now),
             EngineMsg::BoardChanged => {
                 engines.events.board_changed(now);
@@ -239,7 +246,9 @@ impl OrchestrationHandle {
     /// (`postOrchestratorEvent`): the deliveries post theirs here (P18).
     pub fn post(&self, workspace_id: &str, event: OrchestratorEvent) {
         let port = self.port();
-        self.engines().events.post(&port, workspace_id, event, false, now_ms());
+        self.engines()
+            .events
+            .post(&port, workspace_id, event, false, now_ms());
         self.shared.wake.notify_one();
     }
 
@@ -277,7 +286,13 @@ impl OrchestrationHandle {
     }
 
     /// A `worker_*` op, for the workspace P18's dispatch resolved.
-    pub async fn worker_control(&self, op: &str, ws: &Workspace, args: &Value, caller: &Caller) -> Result<Value, String> {
+    pub async fn worker_control(
+        &self,
+        op: &str,
+        ws: &Workspace,
+        args: &Value,
+        caller: &Caller,
+    ) -> Result<Value, String> {
         worker::worker_control(op, ws, args, caller, &self.port()).await
     }
 
@@ -292,7 +307,12 @@ impl OrchestrationHandle {
     }
 
     /// Tells a running session the role its pane was just given or lost.
-    pub async fn announce_role(&self, workspace_id: &str, pane_id: &str, previous: Option<PaneRole>) -> Result<bool, String> {
+    pub async fn announce_role(
+        &self,
+        workspace_id: &str,
+        pane_id: &str,
+        previous: Option<PaneRole>,
+    ) -> Result<bool, String> {
         brief::announce_role(workspace_id, pane_id, previous, &self.port()).await
     }
 

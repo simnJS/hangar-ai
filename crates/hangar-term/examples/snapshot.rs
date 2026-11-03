@@ -12,25 +12,31 @@ use hangar_term::{
     Action, Button, CellPos, Config, Font, Palette, Pointer, SearchOptions, Side, Terminal,
     terminal_view,
 };
+use iced::advanced::Shell;
 use iced::advanced::clipboard;
 use iced::advanced::layout::{Layout, Limits};
 use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::Tree;
-use iced::advanced::Shell;
 use iced::keyboard::Modifiers;
 use iced::{Color, Element, Pixels, Size, mouse, window};
 
 type Renderer = iced::Renderer;
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "snapshot.png".into());
-    let scale: f32 = std::env::var("SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "snapshot.png".into());
+    let scale: f32 = std::env::var("SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
     let columns: u16 = 100;
     let rows: u16 = 34;
 
     let mut terminal = Terminal::new(Config::default(), columns, rows);
     terminal.set_font(Font::from_css_stack(
-        &std::env::var("HANGAR_TERM_FONT").unwrap_or_else(|_| "\"DejaVu Sans Mono\", monospace".into()),
+        &std::env::var("HANGAR_TERM_FONT")
+            .unwrap_or_else(|_| "\"DejaVu Sans Mono\", monospace".into()),
         14.0,
         1.25,
     ));
@@ -39,7 +45,10 @@ fn main() {
     terminal.feed(SCREEN.as_bytes());
 
     let renderer_size = Size::new(900.0, 640.0);
-    let physical = Size::new((renderer_size.width * scale) as u32, (renderer_size.height * scale) as u32);
+    let physical = Size::new(
+        (renderer_size.width * scale) as u32,
+        (renderer_size.height * scale) as u32,
+    );
     let mut renderer = iced::futures::executor::block_on(Renderer::new(
         iced::Font::DEFAULT,
         Pixels(16.0),
@@ -51,11 +60,16 @@ fn main() {
     // that the way an app would, then draw.
     let frame = |terminal: &Terminal, renderer: &mut Renderer, draw: bool| -> Vec<Action> {
         let mut element: Element<'_, Action, iced::Theme, Renderer> =
-            terminal_view(terminal, |action| action).scale_factor(scale).padding(8).into();
+            terminal_view(terminal, |action| action)
+                .scale_factor(scale)
+                .padding(8)
+                .into();
         let mut tree = Tree::new(&element);
-        let node = element
-            .as_widget_mut()
-            .layout(&mut tree, renderer, &Limits::new(Size::ZERO, renderer_size));
+        let node = element.as_widget_mut().layout(
+            &mut tree,
+            renderer,
+            &Limits::new(Size::ZERO, renderer_size),
+        );
         let mut messages = Vec::new();
         let mut shell = Shell::new(&mut messages);
         element.as_widget_mut().update(
@@ -73,7 +87,9 @@ fn main() {
                 &tree,
                 renderer,
                 &iced::Theme::Dark,
-                &Style { text_color: Color::WHITE },
+                &Style {
+                    text_color: Color::WHITE,
+                },
                 Layout::new(&node),
                 mouse::Cursor::Unavailable,
                 &iced::Rectangle::with_size(renderer_size),
@@ -89,9 +105,20 @@ fn main() {
     let none = Modifiers::empty();
     let (c0, r0) = locate(&terminal, "selected");
     for pointer in [
-        Pointer::Down { button: Button::Left, at: at(c0, r0, Side::Left), modifiers: none },
-        Pointer::Move { at: at(c0 + 7, r0, Side::Right), modifiers: none },
-        Pointer::Up { button: Button::Left, at: at(c0 + 7, r0, Side::Right), modifiers: none },
+        Pointer::Down {
+            button: Button::Left,
+            at: at(c0, r0, Side::Left),
+            modifiers: none,
+        },
+        Pointer::Move {
+            at: at(c0 + 7, r0, Side::Right),
+            modifiers: none,
+        },
+        Pointer::Up {
+            button: Button::Left,
+            at: at(c0 + 7, r0, Side::Right),
+            modifiers: none,
+        },
     ] {
         terminal.perform(Action::Pointer(pointer));
     }
@@ -179,7 +206,11 @@ fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     for &byte in &out[start..] {
         crc ^= byte as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { 0xedb8_8320 ^ (crc >> 1) } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                0xedb8_8320 ^ (crc >> 1)
+            } else {
+                crc >> 1
+            };
         }
     }
     out.extend_from_slice(&(!crc).to_be_bytes());

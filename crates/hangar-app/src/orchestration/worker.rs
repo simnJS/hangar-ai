@@ -26,7 +26,9 @@ use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
 use hangar_core::board::Task;
-use hangar_core::git::{Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree};
+use hangar_core::git::{
+    Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree,
+};
 
 use super::events::{JournalEntry, OrchestratorEvent};
 use super::port::{Announcement, Caller, NewPane, WorkerInit};
@@ -98,7 +100,11 @@ pub trait WorkerPort: Sync {
     fn post_event(&self, workspace_id: &str, event: OrchestratorEvent);
     fn announce(&self, announcement: Announcement);
     /// The new pane's id, or `None` when the workspace has no room.
-    fn add_pane(&self, workspace_id: &str, pane: NewPane) -> impl Future<Output = Option<PaneId>> + Send;
+    fn add_pane(
+        &self,
+        workspace_id: &str,
+        pane: NewPane,
+    ) -> impl Future<Output = Option<PaneId>> + Send;
     fn close_pane(&self, workspace_id: &str, pane: &str) -> impl Future<Output = ()> + Send;
     /// Keeps the workspace awake (hibernation's `touchWorkspace`).
     fn touch(&self, workspace_id: &str);
@@ -107,7 +113,12 @@ pub trait WorkerPort: Sync {
     fn kill_pane(&self, pane: &str) -> impl Future<Output = Result<(), String>> + Send;
     fn alive(&self, pane: &str) -> impl Future<Output = bool> + Send;
     /// `bridge_enqueue`: submitted once the pane's session is ready.
-    fn enqueue(&self, pane: &str, text: &str, from: &str) -> impl Future<Output = Result<(), String>> + Send;
+    fn enqueue(
+        &self,
+        pane: &str,
+        text: &str,
+        from: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
     fn dir_exists(&self, path: &str) -> impl Future<Output = bool> + Send;
     fn sleep(&self, ms: u64) -> impl Future<Output = ()> + Send;
     fn board_load(&self, cwd: &str) -> impl Future<Output = Result<Vec<Task>, String>> + Send;
@@ -122,9 +133,18 @@ pub trait WorkerPort: Sync {
         shared_folder: bool,
     ) -> impl Future<Output = Result<Task, String>> + Send;
     /// board.rs `release_worker`.
-    fn release(&self, cwd: &str, id: &str, worker: &str, undo: bool) -> impl Future<Output = Result<Task, String>> + Send;
+    fn release(
+        &self,
+        cwd: &str,
+        id: &str,
+        worker: &str,
+        undo: bool,
+    ) -> impl Future<Output = Result<Task, String>> + Send;
     fn repo_info(&self, path: &str) -> impl Future<Output = RepoInfo> + Send;
-    fn worktree_list(&self, path: &str) -> impl Future<Output = Result<Vec<Worktree>, String>> + Send;
+    fn worktree_list(
+        &self,
+        path: &str,
+    ) -> impl Future<Output = Result<Vec<Worktree>, String>> + Send;
     fn worktree_add(
         &self,
         path: &str,
@@ -146,12 +166,27 @@ pub trait WorkerPort: Sync {
         worktree_path: &str,
         command: &str,
     ) -> impl Future<Output = Result<Option<HookReport>, String>> + Send;
-    fn branch_delete(&self, path: &str, branch: &str, force: bool) -> impl Future<Output = Result<DeleteBranchResult, String>> + Send;
+    fn branch_delete(
+        &self,
+        path: &str,
+        branch: &str,
+        force: bool,
+    ) -> impl Future<Output = Result<DeleteBranchResult, String>> + Send;
     /// The files git ignores that the patterns name: a worker's `.env`.
-    fn copy_ignored(&self, from: &str, to: &str, patterns: &[&str]) -> impl Future<Output = Result<CopyResult, String>> + Send;
+    fn copy_ignored(
+        &self,
+        from: &str,
+        to: &str,
+        patterns: &[&str],
+    ) -> impl Future<Output = Result<CopyResult, String>> + Send;
     /// What is not committed in the working tree holding `path`.
     fn changes(&self, path: &str) -> impl Future<Output = Result<Changes, String>> + Send;
-    fn commits_ahead(&self, path: &str, base: &str, head: &str) -> impl Future<Output = Result<u32, String>> + Send;
+    fn commits_ahead(
+        &self,
+        path: &str,
+        base: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<u32, String>> + Send;
 }
 
 /* ── Names, paths and ports ────────────────────────────────────── */
@@ -171,7 +206,10 @@ fn unprefixed(path: &str) -> &str {
 
 /// Same folder, the way Windows compares them: either separator, any case.
 fn comparable(path: &str) -> String {
-    unprefixed(path).trim_end_matches(['\\', '/']).replace('\\', "/").to_lowercase()
+    unprefixed(path)
+        .trim_end_matches(['\\', '/'])
+        .replace('\\', "/")
+        .to_lowercase()
 }
 
 /// Where `folder` sits inside `root`, in forward slashes: "" for the root
@@ -187,7 +225,11 @@ fn inside(root: &str, folder: &str) -> Option<String> {
         return None;
     }
     // Cut from the folder as given, so the subfolder keeps its own case.
-    let given: Vec<char> = unprefixed(folder).trim_end_matches(['\\', '/']).replace('\\', "/").chars().collect();
+    let given: Vec<char> = unprefixed(folder)
+        .trim_end_matches(['\\', '/'])
+        .replace('\\', "/")
+        .chars()
+        .collect();
     let keep = target.chars().count() - base.chars().count() - 1;
     Some(given[given.len().saturating_sub(keep)..].iter().collect())
 }
@@ -207,7 +249,10 @@ fn join_path(root: &str, relative: &str) -> String {
 /// The worktree a pane works in: the deepest one holding its folder.
 fn worktree_of<'a>(trees: &'a [Worktree], folder: &str) -> Option<&'a Worktree> {
     let mut best: Option<&Worktree> = None;
-    for tree in trees.iter().filter(|tree| inside(&tree.path, folder).is_some()) {
+    for tree in trees
+        .iter()
+        .filter(|tree| inside(&tree.path, folder).is_some())
+    {
         if best.is_none_or(|known| tree.path.chars().count() > known.path.chars().count()) {
             best = Some(tree);
         }
@@ -251,7 +296,10 @@ pub fn sanitize_branch_name(name: &str) -> String {
 /// (`worktreeFolder` of lib/worktrees.ts).
 pub fn worktree_folder(main_root: &str, branch: &str) -> String {
     let separator = if main_root.contains('\\') { "\\" } else { "/" };
-    let mut segments: Vec<&str> = main_root.trim_end_matches(['\\', '/']).split(['\\', '/']).collect();
+    let mut segments: Vec<&str> = main_root
+        .trim_end_matches(['\\', '/'])
+        .split(['\\', '/'])
+        .collect();
     let repo = segments.pop().unwrap_or("");
     let siblings = format!("{repo}-worktrees");
     let folder = folder_name(branch);
@@ -264,12 +312,23 @@ pub fn worktree_folder(main_root: &str, branch: &str) -> String {
 /// every workspace: 21000, 21020, 21040… A worker keeps its block for as long
 /// as its pane lives, restarts included. `None` when every block is taken
 /// (`allocatePortBase`).
-pub fn allocate_port_base(workspaces: &[Workspace], reserved: impl IntoIterator<Item = u32>) -> Option<u32> {
+pub fn allocate_port_base(
+    workspaces: &[Workspace],
+    reserved: impl IntoIterator<Item = u32>,
+) -> Option<u32> {
     let mut taken: Vec<u32> = reserved.into_iter().collect();
-    taken.extend(workspaces.iter().flat_map(|ws| ws.panes.iter()).filter_map(|pane| pane.port_base));
+    taken.extend(
+        workspaces
+            .iter()
+            .flat_map(|ws| ws.panes.iter())
+            .filter_map(|pane| pane.port_base),
+    );
     let mut base = PORT_POOL_START;
     while base + PORT_COUNT - 1 <= PORT_POOL_END {
-        if taken.iter().all(|other| other + PORT_COUNT <= base || base + PORT_COUNT <= *other) {
+        if taken
+            .iter()
+            .all(|other| other + PORT_COUNT <= base || base + PORT_COUNT <= *other)
+        {
             return Some(base);
         }
         base += PORT_COUNT;
@@ -300,7 +359,11 @@ pub fn task_slug(title: &str) -> String {
         }
     }
     if words.chars().count() <= SLUG_MAX {
-        return if words.is_empty() { "task".into() } else { words };
+        return if words.is_empty() {
+            "task".into()
+        } else {
+            words
+        };
     }
     let cut: String = words.chars().take(SLUG_MAX).collect();
     let cut = match cut.rfind('-') {
@@ -313,7 +376,11 @@ pub fn task_slug(title: &str) -> String {
 /// `hangar/<title>-<start of the id>`: whose it is, what it is, and which
 /// task (`workerBranch`).
 pub fn worker_branch(id: &str, title: &str) -> String {
-    let id: String = id.chars().filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_').take(6).collect();
+    let id: String = id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .take(6)
+        .collect();
     sanitize_branch_name(&format!("hangar/{}-{id}", task_slug(title)))
 }
 
@@ -329,7 +396,11 @@ pub fn hook_problem(report: &HookReport) -> Option<String> {
         (None, false, None) => "was stopped by a signal".into(),
         (None, false, Some(code)) => format!("failed (exit {code})"),
     };
-    Some(if report.output.is_empty() { why } else { format!("{why}: {}", report.output) })
+    Some(if report.output.is_empty() {
+        why
+    } else {
+        format!("{why}: {}", report.output)
+    })
 }
 
 /* ── The brief ─────────────────────────────────────────────────── */
@@ -370,9 +441,16 @@ pub struct BriefFacts<'a> {
 /// acceptance; this says where to work, what not to touch, how to report,
 /// when to stop and how to hand the work in.
 pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
-    let owns: Vec<&str> = facts.owns.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+    let owns: Vec<&str> = facts
+        .owns
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
     let git = match (facts.branch, facts.target, facts.worktree) {
-        (Some(branch), Some(target), Some(worktree)) if !branch.is_empty() && !target.is_empty() && !worktree.is_empty() => {
+        (Some(branch), Some(target), Some(worktree))
+            if !branch.is_empty() && !target.is_empty() && !worktree.is_empty() =>
+        {
             Some((branch, target, worktree))
         }
         _ => None,
@@ -467,7 +545,11 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
 
 /// The workspace's orchestrator, when it is the one calling; refused
 /// otherwise (`orchestratorCalling`).
-fn orchestrator_calling<'a>(ws: &'a Workspace, caller: &Caller, op: &str) -> Result<&'a Pane, String> {
+fn orchestrator_calling<'a>(
+    ws: &'a Workspace,
+    caller: &Caller,
+    op: &str,
+) -> Result<&'a Pane, String> {
     let orchestrator = orchestrator(ws);
     let me = caller
         .pane_id
@@ -518,7 +600,12 @@ fn recent_workers(journal: &[JournalEntry]) -> Vec<String> {
         .collect()
 }
 
-fn name_arg(value: Option<&Value>, state: &AppState, starting: &Starting, recent: &[String]) -> Result<String, String> {
+fn name_arg(
+    value: Option<&Value>,
+    state: &AppState,
+    starting: &Starting,
+    recent: &[String],
+) -> Result<String, String> {
     let wanted = text(value);
     let Some(wanted) = wanted else {
         let taken = all_pane_names(&state.workspaces)
@@ -533,14 +620,22 @@ fn name_arg(value: Option<&Value>, state: &AppState, starting: &Starting, recent
         ));
     }
     let lower = wanted.to_lowercase();
-    let holder = state
-        .workspaces
-        .iter()
-        .find(|ws| ws.panes.iter().any(|pane| pane.name.trim().to_lowercase() == lower));
-    if holder.is_some() || starting.names.iter().any(|name| name.to_lowercase() == lower) {
+    let holder = state.workspaces.iter().find(|ws| {
+        ws.panes
+            .iter()
+            .any(|pane| pane.name.trim().to_lowercase() == lower)
+    });
+    if holder.is_some()
+        || starting
+            .names
+            .iter()
+            .any(|name| name.to_lowercase() == lower)
+    {
         return Err(format!(
             "A pane is already named \"{wanted}\"{}; pane names are unique across Hangar. Pick another name, or leave name out to get the next free one.",
-            holder.map(|ws| format!(" (in \"{}\")", ws.name)).unwrap_or_default()
+            holder
+                .map(|ws| format!(" (in \"{}\")", ws.name))
+                .unwrap_or_default()
         ));
     }
     Ok(wanted)
@@ -627,7 +722,9 @@ pub async fn spawn_worker(
     let settings = orchestration_of(ws);
     let state = port.state();
     let Some(task_id) = text(request.task.as_ref()) else {
-        return Err("Give the id of the task to hand over (task), as board_list_tasks shows it.".into());
+        return Err(
+            "Give the id of the task to hand over (task), as board_list_tasks shows it.".into(),
+        );
     };
     if !state.settings.claude_bridge {
         return Err(
@@ -640,26 +737,41 @@ pub async fn spawn_worker(
     let (name, model, port_base) = {
         // Held from the first check to the reservation, so two starts at once
         // see each other, as the TS's single thread made them.
-        let mut starting = port.starting().lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut starting = port
+            .starting()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let running = workers_of(ws);
         let pending = starting.in_workspace(&ws.id);
         if running.len() + pending >= settings.max_workers as usize {
-            let names: Vec<String> = running.iter().map(|pane| format!("\"{}\"", pane.name)).collect();
+            let names: Vec<String> = running
+                .iter()
+                .map(|pane| format!("\"{}\"", pane.name))
+                .collect();
             return Err(format!(
                 "\"{}\" already runs {} worker(s){}, its limit (maxWorkers {}). Wait for one to deliver, or stop one with worker_stop, then start the next. The limit is the person's setting.",
                 ws.name,
                 running.len() + pending,
-                if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) },
+                if names.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", names.join(", "))
+                },
                 settings.max_workers
             ));
         }
         if ws.panes.len() + pending >= MAX_PANES {
             return Err(full(ws));
         }
-        let model = model_arg(request.model.as_ref())?.unwrap_or_else(|| settings.worker_model.clone());
+        let model =
+            model_arg(request.model.as_ref())?.unwrap_or_else(|| settings.worker_model.clone());
         let name = name_arg(request.name.as_ref(), &state, &starting, &recent)?;
-        let Some(port_base) = allocate_port_base(&state.workspaces, starting.ports.iter().copied()) else {
-            return Err("Every block of worker ports is taken. Stop a worker you no longer need first.".into());
+        let Some(port_base) = allocate_port_base(&state.workspaces, starting.ports.iter().copied())
+        else {
+            return Err(
+                "Every block of worker ports is taken. Stop a worker you no longer need first."
+                    .into(),
+            );
         };
         // Held from here to the end, before anything is awaited.
         starting.names.insert(name.clone());
@@ -667,7 +779,14 @@ pub async fn spawn_worker(
         starting.by_workspace.insert(ws.id.clone(), pending + 1);
         (name, model, port_base)
     };
-    let start = Start { ws, task_id, name, model, port_base, by };
+    let start = Start {
+        ws,
+        task_id,
+        name,
+        model,
+        port_base,
+        by,
+    };
     let mut undo: Vec<Undo> = Vec::new();
     let outcome = start_steps(&start, port, &mut undo).await;
     let outcome = match outcome {
@@ -680,7 +799,10 @@ pub async fn spawn_worker(
                 }
             }
             Err(if !failed.is_empty() {
-                format!("{message} The start was undone, except that Hangar {}.", failed.join("; "))
+                format!(
+                    "{message} The start was undone, except that Hangar {}.",
+                    failed.join("; ")
+                )
             } else if !undo.is_empty() {
                 format!("{message} Nothing was left behind: the task is back in todo.")
             } else {
@@ -688,7 +810,10 @@ pub async fn spawn_worker(
             })
         }
     };
-    let mut starting = port.starting().lock().unwrap_or_else(|poison| poison.into_inner());
+    let mut starting = port
+        .starting()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     starting.names.remove(&start.name);
     starting.ports.remove(&start.port_base);
     let left = starting.in_workspace(&ws.id).saturating_sub(1);
@@ -710,7 +835,10 @@ fn full(ws: &Workspace) -> String {
 async fn run_undo(start: &Start<'_>, step: &Undo, port: &impl WorkerPort) -> Result<(), String> {
     let ws = start.ws;
     match step {
-        Undo::Release => port.release(&ws.cwd, &start.task_id, &start.name, true).await.map(drop),
+        Undo::Release => port
+            .release(&ws.cwd, &start.task_id, &start.name, true)
+            .await
+            .map(drop),
         Undo::RemoveWorktree { path, branch } => {
             remove_worktree(ws, path, port).await?;
             port.branch_delete(&ws.cwd, branch, true).await.map(drop)
@@ -724,17 +852,25 @@ async fn run_undo(start: &Start<'_>, step: &Undo, port: &impl WorkerPort) -> Res
     }
 }
 
-async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<Undo>) -> Result<SpawnedWorker, String> {
+async fn start_steps(
+    start: &Start<'_>,
+    port: &impl WorkerPort,
+    undo: &mut Vec<Undo>,
+) -> Result<SpawnedWorker, String> {
     let ws = start.ws;
     let settings = orchestration_of(ws);
     let repo = port.repo_info(&ws.cwd).await;
     // Without git, there is no worktree to give: the worker starts in the
     // workspace's own folder, beside the others, and nothing is merged.
     let git = match (&repo.root, &repo.main_root) {
-        (Some(root), Some(main_root)) if repo.installed && repo.is_repo => Some((root.clone(), main_root.clone())),
+        (Some(root), Some(main_root)) if repo.installed && repo.is_repo => {
+            Some((root.clone(), main_root.clone()))
+        }
         _ => None,
     };
-    let target = git.as_ref().and_then(|_| settings.branch.clone().or_else(|| repo.branch.clone()));
+    let target = git
+        .as_ref()
+        .and_then(|_| settings.branch.clone().or_else(|| repo.branch.clone()));
     if git.is_some() && target.is_none() {
         return Err(format!(
             "{} is on a detached HEAD, so there is no branch to start workers from. Ask the person to check one out, or to set the branch in the workspace's orchestration settings.",
@@ -743,7 +879,13 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
     }
 
     let task = port
-        .claim(&ws.cwd, &start.task_id, &start.name, settings.max_attempts, git.is_none())
+        .claim(
+            &ws.cwd,
+            &start.task_id,
+            &start.name,
+            settings.max_attempts,
+            git.is_none(),
+        )
         .await?;
     undo.push(Undo::Release);
 
@@ -754,7 +896,10 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
         let (branch, path) = add_worktree(ws, main_root, &task, target, port).await?;
         // A workspace on a subfolder of its repository: the same subfolder there.
         folder = join_path(&path, &inside(root, &ws.cwd).unwrap_or_default());
-        undo.push(Undo::RemoveWorktree { path: path.clone(), branch: branch.clone() });
+        undo.push(Undo::RemoveWorktree {
+            path: path.clone(),
+            branch: branch.clone(),
+        });
         // A convenience, as in the worktree panel: a failed copy never undoes
         // the start.
         let _ = port.copy_ignored(root, &path, &COPY_PATTERNS).await;
@@ -795,7 +940,11 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
         return Err(format!("\"{}\" was closed in the meantime.", ws.name));
     };
     let others = workers_of(current);
-    let near = others.last().copied().or_else(|| orchestrator(current)).map(|pane| pane.id.clone());
+    let near = others
+        .last()
+        .copied()
+        .or_else(|| orchestrator(current))
+        .map(|pane| pane.id.clone());
     let pane = NewPane {
         agent: AgentId::Claude,
         cwd: folder.clone(),
@@ -821,7 +970,10 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
         .find(|entry| entry.id == ws.id)
         .and_then(|entry| entry.panes.iter().find(|pane| pane.id == id));
     if created.is_some_and(|pane| pane.name != start.name) {
-        return Err(format!("A pane named \"{}\" appeared in the meantime. Try again.", start.name));
+        return Err(format!(
+            "A pane named \"{}\" appeared in the meantime. Try again.",
+            start.name
+        ));
     }
 
     port.touch(&ws.id);
@@ -855,7 +1007,10 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
     });
     port.post_event(
         &ws.id,
-        OrchestratorEvent::WorkerStarted { worker: start.name.clone(), task_id: Some(task.id.clone()) },
+        OrchestratorEvent::WorkerStarted {
+            worker: start.name.clone(),
+            task_id: Some(task.id.clone()),
+        },
     );
     let mut note = String::new();
     if git.is_none() {
@@ -875,13 +1030,21 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
     );
     Ok(SpawnedWorker {
         worker: start.name.clone(),
-        task: SpawnedTask { id: task.id.clone(), title: task.title.clone(), attempt, max_attempts: settings.max_attempts },
+        task: SpawnedTask {
+            id: task.id.clone(),
+            title: task.title.clone(),
+            attempt,
+            max_attempts: settings.max_attempts,
+        },
         model: start.model.clone(),
         folder,
         branch: tree.as_ref().map(|(branch, _)| branch.clone()),
         base: target,
         worktree: tree.map(|(_, path)| path),
-        ports: Ports { base: start.port_base, count: PORT_COUNT },
+        ports: Ports {
+            base: start.port_base,
+            count: PORT_COUNT,
+        },
         brief: "queued: submitted as soon as its Claude Code session is ready".into(),
         note,
     })
@@ -912,11 +1075,18 @@ async fn add_worktree(
     let stem = worker_branch(&task.id, &task.title);
     let mut last = String::new();
     for round in 1..=BRANCH_TRIES {
-        let branch = if round == 1 { stem.clone() } else { format!("{stem}-{round}") };
+        let branch = if round == 1 {
+            stem.clone()
+        } else {
+            format!("{stem}-{round}")
+        };
         let Some(path) = free_folder(port, &worktree_folder(main_root, &branch)).await else {
             continue;
         };
-        match port.worktree_add(&ws.cwd, &path, &branch, true, Some(target)).await {
+        match port
+            .worktree_add(&ws.cwd, &path, &branch, true, Some(target))
+            .await
+        {
             Ok(()) => return Ok((branch, path)),
             Err(error) => {
                 last = error;
@@ -941,7 +1111,11 @@ async fn add_worktree(
     }
     Err(format!(
         "Could not find a free branch name for the worker: {stem} and its numbered variants are all taken{}. Delete the old ones from the worktree panel, or ask the person to.",
-        if last.is_empty() { String::new() } else { format!(" ({last})") }
+        if last.is_empty() {
+            String::new()
+        } else {
+            format!(" ({last})")
+        }
     ))
 }
 
@@ -985,20 +1159,26 @@ pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
     let (tasks, trees) = if panes.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        let (tasks, trees) = iced::futures::join!(port.board_load(&ws.cwd), port.worktree_list(&ws.cwd));
+        let (tasks, trees) =
+            iced::futures::join!(port.board_load(&ws.cwd), port.worktree_list(&ws.cwd));
         (tasks.unwrap_or_default(), trees.unwrap_or_default())
     };
     let open = port.is_open(&ws.id);
     let mut workers = Vec::new();
     for pane in panes {
-        let task = pane.task_id.as_deref().and_then(|id| tasks.iter().find(|task| task.id == id));
+        let task = pane
+            .task_id
+            .as_deref()
+            .and_then(|id| tasks.iter().find(|task| task.id == id));
         let shared = pane.shared_folder == Some(true);
         let tree = match (&pane.cwd, shared) {
             (Some(cwd), false) => worktree_of(&trees, cwd),
             _ => None,
         };
         let task_value = match (task, &pane.task_id) {
-            (Some(task), _) => json!({"id": task.id, "title": task.title, "column": task.column, "attempts": task.attempts}),
+            (Some(task), _) => {
+                json!({"id": task.id, "title": task.title, "column": task.column, "attempts": task.attempts})
+            }
             (None, Some(id)) if !id.is_empty() => json!({"id": id, "missing": true}),
             _ => Value::Null,
         };
@@ -1067,18 +1247,32 @@ pub struct StoppedWorker {
 
 /// Why a worker's worktree has to stay, or `None` when nothing in it is
 /// worth keeping.
-async fn work_kept(ws: &Workspace, path: &str, tree: &Worktree, port: &impl WorkerPort) -> Option<String> {
+async fn work_kept(
+    ws: &Workspace,
+    path: &str,
+    tree: &Worktree,
+    port: &impl WorkerPort,
+) -> Option<String> {
     let Ok(changes) = port.changes(path).await else {
         return Some("its changes could not be read, so nothing was deleted".into());
     };
     if !changes.files.is_empty() {
-        let named: Vec<&str> = changes.files.iter().take(5).map(|file| file.path.as_str()).collect();
+        let named: Vec<&str> = changes
+            .files
+            .iter()
+            .take(5)
+            .map(|file| file.path.as_str())
+            .collect();
         let more = changes.files.len() - named.len();
         return Some(format!(
             "it has {} uncommitted change(s): {}{}",
             changes.files.len(),
             named.join(", "),
-            if more > 0 { format!(" and {more} more") } else { String::new() }
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
         ));
     }
     let head = tree.branch.clone().or_else(|| tree.head.clone());
@@ -1090,7 +1284,9 @@ async fn work_kept(ws: &Workspace, path: &str, tree: &Worktree, port: &impl Work
         return Some("there is no branch to compare it with, so nothing was deleted".into());
     };
     let Ok(ahead) = port.commits_ahead(&ws.cwd, &target, &head).await else {
-        return Some(format!("it could not be compared with {target}, so nothing was deleted"));
+        return Some(format!(
+            "it could not be compared with {target}, so nothing was deleted"
+        ));
     };
     (ahead > 0).then(|| {
         format!(
@@ -1151,12 +1347,18 @@ pub async fn stop_worker(
                     .into(),
             );
         }
-        (Some(_), None) => worktree.kept = Some("git does not list it as a worktree any more".into()),
+        (Some(_), None) => {
+            worktree.kept = Some("git does not list it as a worktree any more".into())
+        }
         (None, _) => {}
         (Some(_), Some(tree)) if tree.is_main || inside(&tree.path, &ws.cwd).is_some() => {
-            worktree.kept = Some("it is the workspace's own checkout, not one Hangar made for the worker".into());
+            worktree.kept = Some(
+                "it is the workspace's own checkout, not one Hangar made for the worker".into(),
+            );
         }
-        (Some(_), Some(_)) if keep_worktree => worktree.kept = Some("keepWorktree was asked for".into()),
+        (Some(_), Some(_)) if keep_worktree => {
+            worktree.kept = Some("keepWorktree was asked for".into())
+        }
         (Some(path), Some(tree)) => {
             port.sleep(SETTLE_MS).await;
             match work_kept(ws, path, tree, port).await {
@@ -1171,7 +1373,9 @@ pub async fn stop_worker(
                         // Already one plain line naming what holds it: say it as it is.
                         Err(error) => {
                             let line = error.split_whitespace().collect::<Vec<_>>().join(" ");
-                            worktree.kept = Some(format!("{line} The person can finish from the worktree panel."));
+                            worktree.kept = Some(format!(
+                                "{line} The person can finish from the worktree panel."
+                            ));
                         }
                     }
                     if worktree.removed
@@ -1183,8 +1387,9 @@ pub async fn stop_worker(
                             .map(|result| result.deleted)
                             .unwrap_or(false);
                         if !worktree.branch_deleted {
-                            worktree.kept =
-                                Some(format!("the worktree is gone, but the branch {branch} could not be deleted"));
+                            worktree.kept = Some(format!(
+                                "the worktree is gone, but the branch {branch} could not be deleted"
+                            ));
                         }
                     }
                 }
@@ -1199,11 +1404,18 @@ pub async fn stop_worker(
     });
     port.post_event(
         &ws.id,
-        OrchestratorEvent::WorkerStopped { worker: pane.name.clone(), task_id: pane.task_id.clone() },
+        OrchestratorEvent::WorkerStopped {
+            worker: pane.name.clone(),
+            task_id: pane.task_id.clone(),
+        },
     );
     StoppedWorker {
         stopped: pane.name.clone(),
-        task: task.map(|task| StoppedTask { id: task.id, title: task.title, column: task.column }),
+        task: task.map(|task| StoppedTask {
+            id: task.id,
+            title: task.title,
+            column: task.column,
+        }),
         worktree,
     }
 }
@@ -1214,10 +1426,17 @@ fn worker_in<'a>(ws: &'a Workspace, reference: Option<&Value>) -> Result<&'a Pan
     let names = if workers.is_empty() {
         "none".to_string()
     } else {
-        workers.iter().map(|pane| format!("\"{}\"", pane.name)).collect::<Vec<_>>().join(", ")
+        workers
+            .iter()
+            .map(|pane| format!("\"{}\"", pane.name))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     let Some(wanted) = text(reference) else {
-        return Err(format!("Name the worker to stop. Workers of \"{}\": {names}.", ws.name));
+        return Err(format!(
+            "Name the worker to stop. Workers of \"{}\": {names}.",
+            ws.name
+        ));
     };
     let lower = wanted.to_lowercase();
     let matches = |pane: &&Pane| pane.id == wanted || pane.name.trim().to_lowercase() == lower;
@@ -1230,7 +1449,10 @@ fn worker_in<'a>(ws: &'a Workspace, reference: Option<&Value>) -> Result<&'a Pan
             ws.name
         ));
     }
-    Err(format!("No worker \"{wanted}\" in \"{}\". Workers: {names}.", ws.name))
+    Err(format!(
+        "No worker \"{wanted}\" in \"{}\". Workers: {names}.",
+        ws.name
+    ))
 }
 
 /// The `worker_*` ops, for a workspace the control bus already resolved
@@ -1273,13 +1495,22 @@ pub async fn worker_control(
 /// keep the others going.
 pub async fn stop_all_workers(workspace_id: &str, port: &impl WorkerPort) -> usize {
     let state = port.state();
-    let Some(current) = state.workspaces.iter().find(|ws| ws.id == workspace_id).cloned() else {
+    let Some(current) = state
+        .workspaces
+        .iter()
+        .find(|ws| ws.id == workspace_id)
+        .cloned()
+    else {
         return 0;
     };
     let mut stopped = 0;
     for pane in workers_of(&current) {
         let state = port.state();
-        let fresh = state.workspaces.iter().find(|ws| ws.id == workspace_id).unwrap_or(&current);
+        let fresh = state
+            .workspaces
+            .iter()
+            .find(|ws| ws.id == workspace_id)
+            .unwrap_or(&current);
         stop_worker(fresh, pane, false, port, None).await;
         stopped += 1;
     }

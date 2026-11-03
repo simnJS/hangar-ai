@@ -83,7 +83,9 @@ impl OscScanner {
                 _ => State::Ground,
             },
             State::Number(n) => match byte {
-                b'0'..=b'9' => State::Number(n.saturating_mul(10).saturating_add((byte - b'0') as u32)),
+                b'0'..=b'9' => {
+                    State::Number(n.saturating_mul(10).saturating_add((byte - b'0') as u32))
+                }
                 b';' if matches!(n, 7 | 9 | 777) => {
                     self.payload.clear();
                     State::Payload(n)
@@ -141,10 +143,9 @@ impl OscScanner {
                 // (`4;state;percent` is the taskbar progress, `9;cwd` the
                 // working directory) that have nothing to say to a person.
                 // A message written for one does not start with a number.
-                let numeric = text
-                    .split(';')
-                    .next()
-                    .is_some_and(|head| !head.is_empty() && head.bytes().all(|b| b.is_ascii_digit()));
+                let numeric = text.split(';').next().is_some_and(|head| {
+                    !head.is_empty() && head.bytes().all(|b| b.is_ascii_digit())
+                });
                 if numeric {
                     return;
                 }
@@ -186,11 +187,14 @@ fn file_uri_path(uri: &str) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && let Some(hex) = path.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(hex);
-                i += 3;
-                continue;
-            }
+            && let Some(hex) = path
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(hex);
+            i += 3;
+            continue;
+        }
         out.push(bytes[i]);
         i += 1;
     }
@@ -211,13 +215,19 @@ mod tests {
     }
 
     fn note(body: &str) -> Osc {
-        Osc::Notification { title: None, body: body.to_owned() }
+        Osc::Notification {
+            title: None,
+            body: body.to_owned(),
+        }
     }
 
     #[test]
     fn osc_9_with_bell_or_string_terminator() {
         assert_eq!(scan_all(&[b"\x1b]9;build done\x07"]), [note("build done")]);
-        assert_eq!(scan_all(&[b"\x1b]9;build done\x1b\\"]), [note("build done")]);
+        assert_eq!(
+            scan_all(&[b"\x1b]9;build done\x1b\\"]),
+            [note("build done")]
+        );
     }
 
     #[test]
@@ -255,7 +265,9 @@ mod tests {
 
     #[test]
     fn other_commands_and_plain_escapes_are_skipped() {
-        let found = scan_all(&[b"\x1b[31mred\x1b[0m\x1b]0;title\x07\x1b]8;;http://x\x1b\\link\x1b]9;hi\x07"]);
+        let found = scan_all(&[
+            b"\x1b[31mred\x1b[0m\x1b]0;title\x07\x1b]8;;http://x\x1b\\link\x1b]9;hi\x07",
+        ]);
         assert_eq!(found, [note("hi")]);
     }
 

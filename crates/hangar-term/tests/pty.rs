@@ -26,7 +26,12 @@ impl Session {
     /// Runs `program args` in a PTY and feeds a terminal with what it prints.
     fn start(program: &str, args: &[&str]) -> Option<Self> {
         let pair = native_pty_system()
-            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .ok()?;
         let mut command = CommandBuilder::new(program);
         command.args(args);
@@ -104,7 +109,8 @@ impl Session {
 
 #[test]
 fn what_is_typed_reaches_the_process_and_its_output_the_screen() {
-    let Some(mut session) = Session::start("sh", &["-c", "read line; echo \"you said: $line\""]) else {
+    let Some(mut session) = Session::start("sh", &["-c", "read line; echo \"you said: $line\""])
+    else {
         return;
     };
     // The composed text of a dead-key sequence, then Enter.
@@ -156,9 +162,13 @@ fn a_resize_reaches_the_process() {
 
 #[test]
 fn notifications_and_colours_survive_a_real_process() {
-    let Some(mut session) =
-        Session::start("sh", &["-c", r"printf '\033[31mred\033[0m\n\033]9;turn finished\007done\n'"])
-    else {
+    let Some(mut session) = Session::start(
+        "sh",
+        &[
+            "-c",
+            r"printf '\033[31mred\033[0m\n\033]9;turn finished\007done\n'",
+        ],
+    ) else {
         return;
     };
     session.wait_for(|s| s.contains("done"));
@@ -180,7 +190,11 @@ fn bracketed_paste_reaches_a_program_that_asked_for_it() {
     };
     // Wait until the mode is on before pasting, as a user could not paste
     // before the program has drawn.
-    session.wait_until(|terminal| terminal.mode().contains(hangar_term::TermMode::BRACKETED_PASTE));
+    session.wait_until(|terminal| {
+        terminal
+            .mode()
+            .contains(hangar_term::TermMode::BRACKETED_PASTE)
+    });
     let events = session.terminal.perform(Action::Paste("hi".into()));
     session.handle(events);
     let screen = session.wait_for(|s| s.contains("got="));
