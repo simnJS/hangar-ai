@@ -51,6 +51,11 @@ impl Bounds {
         let mut max = [f64::NEG_INFINITY; 3];
         let mut any = false;
         for point in points {
+            // A vertex a file wrote as NaN or infinity would take the whole box,
+            // and the camera with it.
+            if !point.iter().all(|c| c.is_finite()) {
+                continue;
+            }
             any = true;
             for axis in 0..3 {
                 min[axis] = min[axis].min(point[axis]);

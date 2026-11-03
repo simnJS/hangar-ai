@@ -641,6 +641,29 @@ mod tests {
     }
 
     #[test]
+    fn reads_alpha_modes_emissive_strength_unlit_and_double_sidedness() {
+        let material = r#"{
+            "alphaMode": "MASK", "alphaCutoff": 0.3, "doubleSided": true,
+            "emissiveFactor": [1.0, 0.5, 0.0],
+            "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 2.0}, "KHR_materials_unlit": {}},
+            "pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 0.5], "metallicFactor": 0.25, "roughnessFactor": 0.75}
+        }"#;
+        let model = model_from(&samples::cube_glb_with(material), ModelFormat::Glb).unwrap();
+        let m = &model.materials[0];
+        assert_eq!(m.alpha, AlphaMode::Mask(0.3));
+        assert!(m.double_sided && m.unlit);
+        assert_eq!(m.emissive, [2.0, 1.0, 0.0]);
+        assert_eq!((m.metallic, m.roughness), (0.25, 0.75));
+
+        let blend = r#"{"alphaMode": "BLEND", "pbrMetallicRoughness": {}}"#;
+        let model = model_from(&samples::cube_glb_with(blend), ModelFormat::Glb).unwrap();
+        assert_eq!(model.materials[0].alpha, AlphaMode::Blend);
+        // glTF's own defaults: white, fully metallic and rough.
+        assert_eq!(model.materials[0].base_color, [1.0; 4]);
+        assert_eq!(model.materials[0].metallic, 1.0);
+    }
+
+    #[test]
     fn places_a_mesh_every_node_uses_and_counts_each_placement() {
         let model = model_from(&samples::textured_cube_glb(), ModelFormat::Glb).unwrap();
         assert_eq!(model.meshes.len(), 1);

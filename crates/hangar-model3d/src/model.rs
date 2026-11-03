@@ -397,8 +397,10 @@ impl Model {
             if precise {
                 for vertex in &mesh.vertices {
                     let p = matrix.transform_point3(DVec3::from(vertex.position.map(f64::from)));
-                    min = min.min(p);
-                    max = max.max(p);
+                    if p.is_finite() {
+                        min = min.min(p);
+                        max = max.max(p);
+                    }
                 }
             } else {
                 for corner in mesh.bounds().corners() {
@@ -445,12 +447,17 @@ impl Model {
             while i < count {
                 let p =
                     matrix.transform_point3(DVec3::from(mesh.vertices[i].position.map(f64::from)));
-                points.push(p.to_array());
+                if p.is_finite() {
+                    points.push(p.to_array());
+                }
                 i += stride;
             }
             // Carries the stride across meshes, so many small ones are sampled
             // as evenly as one big one.
             skip = (i - count) % stride;
+        }
+        if points.is_empty() {
+            return vec![self.bounds.min, self.bounds.max];
         }
         points
     }

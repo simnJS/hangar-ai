@@ -122,6 +122,14 @@ const CUBE_ACCESSORS: &str = r#"
 
 /// A red cube, as a binary glTF with its buffer inside.
 pub fn cube_glb() -> Vec<u8> {
+    cube_glb_with(
+        r#"{"name": "red", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.1, 0.1, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.5}}"#,
+    )
+}
+
+/// The same cube in a material of the caller's, as glTF JSON: for trying
+/// alpha modes, emissive colours and the rest.
+pub fn cube_glb_with(material: &str) -> Vec<u8> {
     let json = format!(
         r#"{{
   "asset": {{"version": "2.0"}},
@@ -129,7 +137,7 @@ pub fn cube_glb() -> Vec<u8> {
   "scenes": [{{"nodes": [0]}}],
   "nodes": [{{"mesh": 0, "name": "cube"}}],
   "meshes": [{{"primitives": [{{"attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}}, "indices": 3, "material": 0}}]}}],
-  "materials": [{{"name": "red", "pbrMetallicRoughness": {{"baseColorFactor": [0.8, 0.1, 0.1, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.5}}}}],
+  "materials": [{material}],
   "accessors": [{CUBE_ACCESSORS}],
   "bufferViews": [{CUBE_VIEWS}],
   "buffers": [{{"byteLength": 840}}]

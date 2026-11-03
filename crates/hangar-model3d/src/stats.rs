@@ -330,6 +330,21 @@ mod tests {
     }
 
     #[test]
+    fn ignores_vertices_that_are_not_numbers() {
+        let vertices = vec![
+            Vertex::at([0.0; 3]),
+            Vertex::at([1.0, 1.0, 1.0]),
+            Vertex::at([f32::NAN, 0.0, 0.0]),
+            Vertex::at([f32::INFINITY, 0.0, 0.0]),
+        ];
+        let cloud = Mesh::new("bad", Topology::Points, vertices, None, None);
+        let m = model(vec![cloud], vec![standing(0, Mat4::IDENTITY)], 0);
+        assert_eq!(m.info.size, [1.0; 3]);
+        assert!(m.hull.iter().all(|p| p.iter().all(|c| c.is_finite())));
+        assert!(m.radius.is_finite() && m.radius > 0.0);
+    }
+
+    #[test]
     fn samples_a_big_model_down_to_a_few_thousand_points() {
         let vertices = (0..50_000)
             .map(|i| Vertex::at([i as f32, 0.0, 0.0]))

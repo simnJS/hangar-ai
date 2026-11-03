@@ -169,6 +169,56 @@ fn draws_every_helper_without_the_gpu_objecting() {
 }
 
 #[test]
+fn lets_the_background_show_through_a_translucent_material() {
+    let opaque = model_from("cube.glb", &samples::cube_glb());
+    let glass = model_from(
+        "glass.glb",
+        &samples::cube_glb_with(
+            r#"{"alphaMode": "BLEND", "doubleSided": true, "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.1, 0.1, 0.35], "metallicFactor": 0.0}}"#,
+        ),
+    );
+    let (Some(solid), Some(clear)) = (
+        snapshot(&opaque, SnapshotAngle::Front, 200, 150),
+        snapshot(&glass, SnapshotAngle::Front, 200, 150),
+    ) else {
+        return;
+    };
+    let background = theme().background.into_rgba8();
+    let (a, b) = (*solid.get_pixel(100, 75), *clear.get_pixel(100, 75));
+    // Between the solid colour and the background, on every channel that
+    // differs between them.
+    for channel in 0..3 {
+        let (low, high) = (
+            a[channel].min(background[channel]),
+            a[channel].max(background[channel]),
+        );
+        assert!(
+            b[channel] >= low.saturating_sub(2) && b[channel] <= high.saturating_add(2),
+            "channel {channel}: {b:?} is not between {a:?} and {background:?}"
+        );
+    }
+    assert_ne!(a, b);
+}
+
+#[test]
+fn lights_an_emissive_material_and_an_unlit_one_in_their_own_colour() {
+    let emissive = model_from(
+        "glow.glb",
+        &samples::cube_glb_with(
+            r#"{"emissiveFactor": [0.0, 1.0, 0.0], "pbrMetallicRoughness": {"baseColorFactor": [0.0, 0.0, 0.0, 1.0], "metallicFactor": 0.0}}"#,
+        ),
+    );
+    let Some(image) = snapshot(&emissive, SnapshotAngle::Front, 160, 120) else {
+        return;
+    };
+    let centre = *image.get_pixel(80, 60);
+    assert!(
+        centre[1] > 150 && centre[0] < 90 && centre[2] < 90,
+        "{centre:?}"
+    );
+}
+
+#[test]
 fn draws_point_clouds_and_scans() {
     let cloud = model_from("scan.ply", samples::point_cloud_ply(4000).as_bytes());
     let Some(image) = snapshot(&cloud, SnapshotAngle::Front, 200, 200) else {
@@ -218,6 +268,39 @@ fn draws_a_stl_standing_upright() {
     let height = rows.last().unwrap() - rows.first().unwrap();
     let width = columns.last().unwrap() - columns.first().unwrap();
     assert!(height > width, "bar is {width} wide and {height} tall");
+}
+
+#[test]
+fn loads_and_draws_the_demo_hangar() {
+    // A real model: a hangar, a drone over it, 147 meshes and 32 materials. It
+    // is the old viewer's demo file, so it is there unless the demo is gone.
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/models/sample.glb");
+    if !path.exists() {
+        eprintln!("skipped, no demo model");
+        return;
+    }
+    let model = Arc::new(load(&path).unwrap());
+    assert_eq!(
+        (
+            model.info.triangles,
+            model.info.vertices,
+            model.info.meshes,
+            model.info.materials
+        ),
+        (4432, 12180, 147, 32)
+    );
+    assert!((model.info.size[0] - 13.0).abs() < 1e-3 && (model.info.size[2] - 11.5).abs() < 1e-3);
+    assert!(model.warnings.is_empty(), "{:?}", model.warnings);
+    let Some(image) = snapshot(&model, SnapshotAngle::Iso, 400, 300) else {
+        return;
+    };
+    let background = image::Rgba(theme().background.into_rgba8());
+    // The model fills the frame rather than sitting small in the middle.
+    let rows: Vec<u32> = (0..300)
+        .filter(|&y| (0..400).any(|x| !close(*image.get_pixel(x, y), background, 16)))
+        .collect();
+    assert!(rows.last().unwrap() - rows.first().unwrap() > 200);
 }
 
 #[test]
