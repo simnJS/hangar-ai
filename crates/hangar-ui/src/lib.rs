@@ -57,6 +57,7 @@
 //! | [`tabs`] | `strip`: document tabs with close crosses |
 //! | [`list`] | `row`: a list row with selection and hover |
 //! | [`badge`] | `badge`, `count`, `tag` |
+//! | [`logo`] | `logo`: the app mark, in the theme's accent and foreground |
 //! | [`glyph`] | `state`: an agent's state; `gauge`: the context ring |
 //! | [`empty`] | `empty`: what a list says when it has nothing in it |
 //! | [`form`] | `row`, `group`, `section`, `block`, `page`: the settings form, reset button included |
@@ -91,6 +92,7 @@ pub mod keycap;
 pub mod keys;
 pub mod layer;
 pub mod list;
+pub mod logo;
 pub mod matching;
 pub mod menu;
 pub mod menu_nav;
