@@ -156,10 +156,10 @@ impl FromGitDeps for Fakes {
 
     fn find_workspace(&self, folder: &str) -> Option<WorkspaceRef> {
         self.note(format!("find:{folder}"));
-        if self.consent_asked.load(Ordering::SeqCst) {
-            if let Some(found) = &self.options.existing_after_consent {
-                return Some(found.clone());
-            }
+        if self.consent_asked.load(Ordering::SeqCst)
+            && let Some(found) = &self.options.existing_after_consent
+        {
+            return Some(found.clone());
         }
         self.options.existing.clone()
     }

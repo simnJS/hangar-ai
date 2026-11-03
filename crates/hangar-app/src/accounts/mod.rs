@@ -321,7 +321,7 @@ fn write_usage(m: &Model, sv: &Services) -> Task<Message> {
     )
 }
 
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::run(started)
 }
 
@@ -333,7 +333,7 @@ fn started() -> impl iced::futures::Stream<Item = Message> {
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
 /// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
     None
 }
 
@@ -341,8 +341,8 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 /// package acted on it.
 pub fn on_intent(
     st: &mut State,
-    m: &mut Model,
-    sv: &Services,
+    _m: &mut Model,
+    _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
     // A popover goes when something else asks for it (a dialog opens).
@@ -578,15 +578,6 @@ pub fn workspace_picker<'a>(ctx: Ctx<'a>, value: Option<&'a str>) -> Element<'a,
 /// Settings › Accounts (embedded by the settings).
 pub fn settings_page<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     settings_page::view(&st.page, ctx)
-}
-
-/// Whether the person has more than one account to tell apart: the pickers
-/// and the badges are for them.
-pub fn has_several(ctx: Ctx<'_>) -> bool {
-    live(ctx)
-        .accounts
-        .as_ref()
-        .is_some_and(|accounts| accounts.len() > 1)
 }
 
 /// Whether there is any account to choose from (the dialog shows the picker

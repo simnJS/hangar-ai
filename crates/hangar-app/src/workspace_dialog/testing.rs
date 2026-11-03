@@ -151,13 +151,13 @@ impl Harness {
         let path = folder.join(name);
         // The simulator keeps a picture that exists already, to compare
         // against; here the picture is wanted afresh.
-        if let Some(parent) = path.parent() {
-            if let Ok(entries) = std::fs::read_dir(parent) {
-                for entry in entries.flatten() {
-                    let file = entry.file_name().to_string_lossy().into_owned();
-                    if file.starts_with(&format!("{name}-")) && file.ends_with(".png") {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
+        if let Some(parent) = path.parent()
+            && let Ok(entries) = std::fs::read_dir(parent)
+        {
+            for entry in entries.flatten() {
+                let file = entry.file_name().to_string_lossy().into_owned();
+                if file.starts_with(&format!("{name}-")) && file.ends_with(".png") {
+                    let _ = std::fs::remove_file(entry.path());
                 }
             }
         }

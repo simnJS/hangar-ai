@@ -36,8 +36,6 @@ use super::paths::{join_folder, parent_problem, resolve_parent, same_repo_url};
 
 /// What was typed or handed over, and who is asking (`FromGitRequest`).
 pub type FromGitRequest = GitRequest;
-/// Who asks, and so whether the person must be asked first.
-pub type FromGitOrigin = GitOrigin;
 
 /// A pane, as the flow names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +171,9 @@ pub enum FromGitRefusal {
 }
 
 impl FromGitRefusal {
-    /// The name the tool and the TS used (`invalidRepo`, `folderBusy`…).
+    /// The name the tool and the TS used (`invalidRepo`, `folderBusy`…), for
+    /// P18 to give the agent.
+    #[allow(dead_code)]
     pub fn as_str(self) -> &'static str {
         match self {
             FromGitRefusal::InvalidRepo => "invalidRepo",
@@ -538,10 +538,11 @@ async fn proceed<D: FromGitDeps>(
     // The person's decision: no question for their own repositories. A foreign
     // one keeps Claude Code's question, which only they answer.
     let mut trust_failure: Option<String> = None;
-    if ownership.mine && deps.can_trust() {
-        if let Err(err) = deps.trust_folder(&path).await {
-            trust_failure = Some(err);
-        }
+    if ownership.mine
+        && deps.can_trust()
+        && let Err(err) = deps.trust_folder(&path).await
+    {
+        trust_failure = Some(err);
     }
     let trust_set = ownership.mine && deps.can_trust() && trust_failure.is_none();
 
@@ -575,13 +576,13 @@ async fn proceed<D: FromGitDeps>(
         Ok(created) => created,
         Err(err) => {
             let mut left: Vec<String> = Vec::new();
-            if let Some(created) = &made {
-                if let Err(undo) = deps.remove_workspace(&created.workspace.id).await {
-                    left.push(format!(
-                        "the workspace \"{}\" ({undo})",
-                        created.workspace.name
-                    ));
-                }
+            if let Some(created) = &made
+                && let Err(undo) = deps.remove_workspace(&created.workspace.id).await
+            {
+                left.push(format!(
+                    "the workspace \"{}\" ({undo})",
+                    created.workspace.name
+                ));
             }
             if made_folder {
                 if !deps.can_discard() {

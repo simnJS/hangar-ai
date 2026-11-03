@@ -64,7 +64,7 @@ pub enum Msg {
     Finished(FromGitOutcome),
 }
 
-pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(_st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Started => {
             if let Some(remote) = sv.core().core().remote() {
@@ -131,21 +131,21 @@ fn started() -> impl iced::futures::Stream<Item = Message> {
     stream::once(async { Message::GitFlow(Msg::Started) })
 }
 
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::run(started)
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
 /// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
     None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it.
 pub fn on_intent(
-    st: &mut State,
-    m: &mut Model,
+    _st: &mut State,
+    _m: &mut Model,
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
@@ -157,10 +157,10 @@ pub fn on_intent(
 
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
-    event: &CoreEvent,
+    _st: &mut State,
+    _m: &mut Model,
+    _sv: &Services,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
     None
 }

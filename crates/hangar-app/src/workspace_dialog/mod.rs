@@ -692,13 +692,13 @@ fn stop_clone(st: &mut State) -> Task<Message> {
     )
 }
 
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::none()
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
 /// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
     None
 }
 
@@ -707,7 +707,7 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
     match intent {
@@ -726,8 +726,8 @@ pub fn on_intent(
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
     st: &mut State,
-    m: &mut Model,
-    sv: &Services,
+    _m: &mut Model,
+    _sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     match event {

@@ -95,8 +95,6 @@ impl Timers for RuntimeTimers {
 /// Told once for each question the person answered or let run out.
 pub type OnAnswer = dyn Fn(&ConsentRequest, ConsentAnswer) + Send + Sync;
 
-type Listener = Arc<dyn Fn() + Send + Sync>;
-
 struct Waiting {
     request: ConsentRequest,
     cancel: Option<Cancel>,
@@ -108,8 +106,6 @@ struct Inner {
     /// In the order the questions came: the card shows the first.
     waiting: Vec<Waiting>,
     snapshot: Arc<Vec<ConsentRequest>>,
-    listeners: Vec<(u64, Listener)>,
-    next_listener: u64,
 }
 
 pub struct ConsentQueue {
@@ -117,12 +113,6 @@ pub struct ConsentQueue {
     inner: Mutex<Inner>,
     on_answer: Mutex<Option<Arc<OnAnswer>>>,
     changes: watch::Sender<Arc<Vec<ConsentRequest>>>,
-}
-
-/// What a change tells, once the lock is let go.
-struct Published {
-    snapshot: Arc<Vec<ConsentRequest>>,
-    listeners: Vec<Listener>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -231,24 +221,10 @@ impl ConsentQueue {
         lock(&self.inner).snapshot.clone()
     }
 
-    /// The questions waiting, now and at every change.
+    /// The questions waiting, now and at every change (one change per
+    /// question asked or answered).
     pub fn watch(&self) -> watch::Receiver<Arc<Vec<ConsentRequest>>> {
         self.changes.subscribe()
-    }
-
-    /// Called after every change; the returned id stops it (`unsubscribe`).
-    pub fn subscribe(&self, listener: impl Fn() + Send + Sync + 'static) -> u64 {
-        let mut inner = lock(&self.inner);
-        inner.next_listener += 1;
-        let id = inner.next_listener;
-        inner.listeners.push((id, Arc::new(listener)));
-        id
-    }
-
-    pub fn unsubscribe(&self, id: u64) {
-        lock(&self.inner)
-            .listeners
-            .retain(|(listener, _)| *listener != id);
     }
 
     fn settle(&self, id: &str, answer: ConsentAnswer) -> bool {
@@ -275,24 +251,16 @@ impl ConsentQueue {
         true
     }
 
-    fn deliver(&self, published: Published) {
-        self.changes.send_replace(published.snapshot);
-        for listener in published.listeners {
-            listener();
-        }
+    /// Tells the watchers the list as it now stands.
+    fn deliver(&self, snapshot: Arc<Vec<ConsentRequest>>) {
+        self.changes.send_replace(snapshot);
     }
 }
 
-fn publish(inner: &mut Inner) -> Published {
+/// The list after a change, kept to hand out until the next one.
+fn publish(inner: &mut Inner) -> Arc<Vec<ConsentRequest>> {
     inner.snapshot = Arc::new(inner.waiting.iter().map(|e| e.request.clone()).collect());
-    Published {
-        snapshot: inner.snapshot.clone(),
-        listeners: inner
-            .listeners
-            .iter()
-            .map(|(_, listener)| listener.clone())
-            .collect(),
-    }
+    inner.snapshot.clone()
 }
 
 /// The app's one queue: the tool waits on it, the consent card answers it.
@@ -380,10 +348,13 @@ pub fn log_answers_to(remote: Arc<hangar_core::remote::Remote>) {
 pub(crate) mod testing {
     use super::*;
 
+    /// A timer that has not gone off: what it runs, until it is cancelled.
+    type Slot = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+
     #[derive(Default)]
     pub struct Clock {
         now: Mutex<u64>,
-        due: Mutex<Vec<(u64, Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>)>>,
+        due: Mutex<Vec<(u64, Slot)>>,
     }
 
     impl Timers for Arc<Clock> {
@@ -419,10 +390,11 @@ pub(crate) mod testing {
     }
 }
 
+// Asking registers the question at once, so a case that only needs it waiting
+// drops the future it is given.
 #[cfg(test)]
+#[allow(clippy::let_underscore_future)]
 mod tests {
-    use std::sync::atomic::AtomicUsize;
-
     use super::testing::Clock;
     use super::*;
 
@@ -466,17 +438,16 @@ mod tests {
     #[test]
     fn holds_a_request_until_the_person_answers_then_lets_it_go() {
         let queue = queue_on(&Arc::new(Clock::default()));
-        let heard = Arc::new(AtomicUsize::new(0));
-        let counter = heard.clone();
-        queue.subscribe(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-        });
+        let mut watcher = queue.watch();
         let answer = queue.ask(here("a"), CONSENT_TIMEOUT_MS);
         assert_eq!(ids(&queue), ["a"]);
+        // Heard once for the question, once for its answer.
+        assert!(watcher.has_changed().expect("open"));
+        watcher.mark_unchanged();
         assert!(queue.answer("a", true));
         assert_eq!(block_on(answer), ConsentAnswer::Allow);
         assert!(queue.pending().is_empty());
-        assert_eq!(heard.load(Ordering::SeqCst), 2);
+        assert!(watcher.has_changed().expect("open"));
         assert!(!queue.answer("a", true));
     }
 
@@ -498,8 +469,8 @@ mod tests {
         clock.advance(1);
         assert_eq!(block_on(answer), ConsentAnswer::Timeout);
         assert!(queue.pending().is_empty());
-        assert!(CONSENT_TIMEOUT_MS >= 2 * 60_000);
-        assert!(CONSENT_TIMEOUT_MS <= 10 * 60_000);
+        const { assert!(CONSENT_TIMEOUT_MS >= 2 * 60_000) };
+        const { assert!(CONSENT_TIMEOUT_MS <= 10 * 60_000) };
     }
 
     #[test]
@@ -619,20 +590,6 @@ mod tests {
         assert_eq!(watcher.borrow().len(), 1);
         queue.answer("a", true);
         assert!(watcher.borrow().is_empty());
-    }
-
-    #[test]
-    fn a_listener_that_unsubscribed_hears_nothing_more() {
-        let queue = queue_on(&Arc::new(Clock::default()));
-        let heard = Arc::new(AtomicUsize::new(0));
-        let counter = heard.clone();
-        let id = queue.subscribe(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-        });
-        let _ = queue.ask(here("a"), CONSENT_TIMEOUT_MS);
-        queue.unsubscribe(id);
-        queue.answer("a", true);
-        assert_eq!(heard.load(Ordering::SeqCst), 1);
     }
 
     fn asked(destination: &str) -> ConsentRequest {

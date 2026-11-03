@@ -169,7 +169,11 @@ pub fn default_label(
     )
 }
 
-/// The workspaces whose own account is `id`.
+/// The workspaces whose own account is `id`. Kept from `lib/accountSwitch.ts`
+/// for the callers that count them (the page lists who uses an account
+/// through the resolution instead, which also counts the ones that follow the
+/// default).
+#[allow(dead_code)]
 pub fn workspaces_using<'a>(
     workspaces: &'a [SwitchWorkspace],
     id: &str,

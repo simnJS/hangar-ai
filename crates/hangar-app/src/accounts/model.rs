@@ -28,7 +28,9 @@ pub type AccountId = String;
 pub const MAIN_ACCOUNT: &str = "main";
 
 /// Logs the profile a pane runs on in, in the browser (Claude Code 2.1.316;
-/// `claude` then `/login` does the same). Typed by a `Pane.login` pane.
+/// `claude` then `/login` does the same). Typed by a `Pane.login` pane, which
+/// is P5's to start.
+#[allow(dead_code)]
 pub const LOGIN_COMMAND: &str = "claude auth login";
 
 /// `state.json` is hand-edited: anything that is not a non-empty string is no
@@ -40,7 +42,9 @@ pub fn read_account_choice(choice: Option<&str>) -> Option<String> {
 
 /// The same for a value straight out of the JSON, which can be anything. The
 /// lenient reader of `state.json` already drops a field of the wrong type, so
-/// the typed levels cannot hold one; this is for what has not been through it.
+/// the typed levels cannot hold one; this is for what has not been through it
+/// (an MCP or a mobile request naming an account).
+#[allow(dead_code)]
 pub fn read_account_choice_value(value: &Value) -> Option<String> {
     read_account_choice(value.as_str())
 }
@@ -153,7 +157,9 @@ pub struct Launched(HashMap<PaneId, AccountId>);
 
 impl Launched {
     /// `account` `None`: the pane no longer runs Claude Code on any account.
-    /// Returns whether anything changed.
+    /// Returns whether anything changed. Called by P5 as it launches and
+    /// ends Claude Code panes.
+    #[allow(dead_code)]
     pub fn note(&mut self, pane: &str, account: Option<&str>) -> bool {
         match account {
             None => self.0.remove(pane).is_some(),

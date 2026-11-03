@@ -94,7 +94,7 @@ fn title_of(t: Translator, request: &ConsentRequest) -> String {
     }
 }
 
-pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Pending(pending) => {
             let t = Translator::new(m.locale());
@@ -166,7 +166,7 @@ fn focus_events(
     }
 }
 
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::batch([
         Subscription::run(pending_stream),
         iced::event::listen_with(focus_events),
@@ -175,27 +175,27 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
 /// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
     None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it.
 pub fn on_intent(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
-    intent: &Intent,
+    _st: &mut State,
+    _m: &mut Model,
+    _sv: &Services,
+    _intent: &Intent,
 ) -> Option<Task<Message>> {
     None
 }
 
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
-    event: &CoreEvent,
+    _st: &mut State,
+    _m: &mut Model,
+    _sv: &Services,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
     None
 }
@@ -379,11 +379,11 @@ mod tests {
         let ids = |list: Vec<ConsentRequest>| -> Vec<String> {
             list.into_iter().map(|request| request.id).collect()
         };
-        assert_eq!(ids(newly_seen(&mut told, &[a.clone()])), ["c1"]);
-        assert!(newly_seen(&mut told, &[a.clone()]).is_empty());
+        assert_eq!(ids(newly_seen(&mut told, std::slice::from_ref(&a))), ["c1"]);
+        assert!(newly_seen(&mut told, std::slice::from_ref(&a)).is_empty());
         assert_eq!(ids(newly_seen(&mut told, &[a.clone(), b.clone()])), ["c2"]);
         // The first is answered: only the second stays on the list.
-        assert!(newly_seen(&mut told, &[b.clone()]).is_empty());
+        assert!(newly_seen(&mut told, std::slice::from_ref(&b)).is_empty());
         assert_eq!(told.len(), 1);
         assert!(newly_seen(&mut told, &[]).is_empty());
         assert!(told.is_empty());

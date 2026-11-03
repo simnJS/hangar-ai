@@ -2,6 +2,10 @@
 //! needs no service (the store's own actions are P0b's, so what is checked of
 //! a switch is the restart it asks for).
 
+// A state is built by assigning the one field a case is about: a struct
+// literal with `..Default::default()` would bury it.
+#![allow(clippy::field_reassign_with_default)]
+
 use hangar_i18n::Locale;
 use iced::widget::container;
 use iced::{Alignment, Element, Length};

@@ -1,6 +1,10 @@
 //! The dialog, drawn and driven headless (`testing::Harness`), and its update
 //! logic that needs no service.
 
+// A state is built by assigning the one field a case is about: a struct
+// literal with `..Default::default()` would bury it.
+#![allow(clippy::field_reassign_with_default)]
+
 use hangar_i18n::Locale;
 
 use crate::git_flow::clone::RepoRef;

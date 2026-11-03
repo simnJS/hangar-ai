@@ -306,18 +306,18 @@ fn git_fields<'a>(
     .spacing(tokens::space::SM);
     if status == FromGitStatus::NoFolder {
         parent_column = parent_column.push(typography::hint(t, ctx.t(Key::CreateGitNoFolder)));
-    } else if let Some(ParseResult::Ok { repo }) = st.git.parse() {
-        if let Some(destination) = clone_destination(parent.as_deref(), Some(&repo.name)) {
-            parent_column = parent_column.push(typography::hint(
-                t,
-                ctx.i18n
-                    .t_with(
-                        Key::CreateGitDestination,
-                        &args!("path" => destination.as_str()),
-                    )
-                    .into_owned(),
-            ));
-        }
+    } else if let Some(ParseResult::Ok { repo }) = st.git.parse()
+        && let Some(destination) = clone_destination(parent.as_deref(), Some(&repo.name))
+    {
+        parent_column = parent_column.push(typography::hint(
+            t,
+            ctx.i18n
+                .t_with(
+                    Key::CreateGitDestination,
+                    &args!("path" => destination.as_str()),
+                )
+                .into_owned(),
+        ));
     }
     form.push(labelled(
         ctx,

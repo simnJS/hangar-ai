@@ -248,10 +248,10 @@ pub(super) fn create_workspace(m: &mut Model, draft: NewWorkspace) -> Result<Cre
         }),
     });
     // An agent asked: the person stays where they were.
-    if !draft.activate {
-        if let Some(before) = before {
-            m.apply(StoreAction::SetActiveWorkspace(Some(before)));
-        }
+    if !draft.activate
+        && let Some(before) = before
+    {
+        m.apply(StoreAction::SetActiveWorkspace(Some(before)));
     }
     let ws = m.workspace(&id).ok_or_else(unmade)?;
     let orchestrator = ws
