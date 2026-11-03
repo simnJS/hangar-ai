@@ -1,0 +1,20 @@
+#!/bin/sh
+# What an AppImage runs when it is opened: start Hangar from where the image is
+# mounted.
+#
+# The packager's own AppRun is not used (docs/native/PACKAGING.md, "AppImage").
+# It puts the image's folders at the front of PATH, LD_LIBRARY_PATH, XDG_DATA_DIRS
+# and, worse, sets PYTHONHOME and PYTHONPATH to folders that hold no Python. All
+# of that reaches every shell and agent started in a Hangar pane, where
+# `python3` then fails to start. This image bundles no libraries and no tools,
+# so there is nothing for any of those variables to point at.
+here="$(dirname "$(readlink -f "$0")")"
+
+# The runtime sets APPIMAGE (the file that was opened) and normally APPDIR too.
+# hangar-update takes a process to be this image only when its executable is
+# under APPDIR, so a copy of the variables inherited by a shell is not mistaken
+# for it: make sure the second one is there.
+APPDIR="${APPDIR:-$here}"
+export APPDIR
+
+exec "$here/usr/bin/hangar-ai" "$@"

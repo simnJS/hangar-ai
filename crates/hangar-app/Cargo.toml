@@ -59,3 +59,116 @@ unicode-normalization.workspace = true
 iced_test.workspace = true
 # Only to check that every glyph of the preview is an SVG a renderer can read.
 usvg.workspace = true
+
+# The Windows executable's icon and version information (build.rs). Only a
+# Windows host compiles the resource, so it is only a build dependency there.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+# ---------------------------------------------------------------------------
+# Packaging (docs/native/PACKAGING.md)
+#
+# Read by `cargo packager` (cargo-packager, Tauri's bundler extracted from it),
+# which makes the Linux AppImage and .deb and the macOS .app and .dmg. Paths are
+# relative to this folder. The version, description, authors and executable
+# names come from the package itself, so a release bumps one number.
+#
+# The values that an install of the old Tauri app already knows are kept as they
+# were, because the installers and the updater match on them: the identifier,
+# the product name, the executable name and the Debian package name.
+# ---------------------------------------------------------------------------
+[package.metadata.packager]
+productName = "Hangar.AI"
+identifier = "com.simnjs.iabench"
+publisher = "simnjs"
+homepage = "https://github.com/hangar-ai/hangar"
+category = "DeveloperTool"
+longDescription = """
+Hangar runs CLI coding agents (Claude Code, Codex, Gemini CLI, OpenCode) and shells side by side, each in a real terminal pane, around a shared task board and memory that the agents read and write over Hangar's MCP server."""
+icons = [
+  "packaging/icons/32x32.png",
+  "packaging/icons/128x128.png",
+  "packaging/icons/128x128@2x.png",
+  "packaging/icons/icon.icns",
+  "packaging/icons/icon.ico",
+]
+# The helper that shows HTML kit tabs and PDFs is looked for next to the main
+# executable (hangar_webview::find_helper), and every format puts all of the
+# binaries in the one folder: usr/bin, Contents/MacOS, the install folder.
+binaries = [{ path = "hangar-ai", main = true }, { path = "hangar-webview" }]
+
+[package.metadata.packager.deb]
+# `dpkg -i` upgrades the package of the same name, so this one has to stay what
+# the Tauri build called it (its product name in kebab case).
+packageName = "hangar-ai"
+section = "devel"
+# What the two executables link against, by the names Debian and Ubuntu give
+# them (24.04 renamed several to `...t64`, which still provide the old name).
+# WebKitGTK and GTK are for the webview helper only, and were already depended on
+# by the Tauri build; HTML kit tabs and PDF previews need them.
+depends = [
+  "libc6",
+  "libstdc++6",
+  "libasound2t64 | libasound2",
+  "libgtk-3-0t64 | libgtk-3-0",
+  "libwebkit2gtk-4.1-0",
+]
+# Has no placeholders, so the packager copies it as it is; the .rpm below
+# installs the same file. StartupWMClass is the window class the compositor
+# matches windows to.
+desktopTemplate = "packaging/linux/hangar-ai.desktop"
+
+[package.metadata.packager.appimage]
+# The host provides every library (see docs/native/PACKAGING.md, "AppImage"):
+# the GPU stack cannot be bundled, and WebKitGTK cannot be moved from where it
+# looks for its own helper processes. The pattern is quoted twice because the
+# packager pastes it into a shell script, where a bare `*` becomes a file list.
+excludedLibs = ["'*'"]
+
+[package.metadata.packager.macos]
+minimumSystemVersion = "10.15"
+# Merged into the generated Info.plist: the microphone usage description that
+# dictation needs, or macOS kills the app the first time it records.
+infoPlistPath = "packaging/macos/Info.plist"
+
+[package.metadata.packager.dmg]
+# The Tauri bundler's window, so the disk image looks as it did.
+windowSize = { width = 660, height = 400 }
+
+# ---------------------------------------------------------------------------
+# The .rpm, which cargo-packager does not make: `cargo generate-rpm -p
+# crates/hangar-app` (cargo-generate-rpm writes the package itself, with no
+# rpmbuild). `name` keeps the Tauri build's package name (its product name, with
+# the dot), which is what `rpm -U` matches an upgrade on. Asset sources are
+# relative to the repository root.
+# ---------------------------------------------------------------------------
+[package.metadata.generate-rpm]
+name = "Hangar.AI"
+license = "MIT"
+summary = "Terminal multiplexer for CLI coding agents, with a shared task board"
+url = "https://github.com/hangar-ai/hangar"
+# The default is to run ldd on the build machine and require every library it
+# finds, with the versions of the symbols used: a few hundred requirements that
+# only the machine that built the package satisfies (a Fedora has other sonames
+# for ICU and a different set of GStreamer libraries). The ones that matter are
+# listed below instead, by soname, which every distribution's packages provide
+# under whatever name they use.
+auto-req = "no"
+require-sh = false
+assets = [
+  { source = "target/release/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
+  { source = "target/release/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
+  { source = "crates/hangar-app/packaging/linux/hangar-ai.desktop", dest = "/usr/share/applications/hangar-ai.desktop", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/128x128@2x.png", dest = "/usr/share/icons/hicolor/256x256/apps/hangar-ai.png", mode = "644" },
+]
+
+# What the two executables need from the system, as the .deb's Depends lists it.
+# GTK and WebKitGTK are for the webview helper only (HTML kit tabs, PDF previews);
+# the Tauri build's .rpm required them too (as webkit2gtk4.1 and gtk3).
+[package.metadata.generate-rpm.requires]
+"libasound.so.2()(64bit)" = "*"
+"libstdc++.so.6()(64bit)" = "*"
+"libgtk-3.so.0()(64bit)" = "*"
+"libwebkit2gtk-4.1.so.0()(64bit)" = "*"
