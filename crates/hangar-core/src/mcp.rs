@@ -408,8 +408,7 @@ fn base_tool_definitions() -> Value {
                     "name": { "type": "string", "description": "Name for the pane, unique across every workspace. Defaults to the next free first name." },
                     "cwd": { "type": "string", "description": "Folder to start in, absolute or relative to the workspace root. Defaults to the workspace root." },
                     "prompt": { "type": "string", "description": "First message for a Claude Code pane, submitted once its session is ready." },
-                    "near": { "type": "string", "description": "Name of the pane to split. Defaults to the last one." },
-                    "direction": { "type": "string", "enum": ["right", "down"], "description": "Which side of `near` the new pane goes. Default right." },
+                    "near": { "type": "string", "description": "Name of a pane the new one goes next to. Defaults to the last one. Hangar lays the panes out itself: the orchestrator keeps the biggest pane, the others share the rest in an even grid." },
                     "focus": { "type": "boolean", "description": "Bring the new pane to the front. Default false." },
                     "workspace": workspace_arg
                 }

@@ -60,6 +60,11 @@ around the terminals, and needs a fraction of the memory and processor it did.
   your theme, with the buttons your desktop shows, on its side (GNOME's button layout). Drag
   it to move the window, double-click it to maximise, right-click it for the window menu;
   the edges resize the window, and its corners are rounded as GNOME's own windows are.
+- **Agents' panes are laid out, not stacked.** A pane an agent opens or closes (through
+  Hangar's MCP server, or the orchestrator's workers) no longer halves the pane beside it,
+  which ended in a row of slivers: the workspace is laid out again, with the orchestrator
+  on the left in the biggest pane and the others in an even grid beside it. `pane_create`
+  no longer takes a `direction`; `near` says which pane the new one goes after.
 - **A shorter toolbar.** The four layouts are one button with a menu, and the activity
   capsule in the middle is gone: the pane's own header and the inspector say what it is
   doing. **Appearance › Use the system's title bar** brings the

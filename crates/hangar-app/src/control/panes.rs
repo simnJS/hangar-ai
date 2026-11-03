@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 
 use crate::state::types::MAX_PANES;
-use crate::state::{AgentId, AppState, Pane, Patch, Snapshot, SplitDir, Workspace};
+use crate::state::{AgentId, AppState, Pane, Patch, Snapshot, Workspace};
 
 use super::paths::resolve_folder;
 use super::port::{ModelCmd, Port, activity_of, is_asleep, is_open, object, workspace_in};
@@ -167,13 +167,8 @@ pub async fn pane_create(
             ws: ws.id.clone(),
             agent,
             near: near.map(|pane| pane.id.clone()),
-            dir: Some(
-                if args.get("direction").and_then(Value::as_str) == Some("down") {
-                    SplitDir::Col
-                } else {
-                    SplitDir::Row
-                },
-            ),
+            // The workspace is laid out again once the pane is in.
+            dir: None,
             cwd: cwd.clone(),
             name: name.clone(),
             init: None,

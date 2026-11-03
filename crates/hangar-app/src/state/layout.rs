@@ -140,6 +140,53 @@ pub fn preset_tree(ids: &[PaneId]) -> SplitNode {
     fold(SplitDir::Col, bands)
 }
 
+/// The share of the width the lead pane takes beside `others` panes: the most
+/// of any pane whatever their number, less as they grow so theirs stay
+/// usable.
+fn lead_share(others: usize) -> f64 {
+    match others {
+        0 | 1 => 0.6,
+        2 | 3 => 0.55,
+        4..=7 => 0.5,
+        _ => 0.4,
+    }
+}
+
+/// The layout Hangar gives a workspace when an agent opens or closes a pane,
+/// instead of halving one pane each time: the `lead` pane (the
+/// orchestrator's) on the left, bigger than any other, and the rest in an
+/// even grid beside it, in `order`. Without a lead, the even grid
+/// ([`preset_tree`]).
+///
+/// The grid beside the lead has as many columns as keep its panes about as
+/// wide for their height as the window is: one column up to four panes, two
+/// from five, three from eleven.
+pub fn arranged_tree(order: &[PaneId], lead: Option<&str>) -> SplitNode {
+    let Some(lead) = lead.filter(|lead| order.iter().any(|id| id == lead)) else {
+        return preset_tree(order);
+    };
+    let others: Vec<PaneId> = order.iter().filter(|id| *id != lead).cloned().collect();
+    if others.is_empty() {
+        return leaf(lead);
+    }
+    let share = lead_share(others.len());
+    let columns = ((others.len() as f64 * (1.0 - share)).sqrt().round() as usize).max(1);
+    // As many rows as the columns need, the panes dealt so that no row has
+    // more than one pane over another: 13 in three columns are rows of 3, 3,
+    // 3, 2 and 2, not four of 3 and one pane alone across the width.
+    let rows = others.len().div_ceil(columns);
+    let (base, extra) = (others.len() / rows, others.len() % rows);
+    let mut rest = others.as_slice();
+    let bands = (0..rows)
+        .map(|row| {
+            let (band, after) = rest.split_at(base + usize::from(row < extra));
+            rest = after;
+            fold(SplitDir::Row, band.iter().cloned().map(leaf).collect())
+        })
+        .collect();
+    split(SplitDir::Row, share, leaf(lead), fold(SplitDir::Col, bands))
+}
+
 /// The tree with the ratio at `path` replaced (`withRatio`).
 pub fn with_ratio(node: &SplitNode, path: &[Side], ratio: f64) -> SplitNode {
     match node {
@@ -1061,5 +1108,72 @@ mod tests {
         assert_eq!(preferred_dir(None), SplitDir::Row);
         assert_eq!(preferred_dir(Some((800.0, 400.0))), SplitDir::Row);
         assert_eq!(preferred_dir(Some((400.0, 400.0))), SplitDir::Col);
+    }
+
+    // ---- Hangar's own layout for agents' panes
+
+    fn numbered(n: usize) -> Vec<PaneId> {
+        (0..n).map(|i| format!("p{i}")).collect()
+    }
+
+    fn area(rect: &Rect) -> f64 {
+        rect.width * rect.height
+    }
+
+    #[test]
+    fn the_lead_is_the_biggest_pane_whatever_the_number_of_others() {
+        for n in 2..=MAX_PANES {
+            let order = numbered(n);
+            let tree = arranged_tree(&order, Some("p0"));
+            let mut placed = leaf_ids(&tree);
+            placed.sort();
+            let mut wanted = order.clone();
+            wanted.sort();
+            assert_eq!(placed, wanted, "{n} panes, each once");
+            let grid = compute_layout(&tree);
+            let lead = area(&grid.rects["p0"]);
+            for id in order.iter().skip(1) {
+                assert!(
+                    lead > area(&grid.rects[id]),
+                    "{n} panes: p0 is not bigger than {id}"
+                );
+            }
+            // On the left, the whole height.
+            let rect = grid.rects["p0"];
+            assert_eq!((rect.left, rect.top, rect.height), (0.0, 0.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn the_others_share_what_is_left_evenly() {
+        for n in 2..=MAX_PANES {
+            let order = numbered(n);
+            let grid = compute_layout(&arranged_tree(&order, Some("p0")));
+            let areas: Vec<f64> = order
+                .iter()
+                .skip(1)
+                .map(|id| area(&grid.rects[id]))
+                .collect();
+            let (min, max) = areas
+                .iter()
+                .fold((f64::MAX, 0.0_f64), |(lo, hi), a| (lo.min(*a), hi.max(*a)));
+            // Rows differ by one pane at most: two panes beside one at worst.
+            assert!(max <= min * 2.0 + 1e-9, "{n} panes: {areas:?}");
+        }
+    }
+
+    #[test]
+    fn the_lead_moves_to_the_left_and_the_others_keep_their_order() {
+        let order = numbered(4);
+        let tree = arranged_tree(&order, Some("p2"));
+        assert_eq!(leaf_ids(&tree), ["p2", "p0", "p1", "p3"]);
+    }
+
+    #[test]
+    fn without_a_lead_it_is_the_even_grid() {
+        let order = numbered(5);
+        assert_eq!(arranged_tree(&order, None), preset_tree(&order));
+        assert_eq!(arranged_tree(&order, Some("gone")), preset_tree(&order));
+        assert_eq!(arranged_tree(&numbered(1), Some("p0")), leaf("p0"));
     }
 }

@@ -25,6 +25,10 @@ pub fn carry_out(
     let mut then = None;
     let mut touched = None;
     let outcome = match cmd {
+        // A pane an agent opens or closes (pane_create, pane_close, the
+        // orchestrator's workers) lays the workspace out again rather than
+        // halving the pane beside it: the orchestrator keeps the biggest
+        // share and the others an even grid (`StoreAction::ArrangePanes`).
         ModelCmd::AddPane {
             ws,
             agent,
@@ -33,16 +37,34 @@ pub fn carry_out(
             cwd,
             name,
             init,
-        } => m.apply(StoreAction::AddPane {
-            ws,
-            agent,
-            near,
-            dir,
-            cwd,
-            name,
-            init,
-        }),
-        ModelCmd::ClosePane { ws, pane } => m.apply(StoreAction::ClosePane { ws, pane }),
+        } => {
+            let outcome = m.apply(StoreAction::AddPane {
+                ws: ws.clone(),
+                agent,
+                near,
+                dir,
+                cwd,
+                name,
+                init,
+            });
+            if outcome.pane.is_some() {
+                m.apply(StoreAction::ArrangePanes(ws));
+            }
+            outcome
+        }
+        ModelCmd::ClosePane { ws, pane } => {
+            let count = |m: &Model| m.workspace(&ws).map_or(0, |w| w.panes.len());
+            let before = count(m);
+            let outcome = m.apply(StoreAction::ClosePane {
+                ws: ws.clone(),
+                pane,
+            });
+            // Only when one did close: a refused close leaves the layout be.
+            if count(m) < before {
+                m.apply(StoreAction::ArrangePanes(ws));
+            }
+            outcome
+        }
         ModelCmd::RespawnPane {
             ws,
             pane,
@@ -219,6 +241,88 @@ mod tests {
         // Ending once more is harmless.
         delivery(&mut m, false);
         assert!(Snapshot::of(&m).delivering.is_empty());
+    }
+
+    /// A workspace whose first pane is the orchestrator, in the person's own
+    /// layout: the orchestrator squeezed into a quarter of the window.
+    fn orchestrated() -> Model {
+        use crate::state::layout::leaf;
+        use crate::state::types::{Pane, PaneRole, SplitDir, SplitNode, Workspace};
+        let pane = |id: &str, role| Pane {
+            id: id.into(),
+            name: id.into(),
+            role,
+            ..Pane::default()
+        };
+        let split = |a, b, ratio| SplitNode::Split {
+            dir: SplitDir::Row,
+            ratio,
+            a: Box::new(a),
+            b: Box::new(b),
+        };
+        let mut m = Model::default();
+        m.hydrate(AppState {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                name: "Shop".into(),
+                panes: vec![
+                    pane("lead", Some(PaneRole::Orchestrator)),
+                    pane("dev", None),
+                ],
+                tree: Some(split(leaf("lead"), leaf("dev"), 0.25)),
+                ..Workspace::default()
+            }],
+            ..AppState::default()
+        });
+        m
+    }
+
+    fn add(m: &mut Model, near: Option<&str>) {
+        let cmd = ModelCmd::AddPane {
+            ws: "w1".into(),
+            agent: None,
+            near: near.map(Into::into),
+            dir: None,
+            cwd: None,
+            name: None,
+            init: None,
+        };
+        let _ = carry_out(m, cmd, Answer::channel().0);
+    }
+
+    fn lead_is_biggest(m: &Model) {
+        use crate::state::layout::{compute_layout, normalize_tree};
+        let ws = m.workspace("w1").unwrap();
+        let grid = compute_layout(&normalize_tree(&ws.panes, ws.tree.as_ref()));
+        let area = |id: &str| grid.rects[id].width * grid.rects[id].height;
+        for pane in &ws.panes {
+            if pane.id != "lead" {
+                assert!(area("lead") > area(&pane.id), "{:?}", grid.rects);
+            }
+        }
+    }
+
+    #[test]
+    fn panes_an_agent_opens_never_shrink_the_orchestrator_below_the_others() {
+        let mut m = orchestrated();
+        // Opened next to the orchestrator itself, which used to halve it.
+        for _ in 0..6 {
+            add(&mut m, Some("lead"));
+            lead_is_biggest(&m);
+        }
+        assert_eq!(m.workspace("w1").unwrap().panes.len(), 8);
+        // And closing one lays the rest out again.
+        let closing = m.workspace("w1").unwrap().panes[3].id.clone();
+        let _ = carry_out(
+            &mut m,
+            ModelCmd::ClosePane {
+                ws: "w1".into(),
+                pane: closing,
+            },
+            Answer::channel().0,
+        );
+        assert_eq!(m.workspace("w1").unwrap().panes.len(), 7);
+        lead_is_biggest(&m);
     }
 
     #[test]

@@ -16,13 +16,13 @@ use std::sync::Arc;
 use super::Model;
 use super::folders::place_before;
 use super::layout::{
-    MAX_PANES, insert_leaf, leaf, leaf_ids, move_leaf, normalize_tree, preset_size, preset_tree,
-    reading_order, remove_leaf, rename_leaf,
+    MAX_PANES, arranged_tree, insert_leaf, leaf, leaf_ids, move_leaf, normalize_tree, preset_size,
+    preset_tree, reading_order, remove_leaf, rename_leaf,
 };
 use super::pane_names::{all_pane_names, pane_names, pick_pane_name, unique_pane_names};
 use super::types::{
-    AgentId, AppState, DropZone, Pane, PaneId, SavedCommand, Settings, SplitDir, SplitNode,
-    Workspace, WorkspaceFolder, WorkspaceKit, WsId,
+    AgentId, AppState, DropZone, Pane, PaneId, PaneRole, SavedCommand, Settings, SplitDir,
+    SplitNode, Workspace, WorkspaceFolder, WorkspaceKit, WsId,
 };
 use super::unread::{Kept, Unread};
 
@@ -141,6 +141,11 @@ pub enum StoreAction {
     },
     /// `presetTree(leafIds(normalizeTree))`: same ids, nothing restarts.
     TidyLayout(WsId),
+    /// The layout after an agent opened or closed a pane
+    /// (`layout::arranged_tree`): the orchestrator, else the manager, on the
+    /// left and the biggest, the others in an even grid beside it, in the
+    /// order they are read. Same ids, nothing restarts.
+    ArrangePanes(WsId),
     /// Divider drags.
     SetTree(WsId, SplitNode),
     /// Answers the new pane's id, or none at `MAX_PANES`. `init` is applied
@@ -579,6 +584,27 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 let mut next = current.clone();
                 let tree = normalize_tree(&current.panes, current.tree.as_ref());
                 next.tree = Some(preset_tree(&leaf_ids(&tree)));
+                Some((next, ()))
+            });
+        }
+
+        StoreAction::ArrangePanes(ws) => {
+            map_workspace(model, &ws, |current| {
+                let order: Vec<PaneId> = reading_order(&current.panes, current.tree.as_ref())
+                    .iter()
+                    .map(|pane| pane.id.clone())
+                    .collect();
+                let lead = [PaneRole::Orchestrator, PaneRole::Manager]
+                    .into_iter()
+                    .find_map(|role| {
+                        current
+                            .panes
+                            .iter()
+                            .find(|pane| pane.role == Some(role))
+                            .map(|pane| pane.id.as_str())
+                    });
+                let mut next = current.clone();
+                next.tree = Some(arranged_tree(&order, lead));
                 Some((next, ()))
             });
         }
