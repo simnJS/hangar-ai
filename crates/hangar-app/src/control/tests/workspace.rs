@@ -8,9 +8,11 @@ use serde_json::json;
 use super::super::fake::{Fake, lock, pane};
 use super::super::port::{BoxFuture, FromGit, FromGitOutcome, MadeWorkspace};
 use super::super::run::DISABLED;
+use super::super::types::Caller;
+use super::super::workspace::set_check;
 use super::{contains, control, from_ava, matches, refusal, with};
 use crate::message::{GitOrigin, GitRequest};
-use crate::state::types::PaneRole;
+use crate::state::types::{OrchestrationSettings, PaneRole};
 use crate::state::{AgentActivity, AgentId, PaneActivity};
 
 /// P8's flow, as the person and the clone would answer it: the requests it
@@ -403,4 +405,40 @@ async fn keeps_a_command_that_is_one_line_of_reasonable_length() {
         );
     }
     assert!(fake.logged("patch:").is_empty());
+}
+
+#[tokio::test]
+async fn a_panel_edit_made_while_the_check_is_set_survives_it() {
+    let fake = with_orchestrator();
+    // The operation reads the model, and the person changes the workers and
+    // automatic landing in the panel before its write lands.
+    let read = fake.port().snapshot();
+    fake.patch("w1", |ws| {
+        ws.orchestration = Some(OrchestrationSettings {
+            max_workers: 5,
+            auto_merge: false,
+            worker_model: "opus".into(),
+            ..OrchestrationSettings::default()
+        });
+    });
+    let answer = set_check(
+        &json!({"command": "make check"}),
+        &Caller::of(&from_ava()),
+        &read.state,
+        &fake.port(),
+    )
+    .await
+    .unwrap();
+    matches(
+        &answer,
+        json!({"checkCommand": "make check", "previous": null}),
+    );
+    let saved = lock(&fake.state).workspaces[0]
+        .orchestration
+        .clone()
+        .unwrap();
+    assert_eq!(saved.check_command.as_deref(), Some("make check"));
+    assert_eq!(saved.max_workers, 5);
+    assert!(!saved.auto_merge);
+    assert_eq!(saved.worker_model, "opus");
 }
