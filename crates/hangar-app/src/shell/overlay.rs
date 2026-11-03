@@ -1,6 +1,10 @@
 //! Overlays: the dialogs and sheets over the window, as a stack
-//! (`Model.ui.overlays`). The top one has the keyboard, and Escape closes it
-//! (TODO(P0b): Escape, the focus trap and the focus given back).
+//! (`Model.ui.overlays`, each window its own). The top one has the keyboard.
+//! Escape closes it: the overlay's own hangar-ui layer, which captures the
+//! key, or else the shell, which only sees an Escape nothing captured, so one
+//! press never closes two. The focus trap is the layer's; closing gives the
+//! keyboard back to what had it when the overlay opened
+//! (`Model.ui.overlay_openers`, app/shell.rs).
 //!
 //! A variant only says which overlay it is and for what (a workspace, a
 //! pane); the overlay's own state lives in its package, which sets it up when

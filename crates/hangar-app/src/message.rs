@@ -104,7 +104,8 @@ pub enum Intent {
     /// Closes the top overlay.
     CloseOverlay,
     ClosePopovers(CloseReason),
-    /// `None`: the last category, else General.
+    /// `None` is General: opening always names a category, so a shortcut
+    /// lands where it promised (App.tsx `openSettings`).
     OpenSettings(Option<SettingsCategory>),
     TogglePalette,
     ToggleNavigator,

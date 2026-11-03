@@ -35,8 +35,8 @@ pub struct Ui {
     pub broadcast: String,
     /// The one-line notice at the bottom, with the id its expiry names.
     pub notice: Option<(u64, Notice)>,
-    /// The chords of a shortcut sequence typed so far (the chord hint).
-    /// TODO(P7): `keymap::Chord` once it exists; strings until then.
+    /// The chords of a shortcut sequence typed so far, as P7 formats them for
+    /// the chord hint (`keymap::chord_hint`).
     pub pending_chords: Vec<String>,
     /// From `detect_agents`, once at start.
     pub available_agents: Vec<String>,
