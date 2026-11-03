@@ -37,3 +37,8 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+# The orchestration engine (P19): plan statuses, wall-clock times in the
+# briefings, and task titles folded to ASCII for branch names.
+regex.workspace = true
+chrono.workspace = true
+unicode-normalization.workspace = true
