@@ -104,6 +104,15 @@ pub fn segmented_track(t: &Theme) -> impl Fn(&iced::Theme) -> Style + '_ {
     }
 }
 
+/// The track of a segmented control in a form (`.seg`): recessed, with a
+/// hairline around it; its chosen segment is a [`super::button::tab`].
+pub fn segmented(t: &Theme) -> impl Fn(&iced::Theme) -> Style + '_ {
+    move |_| Style {
+        border: hairline(t.colors.line_strong, radius::MD),
+        ..fill(t.colors.seg_track, t.colors.fg)
+    }
+}
+
 /// A context menu or any popover (`.ctx-menu`, `.pane-menu`): the toolbar's
 /// colour, an edge, and a shadow that lifts it off the window.
 pub fn popover(t: &Theme) -> impl Fn(&iced::Theme) -> Style + '_ {

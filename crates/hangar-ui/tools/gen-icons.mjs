@@ -81,6 +81,7 @@ lines.push("        }");
 lines.push("    }");
 lines.push("");
 lines.push("    /// The elements drawn inside the 16-unit box.");
+lines.push("    #[rustfmt::skip]");
 lines.push("    pub(super) const fn elements(self) -> &'static str {");
 lines.push("        match self {");
 for (const { name, svg } of icons) {
