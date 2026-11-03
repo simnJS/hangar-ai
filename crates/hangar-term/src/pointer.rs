@@ -47,6 +47,10 @@ pub(crate) struct PointerState {
     last_cell: Option<(usize, usize)>,
     /// Wheel movement not yet worth a whole line.
     wheel_remainder: f32,
+    /// The link a plain press landed on, with the cell it was in: it opens
+    /// when the button is let go in that cell, which makes the press a click
+    /// and not the start of a drag.
+    link: Option<(crate::event::Link, (i32, i32))>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,6 +152,15 @@ impl Terminal {
             return;
         }
 
+        // A plain click on a link opens it too, as xterm.js's web-links
+        // addon did for the old app. It waits for the release, so that a
+        // drag starting on a URL still selects text; Shift and Alt are
+        // already a selection's own (extending it, a block).
+        self.pointer.link = (!modifiers.shift() && !modifiers.alt())
+            .then(|| links::link_at(&self.term, self.grid_point(at)))
+            .flatten()
+            .map(|hit| (hit.link, (at.column, at.row)));
+
         let now = Instant::now();
         let count = match self.pointer.last_click {
             Some(last)
@@ -211,10 +224,25 @@ impl Terminal {
             return;
         }
 
+        let pressed_link = self.pointer.link.take();
         if !self.pointer.selecting {
             return;
         }
         self.pointer.selecting = false;
+
+        // Let go in the cell of a press on a link, once: a click, which opens
+        // it. The second click of a double click only selects the word, so
+        // the link is not opened twice; the first click already did.
+        if let Some((link, cell)) = pressed_link
+            && self.pointer.last_click.is_none_or(|c| c.count == 1)
+            && cell == (at.column, at.row)
+            && links::link_at(&self.term, self.grid_point(at)).is_some_and(|hit| hit.link == link)
+        {
+            self.term.selection = None;
+            self.pointer.alt_press = false;
+            events.push(Event::OpenLink(link));
+            return;
+        }
 
         // A click that went nowhere leaves no selection behind; one that went
         // somewhere is kept, and offered to the primary selection.
@@ -850,5 +878,116 @@ mod tests {
             modifiers: NONE,
         }));
         assert_eq!(writes(&events), b"\x1bOB\x1bOB\x1bOB");
+    }
+    /// The URLs the events open.
+    fn opened(events: &[Event]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Event::OpenLink(link) => Some(link.uri.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    const PAGE: &str = "see https://hangar.ai/docs now\r\n";
+
+    #[test]
+    fn a_plain_click_on_a_url_opens_it_when_the_button_is_let_go() {
+        let mut term = terminal(PAGE, 40, 3);
+        let pressed = down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        // Not yet: a press may be the start of a drag.
+        assert!(opened(&pressed).is_empty());
+        let released = up(&mut term, Button::Left, at(10, 0, Side::Left));
+        assert_eq!(opened(&released), ["https://hangar.ai/docs"]);
+        assert!(!term.has_selection(), "following a link selects nothing");
+    }
+
+    #[test]
+    fn a_click_that_wobbles_inside_its_cell_is_still_a_click() {
+        // Alacritty would select the character once the pointer crosses the
+        // middle of the cell; a click on a link does not.
+        let mut term = terminal(PAGE, 40, 3);
+        down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        drag(&mut term, at(10, 0, Side::Right));
+        let released = up(&mut term, Button::Left, at(10, 0, Side::Right));
+        assert_eq!(opened(&released), ["https://hangar.ai/docs"]);
+        assert!(!term.has_selection());
+    }
+
+    #[test]
+    fn a_drag_that_starts_on_a_url_selects_text_and_opens_nothing() {
+        let mut term = terminal(PAGE, 40, 3);
+        down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        drag(&mut term, at(18, 0, Side::Right));
+        let released = up(&mut term, Button::Left, at(18, 0, Side::Right));
+        assert!(opened(&released).is_empty());
+        assert_eq!(term.selection_text().as_deref(), Some("//hangar."));
+        // Nor does pressing on a URL and letting go on the text beside it.
+        let mut term = terminal(PAGE, 40, 3);
+        down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        let released = up(&mut term, Button::Left, at(1, 0, Side::Left));
+        assert!(opened(&released).is_empty());
+    }
+
+    #[test]
+    fn a_click_on_plain_text_opens_nothing_and_a_second_click_does_not_open_twice() {
+        let mut term = terminal(PAGE, 40, 3);
+        down(&mut term, Button::Left, at(1, 0, Side::Left), NONE);
+        assert!(opened(&up(&mut term, Button::Left, at(1, 0, Side::Left))).is_empty());
+
+        // A double click on a URL opens it once, with the first click, as
+        // the old terminal did, and selects the word with the second.
+        let mut term = terminal(PAGE, 40, 3);
+        let url = at(10, 0, Side::Left);
+        down(&mut term, Button::Left, url, NONE);
+        assert_eq!(opened(&up(&mut term, Button::Left, url)).len(), 1);
+        down(&mut term, Button::Left, url, NONE);
+        assert!(opened(&up(&mut term, Button::Left, url)).is_empty());
+        assert!(term.has_selection());
+    }
+
+    #[test]
+    fn shift_and_alt_clicks_on_a_url_keep_to_the_selection() {
+        for modifiers in [Modifiers::SHIFT, Modifiers::ALT] {
+            let mut term = terminal(PAGE, 40, 3);
+            let pressed = down(&mut term, Button::Left, at(10, 0, Side::Left), modifiers);
+            let released = up(&mut term, Button::Left, at(10, 0, Side::Left));
+            assert!(
+                opened(&pressed).is_empty() && opened(&released).is_empty(),
+                "{modifiers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_program_that_has_the_mouse_gets_the_click_not_the_browser() {
+        let mut term = terminal(PAGE, 40, 3);
+        term.feed(b"\x1b[?1000h\x1b[?1006h");
+        let pressed = down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        let released = up(&mut term, Button::Left, at(10, 0, Side::Left));
+        assert!(opened(&pressed).is_empty() && opened(&released).is_empty());
+        assert_eq!(writes(&pressed), b"\x1b[<0;11;1M");
+        // Ctrl+Shift+click is how a link is opened over such a program: Shift
+        // takes the mouse back, Ctrl opens.
+        let pressed = down(
+            &mut term,
+            Button::Left,
+            at(10, 0, Side::Left),
+            Modifiers::CTRL | Modifiers::SHIFT,
+        );
+        assert_eq!(opened(&pressed), ["https://hangar.ai/docs"]);
+    }
+
+    #[test]
+    fn a_stale_press_does_not_open_a_link_on_a_later_release() {
+        // The press on a URL was a drag that ended elsewhere; the next plain
+        // click, on text, must not inherit it.
+        let mut term = terminal(PAGE, 40, 3);
+        down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
+        drag(&mut term, at(20, 0, Side::Right));
+        up(&mut term, Button::Left, at(20, 0, Side::Right));
+        down(&mut term, Button::Left, at(1, 0, Side::Left), NONE);
+        assert!(opened(&up(&mut term, Button::Left, at(1, 0, Side::Left))).is_empty());
     }
 }

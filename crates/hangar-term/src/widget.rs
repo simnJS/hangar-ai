@@ -194,6 +194,7 @@ pub struct TerminalView<'a, Message, Theme = iced::Theme, Renderer = iced::Rende
     padding: Padding,
     scale_factor: Option<f32>,
     scrollbar: bool,
+    dim: Option<(Color, f32)>,
     _marker: PhantomData<(Theme, Renderer)>,
 }
 
@@ -212,6 +213,7 @@ pub fn terminal_view<'a, Message, Theme, Renderer>(
         padding: Padding::ZERO,
         scale_factor: None,
         scrollbar: true,
+        dim: None,
         _marker: PhantomData,
     }
 }
@@ -269,6 +271,19 @@ impl<'a, Message, Theme, Renderer> TerminalView<'a, Message, Theme, Renderer> {
     /// Whether to draw the scrollbar. On by default.
     pub fn scrollbar(mut self, show: bool) -> Self {
         self.scrollbar = show;
+        self
+    }
+
+    /// Draws the terminal as if it were only `opacity` opaque over `behind`
+    /// (CSS `opacity`): every colour on it, the background and the cursor
+    /// included, steps that far toward `behind`. It is how a pane that is not
+    /// the one being typed into steps back a little. An `opacity` of 1, or
+    /// more, draws it as it is.
+    ///
+    /// The terminal is drawn as usual and a veil of `behind` goes over it, in
+    /// a layer of its own because a layer draws its quads before its text.
+    pub fn dimmed(mut self, behind: Color, opacity: f32) -> Self {
+        self.dim = (opacity.is_finite() && opacity < 1.0).then_some((behind, opacity.max(0.0)));
         self
     }
 
@@ -432,13 +447,18 @@ where
         shaping: text::Shaping::Basic,
         wrapping: text::Wrapping::None,
     });
-    let width = paragraph.min_bounds().width / SAMPLE.len() as f32;
+    let advance = paragraph.min_bounds().width / SAMPLE.len() as f32;
+    let advance = if advance.is_finite() && advance > 0.5 {
+        advance
+    } else {
+        font.size * 0.6
+    };
     CellSize {
-        width: if width.is_finite() && width > 0.5 {
-            width
-        } else {
-            font.size * 0.6
-        },
+        // The letter spacing is part of the cell, so every column, the
+        // pointer's cell and the number of columns that fit follow it. A
+        // tight spacing never takes the cell below a pixel: a hand-edited
+        // setting must not collapse the grid.
+        width: (advance + font.letter_spacing).max(1.0),
         height,
     }
 }
@@ -948,9 +968,7 @@ where
         if state.over_scrollbar || state.thumb_grab.is_some() {
             return mouse::Interaction::Idle;
         }
-        let link_modifier = state.modifiers.control() || state.modifiers.logo();
-        if state.hover.is_some() && link_modifier && !self.terminal.mouse_reporting(state.modifiers)
-        {
+        if state.hover.is_some() && click_opens_links(self.terminal, state.modifiers) {
             return mouse::Interaction::Pointer;
         }
         if self.terminal.mouse_reporting(state.modifiers) {
@@ -1129,8 +1147,12 @@ where
                     );
                 }
             }
-            // The link under the pointer.
-            if let Some(hit) = &state.hover {
+            // The link under the pointer, when a click would open it.
+            if let Some(hit) = state
+                .hover
+                .as_ref()
+                .filter(|_| click_opens_links(terminal, state.modifiers))
+            {
                 for span in &hit.spans {
                     let row = span.line.0 + offset;
                     if row < 0 || row as usize >= rows {
@@ -1226,6 +1248,19 @@ where
                 }
             }
         });
+
+        // A terminal that steps back: what `behind` shows through it.
+        if let Some((behind, opacity)) = self.dim {
+            renderer.with_layer(bounds, |renderer| {
+                renderer.fill_quad(
+                    quad(bounds),
+                    Color {
+                        a: 1.0 - opacity,
+                        ..behind
+                    },
+                );
+            });
+        }
     }
 }
 
@@ -1433,7 +1468,11 @@ where
                 text::Alignment::Center
             },
             align_y: alignment::Vertical::Top,
-            shaping: if run.flowing && !ligatures {
+            // A flowing run is plain text. So is a lone character that
+            // monospace fonts all carry, which a letter spacing leaves
+            // alone in its cell: it needs no fallback font, and the cheaper
+            // shaping is the one that runs for every character of a screen.
+            shaping: if (run.flowing && !ligatures) || is_plain_cell(&run.text) {
                 text::Shaping::Basic
             } else {
                 text::Shaping::Advanced
@@ -1444,6 +1483,24 @@ where
         run.style.color,
         clip,
     );
+}
+
+/// Whether a click with `modifiers` opens the link under the pointer, which
+/// is when it is underlined and the pointer turns into a hand. A program that
+/// has the mouse gets the click instead; Shift and Alt are the selection's
+/// (extending it, a block); Ctrl or Cmd opens whatever else is held, and
+/// together with Shift is how a link is opened in a program that has the
+/// mouse.
+fn click_opens_links(terminal: &Terminal, modifiers: Modifiers) -> bool {
+    !terminal.mouse_reporting(modifiers)
+        && (modifiers.control() || modifiers.logo() || !(modifiers.shift() || modifiers.alt()))
+}
+
+/// Whether `text` is one character that every monospace font has (the ones
+/// a flowing run is made of).
+fn is_plain_cell(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if crate::plan::flows(c))
 }
 
 /// Where the baseline sits in a row, as a fraction of the row's height from
