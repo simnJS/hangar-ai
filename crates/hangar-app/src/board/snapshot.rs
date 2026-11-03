@@ -27,7 +27,7 @@ use super::format::now_ms;
 use super::model::{Column, Task, test_task};
 use super::task_dialog::Dialog;
 
-const CWD: &str = "/work/hangar";
+pub(super) const CWD: &str = "/work/hangar";
 
 fn pane(id: &str, name: &str, agent: AgentId) -> Pane {
     Pane {
@@ -38,7 +38,7 @@ fn pane(id: &str, name: &str, agent: AgentId) -> Pane {
     }
 }
 
-fn tasks() -> Vec<Task> {
+pub(super) fn tasks() -> Vec<Task> {
     let now = now_ms();
     let task = |id: &str, title: &str, column: &str, edit: &dyn Fn(&mut Task)| {
         let mut task = test_task(id);
@@ -110,7 +110,7 @@ fn tasks() -> Vec<Task> {
     ]
 }
 
-fn model(locale: Locale, theme: &str, loaded: Option<Vec<Task>>) -> Model {
+pub(super) fn model(locale: Locale, theme: &str, loaded: Option<Vec<Task>>) -> Model {
     let mut state = AppState::default();
     state.settings.locale = Some(locale);
     state.settings.theme_id = theme.into();
@@ -324,12 +324,14 @@ fn the_task_dialog_writes_a_new_task() {
 }
 
 fn dialog<'a>(m: &'a Model, id: &'a str, name: &str) {
-    let mut st = State::default();
-    st.dialog = Some(Dialog::open(
-        CWD,
-        Some(id),
-        m.live.board.tasks(CWD).unwrap_or(&[]),
-    ));
+    let st = State {
+        dialog: Some(Dialog::open(
+            CWD,
+            Some(id),
+            m.live.board.tasks(CWD).unwrap_or(&[]),
+        )),
+        ..State::default()
+    };
     draw(name, m, Size::new(900.0, 800.0), |ctx| {
         super::task_view(&st, ctx, CWD, Some(id))
     });

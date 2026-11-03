@@ -35,11 +35,9 @@ use super::actions::{self, After, Draft, Edit, Errors, Mutation};
 use super::card::assignee_view;
 use super::format::{DateStyle, short_task_id, when};
 use super::look;
-use super::model::{
-    Blocker, Column, MAX_BLOCK_REASON, Task as T, blockers_of, index_by_id, recheck_problem,
-};
+use super::model::{Column, MAX_BLOCK_REASON, Task as T, index_by_id, recheck_problem};
 use super::view::View;
-use super::{Msg as BoardMsg, State, add_id, card_id};
+use super::{Msg as BoardMsg, State, card_id};
 
 /// The thread scrolls to its newest message.
 const THREAD: &str = "board-task-thread";
@@ -589,11 +587,6 @@ pub fn mutated(
     } else {
         Task::none()
     }
-}
-
-/// Where the keyboard goes when the task it was on is gone: the column.
-pub fn fallback_focus(column: Column) -> Task<Message> {
-    iced::widget::operation::focus(add_id(column))
 }
 
 // ---- The view --------------------------------------------------------------------------------
@@ -1306,13 +1299,6 @@ fn thread<'a>(v: &View<'a>, dialog: &'a Dialog, task: &'a T) -> Element<'a, Mess
     .into()
 }
 
-/// The ids of dependencies that block a task, for the card; the dialog lists
-/// them all.
-#[allow(dead_code)]
-pub(super) fn blockers<'a>(task: &'a T, all: &'a [T]) -> Vec<Blocker<'a>> {
-    blockers_of(task, &index_by_id(all))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1429,5 +1415,196 @@ mod tests {
         let _ = mutated(&mut st, Errors::ToDialog, After::Nothing, &Ok(()));
         let open = st.dialog.as_ref().expect("still open");
         assert!(open.error.is_none() && !open.blocking && open.reason.is_empty());
+    }
+
+    // ---- What the buttons do -----------------------------------------------
+
+    use crate::board::snapshot::{CWD, model, tasks};
+    use hangar_i18n::Locale;
+
+    const DOING: &str = "3d4e0000-aaaa-bbbb-cccc-dddddddddddd";
+
+    /// A dialog open on a task of the sample board, and the model it is on.
+    fn open_on(id: Option<&str>) -> (State, Model) {
+        let m = model(Locale::En, "graphite", Some(tasks()));
+        let st = State {
+            dialog: Some(Dialog::open(
+                CWD,
+                id,
+                m.live.board.tasks(CWD).unwrap_or(&[]),
+            )),
+            ..State::default()
+        };
+        (st, m)
+    }
+
+    fn send(st: &mut State, m: &mut Model, msg: Msg) -> usize {
+        update(st, m, msg).units()
+    }
+
+    fn dialog(st: &State) -> &Dialog {
+        st.dialog.as_ref().expect("an open dialog")
+    }
+
+    #[test]
+    fn a_block_needs_a_reason_and_a_day_that_is_not_past() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        send(&mut st, &mut m, Msg::StartBlock);
+        assert!(dialog(&st).blocking);
+
+        // Nothing said: the form says what is missing, and writes nothing.
+        send(&mut st, &mut m, Msg::Reason("   ".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::ConfirmBlock), 0);
+        assert_eq!(dialog(&st).error.as_deref(), Some("Say what it waits for."));
+
+        send(&mut st, &mut m, Msg::Reason("the npm release".into()));
+        send(&mut st, &mut m, Msg::Recheck("2000-01-01".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::ConfirmBlock), 0);
+        assert_eq!(dialog(&st).error.as_deref(), Some("That day has passed."));
+
+        send(&mut st, &mut m, Msg::Recheck("next week".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::ConfirmBlock), 0);
+        assert_eq!(
+            dialog(&st).error.as_deref(),
+            Some("Write the day as YYYY-MM-DD.")
+        );
+
+        // A good one goes to the board, and the error is gone.
+        send(&mut st, &mut m, Msg::Recheck("2999-01-01".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::ConfirmBlock), 1);
+        assert!(dialog(&st).error.is_none());
+    }
+
+    #[test]
+    fn the_reason_stops_at_what_the_board_keeps() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        send(
+            &mut st,
+            &mut m,
+            Msg::Reason("x".repeat(MAX_BLOCK_REASON + 40)),
+        );
+        assert_eq!(dialog(&st).reason.chars().count(), MAX_BLOCK_REASON);
+    }
+
+    #[test]
+    fn cancelling_a_block_closes_the_form_and_its_error() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        send(&mut st, &mut m, Msg::StartBlock);
+        send(&mut st, &mut m, Msg::ConfirmBlock);
+        assert!(dialog(&st).error.is_some());
+        send(&mut st, &mut m, Msg::CancelBlock);
+        assert!(!dialog(&st).blocking && dialog(&st).error.is_none());
+    }
+
+    #[test]
+    fn a_comment_is_sent_trimmed_and_a_blank_one_is_not() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        send(&mut st, &mut m, Msg::Comment("   ".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::Send), 0);
+
+        send(&mut st, &mut m, Msg::Comment("  a word ".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::Send), 1);
+        assert!(dialog(&st).comment.is_empty());
+    }
+
+    #[test]
+    fn delete_asks_twice() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        assert_eq!(send(&mut st, &mut m, Msg::AskDelete), 0);
+        assert!(dialog(&st).confirm_delete);
+        send(&mut st, &mut m, Msg::CancelDelete);
+        assert!(!dialog(&st).confirm_delete);
+        send(&mut st, &mut m, Msg::AskDelete);
+        assert_eq!(send(&mut st, &mut m, Msg::ConfirmDelete), 1);
+    }
+
+    #[test]
+    fn leaving_a_field_saves_it_and_typing_in_it_does_not() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        assert_eq!(send(&mut st, &mut m, Msg::Title("Renamed".into())), 0);
+        // Using the release button leaves the title field: it is saved,
+        // then the release goes.
+        assert_eq!(send(&mut st, &mut m, Msg::Release), 2);
+        // Nothing is left to save.
+        assert_eq!(send(&mut st, &mut m, Msg::Release), 1);
+    }
+
+    #[test]
+    fn the_priority_stepper_saves_each_step() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        assert_eq!(send(&mut st, &mut m, Msg::Priority(NumberMsg::Step(1))), 1);
+        assert_eq!(dialog(&st).priority.value(), 2.0);
+        // Typing half a number saves nothing until it reads as one.
+        assert_eq!(
+            send(
+                &mut st,
+                &mut m,
+                Msg::Priority(NumberMsg::Input(String::new()))
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn writing_a_task_changes_the_form_not_the_board() {
+        let (mut st, mut m) = open_on(None);
+        assert_eq!(send(&mut st, &mut m, Msg::Column(Column::Review)), 0);
+        assert_eq!(dialog(&st).column, Column::Review);
+
+        let other = Dependency {
+            id: "x".into(),
+            label: "#x".into(),
+        };
+        send(&mut st, &mut m, Msg::AddDependency(other.clone()));
+        send(&mut st, &mut m, Msg::AddDependency(other));
+        assert_eq!(dialog(&st).depends_on, vec!["x".to_owned()]);
+        send(&mut st, &mut m, Msg::RemoveDependency("x".into()));
+        assert!(dialog(&st).depends_on.is_empty());
+
+        // No title: no task. With one: it goes to the board.
+        assert_eq!(send(&mut st, &mut m, Msg::Create), 0);
+        send(&mut st, &mut m, Msg::Title("A new one".into()));
+        assert_eq!(send(&mut st, &mut m, Msg::Create), 1);
+    }
+
+    #[test]
+    fn a_dependency_of_an_open_task_goes_to_the_board() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        let dep = Dependency {
+            id: "5b3c0000-aaaa-bbbb-cccc-dddddddddddd".into(),
+            label: "#5b3c".into(),
+        };
+        assert_eq!(send(&mut st, &mut m, Msg::AddDependency(dep)), 1);
+        assert_eq!(
+            send(&mut st, &mut m, Msg::RemoveDependency("gone".into())),
+            1
+        );
+    }
+
+    #[test]
+    fn closing_the_dialog_asks_the_shell_to_close_the_overlay() {
+        let (mut st, mut m) = open_on(Some(DOING));
+        assert_eq!(send(&mut st, &mut m, Msg::Close), 1);
+    }
+
+    #[test]
+    fn a_finished_write_closes_the_dialog_when_it_was_asked_to() {
+        let (mut st, _) = open_on(None);
+        // A refusal of a new task stays on screen, with its reason.
+        let refused: Result<(), String> = Err("no".into());
+        assert_eq!(
+            mutated(&mut st, Errors::ToDialog, After::CloseOnOk, &refused).units(),
+            0
+        );
+        assert_eq!(dialog(&st).error.as_deref(), Some("no"));
+        assert_eq!(
+            mutated(&mut st, Errors::ToDialog, After::CloseOnOk, &Ok(())).units(),
+            1
+        );
+        // A delete closes it whatever the board answered.
+        assert_eq!(
+            mutated(&mut st, Errors::Swallow, After::CloseAlways, &refused).units(),
+            1
+        );
     }
 }

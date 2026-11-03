@@ -191,6 +191,147 @@ pub fn read(cwd: &str) -> Task<Message> {
 mod tests {
     use super::*;
 
+    /// A folder to keep a board in, removed when the test is over.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new() -> Scratch {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let dir = std::env::temp_dir()
+                .join(format!("hangar-board-test-{}-{unique}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("a scratch folder");
+            Scratch(dir)
+        }
+
+        fn cwd(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn find(cwd: &str, title: &str) -> hangar_core::board::Task {
+        hangar_core::board_load(cwd.to_owned())
+            .tasks
+            .into_iter()
+            .find(|task| task.title == title)
+            .unwrap_or_else(|| panic!("no task called {title}"))
+    }
+
+    /// What the window sends, against the real board of hangar-core: the
+    /// patches mean what the dialog and the drag think they mean.
+    #[test]
+    fn the_window_writes_a_board_the_way_it_means_to() {
+        let scratch = Scratch::new();
+        let cwd = scratch.cwd();
+
+        apply(
+            cwd.clone(),
+            Mutation::Create(Draft {
+                priority: 2,
+                owns: vec!["src/**".into()],
+                ..Draft::titled("Write it", Column::Doing)
+            }),
+        )
+        .expect("a task is made");
+        apply(
+            cwd.clone(),
+            Mutation::Create(Draft::titled("Then ship it", Column::Todo)),
+        )
+        .expect("another");
+        let first = find(&cwd, "Write it");
+        assert_eq!(first.column, "doing");
+        assert_eq!(first.priority, 2);
+        assert_eq!(first.owns, vec!["src/**".to_owned()]);
+        assert!(first.doing_since.is_some());
+
+        let update = |edit: Edit| {
+            apply(
+                cwd.clone(),
+                Mutation::Update {
+                    id: first.id.clone(),
+                    edit,
+                },
+            )
+        };
+
+        // A block as the person: back to todo, held by nobody.
+        update(Edit::Block {
+            reason: " waiting for the npm release ".into(),
+            recheck: String::new(),
+            human_only: true,
+        })
+        .expect("a block");
+        let blocked = find(&cwd, "Write it");
+        assert_eq!(blocked.column, "todo");
+        let hold = blocked.blocked.expect("blocked");
+        assert_eq!(hold.reason, "waiting for the npm release");
+        assert_eq!(hold.by, "user");
+        assert!(hold.human_only);
+
+        // It stays in todo until it is unblocked: the board says so too.
+        let refused = update(Edit::Column(Column::Doing)).expect_err("refused");
+        assert!(refused.contains("blocked"), "{refused}");
+
+        // The person lifts a block only a person may.
+        update(Edit::Unblock {
+            note: "it is out".into(),
+        })
+        .expect("an unblock");
+        let freed = find(&cwd, "Write it");
+        assert!(freed.blocked.is_none());
+        assert!(
+            freed
+                .comments
+                .last()
+                .is_some_and(|c| c.text.contains("it is out"))
+        );
+
+        update(Edit::Priority(0)).expect("a priority");
+        update(Edit::Release).expect("a release");
+        update(Edit::Owns(vec!["docs/".into(), "README.md".into()])).expect("owns");
+        update(Edit::DependsOn(vec![find(&cwd, "Then ship it").id])).expect("a dependency");
+        let edited = find(&cwd, "Write it");
+        assert_eq!(edited.priority, 0);
+        assert_eq!(
+            edited.owns,
+            vec!["docs/".to_owned(), "README.md".to_owned()]
+        );
+        assert_eq!(edited.depends_on.len(), 1);
+
+        apply(
+            cwd.clone(),
+            Mutation::Comment {
+                id: first.id.clone(),
+                text: "A word".into(),
+            },
+        )
+        .expect("a comment");
+        let talked = find(&cwd, "Write it");
+        let last = talked.comments.last().expect("a comment");
+        assert_eq!(
+            (last.author.as_str(), last.text.as_str()),
+            ("user", "A word")
+        );
+
+        apply(
+            cwd.clone(),
+            Mutation::Delete {
+                id: first.id.clone(),
+            },
+        )
+        .expect("a delete");
+        assert_eq!(hangar_core::board_load(cwd.clone()).tasks.len(), 1);
+        // Deleting what is gone is an error the dialog does not show.
+        assert!(apply(cwd, Mutation::Delete { id: first.id }).is_err());
+    }
+
     #[test]
     fn each_edit_is_one_field_of_the_patch() {
         let patch = Edit::Title("New".into()).patch();
