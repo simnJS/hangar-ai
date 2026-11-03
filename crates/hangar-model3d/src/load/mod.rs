@@ -210,6 +210,14 @@ fn read_whole(
     progress: &mut dyn FnMut(LoadProgress),
 ) -> Result<Vec<u8>, LoadError> {
     let fail = |err: std::io::Error| read_error(err.kind(), &err.to_string());
+    // Asked before opening: Windows refuses to open a folder at all ("Access
+    // is denied"), which would hide the one thing worth saying about it.
+    if std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(LoadError::Read(format!(
+            "{} is a folder: give the path of the model file inside it.",
+            path.display()
+        )));
+    }
     let mut file = std::fs::File::open(path).map_err(fail)?;
     let metadata = file.metadata().map_err(fail)?;
     if !metadata.is_file() {
