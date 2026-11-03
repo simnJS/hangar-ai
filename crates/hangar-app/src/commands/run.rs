@@ -19,10 +19,11 @@ use iced::{Task, window};
 
 use super::CommandId;
 use crate::message::{Intent, Message, TerminalAction};
+use crate::orchestration_ui::actions::{can_create_orchestrator, pin_refusal};
 use crate::shell::{Action, Overlay, SettingsCategory, View, WindowKind};
 use crate::state::PaneId;
 use crate::state::layout::{Direction, leaf_ids, neighbor_of, normalize_tree};
-use crate::state::roles::{can_create_orchestrator, orchestrator_of, pin_refusal, workers_of};
+use crate::state::roles::{orchestrator_of, workers_of};
 use crate::state::types::DropZone;
 use crate::state::types::{AgentId, SplitDir};
 use crate::state::{Model, Patch, Settings, StoreAction, Workspace, folders::sidebar_order};
