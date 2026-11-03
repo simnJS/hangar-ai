@@ -403,7 +403,8 @@ fn now_ms() -> u64 {
         .map_or(0, |since| since.as_millis() as u64)
 }
 
-static EMPTY: Scope = Scope {
+/// A workspace with nothing open.
+pub static EMPTY: Scope = Scope {
     entries: Vec::new(),
     active_id: None,
     panel_open: false,
@@ -539,6 +540,13 @@ impl Store {
     /// workspace's panel, and only that one. Returns the entry's id
     /// (`showPreview`).
     pub fn show_file(&mut self, file: ShowFile) -> String {
+        self.show_file_with(file, true)
+    }
+
+    /// `show_file`; without `reveal` the file is only added, the panel and
+    /// what is in front as they were (the news still waits behind the
+    /// toolbar's button), as a kit's tab is.
+    pub fn show_file_with(&mut self, file: ShowFile, reveal: bool) -> String {
         let scope = self.scope(&file.workspace_id).clone();
         let title = file
             .title
@@ -565,8 +573,10 @@ impl Store {
                 entry.body = body;
                 entry.status = status;
             });
-            next.active_id = Some(id.clone());
-            next.panel_open = true;
+            if reveal {
+                next.active_id = Some(id.clone());
+                next.panel_open = true;
+            }
             next.unseen = true;
             self.set(vec![(file.workspace_id, Some(next))]);
             return id;
@@ -587,9 +597,11 @@ impl Store {
             body,
         };
         let mut next = scope;
+        if reveal || next.active_id.is_none() {
+            next.active_id = Some(id.clone());
+        }
+        next.panel_open = reveal || next.panel_open;
         next.entries.push(entry);
-        next.active_id = Some(id.clone());
-        next.panel_open = true;
         next.unseen = true;
         self.set(vec![(file.workspace_id, Some(next))]);
         id
@@ -691,7 +703,11 @@ impl Store {
         let path = kit_tab_path(
             &tab.kit_id,
             &tab.tab_id,
-            if tab.singleton { &no_params } else { &tab.params },
+            if tab.singleton {
+                &no_params
+            } else {
+                &tab.params
+            },
         );
         let entry = self.kit_tab_entry(
             id.clone(),
@@ -979,7 +995,10 @@ impl Store {
             {
                 next.active_id = next.entries.last().map(|entry| entry.id.clone());
             }
-            patch.push((workspace.clone(), (!next.entries.is_empty()).then_some(next)));
+            patch.push((
+                workspace.clone(),
+                (!next.entries.is_empty()).then_some(next),
+            ));
         }
         if !patch.is_empty() {
             self.set(patch);
@@ -1086,20 +1105,20 @@ impl Store {
             return;
         };
         let workspace = entry.workspace_id.clone();
-        let mut next = Store::with_entry(self.scope(&workspace), id, |entry| match &mut entry.body
-        {
-            Body::Model { .. } => {
-                entry.modified_ms = modified_ms;
-                entry.revision += 1;
-                entry.status = Status::Loading;
-            }
-            Body::File { size: held, .. } => {
-                entry.modified_ms = modified_ms;
-                entry.revision += 1;
-                *held = size.unwrap_or(*held);
-            }
-            Body::Kit(_) => {}
-        });
+        let mut next =
+            Store::with_entry(self.scope(&workspace), id, |entry| match &mut entry.body {
+                Body::Model { .. } => {
+                    entry.modified_ms = modified_ms;
+                    entry.revision += 1;
+                    entry.status = Status::Loading;
+                }
+                Body::File { size: held, .. } => {
+                    entry.modified_ms = modified_ms;
+                    entry.revision += 1;
+                    *held = size.unwrap_or(*held);
+                }
+                Body::Kit(_) => {}
+            });
         next.unseen = true;
         self.set(vec![(workspace, Some(next))]);
     }

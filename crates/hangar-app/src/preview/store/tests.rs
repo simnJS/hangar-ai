@@ -41,7 +41,13 @@ fn info() -> ModelInfo {
     }
 }
 
-fn file(store: &mut Store, kind: FileKind, path: &str, workspace: &str, opened_by: Option<&str>) -> String {
+fn file(
+    store: &mut Store,
+    kind: FileKind,
+    path: &str,
+    workspace: &str,
+    opened_by: Option<&str>,
+) -> String {
     store.show_file(ShowFile {
         workspace_id: workspace.into(),
         path: path.into(),
@@ -240,8 +246,20 @@ fn forgets_the_workspaces_that_were_deleted() {
 fn opens_each_kind_as_a_tab_of_its_workspace_the_latest_in_front() {
     let mut store = store();
     let chair = model(&mut store, "C:/a/chair.glb");
-    let shot = file(&mut store, FileKind::Image, "C:/a/shot.png", "ws", Some("Ava"));
-    let notes = file(&mut store, FileKind::Markdown, "C:/a/NOTES.md", "ws", Some("Ava"));
+    let shot = file(
+        &mut store,
+        FileKind::Image,
+        "C:/a/shot.png",
+        "ws",
+        Some("Ava"),
+    );
+    let notes = file(
+        &mut store,
+        FileKind::Markdown,
+        "C:/a/NOTES.md",
+        "ws",
+        Some("Ava"),
+    );
     let scope = store.scope("ws");
     let kinds: Vec<(&str, &str)> = scope
         .entries
@@ -260,7 +278,10 @@ fn opens_each_kind_as_a_tab_of_its_workspace_the_latest_in_front() {
     assert!(scope.panel_open);
     // A file is ready at once; only a model waits for the 3D viewer.
     let statuses: Vec<Status> = scope.entries.iter().map(|entry| entry.status).collect();
-    assert_eq!(statuses, vec![Status::Loading, Status::Ready, Status::Ready]);
+    assert_eq!(
+        statuses,
+        vec![Status::Loading, Status::Ready, Status::Ready]
+    );
     store.activate_model(&shot);
     assert_eq!(store.scope("ws").active_id.as_deref(), Some(shot.as_str()));
     store.activate_model(&chair);
@@ -271,7 +292,13 @@ fn opens_each_kind_as_a_tab_of_its_workspace_the_latest_in_front() {
 fn keeps_the_3d_viewers_list_to_the_models_and_the_windows_to_everything() {
     let mut store = store();
     let chair = show(&mut store, "C:/a/chair.glb", Some("Ava"), "A");
-    let page = file(&mut store, FileKind::Html, "C:/b/page.html", "B", Some("Ava"));
+    let page = file(
+        &mut store,
+        FileKind::Html,
+        "C:/b/page.html",
+        "B",
+        Some("Ava"),
+    );
     let models: Vec<String> = store.models().iter().map(|m| m.id.clone()).collect();
     assert_eq!(models, vec![chair.clone()]);
     let mut every: Vec<String> = store.entries().map(|e| e.id.clone()).collect();
@@ -280,7 +307,13 @@ fn keeps_the_3d_viewers_list_to_the_models_and_the_windows_to_everything() {
     expected.sort();
     assert_eq!(every, expected);
     // An image opening adds no model.
-    file(&mut store, FileKind::Image, "C:/b/shot.png", "B", Some("Ava"));
+    file(
+        &mut store,
+        FileKind::Image,
+        "C:/b/shot.png",
+        "B",
+        Some("Ava"),
+    );
     assert_eq!(store.models().len(), 1);
     assert!(store.models().iter().all(|entry| entry.is_model()));
 }
@@ -288,8 +321,20 @@ fn keeps_the_3d_viewers_list_to_the_models_and_the_windows_to_everything() {
 #[test]
 fn brings_a_file_shown_again_forward_once_with_a_new_revision_for_its_viewer() {
     let mut store = store();
-    let log = file(&mut store, FileKind::Text, "C:/a/run.log", "ws", Some("Ava"));
-    file(&mut store, FileKind::Pdf, "C:/a/report.pdf", "ws", Some("Ava"));
+    let log = file(
+        &mut store,
+        FileKind::Text,
+        "C:/a/run.log",
+        "ws",
+        Some("Ava"),
+    );
+    file(
+        &mut store,
+        FileKind::Pdf,
+        "C:/a/report.pdf",
+        "ws",
+        Some("Ava"),
+    );
     let again = store.show_file(ShowFile {
         workspace_id: "ws".into(),
         path: "C:/a/run.log".into(),
@@ -318,8 +363,20 @@ fn brings_a_file_shown_again_forward_once_with_a_new_revision_for_its_viewer() {
 fn closes_one_kind_or_another_and_the_last_one_shuts_its_panel() {
     let mut store = store();
     let chair = model(&mut store, "C:/a/chair.glb");
-    let clip = file(&mut store, FileKind::Video, "C:/a/clip.mp4", "ws", Some("Ava"));
-    let song = file(&mut store, FileKind::Audio, "C:/a/theme.ogg", "ws", Some("Ava"));
+    let clip = file(
+        &mut store,
+        FileKind::Video,
+        "C:/a/clip.mp4",
+        "ws",
+        Some("Ava"),
+    );
+    let song = file(
+        &mut store,
+        FileKind::Audio,
+        "C:/a/theme.ogg",
+        "ws",
+        Some("Ava"),
+    );
     store.close_model(&song);
     assert_eq!(store.scope("ws").active_id.as_deref(), Some(clip.as_str()));
     store.close_models(&[chair, clip]);
@@ -332,8 +389,20 @@ fn closes_one_kind_or_another_and_the_last_one_shuts_its_panel() {
 #[test]
 fn keeps_each_workspaces_files_apart_and_closes_one_workspaces_only() {
     let mut store = store();
-    let page_a = file(&mut store, FileKind::Html, "C:/shared/index.html", "A", Some("Ava"));
-    let page_b = file(&mut store, FileKind::Html, "C:/shared/index.html", "B", Some("Ava"));
+    let page_a = file(
+        &mut store,
+        FileKind::Html,
+        "C:/shared/index.html",
+        "A",
+        Some("Ava"),
+    );
+    let page_b = file(
+        &mut store,
+        FileKind::Html,
+        "C:/shared/index.html",
+        "B",
+        Some("Ava"),
+    );
     assert_ne!(page_a, page_b);
     show(&mut store, "C:/b/car.glb", Some("Ben"), "B");
     store.close_workspace_models("B");
@@ -344,7 +413,13 @@ fn keeps_each_workspaces_files_apart_and_closes_one_workspaces_only() {
 #[test]
 fn answers_a_waiting_caller_at_once_for_a_file_which_has_nothing_to_load() {
     let mut store = store();
-    let pdf = file(&mut store, FileKind::Pdf, "C:/a/report.pdf", "ws", Some("Ava"));
+    let pdf = file(
+        &mut store,
+        FileKind::Pdf,
+        "C:/a/report.pdf",
+        "ws",
+        Some("Ava"),
+    );
     let settled = store.settled(&pdf).unwrap().unwrap();
     assert_eq!(settled.status, Status::Ready);
 }
@@ -352,7 +427,13 @@ fn answers_a_waiting_caller_at_once_for_a_file_which_has_nothing_to_load() {
 #[test]
 fn settles_models_only_and_has_a_rewritten_file_read_again_ready_all_along() {
     let mut store = store();
-    let shot = file(&mut store, FileKind::Image, "C:/a/shot.png", "ws", Some("Ava"));
+    let shot = file(
+        &mut store,
+        FileKind::Image,
+        "C:/a/shot.png",
+        "ws",
+        Some("Ava"),
+    );
     store.settle_model(&shot, Err("not a glTF file".into()));
     let entry = first(&store, "ws");
     assert_eq!((entry.status, entry.revision), (Status::Ready, 0));
@@ -360,7 +441,10 @@ fn settles_models_only_and_has_a_rewritten_file_read_again_ready_all_along() {
     store.mark_models_seen("ws");
     store.reload_model(&shot, 99, Some(2048));
     let entry = first(&store, "ws");
-    assert_eq!((entry.status, entry.revision, entry.modified_ms), (Status::Ready, 1, 99));
+    assert_eq!(
+        (entry.status, entry.revision, entry.modified_ms),
+        (Status::Ready, 1, 99)
+    );
     assert!(matches!(entry.body, Body::File { size: 2048, .. }));
     assert!(store.scope("ws").unseen);
 }
@@ -381,9 +465,15 @@ fn opens_a_kits_tab_in_front_its_panel_open_as_the_persons_own_doing() {
     assert!(!scope.unseen);
     let entry = &scope.entries[0];
     let kit = entry.kit().expect("a kit tab");
-    assert_eq!((kit.kit_id.as_str(), kit.tab_id.as_str()), ("hello-kit", "status"));
+    assert_eq!(
+        (kit.kit_id.as_str(), kit.tab_id.as_str()),
+        ("hello-kit", "status")
+    );
     assert_eq!(entry.title, "Status");
-    assert_eq!(entry.path, kit_tab_path("hello-kit", "status", &KitTabParams::new()));
+    assert_eq!(
+        entry.path,
+        kit_tab_path("hello-kit", "status", &KitTabParams::new())
+    );
     assert_eq!(entry.status, Status::Ready);
     assert_eq!(entry.opened_by, None);
     assert_eq!(entry.revision, 0);
@@ -396,13 +486,22 @@ fn opens_a_kits_tab_in_front_its_panel_open_as_the_persons_own_doing() {
 fn brings_an_open_tab_forward_as_it_is_under_the_manifests_title_of_now() {
     let mut store = store();
     let status = kit_tab(&mut store, "status", "ws", "Status");
-    let shot = file(&mut store, FileKind::Image, "C:/a/shot.png", "ws", Some("Ava"));
+    let shot = file(
+        &mut store,
+        FileKind::Image,
+        "C:/a/shot.png",
+        "ws",
+        Some("Ava"),
+    );
     assert_eq!(store.scope("ws").active_id.as_deref(), Some(shot.as_str()));
     assert_eq!(kit_tab(&mut store, "status", "ws", "State"), status);
     let scope = store.scope("ws");
     assert_eq!(scope.entries.len(), 2);
     assert_eq!(scope.active_id.as_deref(), Some(status.as_str()));
-    assert_eq!((scope.entries[0].title.as_str(), scope.entries[0].revision), ("State", 0));
+    assert_eq!(
+        (scope.entries[0].title.as_str(), scope.entries[0].revision),
+        ("State", 0)
+    );
 }
 
 #[test]
@@ -441,7 +540,10 @@ fn closes_like_any_tab() {
     let status = kit_tab(&mut store, "status", "ws", "status");
     let other = kit_tab(&mut store, "other", "ws", "other");
     store.close_model(&other);
-    assert_eq!(store.scope("ws").active_id.as_deref(), Some(status.as_str()));
+    assert_eq!(
+        store.scope("ws").active_id.as_deref(),
+        Some(status.as_str())
+    );
     store.close_models(&[status]);
     let scope = store.scope("ws");
     assert!(scope.entries.is_empty());
@@ -458,7 +560,10 @@ mod with_params {
     #[test]
     fn knows_a_set_of_params_whichever_order_its_names_came_in() {
         let params = |pairs: &[(&str, &str)]| -> KitTabParams {
-            pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+            pairs
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
         };
         assert_eq!(
             kit_params_key(&params(&[("a", "1"), ("b", "2")])),
@@ -554,7 +659,10 @@ mod who_asked {
     }
 
     fn params(pairs: &[(&str, &str)]) -> KitTabParams {
-        pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
@@ -655,7 +763,11 @@ mod a_singleton {
     use super::*;
 
     fn board(store: &mut Store, params: &[(&str, &str)]) -> String {
-        store.open_kit_tab(KitTabToOpen::new("ws", "ci", "board", "Board").singleton().params(params))
+        store.open_kit_tab(
+            KitTabToOpen::new("ws", "ci", "board", "Board")
+                .singleton()
+                .params(params),
+        )
     }
 
     fn view(value: &str) -> KitTabParams {
@@ -678,7 +790,10 @@ mod a_singleton {
         assert_eq!(store.kit_tab_params(&id), view("b"));
         let entry = first(&store, "ws");
         assert_eq!(entry.revision, 0);
-        assert_eq!(entry.path, kit_tab_path("ci", "board", &KitTabParams::new()));
+        assert_eq!(
+            entry.path,
+            kit_tab_path("ci", "board", &KitTabParams::new())
+        );
         assert_eq!(*heard.lock().unwrap(), vec![view("b")]);
 
         // Nothing new: nothing to hear, and it keeps what it holds.
@@ -703,7 +818,10 @@ mod a_singleton {
         );
         let heard: Arc<Mutex<Vec<&str>>> = Arc::default();
         let sink = heard.clone();
-        store.watch_kit_tab_params(&other, Box::new(move |_, _| sink.lock().unwrap().push("other")));
+        store.watch_kit_tab_params(
+            &other,
+            Box::new(move |_, _| sink.lock().unwrap().push("other")),
+        );
         board(&mut store, &[("view", "b")]);
         assert_ne!(mine, other);
         assert!(heard.lock().unwrap().is_empty());
@@ -890,7 +1008,10 @@ mod across_a_restart {
     }
 
     fn params(pairs: &[(&str, &str)]) -> KitTabParams {
-        pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
@@ -899,7 +1020,13 @@ mod across_a_restart {
         let mut before = start(&saved);
         let id = before.open_kit_tab(ci().params(&[("run", "4567")]).opened_by("Ava"));
         before.set_kit_tab_title(&id, "Run #4567");
-        before.set_kit_tab_badge(&id, Some(KitBadge { state: KitBadgeState::Running, text: None }));
+        before.set_kit_tab_badge(
+            &id,
+            Some(KitBadge {
+                state: KitBadgeState::Running,
+                text: None,
+            }),
+        );
 
         let mut after = start(&saved);
         assert!(after.scope("ws").entries.is_empty());
@@ -915,7 +1042,10 @@ mod across_a_restart {
         assert_eq!(entry.opened_by.as_deref(), Some("Ava"));
         // The page says it again once it runs.
         assert_eq!(kit.badge, None);
-        assert_eq!(entry.path, kit_tab_path("ci", "run", &params(&[("run", "4567")])));
+        assert_eq!(
+            entry.path,
+            kit_tab_path("ci", "run", &params(&[("run", "4567")]))
+        );
         assert!(!scope.panel_open);
         assert!(!scope.unseen);
         assert_eq!(scope.active_id.as_deref(), Some(entry.id.as_str()));
@@ -927,7 +1057,11 @@ mod across_a_restart {
         let saved = Memory::default();
         let mut before = start(&saved);
         before.open_kit_tab(ci().params(&[("run", "1")]));
-        before.open_kit_tab(KitTabToOpen::new("ws", "ci", "board", "Run").singleton().params(&[("view", "a")]));
+        before.open_kit_tab(
+            KitTabToOpen::new("ws", "ci", "board", "Run")
+                .singleton()
+                .params(&[("view", "a")]),
+        );
 
         let mut after = start(&saved);
         after.restore_kit_tabs("ws");
@@ -935,7 +1069,11 @@ mod across_a_restart {
         let (run, board) = (&entries[0], &entries[1]);
         assert_eq!(after.open_kit_tab(ci().params(&[("run", "1")])), run.id);
         assert_eq!(
-            after.open_kit_tab(KitTabToOpen::new("ws", "ci", "board", "Run").singleton().params(&[("view", "b")])),
+            after.open_kit_tab(
+                KitTabToOpen::new("ws", "ci", "board", "Run")
+                    .singleton()
+                    .params(&[("view", "b")])
+            ),
             board.id
         );
         assert_eq!(after.kit_tab_params(&board.id), params(&[("view", "b")]));
@@ -972,12 +1110,22 @@ mod across_a_restart {
         let mut after = start(&saved);
         model(&mut after, "C:/m/a.glb");
         after.restore_kit_tabs("ws");
-        let kinds: Vec<&str> = after.scope("ws").entries.iter().map(|e| e.kind_name()).collect();
+        let kinds: Vec<&str> = after
+            .scope("ws")
+            .entries
+            .iter()
+            .map(|e| e.kind_name())
+            .collect();
         assert_eq!(kinds, vec!["model", "kit"]);
 
         let mut again = start(&saved);
         again.restore_kit_tabs("ws");
-        let kinds: Vec<&str> = again.scope("ws").entries.iter().map(|e| e.kind_name()).collect();
+        let kinds: Vec<&str> = again
+            .scope("ws")
+            .entries
+            .iter()
+            .map(|e| e.kind_name())
+            .collect();
         assert_eq!(kinds, vec!["kit"]);
     }
 
@@ -1036,7 +1184,8 @@ mod across_a_restart {
         let saved = Memory::default();
         let mut before = start(&saved);
         before.open_kit_tab(KitTabToOpen::new("kept", "ci", "run", "Run").params(&[("run", "1")]));
-        before.open_kit_tab(KitTabToOpen::new("deleted", "ci", "run", "Run").params(&[("run", "2")]));
+        before
+            .open_kit_tab(KitTabToOpen::new("deleted", "ci", "run", "Run").params(&[("run", "2")]));
         before.forget_saved_kit_tabs(&["kept".to_string()]);
 
         let mut after = start(&saved);
@@ -1078,7 +1227,15 @@ mod across_a_restart {
         let mut after = start(&saved);
         let id = after.open_kit_tab(ci().params(&[("run", "2")]).opened_by("Ava"));
         let entries = after.scope("ws").entries.clone();
-        assert!(!entries.iter().find(|e| e.id == id).unwrap().kit().unwrap().restored);
+        assert!(
+            !entries
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap()
+                .kit()
+                .unwrap()
+                .restored
+        );
         let others: Vec<bool> = entries
             .iter()
             .filter(|e| e.id != id)

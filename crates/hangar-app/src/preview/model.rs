@@ -161,7 +161,9 @@ pub fn check_preview_file(answer: &Value) -> Result<PreviewFile, String> {
         return Err("The preview got no path back for that file. Try again.".into());
     }
     let Some(kind) = text("kind").and_then(Kind::parse) else {
-        let said = text("kind").map(|kind| format!(" ({kind})")).unwrap_or_default();
+        let said = text("kind")
+            .map(|kind| format!(" ({kind})"))
+            .unwrap_or_default();
         let shown: Vec<&str> = Kind::ALL.iter().map(|kind| kind.as_str()).collect();
         return Err(format!(
             "The preview has no viewer for {name}{said}. It shows: {}.",
@@ -349,11 +351,7 @@ pub const TEXT_HEAD_LINES: usize = 5000;
 /// at. The names are highlight.js's, which the TS registered; `highlight.rs`
 /// maps each to a syntax (`languageOf`).
 pub fn language_of(path: &str) -> Option<&'static str> {
-    let name = path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let name = path.rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
     if let Some((_, language)) = NAMES.iter().find(|(whole, _)| *whole == name) {
         return Some(language);
     }
@@ -706,7 +704,9 @@ fn percent_decode(text: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let hex = text.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok());
+            let hex = text
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
             match hex {
                 Some(byte) => {
                     out.push(byte);
@@ -901,7 +901,11 @@ mod tests {
                 .unwrap_err()
                 .contains("no path")
         );
-        assert!(check_preview_file(&Value::Null).unwrap_err().contains("no path"));
+        assert!(
+            check_preview_file(&Value::Null)
+                .unwrap_err()
+                .contains("no path")
+        );
     }
 
     #[test]
@@ -917,8 +921,14 @@ mod tests {
         let path = "C:\\dev\\site\\index.html";
         let base = model_url_for(path, false);
         assert_eq!(preview_url_for(path, 0, false, false), base);
-        assert_eq!(preview_url_for(path, 2, false, false), format!("{base}?rev=2"));
-        assert_eq!(preview_url_for(path, 0, true, false), format!("{base}?as=text"));
+        assert_eq!(
+            preview_url_for(path, 2, false, false),
+            format!("{base}?rev=2")
+        );
+        assert_eq!(
+            preview_url_for(path, 0, true, false),
+            format!("{base}?as=text")
+        );
         assert_eq!(
             preview_url_for(path, 3, true, false),
             format!("{base}?as=text&rev=3")
@@ -1106,7 +1116,10 @@ mod tests {
         let mut taken = HashMap::new();
         assert_eq!(heading_id("Setting up", &mut taken), "setting-up");
         assert_eq!(heading_id("Setting up", &mut taken), "setting-up-1");
-        assert_eq!(heading_id("What's new? (v1.2)", &mut taken), "whats-new-v12");
+        assert_eq!(
+            heading_id("What's new? (v1.2)", &mut taken),
+            "whats-new-v12"
+        );
         assert_eq!(heading_id("Café crème", &mut taken), "café-crème");
         assert_eq!(heading_id("!!!", &mut taken), "section");
     }

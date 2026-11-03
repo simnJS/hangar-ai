@@ -45,3 +45,5 @@ http.workspace = true
 [dev-dependencies]
 # A headless window to drive the views with real events and to draw them.
 iced_test.workspace = true
+# Only to check that every glyph of the preview is an SVG a renderer can read.
+usvg.workspace = true
