@@ -4,9 +4,7 @@
 //! (`components/preview/parts.tsx`, and the `.model-*` rules of `model.css`).
 //! The 3D view (P17) uses them too: they are the preview's vocabulary.
 
-use iced::widget::{
-    Space, button, column, container, mouse_area, progress_bar, row, rule, scrollable, text,
-};
+use iced::widget::{Space, button, column, container, mouse_area, row, rule, scrollable, text};
 use iced::{Alignment, Color, Element, Length, Padding, alignment};
 
 use hangar_i18n::{Key, Number, args};
@@ -379,14 +377,10 @@ pub fn byte_size(ctx: Ctx<'_>, bytes: u64) -> String {
 /// first load (`Loading`).
 pub fn loading<'a, M: 'a>(ctx: Ctx<'a>, title: &'a str, phase: Option<String>) -> Element<'a, M> {
     let t = ctx.theme;
-    // A bar that says something is on its way. It does not travel: nothing
-    // asks for a frame while a file is read, which takes a moment.
-    let bar = container(
-        progress_bar(0.0..=1.0, 0.35)
-            .girth(4.0)
-            .style(style::progress_bar::accent(t)),
-    )
-    .width(Length::Fill);
+    // A bar that runs, which says the file has not been forgotten: it asks
+    // for its own frames, only while it is on screen.
+    let bar: Element<'a, M> =
+        super::travelling::Travelling::new(t.colors.line_strong, t.colors.accent).into();
     container(
         column![
             text(title)

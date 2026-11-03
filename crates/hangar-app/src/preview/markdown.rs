@@ -309,6 +309,8 @@ pub async fn load_images(wanted: Vec<(Uri, PathBuf)>) -> Vec<(Uri, Resolved)> {
 fn read_image(file: &Path) -> Option<Resolved> {
     let bytes = decode::read_file(file).ok()?;
     if model::has_source(&file.to_string_lossy()) {
+        // A source that cannot be read is its alt text, not an empty space.
+        super::image::check_svg(&bytes).ok()?;
         return Some(Resolved::Vector(iced::widget::svg::Handle::from_memory(
             bytes,
         )));

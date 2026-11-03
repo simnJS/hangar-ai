@@ -49,9 +49,21 @@ pub fn read(path: &Path) -> Result<Loaded, String> {
     let bytes = decode::read_file(path)?;
     // An SVG is drawn from its source by the stage, whatever its bytes say.
     if model::has_source(&path.to_string_lossy()) {
+        check_svg(&bytes).map_err(|why| format!("{}: {why}", path.display()))?;
         return Ok(Loaded::Encoded(Bytes(std::sync::Arc::new(bytes))));
     }
     decode::load(bytes).map_err(|why| format!("{}: {why}", path.display()))
+}
+
+/// Whether an SVG can be drawn. The renderer reports a size of nothing for a
+/// source it cannot read, and for one that has no size of its own (which is
+/// drawn as 512 square), so a broken one would be an empty stage and never
+/// the card that says the image failed. A source without a size is fine.
+pub fn check_svg(source: &[u8]) -> Result<(), String> {
+    match usvg::Tree::from_data(source, &usvg::Options::default()) {
+        Ok(_) | Err(usvg::Error::InvalidSize) => Ok(()),
+        Err(why) => Err(why.to_string()),
+    }
 }
 
 /// The picture for what was read: vector for an SVG, raster for the rest.
@@ -383,6 +395,35 @@ mod tests {
 
     fn encoded(bytes: &[u8]) -> Loaded {
         Loaded::Encoded(Bytes(std::sync::Arc::new(bytes.to_vec())))
+    }
+
+    #[test]
+    fn a_broken_svg_fails_and_one_without_a_size_does_not() {
+        assert!(
+            check_svg(b"<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>").is_ok()
+        );
+        // No width, height or viewBox: drawn at 512 square, as before.
+        assert!(check_svg(b"<svg xmlns='http://www.w3.org/2000/svg'/>").is_ok());
+        assert!(check_svg(b"<svg xmlns='http://www.w3.org/2000/svg' width='4'><rect").is_err());
+        assert!(check_svg(b"not xml at all").is_err());
+        assert!(check_svg(b"").is_err());
+        assert!(check_svg(&[0xff, 0xfe, 0x00]).is_err());
+    }
+
+    #[test]
+    fn reading_a_broken_svg_is_a_failed_image_and_a_good_one_is_the_source() {
+        let dir = std::env::temp_dir().join(format!("hangar-svg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("ok.svg"),
+            "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>",
+        )
+        .unwrap();
+        std::fs::write(dir.join("bad.svg"), "<svg><oops").unwrap();
+        assert!(matches!(read(&dir.join("ok.svg")), Ok(Loaded::Encoded(_))));
+        let why = read(&dir.join("bad.svg")).unwrap_err();
+        assert!(why.contains("bad.svg"), "{why}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

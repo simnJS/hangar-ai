@@ -74,6 +74,7 @@ pub mod roots;
 pub mod store;
 pub mod tabs;
 pub mod text;
+pub mod travelling;
 pub mod viewer;
 pub mod webview;
 pub mod windowed;
@@ -163,6 +164,11 @@ pub struct State {
     agreed: HashMap<WsId, Agreed>,
     /// The hook for the control bus has been sent.
     hosted: bool,
+    /// A tab was pressed and the shell is about to give the panel the
+    /// keyboard: that is for the strip's keys, so `focus_entry` is not to put
+    /// it on the image in front. Read and cleared by `focus_entry`, which
+    /// only sees the state by reference.
+    strip_pressed: std::cell::Cell<bool>,
 }
 
 /// A workspace's panel as the shell's signals and the store both held it at
@@ -206,6 +212,7 @@ impl Default for State {
             fronts: HashMap::new(),
             agreed: HashMap::new(),
             hosted: false,
+            strip_pressed: std::cell::Cell::new(false),
         }
     }
 }
@@ -383,7 +390,14 @@ fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
         Msg::Tick => watch(st, m),
         Msg::Activate(ws, id) => {
             st.shared.edit(|store| store.activate_model(&id));
-            strip_to(st, &ws)
+            // A pressed tab has the keyboard, as it did in the TS: the arrows,
+            // Home, End and Delete are the strip's from then on (the panel is
+            // the focused region), until the keyboard goes elsewhere.
+            st.strip_pressed.set(true);
+            Task::batch([
+                strip_to(st, &ws),
+                Task::done(Message::Intent(Intent::FocusRegion(Region::Model))),
+            ])
         }
         Msg::Close(_, id) => {
             st.shared.edit(|store| store.close_model(&id));
@@ -505,20 +519,16 @@ fn sync_panels(st: &mut State, m: &mut Model) {
 }
 
 /// Brings the strip to the tab in front: an agent may bring forward one that
-/// sits past the panel's edge.
+/// sits past the panel's edge. The least that shows the whole of it, by where
+/// the tab is (`tabs::reveal_tab`).
 fn strip_to(st: &State, ws: &str) -> Task<Message> {
-    let Some(scope) = st.shared.read(|store| Some(store.scope(ws).clone())) else {
-        return Task::none();
-    };
-    let ids: Vec<String> = scope.entries.iter().map(|entry| entry.id.clone()).collect();
-    let share = tabs::scroll_share(&ids, scope.active_id.as_deref());
-    iced::widget::operation::snap_to(
-        tabs::strip_id(),
-        iced::widget::scrollable::RelativeOffset {
-            x: Some(share),
-            y: None,
-        },
-    )
+    let front = st
+        .shared
+        .read(|store| Some(store.scope(ws).active_id.clone()));
+    match front {
+        Some(Some(id)) => tabs::reveal_tab(&id),
+        _ => Task::none(),
+    }
 }
 
 fn tab_key(st: &mut State, m: &Model, key: TabKey) -> Task<Message> {
@@ -942,12 +952,13 @@ fn viewer_update(
             Task::none()
         }
         ViewerMsg::ToggleWrap => {
+            // The lines are laid out anew and the view stays where it was
+            // scrolled to, as a class toggled on the TS's `<pre>` kept its
+            // `scrollTop`: the scrollable is the same and keeps its offset
+            // (the window of built rows follows it), and shortens it itself
+            // when the text is now shorter than that.
             st.wrap = !st.wrap;
-            // The lines are laid out anew: from the top, as the TS's were.
-            if let Some(viewer) = st.viewers.get_mut(id) {
-                viewer.scroll = code_lines::Scroll::default();
-            }
-            to_top(id)
+            Task::none()
         }
         ViewerMsg::CodeScrolled(scroll) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
@@ -1404,6 +1415,19 @@ fn tab_keys(
     Some(Message::Preview(Msg::Tab(key)))
 }
 
+/// Whether Escape is the panel's to answer: it is expanded and has the
+/// keyboard. In the TS the keydown was the panel's own, so a terminal or a
+/// field elsewhere kept its Escape.
+fn escape_collapses_here(m: &Model) -> bool {
+    m.ui.focus == Some(Focus::Region(Region::Model)) && escape_would_collapse(m)
+}
+
+/// Whether the focused window's panel is expanded.
+fn escape_would_collapse(m: &Model) -> bool {
+    m.focused_window()
+        .is_some_and(|window| Panels::of(m, window).model_expanded)
+}
+
 /// Expanded, Escape puts the panel back beside the terminals, like leaving a
 /// full-screen view; anything inside that handles Escape itself keeps it.
 fn escape_collapses(
@@ -1450,10 +1474,7 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     if m.ui.focus == Some(Focus::Region(Region::Model)) {
         subscriptions.push(iced::event::listen_with(tab_keys));
     }
-    let expanded = m
-        .focused_window()
-        .is_some_and(|window| Panels::of(m, window).model_expanded);
-    if expanded {
+    if escape_collapses_here(m) {
         subscriptions.push(iced::event::listen_with(escape_collapses));
     }
     Subscription::batch(subscriptions)
@@ -1469,6 +1490,9 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
     }
     let ws = m.window_workspace(window)?;
     let front = m.live.preview.scope(&ws.id)?.active()?;
+    if st.strip_pressed.replace(false) {
+        return Some(Task::none());
+    }
     if front.file_kind() == Some(FileKind::Image) {
         return Some(iced::widget::operation::focus(viewer::stage_id(&front.id)));
     }
@@ -1505,6 +1529,12 @@ fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Ta
                 },
             ))
         }
+        // Expanding takes the keyboard into the panel, as pressing its
+        // button did in the TS (the focus was on the button, inside it), so
+        // that Escape puts it back.
+        Intent::TogglePreviewExpand if escape_would_collapse(m) => Some(Task::done(
+            Message::Intent(Intent::FocusRegion(Region::Model)),
+        )),
         Intent::ActivateWorkspace(ws) => {
             if m.live.hydrated {
                 st.shared.edit(|store| store.restore_kit_tabs(ws));

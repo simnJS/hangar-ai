@@ -30,7 +30,7 @@ use crate::ctx::{Ctx, Metrics};
 use crate::message::{Intent, Message};
 use crate::services::preview::PreviewRequest;
 use crate::services::{PreviewAccess, inbox};
-use crate::shell::{PanelMode, WindowKind};
+use crate::shell::{Focus, PanelMode, Region, WindowKind};
 use crate::state::{AppState, Model, Pane, PreviewPanel, Workspace};
 
 /// hangar-core keeps one list of the folders it serves for the whole process:
@@ -512,6 +512,54 @@ async fn what_the_shells_toggles_write_reaches_the_store() {
 }
 
 #[tokio::test]
+async fn a_pressed_tab_asks_for_the_keyboard_and_the_strip_gets_it_not_the_image() {
+    let mut h = Harness::new("tab-keys");
+    let shot = h.write("shot.png", b"\x89PNG\r\n\x1a\n");
+    let id = h.show(&shot).await;
+    h.shell_toggles(|panel| panel.open = true);
+    assert!(
+        super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
+        "F6 puts the keyboard on the image in front"
+    );
+    assert!(!h.st.strip_pressed.get());
+    h.send(Msg::Activate(WORKSPACE.into(), id));
+    assert!(h.st.strip_pressed.get(), "the shell is about to ask");
+    let task = super::focus_entry(&h.st, &h.model, Region::Model).expect("a panel on screen");
+    assert_eq!(
+        task.units(),
+        0,
+        "nothing is focused: the tabs have the keys"
+    );
+    assert!(!h.st.strip_pressed.get(), "once");
+    assert!(
+        super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
+        "F6 afterwards is F6 again"
+    );
+}
+
+#[tokio::test]
+async fn escape_is_the_panels_only_when_it_is_expanded_and_has_the_keyboard() {
+    let mut h = Harness::new("escape-focus");
+    h.show(&h.write("one.txt", "1")).await;
+    let window = h.model.focused_window().expect("a window");
+    h.shell_toggles(|panel| {
+        panel.open = true;
+        panel.expanded = true;
+    });
+    // Expanded, with the keyboard in a terminal: the terminal's Escape.
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(super::escape_would_collapse(&h.model));
+    assert!(!super::escape_collapses_here(&h.model));
+    // With the keyboard in the panel: the panel's.
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    assert!(super::escape_collapses_here(&h.model));
+    // Not expanded: nobody's.
+    h.shell_toggles(|panel| panel.expanded = false);
+    assert!(!super::escape_collapses_here(&h.model));
+    let _ = window;
+}
+
+#[tokio::test]
 async fn an_agent_revealing_a_tab_opens_the_panel_the_shell_draws() {
     let mut h = Harness::new("reveal");
     let one = h.show(&h.write("one.txt", "1")).await;
@@ -752,6 +800,26 @@ async fn copying_the_text_says_so_and_stops_saying_so() {
     assert!(h.st.notices.contains_key(&id), "a newer word stays");
     h.send(Msg::NoticeGone(id.clone(), seq));
     assert!(!h.st.notices.contains_key(&id));
+}
+
+#[tokio::test]
+async fn wrapping_the_lines_keeps_the_place_the_view_was_scrolled_to() {
+    let mut h = Harness::new("wrap-keeps");
+    let long: String = (1..=300).map(|n| format!("line {n}\n")).collect();
+    let id = h.show(&h.write("long.txt", long)).await;
+    h.read_text(&id);
+    let place = super::code_lines::Scroll {
+        offset: 1234.0,
+        height: 500.0,
+    };
+    h.viewer(&id, ViewerMsg::CodeScrolled(place));
+    assert!(!h.st.wrap);
+    h.viewer(&id, ViewerMsg::ToggleWrap);
+    assert!(h.st.wrap);
+    assert_eq!(h.st.viewers.get(&id).map(|v| v.scroll), Some(place));
+    h.viewer(&id, ViewerMsg::ToggleWrap);
+    assert!(!h.st.wrap);
+    assert_eq!(h.st.viewers.get(&id).map(|v| v.scroll), Some(place));
 }
 
 #[tokio::test]
