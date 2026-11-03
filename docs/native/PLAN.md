@@ -218,7 +218,7 @@ jobs = 16
 
 Working rules:
 
-- One package, one worktree, one branch off `feat/native-rust`. A worktree made by the agent tooling starts from `main`: check `git merge-base --is-ancestor 44cfd25 HEAD` and, if it fails, `git reset --hard feat/native-rust` before anything else. touch only the files your package owns, plus additions to the root `Cargo.toml` and `Cargo.lock`. Never a bare `cargo update`; keep `windows`/`windows-core` at 0.61 (see the cpal note in `crates/hangar-core/Cargo.toml`).
+- One package, one worktree, one branch off `feat/native-rust`. A worktree made by the agent tooling starts from `main`: check `git merge-base --is-ancestor 44cfd25 HEAD` and, if it fails, `git reset --hard feat/native-rust` before anything else. Touch only the files your package owns, plus additions to the root `Cargo.toml` and `Cargo.lock`. Never a bare `cargo update`; keep `windows`/`windows-core` at 0.61 (see the cpal note in `crates/hangar-core/Cargo.toml`).
 - Before handing in: `cargo fmt`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `cargo test -p <crate>`.
 - The coordinator merges with `git merge --no-ff`, runs `cargo check --workspace && cargo test --workspace`, updates STATUS.md, pushes.
 - Reference for any behaviour: the TS in `src/` and its tests, the Rust in `crates/hangar-core`, `docs/kits.md`, `docs/kit-ui.md`, README.md.
