@@ -306,3 +306,48 @@ fn ask<'a>(
     .width(Length::Fixed(320.0))
     .into()
 }
+
+#[cfg(test)]
+mod tests {
+    //! The toolbar's account button is about the workspace of its own window.
+
+    use hangar_i18n::Locale;
+
+    use super::*;
+    use crate::navigator::testing::{ctx_in, detach, simulate};
+    use crate::workspace_dialog::testing::Harness;
+
+    /// `w1` follows the default account, `w2` is on « Perso ».
+    fn harness() -> Harness {
+        Harness::new(Locale::En, "graphite")
+    }
+
+    #[test]
+    fn a_workspace_windows_button_names_the_account_of_its_own_workspace() {
+        let mut h = harness();
+        let own = detach(&mut h.model, "w2");
+        let st = State::default();
+
+        let mut mine = simulate(view(&st, ctx_in(&h.model, &h.pkg, own)));
+        assert!(mine.find("Perso").is_ok());
+        assert!(mine.find("Principal").is_err());
+        drop(mine);
+
+        let mut main = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
+        assert!(main.find("Principal").is_ok());
+        assert!(main.find("Perso").is_err());
+    }
+
+    #[test]
+    fn the_main_window_has_no_button_while_its_workspace_is_in_a_window_of_its_own() {
+        let mut h = harness();
+        let mut state = h.model.state().clone();
+        state.active_workspace_id = Some("w2".into());
+        h.model.hydrate(state);
+        detach(&mut h.model, "w2");
+        let st = State::default();
+        let mut main = simulate(view(&st, ctx_in(&h.model, &h.pkg, h.window)));
+        assert!(main.find("Perso").is_err());
+        assert!(main.find("Principal").is_err());
+    }
+}

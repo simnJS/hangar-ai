@@ -108,6 +108,24 @@ fn enter_sends_now_and_alt_enter_holds_the_line_until_each_agent_is_free() {
 }
 
 #[test]
+fn a_shortcut_typed_in_the_field_runs_and_does_not_also_send_the_line() {
+    let model = model(View::Terminals);
+    // Ctrl+Shift+Enter splits the pane; the field would submit on it.
+    let messages = run(&typed(&model, "run the tests"), &model, |ui| {
+        ui.click("run the tests").expect("the field is shown");
+        ui.key(Named::Enter, Modifiers::CTRL | Modifiers::SHIFT);
+    });
+    assert!(sends(&messages).is_empty(), "{messages:?}");
+
+    // Without the shortcut's modifiers the same key sends, as before.
+    let plain = run(&typed(&model, "run the tests"), &model, |ui| {
+        ui.click("run the tests").unwrap();
+        ui.key(Named::Enter, Modifiers::empty());
+    });
+    assert_eq!(sends(&plain), [false], "{plain:?}");
+}
+
+#[test]
 fn typing_goes_to_the_broadcast_text() {
     let messages = run(&State::default(), &model(View::Terminals), |ui| {
         ui.click("Send the same instruction to all 2 panes…")

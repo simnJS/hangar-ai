@@ -646,6 +646,30 @@ mod tests {
     }
 
     #[test]
+    fn a_palette_opened_in_a_workspace_window_gives_the_keyboard_back_to_that_workspaces_pane() {
+        let mut m = model_of(AppState {
+            workspaces: vec![
+                Workspace {
+                    panes: vec![pane("a1")],
+                    ..filed("main", None)
+                },
+                Workspace {
+                    panes: vec![pane("b1")],
+                    ..filed("own", None)
+                },
+            ],
+            active_workspace_id: Some("main".into()),
+            ..AppState::default()
+        });
+        let own = detach(&mut m, "own");
+        let main = m.main_window().unwrap();
+        m.ui.focus_by_workspace.insert("main".into(), "a1".into());
+        m.ui.focus_by_workspace.insert("own".into(), "b1".into());
+        assert_eq!(super::super::focused_pane(&m, main).as_deref(), Some("a1"));
+        assert_eq!(super::super::focused_pane(&m, own).as_deref(), Some("b1"));
+    }
+
+    #[test]
     fn a_state_word_after_a_dot_starts_in_lower_case() {
         assert_eq!(lower_first("Attend ta réponse"), "attend ta réponse");
         assert_eq!(lower_first("Écrit"), "écrit");

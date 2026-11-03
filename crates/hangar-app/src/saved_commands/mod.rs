@@ -439,4 +439,71 @@ mod tests {
         );
         assert!(locate(&ws, &settings, "x").is_none());
     }
+
+    /// A model with a workspace `w` holding saved commands `w1`, `w2` and
+    /// global ones `g1`, `g2`; the pane `p` is in `w`.
+    fn model_with_commands() -> Model {
+        use crate::state::types::{AgentId, AppState, Pane};
+        let command = |id: &str| SavedCommand {
+            id: id.into(),
+            command: format!("run {id}"),
+            ..SavedCommand::default()
+        };
+        let mut state = AppState {
+            workspaces: vec![Workspace {
+                id: "w".into(),
+                saved_commands: vec![command("w1"), command("w2")],
+                panes: vec![Pane {
+                    id: "p".into(),
+                    agent: AgentId::Shell,
+                    ..Pane::default()
+                }],
+                ..Workspace::default()
+            }],
+            active_workspace_id: Some("w".into()),
+            ..AppState::default()
+        };
+        state.settings.saved_commands = vec![command("g1"), command("g2")];
+        let mut model = Model::default();
+        model.hydrate(state);
+        model
+    }
+
+    #[test]
+    fn a_command_picked_in_the_menu_is_run_as_the_intent_of_its_place() {
+        let model = model_with_commands();
+        let pane = "p".to_string();
+        // The workspace's commands come first, then the global ones: the same
+        // places `command.runN` counts through.
+        for (scope, id, index) in [
+            (CommandScope::Workspace, "w1", 0),
+            (CommandScope::Workspace, "w2", 1),
+            (CommandScope::Global, "g1", 2),
+            (CommandScope::Global, "g2", 3),
+        ] {
+            match run_request(&model, &pane, scope, id) {
+                Some(Intent::RunSavedCommand {
+                    ws,
+                    from,
+                    index: at,
+                }) => {
+                    assert_eq!((ws.as_str(), from.as_str(), at), ("w", "p", index));
+                    let ws = model.workspace("w").unwrap();
+                    assert_eq!(merged(ws, model.settings())[index].id, id);
+                }
+                other => panic!("expected a run of {id}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_command_or_a_pane_that_is_gone_runs_nothing() {
+        let model = model_with_commands();
+        let pane = "p".to_string();
+        assert!(run_request(&model, &pane, CommandScope::Workspace, "g1").is_none());
+        assert!(run_request(&model, &pane, CommandScope::Global, "w1").is_none());
+        assert!(run_request(&model, &pane, CommandScope::Global, "nope").is_none());
+        let ghost = "ghost".to_string();
+        assert!(run_request(&model, &ghost, CommandScope::Global, "g1").is_none());
+    }
 }

@@ -234,3 +234,6 @@ pub fn dev_focused_pane() -> Option<&'static PaneId> {
         })
         .as_ref()
 }
+
+#[cfg(test)]
+mod tests;
