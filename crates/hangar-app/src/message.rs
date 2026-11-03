@@ -213,6 +213,11 @@ pub enum Intent {
         pane: PaneId,
         action: TerminalAction,
     },
+    /// `voice.dictate` was pressed: push to talk starts (`voice.press` of
+    /// lib/voice.ts). Sent by the command table, only while dictation is
+    /// enabled; handled by P6 (`voice`), which also watches for the key's
+    /// release that ends the recording.
+    Dictate,
 }
 
 /// What `Intent::TerminalAction` asks of a pane's terminal.
