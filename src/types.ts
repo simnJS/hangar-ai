@@ -431,6 +431,13 @@ export interface Settings {
    */
   claudeAccount?: string | null;
   /**
+   * Ids of the experimental features turned on (Settings › Experimental), in
+   * the order they were turned on. Empty by default: nothing experimental runs
+   * until someone asks for it. Read through `isExperimentEnabled`, which also
+   * ignores an id this version no longer lists.
+   */
+  experiments: string[];
+  /**
    * The kits enabled on every workspace at once (Settings › Kits), each with
    * the permissions the person accepted once for all. A workspace's own entry
    * for the same kit wins. Read through `everywhereKits`, which takes anything
@@ -521,6 +528,7 @@ export const DEFAULT_SETTINGS: Settings = {
   uiScale: 100,
   agentPaneControl: true,
   claudeAccount: "main",
+  experiments: [],
 };
 
 /** Bounds of the interface size slider, in percent. */

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useStore } from "./store";
 import { typeset } from "./lib/typography";
+import * as experiments from "./strings/experiments";
 import * as kitsManage from "./strings/kitsManage";
 import * as kitsTab from "./strings/kitsTab";
 import * as workspaceFromGit from "./strings/workspaceFromGit";
@@ -1532,6 +1533,7 @@ const en = {
 
   // Dictionaries of their own, each filled without touching this file
   // (src/strings/): a French key missing there fails the build there.
+  ...experiments.en,
   ...kitsManage.en,
   ...kitsTab.en,
   ...worktrees.en,
@@ -3090,6 +3092,7 @@ const fr: Record<Key, string> = {
   "needsYou.notifyQuestion": "Question : {title}",
   "needsYou.notifyLand": "Prête à fusionner : {title}",
 
+  ...experiments.fr,
   ...kitsManage.fr,
   ...kitsTab.fr,
   ...worktrees.fr,
