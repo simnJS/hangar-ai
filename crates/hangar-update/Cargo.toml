@@ -1,0 +1,45 @@
+[package]
+name = "hangar-update"
+description = "Hangar's self-updater: reads the release feed, checks the minisign signature and replaces the installed app"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+# What `tauri-plugin-updater` did for the old app, without Tauri and without any
+# GUI: the same `latest.json`, the same minisign public key and the same
+# per-platform install steps, so an install of the old app updates into the
+# native one through the feed it already polls (docs/native/PLAN.md, "Updater").
+[lib]
+name = "hangar_update"
+
+[dependencies]
+# Versions are compared by semver precedence, as the plugin did.
+semver = "1"
+serde.workspace = true
+serde_json.workspace = true
+# The feed and the downloads. Rustls with its own roots, as hangar-core: nothing
+# here needs a system TLS library, which an AppImage cannot count on.
+ureq = { version = "3.3", default-features = false, features = ["rustls", "rustls-webpki-roots", "win-system-proxy"] }
+# Pure Rust and no dependencies of its own. It reads the public key and the
+# `.sig` files exactly as the plugin's copy did, so a signature the release
+# workflow already produces verifies unchanged.
+minisign-verify = "0.2"
+# The signature in `latest.json` is the `.sig` file, base64-encoded; so is the
+# public key in the configuration.
+base64 = "0.22"
+# `pub_date` is RFC 3339. Only the parser is used.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+# The macOS bundle ships as `.app.tar.gz`, and the Tauri 1 style AppImage
+# archive is the same format; the plugin accepted both.
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+# The downloaded installer lives in a file that removes itself unless the
+# install keeps it, so a cancelled or failed update leaves nothing behind.
+tempfile = "3"
+
+# Starting the installer through the shell, which is what lets one that asks
+# for administrator rights show its prompt: `CreateProcess` refuses those.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
