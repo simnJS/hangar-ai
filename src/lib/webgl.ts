@@ -16,8 +16,27 @@ export const WEBGL_PARK_MS = 10_000;
 /** Set once WebGL2 cannot be had at all: no point asking every pane again. */
 let unavailable = false;
 
+/**
+ * Linux runs the webview on WebKitGTK, where WebGL goes through a compositor
+ * path that is slow and sometimes broken on NVIDIA drivers: every keystroke
+ * redraws late, so typing and deleting lag. xterm's DOM renderer is the better
+ * trade there. `localStorage.setItem("hangar.webgl", "1")` brings WebGL back
+ * on a machine where it is fast; "0" turns it off anywhere.
+ */
+export function webglWanted(): boolean {
+  try {
+    const choice = localStorage.getItem("hangar.webgl");
+    if (choice === "1") return true;
+    if (choice === "0") return false;
+  } catch {
+    /* storage blocked: fall through to the platform default */
+  }
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  return !(/linux/i.test(ua) && !/android/i.test(ua));
+}
+
 export function attachWebgl(term: Terminal, onLost: () => void): WebglAddon | null {
-  if (unavailable) return null;
+  if (unavailable || !webglWanted()) return null;
   const addon = new WebglAddon();
   try {
     term.loadAddon(addon);
