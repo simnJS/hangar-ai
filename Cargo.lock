@@ -3027,6 +3027,7 @@ dependencies = [
 name = "hangar-app"
 version = "1.12.1"
 dependencies = [
+ "chrono",
  "hangar-core",
  "hangar-i18n",
  "hangar-kit-host",
@@ -3042,13 +3043,16 @@ dependencies = [
  "iced_test",
  "open",
  "png 0.18.1",
+ "regex",
  "rfd",
  "serde",
  "serde_json",
  "syntect",
  "tokio",
  "two-face",
+ "unicode-normalization",
  "usvg",
+ "uuid 1.24.0",
 ]
 
 [[package]]

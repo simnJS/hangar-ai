@@ -7,13 +7,16 @@
 
 use std::time::Instant;
 
-use hangar_term::{Action, Config, Event as TerminalEvent, Font, Palette, Pointer, ScrollTo, Terminal, terminal_view};
+use hangar_term::{
+    Action, Config, Event as TerminalEvent, Font, Palette, Pointer, ScrollTo, Terminal,
+    terminal_view,
+};
+use iced::advanced::Shell;
 use iced::advanced::clipboard::{self, Clipboard};
 use iced::advanced::input_method;
 use iced::advanced::layout::{Layout, Limits};
 use iced::advanced::renderer::Headless;
 use iced::advanced::widget::Tree;
-use iced::advanced::Shell;
 use iced::keyboard::key::{Code, Named, NativeCode, Physical};
 use iced::keyboard::{self, Key, Location, Modifiers};
 use iced::{Element, Event, Pixels, Point, Size, mouse, window};
@@ -56,7 +59,10 @@ impl<'a> Harness<'a> {
         .expect("a software renderer");
         let mut element = element;
         let mut tree = Tree::new(&element);
-        let node = element.as_widget_mut().layout(&mut tree, &renderer, &Limits::new(Size::ZERO, SIZE));
+        let node =
+            element
+                .as_widget_mut()
+                .layout(&mut tree, &renderer, &Limits::new(Size::ZERO, SIZE));
         let _ = &mut renderer;
         Self {
             element,
@@ -86,7 +92,9 @@ impl<'a> Harness<'a> {
     }
 
     fn frame(&mut self) -> Outcome {
-        self.send(Event::Window(window::Event::RedrawRequested(Instant::now())))
+        self.send(Event::Window(
+            window::Event::RedrawRequested(Instant::now()),
+        ))
     }
 }
 
@@ -166,13 +174,19 @@ fn a_dead_key_then_space_types_the_apostrophe() {
 fn an_input_method_commit_types_once_even_if_the_key_event_says_the_same() {
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
-    let preedit = h.send(Event::InputMethod(input_method::Event::Preedit("´".into(), None)));
+    let preedit = h.send(Event::InputMethod(input_method::Event::Preedit(
+        "´".into(),
+        None,
+    )));
     assert!(typed(&preedit.actions).is_empty());
     let commit = h.send(Event::InputMethod(input_method::Event::Commit("é".into())));
     assert_eq!(typed(&commit.actions), "é".as_bytes());
     // The key event of the same keystroke arrives right behind.
     let echo = h.send(key(Key::Character("e".into()), Some("é"), none()));
-    assert!(typed(&echo.actions).is_empty(), "the same keystroke is not typed twice");
+    assert!(
+        typed(&echo.actions).is_empty(),
+        "the same keystroke is not typed twice"
+    );
 }
 
 #[test]
@@ -205,11 +219,17 @@ fn intercept_publishes_the_apps_message_instead_of_typing() {
     let terminal = focused_terminal(Config::default());
     // The app's message type is the action here, so use Copy as the marker.
     let view = terminal_view(&terminal, |a| a).intercept(|press| {
-        (press.modifiers.control() && press.modifiers.shift() && matches!(&press.key, Key::Character(c) if c == "p"))
-            .then_some(Action::SelectAll)
+        (press.modifiers.control()
+            && press.modifiers.shift()
+            && matches!(&press.key, Key::Character(c) if c == "p"))
+        .then_some(Action::SelectAll)
     });
     let mut h = Harness::new(view.into());
-    let out = h.send(key(Key::Character("p".into()), Some("P"), Modifiers::CTRL | Modifiers::SHIFT));
+    let out = h.send(key(
+        Key::Character("p".into()),
+        Some("P"),
+        Modifiers::CTRL | Modifiers::SHIFT,
+    ));
     assert!(matches!(out.actions.as_slice(), [Action::SelectAll]));
     assert!(out.captured);
 }
@@ -226,17 +246,28 @@ fn an_unfocused_terminal_ignores_the_keyboard() {
 
 #[test]
 fn modified_keys_are_encoded_the_xterm_way() {
-    let mut terminal = focused_terminal(Config { shift_enter: Some(b"\x1b\r".to_vec()), ..Config::default() });
+    let mut terminal = focused_terminal(Config {
+        shift_enter: Some(b"\x1b\r".to_vec()),
+        ..Config::default()
+    });
     terminal.feed(b"\x1b[?1h");
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     let up = h.send(key(Key::Named(Named::ArrowUp), None, none()));
     assert_eq!(typed(&up.actions), b"\x1bOA", "application cursor mode");
-    let ctrl_c = h.send(key(Key::Character("c".into()), Some("\u{3}"), Modifiers::CTRL));
+    let ctrl_c = h.send(key(
+        Key::Character("c".into()),
+        Some("\u{3}"),
+        Modifiers::CTRL,
+    ));
     assert_eq!(typed(&ctrl_c.actions), b"\x03");
     let alt_b = h.send(key(Key::Character("b".into()), Some("b"), Modifiers::ALT));
     assert_eq!(typed(&alt_b.actions), b"\x1bb");
     let shift_enter = h.send(key(Key::Named(Named::Enter), Some("\r"), Modifiers::SHIFT));
-    assert_eq!(typed(&shift_enter.actions), b"\x1b\r", "the agent pane's newline");
+    assert_eq!(
+        typed(&shift_enter.actions),
+        b"\x1b\r",
+        "the agent pane's newline"
+    );
     let enter = h.send(key(Key::Named(Named::Enter), Some("\r"), none()));
     assert_eq!(typed(&enter.actions), b"\r");
 }
@@ -247,18 +278,37 @@ fn ctrl_shift_c_and_v_are_copy_and_paste_and_ctrl_v_only_if_configured() {
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.clipboard = Clip(Some("from the clipboard".into()));
 
-    let copy = h.send(key(Key::Character("c".into()), Some("\u{3}"), Modifiers::CTRL | Modifiers::SHIFT));
+    let copy = h.send(key(
+        Key::Character("c".into()),
+        Some("\u{3}"),
+        Modifiers::CTRL | Modifiers::SHIFT,
+    ));
     assert!(matches!(copy.actions.as_slice(), [Action::Copy]));
-    let paste = h.send(key(Key::Character("v".into()), Some("\u{16}"), Modifiers::CTRL | Modifiers::SHIFT));
+    let paste = h.send(key(
+        Key::Character("v".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL | Modifiers::SHIFT,
+    ));
     assert!(matches!(paste.actions.as_slice(), [Action::Paste(t)] if t == "from the clipboard"));
     // Ctrl+V alone is the program's ^V.
-    let ctrl_v = h.send(key(Key::Character("v".into()), Some("\u{16}"), Modifiers::CTRL));
+    let ctrl_v = h.send(key(
+        Key::Character("v".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL,
+    ));
     assert_eq!(typed(&ctrl_v.actions), b"\x16");
 
-    let terminal = focused_terminal(Config { ctrl_v_pastes: true, ..Config::default() });
+    let terminal = focused_terminal(Config {
+        ctrl_v_pastes: true,
+        ..Config::default()
+    });
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.clipboard = Clip(Some("pasted".into()));
-    let ctrl_v = h.send(key(Key::Character("v".into()), Some("\u{16}"), Modifiers::CTRL));
+    let ctrl_v = h.send(key(
+        Key::Character("v".into()),
+        Some("\u{16}"),
+        Modifiers::CTRL,
+    ));
     assert!(matches!(ctrl_v.actions.as_slice(), [Action::Paste(t)] if t == "pasted"));
     assert!(ctrl_v.captured);
 }
@@ -268,7 +318,10 @@ fn shift_page_up_scrolls_the_history_but_not_on_the_alternate_screen() {
     let mut terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     let out = h.send(key(Key::Named(Named::PageUp), None, Modifiers::SHIFT));
-    assert!(matches!(out.actions.as_slice(), [Action::Scroll(ScrollTo::PageUp)]));
+    assert!(matches!(
+        out.actions.as_slice(),
+        [Action::Scroll(ScrollTo::PageUp)]
+    ));
     drop(h);
     terminal.feed(b"\x1b[?1049h");
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
@@ -279,7 +332,12 @@ fn shift_page_up_scrolls_the_history_but_not_on_the_alternate_screen() {
 #[test]
 fn the_first_frame_asks_for_the_grid_that_fits_and_only_once() {
     let terminal = focused_terminal(Config::default());
-    let mut h = Harness::new(terminal_view(&terminal, |a| a).padding(0).scale_factor(1.0).into());
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .into(),
+    );
     let first = h.frame();
     let resize = first.actions.iter().find_map(|a| match a {
         Action::Resize(m) => Some(*m),
@@ -292,7 +350,12 @@ fn the_first_frame_asks_for_the_grid_that_fits_and_only_once() {
     assert!(m.rows as f32 * m.cell_height <= SIZE.height);
     // The app has not applied it yet: the next frame does not ask again.
     let second = h.frame();
-    assert!(!second.actions.iter().any(|a| matches!(a, Action::Resize(_))));
+    assert!(
+        !second
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Resize(_)))
+    );
 }
 
 #[test]
@@ -300,28 +363,55 @@ fn applying_the_resize_gives_the_pty_one_event() {
     let mut terminal = focused_terminal(Config::default());
     let action = {
         let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
-        h.frame().actions.into_iter().find(|a| matches!(a, Action::Resize(_))).unwrap()
+        h.frame()
+            .actions
+            .into_iter()
+            .find(|a| matches!(a, Action::Resize(_)))
+            .unwrap()
     };
     let events = terminal.perform(action);
-    assert_eq!(events.iter().filter(|e| matches!(e, TerminalEvent::Resize(_))).count(), 1);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, TerminalEvent::Resize(_)))
+            .count(),
+        1
+    );
     // Once the grid is that size, a frame has nothing to ask.
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
-    assert!(!h.frame().actions.iter().any(|a| matches!(a, Action::Resize(_))));
+    assert!(
+        !h.frame()
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Resize(_)))
+    );
 }
 
 #[test]
 fn mouse_presses_and_the_wheel_become_pointer_actions() {
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
-    let down = h.send(Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)));
-    assert!(matches!(down.actions.as_slice(), [Action::Pointer(Pointer::Down { .. })]));
+    let down = h.send(Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Left,
+    )));
+    assert!(matches!(
+        down.actions.as_slice(),
+        [Action::Pointer(Pointer::Down { .. })]
+    ));
     assert!(down.captured);
-    let up = h.send(Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)));
-    assert!(matches!(up.actions.as_slice(), [Action::Pointer(Pointer::Up { .. })]));
+    let up = h.send(Event::Mouse(mouse::Event::ButtonReleased(
+        mouse::Button::Left,
+    )));
+    assert!(matches!(
+        up.actions.as_slice(),
+        [Action::Pointer(Pointer::Up { .. })]
+    ));
     let wheel = h.send(Event::Mouse(mouse::Event::WheelScrolled {
         delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
     }));
-    assert!(matches!(wheel.actions.as_slice(), [Action::Pointer(Pointer::Wheel { notches, .. })] if *notches == 1.0));
+    assert!(
+        matches!(wheel.actions.as_slice(), [Action::Pointer(Pointer::Wheel { notches, .. })] if *notches == 1.0)
+    );
 }
 
 #[test]
@@ -329,7 +419,9 @@ fn a_press_outside_the_widget_is_not_ours() {
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.cursor = mouse::Cursor::Available(Point::new(SIZE.width + 50.0, 10.0));
-    let down = h.send(Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)));
+    let down = h.send(Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Left,
+    )));
     assert!(down.actions.is_empty() && !down.captured);
 }
 
@@ -338,15 +430,22 @@ fn middle_click_pastes_the_primary_selection_unless_the_program_has_the_mouse() 
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.clipboard = Clip(Some("primary".into()));
-    let out = h.send(Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)));
+    let out = h.send(Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Middle,
+    )));
     assert!(matches!(out.actions.as_slice(), [Action::Paste(t)] if t == "primary"));
 
     let mut terminal = focused_terminal(Config::default());
     terminal.feed(b"\x1b[?1000h\x1b[?1006h");
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.clipboard = Clip(Some("primary".into()));
-    let out = h.send(Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)));
-    assert!(matches!(out.actions.as_slice(), [Action::Pointer(Pointer::Down { .. })]));
+    let out = h.send(Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Middle,
+    )));
+    assert!(matches!(
+        out.actions.as_slice(),
+        [Action::Pointer(Pointer::Down { .. })]
+    ));
 }
 
 #[test]
@@ -354,19 +453,31 @@ fn focus_changes_of_the_window_are_reported() {
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     let out = h.send(Event::Window(window::Event::Unfocused));
-    assert!(matches!(out.actions.as_slice(), [Action::WindowFocus(false)]));
+    assert!(matches!(
+        out.actions.as_slice(),
+        [Action::WindowFocus(false)]
+    ));
     let out = h.send(Event::Window(window::Event::Focused));
-    assert!(matches!(out.actions.as_slice(), [Action::WindowFocus(true)]));
+    assert!(matches!(
+        out.actions.as_slice(),
+        [Action::WindowFocus(true)]
+    ));
 }
 
 #[test]
 fn a_file_dropped_on_the_terminal_is_reported() {
     let terminal = focused_terminal(Config::default());
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
-    let out = h.send(Event::Window(window::Event::FileDropped("/tmp/a b.txt".into())));
-    assert!(matches!(out.actions.as_slice(), [Action::FileDropped(p)] if p.to_str() == Some("/tmp/a b.txt")));
+    let out = h.send(Event::Window(window::Event::FileDropped(
+        "/tmp/a b.txt".into(),
+    )));
+    assert!(
+        matches!(out.actions.as_slice(), [Action::FileDropped(p)] if p.to_str() == Some("/tmp/a b.txt"))
+    );
     h.cursor = mouse::Cursor::Available(Point::new(SIZE.width + 50.0, 10.0));
-    let out = h.send(Event::Window(window::Event::FileDropped("/tmp/other".into())));
+    let out = h.send(Event::Window(window::Event::FileDropped(
+        "/tmp/other".into(),
+    )));
     assert!(out.actions.is_empty());
 }
 

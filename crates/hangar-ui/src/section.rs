@@ -33,7 +33,7 @@ pub struct Section<'a, M> {
     title: String,
     collapsed: bool,
     on_toggle: M,
-    meta: Option<String>,
+    meta: Option<Element<'a, M>>,
     action: Option<Element<'a, M>>,
     body: Option<Element<'a, M>>,
     last: bool,
@@ -63,6 +63,20 @@ pub fn section<'a, M: Clone + 'a>(
 impl<'a, M: Clone + 'a> Section<'a, M> {
     /// A count or a total at the right end of the title, read with it.
     pub fn meta(mut self, meta: impl Into<String>) -> Self {
+        let t = self.theme;
+        self.meta = Some(
+            text(meta.into())
+                .size(font_size::LABEL)
+                .font(fonts::mono())
+                .style(style::text::subtle(t))
+                .into(),
+        );
+        self
+    }
+
+    /// The same place, for a total that is more than a word: coloured counts
+    /// ("+12 −3"). The caller sets it as it wants it read.
+    pub fn meta_element(mut self, meta: impl Into<Element<'a, M>>) -> Self {
         self.meta = Some(meta.into());
         self
     }
@@ -113,12 +127,7 @@ impl<'a, M: Clone + 'a> From<Section<'a, M>> for Element<'a, M> {
         .align_y(Alignment::Center);
         if let Some(meta) = s.meta {
             title = title.push(iced_space::horizontal());
-            title = title.push(
-                text(meta)
-                    .size(font_size::LABEL)
-                    .font(fonts::mono())
-                    .style(style::text::subtle(t)),
-            );
+            title = title.push(meta);
         }
         let toggle = button(title)
             .padding(Padding::from([0.0, space::XXS]))

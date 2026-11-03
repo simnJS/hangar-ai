@@ -71,7 +71,11 @@ pub(crate) fn encode(mode: TermMode, report: Report) -> Option<Vec<u8>> {
     let (x, y) = (report.column + 1, report.row + 1);
 
     if mode.contains(TermMode::SGR_MOUSE) {
-        let end = if report.kind == Kind::Release { 'm' } else { 'M' };
+        let end = if report.kind == Kind::Release {
+            'm'
+        } else {
+            'M'
+        };
         return Some(format!("\x1b[<{code};{x};{y}{end}").into_bytes());
     }
 
@@ -105,7 +109,13 @@ mod tests {
     use super::*;
 
     fn report(code: Code, kind: Kind, column: usize, row: usize) -> Report {
-        Report { code, kind, column, row, modifiers: Modifiers::empty() }
+        Report {
+            code,
+            kind,
+            column,
+            row,
+            modifiers: Modifiers::empty(),
+        }
     }
 
     fn text(bytes: Option<Vec<u8>>) -> String {
@@ -115,15 +125,27 @@ mod tests {
     #[test]
     fn sgr_has_a_final_that_tells_press_from_release() {
         let mode = TermMode::SGR_MOUSE | TermMode::MOUSE_REPORT_CLICK;
-        assert_eq!(text(encode(mode, report(Code::Left, Kind::Press, 0, 0))), "\x1b[<0;1;1M");
-        assert_eq!(text(encode(mode, report(Code::Left, Kind::Release, 0, 0))), "\x1b[<0;1;1m");
-        assert_eq!(text(encode(mode, report(Code::Right, Kind::Press, 199, 59))), "\x1b[<2;200;60M");
+        assert_eq!(
+            text(encode(mode, report(Code::Left, Kind::Press, 0, 0))),
+            "\x1b[<0;1;1M"
+        );
+        assert_eq!(
+            text(encode(mode, report(Code::Left, Kind::Release, 0, 0))),
+            "\x1b[<0;1;1m"
+        );
+        assert_eq!(
+            text(encode(mode, report(Code::Right, Kind::Press, 199, 59))),
+            "\x1b[<2;200;60M"
+        );
     }
 
     #[test]
     fn sgr_has_no_column_limit() {
         let mode = TermMode::SGR_MOUSE;
-        assert_eq!(text(encode(mode, report(Code::Left, Kind::Press, 999, 0))), "\x1b[<0;1000;1M");
+        assert_eq!(
+            text(encode(mode, report(Code::Left, Kind::Press, 999, 0))),
+            "\x1b[<0;1000;1M"
+        );
     }
 
     #[test]
@@ -139,15 +161,27 @@ mod tests {
     #[test]
     fn motion_adds_32_and_no_button_is_3() {
         let mode = TermMode::SGR_MOUSE;
-        assert_eq!(text(encode(mode, report(Code::Left, Kind::Motion, 4, 2))), "\x1b[<32;5;3M");
-        assert_eq!(text(encode(mode, report(Code::None, Kind::Motion, 4, 2))), "\x1b[<35;5;3M");
+        assert_eq!(
+            text(encode(mode, report(Code::Left, Kind::Motion, 4, 2))),
+            "\x1b[<32;5;3M"
+        );
+        assert_eq!(
+            text(encode(mode, report(Code::None, Kind::Motion, 4, 2))),
+            "\x1b[<35;5;3M"
+        );
     }
 
     #[test]
     fn wheel_is_buttons_64_and_65() {
         let mode = TermMode::SGR_MOUSE;
-        assert_eq!(text(encode(mode, report(Code::WheelUp, Kind::Press, 1, 1))), "\x1b[<64;2;2M");
-        assert_eq!(text(encode(mode, report(Code::WheelDown, Kind::Press, 1, 1))), "\x1b[<65;2;2M");
+        assert_eq!(
+            text(encode(mode, report(Code::WheelUp, Kind::Press, 1, 1))),
+            "\x1b[<64;2;2M"
+        );
+        assert_eq!(
+            text(encode(mode, report(Code::WheelDown, Kind::Press, 1, 1))),
+            "\x1b[<65;2;2M"
+        );
     }
 
     #[test]

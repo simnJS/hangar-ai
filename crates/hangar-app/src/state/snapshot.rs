@@ -28,18 +28,31 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The snapshot of `model` now.
-    ///
-    /// TODO(P4, P18): `asleep` and `activity` come from `panes_logic::Live`,
-    /// `delivering` from `control::Live`, once those hold them.
+    /// The snapshot of `model` now: `asleep` and `activity` from P4's
+    /// read-model, `delivering` from P18's.
     pub fn of(model: &Model) -> Snapshot {
+        let panes = &model.live.panes_logic;
         Snapshot {
             state: model.state_arc(),
             opened: model.ui.opened_ids.iter().cloned().collect(),
-            asleep: HashSet::new(),
-            activity: HashMap::new(),
-            delivering: Delivering::new(),
+            asleep: model.live.panes_logic.asleep_ids(),
+            activity: model.live.panes_logic.activity_map().clone(),
+            delivering: model.live.control.delivering(),
             hydrated: model.live.hydrated,
         }
+    }
+
+    /// Whether the model's live parts moved on since this snapshot was taken,
+    /// though nothing to save did: a delivery began or ended, an agent
+    /// started waiting, a workspace went to sleep or was opened. The engines
+    /// and hibernation read those here, so a stale one is published again.
+    /// Cheap while nothing changes: nothing is allocated for empty sets.
+    pub fn is_stale(&self, model: &Model) -> bool {
+        let opened = &model.ui.opened_ids;
+        self.opened.len() != opened.len()
+            || opened.iter().any(|id| !self.opened.contains(id))
+            || self.asleep != model.live.panes_logic.asleep_ids()
+            || self.activity != *model.live.panes_logic.activity_map()
+            || self.delivering != model.live.control.delivering()
     }
 }

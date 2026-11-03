@@ -335,6 +335,7 @@ const en = {
   "mobile.switchHint":
     "Follow your agents and answer them from your phone. Nothing is opened on the Internet: only your own devices, through Tailscale, can reach it.",
   "mobile.error": "Hangar Mobile could not start: {error}",
+  "mobile.unavailable": "its data folder could not be opened",
   "mobile.tailscale": "Tailscale",
   "mobile.tailscaleMissing":
     "Tailscale is a free app that links your PC and your phone privately, wherever you are. Install it on both and sign in to the same account.",
@@ -784,6 +785,7 @@ const en = {
   "board.dockExpand": "Open the full board",
   "board.dockHide": "Hide the board panel",
   "board.dockResize": "Resize the board panel · double-click for the default width",
+  "board.addDetails": "Add with details…",
 
   "model.panel": "Preview",
   "model.toggleHint": "Show or hide the preview of what agents opened",
@@ -1010,6 +1012,12 @@ const en = {
   "task.deleteConfirm": "Confirm",
   "task.close": "Close",
   "task.labels": "Labels",
+  "task.new": "New task",
+  "task.create": "Create",
+  "task.owns": "Files it owns",
+  "task.ownsHint": "one path or pattern per line; its worker changes nothing else",
+  "task.addDependency": "Add a dependency…",
+  "task.removeDependency": "Remove this dependency",
 
   "memory.entries_one": "{n} entry",
   "memory.entries_other": "{n} entries",
@@ -1897,6 +1905,7 @@ const fr: Record<Key, string> = {
   "mobile.switchHint":
     "Suis tes agents et réponds-leur depuis ton téléphone. Rien n'est ouvert sur Internet : seuls tes propres appareils, via Tailscale, peuvent y accéder.",
   "mobile.error": "Hangar Mobile n'a pas pu démarrer : {error}",
+  "mobile.unavailable": "son dossier de données n'a pas pu être ouvert",
   "mobile.tailscale": "Tailscale",
   "mobile.tailscaleMissing":
     "Tailscale est une app gratuite qui relie ton PC et ton téléphone en privé, où que tu sois. Installe-la sur les deux et connecte-toi au même compte.",
@@ -2351,6 +2360,7 @@ const fr: Record<Key, string> = {
   "board.dockExpand": "Ouvrir le tableau en entier",
   "board.dockHide": "Masquer le tableau latéral",
   "board.dockResize": "Redimensionner le tableau latéral · double-clic pour la largeur par défaut",
+  "board.addDetails": "Ajouter avec des détails…",
 
   "model.panel": "Aperçu",
   "model.toggleHint": "Afficher ou masquer l'aperçu de ce que les agents ont ouvert",
@@ -2578,6 +2588,12 @@ const fr: Record<Key, string> = {
   "task.deleteConfirm": "Confirmer",
   "task.close": "Fermer",
   "task.labels": "Labels",
+  "task.new": "Nouvelle tâche",
+  "task.create": "Créer",
+  "task.owns": "Fichiers qui lui sont réservés",
+  "task.ownsHint": "un chemin ou un motif par ligne ; son agent ne modifie rien d'autre",
+  "task.addDependency": "Ajouter une dépendance…",
+  "task.removeDependency": "Retirer cette dépendance",
 
   "memory.entries_one": "{n} entrée",
   "memory.entries_other": "{n} entrées",

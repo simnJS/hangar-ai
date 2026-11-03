@@ -27,7 +27,9 @@ const ROWS: u16 = 60;
 /// One frame of a busy full-screen interface: coloured words on every row, a
 /// frame around the screen, a status bar. `seed` makes each frame differ.
 fn tui_frame(seed: u32, columns: usize, rows: usize) -> String {
-    let words = ["fn", "let", "match", "impl", "struct", "pub", "async", "await", "return", "where"];
+    let words = [
+        "fn", "let", "match", "impl", "struct", "pub", "async", "await", "return", "where",
+    ];
     let colors = [31, 32, 33, 34, 35, 36, 90, 97];
     let mut out = String::from("\x1b[H");
     let mut state = seed.wrapping_mul(2654435761).wrapping_add(1);
@@ -72,7 +74,9 @@ fn frame(
         }
         None => tree.insert(Tree::new(&element)),
     };
-    let node = element.as_widget_mut().layout(tree, renderer, &Limits::new(Size::ZERO, size));
+    let node = element
+        .as_widget_mut()
+        .layout(tree, renderer, &Limits::new(Size::ZERO, size));
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
     element.as_widget_mut().update(
@@ -91,7 +95,9 @@ fn frame(
         tree,
         renderer,
         &iced::Theme::Dark,
-        &Style { text_color: Color::WHITE },
+        &Style {
+            text_color: Color::WHITE,
+        },
         Layout::new(&node),
         mouse::Cursor::Unavailable,
         &iced::Rectangle::with_size(size),
@@ -101,12 +107,18 @@ fn frame(
 
 fn main() {
     let mut terminal = Terminal::new(Config::default(), COLUMNS, ROWS);
-    terminal.set_font(Font::from_css_stack("\"DejaVu Sans Mono\", monospace", 13.0, 1.2));
+    terminal.set_font(Font::from_css_stack(
+        "\"DejaVu Sans Mono\", monospace",
+        13.0,
+        1.2,
+    ));
     terminal.set_palette(Palette::default());
     terminal.set_focused(true);
 
     // Feed: the emulator's throughput on the kind of output agents produce.
-    let sample: String = (0..64).map(|i| tui_frame(i, COLUMNS as usize, ROWS as usize)).collect();
+    let sample: String = (0..64)
+        .map(|i| tui_frame(i, COLUMNS as usize, ROWS as usize))
+        .collect();
     let bytes = sample.as_bytes();
     let start = Instant::now();
     let mut fed = 0usize;
@@ -152,27 +164,39 @@ fn main() {
 
     terminal.feed(tui_frame(1, COLUMNS as usize, ROWS as usize).as_bytes());
     let (_, cold) = frame(&terminal, &mut renderer, size, &mut None);
-    println!("draw, first frame (every row planned):  {:>7.2} ms", cold.as_secs_f64() * 1e3);
+    println!(
+        "draw, first frame (every row planned):  {:>7.2} ms",
+        cold.as_secs_f64() * 1e3
+    );
 
     let mut warm = Vec::new();
     for _ in 0..50 {
         warm.push(frame(&terminal, &mut renderer, size, &mut tree).1);
     }
-    println!("draw, nothing changed (rows cached):     {:>7.2} ms", median(&mut warm));
+    println!(
+        "draw, nothing changed (rows cached):     {:>7.2} ms",
+        median(&mut warm)
+    );
 
     let mut one = Vec::new();
     for i in 0..50 {
         terminal.feed(format!("\x1b[30;1H\x1b[32mline {i} changed\x1b[K").as_bytes());
         one.push(frame(&terminal, &mut renderer, size, &mut tree).1);
     }
-    println!("draw, one row changed:                   {:>7.2} ms", median(&mut one));
+    println!(
+        "draw, one row changed:                   {:>7.2} ms",
+        median(&mut one)
+    );
 
     let mut full = Vec::new();
     for i in 0..50 {
         terminal.feed(tui_frame(100 + i, COLUMNS as usize, ROWS as usize).as_bytes());
         full.push(frame(&terminal, &mut renderer, size, &mut tree).1);
     }
-    println!("draw, whole screen repainted:            {:>7.2} ms", median(&mut full));
+    println!(
+        "draw, whole screen repainted:            {:>7.2} ms",
+        median(&mut full)
+    );
     println!("(a frame at 60 fps is 16.67 ms)");
 
     sixteen_panes(&mut renderer);
@@ -189,7 +213,11 @@ fn sixteen_panes(renderer: &mut Renderer) {
     let mut panes: Vec<Terminal> = (0..16)
         .map(|_| {
             let mut t = Terminal::new(Config::default(), columns as u16, rows as u16);
-            t.set_font(Font::from_css_stack("\"DejaVu Sans Mono\", monospace", 13.0, 1.2));
+            t.set_font(Font::from_css_stack(
+                "\"DejaVu Sans Mono\", monospace",
+                13.0,
+                1.2,
+            ));
             t.set_focused(false);
             t
         })
@@ -234,7 +262,11 @@ fn sixteen_panes(renderer: &mut Renderer) {
 fn replay(path: &str, renderer: &mut Renderer) {
     let bytes = std::fs::read(path).expect("read the recorded stream");
     let mut terminal = Terminal::new(Config::default(), COLUMNS, ROWS);
-    terminal.set_font(Font::from_css_stack("\"DejaVu Sans Mono\", monospace", 13.0, 1.2));
+    terminal.set_font(Font::from_css_stack(
+        "\"DejaVu Sans Mono\", monospace",
+        13.0,
+        1.2,
+    ));
     terminal.set_focused(true);
     let size = Size::new(1700.0, 1000.0);
     let mut tree = None;

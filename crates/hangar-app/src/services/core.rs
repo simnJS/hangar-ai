@@ -17,7 +17,6 @@ use hangar_core::{Core, Host};
 
 use crate::services::events::Bus;
 use crate::shell::Notification;
-use crate::state::AppState;
 use crate::state::types::ShellInfo;
 
 /// `hangar-ai --mcp`: the stdio MCP server agent CLIs start. No window, no
@@ -82,20 +81,21 @@ pub async fn load_state(host: Host) -> Result<Option<Value>, String> {
     blocking(move || hangar_core::store::load_state(&host)).await
 }
 
-/// `save_state`: the whole state, written to `state.json.tmp` then renamed.
-pub async fn save_state(host: Host, state: Arc<AppState>) -> Result<(), String> {
+/// `save_state`: the whole state as `Model::to_json` made it, written to
+/// `state.json.tmp` then renamed, through `writer`, which drops the write
+/// when a later revision went out first (the exit's own write).
+pub async fn save_state(
+    host: Host,
+    state: Value,
+    writer: crate::state::persist::Writer,
+    revision: u64,
+) -> Result<(), String> {
     blocking(move || {
-        let value = serde_json::to_value(&*state).map_err(|err| err.to_string())?;
-        hangar_core::store::save_state(&host, value)
+        writer
+            .write(revision, || hangar_core::store::save_state(&host, state))
+            .map(|_| ())
     })
     .await
-}
-
-/// The same, on the calling thread: the last save on the way out, when there
-/// is no runtime left to wait on.
-pub fn save_state_now(host: &Host, state: &AppState) -> Result<(), String> {
-    let value = serde_json::to_value(state).map_err(|err| err.to_string())?;
-    hangar_core::store::save_state(host, value)
 }
 
 /// `detect_agents` and `detect_shells`, once at start (inventory §1.6).
@@ -110,18 +110,27 @@ pub async fn detect() -> (Vec<String>, Vec<ShellInfo>) {
     .unwrap_or_default()
 }
 
-/// `notify_send`: a desktop notification; one that names a pane comes back,
-/// clicked, as `CoreEvent::NotificationActivated` (Windows).
+/// A desktop notification (`lib/notify.ts`). One that names a pane goes out
+/// through `notify_send`, the only kind a click can come back from (as
+/// `CoreEvent::NotificationActivated`); where that has no backend (outside
+/// Windows) or fails, and for one that names no pane, the plain notification
+/// (`notify::show`), as the TS fell back to the plugin's: one without the
+/// click is worth more than none.
 pub async fn notify(host: Host, notification: Notification) -> Result<(), String> {
     blocking(move || {
-        let (workspace, pane) = notification.target.unwrap_or_default();
-        hangar_core::notify::notify_send(
-            &host,
-            notification.title,
-            notification.body,
-            workspace,
-            pane,
-        )
+        let Notification {
+            title,
+            body,
+            target,
+        } = notification;
+        if let Some((workspace, pane)) = target
+            && hangar_core::notify::notify_send(&host, title.clone(), body.clone(), workspace, pane)
+                .is_ok()
+        {
+            return Ok(());
+        }
+        hangar_core::notify::show(title, body);
+        Ok(())
     })
     .await
 }

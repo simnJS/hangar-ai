@@ -60,7 +60,10 @@ pub(crate) enum Shape {
     /// A quarter circle joining two arms: the rounded corners `╭╮╯╰`.
     Arc(Arc),
     /// Round dots of the given diameter, centred at the points: braille.
-    Dots { diameter: f32, centres: Vec<(f32, f32)> },
+    Dots {
+        diameter: f32,
+        centres: Vec<(f32, f32)>,
+    },
 }
 
 /// A rounded corner, as the stroked quarter of a circle plus the straight
@@ -95,7 +98,13 @@ impl Metrics {
     pub(crate) fn new(width: f32, height: f32, size: f32, scale: f32) -> Self {
         let pixel = 1.0 / scale.max(0.5);
         let light = ((size / 12.0 / pixel).round().max(1.0)) * pixel;
-        Self { width, height, pixel, light, size }
+        Self {
+            width,
+            height,
+            pixel,
+            light,
+            size,
+        }
     }
 
     fn heavy(&self) -> f32 {
@@ -114,12 +123,21 @@ impl Metrics {
     /// once the renderer rounds both to pixels, a pixel-wide gap would show
     /// in the line at every cell where the roundings disagree.
     fn snap_x(&self, v: f32) -> f32 {
-        if (v - self.width).abs() < 1e-3 { self.width } else { self.snap(v) }
+        if (v - self.width).abs() < 1e-3 {
+            self.width
+        } else {
+            self.snap(v)
+        }
     }
 
     /// A rectangle given by its edges, snapped.
     fn span(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
-        let (x0, y0, x1, y1) = (self.snap_x(x0), self.snap(y0), self.snap_x(x1), self.snap(y1));
+        let (x0, y0, x1, y1) = (
+            self.snap_x(x0),
+            self.snap(y0),
+            self.snap_x(x1),
+            self.snap(y1),
+        );
         Rect {
             x: x0,
             y: y0,
@@ -252,7 +270,11 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
     // A straight line is one rectangle across the cell, not two halves that
     // meet in the middle.
     let straight = |stroke: Stroke, horizontal: bool| -> Vec<Rect> {
-        let offsets: &[f32] = if stroke == Stroke::Double { &[-d, d] } else { &[0.0] };
+        let offsets: &[f32] = if stroke == Stroke::Double {
+            &[-d, d]
+        } else {
+            &[0.0]
+        };
         let thick = t(stroke);
         offsets
             .iter()
@@ -265,10 +287,18 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
             })
             .collect()
     };
-    if arms.up == Stroke::None && arms.down == Stroke::None && arms.left == arms.right && arms.left != Stroke::None {
+    if arms.up == Stroke::None
+        && arms.down == Stroke::None
+        && arms.left == arms.right
+        && arms.left != Stroke::None
+    {
         return straight(arms.left, true);
     }
-    if arms.left == Stroke::None && arms.right == Stroke::None && arms.up == arms.down && arms.up != Stroke::None {
+    if arms.left == Stroke::None
+        && arms.right == Stroke::None
+        && arms.up == arms.down
+        && arms.up != Stroke::None
+    {
         return straight(arms.up, false);
     }
 
@@ -281,7 +311,11 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
         let down = arms.down != Stroke::None;
         let perpendicular_double = arms.up == Stroke::Double || arms.down == Stroke::Double;
         let edge = if towards > 0.0 { m.width } else { 0.0 };
-        let offsets: &[f32] = if stroke == Stroke::Double { &[-d, d] } else { &[0.0] };
+        let offsets: &[f32] = if stroke == Stroke::Double {
+            &[-d, d]
+        } else {
+            &[0.0]
+        };
         for &s in offsets {
             let thick = t(stroke);
             // Where the line ends near the centre, as an offset from `cx`.
@@ -296,7 +330,11 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
             } else {
                 towards * d - towards * m.light / 2.0
             };
-            let (x0, x1) = if towards > 0.0 { (cx + end, edge) } else { (edge, cx + end) };
+            let (x0, x1) = if towards > 0.0 {
+                (cx + end, edge)
+            } else {
+                (edge, cx + end)
+            };
             out.push(m.span(x0, cy + s - thick / 2.0, x1, cy + s + thick / 2.0));
         }
     };
@@ -311,7 +349,11 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
         let right = arms.right != Stroke::None;
         let perpendicular_double = arms.left == Stroke::Double || arms.right == Stroke::Double;
         let edge = if towards > 0.0 { m.height } else { 0.0 };
-        let offsets: &[f32] = if stroke == Stroke::Double { &[-d, d] } else { &[0.0] };
+        let offsets: &[f32] = if stroke == Stroke::Double {
+            &[-d, d]
+        } else {
+            &[0.0]
+        };
         for &s in offsets {
             let thick = t(stroke);
             let end = if !(left || right) {
@@ -325,7 +367,11 @@ fn lines(arms: Arms, m: Metrics) -> Vec<Rect> {
             } else {
                 towards * d - towards * m.light / 2.0
             };
-            let (y0, y1) = if towards > 0.0 { (cy + end, edge) } else { (edge, cy + end) };
+            let (y0, y1) = if towards > 0.0 {
+                (cy + end, edge)
+            } else {
+                (edge, cy + end)
+            };
             out.push(m.span(cx + s - thick / 2.0, y0, cx + s + thick / 2.0, y1));
         }
     };
@@ -363,9 +409,17 @@ fn arc((right, down): (bool, bool), m: Metrics) -> Arc {
     let r = m.width.min(m.height) / 2.0;
     // The ring's centre is `r` away from the crossing in the direction of the
     // arms, and its bounds are the circle of radius `r + t/2`.
-    let (ccx, ccy) = (cx + if right { r } else { -r }, cy + if down { r } else { -r });
+    let (ccx, ccy) = (
+        cx + if right { r } else { -r },
+        cy + if down { r } else { -r },
+    );
     let outer = r + t / 2.0;
-    let ring = Rect { x: ccx - outer, y: ccy - outer, w: outer * 2.0, h: outer * 2.0 };
+    let ring = Rect {
+        x: ccx - outer,
+        y: ccy - outer,
+        w: outer * 2.0,
+        h: outer * 2.0,
+    };
     // The corner is the quadrant of the ring that faces the crossing.
     let clip = Rect {
         x: if right { cx - t / 2.0 } else { cx - r },
@@ -385,7 +439,12 @@ fn arc((right, down): (bool, bool), m: Metrics) -> Arc {
     } else {
         stubs.push(m.span(cx - t / 2.0, 0.0, cx + t / 2.0, cy - r));
     }
-    Arc { ring, thickness: t, clip, stubs }
+    Arc {
+        ring,
+        thickness: t,
+        clip,
+        stubs,
+    }
 }
 
 fn block(code: u32, m: Metrics) -> Option<Shape> {
@@ -441,7 +500,16 @@ fn braille(code: u32, m: Metrics) -> Shape {
     let bits = code - 0x2800;
     // Dot n of the pattern: (column, row). The two columns hold dots 1 2 3 7
     // and 4 5 6 8 top to bottom.
-    const DOTS: [(usize, usize); 8] = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (0, 3), (1, 3)];
+    const DOTS: [(usize, usize); 8] = [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (0, 3),
+        (1, 3),
+    ];
     let diameter = (m.width / 4.0).min(m.height / 8.0 * 1.4).max(m.pixel);
     let mut centres = Vec::new();
     for (i, (column, row)) in DOTS.iter().enumerate() {
@@ -492,10 +560,14 @@ mod tests {
         // that stopped at 8 would leave a gap that rounding turns into a
         // missing pixel in some cells.
         let m = Metrics::new(8.43, 18.0, 14.0, 1.0);
-        let Some(Shape::Rects(r)) = shape('─', m) else { panic!("not rects") };
+        let Some(Shape::Rects(r)) = shape('─', m) else {
+            panic!("not rects")
+        };
         let right = r.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
         assert_eq!(right, 8.43);
-        let Some(Shape::Rects(r)) = shape('█', m) else { panic!("not rects") };
+        let Some(Shape::Rects(r)) = shape('█', m) else {
+            panic!("not rects")
+        };
         assert_eq!(r[0].x + r[0].w, 8.43);
     }
 
@@ -554,7 +626,10 @@ mod tests {
         let m = metrics();
         let r = rects('╬');
         let (cx, cy) = (m.width / 2.0, m.height / 2.0);
-        assert!(r.iter().all(|r| !(r.x < cx && r.x + r.w > cx && r.y < cy && r.y + r.h > cy)));
+        assert!(
+            r.iter()
+                .all(|r| !(r.x < cx && r.x + r.w > cx && r.y < cy && r.y + r.h > cy))
+        );
     }
 
     #[test]
@@ -631,14 +706,23 @@ mod tests {
     #[test]
     fn the_table_agrees_with_the_chart_on_a_few_known_characters() {
         let a = arms('┼').unwrap();
-        assert_eq!((a.left, a.right, a.up, a.down), (Stroke::Light, Stroke::Light, Stroke::Light, Stroke::Light));
+        assert_eq!(
+            (a.left, a.right, a.up, a.down),
+            (Stroke::Light, Stroke::Light, Stroke::Light, Stroke::Light)
+        );
         let a = arms('╋').unwrap();
         assert_eq!(a.up, Stroke::Heavy);
         let a = arms('╧').unwrap();
-        assert_eq!((a.left, a.right, a.up, a.down), (Stroke::Double, Stroke::Double, Stroke::Light, Stroke::None));
+        assert_eq!(
+            (a.left, a.right, a.up, a.down),
+            (Stroke::Double, Stroke::Double, Stroke::Light, Stroke::None)
+        );
         let a = arms('╼').unwrap();
         assert_eq!((a.left, a.right), (Stroke::Light, Stroke::Heavy));
         let a = arms('┞').unwrap();
-        assert_eq!((a.up, a.down, a.right, a.left), (Stroke::Heavy, Stroke::Light, Stroke::Light, Stroke::None));
+        assert_eq!(
+            (a.up, a.down, a.right, a.left),
+            (Stroke::Heavy, Stroke::Light, Stroke::Light, Stroke::None)
+        );
     }
 }

@@ -73,8 +73,9 @@ type Output = mpsc::UnboundedReceiver<Option<Vec<u8>>>;
 
 impl Shell {
     fn boot() -> Self {
-        let font = std::env::var("HANGAR_TERM_FONT")
-            .unwrap_or_else(|_| "\"JetBrains Mono\", \"Cascadia Code\", \"DejaVu Sans Mono\", monospace".into());
+        let font = std::env::var("HANGAR_TERM_FONT").unwrap_or_else(|_| {
+            "\"JetBrains Mono\", \"Cascadia Code\", \"DejaVu Sans Mono\", monospace".into()
+        });
         let size = std::env::var("HANGAR_TERM_SIZE")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -87,7 +88,12 @@ impl Shell {
 
         let pty_system = native_pty_system();
         let pair = pty_system
-            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .expect("open a pty");
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let mut command = CommandBuilder::new(shell);
@@ -100,14 +106,21 @@ impl Shell {
         let mut child = pair.slave.spawn_command(command).expect("spawn the shell");
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader().expect("clone the pty reader");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the pty reader");
         let writer = pair.master.take_writer().expect("take the pty writer");
 
         // The reader thread: blocking reads, forwarded as they come. The
         // subscription joins whatever has piled up before it reaches the UI,
         // so a burst of output is one update, not hundreds.
         let (sender, receiver) = mpsc::unbounded();
-        OUTPUT.get_or_init(Default::default).lock().unwrap().replace(receiver);
+        OUTPUT
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .replace(receiver);
         std::thread::spawn(move || {
             let mut buffer = vec![0u8; 64 * 1024];
             loop {
@@ -126,7 +139,10 @@ impl Shell {
 
         Self {
             terminal,
-            pty: Pty { master: pair.master, writer },
+            pty: Pty {
+                master: pair.master,
+                writer,
+            },
             title: "hangar-term".into(),
             search: None,
         }
@@ -199,7 +215,12 @@ impl Shell {
                 if self.search.is_some() {
                     return self.update(Message::CloseSearch);
                 }
-                self.search = Some(self.terminal.search_query().map(|(q, _)| q.to_owned()).unwrap_or_default());
+                self.search = Some(
+                    self.terminal
+                        .search_query()
+                        .map(|(q, _)| q.to_owned())
+                        .unwrap_or_default(),
+                );
                 // The keyboard goes to the search field while it is open.
                 self.terminal.set_focused(false);
                 iced::widget::operation::focus("search")
@@ -250,7 +271,9 @@ impl Shell {
                     hangar_term::ClipboardTarget::Primary => iced::clipboard::write_primary(text),
                 }),
                 Event::OpenLink(link) => {
-                    let _ = std::process::Command::new("xdg-open").arg(&link.uri).spawn();
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&link.uri)
+                        .spawn();
                 }
                 Event::Notification { title, body } => {
                     eprintln!("notification: {} {body}", title.unwrap_or_default());
@@ -268,7 +291,9 @@ impl Shell {
             .intercept(|press| {
                 let ctrl_shift = press.modifiers.control() && press.modifiers.shift();
                 match &press.key {
-                    Key::Character(c) if ctrl_shift && c.eq_ignore_ascii_case("f") => Some(Message::ToggleSearch),
+                    Key::Character(c) if ctrl_shift && c.eq_ignore_ascii_case("f") => {
+                        Some(Message::ToggleSearch)
+                    }
                     _ => None,
                 }
             });
@@ -277,7 +302,12 @@ impl Shell {
         if let Some(query) = &self.search {
             let status = self.terminal.search_status();
             let counter = match status.current {
-                Some(i) => format!("{}/{}{}", i + 1, status.count, if status.truncated { "+" } else { "" }),
+                Some(i) => format!(
+                    "{}/{}{}",
+                    i + 1,
+                    status.count,
+                    if status.truncated { "+" } else { "" }
+                ),
                 None if query.is_empty() => String::new(),
                 None => "no match".into(),
             };
@@ -299,6 +329,8 @@ impl Shell {
                 .padding(6),
             );
         }
-        layout.push(container(terminal).width(Length::Fill).height(Length::Fill)).into()
+        layout
+            .push(container(terminal).width(Length::Fill).height(Length::Fill))
+            .into()
     }
 }

@@ -41,9 +41,21 @@ two-face.workspace = true
 syntect.workspace = true
 # The requests a page makes to the helper's scheme, served by hangar-core.
 http.workspace = true
+uuid.workspace = true
+# Wall-clock dates of the memory view, the local days, weeks and hours of the
+# statistics page (as `Intl.DateTimeFormat` wrote them), the dates of the
+# settings' Hangar Mobile page, the navigator's plan resets and the times in the orchestration briefings;
+# the same build hangar-core already uses.
+chrono.workspace = true
+# The orchestration engine (P19): plan statuses, and task titles folded to
+# ASCII for branch names.
+regex.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
-# A headless window to drive the views with real events and to draw them.
+# Draws a package's views without a window, for the snapshot tests packages keep
+# to look at what they built (kits/views/snapshot.rs), and drives the preview's
+# views with real events.
 iced_test.workspace = true
 # Only to check that every glyph of the preview is an SVG a renderer can read.
 usvg.workspace = true

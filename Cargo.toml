@@ -55,5 +55,13 @@ two-face = { version = "0.4", default-features = false, features = ["syntect-def
 syntect = { version = "5.3", default-features = false, features = ["parsing"] }
 http = "1"
 unicode-normalization = "0.1"
+# Dates in the local time zone (hangar-core and hangar-update already use it).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 usvg = { version = "0.45", default-features = false }
 iced_test = "0.14"
+# The version hangar-core already builds: hangar-app's orchestration engine
+# reads plans with it.
+regex = "1"
+# The ids the store gives new workspaces, panes, folders and saved commands,
+# as `crypto.randomUUID()` gave them (v4); hangar-core already builds it.
+uuid = { version = "1.24.0", features = ["v4"] }

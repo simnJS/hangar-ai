@@ -43,6 +43,9 @@ pub enum Message {
     NoticeExpired(u64),
     /// The main window as `HANGAR_DEV_SCREENSHOT` asked for it (debug builds).
     DevScreenshot(window::Screenshot),
+    /// What only the frame and the command table ask of the shell
+    /// (`shell::Action`); packages send intents instead.
+    Shell(crate::shell::Action),
     Noop,
 
     // One route per package; each `Msg` lives in its package.
@@ -101,7 +104,8 @@ pub enum Intent {
     /// Closes the top overlay.
     CloseOverlay,
     ClosePopovers(CloseReason),
-    /// `None`: the last category, else General.
+    /// `None` is General: opening always names a category, so a shortcut
+    /// lands where it promised (App.tsx `openSettings`).
     OpenSettings(Option<SettingsCategory>),
     TogglePalette,
     ToggleNavigator,
@@ -202,6 +206,60 @@ pub enum Intent {
     Notice(Notice),
     Notify(Notification),
     CreateWorkspaceFromGit(GitRequest),
+    /// A pane was given a role (`previous: None`) or lost one (`previous` is
+    /// the role it had): the session is told once, by a message queued for it
+    /// (`announceRole` of lib/orchestratorBrief.ts). Sent by
+    /// `orchestration_ui::actions` after a pin or an unpin; handled by P19
+    /// (`orchestration`), which owns the briefing.
+    AnnounceRole {
+        ws: WsId,
+        pane: PaneId,
+        previous: Option<crate::state::types::PaneRole>,
+    },
+    /// The `terminal.*` commands on a pane's terminal (App.tsx's handlers on
+    /// `getTerminal(focused)`): clear, copy the selection, paste through the
+    /// terminal (bracketed), select all, scroll to either end. Sent by the
+    /// command table; handled by P5 (`panes`), which holds the terminals.
+    TerminalAction {
+        pane: PaneId,
+        action: TerminalAction,
+    },
+    /// `voice.dictate` was pressed: push to talk starts (`voice.press` of
+    /// lib/voice.ts). Sent by the command table, only while dictation is
+    /// enabled; handled by P6 (`voice`), which also watches for the key's
+    /// release that ends the recording.
+    Dictate,
+    /// `view.closeModels`: every entry of the workspace's preview closes
+    /// (`closeWorkspaceModels`). Sent by the command table, only while the
+    /// workspace has some; handled by P15 (`preview`).
+    ClosePreviews(WsId),
+    /// A pane was given a new id by `StoreAction::RespawnPane`, whoever
+    /// applied it (a restart, an agent or session change, a control op): its
+    /// shell is to be killed and spawned again under `to`. `keeps_session`
+    /// unless the respawn dropped the session it had (a reset), which is when
+    /// a pane owed a resume while asleep keeps it (`carryResume`). Sent by the
+    /// shell after the update that respawned it; handled by P4
+    /// (`panes_logic`: hibernation) and P5 (`panes`: the PTY).
+    PaneRespawned {
+        ws: WsId,
+        from: PaneId,
+        to: PaneId,
+        keeps_session: bool,
+    },
+}
+
+/// What `Intent::TerminalAction` asks of a pane's terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TerminalAction {
+    Clear,
+    /// The selection to the clipboard, when there is one.
+    Copy,
+    /// The clipboard's text through the terminal, which brackets it, so a
+    /// multi-line paste lands as text instead of running line by line.
+    Paste,
+    SelectAll,
+    ScrollTop,
+    ScrollBottom,
 }
 
 /// « From a Git repository » (`FromGitRequest` of lib/workspaceFromGit.ts).
