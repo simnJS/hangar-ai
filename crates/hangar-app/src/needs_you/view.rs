@@ -11,7 +11,7 @@ use hangar_theme::{Theme, fonts, style};
 use hangar_ui::{Icon, glyph, icon, layer, tip};
 
 use super::model::{KINDS, Kind, NeedsYouItem, latest_note};
-use super::{LandRequest, Msg, State, items_of};
+use super::{LandRequest, Msg, State};
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::Message;
@@ -32,16 +32,13 @@ fn msg(msg: Msg) -> Message {
 /// The button, and the panel that hangs off it while it is open. Nothing at all
 /// while the list is empty.
 pub fn entry<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
-    let items = items_of(st, ctx.model);
+    let items = st.items();
     if items.is_empty() {
         return Space::new().into();
     }
     let t = ctx.theme;
     let tr = ctx.i18n;
-    // `HANGAR_DEV_NEEDS_YOU_OPEN=1` shows the panel open, to see it in a theme
-    // and a language (debug builds only).
-    let open = ctx.model.ui.needs_you_open
-        || (cfg!(debug_assertions) && std::env::var_os("HANGAR_DEV_NEEDS_YOU_OPEN").is_some());
+    let open = ctx.model.ui.needs_you_open;
     let label = tr.t_with(Key::NeedsYouButton, &args!("n" => items.len()));
 
     // The toolbar is the window less the navigator when that is open.
@@ -105,7 +102,7 @@ pub fn entry<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         ..Padding::ZERO
     });
 
-    layer::dropdown(anchor, open.then(|| panel(st, ctx, &items)))
+    layer::dropdown(anchor, open.then(|| panel(st, ctx, items)))
         .align_end()
         .tab_inside()
         .on_dismiss(msg(Msg::Close))
@@ -337,7 +334,7 @@ fn item_row<'a>(st: &'a State, ctx: Ctx<'a>, item: &NeedsYouItem) -> Element<'a,
                     .align_y(Alignment::Start),
                 );
             }
-            let landing = st.is_landing(&base.key, Instant::now());
+            let landing = st.is_landing(ctx.model, base, &task.id, Instant::now());
             let land = hangar_ui::button::primary(
                 t,
                 tr.t(if landing {

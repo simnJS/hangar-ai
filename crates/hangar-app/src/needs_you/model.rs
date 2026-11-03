@@ -24,6 +24,25 @@ use crate::state::types::{PaneRole, Workspace};
 /// map is a board still being read, or one nobody asked for.
 pub type Boards = HashMap<String, Vec<Task>>;
 
+/// Where the boards come from: the shared cache of the board package in the
+/// app (`board::Live`, `useBoardsOf`), a plain map in the tests. A folder
+/// whose board has not been read yet has no tasks to list.
+pub trait BoardSource {
+    fn tasks_in(&self, cwd: &str) -> Option<&[Task]>;
+}
+
+impl BoardSource for Boards {
+    fn tasks_in(&self, cwd: &str) -> Option<&[Task]> {
+        self.get(cwd).map(Vec::as_slice)
+    }
+}
+
+impl BoardSource for crate::board::Live {
+    fn tasks_in(&self, cwd: &str) -> Option<&[Task]> {
+        self.tasks(cwd)
+    }
+}
+
 /// What every item says about itself.
 #[derive(Debug, Clone)]
 pub struct ItemBase {
@@ -133,7 +152,7 @@ pub fn watched_boards(workspaces: &[&Workspace]) -> Vec<String> {
 pub fn needs_you_items(
     workspaces: &[&Workspace],
     waiting: &HashSet<String>,
-    boards: &Boards,
+    boards: &impl BoardSource,
 ) -> Vec<NeedsYouItem> {
     if !workspaces.iter().any(|ws| is_orchestrated(ws)) {
         return Vec::new();
@@ -163,7 +182,7 @@ pub fn needs_you_items(
         if !is_orchestrated(ws) || !read.insert(ws.cwd.as_str()) {
             continue;
         }
-        let Some(tasks) = boards.get(&ws.cwd) else {
+        let Some(tasks) = boards.tasks_in(&ws.cwd) else {
             continue;
         };
         let base = |key: String| ItemBase {
