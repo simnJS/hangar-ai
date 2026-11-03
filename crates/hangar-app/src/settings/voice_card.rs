@@ -158,6 +158,16 @@ impl State {
     fn asking(&self) -> bool {
         self.saved == Some(false) || self.replacing
     }
+
+    /// The card when the keychain has no key yet, so that the field to type
+    /// it in shows.
+    #[cfg(test)]
+    pub(super) fn asking_for_a_key() -> State {
+        State {
+            saved: Some(false),
+            ..State::default()
+        }
+    }
 }
 
 /// A key typed (or a legacy one moved) is sent trimmed.
@@ -448,11 +458,14 @@ pub fn key_view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         let typed = st.draft.trim();
         let save = (!st.busy && !typed.is_empty()).then(|| wrap(Msg::KeySave(st.draft.clone())));
         let mut actions = row![
-            input::text_field(t, &st.draft)
-                .placeholder(placeholder(ctx, Key::SettingsVoiceKeyPlaceholder))
-                .secure()
-                .on_input(|text| wrap(Msg::KeyDraft(text)))
-                .on_submit(wrap(Msg::KeySave(st.draft.clone()))),
+            crate::keymap::guard(
+                ctx,
+                input::text_field(t, &st.draft)
+                    .placeholder(placeholder(ctx, Key::SettingsVoiceKeyPlaceholder))
+                    .secure()
+                    .on_input(|text| wrap(Msg::KeyDraft(text)))
+                    .on_submit(wrap(Msg::KeySave(st.draft.clone()))),
+            ),
             button::primary(t, ctx.t(Key::SettingsVoiceKeySave).into_owned()).on_press_maybe(save),
         ]
         .spacing(space::LG)

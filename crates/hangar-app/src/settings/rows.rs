@@ -127,10 +127,12 @@ fn control<'a>(
         } => {
             let shown = text_of(settings, &target);
             (
-                input::text_field(t, shown)
-                    .placeholder(placeholder(hint))
-                    .on_input(move |text| changed(&target, Value::Text(text)))
-                    .into(),
+                crate::keymap::guard(
+                    ctx,
+                    input::text_field(t, shown)
+                        .placeholder(placeholder(hint))
+                        .on_input(move |text| changed(&target, Value::Text(text))),
+                ),
                 false,
                 None,
             )

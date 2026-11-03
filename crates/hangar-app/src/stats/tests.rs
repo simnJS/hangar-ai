@@ -218,3 +218,37 @@ fn a_click_elsewhere_lets_the_keys_go_and_the_readout_with_them() {
     assert_eq!(st.columns, None);
     assert!(!st.keyboard);
 }
+
+// ---- Stale content -----------------------------------------------------------------------------------
+
+mod stale {
+    use std::time::{Duration, Instant};
+
+    use super::ui::{STALE_AFTER, is_stale};
+
+    #[test]
+    fn the_cache_is_held_back_only_after_a_beat_of_waiting_for_the_disk() {
+        let started = Instant::now();
+        let at = |after: Duration| started + after;
+        // A quick look at the disk never makes the page flicker.
+        assert!(!is_stale(true, true, Some(started), at(Duration::ZERO)));
+        assert!(!is_stale(
+            true,
+            true,
+            Some(started),
+            at(STALE_AFTER - Duration::from_millis(1))
+        ));
+        assert!(is_stale(true, true, Some(started), at(STALE_AFTER)));
+    }
+
+    #[test]
+    fn only_what_the_cache_said_is_stale() {
+        let started = Instant::now();
+        let later = started + Duration::from_secs(5);
+        // The disk's own answer, shown while it is read again, is not.
+        assert!(!is_stale(true, false, Some(started), later));
+        // Nothing being read: nothing waits for an answer.
+        assert!(!is_stale(false, true, Some(started), later));
+        assert!(!is_stale(true, true, None, later));
+    }
+}

@@ -64,7 +64,7 @@ pub fn view<'a>(state: Option<&'a KitsDialog>, ctx: Ctx<'a>, ws: &'a WsId) -> El
     let body = column![
         crate::kits::workspace_section(&ctx.pkg.kits, ctx, Some(ws)),
         hangar_ui::text::hint(t, ctx.t(Key::WorktreesHooksTitle)),
-        hooks::view(ctx, draft, |field, text| {
+        hooks::view(ctx, draft, None, |field, text| {
             Message::WorkspaceDialog(Msg::KitsHook(field, text))
         }),
     ]

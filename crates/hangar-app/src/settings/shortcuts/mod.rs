@@ -289,12 +289,13 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let index = ctx.keymap;
     let conflicts = index.conflicts();
 
-    let search = mouse_area(
+    let search = mouse_area(crate::keymap::guard(
+        ctx,
         input::search_field(t, &st.query, placeholder(ctx, Key::KeymapSearch))
             .clear_tip(ctx.t(Key::KeymapClear).into_owned())
             .on_input(|text| wrap(Msg::Query(text)))
             .on_clear(wrap(Msg::ClearQuery)),
-    )
+    ))
     .on_press(wrap(Msg::SearchPressed));
 
     let state: Element<'a, Message> = if conflicts.is_empty() {
