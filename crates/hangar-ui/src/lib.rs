@@ -44,7 +44,7 @@
 //! | [`shortcut_field`] | the Shortcuts settings' control: a command's keys, and the field that records another |
 //! | [`shortcut`] | chords, bindings and the recorder's state machine (`src/lib/keys.ts`) |
 //! | [`keycap`] | `keycap`, `binding`: shortcuts drawn as caps |
-//! | [`layer`] | the overlay every floating thing is made of: `modal`, `palette`, `dropdown`, `context` |
+//! | [`layer`] | the overlay every floating thing is made of: `modal`, `palette`, `dropdown`, `context`, `dock` |
 //! | [`menu`] | `item`, `heading`, `separator`, `dropdown`, `context_menu`: drop-down and context menus |
 //! | [`menu_select`](mod@menu_select) | a closed field that opens a menu: a choice among grouped options, some of them unavailable and saying why |
 //! | [`dialog`] | `dialog(t, title, body)` and `over(t, page, dialog)`: modal dialogs |

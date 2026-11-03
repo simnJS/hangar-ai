@@ -16,7 +16,7 @@
 
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use hangar_core::git::Changes;
 use iced::futures::{Stream, stream};
@@ -53,7 +53,7 @@ impl Timing {
 /// A digest of what makes a reading stale: the files the agent reported
 /// editing, and when its turn started. A turn ending is when files settle,
 /// so a new turn is worth a fresh look too.
-pub fn trigger(edited: &[String], turn_started_at: Option<Instant>) -> u64 {
+pub fn trigger(edited: &[String], turn_started_at: Option<u64>) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     edited.hash(&mut hasher);
     turn_started_at.hash(&mut hasher);
@@ -94,6 +94,7 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::time::Instant;
 
     use iced::futures::StreamExt;
 
@@ -119,7 +120,7 @@ mod tests {
 
     #[test]
     fn what_makes_a_reading_stale_changes_the_key() {
-        let at = Instant::now();
+        let at = 1_700_000_000_000_u64;
         let edited = vec!["/a.rs".to_string(), "/b.rs".to_string()];
         let base = trigger(&edited, Some(at));
         assert_eq!(base, trigger(&edited, Some(at)));
@@ -128,7 +129,7 @@ mod tests {
             base,
             trigger(&["/c.rs".to_string(), "/a.rs".to_string()], Some(at))
         );
-        assert_ne!(base, trigger(&edited, Some(at + Duration::from_secs(1))));
+        assert_ne!(base, trigger(&edited, Some(at + 1_000)));
         assert_ne!(base, trigger(&edited, None));
         assert_ne!(trigger(&[], None), trigger(&["/a.rs".to_string()], None));
     }

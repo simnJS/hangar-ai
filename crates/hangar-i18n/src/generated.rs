@@ -164,6 +164,8 @@ pub enum Key {
     AppLoading,
     /// `board.add`
     BoardAdd,
+    /// `board.addDetails`
+    BoardAddDetails,
     /// `board.addTask`
     BoardAddTask,
     /// `board.addTo`
@@ -1326,6 +1328,14 @@ pub enum Key {
     KitsManageStepRunning,
     /// `kitsManage.stepTodo`
     KitsManageStepTodo,
+    /// `kitsManage.tabKindHint`
+    KitsManageTabKindHint,
+    /// `kitsManage.tabKindHtml`
+    KitsManageTabKindHtml,
+    /// `kitsManage.tabKindNative`
+    KitsManageTabKindNative,
+    /// `kitsManage.tabKindNativeFallback`
+    KitsManageTabKindNativeFallback,
     /// `kitsManage.title`
     KitsManageTitle,
     /// `kitsManage.toggle`
@@ -3008,12 +3018,16 @@ pub enum Key {
     StatusSendHint,
     /// `status.worktree`
     StatusWorktree,
+    /// `task.addDependency`
+    TaskAddDependency,
     /// `task.assignee`
     TaskAssignee,
     /// `task.close`
     TaskClose,
     /// `task.column`
     TaskColumn,
+    /// `task.create`
+    TaskCreate,
     /// `task.createdAt`
     TaskCreatedAt,
     /// `task.delete`
@@ -3032,12 +3046,20 @@ pub enum Key {
     TaskLabels,
     /// `task.name`
     TaskName,
+    /// `task.new`
+    TaskNew,
     /// `task.noComments`
     TaskNoComments,
+    /// `task.owns`
+    TaskOwns,
+    /// `task.ownsHint`
+    TaskOwnsHint,
     /// `task.priority`
     TaskPriority,
     /// `task.release`
     TaskRelease,
+    /// `task.removeDependency`
+    TaskRemoveDependency,
     /// `task.send`
     TaskSend,
     /// `task.thread`
@@ -3435,7 +3457,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1709;
+pub const KEY_COUNT: usize = 1720;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -3515,6 +3537,7 @@ impl Key {
         Key::ActivityThePerson,
         Key::AppLoading,
         Key::BoardAdd,
+        Key::BoardAddDetails,
         Key::BoardAddTask,
         Key::BoardAddTo,
         Key::BoardAllAssignees,
@@ -4096,6 +4119,10 @@ impl Key {
         Key::KitsManageStepRunNeedsWs,
         Key::KitsManageStepRunning,
         Key::KitsManageStepTodo,
+        Key::KitsManageTabKindHint,
+        Key::KitsManageTabKindHtml,
+        Key::KitsManageTabKindNative,
+        Key::KitsManageTabKindNativeFallback,
         Key::KitsManageTitle,
         Key::KitsManageToggle,
         Key::KitsManageUpToDate,
@@ -4937,9 +4964,11 @@ impl Key {
         Key::StatusPanesHint,
         Key::StatusSendHint,
         Key::StatusWorktree,
+        Key::TaskAddDependency,
         Key::TaskAssignee,
         Key::TaskClose,
         Key::TaskColumn,
+        Key::TaskCreate,
         Key::TaskCreatedAt,
         Key::TaskDelete,
         Key::TaskDeleteConfirm,
@@ -4949,9 +4978,13 @@ impl Key {
         Key::TaskFree,
         Key::TaskLabels,
         Key::TaskName,
+        Key::TaskNew,
         Key::TaskNoComments,
+        Key::TaskOwns,
+        Key::TaskOwnsHint,
         Key::TaskPriority,
         Key::TaskRelease,
+        Key::TaskRemoveDependency,
         Key::TaskSend,
         Key::TaskThread,
         Key::TaskThreadHint,
@@ -5229,6 +5262,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "activity.thePerson", en: Text::plain("The person"), fr: Text::plain("La personne") },
     Message { id: "app.loading", en: Text::plain("Loading…"), fr: Text::plain("Chargement…") },
     Message { id: "board.add", en: Text::plain("+ Add…"), fr: Text::plain("+ Ajouter…") },
+    Message { id: "board.addDetails", en: Text::plain("Add with details…"), fr: Text::plain("Ajouter avec des détails…") },
     Message { id: "board.addTask", en: Text::plain("Add…"), fr: Text::plain("Ajouter…") },
     Message { id: "board.addTo", en: Text::plain("Add a task to {column}"), fr: Text::plain("Ajouter une tâche dans «\u{202f}{column}\u{202f}»") },
     Message { id: "board.allAssignees", en: Text::plain("All agents"), fr: Text::plain("Tous les agents") },
@@ -5810,6 +5844,10 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "kitsManage.stepRunNeedsWs", en: Text::plain("Available once the workspace exists."), fr: Text::plain("Disponible une fois le workspace créé.") },
     Message { id: "kitsManage.stepRunning", en: Text::plain("Opening the pane…"), fr: Text::plain("Ouverture du pane…") },
     Message { id: "kitsManage.stepTodo", en: Text::plain("Not run yet"), fr: Text::plain("Pas encore lancée") },
+    Message { id: "kitsManage.tabKindHint", en: Text::plain("A native tab is a WebAssembly module that Hangar draws itself. An HTML tab is a web page, shown in a window of its own. Both are held to the permissions below."), fr: Text::plain("Un onglet natif est un module WebAssembly que Hangar dessine lui-même. Un onglet HTML est une page web, affichée dans une fenêtre à part. Les deux sont soumis aux permissions ci-dessous.") },
+    Message { id: "kitsManage.tabKindHtml", en: Text::plain("HTML"), fr: Text::plain("HTML") },
+    Message { id: "kitsManage.tabKindNative", en: Text::plain("Native"), fr: Text::plain("Natif") },
+    Message { id: "kitsManage.tabKindNativeFallback", en: Text::plain("Native, with an HTML page as a fallback"), fr: Text::plain("Natif, avec une page HTML en secours") },
     Message { id: "kitsManage.title", en: Text::plain("Kits"), fr: Text::plain("Kits") },
     Message { id: "kitsManage.toggle", en: Text::plain("Enable {name} on this workspace"), fr: Text::plain("Activer {name} sur ce workspace") },
     Message { id: "kitsManage.upToDate", en: Text::plain("Up to date (v{version})."), fr: Text::plain("À jour (v{version}).") },
@@ -6651,9 +6689,11 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "status.panesHint", en: Text::plain("Panes in this workspace"), fr: Text::plain("Panneaux de ce workspace") },
     Message { id: "status.sendHint", en: Text::plain("Type it into every pane now (Enter)"), fr: Text::plain("La taper dans tous les panneaux maintenant (Entrée)") },
     Message { id: "status.worktree", en: Text::plain("worktree"), fr: Text::plain("worktree") },
+    Message { id: "task.addDependency", en: Text::plain("Add a dependency…"), fr: Text::plain("Ajouter une dépendance…") },
     Message { id: "task.assignee", en: Text::plain("Assigned to"), fr: Text::plain("Assignée à") },
     Message { id: "task.close", en: Text::plain("Close"), fr: Text::plain("Fermer") },
     Message { id: "task.column", en: Text::plain("Column"), fr: Text::plain("Colonne") },
+    Message { id: "task.create", en: Text::plain("Create"), fr: Text::plain("Créer") },
     Message { id: "task.createdAt", en: Text::plain("Created {date}"), fr: Text::plain("Créée le {date}") },
     Message { id: "task.delete", en: Text::plain("Delete"), fr: Text::plain("Supprimer") },
     Message { id: "task.deleteConfirm", en: Text::plain("Confirm"), fr: Text::plain("Confirmer") },
@@ -6663,9 +6703,13 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "task.free", en: Text::plain("free — any agent can take it"), fr: Text::plain("libre — un agent peut la prendre") },
     Message { id: "task.labels", en: Text::plain("Labels"), fr: Text::plain("Labels") },
     Message { id: "task.name", en: Text::plain("Title"), fr: Text::plain("Titre") },
+    Message { id: "task.new", en: Text::plain("New task"), fr: Text::plain("Nouvelle tâche") },
     Message { id: "task.noComments", en: Text::plain("No message yet."), fr: Text::plain("Aucun message pour l'instant.") },
+    Message { id: "task.owns", en: Text::plain("Files it owns"), fr: Text::plain("Fichiers qui lui sont réservés") },
+    Message { id: "task.ownsHint", en: Text::plain("one path or pattern per line; its worker changes nothing else"), fr: Text::plain("un chemin ou un motif par ligne\u{202f}; son agent ne modifie rien d'autre") },
     Message { id: "task.priority", en: Text::plain("Priority"), fr: Text::plain("Priorité") },
     Message { id: "task.release", en: Text::plain("Release"), fr: Text::plain("Libérer") },
+    Message { id: "task.removeDependency", en: Text::plain("Remove this dependency"), fr: Text::plain("Retirer cette dépendance") },
     Message { id: "task.send", en: Text::plain("Send"), fr: Text::plain("Envoyer") },
     Message { id: "task.thread", en: Text::plain("Thread"), fr: Text::plain("Échanges") },
     Message { id: "task.threadHint", en: Text::plain("this is where agents talk to each other"), fr: Text::plain("c'est ici que les agents se parlent") },

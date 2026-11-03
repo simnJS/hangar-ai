@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use hangar_core::bridge::Queued;
 use hangar_core::git::{ChangedFile, Changes};
@@ -22,7 +22,6 @@ use hangar_i18n::{Locale, Translator};
 use hangar_theme::{AgentState, Theme, by_id_or_default, fonts, to_iced};
 use iced::{Element, Settings, Size, window};
 use iced_test::Simulator;
-use serde_json::json;
 
 use super::sources::TaskCard;
 use super::view::{Data, column_of, scene};
@@ -30,7 +29,10 @@ use crate::app::Packages;
 use crate::ctx::{Ctx, Metrics};
 use crate::message::Message;
 use crate::state::Model;
-use crate::state::live::{ContextGauge, PaneEvent, PaneInsight, RateLimit};
+use crate::state::live::{
+    ContextGauge, EpochMs, PaneEvent, PaneEventDetail, PaneInsight, PaneMcp, PaneMcpMode,
+    RateLimit, TurnOutcome,
+};
 use crate::state::types::{AgentId, AppState, Pane, Workspace};
 
 fn model(agent: AgentId) -> Model {
@@ -56,17 +58,15 @@ fn model(agent: AgentId) -> Model {
     m
 }
 
-fn ago(minutes: u64) -> Instant {
-    Instant::now()
-        .checked_sub(Duration::from_secs(minutes * 60))
-        .unwrap_or_else(Instant::now)
+/// The moment `minutes` ago, as P4 keeps moments.
+fn ago(minutes: u64) -> EpochMs {
+    (super::sources::now_ms() as u64).saturating_sub(minutes * 60_000)
 }
 
 fn insight() -> PaneInsight {
-    let event = |minutes, kind: &str, params| PaneEvent {
+    let event = |minutes, detail| PaneEvent {
         at: ago(minutes),
-        kind: kind.into(),
-        params,
+        detail,
     };
     PaneInsight {
         model: Some("claude-sonnet-4-5-20250929".into()),
@@ -98,22 +98,42 @@ fn insight() -> PaneInsight {
             "/home/ada/dev/clients/storefront/README.md".into(),
         ],
         events: vec![
-            event(1, "edit", json!({"file": "Cart.tsx"})),
-            event(2, "permission", json!({"tool": "Bash"})),
-            event(5, "turn-start", json!({})),
+            event(
+                1,
+                PaneEventDetail::Edit {
+                    file: "Cart.tsx".into(),
+                    overlap: None,
+                },
+            ),
+            event(
+                2,
+                PaneEventDetail::Permission {
+                    tool: Some("Bash".into()),
+                },
+            ),
+            event(5, PaneEventDetail::TurnStart),
             event(
                 12,
-                "turn-end",
-                json!({"outcome": "answer", "answer": "Moved the discount rules into pricing/."}),
+                PaneEventDetail::TurnEnd {
+                    outcome: TurnOutcome::Answer,
+                    answer: Some("Moved the discount rules into pricing/.".into()),
+                },
             ),
             event(
                 40,
-                "queued",
-                json!({"text": "Rebase on main", "from": "hangar"}),
+                PaneEventDetail::Queued {
+                    text: "Rebase on main".into(),
+                    from: Some("hangar".into()),
+                },
             ),
         ],
         turn_started_at: Some(ago(5)),
-        mcp: Some(json!({"mode": "custom", "servers": ["hangar", "github"]})),
+        mcp: Some(PaneMcp {
+            mode: PaneMcpMode::Custom {
+                servers: vec!["hangar".into(), "github".into()],
+            },
+            hangar: Some(true),
+        }),
         ..PaneInsight::default()
     }
 }

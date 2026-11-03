@@ -26,8 +26,9 @@ use super::{Msg, SectionId};
 use crate::ctx::Ctx;
 use crate::message::Message;
 use crate::state::Model;
-use crate::state::live::{ContextGauge, PaneEvent, PaneInsight, RateLimit};
+use crate::state::live::{ContextGauge, PaneEvent, PaneInsight, PaneMcp, PaneMcpMode, RateLimit};
 use crate::state::types::{AgentId, Pane, Workspace};
+use crate::{board, panes_logic};
 
 /// Everything a section needs besides what it shows.
 #[derive(Clone, Copy)]
@@ -213,7 +214,7 @@ pub(super) fn session<'a>(
         rows.push(kv(t, tr.t(Key::InspectorResume), split(id, Some(change))));
     }
 
-    if let Some(since) = insight.session_since.map(sources::wall_ms) {
+    if let Some(since) = insight.session_since.map(sources::at_ms) {
         let words = format::since(since, s.now, s.locale()).text(tr);
         let shown = ink(words, font_size::CAPTION_LG, c.fg).width(Length::Shrink);
         rows.push(kv(
@@ -262,16 +263,11 @@ pub(super) fn session<'a>(
 
 /// The servers a custom launch named, joined; `None` when the pane inherits
 /// Claude Code's own (`PaneMcp`).
-fn mcp_servers(mcp: &serde_json::Value) -> Option<String> {
-    if mcp.get("mode").and_then(|mode| mode.as_str()) != Some("custom") {
-        return None;
+fn mcp_servers(mcp: &PaneMcp) -> Option<String> {
+    match &mcp.mode {
+        PaneMcpMode::Inherit => None,
+        PaneMcpMode::Custom { servers } => Some(servers.join(", ")),
     }
-    let servers: Vec<&str> = mcp
-        .get("servers")
-        .and_then(|list| list.as_array())
-        .map(|list| list.iter().filter_map(|name| name.as_str()).collect())
-        .unwrap_or_default();
-    Some(servers.join(", "))
 }
 
 pub(super) fn terminal<'a>(
@@ -354,8 +350,8 @@ fn gauge_row<'a>(s: &Scene<'a>, gauge: &'a ContextGauge) -> Element<'a, Message>
     let (t, tr) = (s.theme(), s.tr());
     let c = &t.colors;
     let pct = gauge.pct.round() as i64;
-    let used = format::spaced_unit(&sources::format_tokens(gauge.used_tokens), s.locale());
-    let window = format::spaced_unit(&sources::format_tokens(gauge.window), s.locale());
+    let used = format::spaced_unit(&panes_logic::format_tokens(gauge.used_tokens), s.locale());
+    let window = format::spaced_unit(&panes_logic::format_tokens(gauge.window), s.locale());
     let hint = if gauge.pct >= 90.0 {
         Key::InspectorContextHintSoon
     } else {
@@ -430,8 +426,8 @@ fn cost_tile<'a>(
             ]
             .spacing(space::SM)
             .align_y(Alignment::End);
-            if let Some(since) = insight.session_since.map(sources::wall_ms) {
-                let over = sources::elapsed_label(s.now - since, tr);
+            if let Some(since) = insight.session_since.map(sources::at_ms) {
+                let over = board::format::elapsed_label(s.now - since, tr);
                 line = line.push(ink(
                     tr.t_with(Key::InspectorCostOver, &args!("duration" => over.as_str()))
                         .into_owned(),
@@ -528,16 +524,13 @@ fn plan_meter<'a>(
 /// The priority as a signal: how many of the three bars are lit, and the
 /// word (`BoardPriority`).
 ///
-/// TODO(P12): `board::priority` draws this once the board package lands.
+/// The board draws the same signal on its cards, privately; the level and the
+/// word come from `board::format`.
 fn priority<'a>(s: &Scene<'a>, level_of: u8) -> Element<'a, Message> {
     let (t, tr) = (s.theme(), s.tr());
     let c = &t.colors;
-    let level = sources::priority_level(level_of);
-    let word = tr.t(match level {
-        1 => Key::BoardPriorityLow,
-        2 => Key::BoardPriorityMedium,
-        _ => Key::BoardPriorityHigh,
-    });
+    let level = board::format::priority_level(f64::from(level_of)).bars();
+    let word = tr.t(board::format::priority_key(f64::from(level_of)));
     let bar = |lit: bool, height: f32| -> Element<'a, Message> {
         let color = if lit { c.fg_muted } else { c.line_strong };
         container(filler::horizontal())
@@ -589,7 +582,7 @@ pub(super) fn task<'a>(s: &Scene<'a>, card: Option<&TaskCard>) -> Section<'a, Me
         open.clone(),
     ));
 
-    let id = format!("#{}", sources::short_task_id(&card.id));
+    let id = format!("#{}", board::format::short_task_id(&card.id));
     let top = row![
         s.tip(
             ink(id, font_size::LABEL, c.fg_subtle).font(fonts::mono()),
@@ -621,7 +614,7 @@ pub(super) fn task<'a>(s: &Scene<'a>, card: Option<&TaskCard>) -> Section<'a, Me
         )
         .into()
     } else if let Some(since) = doing {
-        let elapsed = sources::elapsed_label(s.now - since, tr);
+        let elapsed = board::format::elapsed_label(s.now - since, tr);
         let words = tr
             .t_with(
                 Key::InspectorTaskDoing,
@@ -701,7 +694,7 @@ pub(super) fn queue<'a>(s: &Scene<'a>, queue: &'a [Queued]) -> Section<'a, Messa
         ]
         .spacing(space::MD)
         .align_y(Alignment::Center);
-        if let Some(by) = sources::queued_by(entry.from.as_deref()) {
+        if let Some(by) = panes_logic::queued_by(entry.from.as_deref()) {
             line = line.push(
                 s.tip(
                     ink(by.clone(), font_size::LABEL, c.fg_subtle),
@@ -786,7 +779,7 @@ pub(super) fn activity<'a>(
         return section.body(empty_note(t, nothing));
     }
     let lines = events.iter().take(ACTIVITY_SHOWN).map(|event| {
-        let at = sources::wall_ms(event.at);
+        let at = sources::at_ms(event.at);
         let time = s.tip(
             container(
                 ink(format::clock_time(at), font_size::LABEL, c.fg_subtle).font(fonts::mono()),
@@ -796,13 +789,13 @@ pub(super) fn activity<'a>(
             format::full_date(at, s.locale()),
         );
         // The dot sits on the first line, whatever the text wraps to.
-        let marker = container(dot(t, &event.kind)).padding(Padding {
+        let marker = container(dot(t, event.detail.kind())).padding(Padding {
             top: 5.0,
             ..Padding::ZERO
         });
         // At most two lines, then cut.
         let words = container(
-            text::Text::new(sources::event_text(event, tr))
+            text::Text::new(panes_logic::pane_event_text(&event.detail, tr))
                 .size(font_size::CAPTION_LG)
                 .style(style::text::muted(t))
                 .width(Length::Fill),

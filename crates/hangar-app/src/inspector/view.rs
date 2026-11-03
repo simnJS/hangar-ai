@@ -91,7 +91,7 @@ fn pane_panel<'a>(
         bridged: activity.is_some_and(|activity| activity.bridged),
         limits: sources::plan_limits(m).map(|plan| plan.limits.as_slice()),
         task: sources::task_for_pane(m, ws, &pane.id),
-        shell: sources::resolve_shell(
+        shell: crate::panes_logic::shells::resolve_shell(
             &m.ui.shells,
             &[
                 pane.shell_id.as_deref(),
