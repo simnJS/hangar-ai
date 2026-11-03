@@ -596,20 +596,19 @@ mod tests {
         assert_eq!(app_ports_of(&with_ports(Some(vec![80, 4000]))), [4000]);
     }
 
-    // The TS also dropped a non-integer (3000.5), a string, a null and a
-    // number past 65535 from the saved list. The typed model cannot hold them:
-    // `Workspace.mobile_ports` is `Vec<u16>`, so the lenient reader of
-    // `state/lenient.rs` already refused the whole field, and nothing is
-    // left to filter by the time the page sees it.
+    // The TS dropped a non-integer (3000.5), a string, a null and a number past
+    // 65535 from the saved list and kept the rest. The lenient reader of
+    // `state/lenient.rs` reads a list entry by entry, so the good ports are
+    // still there and the page keeps the one an app can use, as the TS did.
     #[test]
-    fn a_saved_list_with_something_else_in_it_reads_as_no_list() {
+    fn a_saved_list_with_something_else_in_it_keeps_the_good_ports() {
         use crate::state::read_state;
         use serde_json::json;
         let state = read_state(json!({"workspaces": [
             {"id": "w", "mobilePorts": [80, 3000.5, 70000, "5173", null, 4000]},
             {"id": "x", "mobilePorts": "5173"}
         ]}));
-        assert!(app_ports_of(&state.workspaces[0]).is_empty());
+        assert_eq!(app_ports_of(&state.workspaces[0]), [4000]);
         assert!(app_ports_of(&state.workspaces[1]).is_empty());
     }
 
