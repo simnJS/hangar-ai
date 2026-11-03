@@ -78,6 +78,8 @@ struct Options {
 /// patterns, the real rule being tested in hangar-core.
 struct World {
     state: Mutex<AppState>,
+    /// The workspaces opened in the main window during this run.
+    opened: Mutex<HashSet<String>>,
     log: Mutex<Vec<String>>,
     tasks: Mutex<Vec<Task>>,
     branches: Mutex<Vec<String>>,
@@ -132,6 +134,7 @@ fn world(options: Options) -> World {
             active_workspace_id: Some("w1".into()),
             ..AppState::default()
         }),
+        opened: Mutex::new(HashSet::from(["w1".to_string(), "w2".to_string()])),
         log: Mutex::new(Vec::new()),
         tasks: Mutex::new(options.tasks),
         branches: Mutex::new(strings(&["main"])),
@@ -226,8 +229,14 @@ impl WorkerPort for World {
         Arc::new(self.state.lock().unwrap().clone())
     }
 
-    fn is_open(&self, _workspace_id: &str) -> bool {
-        true
+    /// The live port's own rule, over this world.
+    fn is_open(&self, workspace_id: &str) -> bool {
+        let snapshot = crate::state::Snapshot {
+            state: WorkerPort::state(self),
+            opened: self.opened.lock().unwrap().clone(),
+            ..crate::state::Snapshot::default()
+        };
+        crate::orchestration::live::open_in(&snapshot, workspace_id)
     }
 
     fn activity(&self, _pane: &str) -> Option<PaneActivity> {
@@ -1514,6 +1523,25 @@ async fn lists_each_worker_with_its_task_branch_ports_and_delivery() {
         ),
         (json!("Sam"), json!("haiku"), json!("ready"))
     );
+}
+
+#[tokio::test]
+async fn lists_the_workers_of_a_workspace_in_a_window_of_its_own_as_running() {
+    let app = world(Options {
+        tasks: tasks_one_two(),
+        ..Options::default()
+    });
+    app.call("worker_spawn", json!({"task": "t1"}))
+        .await
+        .unwrap();
+    // Never opened in the main window this run: its panes are not up.
+    app.opened.lock().unwrap().clear();
+    let listed = app.call("worker_list", json!({})).await.unwrap();
+    assert_eq!(listed["workers"][0]["running"], false);
+    // Detached when Hangar last quit: its window draws them.
+    app.map_shop(|ws| ws.detached = Some(true));
+    let listed = app.call("worker_list", json!({})).await.unwrap();
+    assert_eq!(listed["workers"][0]["running"], true);
 }
 
 /* ── worker_stop ───────────────────────────────────────────────── */
