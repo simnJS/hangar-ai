@@ -215,7 +215,7 @@ export_kit!(Panes);
 1. **Start.** Hangar instantiates the module, one instance per open tab, asks
    `hangar_abi_version`, then calls `hangar_init` with a `Start`: the ABI, Hangar's version, the kit,
    the tab with its params and caller, the theme's scheme and language, the permissions the tab holds
-   now, and whether it is in front. `init` answers its first calls and subscriptions; Hangar then
+   now, and whether its pane is on screen. `init` answers its first calls and subscriptions; Hangar then
    asks for the page (`hangar_view`).
 2. **Every input** — a widget used, a call answered, a timer, an event — is one `hangar_update`.
    It answers new calls and the subscriptions as they are now; Hangar asks for the page again.
@@ -280,7 +280,7 @@ with until it starts again.
 | `panes.changed`  | `panes.read` | `{}`                                        | The workspace's panes change; call `panes.list`.        |
 | `tab.params`     | —            | `{ params, caller }`                        | A singleton got new params, or the tab was asked for again. |
 | `theme`          | —            | `{ scheme, locale }`                        | The workspace's theme or Hangar's language changed.     |
-| `tab.visibility` | —            | `{ visible }`                               | The tab came to the front or went behind. New: a native tab has no `document.hidden`. |
+| `tab.visibility` | —            | `{ visible }`                               | The tab's pane came on screen or left it (its workspace or the grid went out of sight, another pane was zoomed over it). New: a native tab has no `document.hidden`. |
 
 The `theme` event carries no tokens: Hangar draws the widgets, so a kit has nothing to apply. The
 scheme is for a kit's own images, the language for its strings. An event the tab may not hear is
@@ -665,6 +665,17 @@ refused call, an unreachable server, a missing file are not failures: they are a
 The app's side of all this is `crates/hangar-app/src/kit_tabs` (P16): one `KitApi` (`TabApi`) for
 both kinds of tab, the page shown when a module does not load, the `ui.*` calls drawn at the foot of
 the tab and in place of its page.
+
+**Where a tab is drawn.** A native tab is a pane of its workspace's grid, beside the terminals
+(a *view pane*, `state::types::ViewPane`): the panes package draws its header, as a terminal's,
+and its body is `kit_tabs::view`, the tab drawn at the pane's size. The tab is still the preview
+store's entry (`preview::store::Body::Kit`): its instance, params, title, badge and caller are kept
+there and run by the same `reconcile`, and the pane's id is the entry's. `preview::panes::sync`
+gives every entry a pane, and takes away the pane of an entry closed. An HTML tab is a pane too,
+holding its bar and the card of its helper window. The tab is visible (`set_visible`, the
+`tab.visibility` event) while its pane is on screen. `kit-tabs.json` keeps each tab's id, so a tab
+comes back after a restart as the pane it was; a tab saved before the tabs were panes comes back as
+a new pane.
 
 ## Decisions taken
 

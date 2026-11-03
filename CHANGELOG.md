@@ -65,6 +65,24 @@ around the terminals, and needs a fraction of the memory and processor it did.
   which ended in a row of slivers: the workspace is laid out again, with the orchestrator
   on the left in the biggest pane and the others in an even grid beside it. `pane_create`
   no longer takes a `direction`; `near` says which pane the new one goes after.
+- **Previews and kit tabs are panes of the grid.** What the side preview panel showed, a
+  native kit tab, an image, code or text, Markdown, a 3D model, opens as a pane beside the
+  terminals, with a terminal pane's header: drag it onto another pane, resize it with the
+  dividers, zoom it, close it, reach it with `Ctrl`+`1`…`9`, which count every pane on
+  screen. Build your own layout of terminals and kit tabs.
+  - A new one opens beside the focused pane, split along its longer side as the + button
+    splits; one already open takes the focus where it is. What an agent opens or closes
+    lays the workspace out again, as its panes do.
+  - A PDF, a web page, a video, a sound or an HTML kit tab still shows in a window of the
+    helper: its pane holds a card with the button that brings the window forward, and
+    closing the pane closes the window.
+  - A workspace holds 16 panes, terminals and previews together. A preset sets the number
+    of terminals and keeps every preview.
+  - Kit tabs come back after a restart as the panes they were, where you left them. Files
+    do not come back, as before.
+  - The panel is gone with its tab strip, its drawer, its expanded mode, its toolbar button
+    and its shortcut (`Mod+Alt+P`). 1.x still reads the file: it keeps the panes as
+    `viewPanes`, a field it does not know, and lays out its terminals without them.
 - **A shorter toolbar.** The four layouts are one button with a menu, and the activity
   capsule in the middle is gone: the pane's own header and the inspector say what it is
   doing. **Appearance › Use the system's title bar** brings the
@@ -78,7 +96,7 @@ around the terminals, and needs a fraction of the memory and processor it did.
   - Text cannot be selected with the pointer in the diff, in native kit tabs and in most
     panels; a Copy button stands in. Terminals, code and Markdown previews select as before.
   - PDFs, web pages, video, audio and HTML kit tabs open in a window of their own rather
-    than in the panel. On GNOME under Wayland, one that an agent opens waits for your click
+    than in their pane. On GNOME under Wayland, one that an agent opens waits for your click
     on **Open in a window**.
   - On Linux, video and audio previews may not play.
   - Dropping a file on a pane does not work under Wayland.

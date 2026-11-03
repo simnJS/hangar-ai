@@ -252,13 +252,18 @@ chat.
   compiled to WebAssembly, which Hangar draws in your theme. The **Library** in
   **Settings → Kits** lists the public kits of the [hangar-ai](https://github.com/hangar-ai)
   organization. See [Kits](#kits).
-- **Previews.** Agents show you files beside their terminal: images (animated GIF and WebP
-  too), code and text with highlighting, Markdown, PDFs, web pages, video and audio.
-- **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX) in a panel, with
-  its glTF animations, and render snapshots to check their own work.
+- **Previews.** Agents show you files as panes of the grid, beside their terminal: images
+  (animated GIF and WebP too), code and text with highlighting, Markdown, PDFs, web pages,
+  video and audio.
+- **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX) in a pane of the
+  grid, with its glTF animations, and render snapshots to check their own work.
+- **Your own control layout.** A preview and a kit's tab are panes like the terminals: drag
+  them by their header onto another pane, resize them with the dividers, zoom them, reach
+  them with `Ctrl`+`1`…`9`. Kit tabs come back where you left them after a restart.
 
 What needs a browser engine, a PDF, a web page, a video or an HTML kit tab, opens in
-`hangar-webview`, a small helper program beside Hangar, in a window of its own.
+`hangar-webview`, a small helper program beside Hangar, in a window of its own; its pane
+holds a card that brings the window forward, and closing the pane closes the window.
 
 ### Also
 
@@ -412,7 +417,7 @@ it, and keeps a backup the first time it writes a file. To do it by hand instead
 | `workspace_list`, `workspace_window`, `pane_list`, `pane_create`, `pane_send`, `pane_read`, `pane_restart`, `pane_close`, `pane_focus` | See the other panes and their state, open another Claude Code or shell pane (in a worktree, for instance), type into a pane or queue a prompt until it is idle, read its output, and show a pane to you. |
 | `workspace_create`, `workspace_set_check` | Any agent can ask for a workspace for a repository the person named (`workspace_create {repo, name?, parent?}`): Hangar clones it, into `parent` when you say where (any absolute folder, on any drive: « put it on my second SSD » gives `E:/AnyPS5`; missing folders are created, and an existing empty folder is used; your Projects folder setting is not changed), creates the workspace and starts an orchestrator that reads the repository, installs its dependencies, sets the check command, runs the tests once and reports. A repository that is not yours is cloned only after you click Clone in Hangar, on a card that shows the destination; for your own, the agent just tells you the folder. The orchestrator sets its own workspace's check command with `workspace_set_check {command}`, and you see it in the orchestration panel. |
 | `worker_spawn`, `worker_list`, `worker_stop`, `delivery_submit`, `delivery_status` | Orchestration. The orchestrator starts, lists and stops workers. A worker hands in its branch for check, review and merge. |
-| `model_show`, `model_snapshot`, `model_close` | Open a 3D model in the preview panel, render it to an image to check it, and close it. |
+| `model_show`, `model_snapshot`, `model_close` | Open a 3D model as a pane of the workspace's grid, render it to an image to check it, and close it. |
 | `phone_share` | Send you a file on your phone through [Hangar Mobile](#hangar-mobile): a screenshot, a render, a report you asked to see. |
 | `project_list`, `project_status`, `project_send` | The [project manager](#project-manager) only: list every project, read where one stands, and queue an instruction for its orchestrator. |
 

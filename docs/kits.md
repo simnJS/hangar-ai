@@ -432,32 +432,33 @@ read again at every call, so taking a grant back denies the next call.
 
 ## A tab
 
-A tab opens in the workspace's side panel — the preview, beside the
-terminals — from the toolbar's **Kits** menu or the command palette, which
-list the tabs of the kits enabled on the workspace, or when
-[an agent or a hook opens it](#opening-a-tab). It stays open per
-workspace, like the files there, and keeps running while another tab or
-workspace is in front; a workspace put to sleep lets its tabs' pages go, and
-they load again when it wakes. Its bar reloads it, and says what it was
-granted.
+A tab opens as a pane of the workspace's grid, beside the terminals, from the toolbar's
+**Kits** menu or the command palette, which list the tabs of the kits enabled on the
+workspace, or when [an agent or a hook opens it](#opening-a-tab). It is a pane like a
+terminal: dragged by its header onto another pane, resized with the dividers, zoomed,
+closed with its cross, reached with `Ctrl`+`1`…`9`. Opened by the person it goes beside the
+focused pane and takes the focus; one that is open already is focused where it is. It
+stays open per workspace, like the files there, and keeps running while its workspace is
+not on screen; a workspace put to sleep lets its tabs' pages go, and they load again when
+it wakes. Its bar reloads it, and says what it was granted. *(In Hangar 1.x a tab opened in
+the side panel of the preview, beside the terminals.)*
 
-**A restart brings it back**, with its params and the title its page gave it.
-Each window saves the tabs of the workspaces it draws in its own storage, and
-restores them the first time it mounts the workspace, so no page runs for a
-workspace nobody opened. They come back behind a closed panel, the panel's button
-saying they are there; the page loads, and sets its badge again. Files in the
-preview do not come back: only kits' tabs.
+**A restart brings it back**, with its params and the title its page gave it, as the pane
+it was, where the person left it. Hangar saves the tabs of each workspace in
+`kit-tabs.json` beside its state, and restores them the first time it mounts the
+workspace, so no page runs for a workspace nobody opened. A restored tab's page loads once
+its pane is on screen, and sets its badge again. Files shown in the grid do not come back:
+only kits' tabs.
 
-**Small or large, a tab is the same thing**: it lives in the panel, at the panel's
-width.
+**Small or large, a tab is the same thing**: it is drawn at its pane's size, whatever the
+person made it. Nothing sets a minimum width for a page but the page.
 
 **Where an HTML page shows, since Hangar 2.0.** Hangar's window runs no browser engine, so
 the page of an HTML tab is shown by `hangar-webview`, a helper program beside Hangar, in a
-window of its own that follows its tab: hidden when the tab, its panel or its workspace
-leaves the screen, back when they return. The tab stays in the panel, with its bar. A
-native tab is drawn in the panel itself. That is 320 interface points at least, so 320 CSS pixels at 100 % interface
-size and 288 at the smallest, 90 %; a very narrow window can leave less, as a drawer.
-Nothing sets a minimum width for a page but the page.
+window of its own that follows its pane: hidden when the pane or its workspace leaves the
+screen, back when they return. The pane holds the tab's bar and a card with the button that
+brings the window forward; closing the pane closes the window. A native tab is drawn in its
+pane itself.
 
 ### Its look: Hangar UI
 
@@ -465,7 +466,7 @@ Nothing sets a minimum width for a page but the page.
 rather than a page framed inside it: `/_hangar/kit.css`, its tokens and components, and
 `/_hangar/kit-ui.js`, its behaviours, loaded after the SDK. It asks for no permission and
 has nothing to install. With it a page follows the theme of its workspace, live, with
-Hangar's language and interface size, and holds at the panel's narrowest. That page also
+Hangar's language and interface size, and holds in a narrow pane. That page also
 has [the rules a kit follows](kit-ui.md#the-rules-a-kit-follows): no colour of its own,
 designed states for what is empty, loading, failing or denied.
 
@@ -478,7 +479,7 @@ library starts on a white frame, and has its width and all the themes to answer 
 A native tab is a module of Rust compiled to `wasm32-unknown-unknown` with the kit SDK,
 `hangar-kit-sdk`. It describes its page as a tree of widgets — rows, text, buttons, fields,
 tables, trees, logs, a drawing canvas — and Hangar draws it with its own widgets, in the
-workspace's theme and the person's language, at any width of the panel. No browser engine
+workspace's theme and the person's language, at any size of its pane. No browser engine
 runs for it, and its module reaches nothing but the calls below, answered under the same
 permissions and limits as an HTML tab's, plus time and memory limits of its own.
 
@@ -581,11 +582,14 @@ the request**.
 - it has **no such tab**;
 - a param is **not declared**, is not a string, or **does not match** its rule.
 
-**`reveal`**, `true` by default, opens the side panel if it is closed, with the tab in front.
-`false` adds the tab and leaves the panel, and what is in front, as they are; a singleton still
-takes its new params, and the panel's button says something is there. Neither ever takes the
-keyboard from a terminal: without room beside the terminals the panel does not come over them as a
-drawer, as it does for the person, and `visible: false` with a `note` says the person has to look.
+A tab an agent opens is a pane of the grid like the person's, and the workspace is laid out
+again around it, as it is for the panes an agent opens: the orchestrator keeps the biggest
+pane, the others share the rest; closing one lays the workspace out again too. A workspace
+holds 16 panes, terminals included: a new tab is refused while it is full (a tab open
+already is still focused). **`reveal`**, `true` by default, says on screen that the tab was
+opened; `false` opens it quietly. A singleton takes its new params either way. Neither ever
+takes the keyboard from a terminal, and `visible: false` with a `note` says the person has
+to look (another view is in front of the grid, or another workspace is on screen).
 A page that focuses something of its own while nobody clicked it has the keyboard handed back to
 the terminal it took it from.
 
@@ -773,7 +777,7 @@ Methods:
 | `data.write`     | `{ path, text }`    | `data.write`     | `{}`: written whole, its folders made.                                   |
 | `loopback.fetch` | `{ port, path, method?, body?, timeoutMs? }` | `loopback:<port>` for that exact port | `{ status, text }`: the local server's answer, whatever its status. |
 | `command.run`    | `{ name, args? }`   | `command:<name>` for that exact name | `{ exitCode, stdout, stderr, timedOut, truncated }`: see [declared commands](#declared-commands). |
-| `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens in the workspace's preview, in front. |
+| `preview.show`   | `{ path }`          | `preview.show`   | `{ opened: true, path }`: the file opens as a pane of the workspace's grid, or reloads in its pane when it is open. |
 | `notify`         | `{ title, body? }`  | `notify`         | `null`: a desktop notification, titled `<kit name> · <title>`.          |
 | `tab.params`     | —                   | —                | `{ params, caller }`: what this tab holds, `{}` for none, and [who asked](#who-asked), `{ pane }` or `null`. |
 | `tab.setTitle`   | `{ title }`         | —                | `{}`: its name in the tab strip.                                         |
@@ -787,8 +791,9 @@ never the message's.
   it is written. Asking for the tab again leaves the name its page gave it. It lasts across a
   restart until the page says otherwise.
 - **`tab.setBadge`** takes a `state` among `"running"`, `"success"`, `"failure"`, `"neutral"`, shown
-  as a small glyph where the tab's icon goes (a ring turning, a check, an alert, a dot), and a `text`
-  of 12 characters at most beside the title, the same plain text. `state: null` takes it away.
+  as a small glyph where the icon of the tab's pane goes, in its header (a ring turning, a check, an
+  alert, a dot), and a `text` of 12 characters at most beside the title, the same plain text.
+  `state: null` takes it away.
   It lasts until the page loads again, so a page sets it when it starts: a stale « running » is worse
   than none.
 - Each may be called **120 times a minute**, enough to count seconds; each change redraws the strip.
