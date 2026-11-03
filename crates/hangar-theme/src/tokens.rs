@@ -49,14 +49,17 @@ pub mod space {
 
 /// Font sizes. The window reads in 12 and 13; the small ones carry metadata.
 pub mod font_size {
+    // The four smallest sizes are the stylesheet's plus up to half a pixel: a
+    // browser drew them with the system's subpixel smoothing, and smoothed in
+    // grey they read too thin. The others are the stylesheet's own.
     /// A mono counter or a version (`.nav-top__version`).
-    pub const MICRO: f32 = 10.0;
+    pub const MICRO: f32 = 10.5;
     /// A group label in small capitals (`.nav-section`), a key hint.
-    pub const LABEL: f32 = 10.5;
+    pub const LABEL: f32 = 11.0;
     /// A caption, a metadata line.
-    pub const CAPTION: f32 = 11.0;
+    pub const CAPTION: f32 = 11.5;
     /// A tiny button, a row's secondary line.
-    pub const CAPTION_LG: f32 = 11.5;
+    pub const CAPTION_LG: f32 = 11.75;
     /// The toolbar, the navigator, the status bar, fields, the palette.
     pub const UI: f32 = 12.0;
     /// The navigator's title.

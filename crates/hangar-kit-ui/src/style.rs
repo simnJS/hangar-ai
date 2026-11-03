@@ -86,28 +86,32 @@ pub enum Align {
     End,
 }
 
-/// The type scale of Hangar UI: `--kit-fs-*`.
+/// The type scale of Hangar UI: `--kit-fs-*`, one pixel larger natively.
+///
+/// A browser drew these sizes with the system's subpixel smoothing; Hangar
+/// draws text smoothed in grey, which reads thinner, and a kit's tab is
+/// dense with its smallest sizes. Each step is the web one plus a pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TextSize {
-    /// 15 px: a page's title.
+    /// 16 px: a page's title.
     Title,
-    /// 13 px: running text.
+    /// 14 px: running text.
     #[default]
     Body,
-    /// 12.5 px: a row's title.
+    /// 13.5 px: a row's title.
     Row,
-    /// 12 px: what a control says.
+    /// 13 px: what a control says.
     Control,
-    /// 11.5 px: an aside, a second line.
+    /// 12.5 px: an aside, a second line.
     Small,
-    /// 11.5 px: code and logs, in the terminals' face.
+    /// 12.5 px: code and logs, in the terminals' face.
     Code,
-    /// 11 px: metadata.
+    /// 12 px: metadata.
     Meta,
-    /// 10.5 px: a section's title, in small capitals.
+    /// 11.5 px: a section's title, in small capitals.
     Label,
-    /// 10 px: a chip.
+    /// 11 px: a chip.
     Chip,
 }
 
@@ -115,14 +119,14 @@ impl TextSize {
     /// Its size in logical pixels, at 100 % interface size.
     pub fn px(self) -> f32 {
         match self {
-            TextSize::Title => 15.0,
-            TextSize::Body => 13.0,
-            TextSize::Row => 12.5,
-            TextSize::Control => 12.0,
-            TextSize::Small | TextSize::Code => 11.5,
-            TextSize::Meta => 11.0,
-            TextSize::Label => 10.5,
-            TextSize::Chip => 10.0,
+            TextSize::Title => 16.0,
+            TextSize::Body => 14.0,
+            TextSize::Row => 13.5,
+            TextSize::Control => 13.0,
+            TextSize::Small | TextSize::Code => 12.5,
+            TextSize::Meta => 12.0,
+            TextSize::Label => 11.5,
+            TextSize::Chip => 11.0,
         }
     }
 }

@@ -199,8 +199,11 @@ impl KitStyle {
         match tone {
             Tone::Default => p.text,
             Tone::Dim => p.text_dim,
-            Tone::Muted => p.text_muted,
-            Tone::Faint => p.text_faint,
+            // A fifth of the way back to the text's own colour: the theme's
+            // muted and faint tones were set for a browser's subpixel
+            // smoothing, and in grey they fade on a kit's small sizes.
+            Tone::Muted => toward(p.text_muted, p.text, 0.2),
+            Tone::Faint => toward(p.text_faint, p.text, 0.2),
             Tone::Accent => p.accent_text,
             Tone::Ok => p.ok,
             Tone::Warn => p.warn,
@@ -272,6 +275,16 @@ fn default_theme(dark: bool) -> &'static Theme {
 impl Default for KitStyle {
     fn default() -> Self {
         KitStyle::dark()
+    }
+}
+
+/// `from` moved `amount` of the way to `to`, alpha included.
+fn toward(from: Color, to: Color, amount: f32) -> Color {
+    Color {
+        r: from.r + (to.r - from.r) * amount,
+        g: from.g + (to.g - from.g) * amount,
+        b: from.b + (to.b - from.b) * amount,
+        a: from.a + (to.a - from.a) * amount,
     }
 }
 
