@@ -2,12 +2,15 @@
 //! (`lib/orchestrationForm.ts`): what a field may hold, how what was typed
 //! becomes the settings saved, and what is worth saving at all.
 //!
-//! Reading is `settings_of`'s (the TS `orchestrationOf` of lib/orchestration):
-//! it takes whatever is stored, hand-edited or not, and falls back field by
-//! field. This is the other way round, a form the person is filling in, and
+//! Reading is `state::roles::orchestration_of`'s (the TS `orchestrationOf` of
+//! lib/orchestration): it takes whatever is stored, hand-edited or not, and
+//! falls back field by field. This is the other way round, a form the person is filling in, and
 //! holds them to a little more: a range for the counts, a shape for the names
 //! a command line will carry.
 
+use crate::state::roles::{
+    ORCHESTRATION_PERMISSION_MODES, orchestration_defaults, orchestration_of,
+};
 use crate::state::types::{OrchestrationSettings, Workspace};
 
 /// What a stepper offers, both ends included.
@@ -23,56 +26,11 @@ pub const MAX_ATTEMPTS: Range = Range { min: 1, max: 5 };
 /// Offered under the model fields; Claude Code takes a full model id as well.
 pub const MODEL_SUGGESTIONS: [&str; 3] = ["opus", "sonnet", "haiku"];
 
-/// The permission modes offered for an orchestration's agents (`None`: the
-/// person's own).
-pub const PERMISSION_MODES: [&str; 3] = ["auto", "acceptEdits", "bypassPermissions"];
-
 /// The default models as text that lives for the whole program, for the
-/// placeholders a field keeps (`defaults()` allocates its own).
+/// placeholders a field keeps (`orchestration_defaults()` allocates its own).
 pub const DEFAULT_ORCHESTRATOR_MODEL: &str = "opus";
 pub const DEFAULT_WORKER_MODEL: &str = "sonnet";
 pub const DEFAULT_REVIEWER_MODEL: &str = "sonnet";
-
-/// The settings of a workspace that never had any (`ORCHESTRATION_DEFAULTS`).
-pub fn defaults() -> OrchestrationSettings {
-    OrchestrationSettings::default()
-}
-
-/// A workspace's settings, each one absent or malformed read as its default
-/// (`orchestrationOf`). The file is already typed when it gets here
-/// (`state/lenient.rs` drops what does not parse); what is left to read
-/// defensively is a value of the right type that means nothing: a count under
-/// one, a blank name, a mode nobody offers.
-pub fn settings_of(ws: &Workspace) -> OrchestrationSettings {
-    let Some(saved) = &ws.orchestration else {
-        return defaults();
-    };
-    let base = defaults();
-    let count = |value: u32, fallback: u32| if value >= 1 { value } else { fallback };
-    let name = |value: &str, fallback: &str| {
-        let value = value.trim();
-        if value.is_empty() { fallback } else { value }.to_owned()
-    };
-    let optional = |value: &Option<String>| {
-        value
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-    };
-    OrchestrationSettings {
-        max_workers: count(saved.max_workers, base.max_workers),
-        max_attempts: count(saved.max_attempts, base.max_attempts),
-        auto_merge: saved.auto_merge,
-        check_command: optional(&saved.check_command),
-        orchestrator_model: name(&saved.orchestrator_model, &base.orchestrator_model),
-        worker_model: name(&saved.worker_model, &base.worker_model),
-        reviewer_model: name(&saved.reviewer_model, &base.reviewer_model),
-        branch: optional(&saved.branch),
-        permission_mode: optional(&saved.permission_mode)
-            .filter(|mode| PERMISSION_MODES.contains(&mode.as_str())),
-    }
-}
 
 /// The fields as the panel holds them: text stays text until it is saved. The
 /// counts are numbers that may not be whole or even finite (a draft is
@@ -126,7 +84,7 @@ impl Problems {
 
 /// The panel opens on what the workspace runs with now, defaults included.
 pub fn draft_of(ws: &Workspace) -> Draft {
-    let settings = settings_of(ws);
+    let settings = orchestration_of(ws);
     Draft {
         max_workers: f64::from(settings.max_workers),
         max_attempts: f64::from(settings.max_attempts),
@@ -208,7 +166,7 @@ pub fn draft_problems(draft: &Draft) -> Problems {
 /// none. Fields with a problem (`draft_problems`) are the caller's to refuse;
 /// here they fall back to the default like a blank one.
 pub fn normalize_draft(draft: &Draft) -> OrchestrationSettings {
-    let base = defaults();
+    let base = orchestration_defaults();
     let problems = draft_problems(draft);
     let model = |field: Field, value: &str, fallback: &str| {
         let value = value.trim();
@@ -245,7 +203,7 @@ pub fn normalize_draft(draft: &Draft) -> OrchestrationSettings {
         } else {
             optional(&draft.branch)
         },
-        permission_mode: PERMISSION_MODES
+        permission_mode: ORCHESTRATION_PERMISSION_MODES
             .contains(&draft.permission_mode.as_str())
             .then(|| draft.permission_mode.clone()),
     }
@@ -259,7 +217,7 @@ pub fn same_settings(a: &OrchestrationSettings, b: &OrchestrationSettings) -> bo
 /// default, so a workspace whose settings were put back is saved as one that
 /// never had any, and follows the defaults a later version ships.
 pub fn stored_orchestration(settings: &OrchestrationSettings) -> Option<OrchestrationSettings> {
-    if same_settings(settings, &defaults()) {
+    if same_settings(settings, &orchestration_defaults()) {
         None
     } else {
         Some(settings.clone())
@@ -282,7 +240,7 @@ mod tests {
 
     #[test]
     fn the_default_model_names_are_the_stores_defaults() {
-        let base = defaults();
+        let base = orchestration_defaults();
         assert_eq!(base.orchestrator_model, DEFAULT_ORCHESTRATOR_MODEL);
         assert_eq!(base.worker_model, DEFAULT_WORKER_MODEL);
         assert_eq!(base.reviewer_model, DEFAULT_REVIEWER_MODEL);
@@ -290,7 +248,7 @@ mod tests {
 
     #[test]
     fn opens_a_workspace_that_never_had_settings_on_the_defaults_blanks_for_the_optional_fields() {
-        let base = defaults();
+        let base = orchestration_defaults();
         assert_eq!(
             draft_of(&Workspace::default()),
             Draft {
@@ -314,7 +272,7 @@ mod tests {
             check_command: Some("pnpm test".into()),
             worker_model: "  ".into(),
             branch: Some("main".into()),
-            ..defaults()
+            ..orchestration_defaults()
         };
         let ws = Workspace {
             orchestration: Some(saved),
@@ -334,11 +292,11 @@ mod tests {
                 max_workers: 0,
                 max_attempts: 0,
                 permission_mode: Some("yolo".into()),
-                ..defaults()
+                ..orchestration_defaults()
             }),
             ..Workspace::default()
         };
-        assert_eq!(settings_of(&ws), defaults());
+        assert_eq!(orchestration_of(&ws), orchestration_defaults());
     }
 
     #[test]
@@ -355,7 +313,7 @@ mod tests {
         );
         assert_eq!(
             normalize_draft(&draft(|d| d.max_workers = f64::NAN)).max_workers,
-            defaults().max_workers
+            orchestration_defaults().max_workers
         );
     }
 
@@ -367,8 +325,8 @@ mod tests {
             d.reviewer_model = " ".into();
         }));
         assert_eq!(next.orchestrator_model, "claude-opus-4-1");
-        assert_eq!(next.worker_model, defaults().worker_model);
-        assert_eq!(next.reviewer_model, defaults().reviewer_model);
+        assert_eq!(next.worker_model, orchestration_defaults().worker_model);
+        assert_eq!(next.reviewer_model, orchestration_defaults().reviewer_model);
     }
 
     #[test]
@@ -400,7 +358,7 @@ mod tests {
             orchestration: Some(next.clone()),
             ..Workspace::default()
         };
-        assert_eq!(settings_of(&ws), next);
+        assert_eq!(orchestration_of(&ws), next);
     }
 
     #[test]
@@ -465,7 +423,7 @@ mod tests {
             d.worker_model = "two words".into();
             d.branch = "bad name".into();
         }));
-        assert_eq!(next.worker_model, defaults().worker_model);
+        assert_eq!(next.worker_model, orchestration_defaults().worker_model);
         assert_eq!(next.branch, None);
     }
 
@@ -475,27 +433,57 @@ mod tests {
             stored_orchestration(&normalize_draft(&draft_of(&Workspace::default()))),
             None
         );
-        assert_eq!(stored_orchestration(&defaults()), None);
+        assert_eq!(stored_orchestration(&orchestration_defaults()), None);
     }
 
     #[test]
     fn stores_every_field_once_one_of_them_differs() {
         let next = OrchestrationSettings {
             auto_merge: false,
-            ..defaults()
+            ..orchestration_defaults()
         };
         assert_eq!(stored_orchestration(&next), Some(next));
     }
 
     #[test]
     fn tells_settings_apart_field_by_field() {
-        assert!(same_settings(&defaults(), &defaults()));
+        assert!(same_settings(
+            &orchestration_defaults(),
+            &orchestration_defaults()
+        ));
         assert!(!same_settings(
-            &defaults(),
+            &orchestration_defaults(),
             &OrchestrationSettings {
                 branch: Some("main".into()),
-                ..defaults()
+                ..orchestration_defaults()
             }
         ));
+    }
+
+    #[test]
+    fn the_panel_opens_on_what_state_roles_reads_back() {
+        // The one reader of stored settings is `state::roles::orchestration_of`
+        // (the TS `orchestrationOf`): a permission mode is kept only when it
+        // is one that is offered, exactly as written.
+        let saved = |mode: &str| Workspace {
+            orchestration: Some(OrchestrationSettings {
+                permission_mode: Some(mode.into()),
+                ..orchestration_defaults()
+            }),
+            ..Workspace::default()
+        };
+        assert_eq!(
+            draft_of(&saved("acceptEdits")).permission_mode,
+            "acceptEdits"
+        );
+        assert_eq!(draft_of(&saved(" acceptEdits ")).permission_mode, "");
+        assert_eq!(draft_of(&saved("yolo")).permission_mode, "");
+        assert_eq!(
+            draft_of(&saved("auto")),
+            Draft {
+                permission_mode: "auto".into(),
+                ..draft_of(&Workspace::default())
+            }
+        );
     }
 }

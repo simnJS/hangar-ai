@@ -16,8 +16,6 @@ mod badge;
 mod form;
 mod panel;
 
-use iced::futures::StreamExt;
-use iced::futures::stream::BoxStream;
 use iced::{Element, Subscription, Task};
 
 use hangar_i18n::{Key, args};
@@ -42,8 +40,6 @@ pub struct State {
     manager: actions::SingleFlight,
     /// The panel while `Overlay::Orchestration` is open.
     panel: Option<panel::Panel>,
-    /// The titles of the tasks the workers are on, for their badges.
-    titles: badge::Titles,
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -58,11 +54,6 @@ pub enum Msg {
     Panel(panel::PanelMsg),
     /// `hq_dir` answered: the folder of the HQ, made, or why not.
     FolderMade(Result<String, String>),
-    /// A board's tasks, as `(id, title)`, for the badges of its workers.
-    Titles {
-        cwd: String,
-        titles: Vec<(String, String)>,
-    },
 }
 
 pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
@@ -74,62 +65,15 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             let done = actions::finish_open_manager(m, &name, folder);
             manager_opened(m, done)
         }
-        Msg::Titles { cwd, titles } => {
-            st.titles.set(cwd, titles);
-            Task::none()
-        }
     }
 }
 
-/// The folders of the boards the workers' tasks are on.
-fn worker_boards(m: &Model) -> Vec<String> {
-    let mut cwds: Vec<String> = m
-        .state()
-        .workspaces
-        .iter()
-        .filter(|ws| {
-            ws.panes
-                .iter()
-                .any(|pane| pane.role == Some(PaneRole::Worker) && pane.task_id.is_some())
-        })
-        .map(|ws| ws.cwd.clone())
-        .collect();
-    cwds.sort();
-    cwds.dedup();
-    cwds
-}
-
-/// Reads one board off the UI thread and says what its tasks are called.
-async fn read_titles(cwd: String) -> Message {
-    let at = cwd.clone();
-    let board = tokio::task::spawn_blocking(move || hangar_core::board_load(at))
-        .await
-        .unwrap_or_default();
-    let titles = board
-        .tasks
-        .into_iter()
-        .map(|task| (task.id, task.title))
-        .collect();
-    Message::OrchestrationUi(Msg::Titles { cwd, titles })
-}
-
-/// Every board a badge needs, once each, when the set of them changes. The
-/// TS held a board for as long as a badge showed it; a board that changes
-/// afterwards comes through `on_event`.
-// `Subscription::run_with` wants a `fn(&D)` for its data type `D`, a `Vec`.
-#[allow(clippy::ptr_arg)]
-fn load_titles(cwds: &Vec<String>) -> BoxStream<'static, Message> {
-    iced::futures::stream::iter(cwds.clone())
-        .then(read_titles)
-        .boxed()
-}
-
-pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
-    let boards = worker_boards(m);
-    if boards.is_empty() {
-        return Subscription::none();
-    }
-    Subscription::run_with(boards, load_titles)
+/// Nothing to follow: a worker's badge reads the title of its task from the
+/// boards cache (`board::Live`), which holds the board of every workspace's
+/// folder, a detached workspace's and a worktree's shared one included, and
+/// reads it again when it changes.
+pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
+    Subscription::none()
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
@@ -308,20 +252,15 @@ pub fn on_intent(
     }
 }
 
-/// Every core event, after the shell's own handling of it. A board that
-/// changed may have renamed the task a worker is on.
+/// Every core event, after the shell's own handling of it. None concerns this
+/// package: a board that changed reaches the badges through `board::Live`.
 pub fn on_event(
     _st: &mut State,
-    m: &mut Model,
+    _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    match event {
-        CoreEvent::BoardChanged { cwd } if worker_boards(m).contains(cwd) => {
-            Some(Task::perform(read_titles(cwd.clone()), |message| message))
-        }
-        _ => None,
-    }
+    None
 }
 
 /// `Overlay::Orchestration`: a workspace's orchestration settings.

@@ -1,5 +1,5 @@
 //! The board as a panel beside the terminals (`BoardDock.tsx`): its resize
-//! grip, and the room it is given.
+//! grip. The room it is given is the shell's to say (`Panels::of(..).dock`).
 //!
 //! The panel sits beside the grids rather than over them, so the terminals
 //! only get narrower, and nothing is remounted: no PTY restarts when the panel
@@ -9,7 +9,6 @@
 //! that, and Escape, the outside click and where the focus goes after it.
 
 use hangar_i18n::Key;
-use hangar_theme::tokens::size;
 use hangar_ui::tip;
 use iced::keyboard::{Key as Pressed, key::Named};
 use iced::widget::{Space, row};
@@ -17,8 +16,7 @@ use iced::{Element, Length, Point, mouse};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::side_panels::{DOCK_MIN, INSPECTOR_MIN, TERMINALS_MIN};
-use crate::state::Model;
+use crate::shell::side_panels::DOCK_MIN;
 
 use super::hit::{Look, hit};
 use super::look;
@@ -39,35 +37,6 @@ pub fn clamp_width(width: f32, max: f32) -> f32 {
     max.min(DOCK_MIN.max(width.round()))
 }
 
-/// The widest the panel can be in a window this wide, leaving the terminals
-/// what they always keep and the other side panels what they need.
-///
-/// TODO(P0b): `side_panels::place` gives the room a panel is really allowed
-/// (`sides.dock.max`) once it is ported; this is the same rule written for the
-/// panels that are open now.
-pub fn max_width(body_width: f32, navigator_open: bool, inspector_width: Option<f32>) -> f32 {
-    let navigator = if navigator_open {
-        size::SIDEBAR_WIDTH
-    } else {
-        0.0
-    };
-    let inspector = inspector_width.map_or(0.0, |width| width.max(INSPECTOR_MIN));
-    (body_width - navigator - inspector - TERMINALS_MIN).max(DOCK_MIN)
-}
-
-/// The widest the panel may be, for the panels the settings have open now and
-/// a window `body_width` wide.
-pub fn room(m: &Model, body_width: f32) -> f32 {
-    let settings = m.settings();
-    max_width(
-        body_width,
-        settings.navigator_open,
-        settings
-            .inspector_open
-            .then_some(settings.inspector_width as f32),
-    )
-}
-
 /// A drag of the grip. The panel grows leftwards, into the terminals, so the
 /// width is how far the pointer has gone left of where it took hold.
 #[derive(Debug, Clone)]
@@ -75,6 +44,8 @@ pub struct Grip {
     start_x: f32,
     start_width: f32,
     max: f32,
+    /// Where the pointer is now.
+    x: f32,
 }
 
 impl Grip {
@@ -83,7 +54,17 @@ impl Grip {
             start_x: at.x,
             start_width: width,
             max,
+            x: at.x,
         }
+    }
+
+    pub fn moved_to(&mut self, x: f32) {
+        self.x = x;
+    }
+
+    /// The width the panel gets if the pointer is let go now.
+    pub fn pending(&self) -> f32 {
+        self.width_at(self.x)
     }
 
     pub fn width_at(&self, x: f32) -> f32 {
@@ -106,12 +87,13 @@ pub(super) fn grip<'a>(st: &'a State, ctx: Ctx<'a>, width: f32, max: f32) -> Ele
         .id("board-dock-grip")
         .on_press(move |at| Message::Board(Msg::GripPress { at, width, max }))
         .on_double_click(Message::Board(Msg::GripReset))
-        .on_key(move |key| match key {
-            Pressed::Named(Named::ArrowLeft) => Some(Message::Board(Msg::GripKey { widen: true })),
-            Pressed::Named(Named::ArrowRight) => {
-                Some(Message::Board(Msg::GripKey { widen: false }))
+        .on_key(move |key| {
+            let nudge = |widen| Message::Board(Msg::GripKey { widen, width, max });
+            match key {
+                Pressed::Named(Named::ArrowLeft) => Some(nudge(true)),
+                Pressed::Named(Named::ArrowRight) => Some(nudge(false)),
+                _ => None,
             }
-            _ => None,
         })
         .interaction(mouse::Interaction::ResizingHorizontally)
         .look(Look {
@@ -175,11 +157,12 @@ mod tests {
     }
 
     #[test]
-    fn the_room_leaves_the_terminals_what_they_keep() {
-        assert_eq!(max_width(1920.0, true, Some(296.0)), 732.0);
-        assert_eq!(max_width(1360.0, false, None), 720.0);
-        // No room at all still leaves the minimum, which the shell turns
-        // into a drawer.
-        assert_eq!(max_width(900.0, true, Some(296.0)), DOCK_MIN);
+    fn the_pending_width_follows_the_pointer_until_it_is_let_go() {
+        let mut grip = Grip::new(Point::new(1000.0, 50.0), 420.0, 800.0);
+        assert_eq!(grip.pending(), 420.0);
+        grip.moved_to(940.0);
+        assert_eq!(grip.pending(), 480.0);
+        grip.moved_to(5000.0);
+        assert_eq!(grip.pending(), DOCK_MIN);
     }
 }

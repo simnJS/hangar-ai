@@ -11,8 +11,8 @@ use super::*;
 use crate::orchestration::brief::{BriefingInputs, build_briefing};
 use crate::orchestration::brief_text::PLAN_TAG;
 use crate::orchestration::events::OrchestratorEvent;
-use crate::orchestration::roles::{hq_of, manager_of, orchestration_of};
 use crate::orchestration::testkit::{pane, shell, strings, task, workspace};
+use crate::state::roles::{hq_of, manager_of, orchestration_of};
 use crate::state::types::{AgentId, AppState, OrchestrationSettings, Pane, PaneRole, Workspace};
 use crate::state::{AgentActivity, PaneActivity};
 
@@ -274,7 +274,7 @@ fn is_neither_an_orchestrator_nor_a_worker_and_has_a_briefing_of_its_own() {
     let world = setup();
     let state = world.state.lock().unwrap().clone();
     let home = &state.workspaces[0];
-    assert!(orchestrator(home).is_none());
+    assert!(orchestrator_of(home).is_none());
     assert!(workers_of(home).is_empty());
     assert_eq!(orchestration_of(home), OrchestrationSettings::default());
     // A manager pane listed first does not hide a workspace's orchestrator.
@@ -286,7 +286,7 @@ fn is_neither_an_orchestrator_nor_a_worker_and_has_a_briefing_of_its_own() {
             pane("o2", "orch", Some(PaneRole::Orchestrator)),
         ],
     );
-    assert_eq!(orchestrator(&mixed).map(|p| p.id.as_str()), Some("o2"));
+    assert_eq!(orchestrator_of(&mixed).map(|p| p.id.as_str()), Some("o2"));
     assert!(workers_of(&mixed).is_empty());
     let briefing = build_briefing(&BriefingInputs {
         state: &state,

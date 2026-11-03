@@ -49,13 +49,14 @@ use std::sync::Arc;
 use iced::{Subscription, Task};
 use serde_json::Value;
 
-use hangar_i18n::{Key, args, t_with};
+use hangar_i18n::{Key, Locale, args, t_with};
 
 use crate::message::{Intent, Message};
 use crate::services::{Channel, ControlRequest, CoreEvent, Services, inbox::Answer};
 use crate::shell::{Notice, Region};
 use crate::state::live::Delivering;
-use crate::state::{Model, StoreOutcome, WsId};
+use crate::state::roles::READY_TO_LAND_LABEL;
+use crate::state::{Model, StoreOutcome, Workspace, WsId};
 
 #[allow(unused_imports)]
 pub use port::{AppPort, CmdOut, Hook, ModelCmd, Port};
@@ -250,41 +251,58 @@ pub fn on_intent(
     };
     let workspace = m.workspace(ws)?.clone();
     let port = st.port(sv);
-    let locale = m.locale();
-    let task = task.clone();
-    Some(Task::future(async move {
-        let title = match port.delivery() {
-            Some(delivery) => delivery
-                .board_load(&workspace.cwd)
-                .await
-                .ok()
-                .and_then(|board| board.tasks.into_iter().find(|entry| entry.id == task))
-                .map_or_else(|| task.clone(), |entry| entry.title),
-            None => task.clone(),
-        };
-        let mut run = delivery::begin_delivery(&port, &workspace.id, &task).await;
-        let landed = delivery::land_delivery(&workspace, &task, &port).await;
-        run.end().await;
-        let notice = match landed {
-            Ok(()) => Notice::Agent(
-                t_with(
-                    locale,
-                    Key::NeedsYouLanded,
-                    &args!("title" => title.as_str()),
-                )
-                .into_owned(),
-            ),
-            Err(error) => Notice::Problem(
+    let landing = land(workspace, task.clone(), port, m.locale());
+    Some(Task::future(landing).then(|said| Task::batch(said.into_iter().map(Task::done))))
+}
+
+/// The key « Besoin de toi » gives a delivery's row (`needs_you::model`), so
+/// a failure reaches that row.
+fn land_key(workspace: &Workspace, task: &str) -> String {
+    format!("task:{}:{task}:{READY_TO_LAND_LABEL}", workspace.cwd)
+}
+
+/// Lands a delivery for the person, and what is then said: a notice either
+/// way, and on a failure the row's own word for it (`LandFailed`), as the
+/// TS's `landItem` threw back to its row. The notice is said too: a landing
+/// refused because its worker moved past it leaves the list, and its row
+/// with it.
+async fn land(workspace: Workspace, task: String, port: Port, locale: Locale) -> Vec<Message> {
+    let title = match port.delivery() {
+        Some(delivery) => delivery
+            .board_load(&workspace.cwd)
+            .await
+            .ok()
+            .and_then(|board| board.tasks.into_iter().find(|entry| entry.id == task))
+            .map_or_else(|| task.clone(), |entry| entry.title),
+        None => task.clone(),
+    };
+    let mut run = delivery::begin_delivery(&port, &workspace.id, &task).await;
+    let landed = delivery::land_delivery(&workspace, &task, &port).await;
+    run.end().await;
+    match landed {
+        Ok(()) => vec![Message::Intent(Intent::Notice(Notice::Agent(
+            t_with(
+                locale,
+                Key::NeedsYouLanded,
+                &args!("title" => title.as_str()),
+            )
+            .into_owned(),
+        )))],
+        Err(error) => vec![
+            Message::Intent(Intent::Notice(Notice::Problem(
                 t_with(
                     locale,
                     Key::NeedsYouLandFailed,
                     &args!("error" => error.as_str()),
                 )
                 .into_owned(),
-            ),
-        };
-        Message::Intent(Intent::Notice(notice))
-    }))
+            ))),
+            Message::NeedsYou(crate::needs_you::Msg::LandFailed {
+                key: land_key(&workspace, &task),
+                error,
+            }),
+        ],
+    }
 }
 
 /// Every core event, after the shell's own handling of it.

@@ -3,7 +3,8 @@
 
 use serde_json::Value;
 
-use crate::state::types::{AGENTS, OrchestrationSettings};
+use crate::state::layout::reading_order;
+use crate::state::types::AGENTS;
 use crate::state::{AgentId, AppState, Pane, Workspace};
 
 use super::port::{ModelCmd, Port};
@@ -105,27 +106,9 @@ pub fn effective_cwd(ws: &Workspace, pane: &Pane) -> String {
 }
 
 /// Panes in reading order, which is what "the last one" means on screen
-/// (`leafIds(normalizeTree(...))`).
-///
-/// TODO(P0b): `state::layout::normalize_tree` once ported; this keeps its
-/// order (the stored tree's leaves that still name a pane, then the panes it
-/// does not hold) without rebuilding the tree.
+/// (`leafIds(normalizeTree(...))`): the shell's `reading_order`.
 pub fn ordered(ws: &Workspace) -> Vec<&Pane> {
-    let mut order: Vec<&Pane> = Vec::new();
-    let leaves = ws.tree.as_ref().map(crate::state::layout::leaf_ids);
-    for id in leaves.iter().flatten() {
-        if let Some(pane) = ws.panes.iter().find(|pane| &pane.id == id)
-            && !order.iter().any(|seen| seen.id == pane.id)
-        {
-            order.push(pane);
-        }
-    }
-    for pane in &ws.panes {
-        if !order.iter().any(|seen| seen.id == pane.id) {
-            order.push(pane);
-        }
-    }
-    order
+    reading_order(&ws.panes, ws.tree.as_ref())
 }
 
 /// The workspace the agent is working in: its pane if Hangar launched it,
@@ -344,53 +327,4 @@ pub fn number_arg(value: Option<&Value>) -> Option<f64> {
 /// of its own (`onScreen`).
 pub fn on_screen(state: &AppState, ws: &Workspace) -> bool {
     ws.detached == Some(true) || state.active_workspace_id.as_deref() == Some(ws.id.as_str())
-}
-
-/// The permission modes an orchestration's agents may run in (null: the
-/// person's own).
-const PERMISSION_MODES: [&str; 3] = ["auto", "acceptEdits", "bypassPermissions"];
-
-/// A workspace's orchestration settings, each one absent or malformed read
-/// as its default (`orchestrationOf`).
-///
-/// TODO(P0b): `state::roles::orchestration_of` once roles.rs is ported; this
-/// is the same reading.
-pub fn orchestration_of(ws: &Workspace) -> OrchestrationSettings {
-    let defaults = OrchestrationSettings::default();
-    let Some(saved) = &ws.orchestration else {
-        return defaults;
-    };
-    let name = |value: &str, fallback: &str| {
-        let value = value.trim();
-        if value.is_empty() { fallback } else { value }.to_string()
-    };
-    let optional = |value: &Option<String>| {
-        value
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    OrchestrationSettings {
-        max_workers: if saved.max_workers >= 1 {
-            saved.max_workers
-        } else {
-            defaults.max_workers
-        },
-        max_attempts: if saved.max_attempts >= 1 {
-            saved.max_attempts
-        } else {
-            defaults.max_attempts
-        },
-        auto_merge: saved.auto_merge,
-        check_command: optional(&saved.check_command),
-        orchestrator_model: name(&saved.orchestrator_model, &defaults.orchestrator_model),
-        worker_model: name(&saved.worker_model, &defaults.worker_model),
-        reviewer_model: name(&saved.reviewer_model, &defaults.reviewer_model),
-        branch: optional(&saved.branch),
-        permission_mode: saved
-            .permission_mode
-            .clone()
-            .filter(|mode| PERMISSION_MODES.contains(&mode.as_str())),
-    }
 }

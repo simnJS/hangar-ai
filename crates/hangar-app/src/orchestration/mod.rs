@@ -29,7 +29,6 @@ pub mod live;
 pub mod manager_feed;
 pub mod port;
 pub mod projects;
-pub mod roles;
 pub mod runtime;
 pub mod text;
 pub mod worker;
@@ -96,7 +95,8 @@ pub enum Msg {
     /// The state is in: the runtime starts.
     Start,
     /// A pane was pinned or unpinned as orchestrator: its running session is
-    /// told (`announceRole`). Sent after the pin, so the snapshot has it.
+    /// told (`announceRole`). Made from P10's `Intent::AnnounceRole`, which
+    /// comes after the pin was applied, so the snapshot has it.
     AnnounceRole {
         ws: WsId,
         pane: PaneId,
@@ -144,7 +144,7 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 }
 
 /// The intents this package acts on: the person's « Arrêter les workers »,
-/// and a pin or an unpin, whose session is told.
+/// and a role given or taken (`Intent::AnnounceRole`), whose session is told.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
@@ -176,29 +176,23 @@ pub fn on_intent(
                 },
             ))
         }
-        Intent::PinOrchestrator { ws, pane, pinned } => {
-            // The snapshot is still the model before this update: whether the
-            // pane was the orchestrator before the pin or the unpin.
-            let before = sv.snapshot();
-            let was = before
-                .state
-                .workspaces
-                .iter()
-                .find(|entry| entry.id == *ws)
-                .and_then(|entry| entry.panes.iter().find(|p| p.id == *pane))
-                .and_then(|p| p.role);
-            let previous = match (pinned, was) {
-                (true, Some(PaneRole::Orchestrator)) => return None,
-                (true, _) => None,
-                (false, Some(PaneRole::Orchestrator)) => Some(PaneRole::Orchestrator),
-                (false, _) => return None,
-            };
-            Some(Task::done(Message::Orchestration(Msg::AnnounceRole {
-                ws: ws.clone(),
-                pane: pane.clone(),
-                previous,
-            })))
-        }
+        _ => role_told(intent).map(|msg| Task::done(Message::Orchestration(msg))),
+    }
+}
+
+/// The session to tell of a role given or taken, from P10's
+/// `Intent::AnnounceRole`. P10 sends it once its pin or unpin is in the
+/// model, and only when it changed something: a pin `pin_refusal` turned
+/// down sends none, so its pane is never told of a role it does not have.
+/// `Intent::PinOrchestrator` itself is not read here for that reason: it
+/// comes before P10 decides.
+fn role_told(intent: &Intent) -> Option<Msg> {
+    match intent {
+        Intent::AnnounceRole { ws, pane, previous } => Some(Msg::AnnounceRole {
+            ws: ws.clone(),
+            pane: pane.clone(),
+            previous: *previous,
+        }),
         _ => None,
     }
 }
@@ -228,4 +222,68 @@ pub fn on_event(
         _ => {}
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::types::{OrchestrationSettings, Workspace};
+
+    fn told(intent: Intent) -> Option<(WsId, PaneId, Option<PaneRole>)> {
+        role_told(&intent).map(|msg| match msg {
+            Msg::AnnounceRole { ws, pane, previous } => (ws, pane, previous),
+            Msg::Start => panic!("a role told, not a start"),
+        })
+    }
+
+    #[test]
+    fn a_pin_alone_tells_no_session_whatever_became_of_it() {
+        // P10 may refuse it (a worker's pane, a second orchestrator): the
+        // pane keeps its role, and nothing may tell it otherwise.
+        for pinned in [true, false] {
+            let pin = Intent::PinOrchestrator {
+                ws: "w1".into(),
+                pane: "p2".into(),
+                pinned,
+            };
+            assert_eq!(told(pin), None);
+        }
+    }
+
+    #[test]
+    fn tells_the_session_the_role_p10_gave_or_took() {
+        let given = Intent::AnnounceRole {
+            ws: "w1".into(),
+            pane: "p1".into(),
+            previous: None,
+        };
+        assert_eq!(told(given), Some(("w1".into(), "p1".into(), None)));
+        let taken = Intent::AnnounceRole {
+            ws: "w1".into(),
+            pane: "p1".into(),
+            previous: Some(PaneRole::Orchestrator),
+        };
+        assert_eq!(
+            told(taken),
+            Some(("w1".into(), "p1".into(), Some(PaneRole::Orchestrator)))
+        );
+    }
+
+    #[test]
+    fn reads_the_settings_through_the_shells_roles_with_the_branch_trimmed() {
+        // What the engine's own copy held to; the shell's `orchestration_of`
+        // is the one read now, for the workers' base branch and the
+        // deliveries' target.
+        let ws = Workspace {
+            orchestration: Some(OrchestrationSettings {
+                branch: Some("  develop ".into()),
+                ..OrchestrationSettings::default()
+            }),
+            ..Workspace::default()
+        };
+        assert_eq!(
+            crate::state::roles::orchestration_of(&ws).branch.as_deref(),
+            Some("develop")
+        );
+    }
 }

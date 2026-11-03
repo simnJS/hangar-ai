@@ -154,6 +154,7 @@ fn bar<'a>(
         .on_clear(msg(Msg::ClearQuery))
         .id(search_id())
         .width(Length::Fill);
+    let search = crate::keymap::guard(ctx, search);
     // Escape empties the field first, the way a search field does.
     let escapes = !st.query.is_empty();
     let search = keys::on_key(search, move |key, _| match key {
@@ -257,20 +258,20 @@ fn cap_note<'a>(st: &'a State, ctx: Ctx<'a>, count: usize) -> Element<'a, Messag
 
 /// A multi-line field of `rows` lines over a text editor's state.
 fn editor<'a>(
-    t: &'a Theme,
+    ctx: Ctx<'a>,
     content: &'a Content,
     rows: u16,
     placeholder: &'static str,
     on_action: fn(iced::widget::text_editor::Action) -> Msg,
 ) -> Element<'a, Message> {
-    iced::widget::text_editor(content)
+    let field = iced::widget::text_editor(content)
         .placeholder(placeholder)
         .on_action(move |action| msg(on_action(action)))
         .size(tokens::font_size::BODY)
         .padding(Padding::from([tokens::space::MD, tokens::space::LG]))
         .height(f32::from(rows) * tokens::font_size::BODY * tokens::line_height::BODY + 20.0)
-        .style(style::text_editor::field(t))
-        .into()
+        .style(style::text_editor::field(ctx.theme));
+    crate::keymap::guard(ctx, field)
 }
 
 /// The new-fact form: a title, the text, the tags, and what creating means.
@@ -281,22 +282,28 @@ fn composer<'a>(st: &'a State, ctx: Ctx<'a>, all: &'a [MemoryEntry]) -> Element<
     let replacing = st.confirming_replace && clash.is_some();
 
     let mut form = column![
-        input::text_field(t, &draft.title)
-            .placeholder(label(ctx, K::MemoryTitlePlaceholder))
-            .on_input(|title| msg(Msg::DraftTitle(title)))
-            .on_submit(msg(Msg::Create))
-            .id(composer_id()),
+        crate::keymap::guard(
+            ctx,
+            input::text_field(t, &draft.title)
+                .placeholder(label(ctx, K::MemoryTitlePlaceholder))
+                .on_input(|title| msg(Msg::DraftTitle(title)))
+                .on_submit(msg(Msg::Create))
+                .id(composer_id()),
+        ),
         editor(
-            t,
+            ctx,
             &draft.content,
             5,
             label(ctx, K::MemoryContentPlaceholder),
             Msg::DraftContent
         ),
-        input::text_field(t, &draft.tags)
-            .placeholder(label(ctx, K::MemoryTagsPlaceholder))
-            .on_input(|tags| msg(Msg::DraftTags(tags)))
-            .mono(),
+        crate::keymap::guard(
+            ctx,
+            input::text_field(t, &draft.tags)
+                .placeholder(label(ctx, K::MemoryTagsPlaceholder))
+                .on_input(|tags| msg(Msg::DraftTags(tags)))
+                .mono(),
+        ),
     ]
     .spacing(tokens::space::MD);
 
@@ -549,20 +556,26 @@ fn editing_form<'a>(ctx: Ctx<'a>, draft: &'a Draft) -> Element<'a, Message> {
     let save = btn::primary(t, ctx.t(K::MemorySave))
         .on_press_maybe(draft.is_complete().then(|| msg(Msg::SaveEdit)));
     column![
-        input::text_field(t, &draft.title)
-            .placeholder(label(ctx, K::MemoryTitlePlaceholder))
-            .on_input(|title| msg(Msg::EditTitle(title))),
+        crate::keymap::guard(
+            ctx,
+            input::text_field(t, &draft.title)
+                .placeholder(label(ctx, K::MemoryTitlePlaceholder))
+                .on_input(|title| msg(Msg::EditTitle(title))),
+        ),
         editor(
-            t,
+            ctx,
             &draft.content,
             8,
             label(ctx, K::MemoryContentPlaceholder),
             Msg::EditContent
         ),
-        input::text_field(t, &draft.tags)
-            .placeholder(label(ctx, K::MemoryTagsPlaceholder))
-            .on_input(|tags| msg(Msg::EditTags(tags)))
-            .mono(),
+        crate::keymap::guard(
+            ctx,
+            input::text_field(t, &draft.tags)
+                .placeholder(label(ctx, K::MemoryTagsPlaceholder))
+                .on_input(|tags| msg(Msg::EditTags(tags)))
+                .mono(),
+        ),
         row![
             typography::subtle(t, ctx.t(K::MemoryTagsHint)).width(Length::Fill),
             btn::ghost(t, ctx.t(K::CreateCancel)).on_press(msg(Msg::CancelEdit)),

@@ -51,8 +51,9 @@ const ROW: f32 = 19.0;
 const OVERSCAN: usize = 12;
 /// What a viewport is taken to be until the first scroll says.
 const FIRST_VIEWPORT: f32 = 900.0;
-/// A tab in the code is drawn as this many spaces.
-const TAB: &str = "    ";
+/// The distance between tab stops: the browser's default `tab-size`, which
+/// the web app's diff table (`white-space: pre`) never overrode.
+const TAB_STOP: usize = 8;
 /// The height of a file in the list (`.diff__file`).
 const FILE_ROW: f32 = 26.0;
 
@@ -82,6 +83,25 @@ pub struct Shown {
     last_line: u32,
 }
 
+/// `text` with each tab replaced by the spaces that reach the next tab stop,
+/// as a browser lays a tab out: a tab after three characters is five spaces,
+/// not a fixed number, so indentation lines up with what an editor shows.
+fn expand_tabs(text: &str, stop: usize) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut column = 0;
+    for c in text.chars() {
+        if c == '\t' {
+            let spaces = stop - column % stop;
+            out.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            out.push(c);
+            column += 1;
+        }
+    }
+    out
+}
+
 impl Shown {
     fn of(diff: &FileDiff) -> Shown {
         let rows: Vec<DiffRow> = parse_unified_diff(&diff.text)
@@ -89,7 +109,7 @@ impl Shown {
             .filter(|row| row.kind != DiffRowKind::Meta)
             .map(|mut row| {
                 if row.text.contains('\t') {
-                    row.text = row.text.replace('\t', TAB);
+                    row.text = expand_tabs(&row.text, TAB_STOP);
                 }
                 row
             })

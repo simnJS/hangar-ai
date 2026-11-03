@@ -869,3 +869,19 @@ mod around_it {
         );
     }
 }
+
+mod guarded {
+    use super::*;
+    use crate::settings::guard_testing::Fixture;
+
+    #[test]
+    fn the_create_form_s_branch_and_folder_leave_the_shortcut_to_the_keymap() {
+        let (panel, _) = panel();
+        let fixture = Fixture::new();
+        // A new branch is the form's first mode: its name and the folder.
+        assert_eq!(
+            fixture.split_chord(view::view(&panel, fixture.ctx())),
+            ["Noop", "Noop"]
+        );
+    }
+}

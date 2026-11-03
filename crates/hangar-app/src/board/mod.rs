@@ -19,7 +19,6 @@
 //! position, which the drag and the dock's grip need).
 
 pub mod actions;
-pub mod agent_pane;
 pub mod cache;
 mod card;
 mod dock;
@@ -38,7 +37,7 @@ mod snapshot;
 pub mod task_dialog;
 mod view;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,8 +49,8 @@ use iced::{Element, Point, Subscription, Task};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{BoardVariant, Overlay, Region, View};
-use crate::state::{Model, Patch, Settings, StoreAction};
+use crate::shell::{BoardVariant, Overlay, Panels, Region, View};
+use crate::state::{Model, Patch, Settings, StoreAction, Workspace};
 
 use actions::{After, Draft, Edit, Errors, Mutation};
 pub use cache::Live;
@@ -86,17 +85,21 @@ pub enum Pointer {
 pub struct State {
     filters: Filters,
     open_filter: Option<FilterKind>,
-    /// What is typed in the add field of each column, not made a card yet.
-    drafts: HashMap<Column, String>,
-    /// The column whose add field was asked for.
-    adding: Option<Column>,
+    /// What is typed in the add field of each column of each board, not made a
+    /// card yet. Keyed by the board's folder as well as the column: two
+    /// windows can draw two boards at once, and a draft belongs to the board
+    /// it was typed on.
+    drafts: HashMap<(String, Column), String>,
+    /// The board and column whose add field was asked for.
+    adding: Option<(String, Column)>,
     /// The dock's folded sections. Finished work, and work nobody started,
     /// are the least useful things to keep in view next to the agents.
     folded: Vec<Column>,
     /// Dock only: the filter row is one click away rather than always there.
     filter_bar: bool,
-    /// Asked for a first task from the empty board: show the columns anyway.
-    composing: bool,
+    /// The boards (by folder) a first task was asked for on, from the empty
+    /// board: they show the columns anyway.
+    composing: HashSet<String>,
     /// Why a move was refused, shown for a few seconds.
     toast: Option<(u64, String)>,
     toasts: u64,
@@ -116,7 +119,7 @@ impl Default for State {
             adding: None,
             folded: vec![Column::Todo, Column::Done],
             filter_bar: false,
-            composing: false,
+            composing: HashSet::new(),
             toast: None,
             toasts: 0,
             press: None,
@@ -156,22 +159,27 @@ pub enum Msg {
     Expand,
     HideDock,
 
-    // Columns
-    StartAdding(Column),
+    // Columns. Every message that writes, or reads what is written, carries the
+    // folder of the board it is about: the window that sent it draws the
+    // board of its own workspace, which is not the main window's active one
+    // when a workspace is detached.
+    StartAdding(String, Column),
     FocusAdd(Column),
     FocusField(&'static str),
-    Draft(Column, String),
-    Submit(Column),
-    ClearDraft(Column),
-    AddDetails(Column),
+    Draft(String, Column, String),
+    Submit(String, Column),
+    ClearDraft(String, Column),
+    AddDetails(String, Column),
     Fold(Column),
 
     // Cards
-    Press(String, Point),
+    /// `(cwd, task, position)`.
+    Press(String, String, Point),
     Pointer(Pointer),
     Enter(Column),
     Leave(Column),
-    OpenTask(String),
+    /// `(cwd, task)`.
+    OpenTask(String, String),
     FocusAgent {
         ws: String,
         pane: String,
@@ -186,8 +194,12 @@ pub enum Msg {
         max: f32,
     },
     GripReset,
+    /// An arrow key on the grip, with the widest the window allows (the
+    /// window that has the grip knows it; the message carries it).
     GripKey {
         widen: bool,
+        width: f32,
+        max: f32,
     },
 
     Dialog(task_dialog::Msg),
@@ -201,7 +213,7 @@ impl Msg {
         matches!(
             self,
             Msg::Press(..)
-                | Msg::OpenTask(_)
+                | Msg::OpenTask(..)
                 | Msg::Fold(_)
                 | Msg::OpenFilter(_)
                 | Msg::Filter(..)
@@ -210,7 +222,7 @@ impl Msg {
                 | Msg::OpenMcp
                 | Msg::Expand
                 | Msg::HideDock
-                | Msg::StartAdding(_)
+                | Msg::StartAdding(..)
                 | Msg::Draft(..)
                 | Msg::GripPress { .. }
                 | Msg::Dialog(_)
@@ -218,9 +230,11 @@ impl Msg {
     }
 
     /// The column whose draft this message is about, which it leaves be.
-    fn keeps_draft_of(&self) -> Option<Column> {
+    fn keeps_draft_of(&self) -> Option<(&str, Column)> {
         match self {
-            Msg::StartAdding(column) | Msg::Draft(column, _) => Some(*column),
+            Msg::StartAdding(cwd, column) | Msg::Draft(cwd, column, _) => {
+                Some((cwd.as_str(), *column))
+            }
             _ => None,
         }
     }
@@ -236,19 +250,36 @@ fn card_id(task: &str) -> Id {
     Id::from(format!("board-card-{task}"))
 }
 
-/// The folder of the board the window shows.
-fn active_cwd(m: &Model) -> Option<String> {
-    m.active_workspace().map(|ws| ws.cwd.clone())
+/// The folder of the board the window that has the keyboard shows. Only what
+/// has no window of its own to ask (the F6 landing) reads this; a message
+/// carries the folder of the board it was sent from.
+fn focused_cwd(m: &Model) -> Option<String> {
+    let workspace = match m.focused_window() {
+        Some(window) => m.window_workspace(window),
+        None => m.active_workspace().filter(|ws| ws.detached != Some(true)),
+    };
+    workspace.map(|ws| ws.cwd.clone())
 }
 
-/// Whether a board is on screen: the full view, or the dock beside the
-/// terminals.
-fn board_shown(m: &Model) -> bool {
-    match m.ui.view {
-        View::Board => true,
-        View::Terminals => m.settings().board_dock_open,
-        _ => false,
+/// The workspaces whose board is on screen now, one per window that draws
+/// one: the full view, or the dock (beside the terminals or as an open
+/// drawer), as the shell placed it for that window.
+fn boards_on_screen(m: &Model) -> Vec<&Workspace> {
+    if m.live.windows.is_empty() {
+        // Before the first window opens, the one the model describes.
+        let shown = match m.ui.view {
+            View::Board => true,
+            View::Terminals => m.settings().board_dock_open,
+            _ => false,
+        };
+        return m.active_workspace().filter(|_| shown).into_iter().collect();
     }
+    m.live
+        .windows
+        .keys()
+        .filter(|window| m.view_in(**window) == View::Board || Panels::of(m, **window).dock.shown)
+        .filter_map(|window| m.window_workspace(*window))
+        .collect()
 }
 
 fn task_named<'a>(m: &'a Model, cwd: &str, id: &str) -> Option<&'a BoardTask> {
@@ -276,25 +307,30 @@ fn read_one(m: &mut Model, cwd: &str) -> Task<Message> {
 
 /// Makes a card of what was typed in the add fields, but the one about to be
 /// typed in.
-fn flush_drafts(st: &mut State, m: &Model, keep: Option<Column>) -> Task<Message> {
-    let Some(cwd) = active_cwd(m) else {
-        return Task::none();
-    };
+fn flush_drafts(st: &mut State, keep: Option<(&str, Column)>) -> Task<Message> {
+    // Each draft is made on the board it was typed on, which may not be the
+    // one the message that abandoned it is about.
+    let mut abandoned: Vec<(String, Column)> = st
+        .drafts
+        .keys()
+        .filter(|(cwd, column)| keep != Some((cwd.as_str(), *column)))
+        .cloned()
+        .collect();
+    let rank = |column: &Column| Column::ALL.iter().position(|c| c == column);
+    abandoned.sort_by(|a, b| a.0.cmp(&b.0).then(rank(&a.1).cmp(&rank(&b.1))));
     let mut made = Vec::new();
-    for column in Column::ALL {
-        if Some(column) == keep {
+    for (cwd, column) in abandoned {
+        let Some(draft) = st.drafts.remove(&(cwd.clone(), column)) else {
             continue;
-        }
-        if let Some(draft) = st.drafts.remove(&column) {
-            let title = draft.trim();
-            if !title.is_empty() {
-                made.push(actions::run(
-                    &cwd,
-                    Mutation::Create(Draft::titled(title, column)),
-                    Errors::Swallow,
-                    After::Nothing,
-                ));
-            }
+        };
+        let title = draft.trim();
+        if !title.is_empty() {
+            made.push(actions::run(
+                &cwd,
+                Mutation::Create(Draft::titled(title, column)),
+                Errors::Swallow,
+                After::Nothing,
+            ));
         }
     }
     Task::batch(made)
@@ -310,13 +346,10 @@ fn toast(st: &mut State, words: String) -> Task<Message> {
     )
 }
 
-/// Moves a card to a column, unless it is blocked: the person has to lift the
-/// block first, and is told so.
-fn move_task(st: &mut State, m: &Model, id: &str, to: Column) -> Task<Message> {
-    let Some(cwd) = active_cwd(m) else {
-        return Task::none();
-    };
-    let Some(task) = task_named(m, &cwd, id) else {
+/// Moves a card of the board in `cwd` to a column, unless it is blocked: the
+/// person has to lift the block first, and is told so.
+fn move_task(st: &mut State, m: &Model, cwd: &str, id: &str, to: Column) -> Task<Message> {
+    let Some(task) = task_named(m, cwd, id) else {
         return Task::none();
     };
     if Column::of(task) == Some(to) {
@@ -333,7 +366,7 @@ fn move_task(st: &mut State, m: &Model, id: &str, to: Column) -> Task<Message> {
         return toast(st, words);
     }
     actions::run(
-        &cwd,
+        cwd,
         Mutation::Update {
             id: id.to_owned(),
             edit: Edit::Column(to),
@@ -344,28 +377,21 @@ fn move_task(st: &mut State, m: &Model, id: &str, to: Column) -> Task<Message> {
 }
 
 fn set_dock_width(m: &mut Model, width: f32) {
+    if (m.settings().board_dock_width - f64::from(width)).abs() < 0.5 {
+        return;
+    }
     m.apply(StoreAction::UpdateSettings(Patch::new(
         move |settings: &mut Settings| settings.board_dock_width = f64::from(width),
     )));
 }
 
-/// The widest the dock may be in the window that has the focus.
-fn dock_room(m: &Model) -> f32 {
-    let window =
-        m.ui.focused_window
-            .and_then(|window| m.ui.body_width.get(&window))
-            .copied()
-            .unwrap_or(crate::shell::windows::MAIN_SIZE.width);
-    dock::room(m, window)
-}
-
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     let abandoned = if msg.leaves_the_add_field() {
         // The field that was asked for is left, unless it is the next one.
-        if !matches!(msg, Msg::StartAdding(_) | Msg::Draft(..)) {
+        if !matches!(msg, Msg::StartAdding(..) | Msg::Draft(..)) {
             st.adding = None;
         }
-        flush_drafts(st, m, msg.keeps_draft_of())
+        flush_drafts(st, msg.keeps_draft_of())
     } else {
         Task::none()
     };
@@ -434,10 +460,10 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::HideDock => Task::done(Message::Intent(Intent::CloseDock)),
 
         // ---- Columns ----------------------------------------------------
-        Msg::StartAdding(column) => {
+        Msg::StartAdding(cwd, column) => {
             // Puts the cursor in a column's add field, unfolding it if need be.
-            st.composing = true;
-            st.adding = Some(column);
+            st.composing.insert(cwd.clone());
+            st.adding = Some((cwd, column));
             st.folded.retain(|folded| *folded != column);
             // The field is on screen after this message's view.
             Task::perform(
@@ -447,16 +473,16 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
         Msg::FocusAdd(column) => iced::widget::operation::focus(add_id(column)),
         Msg::FocusField(id) => iced::widget::operation::focus(id),
-        Msg::Draft(column, text) => {
-            st.drafts.insert(column, text);
+        Msg::Draft(cwd, column, text) => {
+            st.drafts.insert((cwd, column), text);
             Task::none()
         }
-        Msg::Submit(column) => {
-            let title = st.drafts.remove(&column).unwrap_or_default();
+        Msg::Submit(cwd, column) => {
+            let title = st.drafts.remove(&(cwd.clone(), column)).unwrap_or_default();
             st.adding = None;
-            let (Some(cwd), false) = (active_cwd(m), title.trim().is_empty()) else {
+            if title.trim().is_empty() {
                 return Task::none();
-            };
+            }
             actions::run(
                 &cwd,
                 Mutation::Create(Draft::titled(&title, column)),
@@ -464,16 +490,13 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                 After::Nothing,
             )
         }
-        Msg::ClearDraft(column) => {
-            st.drafts.remove(&column);
+        Msg::ClearDraft(cwd, column) => {
+            st.drafts.remove(&(cwd, column));
             Task::none()
         }
-        Msg::AddDetails(column) => {
-            let title = st.drafts.remove(&column).unwrap_or_default();
+        Msg::AddDetails(cwd, column) => {
+            let title = st.drafts.remove(&(cwd.clone(), column)).unwrap_or_default();
             st.adding = None;
-            let Some(cwd) = active_cwd(m) else {
-                return Task::none();
-            };
             st.seed = Some((column, title));
             Task::done(Message::Intent(Intent::OpenTask { cwd, task: None }))
         }
@@ -487,15 +510,12 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
 
         // ---- Cards ------------------------------------------------------
-        Msg::Press(id, at) => {
-            let Some(cwd) = active_cwd(m) else {
-                return Task::none();
-            };
+        Msg::Press(cwd, id, at) => {
             let Some(column) = task_named(m, &cwd, &id).and_then(Column::of) else {
                 return Task::none();
             };
             // A new press ends any drag in progress.
-            st.press = Some(drag::Press::new(id, column, at));
+            st.press = Some(drag::Press::new(id, column, at).on(&cwd));
             st.adding = None;
             Task::none()
         }
@@ -512,13 +532,10 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             }
             Task::none()
         }
-        Msg::OpenTask(id) => match active_cwd(m) {
-            Some(cwd) => Task::done(Message::Intent(Intent::OpenTask {
-                cwd,
-                task: Some(id),
-            })),
-            None => Task::none(),
-        },
+        Msg::OpenTask(cwd, id) => Task::done(Message::Intent(Intent::OpenTask {
+            cwd,
+            task: Some(id),
+        })),
         Msg::FocusAgent {
             ws,
             pane,
@@ -552,9 +569,8 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             set_dock_width(m, dock::default_width());
             Task::none()
         }
-        Msg::GripKey { widen } => {
-            let width = m.settings().board_dock_width as f32;
-            set_dock_width(m, dock::key_width(width, dock_room(m), widen));
+        Msg::GripKey { widen, width, max } => {
+            set_dock_width(m, dock::key_width(width, max, widen));
             Task::none()
         }
 
@@ -564,10 +580,19 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
 
 /// The pointer, while a card or the grip is held.
 fn pointer_event(st: &mut State, m: &mut Model, pointer: Pointer) -> Task<Message> {
-    if let Some(grip) = &st.grip {
+    if let Some(grip) = &mut st.grip {
+        // The width is saved once, when the pointer is let go, as the TS did:
+        // every move saved the settings and republished the snapshot. The
+        // pointer's travel is kept meanwhile. Escape or the window losing the
+        // focus drops it, and the panel keeps the width it had.
         match pointer {
-            Pointer::Moved(at) => set_dock_width(m, grip.width_at(at.x)),
-            Pointer::Released | Pointer::Cancelled => st.grip = None,
+            Pointer::Moved(at) => grip.moved_to(at.x),
+            Pointer::Released => {
+                let width = grip.pending();
+                st.grip = None;
+                set_dock_width(m, width);
+            }
+            Pointer::Cancelled => st.grip = None,
         }
         return Task::none();
     }
@@ -586,9 +611,12 @@ fn pointer_event(st: &mut State, m: &mut Model, pointer: Pointer) -> Task<Messag
             let Some(press) = st.press.take() else {
                 return Task::none();
             };
+            // The board the card was pressed on, which may not be the main
+            // window's.
+            let cwd = press.cwd.clone();
             match press.release() {
-                drag::Ended::Click(id) => handle(st, m, Msg::OpenTask(id)),
-                drag::Ended::Drop { task, to } => move_task(st, m, &task, to),
+                drag::Ended::Click(id) => handle(st, m, Msg::OpenTask(cwd, id)),
+                drag::Ended::Drop { task, to } => move_task(st, m, &cwd, &task, to),
                 drag::Ended::Nothing => Task::none(),
             }
         }
@@ -660,7 +688,7 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         all.push(iced::time::every(Duration::from_secs(60)).map(|_| Message::Board(Msg::Reload)));
     }
     // Cards in progress carry a clock, drawn to the minute.
-    if board_shown(m) && clock_running(m) {
+    if clock_running(m) {
         all.push(iced::time::every(Duration::from_secs(30)).map(|_| Message::Board(Msg::Redraw)));
     }
     if st.press.is_some() || st.grip.is_some() {
@@ -669,15 +697,15 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     Subscription::batch(all)
 }
 
-/// Whether a task of the board on screen is in progress with a clock.
+/// Whether a task of a board on screen, in any window, is in progress with a
+/// clock.
 fn clock_running(m: &Model) -> bool {
-    let Some(workspace) = m.active_workspace() else {
-        return false;
-    };
-    m.live.board.tasks(&workspace.cwd).is_some_and(|tasks| {
-        tasks
-            .iter()
-            .any(|task| task.column == "doing" && task.doing_since.is_some())
+    boards_on_screen(m).into_iter().any(|workspace| {
+        m.live.board.tasks(&workspace.cwd).is_some_and(|tasks| {
+            tasks
+                .iter()
+                .any(|task| task.column == "doing" && task.doing_since.is_some())
+        })
     })
 }
 
@@ -687,9 +715,9 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
     if !matches!(region, Region::Main | Region::Dock) {
         return None;
     }
-    let cwd = active_cwd(m)?;
+    let cwd = focused_cwd(m)?;
     let tasks = m.live.board.tasks(&cwd)?;
-    if tasks.is_empty() && !st.composing {
+    if tasks.is_empty() && !st.composing.contains(&cwd) {
         return None;
     }
     let dock = region == Region::Dock;
@@ -756,7 +784,7 @@ fn react(st: &mut State, m: &mut Model, intent: &Intent) -> Option<Task<Message>
             st.press = None;
             st.grip = None;
             st.adding = None;
-            st.composing = false;
+            st.composing.clear();
             st.toast = None;
             None
         }
@@ -785,13 +813,16 @@ pub fn on_event(
 /// Region `main` in the board view (`BoardVariant::Full`), or region `dock`
 /// beside the terminals (`BoardVariant::Dock`).
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, variant: BoardVariant) -> Element<'a, Message> {
-    let Some(workspace) = ctx.model.active_workspace() else {
+    // The workspace of this window: a detached one draws its own board, not
+    // the main window's active one.
+    let Some(workspace) = ctx.workspace() else {
         return Space::new().into();
     };
     match variant {
         BoardVariant::Full => view::board(st, ctx, &workspace.cwd, None),
         BoardVariant::Dock { width, .. } => {
-            let max = dock::room(ctx.model, ctx.metrics.body_width);
+            // The room the shell placed the panel in, for this window.
+            let max = ctx.panels().dock.max;
             view::board(st, ctx, &workspace.cwd, Some((width, max)))
         }
     }
@@ -809,7 +840,7 @@ pub fn task_view<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::snapshot::{CWD, model, tasks};
+    use super::snapshot::{CWD, SITE, model, tasks, two_windows};
     use super::*;
     use hangar_i18n::Locale;
 
@@ -830,7 +861,11 @@ mod tests {
     }
 
     fn drag(st: &mut State, m: &mut Model, id: &str, to: Column) -> Task<Message> {
-        step(st, m, Msg::Press(id.into(), Point::new(10.0, 10.0)));
+        step(
+            st,
+            m,
+            Msg::Press(CWD.into(), id.into(), Point::new(10.0, 10.0)),
+        );
         step(st, m, Msg::Pointer(Pointer::Moved(Point::new(80.0, 10.0))));
         step(st, m, Msg::Enter(to));
         handle(st, m, Msg::Pointer(Pointer::Released))
@@ -838,15 +873,16 @@ mod tests {
 
     #[test]
     fn what_was_typed_becomes_a_card_when_the_person_goes_elsewhere() {
-        let (mut st, m) = setup();
-        st.drafts.insert(Column::Todo, "  Fix the thing ".into());
-        st.drafts.insert(Column::Done, "   ".into());
+        let (mut st, _m) = setup();
+        st.drafts
+            .insert((CWD.into(), Column::Todo), "  Fix the thing ".into());
+        st.drafts.insert((CWD.into(), Column::Done), "   ".into());
 
         // Typing in another column leaves the first one's field.
-        let typing = Msg::Draft(Column::Doing, "x".into());
+        let typing = Msg::Draft(CWD.into(), Column::Doing, "x".into());
         assert!(typing.leaves_the_add_field());
-        assert_eq!(typing.keeps_draft_of(), Some(Column::Doing));
-        let made = flush_drafts(&mut st, &m, Some(Column::Doing));
+        assert_eq!(typing.keeps_draft_of(), Some((CWD, Column::Doing)));
+        let made = flush_drafts(&mut st, typing.keeps_draft_of());
         // One card, from the one that had words; both drafts are gone.
         assert_eq!(made.units(), 1);
         assert!(st.drafts.is_empty());
@@ -854,31 +890,33 @@ mod tests {
 
     #[test]
     fn typing_in_a_field_does_not_make_a_card_of_it() {
-        let (mut st, m) = setup();
-        st.drafts.insert(Column::Todo, "Fix".into());
-        let made = flush_drafts(&mut st, &m, Some(Column::Todo));
+        let (mut st, _m) = setup();
+        st.drafts.insert((CWD.into(), Column::Todo), "Fix".into());
+        let made = flush_drafts(&mut st, Some((CWD, Column::Todo)));
         assert_eq!(made.units(), 0);
         assert_eq!(
-            st.drafts.get(&Column::Todo).map(String::as_str),
+            st.drafts
+                .get(&(CWD.to_owned(), Column::Todo))
+                .map(String::as_str),
             Some("Fix")
         );
-        assert!(!Msg::Submit(Column::Todo).leaves_the_add_field());
+        assert!(!Msg::Submit(CWD.into(), Column::Todo).leaves_the_add_field());
         assert!(!Msg::Pointer(Pointer::Released).leaves_the_add_field());
     }
 
     #[test]
     fn submitting_makes_the_card_and_empties_the_field() {
         let (mut st, mut m) = setup();
-        st.drafts.insert(Column::Todo, "Fix".into());
-        st.adding = Some(Column::Todo);
+        st.drafts.insert((CWD.into(), Column::Todo), "Fix".into());
+        st.adding = Some((CWD.into(), Column::Todo));
         assert_eq!(
-            handle(&mut st, &mut m, Msg::Submit(Column::Todo)).units(),
+            handle(&mut st, &mut m, Msg::Submit(CWD.into(), Column::Todo)).units(),
             1
         );
         assert!(st.drafts.is_empty() && st.adding.is_none());
         // Nothing typed: nothing made.
         assert_eq!(
-            handle(&mut st, &mut m, Msg::Submit(Column::Todo)).units(),
+            handle(&mut st, &mut m, Msg::Submit(CWD.into(), Column::Todo)).units(),
             0
         );
     }
@@ -907,7 +945,7 @@ mod tests {
         step(
             &mut st,
             &mut m,
-            Msg::Press(BLOCKED.into(), Point::new(1.0, 1.0)),
+            Msg::Press(CWD.into(), BLOCKED.into(), Point::new(1.0, 1.0)),
         );
         step(
             &mut st,
@@ -925,7 +963,7 @@ mod tests {
         step(
             &mut st,
             &mut m,
-            Msg::Press(DOING.into(), Point::new(5.0, 5.0)),
+            Msg::Press(CWD.into(), DOING.into(), Point::new(5.0, 5.0)),
         );
         step(
             &mut st,
@@ -943,7 +981,7 @@ mod tests {
         step(
             &mut st,
             &mut m,
-            Msg::Press(FREE.into(), Point::new(5.0, 5.0)),
+            Msg::Press(CWD.into(), FREE.into(), Point::new(5.0, 5.0)),
         );
         step(
             &mut st,
@@ -959,7 +997,11 @@ mod tests {
     #[test]
     fn a_press_on_a_task_that_is_gone_starts_nothing() {
         let (mut st, mut m) = setup();
-        step(&mut st, &mut m, Msg::Press("gone".into(), Point::ORIGIN));
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(CWD.into(), "gone".into(), Point::ORIGIN),
+        );
         assert!(st.press.is_none());
     }
 
@@ -995,8 +1037,8 @@ mod tests {
     #[test]
     fn asking_to_add_unfolds_the_column_and_shows_the_columns() {
         let (mut st, mut m) = setup();
-        let focus = handle(&mut st, &mut m, Msg::StartAdding(Column::Done));
-        assert!(st.composing && st.adding == Some(Column::Done));
+        let focus = handle(&mut st, &mut m, Msg::StartAdding(CWD.into(), Column::Done));
+        assert!(st.composing.contains(CWD) && st.adding == Some((CWD.into(), Column::Done)));
         assert!(!st.folded.contains(&Column::Done));
         // The keyboard goes to the field once it is drawn.
         assert_eq!(focus.units(), 1);
@@ -1084,8 +1126,9 @@ mod tests {
     #[test]
     fn a_new_task_takes_what_the_add_field_held() {
         let (mut st, mut m) = setup();
-        st.drafts.insert(Column::Doing, "Typed in the board".into());
-        step(&mut st, &mut m, Msg::AddDetails(Column::Doing));
+        st.drafts
+            .insert((CWD.into(), Column::Doing), "Typed in the board".into());
+        step(&mut st, &mut m, Msg::AddDetails(CWD.into(), Column::Doing));
         assert!(st.drafts.is_empty());
         let new = Intent::OpenTask {
             cwd: CWD.into(),
@@ -1119,11 +1162,15 @@ mod tests {
     #[test]
     fn leaving_the_board_ends_what_was_in_progress() {
         let (mut st, mut m) = setup();
-        step(&mut st, &mut m, Msg::Press(FREE.into(), Point::ORIGIN));
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(CWD.into(), FREE.into(), Point::ORIGIN),
+        );
         st.open_filter = Some(FilterKind::State);
-        st.composing = true;
+        st.composing.insert(CWD.into());
         react(&mut st, &mut m, &Intent::SetView(View::Terminals));
-        assert!(st.press.is_none() && st.open_filter.is_none() && !st.composing);
+        assert!(st.press.is_none() && st.open_filter.is_none() && st.composing.is_empty());
     }
 
     #[test]
@@ -1140,9 +1187,272 @@ mod tests {
 
     #[test]
     fn the_clock_runs_only_while_a_task_is_in_progress_with_one() {
-        let (_, m) = setup();
+        let (_, mut m) = setup();
+        // No board is on screen: nothing to redraw.
+        assert!(!clock_running(&m));
+        m.ui.view = View::Board;
         assert!(clock_running(&m));
-        let idle = model(Locale::En, "graphite", Some(vec![model::test_task("a")]));
+        let mut idle = model(Locale::En, "graphite", Some(vec![model::test_task("a")]));
+        idle.ui.view = View::Board;
         assert!(!clock_running(&idle));
+    }
+
+    // ---- Two windows ------------------------------------------------------
+
+    /// What `actions::run` was asked for, without running it.
+    fn asked() -> Vec<(String, Mutation)> {
+        actions::take_asked()
+    }
+
+    #[test]
+    fn a_card_added_in_a_detached_window_lands_on_that_workspaces_board() {
+        // The main window's active workspace is on `CWD`; the person is in the
+        // detached `site` window, whose board is on `SITE`.
+        let (mut m, _main, _site) = two_windows();
+        let mut st = State::default();
+        asked();
+        step(&mut st, &mut m, Msg::StartAdding(SITE.into(), Column::Todo));
+        step(
+            &mut st,
+            &mut m,
+            Msg::Draft(SITE.into(), Column::Todo, "Fix the header".into()),
+        );
+        step(&mut st, &mut m, Msg::Submit(SITE.into(), Column::Todo));
+        let written = asked();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, SITE);
+        assert!(matches!(
+            &written[0].1,
+            Mutation::Create(draft) if draft.title == "Fix the header" && draft.column == Column::Todo
+        ));
+    }
+
+    #[test]
+    fn a_draft_is_made_on_the_board_it_was_typed_on() {
+        // Typed in the detached window, abandoned by a press in the main one.
+        let (mut m, _main, _site) = two_windows();
+        let mut st = State::default();
+        asked();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Draft(SITE.into(), Column::Todo, "From the site".into()),
+        );
+        let elsewhere = Msg::Press(CWD.into(), FREE.into(), Point::ORIGIN);
+        assert!(elsewhere.leaves_the_add_field());
+        drop(update_without_services(&mut st, &mut m, elsewhere));
+        let written = asked();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, SITE);
+    }
+
+    /// `update` without a `Services`, for the messages that do not use one.
+    fn update_without_services(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
+        let abandoned = flush_drafts(st, msg.keeps_draft_of());
+        Task::batch([abandoned, handle(st, m, msg)])
+    }
+
+    #[test]
+    fn a_card_dropped_in_a_detached_window_moves_on_that_workspaces_board() {
+        let (mut m, _main, _site) = two_windows();
+        let mut st = State::default();
+        asked();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(SITE.into(), "site-task".into(), Point::new(5.0, 5.0)),
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(90.0, 5.0))),
+        );
+        step(&mut st, &mut m, Msg::Enter(Column::Review));
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        let written = asked();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, SITE);
+        assert!(matches!(
+            &written[0].1,
+            Mutation::Update { id, edit: Edit::Column(Column::Review) } if id == "site-task"
+        ));
+    }
+
+    #[test]
+    fn a_click_on_a_card_of_a_detached_window_opens_the_task_of_its_board() {
+        let (mut m, _main, _site) = two_windows();
+        let mut st = State::default();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(SITE.into(), "site-task".into(), Point::new(5.0, 5.0)),
+        );
+        assert_eq!(
+            st.press.as_ref().map(|press| press.cwd.as_str()),
+            Some(SITE)
+        );
+        let opened = handle(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        assert_eq!(opened.units(), 1);
+    }
+
+    #[test]
+    fn the_keyboard_lands_on_the_board_of_the_window_that_has_it() {
+        let (mut m, main, site) = two_windows();
+        let st = State::default();
+        // The detached window has the keyboard: its board has one card.
+        assert_eq!(focused_cwd(&m).as_deref(), Some(SITE));
+        assert!(focus_entry(&st, &m, Region::Main).is_some());
+        // The main window has it: the active workspace's board.
+        m.ui.focused_window = Some(main);
+        assert_eq!(focused_cwd(&m).as_deref(), Some(CWD));
+        let _ = site;
+    }
+
+    #[test]
+    fn the_clock_runs_for_a_board_on_screen_in_any_window() {
+        use crate::state::Patch;
+        let (mut m, main, site) = two_windows();
+        // Only the site's board has a task in progress with a clock.
+        let mut doing = model::test_task("site-task");
+        doing.column = "doing".into();
+        doing.doing_since = Some(1);
+        m.live.board.request(SITE);
+        m.live.board.answer(SITE, Some(Arc::new(vec![doing])));
+        let idle: Vec<BoardTask> = vec![model::test_task("idle")];
+        m.live.board.request(CWD);
+        m.live.board.answer(CWD, Some(Arc::new(idle)));
+        m.apply(StoreAction::UpdateSettings(Patch::new(
+            |settings: &mut Settings| settings.board_dock_open = true,
+        )));
+        // Every window shows its terminals with the dock beside them.
+        assert!(boards_on_screen(&m).iter().any(|ws| ws.cwd == SITE));
+        assert!(clock_running(&m), "the site's dock is on screen");
+
+        // The site window shows the memory view: its board is not drawn.
+        m.ui.focused_window = Some(site);
+        m.ui.view = View::Memory;
+        assert!(!boards_on_screen(&m).iter().any(|ws| ws.cwd == SITE));
+        assert!(!clock_running(&m));
+
+        // The main window on the full board: its workspace's board is drawn,
+        // and the site window (back on its terminals, dock open) draws its own.
+        m.ui.focused_window = Some(main);
+        m.ui.view = View::Board;
+        let drawn: Vec<&str> = boards_on_screen(&m)
+            .iter()
+            .map(|ws| ws.cwd.as_str())
+            .collect();
+        assert!(drawn.contains(&CWD) && drawn.contains(&SITE), "{drawn:?}");
+    }
+
+    #[test]
+    fn the_dock_as_a_drawer_counts_as_on_screen() {
+        use crate::shell::Drawer;
+        use crate::state::Patch;
+        let (mut m, main, site) = two_windows();
+        m.apply(StoreAction::UpdateSettings(Patch::new(
+            |settings: &mut Settings| settings.board_dock_open = false,
+        )));
+        // The dock is closed: nothing is drawn.
+        assert!(boards_on_screen(&m).is_empty());
+        // Too narrow for a dock beside the terminals: the shell makes it a
+        // drawer, shown only while the person has opened it.
+        m.ui.body_width.insert(site, 700.0);
+        m.ui.drawer = Some(Drawer::Dock);
+        assert!(
+            Panels::of(&m, site).dock.drawer,
+            "the room leaves only a drawer"
+        );
+        // The old rule read the setting alone and drew no clock for it.
+        assert!(boards_on_screen(&m).iter().any(|ws| ws.cwd == SITE));
+    }
+
+    #[test]
+    fn the_grip_saves_the_width_once_when_it_is_let_go() {
+        let (mut st, mut m) = setup();
+        let saved = |m: &Model| m.settings().board_dock_width;
+        let before = saved(&m);
+        let revision = m.revision();
+        step(
+            &mut st,
+            &mut m,
+            Msg::GripPress {
+                at: Point::new(1000.0, 50.0),
+                width: before as f32,
+                max: 800.0,
+            },
+        );
+        for x in [990.0, 960.0, 940.0] {
+            step(
+                &mut st,
+                &mut m,
+                Msg::Pointer(Pointer::Moved(Point::new(x, 50.0))),
+            );
+        }
+        // Nothing is written while the pointer travels.
+        assert_eq!(saved(&m), before);
+        assert_eq!(m.revision(), revision);
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        assert_eq!(saved(&m), before + 60.0);
+        assert!(st.grip.is_none());
+        assert_eq!(m.revision(), revision + 1);
+    }
+
+    #[test]
+    fn a_cancelled_grip_leaves_the_width_as_it_was() {
+        let (mut st, mut m) = setup();
+        let before = m.settings().board_dock_width;
+        step(
+            &mut st,
+            &mut m,
+            Msg::GripPress {
+                at: Point::new(1000.0, 50.0),
+                width: before as f32,
+                max: 800.0,
+            },
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(900.0, 50.0))),
+        );
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Cancelled));
+        assert_eq!(m.settings().board_dock_width, before);
+        assert!(st.grip.is_none());
+    }
+
+    #[test]
+    fn a_grip_released_where_it_began_writes_nothing() {
+        let (mut st, mut m) = setup();
+        let revision = m.revision();
+        let width = m.settings().board_dock_width as f32;
+        step(
+            &mut st,
+            &mut m,
+            Msg::GripPress {
+                at: Point::new(1000.0, 50.0),
+                width,
+                max: 800.0,
+            },
+        );
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        assert_eq!(m.revision(), revision);
+    }
+
+    #[test]
+    fn the_arrow_keys_widen_and_narrow_within_the_room_the_message_carries() {
+        let (mut st, mut m) = setup();
+        let before = m.settings().board_dock_width as f32;
+        step(
+            &mut st,
+            &mut m,
+            Msg::GripKey {
+                widen: true,
+                width: before,
+                max: before + 10.0,
+            },
+        );
+        // The window leaves only ten more points.
+        assert_eq!(m.settings().board_dock_width as f32, before + 10.0);
     }
 }

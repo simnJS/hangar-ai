@@ -511,6 +511,22 @@ impl Live {
         self.refresh_gauge(&info.id);
     }
 
+    /// The agent's command was typed into the shell: the session starts now
+    /// and says so in the history. Only for the agents that have no mod to
+    /// say it (`resumed` is the session the command resumes).
+    pub(super) fn launched(&mut self, info: &PaneInfo, resumed: Option<&str>, now: EpochMs) {
+        if !self.machines.contains_key(&info.id) {
+            return;
+        }
+        self.insights
+            .update(&info.id, |insight| insight.session_since = Some(now));
+        self.record(
+            &info.id,
+            session_event(resumed.unwrap_or_default(), resumed.is_some()),
+            now,
+        );
+    }
+
     // ----- the history
 
     /// A line in the pane's history, for the inspector. An agent that saves

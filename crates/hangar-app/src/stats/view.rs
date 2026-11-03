@@ -85,6 +85,19 @@ fn page<'a>(
                 .into(),
         },
     };
+    // What the cache said, kept on screen and held back while the disk is
+    // read.
+    let stale = ui::is_stale(
+        live.refreshing,
+        live.data.as_ref().is_some_and(|data| data.scan.cached_only),
+        live.refresh_started,
+        ctx.now,
+    );
+    let body = if stale {
+        iced::widget::stack![body, ui::stale_veil(ui.t)].into()
+    } else {
+        body
+    };
     container(column![
         bar,
         rule::horizontal(1).style(style::rule::sep(ui.t)),

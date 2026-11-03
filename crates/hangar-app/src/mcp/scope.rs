@@ -18,10 +18,9 @@
 //! file and tested with it; they belong to the pane launch (P4/P5), which
 //! calls them from `crate::mcp::scope`.
 
-use serde_json::Value;
-
 use hangar_core::mcp_scope::{ServerInfo, Status, Transport};
 
+use crate::state::live::{PaneMcp as Launched, PaneMcpMode};
 use crate::state::types::{McpMode, ShellInfo, Workspace, WorkspaceMcp};
 
 /// Absent from every workspace saved before this existed: Claude Code's own.
@@ -138,31 +137,20 @@ pub struct PaneMcp {
     pub hangar: Option<bool>,
 }
 
-impl PaneMcp {
-    /// Reads what a pane's insight holds (`PaneInsight.mcp`, raw JSON until P4
-    /// types it): `{mode: "inherit"}` or `{mode: "custom", servers: [..]}`,
-    /// each with an optional `hangar`.
-    pub fn from_value(value: &Value) -> Option<PaneMcp> {
-        let mode = match value.get("mode")?.as_str()? {
-            "inherit" => McpMode::Inherit,
-            "custom" => McpMode::Custom,
-            _ => return None,
+/// What the launch recorded (`panes_logic::Live::set_launch_mcp`), in the
+/// shape the rules compare: one list of names for `custom`, none for
+/// `inherit`.
+impl From<&Launched> for PaneMcp {
+    fn from(launch: &Launched) -> PaneMcp {
+        let (mode, servers) = match &launch.mode {
+            PaneMcpMode::Inherit => (McpMode::Inherit, Vec::new()),
+            PaneMcpMode::Custom { servers } => (McpMode::Custom, servers.clone()),
         };
-        let servers = value
-            .get("servers")
-            .and_then(Value::as_array)
-            .map(|names| {
-                names
-                    .iter()
-                    .filter_map(|name| name.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(PaneMcp {
+        PaneMcp {
             mode,
             servers,
-            hangar: value.get("hangar").and_then(Value::as_bool),
-        })
+            hangar: launch.hangar,
+        }
     }
 }
 
@@ -478,23 +466,25 @@ mod tests {
     }
 
     #[test]
-    fn reads_what_a_panes_insight_holds() {
-        use serde_json::json;
+    fn reads_what_the_launch_recorded() {
+        let inherit = Launched {
+            mode: PaneMcpMode::Inherit,
+            hangar: None,
+        };
+        assert_eq!(PaneMcp::from(&inherit), running_inherit());
+        let custom = Launched {
+            mode: PaneMcpMode::Custom {
+                servers: vec!["hangar".into(), "docs".into()],
+            },
+            hangar: Some(true),
+        };
         assert_eq!(
-            PaneMcp::from_value(&json!({"mode": "inherit"})),
-            Some(running_inherit())
-        );
-        assert_eq!(
-            PaneMcp::from_value(
-                &json!({"mode": "custom", "servers": ["hangar", 3, "docs"], "hangar": true})
-            ),
-            Some(PaneMcp {
+            PaneMcp::from(&custom),
+            PaneMcp {
                 hangar: Some(true),
                 ..running(&["hangar", "docs"])
-            })
+            }
         );
-        assert_eq!(PaneMcp::from_value(&json!({"mode": "elsewhere"})), None);
-        assert_eq!(PaneMcp::from_value(&json!("custom")), None);
     }
 
     #[test]

@@ -17,14 +17,18 @@
 //! launched, `Unmounted` when the terminal goes.
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hangar_core::kits::IssueReason;
+use hangar_core::kits::{KitInfo, LaunchIssue};
 use hangar_i18n::{Key, Locale, Translator, args};
 use hangar_term::Terminal;
 use iced::Task;
 
+use crate::kits::model::{
+    KitLaunchIssue, LaunchReason, PaneKits, kit_issue_notes, load_pane_kits_with,
+};
 use crate::mcp::scope::{ShellFamily, mcp_config_arg, shell_family, workspace_mcp};
 use crate::message::{Intent, Message};
 use crate::orchestration_ui::actions::{
@@ -36,6 +40,7 @@ use crate::panes_logic::agents::{LaunchOptions, is_resumable, known_session_ids,
 use crate::panes_logic::shells::resolve_shell;
 use crate::services::{CoreEvent, Services};
 use crate::state::live::{PaneMcp, PaneMcpMode, PaneStatus};
+use crate::state::roles::{ORCHESTRATION_ALLOWED_TOOLS, orchestration_of};
 use crate::state::types::{AgentId, McpMode, Pane, PaneRole, Settings, ShellInfo, Workspace};
 use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
 
@@ -49,10 +54,6 @@ use super::search::Search;
 /// shell starts at the default 80×24: a pane of a workspace off screen is
 /// never measured, as a hidden xterm.js was never fitted.
 pub const MEASURE_WAIT: Duration = Duration::from_millis(250);
-
-/// The tools an orchestrator and its workers are let through without asking
-/// (`ORCHESTRATION_ALLOWED_TOOLS`).
-const ORCHESTRATION_ALLOWED_TOOLS: [&str; 1] = ["mcp__hangar"];
 
 /// A pane, while it is mounted.
 pub struct PaneRt {
@@ -109,7 +110,9 @@ impl std::fmt::Debug for PaneRt {
 /// What `pty_spawn` answered, and what the launch learnt on the way.
 #[derive(Debug, Clone)]
 pub struct SpawnReport {
-    pub kit_issues: Vec<(String, IssueReason, Option<String>)>,
+    /// Why each kit the pane was given stays out of it: the ones held for
+    /// what they run by themselves first, then those `pty_spawn` kept out.
+    pub kit_issues: Vec<KitLaunchIssue>,
     /// The account the pane was launched on, as P8's choice resolved it.
     pub resolved: Option<String>,
     /// The account that was asked for and is gone: the fallback applies.
@@ -135,27 +138,80 @@ pub fn shell_of<'a>(m: &'a Model, ws: &Workspace, pane: &Pane) -> Option<&'a She
     )
 }
 
-/// The folder a pane's shell opens in.
-pub fn folder_of(ws: &Workspace, pane: &Pane) -> String {
-    pane.cwd
-        .clone()
-        .filter(|cwd| !cwd.is_empty())
-        .unwrap_or_else(|| ws.cwd.clone())
+/// The folder a pane's shell opens in: P4's rule, the one every package uses.
+pub use crate::panes_logic::folder_of;
+
+/// What a pane's kits are decided from: its workspace's entries and the ones
+/// turned on everywhere, with their grants, as the model held them when the
+/// pane mounted. Only these two lists are kept, not the whole workspace and
+/// settings.
+#[derive(Debug, Clone, Default)]
+struct KitChoice {
+    ws: Workspace,
+    settings: Settings,
 }
 
-/// The kits a pane of `ws` starts with: the workspace's, then those turned on
-/// everywhere (`effectiveKits`). Which of them stay out (missing, broken,
-/// forbidden by a policy) is core's to say at spawn; the hooks a GitHub kit
-/// changed since they were accepted (`paneKits`' `held`) are P14's to check,
-/// and until it does such a kit loads with the pane.
-fn kits_of(settings: &Settings, ws: &Workspace) -> Vec<String> {
-    let mut ids: Vec<String> = ws.kits.iter().flatten().map(|kit| kit.id.clone()).collect();
-    for kit in settings.kits_everywhere.iter().flatten() {
-        if !ids.contains(&kit.id) {
-            ids.push(kit.id.clone());
+impl KitChoice {
+    fn of(settings: &Settings, ws: &Workspace) -> KitChoice {
+        KitChoice {
+            ws: Workspace {
+                kits: ws.kits.clone(),
+                ..Workspace::default()
+            },
+            settings: Settings {
+                kits_everywhere: settings.kits_everywhere.clone(),
+                ..Settings::default()
+            },
         }
     }
-    ids
+}
+
+/// The kits a pane starts with, and the ones held out (`loadPaneKits`), from
+/// `list`, the kits on disk as they are at the spawn. A GitHub kit whose
+/// hooks (or anything else it runs by itself) changed since the workspace
+/// accepted them stays out of the pane until they are accepted again: core's
+/// `pty_spawn` loads every id it is handed, so this is where the consent is
+/// held. What else keeps a kit out (missing, broken, forbidden by a policy)
+/// core says at spawn. `None`, a login pane, starts with no kit at all.
+async fn launch_kits<F, Fut>(choice: Option<&KitChoice>, list: F) -> PaneKits
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Vec<KitInfo>, String>>,
+{
+    match choice {
+        Some(choice) => load_pane_kits_with(Some(&choice.ws), Some(&choice.settings), list).await,
+        None => PaneKits::default(),
+    }
+}
+
+/// Why each kit a pane was given stays out of it, in the order its notes are
+/// shown (`[...held, ...kitIssues]`): those held for what they run by
+/// themselves, then what `pty_spawn` kept out.
+fn kit_issues(held: &[String], spawned: &[LaunchIssue]) -> Vec<KitLaunchIssue> {
+    held.iter()
+        .map(|id| KitLaunchIssue {
+            id: id.clone(),
+            reason: LaunchReason::Hooks,
+            detail: None,
+        })
+        .chain(spawned.iter().map(KitLaunchIssue::from))
+        .collect()
+}
+
+/// `--permission-mode` and `--allowedTools` of a launch: for an orchestrator
+/// and its workers, which work while nobody watches, the mode the workspace
+/// chose for them, read as `orchestrationOf` reads it (a mode that is not
+/// offered, edited in by hand, is the person's own default), and Hangar's
+/// own tools; nothing for any other pane.
+fn role_flags(ws: &Workspace, pane: &Pane) -> (Option<String>, Vec<String>) {
+    if pane.role.is_none() {
+        return (None, Vec::new());
+    }
+    let tools = ORCHESTRATION_ALLOWED_TOOLS
+        .iter()
+        .map(|tool| (*tool).to_owned())
+        .collect();
+    (orchestration_of(ws).permission_mode, tools)
 }
 
 /// The Claude account choices of a launch, the settings', the workspace's
@@ -178,7 +234,8 @@ struct Spawn {
     name: String,
     bridge: bool,
     port_base: Option<u16>,
-    kits: Vec<String>,
+    /// `None` for a login pane, which starts with no kit.
+    kits: Option<KitChoice>,
     agent: AgentId,
     /// A Claude Code pane's: the account it is launched on.
     account: Option<AccountChoice>,
@@ -234,12 +291,12 @@ pub fn mount(
         bridge: settings.claude_bridge,
         port_base: pane.port_base.and_then(|port| u16::try_from(port).ok()),
         // A pane opened to log its Claude account in runs the login and
-        // nothing else: no kits, no servers, no conversation.
-        kits: if login {
-            Vec::new()
-        } else {
-            kits_of(settings, ws)
-        },
+        // nothing else: no kits, no servers, no conversation. The TS said so
+        // too, but still handed such a pane the kits turned on everywhere
+        // (`loadPaneKits(null, settings)`); the comment is followed here.
+        // Every other pane gets the kits, a shell pane too: a `claude` typed
+        // into it loads them, like the bridge.
+        kits: (!login).then(|| KitChoice::of(settings, ws)),
         agent: pane.agent,
         account,
         mcp: (pane.agent == AgentId::Claude && !login).then(|| McpLaunch {
@@ -285,9 +342,10 @@ pub fn mount(
 }
 
 /// Starts the shell, if it has not started: on the terminal's first
-/// measure, or once `MEASURE_WAIT` is over. The spawn runs on the blocking
-/// pool, since it waits up to 5 s for a shell of the same id still being
-/// reaped, and the MCP scope file is written before it.
+/// measure, or once `MEASURE_WAIT` is over. The kits on disk are read first,
+/// to hold out those whose hooks were not accepted; the spawn then runs on
+/// the blocking pool, since it waits up to 5 s for a shell of the same id
+/// still being reaped, and the MCP scope file is written before it.
 pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Message> {
     let Some(spawn) = rt.pending.take() else {
         return Task::none();
@@ -299,7 +357,8 @@ pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Messa
     let id = spawn.id.clone();
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || spawn.run(&host, &pty, sink, columns, rows))
+            let kits = launch_kits(spawn.kits.as_ref(), hangar_core::kits::kits_list).await;
+            tokio::task::spawn_blocking(move || spawn.run(&host, &pty, sink, columns, rows, kits))
                 .await
                 .unwrap_or_else(|error| Err(format!("the spawn stopped: {error}")))
         },
@@ -308,6 +367,8 @@ pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Messa
 }
 
 impl Spawn {
+    /// `kits` is what [`launch_kits`] found: only its `ids` reach the shell
+    /// and the MCP scope, and its `held` become notes.
     fn run(
         self,
         host: &hangar_core::Host,
@@ -315,6 +376,7 @@ impl Spawn {
         sink: hangar_core::pty::PtySink,
         columns: u16,
         rows: u16,
+        kits: PaneKits,
     ) -> Result<SpawnReport, String> {
         let mut notes = Vec::new();
         let resolved = self.account.as_ref().map(|choice| {
@@ -327,7 +389,7 @@ impl Spawn {
         let account = resolved.as_ref().map(|resolved| resolved.id.clone());
         let missing = resolved.and_then(|resolved| resolved.missing);
         let (mcp, scope) = match &self.mcp {
-            Some(launch) => self.mcp_scope(host, launch, account.as_deref(), &mut notes),
+            Some(launch) => self.mcp_scope(host, launch, &kits.ids, account.as_deref(), &mut notes),
             None => (None, None),
         };
         let spawned = hangar_core::pty::pty_spawn(
@@ -345,16 +407,12 @@ impl Spawn {
             // typed command names the variable, never the path, which holds
             // the person's name.
             scope.as_ref().map(|(path, _, _)| path.clone()),
-            Some(self.kits),
+            Some(kits.ids),
             Some(self.agent.as_str().to_owned()),
             account.clone(),
         )?;
         Ok(SpawnReport {
-            kit_issues: spawned
-                .kit_issues
-                .into_iter()
-                .map(|issue| (issue.id, issue.reason, issue.detail))
-                .collect(),
+            kit_issues: kit_issues(&kits.held, &spawned.kit_issues),
             resolved: account,
             missing,
             account: spawned.account,
@@ -374,6 +432,7 @@ impl Spawn {
         &self,
         host: &hangar_core::Host,
         launch: &McpLaunch,
+        kits: &[String],
         account: Option<&str>,
         notes: &mut Vec<String>,
     ) -> (Option<PaneMcp>, Option<(String, String, bool)>) {
@@ -419,7 +478,9 @@ impl Spawn {
             notes.push(tr.t(Key::McpScopeWarnWsl).into_owned());
             return (Some(inherit(false)), None);
         }
-        let file = match write(launch.enabled.clone(), Some(self.kits.clone())) {
+        // The servers of the kits the pane starts with, never of one held
+        // out: its servers are among what it runs by itself.
+        let file = match write(launch.enabled.clone(), Some(kits.to_vec())) {
             Ok(file) => file,
             Err(error) => {
                 notes.push(failed(error));
@@ -447,40 +508,6 @@ impl Spawn {
         };
         (Some(mcp), Some((file.path, arg, true)))
     }
-}
-
-/// The lines a Claude Code pane shows before its agent starts, one per kit
-/// left out and one for every kit a sideloading policy kept out
-/// (`kitIssueNotes`).
-fn kit_notes(tr: Translator, issues: &[(String, IssueReason, Option<String>)]) -> Vec<String> {
-    let mut notes = Vec::new();
-    let mut forbidden = Vec::new();
-    for (id, reason, detail) in issues {
-        match reason {
-            IssueReason::Forbidden => forbidden.push(id.as_str()),
-            IssueReason::Missing => notes.push(
-                tr.t_with(Key::KitsWarnMissing, &args!("id" => id.as_str()))
-                    .into_owned(),
-            ),
-            IssueReason::Broken => notes.push(
-                tr.t_with(
-                    Key::KitsWarnBroken,
-                    &args!("id" => id.as_str(), "detail" => detail.as_deref().unwrap_or_default()),
-                )
-                .into_owned(),
-            ),
-        }
-    }
-    if !forbidden.is_empty() {
-        notes.push(
-            tr.t_with(
-                Key::KitsWarnForbidden,
-                &args!("ids" => forbidden.join(", ")),
-            )
-            .into_owned(),
-        );
-    }
-    notes
 }
 
 fn status(pane: &PaneId, status: PaneStatus) -> Task<Message> {
@@ -518,6 +545,9 @@ pub fn spawned(
     rt.link.resize(columns, rows);
     rt.mcp = report.mcp.clone();
     rt.mcp_arg = report.mcp_arg.clone();
+    // The inspector's MCP row and the MCP panel's "is it up to date" read the
+    // servers a pane started with from P4's read-model, not from here.
+    m.live.panes_logic.set_launch_mcp(&id, report.mcp.clone());
 
     let Some((ws, pane)) = find(m, &rt.ws, &id) else {
         return status(&id, PaneStatus::Running);
@@ -542,7 +572,8 @@ pub fn spawned(
             );
         }
         notes.extend(report.notes.iter().cloned());
-        notes.extend(kit_notes(tr, &report.kit_issues));
+        // Said where Claude Code runs; a shell pane has no use for it.
+        notes.extend(kit_issue_notes(&report.kit_issues, tr));
         // What the pane's usage counts against until it restarts, whatever
         // is chosen meanwhile (P8's `Launched`).
         let account = report
@@ -643,12 +674,7 @@ pub fn launch_ready(
         resume = None;
     }
     let settings = m.settings();
-    let orchestration = ws.orchestration.clone().unwrap_or_default();
-    let role = pane.role.is_some();
-    let tools: Vec<String> = ORCHESTRATION_ALLOWED_TOOLS
-        .iter()
-        .map(|s| (*s).to_owned())
-        .collect();
+    let (permission_mode, tools) = role_flags(&ws, &pane);
     // Read when the agent starts: a workspace renamed later shows on the
     // next launch.
     let name = crate::state::pane_names::session_name(&pane.name, &ws.name);
@@ -658,21 +684,22 @@ pub fn launch_ready(
         name: Some(&name),
         mcp_config: rt.mcp_arg.as_ref().map(|(arg, _)| arg.as_str()),
         mcp_strict: rt.mcp_arg.as_ref().map(|(_, strict)| *strict),
-        // An orchestrator and its workers work while nobody watches: the mode
-        // the workspace chose for them, and Hangar's own tools.
-        permission_mode: if role {
-            orchestration.permission_mode.as_deref()
-        } else {
-            None
-        },
-        allowed_tools: if role { &tools } else { &[] },
+        permission_mode: permission_mode.as_deref(),
+        allowed_tools: &tools,
         model: pane.model.as_deref(),
     };
+    let mut launched = None;
     if let Some(command) = launch_command(rt.agent, resume.as_deref(), &options) {
         if let Some(id) = &resume {
             m.live.panes_logic.claim_session(id);
         }
         rt.link.write(format!("{command}\r").into_bytes());
+        // Dates the launch for the pane's agent state (P4 ignores it where
+        // the bridge or a shell says more).
+        launched = Some(Task::done(Message::PanesLogic(Logic::Launched {
+            pane: id.clone(),
+            resumed: resume.clone(),
+        })));
     }
     if forget {
         m.apply(StoreAction::UpdatePane {
@@ -683,17 +710,22 @@ pub fn launch_ready(
     }
     // Followed for as long as the pane lives, resumed or not: /new inside
     // the agent opens another transcript, and the pane has to follow it.
-    if is_resumable(rt.agent) {
+    let watch = if is_resumable(rt.agent) {
         let mut known = known;
         known.extend(resume);
-        return Task::done(Message::PanesLogic(Logic::WatchSession {
+        Task::done(Message::PanesLogic(Logic::WatchSession {
             pane: id,
             agent: rt.agent,
             cwd: folder_of(&ws, &pane),
             known,
-        }));
+        }))
+    } else {
+        Task::none()
+    };
+    match launched {
+        Some(launched) => Task::batch([launched, watch]),
+        None => watch,
     }
-    Task::none()
 }
 
 /// The login pane's shell has settled.
@@ -829,41 +861,266 @@ pub fn role_restart_answered(
 
 #[cfg(test)]
 mod tests {
+    use hangar_core::kits::{GitSource, IssueReason, Source};
+
     use super::*;
     use crate::panes_logic::agents::launch_command;
+    use crate::state::types::{AppState, OrchestrationSettings, WorkspaceKit};
 
-    #[test]
-    fn a_pane_gets_its_workspace_kits_then_the_ones_everywhere() {
-        use crate::state::types::WorkspaceKit;
-        let kit = |id: &str| WorkspaceKit {
+    /// What a workspace that accepted a kit's hooks holds for it.
+    const HOOKS: &str = "hooks:0123456789abcdef";
+
+    fn block_on<T>(future: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(future)
+    }
+
+    fn entry(id: &str, granted: &[&str]) -> WorkspaceKit {
+        WorkspaceKit {
             id: id.into(),
-            granted: vec![],
-        };
+            granted: granted.iter().map(|g| (*g).to_owned()).collect(),
+        }
+    }
+
+    /// A kit installed from GitHub; with `hooks`, one whose plugin runs
+    /// something by itself that a workspace has to accept.
+    fn git_kit(id: &str, hooks: Option<&str>) -> KitInfo {
+        KitInfo {
+            id: id.into(),
+            source: Source::Git(GitSource {
+                url: format!("https://github.com/someone/{id}"),
+                git_ref: None,
+                subdir: None,
+            }),
+            dir: format!("/kits/{id}"),
+            installed_version: "1.0.0".into(),
+            added_at: 0,
+            manifest: None,
+            error: None,
+            update: None,
+            hooks_permission: hooks.map(str::to_owned),
+            hooks_consent: hooks.is_some(),
+            commands_permission: None,
+        }
+    }
+
+    fn choice(own: Vec<WorkspaceKit>, everywhere: Vec<WorkspaceKit>) -> KitChoice {
         let settings = Settings {
-            kits_everywhere: Some(vec![kit("b"), kit("c")]),
+            kits_everywhere: Some(everywhere),
             ..Settings::default()
         };
         let ws = Workspace {
-            kits: Some(vec![kit("a"), kit("b")]),
+            kits: Some(own),
             ..Workspace::default()
         };
-        assert_eq!(kits_of(&settings, &ws), ["a", "b", "c"]);
+        KitChoice::of(&settings, &ws)
+    }
+
+    /// A mounted pane without its shell, for what the launch does once the
+    /// spawn answers.
+    fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
+        let link = PaneLink::new(
+            pane.id.clone(),
+            Terminal::new(hangar_term::Config::default(), 80, 24),
+            Arc::new(hangar_core::pty::PtyManager::default()),
+        );
+        PaneRt {
+            ws: ws.id.clone(),
+            name: pane.name.clone(),
+            agent: pane.agent,
+            link,
+            status: PaneStatus::Starting,
+            notes: Vec::new(),
+            dismissed: HashSet::new(),
+            search: None,
+            last_query: String::new(),
+            account: None,
+            mcp: None,
+            launched_role: pane.role,
+            role_handled: false,
+            pending: None,
+            resume: None,
+            owed: false,
+            mcp_arg: None,
+            look: look::look(&Settings::default(), ws, pane.agent),
+            focused: false,
+            launch: None,
+        }
+    }
+
+    fn report(kit_issues: Vec<KitLaunchIssue>) -> SpawnReport {
+        SpawnReport {
+            kit_issues,
+            resolved: None,
+            missing: None,
+            account: None,
+            mcp: None,
+            mcp_arg: None,
+            notes: Vec::new(),
+        }
     }
 
     #[test]
-    fn kit_notes_say_each_kit_left_out_and_the_forbidden_ones_together() {
-        let tr = Translator::new(Locale::En);
-        let notes = kit_notes(
-            tr,
+    fn a_pane_gets_its_workspace_kits_then_the_ones_everywhere() {
+        let kits = block_on(launch_kits(
+            Some(&choice(
+                vec![entry("alpha", &[]), entry("beta", &[])],
+                vec![entry("beta", &[]), entry("gamma", &[])],
+            )),
+            || async { Ok(vec![git_kit("alpha", None), git_kit("gamma", None)]) },
+        ));
+        // "beta" is not installed: core says so at spawn, so it goes on.
+        assert_eq!(kits.ids, ["alpha", "beta", "gamma"]);
+        assert!(kits.held.is_empty());
+    }
+
+    #[test]
+    fn a_git_kit_with_hooks_not_accepted_stays_out_of_the_pane_and_says_so() {
+        // "studio" changed what it runs by itself since this workspace
+        // enabled it; "quiet" runs nothing; "trusted" was accepted as it is.
+        let kits = block_on(launch_kits(
+            Some(&choice(
+                vec![
+                    entry("studio", &[]),
+                    entry("quiet", &[]),
+                    entry("trusted", &[HOOKS]),
+                ],
+                vec![],
+            )),
+            || async {
+                Ok(vec![
+                    git_kit("studio", Some(HOOKS)),
+                    git_kit("quiet", None),
+                    git_kit("trusted", Some(HOOKS)),
+                ])
+            },
+        ));
+        assert_eq!(kits.ids, ["quiet", "trusted"], "only these reach the spawn");
+        assert_eq!(kits.held, ["studio"]);
+
+        // The pane's note bar says so once its shell runs.
+        let pane = Pane {
+            id: "p1".into(),
+            name: "Ava".into(),
+            agent: AgentId::Claude,
+            ..Pane::default()
+        };
+        let ws = Workspace {
+            id: "w1".into(),
+            name: "hangar".into(),
+            cwd: "/work/hangar".into(),
+            panes: vec![pane.clone()],
+            kits: Some(vec![entry("studio", &[])]),
+            ..Workspace::default()
+        };
+        let mut m = Model::default();
+        m.hydrate(AppState {
+            workspaces: vec![ws.clone()],
+            ..AppState::default()
+        });
+        let mut rt = mounted(&ws, &pane);
+        let _ = spawned(&mut rt, &mut m, Ok(report(kit_issues(&kits.held, &[]))));
+        let warning = Translator::new(Locale::En)
+            .t_with(Key::KitsManageWarnHooks, &args!("id" => "studio"))
+            .into_owned();
+        assert!(warning.contains("studio"), "{warning}");
+        assert_eq!(rt.notes, [warning]);
+    }
+
+    #[test]
+    fn the_kits_on_everywhere_are_held_the_same_way() {
+        let kits = block_on(launch_kits(
+            Some(&choice(vec![], vec![entry("studio", &[])])),
+            || async { Ok(vec![git_kit("studio", Some(HOOKS))]) },
+        ));
+        assert!(kits.ids.is_empty());
+        assert_eq!(kits.held, ["studio"]);
+    }
+
+    #[test]
+    fn a_login_pane_starts_with_no_kit_and_reads_none() {
+        let asked = std::cell::Cell::new(false);
+        let kits = block_on(launch_kits(None, || {
+            asked.set(true);
+            async { Ok(Vec::new()) }
+        }));
+        assert_eq!(kits, PaneKits::default());
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn kit_notes_put_the_held_kits_first_and_the_forbidden_ones_together() {
+        let issues = kit_issues(
+            &["studio".to_owned()],
             &[
-                ("a".into(), IssueReason::Missing, None),
-                ("b".into(), IssueReason::Forbidden, None),
-                ("c".into(), IssueReason::Forbidden, None),
+                LaunchIssue::new("alpha", IssueReason::Missing, None),
+                LaunchIssue::new("beta", IssueReason::Forbidden, None),
+                LaunchIssue::new("gamma", IssueReason::Forbidden, None),
             ],
         );
-        assert_eq!(notes.len(), 2);
-        assert!(notes[0].contains("“a”"));
-        assert!(notes[1].contains("b, c"));
+        assert_eq!(issues[0].reason, LaunchReason::Hooks);
+        let tr = Translator::new(Locale::Fr);
+        assert_eq!(
+            kit_issue_notes(&issues, tr),
+            [
+                tr.t_with(Key::KitsManageWarnHooks, &args!("id" => "studio")),
+                tr.t_with(Key::KitsWarnMissing, &args!("id" => "alpha")),
+                tr.t_with(Key::KitsWarnForbidden, &args!("ids" => "beta, gamma")),
+            ]
+        );
+    }
+
+    fn role_ws(mode: Option<&str>) -> Workspace {
+        Workspace {
+            orchestration: Some(OrchestrationSettings {
+                permission_mode: mode.map(str::to_owned),
+                ..OrchestrationSettings::default()
+            }),
+            ..Workspace::default()
+        }
+    }
+
+    fn with_role(role: Option<PaneRole>) -> Pane {
+        Pane {
+            agent: AgentId::Claude,
+            role,
+            ..Pane::default()
+        }
+    }
+
+    #[test]
+    fn an_orchestration_pane_gets_its_workspace_mode_and_hangars_tools() {
+        let ws = role_ws(Some("acceptEdits"));
+        let (mode, tools) = role_flags(&ws, &with_role(Some(PaneRole::Worker)));
+        assert_eq!(mode.as_deref(), Some("acceptEdits"));
+        assert_eq!(tools, ["mcp__hangar"]);
+        let options = LaunchOptions {
+            permission_mode: mode.as_deref(),
+            allowed_tools: &tools,
+            ..LaunchOptions::default()
+        };
+        assert_eq!(
+            launch_command(AgentId::Claude, None, &options).as_deref(),
+            Some("claude --permission-mode acceptEdits --allowedTools mcp__hangar")
+        );
+    }
+
+    #[test]
+    fn a_mode_that_is_not_offered_is_the_persons_own_default() {
+        // Typed into state.json by hand: plain letters, which the command
+        // line would have taken, and not a mode the workspace can choose.
+        let ws = role_ws(Some("dontAsk"));
+        let (mode, tools) = role_flags(&ws, &with_role(Some(PaneRole::Orchestrator)));
+        assert_eq!(mode, None);
+        assert_eq!(tools, ["mcp__hangar"]);
+    }
+
+    #[test]
+    fn a_pane_without_a_role_gets_neither() {
+        let ws = role_ws(Some("bypassPermissions"));
+        assert_eq!(role_flags(&ws, &with_role(None)), (None, Vec::new()));
     }
 
     // The four cases of mcpScope.test.ts, "launchCommand with a server

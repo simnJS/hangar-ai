@@ -632,6 +632,13 @@ fn editor<'a>(
         .into()
 }
 
+/// A field with the keymap asked first (`keymap::guard`): a shortcut it takes
+/// is spent before the field sees it, so Ctrl+Shift+Enter in the title splits
+/// a pane behind the dialog and does not also save the task.
+fn guarded<'a>(v: &View<'a>, field: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    crate::keymap::guard(v.ctx, field)
+}
+
 fn stack_of<'a>(parts: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     column(parts).spacing(space::SM).into()
 }
@@ -768,16 +775,18 @@ fn fields<'a>(
 
     parts.push(stack_of(vec![
         label(t, tr.t(Key::TaskName), None),
-        field(t, "", &dialog.title)
-            .id(TITLE_FIELD)
-            .font(fonts::ui_semibold())
-            .on_input(|text| msg(Msg::Title(text)))
-            .on_submit(msg(if dialog.is_new() {
-                Msg::Create
-            } else {
-                Msg::SaveTitle
-            }))
-            .into(),
+        guarded(
+            v,
+            field(t, "", &dialog.title)
+                .id(TITLE_FIELD)
+                .font(fonts::ui_semibold())
+                .on_input(|text| msg(Msg::Title(text)))
+                .on_submit(msg(if dialog.is_new() {
+                    Msg::Create
+                } else {
+                    Msg::SaveTitle
+                })),
+        ),
     ]));
     parts.push(stack_of(vec![
         label(
@@ -785,9 +794,12 @@ fn fields<'a>(
             tr.t(Key::TaskDescription),
             Some(tr.t(Key::TaskDescriptionHint).into_owned()),
         ),
-        editor(t, &dialog.description, 92.0, |action| {
-            msg(Msg::Description(action))
-        }),
+        guarded(
+            v,
+            editor(t, &dialog.description, 92.0, |action| {
+                msg(Msg::Description(action))
+            }),
+        ),
     ]));
 
     // While a task is blocked it stays in To do: the others are not offered.
@@ -813,9 +825,10 @@ fn fields<'a>(
     let priority_field = stack_of(vec![
         label(t, tr.t(Key::TaskPriority), None),
         row![
-            container(number_input(t, &dialog.priority, |change| {
-                msg(Msg::Priority(change))
-            }))
+            container(guarded(
+                v,
+                number_input(t, &dialog.priority, |change| { msg(Msg::Priority(change)) }),
+            ))
             .width(120.0),
             super::card::priority(v, priority_value),
         ]
@@ -857,7 +870,10 @@ fn owns_field<'a>(v: &View<'a>, dialog: &'a Dialog) -> Element<'a, Message> {
             tr.t(Key::TaskOwns),
             Some(tr.t(Key::TaskOwnsHint).into_owned()),
         ),
-        editor(t, &dialog.owns, 56.0, |action| msg(Msg::Owns(action))),
+        guarded(
+            v,
+            editor(t, &dialog.owns, 56.0, |action| msg(Msg::Owns(action))),
+        ),
     ])
 }
 
@@ -1045,9 +1061,12 @@ fn block_section<'a>(v: &View<'a>, dialog: &'a Dialog, task: &'a T) -> Element<'
         );
         parts.push(
             row![
-                field(t, &tr.t(Key::BoardUnblockNote), &dialog.note)
-                    .on_input(|text| msg(Msg::Note(text)))
-                    .on_submit(msg(Msg::Unblock)),
+                guarded(
+                    v,
+                    field(t, &tr.t(Key::BoardUnblockNote), &dialog.note)
+                        .on_input(|text| msg(Msg::Note(text)))
+                        .on_submit(msg(Msg::Unblock)),
+                ),
                 button::secondary(t, tr.t(Key::BoardUnblock)).on_press(msg(Msg::Unblock)),
             ]
             .spacing(space::MD)
@@ -1059,20 +1078,20 @@ fn block_section<'a>(v: &View<'a>, dialog: &'a Dialog, task: &'a T) -> Element<'
             tr.t(Key::BoardBlockReason),
             Some(tr.t(Key::BoardBlockHint).into_owned()),
         ));
-        parts.push(
+        parts.push(guarded(
+            v,
             field(t, "", &dialog.reason)
                 .id(REASON_FIELD)
                 .on_input(|text| msg(Msg::Reason(text)))
-                .on_submit(msg(Msg::ConfirmBlock))
-                .into(),
-        );
+                .on_submit(msg(Msg::ConfirmBlock)),
+        ));
         parts.push(label(t, tr.t(Key::BoardBlockRecheck), None));
-        parts.push(
+        parts.push(guarded(
+            v,
             field(t, "YYYY-MM-DD", &dialog.recheck)
                 .on_input(|text| msg(Msg::Recheck(text)))
-                .on_submit(msg(Msg::ConfirmBlock))
-                .into(),
-        );
+                .on_submit(msg(Msg::ConfirmBlock)),
+        ));
         parts.push(
             checkbox(dialog.human_only)
                 .label(tr.t(Key::BoardBlockHumanOnly))
@@ -1280,9 +1299,12 @@ fn thread<'a>(v: &View<'a>, dialog: &'a Dialog, task: &'a T) -> Element<'a, Mess
     };
 
     let compose = row![
-        field(t, &tr.t(Key::TaskWriteComment), &dialog.comment)
-            .on_input(|text| msg(Msg::Comment(text)))
-            .on_submit(msg(Msg::Send)),
+        guarded(
+            v,
+            field(t, &tr.t(Key::TaskWriteComment), &dialog.comment)
+                .on_input(|text| msg(Msg::Comment(text)))
+                .on_submit(msg(Msg::Send)),
+        ),
         button::secondary(t, tr.t(Key::TaskSend))
             .on_press_maybe((!dialog.comment.trim().is_empty()).then(|| msg(Msg::Send))),
     ]

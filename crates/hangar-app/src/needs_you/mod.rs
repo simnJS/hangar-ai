@@ -9,13 +9,14 @@
 //! it (go to the agent, answer the orchestrator, merge the delivery) plus the
 //! board, where the task says the rest.
 //!
-//! Boards are read here, for the workspaces that orchestrate, and again
-//! whenever core says a board was written.
+//! The boards come from the board package's shared cache (`board::Live`,
+//! `useBoardsOf`), which follows core's change events itself.
 //!
-//! TODO(P12): the board cache is to be P12's (`board::Live`), read by this
-//! package, the inspector and the orchestration engine. It is an empty struct
-//! today, so this keeps its own copy of the boards it watches; replacing
-//! `State::boards` with a read of P12's is the whole change.
+//! The list is worked out here, off the interface's draw: a beat of the clock
+//! (and each press of the button) computes it, keeps it for the button to
+//! draw, and tells the shell how long it is (`live.signals.needs_you`), which
+//! is what makes `view.needsYou` a live command and what lets the shell leave
+//! the panel open: with a count of zero it closes it.
 
 pub mod model;
 mod view;
@@ -23,37 +24,44 @@ mod view;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use iced::futures::{Stream, StreamExt, stream};
 use iced::{Element, Event, Subscription, Task, window};
 
-use hangar_core::board::Task as BoardTask;
 use hangar_i18n::{Key, Translator, args};
 
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
-use crate::navigator::model::sidebar_order;
-use crate::navigator::reads;
+use crate::panes_logic::state_glyph_state;
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Notification, Region};
+use crate::state::folders::sidebar_order;
+use crate::state::live::GlyphState;
 use crate::state::roles::orchestrator_of;
 
-use crate::state::{AgentActivity, Model};
+use crate::state::Model;
 
-use model::{Boards, NeedsYouItem, NoticeMemory, is_orchestrated, watched_boards};
+use model::{BoardSource, NeedsYouItem, NoticeMemory, watched_boards};
 
-/// How long « Land » says it is landing before it lets the person try again:
-/// the delivery's own state is `control::Live`'s, which does not exist yet, and
-/// a refusal that never says so must not leave the button dead for good.
-const LAND_PATIENCE: Duration = Duration::from_secs(45);
+/// How often the list is worked out again while there is anything to watch:
+/// a pane that starts waiting, a task that gets its label, a delivery that
+/// ends. The reads are of memory only, so the beat can be short, and the
+/// button and the `view.needsYou` command are never more than this behind.
+const BEAT: Duration = Duration::from_millis(400);
+
+/// How long a press on « Land » says it is landing before the delivery itself
+/// does (`control::Live::task_delivering`): the engine reads the task's title
+/// before it registers the run. Past it, a refusal that never says so must not
+/// leave the button dead.
+const LAND_GRACE: Duration = Duration::from_secs(10);
 
 /// The package's UI state; lives in `App.pkg.needs_you`.
 #[derive(Debug)]
 pub struct State {
-    /// The tasks of each board watched, once read.
-    boards: Boards,
+    /// The list as last worked out; the button draws this.
+    items: Vec<NeedsYouItem>,
     /// What « Fusionner » last failed with, by item key.
     failures: HashMap<String, String>,
-    /// The deliveries asked to land, and when.
+    /// The deliveries asked to land, and when, until the engine's own run of
+    /// them shows.
     landing: HashMap<String, Instant>,
     /// What the notices have already told.
     memory: NoticeMemory,
@@ -64,7 +72,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         State {
-            boards: Boards::new(),
+            items: Vec::new(),
             failures: HashMap::new(),
             landing: HashMap::new(),
             memory: NoticeMemory::default(),
@@ -82,11 +90,26 @@ impl State {
         self.landing.retain(|key, _| live.contains(key.as_str()));
     }
 
-    /// Whether a delivery is being landed right now, from here.
-    pub(crate) fn is_landing(&self, key: &str, now: Instant) -> bool {
-        self.landing
-            .get(key)
-            .is_some_and(|since| now.saturating_duration_since(*since) < LAND_PATIENCE)
+    /// Whether a delivery is being landed right now: its run is going
+    /// (`useDelivering`), or it was asked a moment ago and the engine has not
+    /// registered it yet.
+    pub(crate) fn is_landing(
+        &self,
+        m: &Model,
+        item: &model::ItemBase,
+        task: &str,
+        now: Instant,
+    ) -> bool {
+        m.live.control.task_delivering(&item.workspace_id, task)
+            || self
+                .landing
+                .get(&item.key)
+                .is_some_and(|since| now.saturating_duration_since(*since) < LAND_GRACE)
+    }
+
+    /// The list as last worked out.
+    pub(crate) fn items(&self) -> &[NeedsYouItem] {
+        &self.items
     }
 
     pub(crate) fn failure(&self, key: &str) -> Option<&str> {
@@ -106,9 +129,8 @@ pub enum Msg {
     Toggle,
     /// Escape, Tab or a press elsewhere.
     Close,
-    /// These boards have to be read (the set watched changed).
-    Load(Vec<String>),
-    Loaded(String, Vec<BoardTask>),
+    /// The beat: the list is worked out again.
+    Refresh,
     /// A row's action, once the panel is gone.
     GoTo {
         ws: String,
@@ -133,19 +155,62 @@ pub struct LandRequest {
     pub task: String,
 }
 
-fn items_of(st: &State, m: &Model) -> Vec<NeedsYouItem> {
-    let state = m.state();
-    let workspaces = sidebar_order(&state.workspaces, &state.folders);
-    if !workspaces.iter().any(|ws| is_orchestrated(ws)) {
-        return Vec::new();
-    }
-    let waiting = workspaces
+/// The panes whose agent is in a dialog, asking for a permission or an answer
+/// (`paneGlyphState` is `waiting`).
+fn waiting_panes(m: &Model) -> HashSet<String> {
+    m.state()
+        .workspaces
         .iter()
         .flat_map(|ws| ws.panes.iter())
-        .filter(|pane| reads::activity(m, &pane.id) == AgentActivity::Waiting)
+        .filter(|pane| state_glyph_state(m, &pane.id) == GlyphState::Waiting)
         .map(|pane| pane.id.clone())
+        .collect()
+}
+
+/// What the person has to look at, worked out from the state, the panes'
+/// activity and the boards.
+struct Look {
+    items: Vec<NeedsYouItem>,
+    /// The watched folders whose board has been read: the notices take a
+    /// board's first read as its baseline.
+    loaded: HashSet<String>,
+}
+
+fn look(m: &Model, waiting: &HashSet<String>, boards: &impl BoardSource) -> Look {
+    let state = m.state();
+    let workspaces = sidebar_order(&state.workspaces, &state.folders);
+    let items = model::needs_you_items(&workspaces, waiting, boards);
+    let loaded = watched_boards(&workspaces)
+        .into_iter()
+        .filter(|cwd| boards.tasks_in(cwd).is_some())
         .collect();
-    model::needs_you_items(&workspaces, &waiting, &st.boards)
+    Look { items, loaded }
+}
+
+/// Works the list out again from the model as it is now, keeps it, and tells
+/// the shell its length. Runs on the beat and before a press on the button is
+/// obeyed: the shell closes the panel after every message while the count is
+/// zero, so a count that lagged would shut it as it opened.
+fn refresh(st: &mut State, m: &mut Model) -> Task<Message> {
+    let seen = look(m, &waiting_panes(m), &m.live.board);
+    settle(st, m, seen)
+}
+
+fn settle(st: &mut State, m: &mut Model, seen: Look) -> Task<Message> {
+    m.live.signals.needs_you = seen.items.len();
+    st.forget_gone(&seen.items);
+    // A delivery whose run has shown no longer needs the grace: the run says
+    // when it ends.
+    st.landing.retain(|key, _| {
+        !seen.items.iter().any(|item| {
+            item.key() == key
+                && matches!(item, NeedsYouItem::Land { base, task, .. }
+                    if m.live.control.task_delivering(&base.workspace_id, &task.id))
+        })
+    });
+    let tasks = notices(st, m, &seen);
+    st.items = seen.items;
+    tasks
 }
 
 fn watched(m: &Model) -> Vec<String> {
@@ -153,42 +218,22 @@ fn watched(m: &Model) -> Vec<String> {
     watched_boards(&sidebar_order(&state.workspaces, &state.folders))
 }
 
-fn load(cwds: Vec<String>) -> Task<Message> {
-    Task::batch(cwds.into_iter().map(|cwd| {
-        Task::perform(
-            async move {
-                let for_read = cwd.clone();
-                let board =
-                    tokio::task::spawn_blocking(move || hangar_core::board_load(for_read)).await;
-                (cwd, board.map(|board| board.tasks).ok())
-            },
-            |(cwd, tasks)| match tasks {
-                // No board yet, or a read that failed: nothing to show rather
-                // than an error.
-                Some(tasks) => Message::NeedsYou(Msg::Loaded(cwd, tasks)),
-                None => Message::Noop,
-            },
-        )
-    }))
+/// The button, or the `view.needsYou` shortcut's twin: the list first, so the
+/// shell's count is the truth when it looks after this message.
+fn toggle(st: &mut State, m: &mut Model) -> Task<Message> {
+    let tasks = refresh(st, m);
+    m.ui.needs_you_open = !m.ui.needs_you_open;
+    tasks
 }
 
 pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
-        Msg::Toggle => {
-            m.ui.needs_you_open = !m.ui.needs_you_open;
-            Task::none()
-        }
+        Msg::Toggle => toggle(st, m),
         Msg::Close => {
             m.ui.needs_you_open = false;
             Task::none()
         }
-        Msg::Load(cwds) => load(cwds),
-        Msg::Loaded(cwd, tasks) => {
-            st.boards.insert(cwd, tasks);
-            let items = items_of(st, m);
-            st.forget_gone(&items);
-            notices(st, m, &items)
-        }
+        Msg::Refresh => refresh(st, m),
         Msg::GoTo { ws, pane } => {
             m.ui.needs_you_open = false;
             Task::done(Message::Intent(Intent::FocusPane {
@@ -213,7 +258,7 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             st.landing.remove(&key);
             // Its failure can arrive after the row left, a landing refused once
             // its worker moved past it: that one is not kept.
-            if items_of(st, m).iter().any(|item| item.key() == key) {
+            if st.items.iter().any(|item| item.key() == key) {
                 st.failures.insert(key, error);
             }
             Task::none()
@@ -229,12 +274,8 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
 /// land, through the same plumbing and the same settings as the panes' own:
 /// off with « Notifier », and kept for when the window is not in front unless
 /// asked otherwise. A click lands on the workspace's orchestrator.
-fn notices(st: &mut State, m: &Model, items: &[NeedsYouItem]) -> Task<Message> {
-    let loaded: HashSet<String> = watched(m)
-        .into_iter()
-        .filter(|cwd| st.boards.contains_key(cwd))
-        .collect();
-    let (memory, fresh) = model::notice_delta(&st.memory, items, &loaded);
+fn notices(st: &mut State, m: &Model, seen: &Look) -> Task<Message> {
+    let (memory, fresh) = model::notice_delta(&st.memory, &seen.items, &seen.loaded);
     st.memory = memory;
     let settings = m.settings();
     if fresh.is_empty() || !settings.notify_on_idle {
@@ -267,29 +308,26 @@ fn notices(st: &mut State, m: &Model, items: &[NeedsYouItem]) -> Task<Message> {
     }))
 }
 
-/// The boards to read are those of the workspaces that orchestrate: a
-/// subscription for each set of them, which reads them when the set changes
-/// (a workspace starts to orchestrate, or stops), and the window's focus for
-/// the notices.
-pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
+/// The beat, while there is anything to watch (a workspace that orchestrates,
+/// a list on screen, a count the shell still holds), and the window's focus
+/// for the notices. Someone who never pins an orchestrator pays for neither.
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let focus = iced::event::listen_with(|event, _status, _window| match event {
         Event::Window(window::Event::Focused) => Some(Message::NeedsYou(Msg::Focus(true))),
         Event::Window(window::Event::Unfocused) => Some(Message::NeedsYou(Msg::Focus(false))),
         _ => None,
     });
-    let cwds = watched(m);
-    if cwds.is_empty() {
+    let watching = !watched(m).is_empty()
+        || !st.items.is_empty()
+        || !st.landing.is_empty()
+        || m.live.signals.needs_you != 0;
+    if !watching {
         return focus;
     }
-    Subscription::batch([focus, Subscription::run_with(cwds, read_once)])
-}
-
-// `Subscription::run_with` hands the builder a reference to its data, which
-// is the `Vec` the subscription is identified by.
-#[allow(clippy::ptr_arg)]
-fn read_once(cwds: &Vec<String>) -> impl Stream<Item = Message> + use<> {
-    let cwds = cwds.clone();
-    stream::once(async move { Message::NeedsYou(Msg::Load(cwds)) }).chain(stream::pending())
+    Subscription::batch([
+        focus,
+        iced::time::every(BEAT).map(|_| Message::NeedsYou(Msg::Refresh)),
+    ])
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
@@ -309,23 +347,15 @@ pub fn on_intent(
     None
 }
 
-/// A board written by an agent or a worker is read again.
+/// Nothing: the board package reads a board again when core says it was
+/// written, and the next beat sees it.
 pub fn on_event(
-    st: &mut State,
-    m: &mut Model,
+    _st: &mut State,
+    _m: &mut Model,
     _sv: &Services,
-    event: &CoreEvent,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    match event {
-        CoreEvent::BoardChanged { .. } => {
-            let cwds: Vec<String> = watched(m)
-                .into_iter()
-                .filter(|cwd| st.boards.contains_key(cwd))
-                .collect();
-            (!cwds.is_empty()).then(|| load(cwds))
-        }
-        _ => None,
-    }
+    None
 }
 
 /// The toolbar's « Besoin de toi » button and its panel (embedded by the

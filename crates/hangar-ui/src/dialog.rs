@@ -29,7 +29,7 @@
 
 use hangar_theme::tokens::{font_size, size, space};
 use hangar_theme::{Theme, style};
-use iced::widget::{column, container, row, rule, scrollable, space as iced_space};
+use iced::widget::{Id, column, container, row, rule, scrollable, space as iced_space};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::button::icon_button;
@@ -49,6 +49,7 @@ pub struct Dialog<'a, M> {
     lead: Option<Element<'a, M>>,
     width: f32,
     body_max_height: f32,
+    body_id: Option<Id>,
     body_padding: Padding,
     on_close: Option<M>,
     close_tip: String,
@@ -71,6 +72,7 @@ pub fn dialog<'a, M: Clone + 'a>(
         width: size::DIALOG_WIDTH,
         // Room for the head and the foot in a window of about 600.
         body_max_height: 420.0,
+        body_id: None,
         // In line with the title above it, which starts 18 px in.
         body_padding: Padding::from([space::XL, 18.0]),
         on_close: None,
@@ -115,6 +117,14 @@ impl<'a, M: Clone + 'a> Dialog<'a, M> {
     /// The tallest the body grows before it scrolls.
     pub fn body_max_height(mut self, height: f32) -> Self {
         self.body_max_height = height;
+        self
+    }
+
+    /// Names the scrollable of the body, so that the owner can scroll it with
+    /// `iced::widget::operation::scroll_to`: a list that moves a keyboard
+    /// cursor keeps the row in view.
+    pub fn body_id(mut self, id: impl Into<Id>) -> Self {
+        self.body_id = Some(id.into());
         self
     }
 
@@ -166,15 +176,16 @@ impl<'a, M: Clone + 'a> From<Dialog<'a, M>> for Element<'a, M> {
             head.height(48.0)
         };
 
-        let body = container(
-            scrollable(
-                container(d.body)
-                    .padding(d.body_padding)
-                    .width(Length::Fill),
-            )
-            .style(style::scrollable::default(t)),
+        let mut scroll = scrollable(
+            container(d.body)
+                .padding(d.body_padding)
+                .width(Length::Fill),
         )
-        .max_height(d.body_max_height);
+        .style(style::scrollable::default(t));
+        if let Some(id) = d.body_id {
+            scroll = scroll.id(id);
+        }
+        let body = container(scroll).max_height(d.body_max_height);
 
         let mut foot = row![].spacing(space::MD).align_y(Alignment::Center);
         if let Some(lead) = d.lead {

@@ -46,6 +46,8 @@ use crate::state::{Model, PaneId, WsId};
 
 pub mod activation;
 pub mod gallery;
+#[cfg(test)]
+mod guarded;
 pub mod icon;
 pub mod model;
 pub mod setup;
