@@ -20,10 +20,13 @@
 
 pub mod abi;
 pub mod api;
+mod draw;
 mod element;
 mod event;
+pub mod keys;
 mod style;
 
+pub use draw::*;
 pub use element::*;
 pub use event::*;
 pub use style::*;

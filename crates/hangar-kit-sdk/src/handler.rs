@@ -4,7 +4,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use hangar_kit_ui::{EventValue, Sort};
+use hangar_kit_ui::{EventValue, Mark, Point, Range, Sort};
 
 /// A handler as the SDK builds the tree with it. When the view is sent, each
 /// one is kept in a table and replaced by its number there; the event that
@@ -20,6 +20,14 @@ pub enum Handler<M> {
     Index(Rc<dyn Fn(usize) -> M>),
     /// A table's order asked for.
     Sort(Rc<dyn Fn(Sort) -> M>),
+    /// A mark drawn on a canvas.
+    Mark(Rc<dyn Fn(Mark) -> M>),
+    /// A point of a canvas pressed.
+    Point(Rc<dyn Fn(Point) -> M>),
+    /// A number: a canvas's scale.
+    Number(Rc<dyn Fn(f64) -> M>),
+    /// The lines of a long log to give next.
+    Range(Rc<dyn Fn(Range) -> M>),
 }
 
 impl<M: Clone> Clone for Handler<M> {
@@ -30,6 +38,10 @@ impl<M: Clone> Clone for Handler<M> {
             Handler::Bool(f) => Handler::Bool(f.clone()),
             Handler::Index(f) => Handler::Index(f.clone()),
             Handler::Sort(f) => Handler::Sort(f.clone()),
+            Handler::Mark(f) => Handler::Mark(f.clone()),
+            Handler::Point(f) => Handler::Point(f.clone()),
+            Handler::Number(f) => Handler::Number(f.clone()),
+            Handler::Range(f) => Handler::Range(f.clone()),
         }
     }
 }
@@ -42,6 +54,10 @@ impl<M> fmt::Debug for Handler<M> {
             Handler::Bool(_) => "Handler::Bool",
             Handler::Index(_) => "Handler::Index",
             Handler::Sort(_) => "Handler::Sort",
+            Handler::Mark(_) => "Handler::Mark",
+            Handler::Point(_) => "Handler::Point",
+            Handler::Number(_) => "Handler::Number",
+            Handler::Range(_) => "Handler::Range",
         })
     }
 }
@@ -62,6 +78,10 @@ impl<M: Clone> Handler<M> {
             (Handler::Bool(f), Some(EventValue::Bool(on))) => Some(f(on)),
             (Handler::Index(f), Some(EventValue::Index(index))) => Some(f(index as usize)),
             (Handler::Sort(f), Some(EventValue::Sort(sort))) => Some(f(sort)),
+            (Handler::Mark(f), Some(EventValue::Mark(mark))) => Some(f(mark)),
+            (Handler::Point(f), Some(EventValue::Point(point))) => Some(f(point)),
+            (Handler::Number(f), Some(EventValue::Number(number))) => Some(f(number)),
+            (Handler::Range(f), Some(EventValue::Range(range))) => Some(f(range)),
             _ => None,
         }
     }
@@ -77,6 +97,10 @@ impl<M: 'static> Handler<M> {
             Handler::Bool(g) => Handler::Bool(Rc::new(move |on| f(g(on)))),
             Handler::Index(g) => Handler::Index(Rc::new(move |index| f(g(index)))),
             Handler::Sort(g) => Handler::Sort(Rc::new(move |sort| f(g(sort)))),
+            Handler::Mark(g) => Handler::Mark(Rc::new(move |mark| f(g(mark)))),
+            Handler::Point(g) => Handler::Point(Rc::new(move |point| f(g(point)))),
+            Handler::Number(g) => Handler::Number(Rc::new(move |number| f(g(number)))),
+            Handler::Range(g) => Handler::Range(Rc::new(move |range| f(g(range)))),
         }
     }
 }

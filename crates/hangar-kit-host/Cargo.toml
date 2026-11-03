@@ -19,6 +19,17 @@ iced.workspace = true
 wasmtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# `canvas.export` (paint.rs): a canvas's marks over its background, drawn off
+# screen and written as a PNG; and the pictures a tab holds (`files.pick`,
+# `ui.pasteImage`) read for their size.
+tiny-skia.workspace = true
+ab_glyph.workspace = true
+image.workspace = true
+png.workspace = true
+base64.workspace = true
+# The person's time zone, which a tab starts with (`Start::utc_offset`):
+# wasm32 has none.
+chrono.workspace = true
 
 [dev-dependencies]
 # Drives the widgets that are hangar-ui's as a person would (render/tests.rs).

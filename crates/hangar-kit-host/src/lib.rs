@@ -19,11 +19,15 @@
 mod api;
 mod gate;
 mod message;
+mod paint;
 mod render;
 mod runtime;
 mod tab;
 
-pub use api::{CallFuture, HostCall, KitApi, LoopbackCall, ready};
+pub use api::{
+    CallFuture, ClipboardFuture, ClipboardImage, HostCall, KitApi, LoopbackCall, PickFuture,
+    PickedFile, ready,
+};
 pub use gate::Gate;
 pub use message::{KitMessage, Local};
 pub use render::{KitStyle, Palette};

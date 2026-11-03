@@ -79,6 +79,12 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 # The version hangar-core and hangar-model3d already build: hangar-core's
 # `model_save_png` takes a capture as base64.
 base64 = "0.22"
+# The picture a native kit tab exports (`canvas.export`, hangar-kit-host's
+# paint.rs), drawn off screen: the rasteriser iced's tiny-skia backend
+# already builds, and Inter's glyphs by the crate winit's Wayland
+# decorations already build.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+ab_glyph = "0.2"
 iced_test = "0.14"
 # The version hangar-core already builds: hangar-app's orchestration engine
 # reads plans with it.

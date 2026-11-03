@@ -22,7 +22,10 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use hangar_kit_host::{CallFuture, Gate, HostCall, KitApi, LoopbackCall};
+use hangar_kit_host::{
+    CallFuture, ClipboardFuture, ClipboardImage, Gate, HostCall, KitApi, LoopbackCall, PickFuture,
+    PickedFile,
+};
 use hangar_kit_ui::ImageSource;
 use hangar_kit_ui::abi::{Call, CallId};
 use hangar_kit_ui::api::{self, BadgeState, KitError, limits};
@@ -173,6 +176,35 @@ pub trait Deps: Send + Sync + 'static {
     fn ui(&self, call: UiCall) -> BoxFuture<Result<Value, KitError>>;
     /// The bytes of an image a native tab's view shows.
     fn image(&self, kit: &str, source: &ImageSource) -> Result<Vec<u8>, KitError>;
+    /// The bytes of an image of the workspace folder `root`, held to the
+    /// rules of `files.read` (hidden ones when `hidden`). Refused by default.
+    fn workspace_image(
+        &self,
+        root: String,
+        path: String,
+        hidden: bool,
+    ) -> Result<Vec<u8>, KitError> {
+        let _ = (root, path, hidden);
+        Err(KitError::new(
+            KitError::UNSUPPORTED,
+            "no image of the workspace",
+        ))
+    }
+    /// `files.pick`: the system's chooser, opened in `root` (media.rs).
+    /// Refused by default.
+    fn pick_file(
+        &self,
+        root: String,
+        request: api::FilesPick,
+    ) -> BoxFuture<Result<Option<PickedFile>, KitError>> {
+        let _ = (root, request);
+        ready(Err(KitError::new(KitError::UNSUPPORTED, "no file chooser")))
+    }
+    /// `ui.pasteImage`: the clipboard's picture (media.rs). Refused by
+    /// default.
+    fn clipboard_image(&self) -> BoxFuture<Result<Option<ClipboardImage>, KitError>> {
+        ready(Err(KitError::new(KitError::UNSUPPORTED, "no clipboard")))
+    }
 }
 
 /// A pane `panes.send` may reach: a Claude Code agent whose session runs
@@ -450,21 +482,44 @@ impl KitApi for TabApi {
             HostCall::Toast(toast) => deps.ui(UiCall::Toast(toast)),
             HostCall::Confirm(confirm) => deps.ui(UiCall::Confirm(confirm)),
             HostCall::Copy { text } => deps.ui(UiCall::Copy(text)),
+            // A native tab does these itself, through `pick_file`,
+            // `clipboard_image` and `files.writeBinary`; a page has them in
+            // its own document and is answered `unknown` before the gate.
+            native
+            @ (HostCall::FilesPick(_) | HostCall::PasteImage | HostCall::CanvasExport(_)) => {
+                hangar_kit_host::ready(Err(error(
+                    KitError::UNKNOWN,
+                    format!("no method {:?}", native.method()),
+                )))
+            }
         }
     }
 
     fn image(&self, source: &ImageSource) -> Result<Vec<u8>, KitError> {
-        self.deps.image(self.cx.kit_id(), source)
+        match source {
+            ImageSource::File(path) => {
+                let ws = self.workspace_now()?;
+                let hidden = api::reads_hidden_files(&self.cx.permissions());
+                self.deps.workspace_image(ws.cwd, path.clone(), hidden)
+            }
+            _ => self.deps.image(self.cx.kit_id(), source),
+        }
+    }
+
+    fn pick_file(&self, request: &api::FilesPick) -> PickFuture {
+        let (ws, deps, request) = (self.workspace_now(), self.deps.clone(), request.clone());
+        Box::pin(async move { deps.pick_file(ws?.cwd, request).await })
+    }
+
+    fn clipboard_image(&self) -> ClipboardFuture {
+        self.deps.clipboard_image()
     }
 }
 
 /// The methods of a native tab that stand for what a page has in its own
 /// document (`hangar.ui`): no method of a page's protocol.
 fn page_has_its_own(method: &str) -> bool {
-    matches!(
-        method,
-        api::method::UI_TOAST | api::method::UI_CONFIRM | api::method::UI_COPY
-    )
+    api::NATIVE_ONLY.contains(&method)
 }
 
 /// What to post to a page for a message it sent: an answer at once (a

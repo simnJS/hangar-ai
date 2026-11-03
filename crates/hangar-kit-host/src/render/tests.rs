@@ -23,6 +23,7 @@ fn draw<'a>(widgets: &'a WidgetState, given: &'a ui::Element) -> El<'a> {
         style: KitStyle::dark(),
         seq: 7,
         widgets,
+        ns: 1,
     };
     element(&cx, given)
 }
@@ -179,6 +180,7 @@ fn hangar_says_its_own_words_in_the_tabs_language() {
         style: KitStyle::light().with_locale(hangar_i18n::Locale::Fr),
         seq: 1,
         widgets: &widgets,
+        ns: 1,
     };
     let mut drawn = simulate(element(&cx, &given));
     drawn
@@ -509,6 +511,7 @@ fn snapshots() {
         },
         &NoImages,
         &[],
+        &crate::tab::Held::default(),
     );
     for (name, style) in [
         ("dark-en", KitStyle::dark()),
@@ -521,6 +524,7 @@ fn snapshots() {
             style,
             seq: 7,
             widgets: &widgets,
+            ns: 1,
         };
         let settings = Settings {
             fonts: vec![Cow::Borrowed(hangar_theme::fonts::INTER_VARIABLE)],
@@ -555,4 +559,281 @@ impl KitApi for NoImages {
     fn call(&self, _: crate::api::HostCall) -> crate::api::CallFuture {
         crate::api::ready(Err(KitError::new(KitError::UNAVAILABLE, "no app")))
     }
+}
+
+/* ── what the kits' native tabs added: a canvas, shortcuts, long logs ── */
+
+fn sketch() -> ui::Canvas {
+    let mut canvas = ui::Canvas::new("shot", 200.0, 100.0)
+        .zoom(Some(1.0))
+        .tool(Some(ui::Tool::Rect))
+        .ink(ui::Ink::Blue);
+    canvas.on_draw = Some(HandlerId(4));
+    canvas.on_point = Some(HandlerId(5));
+    canvas
+}
+
+fn drag(drawn: &mut Simulator<'_, KitMessage>, from: (f32, f32), to: (f32, f32)) {
+    use iced::{Event, Point, mouse};
+    let (start, end) = (Point::new(from.0, from.1), Point::new(to.0, to.1));
+    drawn.point_at(start);
+    drawn.simulate([
+        Event::Mouse(mouse::Event::CursorMoved { position: start }),
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+    ]);
+    drawn.point_at(end);
+    drawn.simulate([
+        Event::Mouse(mouse::Event::CursorMoved { position: end }),
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ]);
+}
+
+#[test]
+fn a_drag_on_a_canvas_sends_the_mark_it_drew_in_the_canvass_units() {
+    let given = ui::Element::Canvas(sketch().zoom(Some(2.0)));
+    let widgets = WidgetState::default();
+    let mut drawn = simulate(draw(&widgets, &given));
+    // At twice its size: 20, 10 on screen is 10, 5 of the canvas.
+    drag(&mut drawn, (20.0, 10.0), (120.0, 90.0));
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    let marks = handled(&sent, 4);
+    let [Some(EventValue::Mark(mark))] = marks.as_slice() else {
+        panic!("{sent:?}");
+    };
+    assert_eq!(
+        mark.shape,
+        ui::Shape::Rect {
+            x: 10.0,
+            y: 5.0,
+            w: 50.0,
+            h: 40.0
+        }
+    );
+    assert_eq!(mark.ink, ui::Ink::Blue);
+}
+
+#[test]
+fn a_press_on_a_canvas_that_does_not_move_is_a_point() {
+    let given = ui::Element::Canvas(sketch());
+    let widgets = WidgetState::default();
+    let mut drawn = simulate(draw(&widgets, &given));
+    click_at(&mut drawn, 30.0, 40.0);
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    assert_eq!(
+        handled(&sent, 5),
+        vec![Some(EventValue::Point(ui::Point::new(30.0, 40.0)))]
+    );
+    assert!(handled(&sent, 4).is_empty(), "{sent:?}");
+}
+
+#[test]
+fn a_canvas_without_a_zoom_fits_its_room_and_says_its_scale() {
+    let mut canvas = ui::Canvas::new("wide", 800.0, 200.0);
+    canvas.on_fit = Some(HandlerId(6));
+    let given = ui::Element::Canvas(canvas);
+    let widgets = WidgetState::default();
+    let mut drawn = simulate(draw(&widgets, &given));
+    click_at(&mut drawn, 10.0, 10.0);
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    // 400 points of room for 800 units.
+    assert_eq!(
+        handled(&sent, 6).first(),
+        Some(&Some(EventValue::Number(0.5)))
+    );
+}
+
+fn ctrl_s() -> iced::keyboard::Event {
+    use iced::keyboard::{self, Key, Modifiers};
+    keyboard::Event::KeyPressed {
+        key: Key::Character("s".into()),
+        modified_key: Key::Character("s".into()),
+        physical_key: keyboard::key::Physical::Unidentified(
+            keyboard::key::NativeCode::Unidentified,
+        ),
+        location: keyboard::Location::Standard,
+        modifiers: Modifiers::COMMAND,
+        text: None,
+        repeat: false,
+    }
+}
+
+#[test]
+fn a_shortcut_is_sent_from_inside_the_tab_and_not_once_the_person_is_elsewhere() {
+    let page = ui::Element::Column(ui::Column::new(vec![ui::Element::TextInput(text_input())]));
+    let widgets = WidgetState::default();
+    let specs = vec!["mod+s".to_owned(), "escape".to_owned()];
+    let mut drawn = simulate(keys::shortcuts(draw(&widgets, &page), &specs));
+    drawn.simulate([iced::Event::Keyboard(ctrl_s())]);
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    assert!(
+        matches!(sent.as_slice(), [KitMessage::Shortcut(keys)] if keys == "mod+s"),
+        "{sent:?}"
+    );
+    // The page is a column as tall as its field: a press under it is a
+    // press elsewhere in the window.
+    let page =
+        ui::Element::Container(ui::Container::new(page.clone()).height(ui::Length::Px(40.0)));
+    let mut drawn = simulate(
+        iced::widget::column![
+            keys::shortcuts(draw(&widgets, &page), &specs),
+            iced::widget::space().height(200),
+        ]
+        .into(),
+    );
+    click_at(&mut drawn, 30.0, 200.0);
+    drawn.simulate([iced::Event::Keyboard(ctrl_s())]);
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    assert!(
+        !sent
+            .iter()
+            .any(|message| matches!(message, KitMessage::Shortcut(_))),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn shortcuts_match_as_the_platform_writes_them() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    use ui::keys::Shortcut;
+    let spec = |text: &str| Shortcut::parse(text).unwrap();
+    let s = Key::Character("S".into());
+    assert!(keys::matches(&spec("mod+s"), &s, Modifiers::COMMAND));
+    assert!(!keys::matches(
+        &spec("mod+s"),
+        &s,
+        Modifiers::COMMAND | Modifiers::SHIFT
+    ));
+    assert!(keys::matches(
+        &spec("mod+shift+s"),
+        &s,
+        Modifiers::COMMAND | Modifiers::SHIFT
+    ));
+    assert!(!keys::matches(&spec("mod+s"), &s, Modifiers::empty()));
+    assert!(keys::matches(
+        &spec("escape"),
+        &Key::Named(Named::Escape),
+        Modifiers::empty()
+    ));
+    // `+` needs shift on most keyboards, which `mod++` does not ask for.
+    assert!(keys::matches(
+        &spec("mod++"),
+        &Key::Character("+".into()),
+        Modifiers::COMMAND | Modifiers::SHIFT
+    ));
+}
+
+#[test]
+fn radio_buttons_send_the_value_chosen_and_a_disabled_one_nothing() {
+    let mut radio = ui::Radio::new(
+        vec![
+            ui::SelectOption::new("mine", "Yours"),
+            ui::SelectOption::new("disk", "On disk").disabled(true),
+        ],
+        Some("disk".into()),
+    );
+    radio.on_select = Some(HandlerId(8));
+    let given = ui::Element::Radio(radio);
+    let widgets = WidgetState::default();
+    let mut drawn = simulate(draw(&widgets, &given));
+    // Fourteen points a button, six between them; a radio's label is not a
+    // text a search finds.
+    click_at(&mut drawn, 7.0, 7.0);
+    click_at(&mut drawn, 7.0, 27.0);
+    let sent: Vec<KitMessage> = drawn.into_messages().collect();
+    assert_eq!(
+        handled(&sent, 8),
+        vec![Some(EventValue::Text("mine".into()))],
+        "{sent:?}"
+    );
+}
+
+fn long(lines: u32, total: Option<u32>, first: u32) -> ui::Log {
+    let mut log = ui::Log::new(
+        (first..first + lines)
+            .map(|n| ui::LogLine::new(format!("line {n}")))
+            .collect(),
+    )
+    .id("job");
+    log.total = total;
+    log.first = first;
+    log.on_range = Some(HandlerId(9));
+    log
+}
+
+#[test]
+fn a_long_log_draws_the_lines_in_view_and_not_the_others() {
+    let given = ui::Element::Log(long(20_000, None, 0));
+    let widgets = WidgetState::default();
+    let mut drawn = simulate(draw(&widgets, &given));
+    drawn.find("line 3").expect("a line in view");
+    assert!(
+        drawn.find("line 19999").is_err(),
+        "a line far below is not drawn"
+    );
+    let mut scrolled = WidgetState::default();
+    scrolled
+        .scrolls
+        .insert("job".into(), (4.0 + 17.0 * 15_000.0, 240.0));
+    let mut drawn = simulate(draw(&scrolled, &given));
+    drawn
+        .find("line 15004")
+        .expect("a line in view once scrolled");
+    assert!(drawn.find("line 3").is_err());
+}
+
+#[test]
+fn a_log_given_in_parts_asks_for_the_lines_coming_into_view() {
+    let root = ui::Element::Log(long(400, Some(50_000), 1000));
+    // In view: what was given, nothing to ask.
+    assert_eq!(range_wanted(&root, "job", 4.0 + 1100.0 * 17.0, 240.0), None);
+    let (asked, handler) = range_wanted(&root, "job", 4.0 + 30_000.0 * 17.0, 240.0).expect("asked");
+    assert_eq!(handler, HandlerId(9));
+    assert!(asked.start <= 30_000 && asked.end >= 30_015, "{asked:?}");
+    assert!(asked.end <= 50_000);
+    assert_eq!(range_wanted(&root, "other", 0.0, 240.0), None);
+}
+
+#[test]
+fn a_text_area_with_line_numbers_numbers_its_lines() {
+    let mut area = ui::TextArea::new("editor", "a = 1\nb = \nc = 3")
+        .line_numbers()
+        .mark(ui::LineMark::new(2, ui::Notice::Error).label("a value is missing"));
+    area.on_input = Some(HandlerId(10));
+    let given = ui::Element::TextArea(area);
+    let mut widgets = WidgetState::default();
+    widgets.sync(
+        &ui::abi::View {
+            seq: 7,
+            root: given.clone(),
+        },
+        &NoImages,
+        &[],
+        &crate::tab::Held::default(),
+    );
+    let mut drawn = simulate(draw(&widgets, &given));
+    for number in ["1", "2", "3"] {
+        drawn.find(number).expect("a line's number");
+    }
+}
+
+#[test]
+fn a_workspace_image_needs_files_read_and_a_held_one_is_the_tabs() {
+    let picture =
+        |source: ImageSource| ui::Element::Image(ui::Image::new(source).description("a capture"));
+    let mut held = crate::tab::Held::default();
+    let id = held.hold(b"\x89PNG\r\n\x1a\n not much of one".to_vec());
+    let page = ui::Element::Column(ui::Column::new(vec![
+        picture(ImageSource::File("shot.png".into())),
+        picture(ImageSource::Held(id.clone())),
+    ]));
+    let mut widgets = WidgetState::default();
+    widgets.sync(&ui::abi::View { seq: 7, root: page }, &NoImages, &[], &held);
+    assert!(matches!(
+        widgets.images.get(&ImageSource::File("shot.png".into())),
+        Some(Picture::Missing(Missing::Refused(why))) if why.contains("files.read")
+    ));
+    assert!(matches!(
+        widgets.images.get(&ImageSource::Held(id)),
+        Some(Picture::Raster(_))
+    ));
 }

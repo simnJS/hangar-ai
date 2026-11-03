@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use hangar_kit_ui::abi::{CallId, Input, LogLevel, Output, Start, View};
+use hangar_kit_ui::abi::{self, CallId, Input, LogLevel, MAX_TIMERS, Output, Start, View};
 use hangar_kit_ui::{HandlerId, UiEvent};
 
 use crate::Kit;
@@ -18,6 +18,17 @@ use crate::subscriptions::Subscriptions;
 /// more than a person can click through between two frames.
 const KEPT_VIEWS: usize = 8;
 
+/// A message [`Context::after`](crate::Context::after) waits to send.
+struct Timeout<M> {
+    key: String,
+    /// The timer's id on the wire: the key and a number of its own, so that
+    /// asking again under a key is another timer, which starts from zero,
+    /// where one of the same id and period would keep running.
+    id: String,
+    every_ms: u32,
+    message: M,
+}
+
 pub struct Runtime<K: Kit> {
     kit: Option<K>,
     pending: HashMap<CallId, Pending<K::Message>>,
@@ -25,6 +36,9 @@ pub struct Runtime<K: Kit> {
     views: VecDeque<(u32, Vec<Handler<K::Message>>)>,
     seq: u32,
     subscriptions: Subscriptions<K::Message>,
+    timeouts: Vec<Timeout<K::Message>>,
+    next_timeout: u64,
+    utc_offset: i32,
 }
 
 impl<K: Kit> Default for Runtime<K> {
@@ -42,6 +56,9 @@ impl<K: Kit> Runtime<K> {
             views: VecDeque::new(),
             seq: 0,
             subscriptions: Subscriptions::none(),
+            timeouts: Vec::new(),
+            next_timeout: 0,
+            utc_offset: 0,
         }
     }
 
@@ -51,13 +68,14 @@ impl<K: Kit> Runtime<K> {
     }
 
     pub fn init(&mut self, start: Start) -> Output {
-        let mut cx = Context::new(self.next_call, false);
+        self.utc_offset = start.utc_offset;
+        let mut cx = Context::new(self.next_call, false, self.utc_offset);
         self.kit = Some(K::init(&start, &mut cx));
         self.finish(cx)
     }
 
     pub fn update(&mut self, input: Input) -> Output {
-        let gesture = matches!(input, Input::Ui(_));
+        let gesture = matches!(input, Input::Ui(_) | Input::Shortcut(_));
         let message = match input {
             Input::Ui(event) => self.resolve(event),
             Input::Reply(reply) => match self.pending.remove(&reply.id) {
@@ -70,12 +88,25 @@ impl<K: Kit> Runtime<K> {
                     None
                 }
             },
-            Input::Timer(timer) => self
-                .subscriptions
-                .timers
+            Input::Timer(timer) => match self
+                .timeouts
                 .iter()
-                .find(|(id, _, _)| *id == timer.id)
-                .map(|(_, _, message)| message.clone()),
+                .position(|timeout| timeout.id == timer.id)
+            {
+                Some(at) => Some(self.timeouts.remove(at).message),
+                None => self
+                    .subscriptions
+                    .timers
+                    .iter()
+                    .find(|(id, _, _)| *id == timer.id)
+                    .map(|(_, _, message)| message.clone()),
+            },
+            Input::Shortcut(pressed) => self
+                .subscriptions
+                .shortcuts
+                .iter()
+                .find(|(keys, _)| *keys == pressed.keys)
+                .map(|(_, message)| message.clone()),
             Input::Event(event) => self
                 .subscriptions
                 .events
@@ -83,7 +114,7 @@ impl<K: Kit> Runtime<K> {
                 .find(|(name, _)| *name == event.name)
                 .and_then(|(_, handler)| handler(event.data)),
         };
-        let mut cx = Context::new(self.next_call, gesture);
+        let mut cx = Context::new(self.next_call, gesture, self.utc_offset);
         if let (Some(kit), Some(message)) = (self.kit.as_mut(), message) {
             kit.update(message, &mut cx);
         }
@@ -133,12 +164,42 @@ impl<K: Kit> Runtime<K> {
             self.pending.insert(call.id, pending);
             calls.push(call);
         }
+        for key in cx.cancelled {
+            self.timeouts.retain(|timeout| timeout.key != key);
+        }
+        for (key, every_ms, message) in cx.after {
+            self.timeouts.retain(|timeout| timeout.key != key);
+            self.next_timeout += 1;
+            self.timeouts.push(Timeout {
+                id: format!("~after:{key}:{}", self.next_timeout),
+                key,
+                every_ms,
+                message,
+            });
+        }
         if let Some(kit) = self.kit.as_ref() {
             self.subscriptions = kit.subscriptions();
         }
+        let mut subscriptions = self.subscriptions.wire();
+        subscriptions
+            .timers
+            .extend(self.timeouts.iter().map(|timeout| abi::Timer {
+                id: timeout.id.clone(),
+                every_ms: timeout.every_ms,
+            }));
+        if subscriptions.timers.len() > MAX_TIMERS {
+            crate::sys::log(
+                LogLevel::Warn,
+                &format!(
+                    "{} timers asked for, of which Hangar runs {MAX_TIMERS}: the others never come",
+                    subscriptions.timers.len()
+                ),
+            );
+        }
         Output {
             calls,
-            subscriptions: Some(self.subscriptions.wire()),
+            subscriptions: Some(subscriptions),
+            operations: cx.operations,
         }
     }
 }

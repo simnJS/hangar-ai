@@ -17,7 +17,7 @@
 use std::rc::Rc;
 
 use hangar_kit_ui as ui;
-use hangar_kit_ui::{EmptyKind, Icon, ImageSource, Notice, Sort, Status};
+use hangar_kit_ui::{EmptyKind, Icon, ImageSource, Ink, Mark, Notice, Point, Range, Sort, Status};
 
 use crate::handler::Handler;
 
@@ -100,7 +100,9 @@ pub fn pre(text: impl Into<String>) -> ui::Pre {
     ui::Pre::new(text)
 }
 
-pub fn log_lines(lines: impl IntoIterator<Item = ui::LogLine>) -> ui::Log {
+/// A log. Give a long one an `id` (`.id("job")`): Hangar then draws only
+/// the lines in view, and `Context::scroll_to_line` reaches it.
+pub fn log_lines<M>(lines: impl IntoIterator<Item = ui::LogLine>) -> ui::Log<Handler<M>> {
     ui::Log::new(lines.into_iter().collect())
 }
 
@@ -260,6 +262,15 @@ pub fn select_option(value: impl Into<String>, label: impl Into<String>) -> ui::
     ui::SelectOption::new(value, label)
 }
 
+/// Round buttons, one chosen: `radio([select_option("mine", "Yours"), …],
+/// Some("mine"))`.
+pub fn radio<M>(
+    options: impl IntoIterator<Item = ui::SelectOption>,
+    selected: Option<impl Into<String>>,
+) -> ui::Radio<Handler<M>> {
+    ui::Radio::new(options.into_iter().collect(), selected.map(Into::into))
+}
+
 pub fn checkbox<M>(label: impl Into<String>, checked: bool) -> ui::Checkbox<Handler<M>> {
     ui::Checkbox::new(label, checked)
 }
@@ -304,6 +315,33 @@ pub fn data_image(path: impl Into<String>) -> ui::Image {
     ui::Image::new(ImageSource::Data(path.into()))
 }
 
+/// An image of the workspace folder: needs `files.read`.
+pub fn file_image(path: impl Into<String>) -> ui::Image {
+    ui::Image::new(ImageSource::File(path.into()))
+}
+
+/// A picture the tab holds (`files.pick` outside the workspace,
+/// `ui.pasteImage`): needs nothing more.
+pub fn held_image(id: impl Into<String>) -> ui::Image {
+    ui::Image::new(ImageSource::Held(id.into()))
+}
+
+/// A picture with marks on it, `width` by `height` of its own units, which
+/// the person draws on with `tool`: see [`ui::Canvas`].
+pub fn canvas<M>(id: impl Into<String>, width: f32, height: f32) -> ui::Canvas<Handler<M>> {
+    ui::Canvas::new(id, width, height)
+}
+
+/// A square of an ink to choose it by, named by `label`.
+pub fn swatch<M>(ink: Ink, label: impl Into<String>) -> ui::Swatch<Handler<M>> {
+    ui::Swatch::new(ink, label)
+}
+
+/// A line of a text area marked in its gutter, from 1.
+pub fn line_mark(line: u32, kind: Notice) -> ui::LineMark {
+    ui::LineMark::new(line, kind)
+}
+
 pub fn sparkline(values: impl IntoIterator<Item = f32>) -> ui::Sparkline {
     ui::Sparkline::new(values.into_iter().collect())
 }
@@ -344,7 +382,7 @@ macro_rules! on_press {
     };
 }
 
-on_press!(Button, Link, ListItem, Filter, Span);
+on_press!(Button, Link, ListItem, Filter, Span, Swatch);
 
 /// Widgets that are typed into.
 pub trait OnInput<M> {
@@ -437,7 +475,65 @@ macro_rules! on_select {
     };
 }
 
-on_select!(Select, Tabs, Menu, Tree);
+on_select!(Select, Tabs, Menu, Tree, Radio);
+
+/// A menu filled once it opens.
+pub trait OnOpen<M> {
+    /// Opened, it sends `message`; give the menu an `id` so that it stays
+    /// open while its items change.
+    fn on_open(self, message: M) -> Self;
+}
+
+impl<M> OnOpen<M> for ui::Menu<Handler<M>> {
+    fn on_open(mut self, message: M) -> Self {
+        self.on_open = Some(Handler::Message(message));
+        self
+    }
+}
+
+/// A canvas's handlers.
+pub trait CanvasEvents<M> {
+    /// A drag finished: the mark it drew, in the canvas's units, inside it.
+    /// The kit keeps it (or not) in its `marks`.
+    fn on_draw(self, f: impl Fn(Mark) -> M + 'static) -> Self;
+    /// A press that did not become a drag, or any press with the `point`
+    /// tool: where, in the canvas's units.
+    fn on_point(self, f: impl Fn(Point) -> M + 'static) -> Self;
+    /// Without a zoom, the scale the canvas is drawn at, each time it
+    /// changes.
+    fn on_fit(self, f: impl Fn(f32) -> M + 'static) -> Self;
+}
+
+impl<M> CanvasEvents<M> for ui::Canvas<Handler<M>> {
+    fn on_draw(mut self, f: impl Fn(Mark) -> M + 'static) -> Self {
+        self.on_draw = Some(Handler::Mark(Rc::new(f)));
+        self
+    }
+
+    fn on_point(mut self, f: impl Fn(Point) -> M + 'static) -> Self {
+        self.on_point = Some(Handler::Point(Rc::new(f)));
+        self
+    }
+
+    fn on_fit(mut self, f: impl Fn(f32) -> M + 'static) -> Self {
+        self.on_fit = Some(Handler::Number(Rc::new(move |scale| f(scale as f32))));
+        self
+    }
+}
+
+/// A long log the kit gives in parts.
+pub trait OnRange<M> {
+    /// The lines in view are not all given: `f` of the range to give next.
+    /// Give them, from its `start`, with `.window(start, total)`.
+    fn on_range(self, f: impl Fn(Range) -> M + 'static) -> Self;
+}
+
+impl<M> OnRange<M> for ui::Log<Handler<M>> {
+    fn on_range(mut self, f: impl Fn(Range) -> M + 'static) -> Self {
+        self.on_range = Some(Handler::Range(Rc::new(f)));
+        self
+    }
+}
 
 /// A table's handlers.
 pub trait TableEvents<M> {

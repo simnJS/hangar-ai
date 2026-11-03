@@ -15,6 +15,36 @@ use hangar_kit_ui::api::{self, BadgeState, KitError};
 /// (docs/kits.md, "The tab message protocol"), or its error.
 pub type CallFuture = Pin<Box<dyn Future<Output = Result<Value, KitError>> + Send + 'static>>;
 
+/// What the system's file chooser gave, once the person has chosen.
+pub type PickFuture =
+    Pin<Box<dyn Future<Output = Result<Option<PickedFile>, KitError>> + Send + 'static>>;
+
+/// What the clipboard holds as a picture.
+pub type ClipboardFuture =
+    Pin<Box<dyn Future<Output = Result<Option<ClipboardImage>, KitError>> + Send + 'static>>;
+
+/// A file the person chose with `files.pick`: one of the workspace, by its
+/// path relative to it; or one outside it, by its bytes, which the tab then
+/// holds as a picture (10 MB at most: the app refuses a larger one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedFile {
+    pub name: String,
+    pub size: u64,
+    /// Relative to the workspace folder, with `/`: inside it.
+    pub workspace_path: Option<String>,
+    /// Outside it, what it holds.
+    pub bytes: Option<Vec<u8>>,
+}
+
+/// A picture of the clipboard, as the system gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipboardImage {
+    pub width: u32,
+    pub height: u32,
+    /// Four bytes a pixel, not premultiplied, row after row.
+    pub rgba: Vec<u8>,
+}
+
 /// The app's side of one tab. One per open tab: it knows which workspace,
 /// which kit and which tab it answers for, from its own record, never from
 /// what the kit says.
@@ -51,6 +81,27 @@ pub trait KitApi: Send + Sync + 'static {
             KitError::UNSUPPORTED,
             "this Hangar shows no image of a kit",
         ))
+    }
+
+    /// `files.pick`, let through (`files.read` held, a person's click or
+    /// keystroke): the system's file chooser, opened in the workspace
+    /// folder, answering `None` when the person cancels. Refused by default.
+    fn pick_file(&self, request: &api::FilesPick) -> PickFuture {
+        let _ = request;
+        Box::pin(std::future::ready(Err(KitError::new(
+            KitError::UNSUPPORTED,
+            "this Hangar has no file chooser for a kit",
+        ))))
+    }
+
+    /// `ui.pasteImage`, let through (a person's click or keystroke): the
+    /// picture on the clipboard, `None` when it holds none. Refused by
+    /// default.
+    fn clipboard_image(&self) -> ClipboardFuture {
+        Box::pin(std::future::ready(Err(KitError::new(
+            KitError::UNSUPPORTED,
+            "this Hangar reads no picture from the clipboard for a kit",
+        ))))
     }
 }
 
@@ -126,6 +177,15 @@ pub enum HostCall {
     Confirm(api::Confirm),
     /// `{}`. Only from an update that answers a person's click or keystroke.
     Copy { text: String },
+    /// `files.pick`: done by the tab with [`KitApi::pick_file`], never
+    /// handed to [`KitApi::call`].
+    FilesPick(api::FilesPick),
+    /// `ui.pasteImage`: done by the tab with [`KitApi::clipboard_image`],
+    /// never handed to [`KitApi::call`].
+    PasteImage,
+    /// `canvas.export`: drawn by the tab, which hands the app the PNG as a
+    /// [`HostCall::FilesWriteBinary`], never this.
+    CanvasExport(Box<api::CanvasExport>),
 }
 
 impl HostCall {
@@ -153,6 +213,9 @@ impl HostCall {
             HostCall::Toast(_) => UI_TOAST,
             HostCall::Confirm(_) => UI_CONFIRM,
             HostCall::Copy { .. } => UI_COPY,
+            HostCall::FilesPick(_) => FILES_PICK,
+            HostCall::PasteImage => UI_PASTE_IMAGE,
+            HostCall::CanvasExport(_) => CANVAS_EXPORT,
         }
     }
 }

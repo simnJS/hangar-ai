@@ -410,6 +410,14 @@ impl Deps for Fake {
     fn image(&self, _kit: &str, _source: &ImageSource) -> Result<Vec<u8>, KitError> {
         Err(KitError::new(KitError::UNSUPPORTED, "no image"))
     }
+    fn workspace_image(
+        &self,
+        root: String,
+        path: String,
+        hidden: bool,
+    ) -> Result<Vec<u8>, KitError> {
+        Ok(format!("{root}|{path}|{hidden}").into_bytes())
+    }
 }
 
 /// A page's host over the fake world, with a clock of its own.
@@ -757,7 +765,14 @@ mod what_a_tab_may_ask_about_itself_with_no_permission {
     #[test]
     fn leaves_to_a_page_what_it_has_in_its_own_document() {
         let mut s = bare();
-        for method in ["ui.toast", "ui.confirm", "ui.copy"] {
+        for method in [
+            "ui.toast",
+            "ui.confirm",
+            "ui.copy",
+            "files.pick",
+            "ui.pasteImage",
+            "canvas.export",
+        ] {
             let answer = error_body(s.call(method, Some(json!({ "message": "hi", "text": "x" }))));
             assert_eq!(answer["code"], "unknown", "{method}");
         }
@@ -2918,6 +2933,37 @@ mod hosts_are_bound_to_their_own_window {
 
 mod a_native_tabs_calls {
     use super::*;
+
+    /// The images of the workspace a view shows are read from its folder,
+    /// as it is now, hidden ones with `files.write` too; the chooser opens
+    /// there, and neither once the workspace is gone.
+    #[test]
+    fn reach_the_workspace_as_it_is_now_for_its_images_and_the_chooser() {
+        let fake = Fake::default();
+        let api = TabApi::new(Arc::new(fake.clone()), Arc::new(fake.clone()));
+        assert_eq!(
+            KitApi::image(&api, &ImageSource::File("shots/a.png".into())).unwrap(),
+            b"C:/projects/game|shots/a.png|false".to_vec()
+        );
+        fake.world().granted = vec!["files.read".into(), "files.write".into()];
+        assert_eq!(
+            KitApi::image(&api, &ImageSource::File(".shots/a.png".into())).unwrap(),
+            b"C:/projects/game|.shots/a.png|true".to_vec()
+        );
+        fake.world().current = None;
+        assert_eq!(
+            KitApi::image(&api, &ImageSource::File("a.png".into()))
+                .unwrap_err()
+                .code,
+            "unavailable"
+        );
+        assert_eq!(
+            block_on(KitApi::pick_file(&api, &api::FilesPick::default()))
+                .unwrap_err()
+                .code,
+            "unavailable"
+        );
+    }
 
     /// The same `TabApi` answers a native tab, the gate being its `KitTab`'s:
     /// here through a gate of its own, with a click behind it.

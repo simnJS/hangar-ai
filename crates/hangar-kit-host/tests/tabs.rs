@@ -20,8 +20,9 @@ use hangar_kit_host::ui::abi::{KitInfo, TabInfo};
 use hangar_kit_host::ui::api::{KitError, Theme};
 use hangar_kit_host::ui::{Element, HandlerId, UiEvent};
 use hangar_kit_host::{
-    CallFuture, Effects, FailureKind, HostCall, KitApi, KitMessage, KitModule, KitRuntime,
-    KitStyle, KitTab, Limits, LoadError, TabStart, ready,
+    CallFuture, ClipboardFuture, ClipboardImage, Effects, FailureKind, HostCall, KitApi,
+    KitMessage, KitModule, KitRuntime, KitStyle, KitTab, Limits, LoadError, PickFuture, PickedFile,
+    TabStart, ready,
 };
 
 fn workspace() -> PathBuf {
@@ -91,6 +92,9 @@ fn probe(runtime: &KitRuntime) -> KitModule {
 struct Fake {
     granted: Mutex<Vec<String>>,
     asked: Mutex<Vec<HostCall>>,
+    /// What the file chooser gives, and the clipboard holds.
+    picked: Mutex<Option<PickedFile>>,
+    clipboard: Mutex<Option<ClipboardImage>>,
 }
 
 impl Fake {
@@ -128,6 +132,32 @@ impl KitApi for Fake {
             _ => Ok(json!({})),
         })
     }
+
+    fn pick_file(&self, _request: &hangar_kit_host::ui::api::FilesPick) -> PickFuture {
+        Box::pin(std::future::ready(Ok(self.picked.lock().unwrap().clone())))
+    }
+
+    fn clipboard_image(&self) -> ClipboardFuture {
+        Box::pin(std::future::ready(Ok(self
+            .clipboard
+            .lock()
+            .unwrap()
+            .clone())))
+    }
+}
+
+/// A PNG of `width` by `height`, all of one grey.
+fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer
+        .write_image_data(&vec![128; (width * height * 4) as usize])
+        .unwrap();
+    drop(writer);
+    bytes
 }
 
 fn start(params: &[(&str, &str)]) -> TabStart {
@@ -204,6 +234,142 @@ fn press(tab: &mut KitTab, label: &str) -> Effects {
         value: None,
     };
     tab.update(KitMessage::Ui(event))
+}
+
+#[test]
+fn a_shortcut_reaches_the_kit_as_a_keystroke_and_others_go_unheard() {
+    let runtime = runtime(Limits::default());
+    let (mut tab, effects) =
+        KitTab::start(&runtime, &probe(&runtime), start(&[]), Fake::granting(&[]));
+    settle(&mut tab, effects);
+    assert_eq!(tab.shortcuts(), ["mod+s"]);
+    tab.update(KitMessage::Shortcut("mod+s".into()));
+    tab.update(KitMessage::Shortcut("mod+q".into()));
+    assert!(texts(&tab).contains(&"saves: 1".to_owned()));
+    // The person's time zone, which wasm32 has not.
+    let offset = chrono::Local::now().offset().local_minus_utc() / 60;
+    assert!(texts(&tab).contains(&format!("offset: {offset}")));
+}
+
+#[test]
+fn operations_name_the_tabs_own_widgets_and_skip_what_is_not_there() {
+    let runtime = runtime(Limits::default());
+    let (mut tab, effects) =
+        KitTab::start(&runtime, &probe(&runtime), start(&[]), Fake::granting(&[]));
+    settle(&mut tab, effects);
+    let effects = press(&mut tab, "Focus");
+    assert_eq!(
+        effects.operations(),
+        vec![
+            format!("focus {}", tab.widget_id("name")),
+            // Line 40, three lines under the top, under the log's padding.
+            format!("scroll {} {}", tab.widget_id("job"), 4.0 + 37.0 * 17.0),
+        ]
+    );
+    let (other, _) = KitTab::start(&runtime, &probe(&runtime), start(&[]), Fake::granting(&[]));
+    assert_ne!(other.widget_id("name"), tab.widget_id("name"));
+}
+
+#[test]
+fn a_file_picked_inside_the_workspace_is_a_path_and_one_outside_is_held() {
+    let runtime = runtime(Limits::default());
+    let fake = Fake::granting(&["files.read"]);
+    let (mut tab, effects) = KitTab::start(&runtime, &probe(&runtime), start(&[]), fake.clone());
+    settle(&mut tab, effects);
+    *fake.picked.lock().unwrap() = Some(PickedFile {
+        name: "shot.png".into(),
+        size: 120,
+        workspace_path: Some("captures/shot.png".into()),
+        bytes: None,
+    });
+    let effects = press(&mut tab, "Pick");
+    settle(&mut tab, effects);
+    *fake.picked.lock().unwrap() = Some(PickedFile {
+        name: "elsewhere.png".into(),
+        size: 120,
+        workspace_path: None,
+        bytes: Some(png(4, 4)),
+    });
+    let effects = press(&mut tab, "Pick");
+    settle(&mut tab, effects);
+    *fake.picked.lock().unwrap() = None;
+    let effects = press(&mut tab, "Pick");
+    settle(&mut tab, effects);
+    let shown = texts(&tab);
+    for expected in [
+        "files.pick: captures/shot.png",
+        "files.pick: held-1",
+        "files.pick: cancelled",
+    ] {
+        assert!(
+            shown.contains(&expected.to_owned()),
+            "{expected} in {shown:?}"
+        );
+    }
+    // Not from a click: refused before the app is asked.
+    let (mut tab, effects) = KitTab::start(
+        &runtime,
+        &probe(&runtime),
+        start(&[("calls", "files.pick")]),
+        fake.clone(),
+    );
+    settle(&mut tab, effects);
+    assert!(texts(&tab).contains(&"files.pick: denied".to_owned()));
+}
+
+#[test]
+fn a_pasted_picture_is_held_and_an_empty_clipboard_is_not_found() {
+    let runtime = runtime(Limits::default());
+    let fake = Fake::granting(&[]);
+    let (mut tab, effects) = KitTab::start(&runtime, &probe(&runtime), start(&[]), fake.clone());
+    settle(&mut tab, effects);
+    let effects = press(&mut tab, "Paste");
+    settle(&mut tab, effects);
+    *fake.clipboard.lock().unwrap() = Some(ClipboardImage {
+        width: 2,
+        height: 1,
+        rgba: vec![255, 0, 0, 255, 0, 0, 255, 255],
+    });
+    let effects = press(&mut tab, "Paste");
+    settle(&mut tab, effects);
+    let shown = texts(&tab);
+    assert!(
+        shown.contains(&"ui.pasteImage: not_found".to_owned()),
+        "{shown:?}"
+    );
+    assert!(
+        shown.contains(&"ui.pasteImage: held-1".to_owned()),
+        "{shown:?}"
+    );
+}
+
+#[test]
+fn a_canvas_is_exported_as_a_new_png_through_the_apps_binary_write() {
+    use base64::Engine;
+    let runtime = runtime(Limits::default());
+    let fake = Fake::granting(&["files.write"]);
+    let (mut tab, effects) = KitTab::start(&runtime, &probe(&runtime), start(&[]), fake.clone());
+    settle(&mut tab, effects);
+    let effects = press(&mut tab, "Export");
+    settle(&mut tab, effects);
+    assert!(texts(&tab).contains(&"canvas.export: shots/probe.png".to_owned()));
+    let Some(HostCall::FilesWriteBinary { path, base64 }) = fake.asked().last().cloned() else {
+        panic!("{:?}", fake.asked());
+    };
+    assert_eq!(path, "shots/probe.png");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .unwrap();
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let info = decoder.read_info().unwrap();
+    assert_eq!((info.info().width, info.info().height), (64, 32));
+    // Without files.write it is denied, and nothing is drawn.
+    fake.granted.lock().unwrap().clear();
+    let before = fake.asked().len();
+    let effects = press(&mut tab, "Export");
+    settle(&mut tab, effects);
+    assert!(texts(&tab).contains(&"canvas.export: denied".to_owned()));
+    assert_eq!(fake.asked().len(), before);
 }
 
 /// The app may move a tab to a worker thread (docs/native/kits-native.md,

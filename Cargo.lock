@@ -3220,14 +3220,20 @@ dependencies = [
 name = "hangar-kit-host"
 version = "1.12.1"
 dependencies = [
+ "ab_glyph",
+ "base64 0.22.1",
+ "chrono",
  "hangar-i18n",
  "hangar-kit-ui",
  "hangar-theme",
  "hangar-ui",
  "iced",
  "iced_test",
+ "image",
+ "png 0.18.1",
  "serde",
  "serde_json",
+ "tiny-skia",
  "wasmtime",
 ]
 

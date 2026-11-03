@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::draw::{Canvas, Swatch};
 use crate::style::*;
 
 /// The number a kit gives a handler in one view. Hangar sends it back with
@@ -51,7 +52,7 @@ pub enum Element<H = HandlerId> {
     Text(Text),
     Spans(Spans<H>),
     Pre(Pre),
-    Log(Log),
+    Log(Log<H>),
     KeyValue(KeyValue<H>),
     // The parts of a page.
     Header(Header<H>),
@@ -73,6 +74,8 @@ pub enum Element<H = HandlerId> {
     Checkbox(Checkbox<H>),
     Switch(Switch<H>),
     Filter(Filter<H>),
+    Radio(Radio<H>),
+    Swatch(Swatch<H>),
     // States.
     Chip(Chip),
     State(StateLabel),
@@ -83,6 +86,7 @@ pub enum Element<H = HandlerId> {
     Image(Image),
     Sparkline(Sparkline),
     Bars(Bars),
+    Canvas(Canvas<H>),
     /// A widget a newer Hangar knows.
     #[serde(other)]
     Unsupported,
@@ -113,8 +117,9 @@ into_element!(
         KeyValue(KeyValue), Header(Header), Section(Section), List(List), Table(Table),
         Tree(Tree), Tabs(Tabs), Empty(Empty), Banner(Banner), Button(Button), Link(Link),
         Menu(Menu), TextInput(TextInput), TextArea(TextArea), Search(Search), Select(Select),
-        Checkbox(Checkbox), Switch(Switch), Filter(Filter);
-    plain: Space(Space), Divider(Divider), Text(Text), Pre(Pre), Log(Log), Chip(Chip),
+        Checkbox(Checkbox), Switch(Switch), Filter(Filter), Log(Log), Radio(Radio),
+        Swatch(Swatch), Canvas(Canvas);
+    plain: Space(Space), Divider(Divider), Text(Text), Pre(Pre), Chip(Chip),
         State(StateLabel), Glyph(Glyph), Progress(Progress), Icon(Symbol), Image(Image),
         Sparkline(Sparkline), Bars(Bars),
 );
@@ -173,6 +178,7 @@ impl<H> Element<H> {
             }
             Element::KeyValue(w) => w.pairs.iter().for_each(|pair| pair.value.for_each(f)),
             Element::Header(w) => {
+                all(&w.lead, f);
                 all(&w.state, f);
                 all(&w.actions, f);
             }
@@ -189,6 +195,7 @@ impl<H> Element<H> {
                         end.for_each(f);
                     }
                     all(&item.actions, f);
+                    all(&item.body, f);
                 }
             }
             Element::Table(w) => w
@@ -196,7 +203,10 @@ impl<H> Element<H> {
                 .iter()
                 .flat_map(|row| &row.cells)
                 .for_each(|cell| cell.content.for_each(f)),
-            Element::Empty(w) => all(&w.actions, f),
+            Element::Empty(w) => {
+                all(&w.actions, f);
+                all(&w.children, f);
+            }
             Element::Banner(w) => all(&w.actions, f),
             _ => {}
         }
@@ -231,6 +241,7 @@ impl<H> Element<H> {
                 spacing: w.spacing,
             }),
             Element::Scroll(w) => Element::Scroll(Scroll {
+                id: w.id,
                 child: map_box(*w.child, f),
                 axis: w.axis,
                 width: w.width,
@@ -285,7 +296,15 @@ impl<H> Element<H> {
                 wrap: w.wrap,
             }),
             Element::Pre(w) => Element::Pre(w),
-            Element::Log(w) => Element::Log(w),
+            Element::Log(w) => Element::Log(Log {
+                id: w.id,
+                lines: w.lines,
+                height: w.height,
+                at_end: w.at_end,
+                total: w.total,
+                first: w.first,
+                on_range: w.on_range.map(&mut *f),
+            }),
             Element::KeyValue(w) => Element::KeyValue(KeyValue {
                 pairs: w
                     .pairs
@@ -297,6 +316,7 @@ impl<H> Element<H> {
                     .collect(),
             }),
             Element::Header(w) => Element::Header(Header {
+                lead: map_all(w.lead, f),
                 title: w.title,
                 state: map_all(w.state, f),
                 actions: map_all(w.actions, f),
@@ -317,8 +337,10 @@ impl<H> Element<H> {
                         sub: item.sub,
                         end: map_opt_box(item.end, f),
                         actions: map_all(item.actions, f),
+                        body: map_all(item.body, f),
                         selected: item.selected,
                         wrap: item.wrap,
+                        mono: item.mono,
                         tooltip: item.tooltip,
                         on_press: item.on_press.map(&mut *f),
                     })
@@ -361,11 +383,14 @@ impl<H> Element<H> {
             }),
             Element::Empty(w) => Element::Empty(Empty {
                 kind: w.kind,
+                icon: w.icon,
                 title: w.title,
                 text: w.text,
                 actions: map_all(w.actions, f),
+                children: map_all(w.children, f),
             }),
             Element::Banner(w) => Element::Banner(Banner {
+                title: w.title,
                 text: w.text,
                 kind: w.kind,
                 actions: map_all(w.actions, f),
@@ -383,14 +408,17 @@ impl<H> Element<H> {
                 on_press: w.on_press.map(&mut *f),
             }),
             Element::Menu(w) => Element::Menu(Menu {
+                id: w.id,
                 label: w.label,
                 icon: w.icon,
                 kind: w.kind,
                 small: w.small,
                 items: w.items,
                 on_select: w.on_select.map(&mut *f),
+                on_open: w.on_open.map(&mut *f),
             }),
             Element::TextInput(w) => Element::TextInput(TextInput {
+                id: w.id,
                 value: w.value,
                 placeholder: w.placeholder,
                 label: w.label,
@@ -410,10 +438,14 @@ impl<H> Element<H> {
                 hint: w.hint,
                 error: w.error,
                 height: w.height,
+                fill: w.fill,
                 mono: w.mono,
+                line_numbers: w.line_numbers,
+                marks: w.marks,
                 on_input: w.on_input.map(&mut *f),
             }),
             Element::Search(w) => Element::Search(Search {
+                id: w.id,
                 value: w.value,
                 placeholder: w.placeholder,
                 on_input: w.on_input.map(&mut *f),
@@ -445,6 +477,19 @@ impl<H> Element<H> {
                 pressed: w.pressed,
                 on_press: w.on_press.map(&mut *f),
             }),
+            Element::Radio(w) => Element::Radio(Radio {
+                options: w.options,
+                selected: w.selected,
+                label: w.label,
+                horizontal: w.horizontal,
+                on_select: w.on_select.map(&mut *f),
+            }),
+            Element::Swatch(w) => Element::Swatch(Swatch {
+                ink: w.ink,
+                label: w.label,
+                selected: w.selected,
+                on_press: w.on_press.map(&mut *f),
+            }),
             Element::Chip(w) => Element::Chip(w),
             Element::State(w) => Element::State(w),
             Element::Glyph(w) => Element::Glyph(w),
@@ -453,6 +498,22 @@ impl<H> Element<H> {
             Element::Image(w) => Element::Image(w),
             Element::Sparkline(w) => Element::Sparkline(w),
             Element::Bars(w) => Element::Bars(w),
+            Element::Canvas(w) => Element::Canvas(Canvas {
+                id: w.id,
+                width: w.width,
+                height: w.height,
+                background: w.background,
+                marks: w.marks,
+                zoom: w.zoom,
+                fit_height: w.fit_height,
+                tool: w.tool,
+                ink: w.ink,
+                stroke: w.stroke,
+                description: w.description,
+                on_draw: w.on_draw.map(&mut *f),
+                on_point: w.on_point.map(&mut *f),
+                on_fit: w.on_fit.map(&mut *f),
+            }),
             Element::Unsupported => Element::Unsupported,
         }
     }
@@ -637,6 +698,9 @@ impl<H> Grid<H> {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct Scroll<H = HandlerId> {
+    /// What `Context::scroll_to` names it by; unique in the view.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub child: Box<Element<H>>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub axis: Axis,
@@ -653,6 +717,7 @@ pub struct Scroll<H = HandlerId> {
 impl<H> Scroll<H> {
     pub fn new(child: impl Into<Element<H>>) -> Self {
         Scroll {
+            id: String::new(),
             child: Box::new(child.into()),
             axis: Axis::Vertical,
             width: None,
@@ -661,7 +726,7 @@ impl<H> Scroll<H> {
         }
     }
     opt!(width: Length, height: Length);
-    set!(axis: Axis);
+    set!(axis: Axis, id: String);
     pub fn stick_to_end(mut self) -> Self {
         self.stick_to_end = true;
         self
@@ -1018,10 +1083,22 @@ impl Pre {
 
 /// A log: lines with their kind and number, scrolling inside itself
 /// (`.kit-log`, `hangar.ui.log`).
+///
+/// With an `id`, it is a long log: Hangar draws only the lines in view, each
+/// on one line (it scrolls sideways for a longer one), so tens of thousands
+/// of lines scroll as easily as ten, and `Context::scroll_to_line` brings
+/// one into view. With a `total` as well, the kit gives only some of them:
+/// `lines` are the lines from `first` on, of `total`, and Hangar asks for
+/// others with `onRange` as the person scrolls, so a view never carries the
+/// whole of a large log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
-pub struct Log {
+#[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
+pub struct Log<H = HandlerId> {
+    /// Unique in the view.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     #[serde(default)]
     pub lines: Vec<LogLine>,
     /// How tall it grows before it scrolls; 240 by default.
@@ -1030,19 +1107,44 @@ pub struct Log {
     /// Opens at its end, and stays there as lines are added.
     #[serde(default, skip_serializing_if = "is_false")]
     pub at_end: bool,
+    /// How many lines the whole log has, when `lines` are some of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    /// The index of the first of `lines` in the whole log.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub first: u32,
+    /// The lines in view, and some around them, are not all given: a
+    /// [`Range`](crate::Range) of the lines to give next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_range: Option<H>,
 }
 
-impl Log {
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+impl<H> Log<H> {
     pub fn new(lines: Vec<LogLine>) -> Self {
         Log {
+            id: String::new(),
             lines,
             height: None,
             at_end: false,
+            total: None,
+            first: 0,
+            on_range: None,
         }
     }
     num!(height: f32);
+    set!(id: String);
     pub fn at_end(mut self) -> Self {
         self.at_end = true;
+        self
+    }
+    /// The lines given are those from `first` on, of `total`.
+    pub fn window(mut self, first: u32, total: u32) -> Self {
+        self.first = first;
+        self.total = Some(total);
         self
     }
 }
@@ -1072,6 +1174,10 @@ impl LogLine {
     }
     set!(kind: LineKind);
     num!(number: u32);
+    pub fn current(mut self, current: bool) -> Self {
+        self.current = current;
+        self
+    }
 }
 
 /// Names and values, in two columns (`.kit-kv`).
@@ -1116,6 +1222,9 @@ impl<H> Pair<H> {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct Header<H = HandlerId> {
+    /// Before the title: a back button.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lead: Vec<Element<H>>,
     pub title: String,
     /// The line under the title: a [`StateLabel`] and a few words.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1127,6 +1236,7 @@ pub struct Header<H = HandlerId> {
 impl<H> Header<H> {
     pub fn new(title: impl Into<String>) -> Self {
         Header {
+            lead: Vec::new(),
             title: title.into(),
             state: Vec::new(),
             actions: Vec::new(),
@@ -1139,6 +1249,11 @@ impl<H> Header<H> {
     }
     pub fn action(mut self, action: impl Into<Element<H>>) -> Self {
         self.actions.push(action.into());
+        self
+    }
+    /// Before the title: `icon_button(Icon::ArrowLeft, "Back")`.
+    pub fn lead(mut self, part: impl Into<Element<H>>) -> Self {
+        self.lead.push(part.into());
         self
     }
 }
@@ -1220,11 +1335,19 @@ pub struct ListItem<H = HandlerId> {
     /// Controls after the value.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<Element<H>>,
+    /// Under the title and the second line, from the title's edge: more
+    /// lines, a banner, a `pre`, a line of buttons. What a richer row of a
+    /// page holds (`.kit-row--wrap` with blocks in it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body: Vec<Element<H>>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub selected: bool,
     /// Title and second line wrap, rather than truncate.
     #[serde(default, skip_serializing_if = "is_false")]
     pub wrap: bool,
+    /// The title in the terminals' face: a path, a key.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mono: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
     /// Pressed: no value.
@@ -1240,8 +1363,10 @@ impl<H> ListItem<H> {
             sub: None,
             end: None,
             actions: Vec::new(),
+            body: Vec::new(),
             selected: false,
             wrap: false,
+            mono: false,
             tooltip: None,
             on_press: None,
         }
@@ -1269,6 +1394,15 @@ impl<H> ListItem<H> {
     }
     pub fn wrap(mut self) -> Self {
         self.wrap = true;
+        self
+    }
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
+    }
+    /// Adds a part under the title and the second line.
+    pub fn body(mut self, part: impl Into<Element<H>>) -> Self {
+        self.body.push(part.into());
         self
     }
 }
@@ -1562,23 +1696,36 @@ impl TabItem {
 pub struct Empty<H = HandlerId> {
     #[serde(default, skip_serializing_if = "is_default")]
     pub kind: EmptyKind,
+    /// In place of the kind's own (an alert, a lock): a search, a folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<Element<H>>,
+    /// Under the text, before the actions: a command to type, what a tool
+    /// said (a `text().code()`, a `pre`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Element<H>>,
 }
 
 impl<H> Empty<H> {
     pub fn new(kind: EmptyKind, title: impl Into<String>) -> Self {
         Empty {
             kind,
+            icon: None,
             title: title.into(),
             text: None,
             actions: Vec::new(),
+            children: Vec::new(),
         }
     }
-    opt!(text: String);
+    opt!(text: String, icon: Icon);
+    pub fn child(mut self, part: impl Into<Element<H>>) -> Self {
+        self.children.push(part.into());
+        self
+    }
     pub fn action(mut self, action: impl Into<Element<H>>) -> Self {
         self.actions.push(action.into());
         self
@@ -1592,6 +1739,9 @@ impl<H> Empty<H> {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct Banner<H = HandlerId> {
+    /// In bold, before the text: what the banner is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub text: String,
     #[serde(default, skip_serializing_if = "is_default")]
     pub kind: Notice,
@@ -1602,11 +1752,13 @@ pub struct Banner<H = HandlerId> {
 impl<H> Banner<H> {
     pub fn new(kind: Notice, text: impl Into<String>) -> Self {
         Banner {
+            title: None,
             text: text.into(),
             kind,
             actions: Vec::new(),
         }
     }
+    opt!(title: String);
     pub fn action(mut self, action: impl Into<Element<H>>) -> Self {
         self.actions.push(action.into());
         self
@@ -1704,6 +1856,12 @@ impl<H> Link<H> {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct Menu<H = HandlerId> {
+    /// What Hangar keeps it open under, unique in the view. Without one a
+    /// menu is told from another by what it lists, and closes when that
+    /// changes; with one it stays open while its items change: a menu
+    /// filled once it opens (`onOpen`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     /// Without one, the button is the `more` icon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -1717,21 +1875,27 @@ pub struct Menu<H = HandlerId> {
     /// An item chosen: its id, as a text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_select: Option<H>,
+    /// The menu opened: no value. A kit lists what it only knows now (the
+    /// panes an agent may be handed to) in its next view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_open: Option<H>,
 }
 
 impl<H> Menu<H> {
     pub fn new(items: Vec<MenuEntry>) -> Self {
         Menu {
+            id: String::new(),
             label: None,
             icon: None,
             kind: ButtonKind::Ghost,
             small: true,
             items,
             on_select: None,
+            on_open: None,
         }
     }
     opt!(label: String, icon: Icon);
-    set!(kind: ButtonKind);
+    set!(kind: ButtonKind, id: String);
 }
 
 /// An item of a [`Menu`], or the line between two groups of them. In JSON,
@@ -1800,6 +1964,9 @@ impl From<MenuItem> for MenuEntry {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct TextInput<H = HandlerId> {
+    /// What `Context::focus` names it by; unique in the view.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1830,6 +1997,7 @@ pub struct TextInput<H = HandlerId> {
 impl<H> TextInput<H> {
     pub fn new(placeholder: impl Into<String>, value: impl Into<String>) -> Self {
         TextInput {
+            id: String::new(),
             value: value.into(),
             placeholder: placeholder.into(),
             label: None,
@@ -1843,6 +2011,7 @@ impl<H> TextInput<H> {
         }
     }
     opt!(label: String, hint: String, error: String, width: Length);
+    set!(id: String);
     pub fn secure(mut self) -> Self {
         self.secure = true;
         self
@@ -1876,11 +2045,46 @@ pub struct TextArea<H = HandlerId> {
     /// In logical pixels; 120 by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f32>,
+    /// Takes the height left, in a `page` that fills: an editor.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fill: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub mono: bool,
+    /// A gutter of line numbers, the lines kept whole (no wrapping): a code
+    /// editor. `Context::cursor_to` then also brings a line into view.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub line_numbers: bool,
+    /// Lines marked in the gutter: the one asked for, one that is wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<LineMark>,
     /// Each change: the whole text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_input: Option<H>,
+}
+
+/// A line of a text area marked in its gutter, from 1: `info` for the line
+/// asked for, `error` and `warning` for what is wrong there, `success`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct LineMark {
+    pub line: u32,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub kind: Notice,
+    /// Shown on hover over the number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl LineMark {
+    pub fn new(line: u32, kind: Notice) -> Self {
+        LineMark {
+            line,
+            kind,
+            label: None,
+        }
+    }
+    opt!(label: String);
 }
 
 impl<H> TextArea<H> {
@@ -1893,7 +2097,10 @@ impl<H> TextArea<H> {
             hint: None,
             error: None,
             height: None,
+            fill: false,
             mono: false,
+            line_numbers: false,
+            marks: Vec::new(),
             on_input: None,
         }
     }
@@ -1902,6 +2109,20 @@ impl<H> TextArea<H> {
     num!(height: f32);
     pub fn mono(mut self) -> Self {
         self.mono = true;
+        self
+    }
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self
+    }
+    /// A code editor: numbers in a gutter, lines kept whole, in mono.
+    pub fn line_numbers(mut self) -> Self {
+        self.line_numbers = true;
+        self.mono = true;
+        self
+    }
+    pub fn mark(mut self, mark: LineMark) -> Self {
+        self.marks.push(mark);
         self
     }
 }
@@ -1913,6 +2134,9 @@ impl<H> TextArea<H> {
 #[non_exhaustive]
 #[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
 pub struct Search<H = HandlerId> {
+    /// What `Context::focus` names it by; unique in the view.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1931,6 +2155,7 @@ pub struct Search<H = HandlerId> {
 impl<H> Search<H> {
     pub fn new(placeholder: impl Into<String>, value: impl Into<String>) -> Self {
         Search {
+            id: String::new(),
             value: value.into(),
             placeholder: placeholder.into(),
             on_input: None,
@@ -1938,6 +2163,7 @@ impl<H> Search<H> {
             on_clear: None,
         }
     }
+    set!(id: String);
 }
 
 /// One value among a few (`.kit-select`).
@@ -1982,6 +2208,10 @@ impl<H> Select<H> {
 pub struct SelectOption {
     pub value: String,
     pub label: String,
+    /// Listed, and choosing it does nothing: a file that cannot be read.
+    /// Its label says why.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
 }
 
 impl SelectOption {
@@ -1989,7 +2219,51 @@ impl SelectOption {
         SelectOption {
             value: value.into(),
             label: label.into(),
+            disabled: false,
         }
+    }
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+/// One value among a few, all of them in sight: round buttons, one chosen
+/// (`input type=radio`). For two to five choices a person compares; a
+/// `select` for more.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+#[serde(bound(serialize = "H: Serialize", deserialize = "H: Deserialize<'de>"))]
+pub struct Radio<H = HandlerId> {
+    pub options: Vec<SelectOption>,
+    /// The chosen option's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Side by side rather than one above the other.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub horizontal: bool,
+    /// An option chosen: its value, as a text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_select: Option<H>,
+}
+
+impl<H> Radio<H> {
+    pub fn new(options: Vec<SelectOption>, selected: Option<String>) -> Self {
+        Radio {
+            options,
+            selected,
+            label: None,
+            horizontal: false,
+            on_select: None,
+        }
+    }
+    opt!(label: String);
+    pub fn horizontal(mut self) -> Self {
+        self.horizontal = true;
+        self
     }
 }
 
@@ -2227,14 +2501,21 @@ impl Image {
 }
 
 /// Where an image is read from: a path relative to the kit's root, which
-/// needs no permission, or to its data folder, which needs `data.read`. In
-/// JSON, `{ "kit": "assets/logo.png" }` or `{ "data": "charts/today.png" }`.
-/// PNG, JPEG, GIF, WebP and SVG; 10 MB at most.
+/// needs no permission, or to its data folder, which needs `data.read`, or
+/// to the workspace folder, which needs `files.read` (hidden files with
+/// `files.write` too, as `files.read` reads them); or a picture the person
+/// handed the tab, which it holds for as long as it runs (`files.pick` of a
+/// file outside the workspace, `ui.pasteImage`). In JSON,
+/// `{ "kit": "assets/logo.png" }`, `{ "data": "charts/today.png" }`,
+/// `{ "file": "docs/capture.png" }` or `{ "held": "held-1" }`. PNG, JPEG,
+/// GIF, WebP and SVG; 10 MB at most.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageSource {
     Kit(String),
     Data(String),
+    File(String),
+    Held(String),
 }
 
 /// A line of values, small, in a row or a header: a trend at a glance.

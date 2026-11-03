@@ -125,9 +125,17 @@ impl KitApi for Pretend {
         match source {
             hangar_kit_host::ui::ImageSource::Kit(path) => std::fs::read(self.kit.join(path))
                 .map_err(|why| KitError::new(KitError::NOT_FOUND, why.to_string())),
+            // The pretend workspace is the folder the preview was started in.
+            hangar_kit_host::ui::ImageSource::File(path) => std::fs::read(path)
+                .map_err(|why| KitError::new(KitError::NOT_FOUND, why.to_string())),
             hangar_kit_host::ui::ImageSource::Data(_) => Err(KitError::new(
                 KitError::NOT_FOUND,
                 "no image in the preview's data",
+            )),
+            // The tab holds these itself: they are never asked of the app.
+            hangar_kit_host::ui::ImageSource::Held(_) => Err(KitError::new(
+                KitError::NOT_FOUND,
+                "a held picture is the tab's own",
             )),
         }
     }
