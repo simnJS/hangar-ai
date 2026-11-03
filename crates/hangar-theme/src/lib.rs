@@ -1,6 +1,6 @@
-//! The themes of Hangar: the 33 palettes of `src/themes.ts`, the colours of
-//! the whole window derived from them, the design tokens of the stylesheets,
-//! and how all of it maps onto iced.
+//! The themes of Hangar: the 33 palettes the web app had (`src/themes.ts`, tag
+//! v1.12.1), the colours of the whole window derived from them, the design
+//! tokens of the stylesheets, and how all of it maps onto iced.
 //!
 //! See docs/native/PLAN.md, "hangar-theme".
 //!
@@ -19,9 +19,24 @@
 //!   that turn a palette into a window, ported from `src/lib/contrast.ts` and
 //!   `deriveChromeTokens`.
 //!
-//! The tables in `data.rs` are generated from the TypeScript by
-//! `tools/gen-themes.mjs`, so that the values are the web app's own and not a
-//! second copy kept by hand.
+//! # Adding a theme
+//!
+//! The themes are the table in `data.rs`: it was first written from the web
+//! app's TypeScript, and is the source now.
+//!
+//! 1. Add a `Theme` to `THEMES`, with the dark themes before the light ones,
+//!    and raise the array's length and the count in `cover_every_theme`. Its
+//!    `id` is what settings store: lowercase letters, digits and `-`, never
+//!    changed once released.
+//! 2. Write its `terminal` palette and the `accent` of its `colors`. For the
+//!    rest of `colors`, copy any theme's for now.
+//! 3. Run `cargo test -p hangar-theme`. The derivation test fails on the new
+//!    theme and prints the whole `colors: Colors { ... }` entry that
+//!    [`derive_colors`] gives for its palette and accent: paste it over the
+//!    copied one. The contrast tests then say whether the palette reads.
+//! 4. If one of the two themes `crates/hangar-core/kit-sdk/tokens.json` names
+//!    changed, run `node scripts/gen-hangar-ui.mjs` for the kits' stylesheet;
+//!    the `kit` tests fail until it is.
 
 pub mod contrast;
 mod data;

@@ -2,9 +2,21 @@
 //! text around them.
 //!
 //! Every glyph sits on the same 16-unit grid with the same 1.35-unit stroke,
-//! round caps and round joins, exactly as `src/components/Icon.tsx` draws it;
-//! `tools/gen-icons.mjs` lifts the drawings out of that file, so the two sets
-//! cannot drift.
+//! round caps and round joins, as the web app's `src/components/Icon.tsx` drew
+//! it (tag v1.12.1). The table in `data.rs` was lifted out of that file and is
+//! the source now; the HTML kits' stylesheet takes a few of its drawings from
+//! it too (`scripts/gen-hangar-ui.mjs`).
+//!
+//! # Adding an icon
+//!
+//! In `data.rs`, give it a variant of [`Icon`] at the end of the enum, the
+//! same at the end of `ALL` (one more in its length and in the count of
+//! `every_icon_of_the_web_app_is_there`), its name in `name()` (camelCase:
+//! the layouts and settings store it), and its drawing in `elements()`. The
+//! drawing is the SVG elements inside a `viewBox="0 0 16 16"` box (`<path>`,
+//! `<rect>`, `<circle>`), stroked by the shared style; a filled part says
+//! `fill="#000"`, which the tint replaces. Keep to the grid and the stroke,
+//! so it sits with the others.
 //!
 //! ```ignore
 //! use hangar_ui::{icon, Icon};

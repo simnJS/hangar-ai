@@ -662,27 +662,29 @@ page registered with `hangar.on("theme", …)`.
 - **`scheme`**: `"dark"` or `"light"`, the theme's `appearance`.
 - **`locale`**: Hangar's language, `"en"` or `"fr"`, once the setting is resolved. It reaches `hangar.ui.locale`.
 - **`tokens`**: all of these, as strings:
-  - one entry per line of `colors` in `src-tauri/kit-sdk/tokens.json`, the key being the token and the value
-    what `deriveChromeTokens(theme)` (`src/themes.ts`) gives for the name on that line. The map is imported from
+  - one entry per line of `colors` in `crates/hangar-core/kit-sdk/tokens.json`, the key being the token and the
+    value the theme's chrome token named on that line (`hangar_theme::kit_tokens`). The map is included from
     that file rather than copied, so a token added there reaches the host by itself;
   - `--kit-scale`, the interface size, `"1"` at 100 %;
   - `--kit-mono`, the value the app gives `--mono`: the terminals' font.
 
-```ts
-import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
-
-function kitThemeEvent(theme: TerminalTheme, settings: { uiScale: number; mono: string; locale: Locale }) {
-  const chrome = deriveChromeTokens(theme);
-  const tokens: Record<string, string> = {
-    "--kit-scale": String(settings.uiScale),
-    "--kit-mono": settings.mono,
-  };
-  for (const [token, source] of Object.entries(tokenMap.colors)) tokens[token] = chrome[source];
-  return { hangar: 1, event: "theme", data: { scheme: theme.appearance, locale: settings.locale, tokens } };
+```rust
+// crates/hangar-app/src/kit_tabs/tabs.rs
+pub fn kit_theme_event(theme: &Theme, ui_scale: f64, mono: &str, locale: Locale) -> Value {
+    let mut tokens = Map::new();
+    tokens.insert("--kit-scale".into(), json!(ui_scale.to_string()));
+    tokens.insert("--kit-mono".into(), json!(mono));
+    for (token, value) in hangar_theme::kit_tokens(theme) {
+        tokens.insert(token, json!(value));
+    }
+    hangar_webview::kit_relay::event(
+        "theme",
+        json!({ "scheme": theme.appearance.as_str(), "locale": locale.id(), "tokens": tokens }),
+    )
 }
 ```
 
-`src/lib/hangarUi.test.ts` holds what this sends, on every bundled theme, to the contrast below.
+`hangar-theme`'s `kit` tests hold what this sends, on every bundled theme, to the contrast below.
 
 ### What the page does with it
 
@@ -696,31 +698,33 @@ A page may force a scheme with `<html data-kit-scheme="dark">`, as the gallery d
 
 ## Contrast
 
-By `src/lib/contrast.ts` and the constants of `src/themes.ts`: text at 4.5:1, a state's shape and the focus ring at
-3:1. `src/lib/hangarUi.test.ts` checks every pair of the components, on all of Hangar's themes and not only
-the two the sheet writes, tints included: an error line, a banner, a filter left on.
+By the window's own rule (`hangar_theme::contrast`, `TEXT_CONTRAST` and `FILL_CONTRAST`): text at 4.5:1, a state's
+shape and the focus ring at 3:1. `hangar-theme`'s `kit::tests::contrast` checks every pair of the components, on
+all of Hangar's themes and not only the two the sheet writes, tints included: an error line, a banner, a filter
+left on. A component that writes a new pair adds it there.
 
 ## How it is made
 
 | Part                                    | From                                                                                 |
 | --------------------------------------- | ------------------------------------------------------------------------------------ |
-| Colours, in both schemes                | `deriveChromeTokens` of `src/themes.ts`, on `graphite` and `github-light`, through `src-tauri/kit-sdk/tokens.json`. |
-| Measures, type scale, font stacks       | The rules of `src/styles.css` and `src/styles/model.css`, named one by one in `scripts/gen-hangar-ui.mjs`. |
-| Icons                                   | The drawings of `src/components/Icon.tsx`.                                           |
-| The font and its `@font-face`           | `@fontsource-variable/inter`, the package the app loads it from.                     |
+| Colours, in both schemes                | `hangar-theme`'s `graphite` and `github-light`, through `crates/hangar-core/kit-sdk/tokens.json` (`cargo run -p hangar-theme --example kit-tokens`). |
+| Measures, type scale, font stacks       | Written in `scripts/gen-hangar-ui.mjs`: the last values of the web app's stylesheets, which left with it (tag `v1.12.1`). A size moved in `hangar_theme::tokens` is moved there too. |
+| Icons                                   | The drawings of `hangar-ui`'s icon table (`crates/hangar-ui/src/icon/data.rs`).     |
+| The font and its `@font-face`           | `@fontsource-variable/inter`, the package Hangar Mobile loads it from (`pnpm install` first). |
 | The components, and the `--kit-space-*` | By hand. Hangar has no spacing scale of its own: these are the steps its sheets use. |
 
 The generated part sits between two marked comments at the top of `kit.css`. After a change in Hangar that the test
-reports:
+reports (a theme of the two, an icon, the font package):
 
 ```sh
-node scripts/gen-hangar-ui.mjs
+node scripts/gen-hangar-ui.mjs           # writes kit.css and the font beside it
+node scripts/gen-hangar-ui.mjs --check   # fails when either is stale
 ```
 
-If a rule the library follows goes away, the script stops and names it, rather than keep the old number.
+If a token or an icon the library follows goes away, the script stops and names it, rather than keep the old value.
 
 ## The gallery
 
-`src-tauri/kit-sdk/gallery.html` shows every component and state in both themes, at 320 px and wide, for reviewing
+`crates/hangar-core/kit-sdk/gallery.html` shows every component and state in both themes, at 320 px and wide, for reviewing
 by eye. Open the file in a browser. It is not served to kits. `?only=dark-320` shows one of the four, and
 `?locale=en` changes what the library itself says.

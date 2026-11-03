@@ -1,6 +1,6 @@
-//! The themes held to what `src/themes.test.ts` held them to, on the tables
-//! the generator wrote, plus the checks that make the port trustworthy: the
-//! Rust derivation must give the TypeScript's tokens.
+//! The themes held to what the web app's `src/themes.test.ts` held them to,
+//! plus the checks that make the port trustworthy: the Rust derivation must
+//! give the tokens the table holds, which the TypeScript first wrote.
 
 use std::collections::HashSet;
 
@@ -191,25 +191,58 @@ mod the_bundled_themes {
 mod the_derivation_of_the_chrome_tokens {
     use super::*;
 
+    /// A `colors` entry of `data.rs` as it is written there.
+    fn rust_block(colors: &Colors) -> String {
+        let lines: Vec<String> = colors
+            .iter()
+            .map(|(name, color)| {
+                let field = name.trim_start_matches("--").replace('-', "_");
+                let [r, g, b, _] = color.into_rgba8();
+                if color.a >= 1.0 {
+                    format!("            {field}: rgb(0x{r:02x}{g:02x}{b:02x}),")
+                } else {
+                    format!("            {field}: rgba({r}, {g}, {b}, {}),", color.a)
+                }
+            })
+            .collect();
+        format!(
+            "        colors: Colors {{\n{}\n        }},",
+            lines.join("\n")
+        )
+    }
+
     #[test]
     fn gives_on_every_theme_the_tokens_the_typescript_gives() {
-        // The tables were written by running deriveChromeTokens; this is the
-        // port of it, which has to agree to the last channel.
+        // The tables were first written by running the web app's
+        // deriveChromeTokens; this is the port of it, which has to agree to
+        // the last channel. A theme added to data.rs is held to it too: on a
+        // mismatch the message is the whole `colors` entry the derivation
+        // gives, ready to paste over the theme's.
         for theme in themes() {
             let derived = derive_colors(theme.appearance, theme.colors.accent, &theme.terminal);
-            for ((name, expected), (_, got)) in theme.colors.iter().zip(derived.iter()) {
-                assert_eq!(
-                    got.into_rgba8(),
-                    expected.into_rgba8(),
-                    "{}: {name}",
-                    theme.id
-                );
-                assert!(
-                    (got.a - expected.a).abs() < 1e-6,
-                    "{}: {name} alpha",
-                    theme.id
-                );
-            }
+            let agree = theme
+                .colors
+                .iter()
+                .zip(derived.iter())
+                .all(|((_, expected), (_, got))| {
+                    got.into_rgba8() == expected.into_rgba8() && (got.a - expected.a).abs() < 1e-6
+                });
+            assert!(
+                agree,
+                "{}: the colours are not the ones its palette and accent give; they are\n{}",
+                theme.id,
+                rust_block(&derived)
+            );
+        }
+    }
+
+    #[test]
+    fn prints_an_entry_the_way_the_table_writes_it() {
+        // What the test above prints is pasted into data.rs: it has to read
+        // exactly as the entries already there.
+        const TABLE: &str = include_str!("data.rs");
+        for theme in themes() {
+            assert!(TABLE.contains(&rust_block(&theme.colors)), "{}", theme.id);
         }
     }
 }
