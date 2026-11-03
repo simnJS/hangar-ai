@@ -246,6 +246,14 @@ pub enum Intent {
         to: PaneId,
         keeps_session: bool,
     },
+    /// The keyboard's move from pane to pane inside the workspace a window
+    /// shows (`pane.focus1`…`9`, `pane.next`, `pane.prev`, the directional
+    /// moves): App.tsx's `focusPane` alone, which only recorded the focus.
+    /// Unlike `FocusPane` (the full landing of a notification, the board or
+    /// Needs-you) it leaves the overlays, the view and the active workspace
+    /// as they are, so a dialog open over the panes keeps what was typed in
+    /// it. Sent by the command table; handled by the shell.
+    SelectPane { ws: WsId, pane: PaneId },
 }
 
 /// What `Intent::TerminalAction` asks of a pane's terminal.
