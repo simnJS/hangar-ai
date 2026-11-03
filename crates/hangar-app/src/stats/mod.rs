@@ -22,7 +22,8 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.stats`. The usage cache (60 s fresh), shared with P20's `remote_stats`.
+/// `Model.live.stats`.
+/// The usage cache (60 s fresh), shared with P20's `remote_stats`.
 #[derive(Debug, Default)]
 pub struct Live;
 

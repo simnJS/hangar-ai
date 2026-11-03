@@ -22,7 +22,7 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.git_flow`. Nothing yet.
+/// `Model.live.git_flow`.
 #[derive(Debug, Default)]
 pub struct Live;
 

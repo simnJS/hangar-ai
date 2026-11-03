@@ -21,7 +21,7 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.memory`. Nothing yet.
+/// `Model.live.memory`.
 #[derive(Debug, Default)]
 pub struct Live;
 

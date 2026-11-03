@@ -24,7 +24,8 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.board`. The boards cache by folder (`board_load` + `CoreEvent::BoardChanged`), which
+/// `Model.live.board`.
+/// The boards cache by folder (`board_load` + `CoreEvent::BoardChanged`), which
 /// P6, P9 and P19 read.
 #[derive(Debug, Default)]
 pub struct Live;

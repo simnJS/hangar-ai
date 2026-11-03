@@ -21,7 +21,7 @@ use crate::state::{Model, WsId};
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.mcp`. Nothing yet.
+/// `Model.live.mcp`.
 #[derive(Debug, Default)]
 pub struct Live;
 

@@ -70,7 +70,8 @@ cargo test -p hangar-app && cargo clippy -p hangar-app --all-targets -- -D warni
    `sv.snapshot()` (an `Arc<Snapshot>` republished after every change, or
    `sv.snapshots()` to wait on the next) and act with `sv.send(Message::…)`,
    which the shell's inbox subscription feeds to `update`. Model writes from
-   an engine are `Message::Control(control::Msg::Model(cmd, reply))`.
+   an engine are `Message::Control(control::Msg::Model(cmd, answer))`, with
+   `services::inbox::Answer::channel()` to await the outcome.
 
 And the house rules: no literal UI text (every string is a `hangar_i18n::Key`,
 `ctx.t(Key::…)`); no colours picked in a view (`hangar_theme::style::*` with
@@ -143,7 +144,7 @@ included, and set up its state in `on_intent(Intent::OpenOverlay(…))`.
 | P15 | `preview` | `Preview` | `view_panel(st, ctx, PanelMode)`, `view_entry(st, ctx, ws, entry)`; `preview_access(st) -> Arc<dyn PreviewAccess>` once at boot | region `model` | The frame does not show the panel yet: P0b adds it once `Live` says a workspace has a preview open (tell P0b how to ask). |
 | P16 | `kit_tabs` | `KitTabs` | `view(st, ctx, ws, tab)` (called by `preview::view_entry`) | – | Wave 2. |
 | P17 | `model3d_view` | `Model3d` | `view(st, ctx, ws, entry)` (called by `preview::view_entry`) | – | Wave 2. |
-| P18 | `control` | `Control` | `Msg::Request(ControlRequest)`, `Msg::Model(ModelCmd, Reply)` | – | Define `ModelCmd` here; the stub answers every request with an error until you land. Requests before hydration never reach you. |
+| P18 | `control` | `Control` | `Msg::Request(ControlRequest)` (the shell routes core's requests here) | – | `Msg::Model(ModelCmd, Answer<…>)` and `ModelCmd` are yours to shape with P19 and P20; the stub answers every request with an error until you land. Requests before hydration never reach you. |
 | P19 | `orchestration` | `Orchestration` | – | – | Start the runtime on hydration (`m.live.hydrated` in `on_event`/`update`), not before. |
 | P20 | `mobile` | `Mobile` | – | – | `remote_*` requests come through P18's dispatch. |
 

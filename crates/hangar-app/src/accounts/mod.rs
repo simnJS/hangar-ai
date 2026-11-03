@@ -22,7 +22,7 @@ use crate::state::{Model, PaneId, WsId};
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.accounts`. Nothing yet.
+/// `Model.live.accounts`.
 #[derive(Debug, Default)]
 pub struct Live;
 

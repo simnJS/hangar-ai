@@ -20,7 +20,7 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.status_bar`. Nothing yet.
+/// `Model.live.status_bar`.
 #[derive(Debug, Default)]
 pub struct Live;
 

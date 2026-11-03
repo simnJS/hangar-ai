@@ -26,7 +26,8 @@ use crate::state::{Model, WsId};
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.preview`. The preview of each workspace: entries, the active one, panel open, expanded,
+/// `Model.live.preview`.
+/// The preview of each workspace: entries, the active one, panel open, expanded,
 /// unseen.
 #[derive(Debug, Default)]
 pub struct Live;

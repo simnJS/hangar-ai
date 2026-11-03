@@ -24,7 +24,8 @@ use crate::state::{GlyphState, Model, PaneId};
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.panes_logic`. Activity per pane, plan limits, insight per pane, hibernation (`touched`, `rest`,
+/// `Model.live.panes_logic`.
+/// Activity per pane, plan limits, insight per pane, hibernation (`touched`, `rest`,
 /// `asleep`), branch cache: the shared value types are in `state::live`.
 #[derive(Debug, Default)]
 pub struct Live;

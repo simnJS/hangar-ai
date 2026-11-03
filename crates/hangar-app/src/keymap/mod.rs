@@ -23,7 +23,8 @@ use crate::state::Model;
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.keymap`. `index` is read by the shell for `Ctx::keymap` and, later, by hangar-term's
+/// `Model.live.keymap`.
+/// `index` is read by the shell for `Ctx::keymap` and, later, by hangar-term's
 /// key filter: keep that field's name and type.
 #[derive(Debug, Default)]
 pub struct Live {

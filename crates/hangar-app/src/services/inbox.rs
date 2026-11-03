@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use iced::Subscription;
 use iced::futures::stream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::message::Message;
 
@@ -20,6 +20,45 @@ impl Inbox {
     /// Queues `message` for `update`. Fails only once the app is closing.
     pub fn send(&self, message: Message) -> bool {
         self.0.send(message).is_ok()
+    }
+}
+
+/// The answer to a message sent through the inbox, for the task that waits
+/// on it: an engine sends `Message::Control(control::Msg::Model(cmd, answer))`
+/// and awaits the receiver; `update` answers once it has applied the command.
+/// The first `send` wins, so it can ride in a `Message` (which is cloned) and
+/// be answered from wherever the handling ends.
+pub struct Answer<T>(Arc<Mutex<Option<oneshot::Sender<T>>>>);
+
+impl<T> Answer<T> {
+    /// An answer and the receiver that waits for it. A receiver whose answer
+    /// was dropped unsent gets an error: the app went away, or nobody handled
+    /// the message.
+    pub fn channel() -> (Answer<T>, oneshot::Receiver<T>) {
+        let (tx, rx) = oneshot::channel();
+        (Answer(Arc::new(Mutex::new(Some(tx)))), rx)
+    }
+
+    /// Answers, if nothing answered before. Returns whether this one did.
+    pub fn send(&self, value: T) -> bool {
+        let sender = self
+            .0
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
+        sender.is_some_and(|sender| sender.send(value).is_ok())
+    }
+}
+
+impl<T> Clone for Answer<T> {
+    fn clone(&self) -> Self {
+        Answer(self.0.clone())
+    }
+}
+
+impl<T> std::fmt::Debug for Answer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Answer(..)")
     }
 }
 

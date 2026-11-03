@@ -12,16 +12,17 @@
 use iced::{Subscription, Task};
 
 use crate::message::{Intent, Message};
-use crate::services::{ControlRequest, CoreEvent, Reply, Services};
+use crate::services::{ControlRequest, CoreEvent, Services, inbox::Answer};
 use crate::shell::Region;
-use crate::state::Model;
+use crate::state::{Model, StoreOutcome};
 
 /// The package's UI state; lives in `App.pkg.control`.
 #[derive(Debug, Default)]
 pub struct State;
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.control`. Deliveries running, in flight and settled; what the snapshot's `delivering`
+/// `Model.live.control`.
+/// Deliveries running, in flight and settled; what the snapshot's `delivering`
 /// is made from.
 #[derive(Debug, Default)]
 pub struct Live;
@@ -32,8 +33,9 @@ pub enum Msg {
     /// A control request from core (an agent's, a briefing, a phone's call).
     /// Before hydration the shell answers it itself and it never comes here.
     Request(ControlRequest),
-    /// A model write from an engine, answered with its outcome.
-    Model(ModelCmd, Reply),
+    /// A model write from an engine (`AppPort::apply`), answered on the UI
+    /// thread once applied.
+    Model(ModelCmd, Answer<Result<StoreOutcome, String>>),
 }
 
 /// What an engine asks the model to do, on the UI thread
