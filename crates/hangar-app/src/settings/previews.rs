@@ -396,10 +396,13 @@ pub fn projects_folder<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
         std::borrow::Cow::Owned(_) => "",
     };
     row![
-        input::text_field(t, path)
-            .placeholder(placeholder)
-            .mono()
-            .on_input(|text| change(Target::ProjectsFolder, &text)),
+        crate::keymap::guard(
+            ctx,
+            input::text_field(t, path)
+                .placeholder(placeholder)
+                .mono()
+                .on_input(|text| change(Target::ProjectsFolder, &text)),
+        ),
         buttons::secondary(t, ctx.t(Key::CreateBrowse).into_owned())
             .on_press(Message::Settings(Msg::BrowseProjects)),
     ]

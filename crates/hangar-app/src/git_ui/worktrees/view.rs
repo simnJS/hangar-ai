@@ -1037,11 +1037,12 @@ fn form<'a>(panel: &'a Panel, ctx: Ctx<'a>) -> Element<'a, Message> {
     // The branch.
     let mut field = column![].spacing(space::XS).width(Length::Fill);
     if panel.form.mode == Mode::New {
-        field = field.push(
+        field = field.push(crate::keymap::guard(
+            ctx,
             text_field(t, &panel.form.new_branch)
                 .placeholder(plain(tr, Key::WorktreesBranchPlaceholder))
                 .on_input(|name| wrap(WtMsg::NewBranch(name))),
-        );
+        ));
         let trimmed = panel.form.new_branch.trim();
         if !sanitized.is_empty() && sanitized != trimmed {
             field = field.push(hint(
@@ -1161,9 +1162,12 @@ fn form<'a>(panel: &'a Panel, ctx: Ctx<'a>) -> Element<'a, Message> {
         row![
             label(Key::WorktreesPath),
             column![
-                text_field(t, panel.folder_text())
-                    .mono()
-                    .on_input(|path| wrap(WtMsg::Folder(path))),
+                crate::keymap::guard(
+                    ctx,
+                    text_field(t, panel.folder_text())
+                        .mono()
+                        .on_input(|path| wrap(WtMsg::Folder(path))),
+                ),
                 hint(tr.t(Key::WorktreesPathHint).into_owned(), None),
             ]
             .spacing(space::XS)

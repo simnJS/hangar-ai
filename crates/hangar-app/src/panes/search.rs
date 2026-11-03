@@ -210,26 +210,33 @@ pub fn view<'a>(
 
     // Enter, Shift+Enter, Escape, Alt+C and Alt+R, before the field sees
     // them; only while the field has the keyboard, or Enter typed into the
-    // terminal would step the search.
+    // terminal would step the search. The keymap goes first, as the TS's
+    // shortcuts listened before any field: Mod+Shift+Enter splits the pane
+    // and types nothing here, and a person who bound Alt+C to a command gets
+    // the command. What the field owns (characters, Enter, Escape, copy and
+    // paste) the keymap leaves to it.
     let input: Element<'a, Message> = if search.typing {
-        keys::on_key(input, move |key, modifiers| match key {
-            KeyCode::Named(Named::Enter) => Some(wrap(
-                pane,
-                SearchMsg::Step(if modifiers.shift() {
-                    SearchDirection::Forward
-                } else {
-                    SearchDirection::Backward
-                }),
-            )),
-            KeyCode::Named(Named::Escape) => Some(wrap(pane, SearchMsg::Close)),
-            KeyCode::Character(c) if modifiers.alt() && c.eq_ignore_ascii_case("c") => {
-                Some(wrap(pane, SearchMsg::ToggleCase))
-            }
-            KeyCode::Character(c) if modifiers.alt() && c.eq_ignore_ascii_case("r") => {
-                Some(wrap(pane, SearchMsg::ToggleRegex))
-            }
-            _ => None,
-        })
+        crate::keymap::guard(
+            ctx,
+            keys::on_key(input, move |key, modifiers| match key {
+                KeyCode::Named(Named::Enter) => Some(wrap(
+                    pane,
+                    SearchMsg::Step(if modifiers.shift() {
+                        SearchDirection::Forward
+                    } else {
+                        SearchDirection::Backward
+                    }),
+                )),
+                KeyCode::Named(Named::Escape) => Some(wrap(pane, SearchMsg::Close)),
+                KeyCode::Character(c) if modifiers.alt() && c.eq_ignore_ascii_case("c") => {
+                    Some(wrap(pane, SearchMsg::ToggleCase))
+                }
+                KeyCode::Character(c) if modifiers.alt() && c.eq_ignore_ascii_case("r") => {
+                    Some(wrap(pane, SearchMsg::ToggleRegex))
+                }
+                _ => None,
+            }),
+        )
     } else {
         input.into()
     };
@@ -341,4 +348,80 @@ pub fn view<'a>(
 /// A binding written as the platform shows it (`formatBinding`).
 fn shortcut(binding: &str) -> String {
     hangar_ui::shortcut::format_binding(binding)
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::keyboard::Modifiers;
+    use iced::keyboard::key::Named;
+
+    use super::*;
+    use crate::app::Packages;
+    use crate::navigator::testing::{Drive, ctx, model_of, pane, simulate, workspace};
+    use crate::shell::View;
+    use crate::state::types::{AgentId, AppState};
+
+    /// What the bar sends when Enter is pressed in its field with
+    /// `modifiers`, over a workspace on screen, where splitting a pane
+    /// (Mod+Shift+Enter) is a live shortcut.
+    fn enter_in_the_field(modifiers: Modifiers) -> Vec<Message> {
+        let mut model = model_of(AppState {
+            workspaces: vec![workspace(
+                "w",
+                "hangar",
+                None,
+                vec![pane("p1", "Ava", AgentId::Claude)],
+            )],
+            active_workspace_id: Some("w".into()),
+            ..AppState::default()
+        });
+        model.ui.view = View::Terminals;
+        let pkg = Packages::default();
+        let id: PaneId = "p1".into();
+        let search = Search::new(&id, "needle".into());
+        let mut ui = simulate(view(
+            ctx(&model, &pkg),
+            &id,
+            &search,
+            SearchStatus::default(),
+        ));
+        ui.click("needle").expect("the field is shown");
+        ui.key(Named::Enter, modifiers);
+        ui.into_messages().collect()
+    }
+
+    fn steps(messages: &[Message]) -> Vec<SearchDirection> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Panes(Msg::Search(_, SearchMsg::Step(direction))) => Some(*direction),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn enter_steps_back_and_shift_enter_forward() {
+        assert_eq!(
+            steps(&enter_in_the_field(Modifiers::empty())),
+            [SearchDirection::Backward]
+        );
+        assert_eq!(
+            steps(&enter_in_the_field(Modifiers::SHIFT)),
+            [SearchDirection::Forward]
+        );
+    }
+
+    #[test]
+    fn a_shortcut_typed_in_the_field_is_the_keymaps_and_does_not_step() {
+        let messages = enter_in_the_field(Modifiers::COMMAND | Modifiers::SHIFT);
+        assert!(steps(&messages).is_empty(), "{messages:?}");
+        // Spent by the guard; the keymap's subscription runs the split.
+        assert!(
+            messages
+                .iter()
+                .any(|message| matches!(message, Message::Noop)),
+            "{messages:?}"
+        );
+    }
 }

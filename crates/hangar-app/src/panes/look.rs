@@ -3,7 +3,7 @@
 //! §4/1.1–1.2). A change of either restyles the terminals in place, as the
 //! TS effect on `[theme, fontFamily, …]` did: nothing restarts.
 
-use hangar_term::{Config, CursorShape, Font, Palette};
+use hangar_term::{Config, CursorShape, Font, Osc52, Palette};
 use hangar_theme::Theme;
 
 use crate::state::types::{AgentId, CursorStyle, Settings, Workspace};
@@ -52,8 +52,15 @@ pub fn palette(theme: &Theme) -> Palette {
 ///   would revert the line in PSReadLine or cmd.
 /// - Ctrl+V pastes, as it does everywhere else on the machine; readline's
 ///   quoted-insert is lost on purpose, the bargain Windows Terminal makes.
+/// - Programs may neither write nor read the clipboard (`OSC 52`). xterm.js
+///   without its clipboard addon ignored the sequence, and an agent, or
+///   anything it runs, putting text on the clipboard unseen, for the person
+///   to paste into another shell, is not worth the convenience. The person
+///   copies with the selection, as before. Offering it back would take a
+///   setting, which the TS never had.
 pub fn config(settings: &Settings, agent: AgentId) -> Config {
     Config {
+        osc52: Osc52::Disabled,
         scrollback: usize::try_from(settings.scrollback).unwrap_or(usize::MAX),
         cursor_shape: match settings.cursor_style {
             CursorStyle::Block => CursorShape::Block,
@@ -113,6 +120,35 @@ mod tests {
             Some(&b"\x1b\r"[..])
         );
         assert!(config(&settings, AgentId::Shell).ctrl_v_pastes);
+    }
+
+    #[test]
+    fn a_program_cannot_reach_the_clipboard() {
+        use hangar_term::{Event, Terminal};
+        for agent in [AgentId::Shell, AgentId::Claude] {
+            let config = config(&Settings::default(), agent);
+            assert_eq!(config.osc52, Osc52::Disabled);
+            let mut terminal = Terminal::new(config, 80, 24);
+            // Copy "hello", then ask for what the clipboard holds.
+            let events = terminal.feed(b"\x1b]52;c;aGVsbG8=\x07\x1b]52;c;?\x07");
+            assert!(
+                !events.iter().any(|event| matches!(
+                    event,
+                    Event::SetClipboard { .. } | Event::ClipboardLoad { .. }
+                )),
+                "{events:?}"
+            );
+        }
+        // What the same bytes do in a terminal that allows it, so the test
+        // above is not passing for want of a well-formed sequence.
+        let mut open = Terminal::new(Config::default(), 80, 24);
+        let events = open.feed(b"\x1b]52;c;aGVsbG8=\x07");
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::SetClipboard { text, .. } if text == "hello")),
+            "{events:?}"
+        );
     }
 
     #[test]

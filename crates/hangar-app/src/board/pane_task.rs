@@ -3,8 +3,8 @@
 
 use crate::state::Workspace;
 
-use super::agent_pane::find_agent_pane;
 use super::model::Task;
+use crate::panes_logic::find_agent_pane;
 
 /// Work in progress first, then work waiting for review; the freshest of each.
 fn rank(task: &Task) -> u8 {
@@ -16,7 +16,7 @@ fn rank(task: &Task) -> u8 {
 }
 
 /// The task an agent in this pane is on, as far as the board can tell: an open
-/// task whose assignee resolves to this pane (`agent_pane`, which only answers
+/// task whose assignee resolves to this pane (`panes_logic::find_agent_pane`, which only answers
 /// when the name is unambiguous). Done and unassigned tasks never count.
 pub fn task_for_pane<'a>(
     tasks: Option<&'a [Task]>,

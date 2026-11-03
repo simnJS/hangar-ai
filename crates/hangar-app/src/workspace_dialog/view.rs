@@ -24,6 +24,7 @@ use crate::state::types::{AGENTS, AgentId};
 use super::folder::{self, LAYOUTS, Root};
 use super::git_form::{self, FromGitStatus};
 use super::hooks;
+use super::sweep;
 use super::{Msg, Source, State};
 
 /// The column of the labels (`.form-grid__label`, at most 180).
@@ -100,14 +101,19 @@ fn field<'a>(
         })
 }
 
-/// A path field and the buttons beside it (`.picker`).
+/// A path field and the buttons beside it (`.picker`). The field is guarded
+/// like every other of the dialog: the keymap takes its shortcuts first.
 fn picker<'a>(
+    ctx: Ctx<'a>,
     path: TextInput<'a, Message>,
     buttons: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let mut line = row![path.font(hangar_theme::fonts::mono())]
-        .spacing(tokens::space::SM)
-        .align_y(Alignment::Center);
+    let mut line = row![crate::keymap::guard(
+        ctx,
+        path.font(hangar_theme::fonts::mono())
+    )]
+    .spacing(tokens::space::SM)
+    .align_y(Alignment::Center);
     for one in buttons {
         line = line.push(one);
     }
@@ -206,7 +212,7 @@ pub fn dialog<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     form = form.push(labelled(
         ctx,
         Some(ctx.t(Key::CreateName).into_owned()),
-        name,
+        crate::keymap::guard(ctx, name),
     ));
 
     if st.source == Source::Git && (running || st.git.error.is_some()) {
@@ -259,13 +265,14 @@ fn git_fields<'a>(
         &placeholder,
         &st.git.repo,
         status == FromGitStatus::Refused,
-    );
+    )
+    .id(super::repo_id());
     if !locked {
         repo = repo
             .on_input(|repo| msg(Msg::Repo(repo)))
             .on_submit(submit_message(st, ctx));
     }
-    let mut repo_column = column![repo].spacing(tokens::space::SM);
+    let mut repo_column = column![crate::keymap::guard(ctx, repo)].spacing(tokens::space::SM);
     match (status, st.git.parse()) {
         (FromGitStatus::Refused, Some(ParseResult::Refused { reason })) => {
             repo_column = repo_column.push(typography::hint(
@@ -295,12 +302,16 @@ fn git_fields<'a>(
         false,
     );
     if !locked {
-        path = path.on_input(|parent| msg(Msg::Parent(parent)));
+        // Return anywhere in the form sends it, as the `<form>` of the web
+        // app did.
+        path = path
+            .on_input(|parent| msg(Msg::Parent(parent)))
+            .on_submit(submit_message(st, ctx));
     }
     let browse = ui_button::secondary(t, ctx.t(Key::CreateBrowse))
         .on_press_maybe((!locked).then(|| msg(Msg::BrowseParent)));
     let mut parent_column = column![
-        picker(path, vec![browse.into()]),
+        picker(ctx, path, vec![browse.into()]),
         typography::hint(t, ctx.t(Key::CreateGitParentHint)),
     ]
     .spacing(tokens::space::SM);
@@ -339,14 +350,18 @@ fn progress_or_error<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
             Some(progress) => progress_label(&progress.phase, progress.percent),
             None => ctx.t(Key::CreateGitStarting).into_owned(),
         };
-        return column![
-            progress_bar(0.0..=100.0, f32::from(percent.unwrap_or(0)))
+        // A percentage the bar can use, else a segment that slides: a bar
+        // stuck at zero would read as a clone that does not move.
+        let bar: Element<'a, Message> = match percent {
+            Some(percent) => progress_bar(0.0..=100.0, f32::from(percent))
                 .girth(6)
-                .style(style::progress_bar::accent(t)),
-            typography::hint(t, label),
-        ]
-        .spacing(tokens::space::SM)
-        .into();
+                .style(style::progress_bar::accent(t))
+                .into(),
+            None => sweep::bar(t, 6.0, st.git.sweep_elapsed()),
+        };
+        return column![bar, typography::hint(t, label)]
+            .spacing(tokens::space::SM)
+            .into();
     }
     match &st.git.error {
         Some(error) => notice(
@@ -366,8 +381,11 @@ fn folder_fields<'a>(
 ) -> iced::widget::Column<'a, Message> {
     let t = ctx.theme;
     let empty = ctx.t(Key::CreateFolderEmpty);
-    let cwd = field(ctx, &empty, &st.folder.cwd, false).on_input(|cwd| msg(Msg::Cwd(cwd)));
+    let cwd = field(ctx, &empty, &st.folder.cwd, false)
+        .on_input(|cwd| msg(Msg::Cwd(cwd)))
+        .on_submit(submit_message(st, ctx));
     let mut folder_column = column![picker(
+        ctx,
         cwd,
         vec![
             ui_button::secondary(t, ctx.t(Key::CreateBrowse))
@@ -611,9 +629,12 @@ fn folder_agents<'a>(
     form.push(labelled(
         ctx,
         Some(ctx.t(Key::WorktreesHooksTitle).into_owned()),
-        hooks::view(ctx, &st.folder.hooks, |field, text| {
-            msg(Msg::Hook(field, text))
-        }),
+        hooks::view(
+            ctx,
+            &st.folder.hooks,
+            Some(submit_message(st, ctx)),
+            |field, text| msg(Msg::Hook(field, text)),
+        ),
     ))
 }
 
@@ -687,9 +708,9 @@ fn preview<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let columns = folder::preview_columns(st.folder.layout);
     // Pane names are unique across workspaces: these are the next free ones,
     // the same the store will hand out.
-    let names = folder::pick_pane_names(
+    let names = crate::state::pane_names::pick_pane_names(
         st.folder.assignments.len(),
-        folder::all_pane_names(&ctx.model.state().workspaces),
+        crate::state::pane_names::all_pane_names(&ctx.model.state().workspaces),
     );
     let cells: Vec<Element<'a, Message>> = st
         .folder

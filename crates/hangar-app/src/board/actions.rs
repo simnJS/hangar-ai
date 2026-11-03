@@ -114,7 +114,7 @@ impl Draft {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Create(Draft),
     Update { id: String, edit: Edit },
@@ -152,8 +152,23 @@ fn apply(cwd: String, mutation: Mutation) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The changes asked for on this thread, in order: a test checks which
+    /// board a message wrote to without running the task.
+    static ASKED: std::cell::RefCell<Vec<(String, Mutation)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The changes `run` was asked for since the last call, oldest first.
+#[cfg(test)]
+pub(super) fn take_asked() -> Vec<(String, Mutation)> {
+    ASKED.with(|asked| std::mem::take(&mut *asked.borrow_mut()))
+}
+
 /// Runs the change off the UI thread and answers `Msg::Mutated`.
 pub fn run(cwd: &str, mutation: Mutation, errors: Errors, after: After) -> Task<Message> {
+    #[cfg(test)]
+    ASKED.with(|asked| asked.borrow_mut().push((cwd.to_owned(), mutation.clone())));
     let folder = cwd.to_owned();
     let work = cwd.to_owned();
     Task::perform(

@@ -11,7 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::keyboard::Key as Pressed;
 use iced::keyboard::key::Named;
-use iced::widget::{Space, button, column, container, row, rule, text};
+use iced::widget::scrollable::AbsoluteOffset;
+use iced::widget::{Id, Space, button, column, container, operation, row, rule, text};
 use iced::{Alignment, Element, Length, Subscription, Task};
 
 use hangar_core::sessions::{AgentSession, list_sessions};
@@ -29,6 +30,53 @@ use crate::services::{CoreEvent, Services};
 use crate::shell::{Overlay, Region};
 use crate::state::types::{AgentId, Pane};
 use crate::state::{Model, PaneId, Patch, WsId};
+
+/// The height of a row of the list.
+const ROW_HEIGHT: f32 = 30.0;
+/// The tallest the body grows before it scrolls (the dialog's own default,
+/// named so that the arithmetic below does not depend on it).
+const BODY_HEIGHT: f32 = 420.0;
+
+/// The list's scrollable.
+fn list_id() -> Id {
+    Id::new("session-picker-list")
+}
+
+/// How far down the list the top of a row is: the body's padding, the
+/// « New session » row, and for a session the hairline between them. The
+/// rows are `space::XXS` apart.
+fn row_top(row: usize) -> f32 {
+    let pad = space::MD;
+    if row == 0 {
+        return pad;
+    }
+    let hairline = 2.0 * space::XS + 1.0;
+    pad + ROW_HEIGHT
+        + space::XXS
+        + hairline
+        + space::XXS
+        + (row - 1) as f32 * (ROW_HEIGHT + space::XXS)
+}
+
+/// Where to scroll the list so that the keyboard's row is in view: the row
+/// in the middle of the body, which iced stops at the ends of the list. (The
+/// web app focused the row's button and the browser scrolled it into view;
+/// iced cannot focus a button, and cannot say how far the person scrolled
+/// with the wheel, so the row is centred rather than nudged.)
+fn offset_for(row: usize) -> f32 {
+    (row_top(row) + ROW_HEIGHT / 2.0 - BODY_HEIGHT / 2.0).max(0.0)
+}
+
+/// Brings the keyboard's row into view.
+fn reveal(row: usize) -> Task<Message> {
+    operation::scroll_to(
+        list_id(),
+        AbsoluteOffset {
+            x: None,
+            y: Some(offset_for(row)),
+        },
+    )
+}
 
 /// The package's UI state; lives in `App.pkg.session_picker`.
 #[derive(Debug, Default)]
@@ -112,11 +160,13 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 picker.cursor = at + 1;
             }
             picker.sessions = Some(sessions);
-            Task::none()
+            // The session the pane is on may be far down the list.
+            reveal(picker.cursor)
         }
         Msg::Step(step) => {
             if let Some(next) = step_index(Some(picker.cursor), picker.rows(), step, false) {
                 picker.cursor = next;
+                return reveal(next);
             }
             Task::none()
         }
@@ -252,6 +302,14 @@ fn relative(i18n: Translator, now_ms: u64, modified_ms: u64) -> String {
         .into_owned()
 }
 
+/// The interface font in italics, for « untitled ».
+fn italic() -> iced::Font {
+    iced::Font {
+        style: iced::font::Style::Italic,
+        ..fonts::ui()
+    }
+}
+
 /// A session id as the pane header shortens it, with an ellipsis saying
 /// there is more of it (`sessionIdLabel`).
 fn id_label(id: &str) -> String {
@@ -347,7 +405,15 @@ pub fn view<'a>(
                 let row_at = at + 1;
                 let current = picker.current.as_deref() == Some(session.id.as_str());
                 let label: Element<'a, Message> = if session.label.is_empty() {
-                    quiet(row_at, ctx.t(Key::SessionsUntitled).into_owned())
+                    // `<em>` in the web app.
+                    let words = text(ctx.t(Key::SessionsUntitled).into_owned())
+                        .size(font_size::UI)
+                        .font(italic());
+                    if chosen(row_at) {
+                        words.into()
+                    } else {
+                        words.style(style::text::secondary(t)).into()
+                    }
                 } else {
                     let font = if current {
                         fonts::ui_semibold()
@@ -365,16 +431,22 @@ pub fn view<'a>(
                 let id = text(id_label(&session.id))
                     .size(font_size::CAPTION)
                     .font(fonts::mono());
+                // The whole id on hover (`title={session.id}`).
+                let whole = session.id.clone();
                 let meta = row![
                     quiet(
                         row_at,
                         format!("{} · ", relative(ctx.i18n, now, session.modified_ms))
                     ),
-                    if chosen(row_at) {
-                        id
-                    } else {
-                        id.style(style::text::secondary(t))
-                    },
+                    hangar_ui::tip::over(
+                        t,
+                        if chosen(row_at) {
+                            id
+                        } else {
+                            id.style(style::text::secondary(t))
+                        },
+                        whole,
+                    ),
                 ]
                 .align_y(Alignment::Center);
                 body = body.push(line(row_at, Some(session.id.clone()), label, meta.into()));
@@ -404,6 +476,8 @@ pub fn view<'a>(
         body,
     )
     .subtitle(picker.cwd.clone())
+    .body_id(list_id())
+    .body_max_height(BODY_HEIGHT)
     .width(size::DIALOG_LIST_WIDTH)
     .body_padding([space::MD, space::MD])
     .note(ctx.t(Key::SessionsNote))
@@ -484,5 +558,30 @@ mod tests {
         assert_eq!(open.session_at(2).as_deref(), Some("b"));
         assert_eq!(open.session_at(7), None);
         assert_eq!(picker(None).rows(), 1);
+    }
+
+    #[test]
+    fn the_top_of_the_list_needs_no_scrolling() {
+        assert_eq!(offset_for(0), 0.0);
+        // Rows that sit in the first screenful stay where they are.
+        assert_eq!(offset_for(1), 0.0);
+        assert_eq!(offset_for(5), 0.0);
+    }
+
+    #[test]
+    fn a_row_far_down_is_centred_in_the_body() {
+        let row = 40;
+        let middle = row_top(row) + ROW_HEIGHT / 2.0;
+        assert_eq!(offset_for(row), middle - BODY_HEIGHT / 2.0);
+        // And the further down, the further the list is moved, by one row's
+        // pitch at a time.
+        let pitch = offset_for(row + 1) - offset_for(row);
+        assert_eq!(pitch, ROW_HEIGHT + space::XXS);
+    }
+
+    #[test]
+    fn sessions_start_below_the_new_session_row_and_its_hairline() {
+        assert!(row_top(1) > row_top(0) + ROW_HEIGHT);
+        assert_eq!(row_top(2) - row_top(1), ROW_HEIGHT + space::XXS);
     }
 }

@@ -17,6 +17,7 @@ pub mod folder;
 pub mod git_form;
 pub mod hooks;
 mod kits_dialog;
+mod sweep;
 #[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
@@ -24,16 +25,17 @@ mod tests;
 mod view;
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hangar_i18n::{Key, Translator, args};
+use iced::widget::{Id, operation};
 use iced::{Element, Subscription, Task};
 
 use crate::ctx::Ctx;
 use crate::git_flow::AppDeps;
 use crate::git_flow::clone::{
     CloneProgress, ParseResult, clean_repo_input, is_progress_of, new_clone_job_id,
-    parse_repo_input,
+    overall_percent, parse_repo_input,
 };
 use crate::git_flow::flow::{FromGitOutcome, FromGitRequest};
 use crate::git_flow::paths::{projects_folder_of, resolve_parent};
@@ -119,9 +121,32 @@ struct Git {
     /// The job the dialog follows and cancels.
     job: Option<String>,
     cancelled: bool,
+    /// When the clone began and the last tick since: the sweep of the
+    /// indeterminate bar is the difference.
+    began: Option<Instant>,
+    beat: Option<Instant>,
 }
 
 impl Git {
+    /// Whether the bar has nothing to measure yet: the clone runs, and git
+    /// has not given a percentage the bar can use.
+    fn indeterminate(&self) -> bool {
+        self.running
+            && self
+                .progress
+                .as_ref()
+                .and_then(|progress| overall_percent(&progress.phase, progress.percent))
+                .is_none()
+    }
+
+    /// How far into its animation the indeterminate bar is.
+    fn sweep_elapsed(&self) -> Duration {
+        match (self.began, self.beat) {
+            (Some(began), Some(beat)) => beat.saturating_duration_since(began),
+            _ => Duration::ZERO,
+        }
+    }
+
     /// What was said about the address as it is now, never about an older
     /// one.
     fn parse(&self) -> Option<&ParseResult> {
@@ -207,9 +232,16 @@ pub enum Msg {
         outcome: FromGitOutcome,
     },
     Stop,
+    /// The tick that moves the indeterminate bar.
+    Tick(Instant),
 
     // The kits dialog.
     KitsHook(HookField, String),
+}
+
+/// The repository field (`autoFocus` in the web app, when Git is the source).
+pub(crate) fn repo_id() -> Id {
+    Id::new("workspace-dialog-repo")
 }
 
 /// The dialog is the overlay in front.
@@ -279,7 +311,12 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             // Reading the address follows the source, as the web app's effect
             // did.
             if source == Source::Git {
-                return schedule_parse(st);
+                // `autoFocus` of the repository field, which mounts with this
+                // source. The dialog's layer already puts the keyboard in
+                // the first field when it opens (the folder, or the
+                // repository when a clone is still showing); only a switch
+                // made inside the open dialog needs asking.
+                return Task::batch([schedule_parse(st), operation::focus(repo_id())]);
             }
             Task::none()
         }
@@ -485,6 +522,10 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::GitDone { job, outcome } => git_done(st, m, t, &job, outcome),
         // Started by `update`.
         Msg::Stop => Task::none(),
+        Msg::Tick(at) => {
+            st.git.beat = Some(at);
+            Task::none()
+        }
 
         // ── the kits dialog ──
         Msg::KitsHook(field, text) => {
@@ -589,6 +630,8 @@ fn start_git(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     st.git.error = None;
     st.git.progress = None;
     st.git.running = true;
+    st.git.began = Some(Instant::now());
+    st.git.beat = st.git.began;
     let request = FromGitRequest {
         repo: st.git.repo.clone(),
         name: Some(st.name.trim().to_string()).filter(|name| !name.is_empty()),
@@ -692,8 +735,14 @@ fn stop_clone(st: &mut State) -> Task<Message> {
     )
 }
 
-pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
-    Subscription::none()
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    // The moving bar needs a frame now and then; nothing else in the dialog
+    // does, so the tick runs only while it is on show.
+    if st.source == Source::Git && st.git.indeterminate() && on_top(m) {
+        iced::time::every(sweep::TICK).map(|at| Message::WorkspaceDialog(Msg::Tick(at)))
+    } else {
+        Subscription::none()
+    }
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns

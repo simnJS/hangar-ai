@@ -16,8 +16,7 @@
 //! The terminal's answers to the program's queries (cursor position, device
 //! attributes, colours) come out of the same feed and go straight to the
 //! pane's writer, in order with the typing; the other things the terminal
-//! has to say (a bell, a notification, a copy) go to the window as
-//! [`HubEvent`]s.
+//! has to say (a bell, a notification) go to the window as [`HubEvent`]s.
 //!
 //! # The input path
 //!
@@ -32,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 
 use hangar_core::pty::{PtyEvent, PtyManager, PtySink};
-use hangar_term::{ClipboardTarget, Event, Terminal};
+use hangar_term::{Event, Terminal};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::state::PaneId;
@@ -57,8 +56,6 @@ pub enum HubKind {
         title: Option<String>,
         body: String,
     },
-    /// A program asked to copy (`OSC 52`).
-    Copy(String),
 }
 
 /// The sending half of the window's channel, cloned into every sink.
@@ -155,13 +152,10 @@ impl PaneLink {
                         Event::Notification { title, body } => {
                             HubKind::Notification { title, body }
                         }
-                        Event::SetClipboard {
-                            target: ClipboardTarget::Clipboard,
-                            text,
-                        } => HubKind::Copy(text),
                         // Titles stay unused, as in the web app (inventory
-                        // §4/1.12); the primary selection and reading the
-                        // clipboard are not offered to programs.
+                        // §4/1.12). The clipboard is not offered to
+                        // programs (`OSC 52`, off in `look::config`), as
+                        // xterm.js without its clipboard addon never did.
                         _ => continue,
                     };
                     let _ = hub.send(HubEvent {

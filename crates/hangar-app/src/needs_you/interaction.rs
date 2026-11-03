@@ -2,10 +2,12 @@
 
 use serde_json::json;
 
+use super::model::Boards;
 use super::*;
 use crate::app::Packages;
 use crate::navigator::testing::{ctx, model_of, pane, simulate, workspace};
 use crate::state::types::{AgentId, AppState, PaneRole};
+use hangar_core::board::Task as BoardTask;
 
 fn task(id: &str, title: &str, labels: &[&str]) -> BoardTask {
     serde_json::from_value(json!({
@@ -31,19 +33,23 @@ fn world() -> (Model, State) {
     ws.panes[0].role = Some(PaneRole::Orchestrator);
     ws.panes[1].role = Some(PaneRole::Worker);
     let cwd = ws.cwd.clone();
-    let model = model_of(AppState {
+    let mut model = model_of(AppState {
         workspaces: vec![ws],
         active_workspace_id: Some("w".into()),
         ..AppState::default()
     });
     let mut st = State::default();
-    st.boards.insert(
+    let boards: Boards = [(
         cwd,
         vec![
             task("1", "Choose the payment provider", &["needs-you"]),
             task("2", "Add the webhook", &["ready-to-land"]),
         ],
-    );
+    )]
+    .into_iter()
+    .collect();
+    let seen = look(&model, &HashSet::new(), &boards);
+    let _ = settle(&mut st, &mut model, seen);
     (model, st)
 }
 

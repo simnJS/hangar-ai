@@ -158,3 +158,57 @@ fn the_cleanup_settings_travel_with_the_config() {
     assert_eq!(config.cleanup_model, "llama");
     assert_eq!(config.cleanup_hint, "Hangar, Groq");
 }
+
+// ---- the shortcut -------------------------------------------------------------------------------
+
+fn dictation_on(on: bool) -> Model {
+    use crate::state::{Patch, StoreAction};
+    let mut m = Model::default();
+    m.apply(StoreAction::UpdateSettings(Patch::new(
+        move |settings: &mut Settings| settings.voice_enabled = on,
+    )));
+    m
+}
+
+#[test]
+fn the_dictate_command_is_a_press() {
+    // `voice.dictate` sends `Intent::Dictate` (the command table); nothing else
+    // is this package's.
+    assert!(matches!(press_of(&Intent::Dictate), Some(Msg::Press)));
+    assert!(press_of(&Intent::ToggleNavigator).is_none());
+}
+
+#[test]
+fn a_press_with_dictation_on_starts_a_recording_with_the_settings() {
+    let m = dictation_on(true);
+    let mut st = State::default();
+    let config = begin(&mut st, &m).expect("the press starts a dictation");
+    assert_eq!(st.phase(), Phase::Recording);
+    assert!(st.starting, "until the microphone has opened");
+    assert!(matches!(config.engine, EngineKind::Local));
+}
+
+#[test]
+fn a_press_with_dictation_off_does_nothing() {
+    let m = dictation_on(false);
+    let mut st = State::default();
+    assert!(begin(&mut st, &m).is_none());
+    assert_eq!(st.phase(), Phase::Idle);
+}
+
+#[test]
+fn the_key_repeating_while_held_is_not_another_dictation() {
+    let m = dictation_on(true);
+    let mut st = State::default();
+    assert!(begin(&mut st, &m).is_some());
+    assert!(begin(&mut st, &m).is_none());
+}
+
+#[test]
+fn no_microphone_is_held_open_when_the_app_starts() {
+    // A fresh core records nothing; `Msg::Recover` only stops what
+    // `voice_recording` says is open.
+    assert!(!stale_recording(
+        &hangar_core::voice::VoiceManager::default()
+    ));
+}

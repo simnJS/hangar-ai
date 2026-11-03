@@ -54,19 +54,59 @@ pub fn measure_key(measure: Measure) -> hangar_i18n::Key {
 /// where cards lift off it; a grey on a light one, where they are white
 /// sheets on it, the way the settings draw their groups (`--stats-page`).
 pub fn page(t: &Theme) -> impl Fn(&iced::Theme) -> container::Style + '_ {
-    move |_| {
-        let colors = &t.colors;
-        let background = if t.is_dark() {
-            colors.bg
-        } else {
-            colors.chrome_bar
-        };
-        container::Style {
-            background: Some(Background::Color(background)),
-            text_color: Some(colors.fg),
-            ..container::Style::default()
-        }
+    move |_| container::Style {
+        background: Some(Background::Color(page_color(t))),
+        text_color: Some(t.colors.fg),
+        ..container::Style::default()
     }
+}
+
+/// The colour of the page itself.
+fn page_color(t: &Theme) -> Color {
+    if t.is_dark() {
+        t.colors.bg
+    } else {
+        t.colors.chrome_bar
+    }
+}
+
+/// How much of the page shows through the content while it is stale
+/// (`.stats__scroll.is-stale { opacity: 0.62 }`).
+const STALE_OPACITY: f32 = 0.62;
+/// The pause before the content is held back, so that a quick look at the
+/// disk never makes the page flicker (`transition-delay: 300ms`).
+pub const STALE_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Whether the content is what the cache said while the disk is still being
+/// read, and has been for long enough to show it.
+pub fn is_stale(
+    refreshing: bool,
+    cached_only: bool,
+    started: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    refreshing
+        && cached_only
+        && started.is_some_and(|started| now.saturating_duration_since(started) >= STALE_AFTER)
+}
+
+/// A veil over the content that lets the page behind it show through by what
+/// is missing of [`STALE_OPACITY`]. iced has no opacity for a subtree, and
+/// the content lies on the page's own colour, so a layer of that colour over
+/// it is the same picture. It takes no events: they pass to the content.
+pub fn stale_veil<'a, M: 'a>(t: &Theme) -> iced::Element<'a, M> {
+    let color = Color {
+        a: 1.0 - STALE_OPACITY,
+        ..page_color(t)
+    };
+    container(iced::widget::Space::new())
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(Background::Color(color)),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// A key figure or a card of the page.

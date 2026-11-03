@@ -141,11 +141,14 @@ pub(super) fn card<'a>(v: &View<'a>, task: &'a Task) -> Element<'a, Message> {
         },
     ));
 
+    // The card says which board it is on: the window that draws it is not
+    // always the main window's active workspace.
     let (pressed, opened) = (task.id.clone(), task.id.clone());
+    let (pressed_on, opened_on) = (v.cwd.to_owned(), v.cwd.to_owned());
     hit(framed)
         .id(card_id(&task.id))
-        .on_press(move |at| Message::Board(Msg::Press(pressed.clone(), at)))
-        .on_activate(Message::Board(Msg::OpenTask(opened)))
+        .on_press(move |at| Message::Board(Msg::Press(pressed_on.clone(), pressed.clone(), at)))
+        .on_activate(Message::Board(Msg::OpenTask(opened_on, opened)))
         .interaction(mouse::Interaction::Pointer)
         .look(Look {
             hover: Some(look::card_hover(t)),
