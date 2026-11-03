@@ -12,6 +12,8 @@ use iced::{Color, Element, Length, Padding, alignment};
 const MARGIN: f32 = 14.0;
 /// `min-width` of the box.
 const MIN_WIDTH: f32 = 170.0;
+/// The width of a box that has a total in it.
+const TOTAL_WIDTH: f32 = 220.0;
 
 /// One line of a readout.
 #[derive(Debug, Clone)]
@@ -44,6 +46,7 @@ pub fn readout<'a, M: 'a>(
     title: String,
     rows: Vec<Row>,
 ) -> Element<'a, M> {
+    let has_total = rows.iter().any(|line| line.strong);
     let mut lines = column![
         Space::new().width(MIN_WIDTH).height(0),
         text(title)
@@ -93,9 +96,17 @@ pub fn readout<'a, M: 'a>(
             lines = lines.push(line_row);
         }
     }
+    // The hairline over the total fills its column, and a column that shrinks
+    // to its content cannot give a filling child a width: a box with a total
+    // has the width its widest figure and label need instead.
     let card = container(lines)
         .padding(Padding::from([space::MD, space::LG]))
         .style(style::container::popover(theme));
+    let card = if has_total {
+        card.width(TOTAL_WIDTH)
+    } else {
+        card
+    };
 
     let flip = x > width / 2.0;
     let mut padding = Padding::ZERO;

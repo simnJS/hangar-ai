@@ -16,13 +16,13 @@ use crate::message::Message;
 
 /// The tallest a table grows before it scrolls.
 const MAX_HEIGHT: f32 = 260.0;
-const FIRST_COLUMN: f32 = 150.0;
-const NUMBER_COLUMN: f32 = 104.0;
+const FIRST_COLUMN: Length = Length::FillPortion(3);
+const NUMBER_COLUMN: Length = Length::FillPortion(2);
 
 fn cell<'a>(
     ui: Ui,
     content: String,
-    width: f32,
+    width: impl Into<Length>,
     left: bool,
     head: bool,
 ) -> Element<'a, Message> {
@@ -36,7 +36,7 @@ fn cell<'a>(
         words.style(style::text::primary(t))
     };
     container(words)
-        .width(width)
+        .width(width.into())
         .padding(Padding::from([5.0, space::LG]))
         .align_x(if left {
             alignment::Horizontal::Left
@@ -48,7 +48,7 @@ fn cell<'a>(
 
 /// A table's frame: a hairline around it, scrolling both ways past
 /// [`MAX_HEIGHT`] or the card's width.
-fn frame<'a>(ui: Ui, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+fn frame<'a>(ui: Ui, rows: Vec<Element<'a, Message>>, sideways: bool) -> Element<'a, Message> {
     let t = ui.t;
     let mut body = column![];
     for (at, line) in rows.into_iter().enumerate() {
@@ -59,9 +59,13 @@ fn frame<'a>(ui: Ui, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     }
     container(
         scrollable(body)
-            .direction(Direction::Both {
-                vertical: Scrollbar::new().width(hangar_theme::tokens::size::SCROLLBAR),
-                horizontal: Scrollbar::new().width(hangar_theme::tokens::size::SCROLLBAR),
+            .direction(if sideways {
+                Direction::Both {
+                    vertical: Scrollbar::new().width(hangar_theme::tokens::size::SCROLLBAR),
+                    horizontal: Scrollbar::new().width(hangar_theme::tokens::size::SCROLLBAR),
+                }
+            } else {
+                Direction::Vertical(Scrollbar::new().width(hangar_theme::tokens::size::SCROLLBAR))
             })
             .style(style::scrollable::default(t))
             .width(Length::Fill),
@@ -121,7 +125,7 @@ pub fn columns<'a>(ui: Ui, summary: &Summary, measure: Measure) -> Element<'a, M
         ));
         rows.push(line.into());
     }
-    frame(ui, rows)
+    frame(ui, rows, false)
 }
 
 /// The table twin of the heatmap: a row per weekday, a column per hour.
@@ -153,5 +157,5 @@ pub fn heat<'a>(ui: Ui, summary: &Summary) -> Element<'a, Message> {
         }
         rows.push(line.into());
     }
-    frame(ui, rows)
+    frame(ui, rows, true)
 }

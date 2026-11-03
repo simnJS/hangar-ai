@@ -470,11 +470,14 @@ fn empty_state<'a>(ui: Ui, data: &hangar_core::stats::UsageStats) -> Element<'a,
             };
             sources = sources.push(
                 row![
-                    text(source.root.clone())
-                        .size(font_size::CAPTION)
-                        .font(fonts::mono())
-                        .style(style::text::secondary(t)),
-                    Space::new().width(Length::Fill),
+                    container(
+                        one_line(source.root.clone())
+                            .size(font_size::CAPTION)
+                            .font(fonts::mono())
+                            .style(style::text::secondary(t))
+                    )
+                    .width(Length::Fill)
+                    .clip(true),
                     text(count)
                         .size(font_size::CAPTION)
                         .style(style::text::subtle(t)),
