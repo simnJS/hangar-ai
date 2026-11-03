@@ -135,6 +135,40 @@ pub(super) fn model(locale: Locale, theme: &str, loaded: Option<Vec<Task>>) -> M
     m
 }
 
+/// The folder of the second workspace of [`two_windows`].
+pub(super) const SITE: &str = "/work/site";
+
+/// Two workspaces in two windows, as after a detach: `ws` (on `CWD`) in the
+/// main window, where it is the active workspace, and `site` (on `SITE`) in a
+/// window of its own, which has the keyboard. Both boards are read, and the
+/// site's holds one task.
+pub(super) fn two_windows() -> (Model, window::Id, window::Id) {
+    use crate::shell::WindowKind;
+    let mut m = model(Locale::En, "graphite", Some(tasks()));
+    let mut state = m.state().clone();
+    state.workspaces.push(Workspace {
+        id: "site".into(),
+        name: "Site".into(),
+        cwd: SITE.into(),
+        detached: Some(true),
+        panes: vec![pane("s1", "Zed", AgentId::Claude)],
+        ..Workspace::default()
+    });
+    m.hydrate(state);
+    m.live.board.follow(&[CWD.to_owned(), SITE.to_owned()]);
+    m.live.board.request(SITE);
+    let mut one = test_task("site-task");
+    one.title = "Fix the footer".into();
+    m.live.board.answer(SITE, Some(Arc::new(vec![one])));
+    let (main, site) = (window::Id::unique(), window::Id::unique());
+    m.live.windows.insert(main, WindowKind::Main);
+    m.live
+        .windows
+        .insert(site, WindowKind::Workspace("site".into()));
+    m.ui.focused_window = Some(site);
+    (m, main, site)
+}
+
 fn ctx<'a>(m: &'a Model, packages: &'a Packages) -> Ctx<'a> {
     Ctx {
         model: m,
@@ -285,14 +319,15 @@ fn a_filter_menu_and_a_card_being_dragged() {
         "3d4e0000-aaaa-bbbb-cccc-dddddddddddd".to_owned(),
         Column::Doing,
         iced::Point::new(10.0, 10.0),
-    );
+    )
+    .on(CWD);
     press.pointer_moved(iced::Point::new(60.0, 10.0));
     press.enter(Column::Review);
     let st = State {
         press: Some(press),
         open_filter: Some(super::FilterKind::Assignee),
-        adding: Some(Column::Todo),
-        drafts: [(Column::Todo, "Draft of a card".to_owned())].into(),
+        adding: Some((CWD.to_owned(), Column::Todo)),
+        drafts: [((CWD.to_owned(), Column::Todo), "Draft of a card".to_owned())].into(),
         toast: Some((1, "“Release 1.13” is blocked and stays in To do.".into())),
         ..State::default()
     };

@@ -18,16 +18,19 @@ use hangar_theme::{fonts, style, tokens};
 use hangar_ui::input::{NumberField, NumberMsg};
 use hangar_ui::{Icon, button, dialog, form, icon, input, text as typography};
 
-use super::actions::{orchestrator_of, workers_of};
 use super::form::{
     DEFAULT_ORCHESTRATOR_MODEL, DEFAULT_REVIEWER_MODEL, DEFAULT_WORKER_MODEL, Draft, Field,
-    MAX_ATTEMPTS, MAX_WORKERS, MODEL_SUGGESTIONS, PERMISSION_MODES, Problem, defaults, draft_of,
-    draft_problems, normalize_draft, same_settings, settings_of, stored_orchestration,
+    MAX_ATTEMPTS, MAX_WORKERS, MODEL_SUGGESTIONS, Problem, draft_of, draft_problems,
+    normalize_draft, same_settings, stored_orchestration,
 };
 use super::{Msg, State};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::shell::Notice;
+use crate::state::roles::{
+    ORCHESTRATION_PERMISSION_MODES, orchestration_defaults, orchestration_of, orchestrator_of,
+    workers_of,
+};
 use crate::state::types::WsId;
 use crate::state::{Model, Patch, StoreAction, Workspace};
 
@@ -44,7 +47,7 @@ pub enum ModelField {
 pub enum PanelMsg {
     Workers(NumberMsg),
     Attempts(NumberMsg),
-    /// A mode of `PERMISSION_MODES`, or empty for the person's own.
+    /// A mode of `ORCHESTRATION_PERMISSION_MODES`, or empty for the person's own.
     Permission(String),
     AutoMerge(bool),
     Check(String),
@@ -136,7 +139,7 @@ fn save(panel: &Panel, m: &mut Model) -> iced::Task<Message> {
     let Some(ws) = m.workspace(&panel.ws) else {
         return iced::Task::none();
     };
-    let saved = settings_of(ws);
+    let saved = orchestration_of(ws);
     let next = normalize_draft(&panel.draft);
     if !draft_problems(&panel.draft).is_empty() || same_settings(&next, &saved) {
         return iced::Task::none();
@@ -190,8 +193,8 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
     let problems = draft_problems(draft);
     let next = normalize_draft(draft);
     let blocked = !problems.is_empty();
-    let changed = !same_settings(&next, &settings_of(ws));
-    let at_defaults = same_settings(&next, &defaults());
+    let changed = !same_settings(&next, &orchestration_of(ws));
+    let at_defaults = same_settings(&next, &orchestration_defaults());
 
     let body = column![
         typography::label(t, ctx.t(Key::OrchIntro)),
@@ -202,7 +205,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
                 Key::OrchMaxWorkers,
                 Key::OrchMaxWorkersHint,
                 &panel.workers,
-                defaults().max_workers,
+                orchestration_defaults().max_workers,
                 PanelMsg::Workers,
             ),
             count_row(
@@ -210,7 +213,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
                 Key::OrchMaxAttempts,
                 Key::OrchMaxAttemptsHint,
                 &panel.attempts,
-                defaults().max_attempts,
+                orchestration_defaults().max_attempts,
                 PanelMsg::Attempts,
             ),
             permission_row(ctx, draft),
@@ -296,7 +299,7 @@ fn label(ctx: Ctx<'_>, key: Key) -> &'static str {
 fn status<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let t = ctx.theme;
     let orchestrator = orchestrator_of(ws);
-    let workers = workers_of(ws).count();
+    let workers = workers_of(ws).len();
     let tint = if orchestrator.is_some() {
         t.colors.accent_hi
     } else {
@@ -385,7 +388,7 @@ fn permission_row<'a>(ctx: Ctx<'a>, draft: &'a Draft) -> Element<'a, Message> {
         id: "",
         label: ctx.t(Key::OrchPermissionTheirs).into_owned(),
     }];
-    for mode in PERMISSION_MODES {
+    for mode in ORCHESTRATION_PERMISSION_MODES {
         options.push(Mode {
             id: mode,
             label: ctx
