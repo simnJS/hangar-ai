@@ -37,7 +37,7 @@
 //!
 //! | Module | What is in it |
 //! | --- | --- |
-//! | [`icon`](mod@icon) | `icon(Icon::X, size)`: the 75 icons of `Icon.tsx`, in the colour of the text around them |
+//! | [`icon`](mod@icon) | `icon(Icon::X, size)`: the 75 icons of the web app's set, in the colour of the text around them |
 //! | [`text`] | `body`, `label`, `muted`, `hint`, `title`, `heading`, `mono`: text by role |
 //! | [`button`] | `primary`, `secondary`, `ghost`, `danger`, `icon_button` (with tooltip), `toggle_button`, `tab_button`, `link` |
 //! | [`input`] | `text_field` (label, hint, error), `search_field`, `number_input`, `textarea`, `select`, `checkbox`, `switch`, `slider`, `segmented` |

@@ -38,24 +38,21 @@ body:
   - type: dropdown
     id: agents
     attributes:
-      label: Agent
-      description: Which agent were the affected panes running?
+      label: Pane
+      description: What were the affected panes running?
       multiple: true
       options:
         - Claude Code
-        - Codex
-        - Gemini CLI
-        - OpenCode
         - Plain shell
-        - Not agent-specific
+        - Not pane-specific
     validations:
       required: true
 
   - type: input
     id: agent-version
     attributes:
-      label: Agent version and shell
-      description: The output of `claude --version`, `codex --version`, etc., and the pane's shell (PowerShell, Git Bash, WSL, zsh…).
+      label: Claude Code version and shell
+      description: The output of `claude --version`, and the pane's shell (PowerShell, Git Bash, WSL, zsh…).
       placeholder: "Claude Code 2.1.311, PowerShell 7.5"
 
   - type: dropdown

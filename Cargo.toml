@@ -9,9 +9,6 @@ resolver = "3"
 # for the host as well as for wasm32-unknown-unknown, so the workspace's
 # checks and tests reach them (docs/native/kits-native.md, "Building a tab").
 members = ["crates/*", "examples/kits/*/tab", "crates/hangar-kit-host/tests/probe"]
-# The Tauri app this branch replaces, left to read from while the port is
-# under way (docs/native/PLAN.md, "Retiring the webview app").
-exclude = ["src-tauri"]
 
 [workspace.package]
 version = "1.12.1"

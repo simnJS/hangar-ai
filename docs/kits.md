@@ -26,12 +26,15 @@ The public kits live in their own repositories in the
 [`kit-ci`](https://github.com/hangar-ai/kit-ci): they are good models to read. A new
 kit starts from [`kit-template`](https://github.com/hangar-ai/kit-template).
 
-This page is the contract. The code lives in `src-tauri/src/kits.rs` and
-`src-tauri/src/kits/`, with the typed wrappers in `src/lib/kits.ts`; a tab's
-page is served by `src-tauri/src/kit_scheme.rs` with the SDK in
-`src-tauri/kit-sdk/kit.js`, and framed and answered by
-`src/components/preview/KitTabView.tsx`, `src/lib/kitTabs.ts` and
-`src/lib/kitApi.ts`. How a tab should look is in [Hangar UI](kit-ui.md), the
+This page is the contract. The code lives in `crates/hangar-core/src/kits.rs` and
+`crates/hangar-core/src/kits/`, with what the app makes of a kit in
+`crates/hangar-app/src/kits/` (`model.rs`); a tab's page is served by
+`crates/hangar-core/src/kit_scheme.rs` with the SDK in
+`crates/hangar-core/kit-sdk/kit.js`, and opened and answered by
+`crates/hangar-app/src/kit_tabs/` (`api.rs`, `tabs.rs`). The web app these were
+ported from (`src/lib/kits.ts`, `src/lib/kitApi.ts`, `src/lib/kitTabs.ts`,
+`src/components/preview/KitTabView.tsx`) is at tag `v1.12.1`; the names below that
+come from it are kept for that reason. How a tab should look is in [Hangar UI](kit-ui.md), the
 interface library served to every tab.
 
 ## A minimal kit
@@ -641,7 +644,7 @@ before enabling it.
 
 ### Where its page comes from
 
-The `hangar-kit` scheme (`src-tauri/src/kit_scheme.rs`) serves the kits
+The `hangar-kit` scheme (`crates/hangar-core/src/kit_scheme.rs`) serves the kits
 installed on the machine that can be used — not a missing, broken or
 too-new one — at `<base>/<kit id>/<path in the kit>`, the base being
 `http://hangar-kit.localhost` on Windows and `hangar-kit://localhost`
@@ -1039,20 +1042,21 @@ more. A tab showing a local server's queue and keeping a note, asking for
 </script>
 ```
 
-`src/lib/kits.ts` exports the protocol's constants: `KIT_METHODS` (method →
-permission), `KIT_EVENTS`, `KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`,
-`KIT_BINARY_MAX_BYTES`, `KIT_LIST_*`, `KIT_DATA_MAX_BYTES`, `KIT_LOOPBACK_*`,
-`KIT_COMMAND_PATTERN`, `KIT_DENIED`, the message types, `kitMayCall` and
-`kitReadsHiddenFiles`. The window's side is `src/lib/kitApi.ts` (its
-limits and error codes, the `tab.*` methods, which need no permission, among
-them), the tab itself `src/components/preview/KitTabView.tsx`, the `theme` event it sends
-`kitThemeEvent` in `src/lib/kitTabs.ts`,
+`crates/hangar-app/src/kits/model.rs` holds the protocol's constants: `KIT_METHODS`
+(method → permission), `KIT_EVENTS`, `KIT_LOOPBACK_*`, `KIT_COMMAND_PATTERN` and
+the permission names, as the web app's `src/lib/kits.ts` exported them with
+`KIT_SDK_PATH`, `KIT_FILE_MAX_BYTES`, `KIT_BINARY_MAX_BYTES`, `KIT_LIST_*`,
+`KIT_DATA_MAX_BYTES`, `KIT_DENIED`, the message types, `kitMayCall` and
+`kitReadsHiddenFiles`. The window's side is `crates/hangar-app/src/kit_tabs/api.rs`
+(its limits and error codes, the `tab.*` methods, which need no permission, among
+them), the tab itself `kit_tabs/view.rs` and `kit_tabs/native.rs`, the `theme` event
+it sends `kit_theme_event` in `kit_tabs/tabs.rs`,
 and the paths `files.read` and `preview.show` take are checked on disk by
-`kit_file_read` and `kit_workspace_path` (`src-tauri/src/kit_scheme/files.rs`), and
+`kit_file_read` and `kit_workspace_path` (`crates/hangar-core/src/kit_scheme/files.rs`), and
 those `files.write`, `files.writeBinary`, `files.readBinary` and `files.list` take, and what a tab holding
-`files.write` reads, by `src-tauri/src/kits/files.rs`; the
-data folder is `src-tauri/src/kits/data.rs`, `loopback.fetch`
-`src-tauri/src/kits/loopback.rs` and `command.run` `src-tauri/src/kits/commands.rs`.
+`files.write` reads, by `crates/hangar-core/src/kits/files.rs`; the
+data folder is `crates/hangar-core/src/kits/data.rs`, `loopback.fetch`
+`crates/hangar-core/src/kits/loopback.rs` and `command.run` `crates/hangar-core/src/kits/commands.rs`.
 
 ## Declared commands
 
@@ -1100,7 +1104,7 @@ in the program, a `run` written as a string, an arg named `kitDir`.
 
 **The program** is a name found on the PATH: not a path, nor a name ending in a dot
 or a space. It is found on the PATH Hangar computes for everything it starts
-(`src-tauri/src/path_env.rs`), passing over relative and empty entries, so nothing
+(`crates/hangar-core/src/path_env.rs`), passing over relative and empty entries, so nothing
 is ever run from the project's folder for being there. Absent, the call answers
 `not_found`, an ordinary state for a tab (`gh` not installed), and nothing is logged.
 
@@ -1435,13 +1439,14 @@ kits?: { id: string; granted: string[] }[]
 
 `granted` is the tab permissions the person accepted, and `hooks:<hash>` and
 `commands:<hash>` for what a GitHub kit runs by itself and the commands its tabs may run, once accepted. `state.json` is edited by hand, so it is read through
-`workspaceKits(ws)` (`src/lib/kits.ts`): an entry that is not an object with a
+`workspace_kits` (`crates/hangar-app/src/kits/model.rs`, `workspaceKits` in the web
+app): an entry that is not an object with a
 valid kit id and a `granted` array is no kit, a duplicate id counts once, and a
 permission Hangar does not know is never granted. A missing `kits` is no kit.
 
 A kit can also be enabled on **all workspaces at once** from Settings › Kits, accepted
 once for all of them: `kitsEverywhere` in the settings, of the same shape. What decides
-anything about a workspace's kits is `effectiveKits(ws, settings)`: its own entries, then
+anything about a workspace's kits is `effective_kits` (`effectiveKits(ws, settings)`): its own entries, then
 the others of `kitsEverywhere`, a workspace's own entry winning for its grants. So its
 panes load such a kit, and its tabs open and hold what was accepted, the pseudo
 permissions included. The workspace's Kits dialog shows it on, its switch locked, and
@@ -1454,7 +1459,9 @@ a project's file is a tab granted `files.write`, saying what, or a kit's own cod
 
 ## Commands and events
 
-Tauri commands, with their wrappers in `src/lib/kits.ts`:
+hangar-core's functions, under the names of the Tauri commands they were
+([core-api.md](native/core-api.md)), with the wrappers the web app had in
+`src/lib/kits.ts` (tag `v1.12.1`):
 
 | Command                      | Wrapper                      | Answers                                                                                   |
 | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
@@ -1491,12 +1498,11 @@ seconds).
 
 ## Strings
 
-The interface around kits is translated in two dictionaries of their own, each
-merged into `src/i18n.ts`:
+The interface around kits is translated under two prefixes of Hangar's
+dictionaries (`crates/hangar-i18n/dict/en.json` and `fr.json`):
 
-- `src/strings/kitsManage.ts` — Settings › Kits and the activation dialog, keys
-  `kitsManage.*`;
-- `src/strings/kitsTab.ts` — a kit's tab and its frame, keys `kitsTab.*`.
+- `kitsManage.*` — Settings › Kits and the activation dialog;
+- `kitsTab.*` — a kit's tab and its frame.
 
-Each exports `en`, the reference, and `fr: Record<keyof typeof en, string>`:
-a French key missing there fails the build, without `i18n.ts` changing.
+English is the reference; a French key missing fails the generator
+(`node crates/hangar-i18n/tools/generate.mjs`).

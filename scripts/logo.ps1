@@ -11,12 +11,15 @@
 #
 # Then propagate it to everything that embeds a copy:
 #
-#   pnpm tauri icon assets/logo.png        # the OS icon set under src-tauri/icons/
+#   npx @tauri-apps/cli icon assets/logo.png -o <folder>
+#       # then copy 32x32.png, 128x128.png, 128x128@2x.png, icon.png, icon.ico
+#       # and icon.icns from <folder> over crates/hangar-app/packaging/icons/,
+#       # the OS icon set the packages and the window use
 #   powershell -File scripts/installer-art.ps1   # the installer bitmaps
 #
 # Windows-only: it draws through System.Drawing, which is also why the output is
 # checked in rather than generated in CI. The in-app mark lives separately in
-# src/components/Logo.tsx — it is the bare glyph, without the tile behind it.
+# crates/hangar-ui/src/logo.rs — it is the bare glyph, without the tile behind it.
 
 Add-Type -AssemblyName System.Drawing
 

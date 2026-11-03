@@ -760,10 +760,7 @@ async fn a_capture_is_written_where_asked_as_a_png() {
 /* ── the numbers ───────────────────────────────────────────────── */
 
 fn sample() -> Mesh {
-    hangar_model3d::load::load(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/models/sample.glb"),
-    )
-    .expect("the repository's sample model loads")
+    hangar_model3d::load::load(sample_path()).expect("the repository's sample model loads")
 }
 
 #[test]
@@ -1009,8 +1006,12 @@ fn a_model_on_screen_has_its_numbers_and_a_failed_reload_says_so_over_it() {
     }
 }
 
+/// The repository's sample model: a hangar and a drone flying a loop around
+/// it, made from primitives with no third-party asset (by
+/// `scripts/demo-model.mjs` at tag v1.12.1, for the browser demo it was first
+/// drawn for).
 fn sample_path() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/models/sample.glb")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models/sample.glb")
 }
 
 fn group(locale: Locale) -> String {

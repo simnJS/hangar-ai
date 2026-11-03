@@ -201,10 +201,8 @@ kbd {
   max-width: calc(var(--wrap-wide) + 2 * var(--gutter));
 }
 
-/* Without script there is no theme to try, no chip to send and no app
-   reporting that it started: those parts step aside. */
-html:not(.js) .js-only,
-html:not(.js) .stage__boot {
+/* Without script there is no theme to try: that part steps aside. */
+html:not(.js) .js-only {
   display: none;
 }
 
@@ -897,173 +895,6 @@ html:not(.js) .stage__boot {
   line-height: 1.55;
 }
 
-/* ── demo ────────────────────────────────────────────────────── */
-
-.demo {
-  padding-block: clamp(72px, 10vw, 136px) clamp(56px, 8vw, 104px);
-}
-
-.head--split {
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  align-items: end;
-  gap: 24px 56px;
-}
-
-.head--split .head__lede {
-  margin-top: 0;
-}
-
-.stage {
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-xl);
-  background: var(--bg);
-  box-shadow: 0 0 0 1px var(--sep), 0 40px 90px -30px var(--shadow);
-}
-
-.stage__bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 38px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid var(--sep);
-  background: var(--chrome-bar);
-  font-size: 13px;
-}
-
-.stage__title {
-  color: var(--fg-hi);
-  font-weight: 600;
-}
-
-.stage__note {
-  padding: 1px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-xs);
-  color: var(--fg-secondary);
-  font-size: 12px;
-}
-
-.stage__out {
-  margin-left: auto;
-  padding: 4px 8px;
-  border-radius: var(--r-xs);
-  font-weight: 520;
-  text-decoration: none;
-}
-
-.stage__out:hover {
-  background: var(--raised);
-}
-
-.stage__body {
-  position: relative;
-  height: clamp(600px, 56vw, 800px);
-  max-height: calc(100vh - var(--bar-h) - 120px);
-  min-height: 560px;
-}
-
-.stage__frame {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: var(--bg);
-}
-
-.stage__boot {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--bg);
-  color: var(--fg-secondary);
-  font-size: 14px;
-  transition: opacity 300ms var(--ease), visibility 0s linear 300ms;
-}
-
-.stage.is-ready .stage__boot {
-  visibility: hidden;
-  opacity: 0;
-}
-
-.stage__boot a {
-  margin-left: 4px;
-}
-
-.spin {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-.stage__small {
-  display: none;
-  padding: 28px 20px;
-  text-align: center;
-}
-
-.stage__small p {
-  margin-bottom: 16px;
-  color: var(--fg-secondary);
-  font-size: 15px;
-}
-
-.prompts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 16px;
-  margin-top: 18px;
-}
-
-.prompts__label {
-  color: var(--fg-muted);
-  font-size: 14px;
-}
-
-.prompts__label b {
-  font-weight: 560;
-}
-
-.prompts__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chip {
-  min-height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  background: var(--chrome);
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 140ms var(--ease), color 140ms var(--ease);
-}
-
-.chip:hover {
-  border-color: var(--border-strong);
-  color: var(--fg-hi);
-}
-
-.chip.is-sent {
-  border-color: var(--state-working);
-  color: var(--fg-hi);
-}
-
 /* ── features ────────────────────────────────────────────────── */
 
 .features {
@@ -1397,22 +1228,6 @@ html:not(.js) .stage__boot {
   }
 }
 
-@media (max-width: 999px) {
-  .stage__body,
-  .prompts {
-    display: none;
-  }
-
-  .stage__small {
-    display: block;
-  }
-
-  .stage__note,
-  .stage__out {
-    display: none;
-  }
-}
-
 @media (max-width: 959px) {
   .seg {
     display: none;
@@ -1437,7 +1252,6 @@ html:not(.js) .stage__boot {
 
   .pair,
   .show,
-  .head--split,
   .faq__in,
   .after {
     grid-template-columns: minmax(0, 1fr);
@@ -1773,20 +1587,6 @@ html:not(.js) .stage__boot {
     margin-top: -4px;
     padding-bottom: 14px;
     font-size: 14.5px;
-  }
-
-  /* demo: the stage says the app needs a wider screen */
-
-  .demo {
-    padding-block: 44px 40px;
-  }
-
-  .stage__small {
-    padding: 22px 16px;
-  }
-
-  .stage__small .btn {
-    min-height: 44px;
   }
 
   /* features */

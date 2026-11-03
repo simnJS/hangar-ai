@@ -36,7 +36,7 @@ These are in scope:
 
 - the desktop app, including its local HTTP API (`127.0.0.1`, protected by a per-launch
   token) and the `hangar-ai --mcp` server;
-- the `hangar-bridge` Claude Code mod in `src-tauri/claude-mod/`;
+- the `hangar-bridge` Claude Code mod in `crates/hangar-core/claude-mod/`;
 - the installers, the updater and the release workflow in this repository.
 
 These are out of scope, and should be reported to their own projects:

@@ -7,7 +7,9 @@ Rust functions and reads a typed event bus. This file is the whole contract:
 every former command, every former event, and what the app now does itself.
 
 The React frontend in `src/` stays the reference for *when* each call is
-made; this file says *what* to call instead.
+made; this file says *what* to call instead. Since wave 5 it is no longer on
+the branch: the `src/…` files named here are read at tag `v1.12.1`
+(`git show v1.12.1:src/lib/ipc.ts`).
 
 ## Contents
 

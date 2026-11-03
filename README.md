@@ -17,7 +17,6 @@
 
 <p align="center">
   <a href="https://hangar.simnjs.fr">Website</a> ·
-  <a href="https://hangar.simnjs.fr/demo/">Browser demo</a> ·
   <a href="#hangar-mobile">Hangar Mobile</a> ·
   <a href="#install">Download</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
@@ -28,8 +27,8 @@
 
 <p align="center"><sub>Screenshots of a real session: Claude Code agents at work on checkout-v2, a sample repository.</sub></p>
 
-Hangar.AI is an open-source desktop app for Windows, macOS and Linux, built with Tauri 2
-and React. It runs Claude Code, as many sessions as you need, each in a real terminal
+Hangar.AI is an open-source desktop app for Windows, macOS and Linux, written in Rust
+with a native interface (iced). It runs Claude Code, as many sessions as you need, each in a real terminal
 next to plain shells, and gives them a shared place to coordinate.
 
 With **Hangar Mobile**, you follow and steer them from your phone while Hangar keeps running
@@ -366,10 +365,11 @@ it, and keeps a backup the first time it writes a file. To do it by hand instead
 | `phone_share` | Send you a file on your phone through [Hangar Mobile](#hangar-mobile): a screenshot, a render, a report you asked to see. |
 | `project_list`, `project_status`, `project_send` | The [project manager](#project-manager) only: list every project, read where one stands, and queue an instruction for its orchestrator. |
 
-You can test the server by hand from a build:
+You can test the server by hand from a dev build, with a dev Hangar running on the same
+data (see [Build from source](#build-from-source)):
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./src-tauri/target/debug/hangar-ai --mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | scripts/native-dev.sh -- --mcp
 ```
 
 ## Privacy
@@ -405,53 +405,62 @@ change that.
 
 You need:
 
-- **Node.js** 22, as in CI (Vite 7 needs at least 20.19), and **pnpm** 10;
-- **Rust** stable;
+- **Rust** stable, and `rustup target add wasm32-unknown-unknown` for native kit tabs;
 - **cmake** and **LLVM/clang**: dictation compiles whisper.cpp from source and generates
   its bindings with libclang;
-- the Tauri prerequisites for your system:
-  - **Windows:** the MSVC build tools and WebView2, plus cmake and LLVM
-    (`winget install Kitware.CMake LLVM.LLVM`);
+- for your system:
+  - **Windows:** the MSVC build tools, plus cmake and LLVM
+    (`winget install Kitware.CMake LLVM.LLVM`), and WebView2 for the pages the webview
+    helper shows (HTML kit tabs, PDFs);
   - **macOS:** the Xcode command line tools (`xcode-select --install`, which includes
     clang) and `brew install cmake`;
-  - **Linux:** the WebKitGTK, ALSA and libclang headers, as installed by CI on Ubuntu
-    22.04:
+  - **Linux:** the ALSA, libclang and OpenSSL headers, and WebKitGTK for the webview
+    helper, as installed by CI on Ubuntu 22.04:
 
     ```bash
-    sudo apt install build-essential cmake libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-      librsvg2-dev libxdo-dev libssl-dev libasound2-dev libclang-dev patchelf
+    sudo apt install build-essential cmake libwebkit2gtk-4.1-dev libssl-dev libasound2-dev libclang-dev
     ```
+- **Node.js** 22 and **pnpm** 10, only for Hangar Mobile, the phone app: a build without it
+  serves the phone a page saying the app is missing.
 
 Then:
 
 ```bash
+scripts/native-dev.sh             # build and run Hangar, on data of its own under target/dev-home/
+scripts/native-dev.sh --release   # the same, optimised
+cargo test --workspace            # the tests
 pnpm install
-pnpm tauri dev      # run the app with hot reload
-pnpm tauri build    # build the installers for this platform, Hangar Mobile included
-pnpm demo:dev       # the browser demo, with canned agents, on http://localhost:4300
-pnpm mobile:dev     # Hangar Mobile against a fake PC, on http://localhost:4310
-pnpm mobile:build   # Hangar Mobile into dist-mobile/, which a dev build serves to the phone
+pnpm mobile:build                 # Hangar Mobile into dist-mobile/, which the next build embeds
+pnpm mobile:dev                   # Hangar Mobile against a fake PC, on http://localhost:4310
+pnpm test                         # Hangar Mobile's tests
 ```
 
+The installers are built by the scripts under `crates/hangar-app/packaging/`, as the
+release workflow runs them: see [docs/native/PACKAGING.md](docs/native/PACKAGING.md).
+
 > [!WARNING]
-> If Hangar is already installed on your machine, a plain `pnpm tauri dev` shares its data
-> and its MCP endpoint. Your installed agents would then talk to the dev build. See
-> [CONTRIBUTING.md](CONTRIBUTING.md#running-a-dev-build-next-to-an-installed-hangar) to run
-> the two side by side.
+> If Hangar is already installed on your machine, a plain `cargo run -p hangar-app` shares
+> its data and its MCP endpoint, and your installed agents would then talk to the dev
+> build. `scripts/native-dev.sh` keeps them apart; see
+> [CONTRIBUTING.md](CONTRIBUTING.md#running-a-dev-build-next-to-an-installed-hangar).
 
 ## Repository layout
 
 ```
-src/                 React frontend (components, lib, styles, i18n)
-src/mobile/          Hangar Mobile, the phone app, built into dist-mobile/ and embedded in the binary
-src-tauri/src/       Rust backend: PTYs, board, memory, MCP server, git, deliveries, stats, dictation
-src-tauri/claude-mod/hangar-bridge/
+crates/hangar-app/   the app: windows, views and state; packaging/ holds the installers' scripts and icons
+crates/hangar-core/  everything that is not drawing: PTYs, board, memory, MCP server, git, deliveries,
+                     stats, dictation, Hangar Mobile's server, the kits and their HTML SDK
+crates/hangar-core/claude-mod/hangar-bridge/
                      the Claude Code mod that reports session state to Hangar
-src-tauri/installer/ NSIS installer script and artwork
-demo/                the browser demo: src/ compiled unchanged against a fake backend
+crates/              the other crates: theme, widgets, terminal, strings, kits, webview helper,
+                     3D viewer, updater (docs/native/PLAN.md)
+mobile/              Hangar Mobile, the phone app, built into dist-mobile/ and embedded in the binary
+examples/kits/       example kits
+assets/              the logo, the README's images and the sample 3D model
 site/                the website at hangar.simnjs.fr
-scripts/             logo, installer art, demo model and demo bundling scripts
-.github/workflows/   CI (checks on pushes to main and on pull requests) and Release (builds and publishes on a tag)
+scripts/             the dev launcher, the kits' stylesheet generator, logo and installer art
+docs/                kits, Hangar UI, and the native port's plan and status
+.github/workflows/   CI (checks on pushes to main and feat/native-rust, and on pull requests) and Release (builds and publishes on a tag)
 ```
 
 ## Contributing

@@ -1,6 +1,6 @@
 //! Hangar's interface strings, in English and French, and the functions that
-//! turn a key into text. Ported from `src/i18n.ts`; see docs/native/PLAN.md,
-//! "hangar-i18n".
+//! turn a key into text. Ported from the web app's `src/i18n.ts` (tag
+//! v1.12.1); see docs/native/PLAN.md, "hangar-i18n".
 //!
 //! # Using it from a view
 //!
@@ -45,18 +45,21 @@
 //!
 //! # Adding or changing a string
 //!
-//! The strings live in the web app's files, still the source of truth while both
-//! apps exist: `src/i18n.ts` (`en`, and `fr` which is typed against it, so a
-//! missing French string fails there), `src/strings/*.ts`, and
-//! `src/components/accounts/strings.ts`, whose keys get an `accounts.` prefix
-//! here because they clash with the central dictionary's `settings.*`. Then:
+//! The strings live in this crate: `dict/en.json` and `dict/fr.json`, one key
+//! per line, the French file in the English one's order. They were the web
+//! app's `src/i18n.ts`, `src/strings/*.ts` and `src/components/accounts/strings.ts`
+//! (tag v1.12.1); the accounts strings kept the `accounts.` prefix they had
+//! here, because they clash with the central dictionary's `settings.*`. Then:
 //!
-//! 1. Write both languages with plain spaces; the typesetter adds the no-break
-//!    ones (`src/lib/typography.ts`: narrow before `? ! ; : » %` and after `«`
-//!    in French, and between a number and its unit in both).
-//! 2. Run `node crates/hangar-i18n/tools/generate.mjs` (Node 22.18 or later) and
-//!    commit `src/generated.rs` with the change. `--check` fails when the file
-//!    is stale. Nothing in `cargo build` needs Node.
+//! 1. Add the key to both files, in the same place, with plain spaces; the
+//!    typesetter adds the no-break ones (`tools/typography.mjs`: narrow before
+//!    `? ! ; : » %` and after `«` in French, and between a number and its unit
+//!    in both). A counted message is two keys, `x_one` and `x_other`.
+//! 2. Run `node crates/hangar-i18n/tools/generate.mjs` and commit
+//!    `src/generated.rs` with the change. It refuses a key missing from one
+//!    language, a key written twice and a no-break space typed by hand;
+//!    `--check` fails when the file is stale. Nothing in `cargo build` needs
+//!    Node.
 //! 3. Use the new `Key` variant: `settings.catExperimental` is
 //!    `Key::SettingsCatExperimental`. A counted message is one variant for its
 //!    `x_one` and `x_other` pair.

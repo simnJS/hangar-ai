@@ -13,78 +13,77 @@ interaction.
 ## Setup
 
 Install the prerequisites listed in
-[README → Build from source](README.md#build-from-source): Node.js 22, pnpm 10, Rust
-stable, cmake and LLVM/clang, and the Tauri prerequisites for your system. Then:
+[README → Build from source](README.md#build-from-source): Rust stable with the
+`wasm32-unknown-unknown` target, cmake and LLVM/clang and your system's headers, and
+Node.js 22 with pnpm 10 if you work on Hangar Mobile. Then:
+
+```bash
+scripts/native-dev.sh
+```
+
+The app is the Cargo workspace under `crates/` (map and rules in
+[docs/native/PLAN.md](docs/native/PLAN.md)); `cargo run -p hangar-term --example shell`
+and the other crates' examples run a part on its own. The old Tauri and React app is no
+longer on this branch; read it at tag `v1.12.1` (`git show v1.12.1:src/lib/board.ts`).
+
+For Hangar Mobile, the phone app under `mobile/`, the fastest loop needs no PC: it runs
+against a fake one.
 
 ```bash
 pnpm install
-pnpm tauri dev
+pnpm mobile:dev      # http://localhost:4310, `--host` to open it from a phone
 ```
-
-For interface work, the browser demo is the fastest loop. It needs no Rust, no
-pseudo-terminal and no agent:
-
-```bash
-pnpm demo:dev        # http://localhost:4300
-```
-
-The demo compiles `src/` unchanged against a fake backend in `demo/backend/`. If you
-add or rename a Tauri command, answer it in `demo/backend/index.ts` too, or that panel
-breaks in the demo. See [demo/README.md](demo/README.md).
 
 ### Running a dev build next to an installed Hangar
 
-A plain `pnpm tauri dev` uses the same bundle identifier as the installed app. It reads
-and writes the same workspaces and resumes the same agent sessions. It also takes over
+A plain `cargo run -p hangar-app` is the same app as the installed one. It reads and
+writes the same workspaces and resumes the same agent sessions. It also takes over
 `~/.hangar/endpoint.json`, so your installed agents' MCP calls reach the dev build, and it
 deletes that file when it closes.
 
-To keep the two apart, give the dev build its own identifier, its own empty state and its
-own endpoint file:
+`scripts/native-dev.sh` keeps the two apart: it sets `HANGAR_DATA_ROOT` and
+`HANGAR_ENDPOINT_FILE` so that the state, the app data, the endpoint file, the Claude Code
+mods, kits and accounts all go under `target/dev-home/` (`HANGAR_DEV_HOME` names another
+folder, for instance one holding a copy of a real `state.json`). Arguments after `--` go
+to the app:
 
 ```bash
-# 1. An empty state for the dev identifier. Without it, the dev build copies the
-#    installed app's workspaces on first launch.
-#    Windows: %APPDATA%\com.simnjs.hangar-dev
-#    macOS:   ~/Library/Application Support/com.simnjs.hangar-dev
-#    Linux:   ~/.local/share/com.simnjs.hangar-dev
-mkdir -p "<that folder>" && echo '{}' > "<that folder>/state.json"
-
-# 2. Run under that identifier, with an endpoint file outside ~/.hangar
-HANGAR_ENDPOINT_FILE="$HOME/hangar-dev-endpoint.json" \
-  pnpm tauri dev --config '{"identifier":"com.simnjs.hangar-dev","productName":"Hangar.AI Dev"}'
+scripts/native-dev.sh --release                # an optimised build
+HANGAR_DEV_HOME=/tmp/hangar-try scripts/native-dev.sh
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | scripts/native-dev.sh -- --mcp
 ```
 
-To call the dev build's MCP server, run `src-tauri/target/debug/hangar-ai --mcp` with the
-same `HANGAR_ENDPOINT_FILE`. When you are done, delete the `com.simnjs.hangar-dev` folders.
+The last one calls the MCP server of the dev Hangar running on the same folder.
 
 ## Checks
 
 CI runs these checks on every pull request and every push to `main`. Run them before you
 open a PR.
 
-Frontend, from the repository root:
+The workspace, from the repository root:
 
 ```bash
-pnpm exec tsc --noEmit -p .   # typecheck
-pnpm exec vitest run          # unit tests
-pnpm build                    # production bundle
-pnpm demo:build               # the browser demo, as the website builds it (writes site/demo/, which is gitignored)
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked    # ICED_TEST_BACKEND=tiny-skia draws the views' tests in software
 ```
 
-Rust, from `src-tauri/`:
+Hangar Mobile and the generated files:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
+pnpm install
+pnpm mobile:typecheck
+pnpm test                                      # the phone app's tests
+pnpm mobile:build
+node crates/hangar-i18n/tools/generate.mjs --check
+node scripts/gen-hangar-ui.mjs --check         # the HTML kits' stylesheet, if a theme or icon changed
 ```
 
-The Claude Code mod, if you touched `src-tauri/claude-mod/` (this one is not in CI, so
-run it yourself):
+The Claude Code mod, if you touched `crates/hangar-core/claude-mod/` (this one is not in
+CI, so run it yourself):
 
 ```bash
-claude plugin test src-tauri/claude-mod/hangar-bridge
+claude plugin test crates/hangar-core/claude-mod/hangar-bridge
 ```
 
 Some things to know:
@@ -101,12 +100,14 @@ Some things to know:
 
 - **Comments explain why.** Most modules start with a comment about the decision behind
   them. Read it before you change the module, and update it if the reason changes.
-- **Tests.** Pure frontend logic lives in `src/lib/` with a `*.test.ts` beside it
-  (vitest). Rust tests sit in a `tests` module at the end of each file.
-- **Translations.** `src/i18n.ts` holds English, the reference, and French. The French
-  table is typed against the English one, so a missing key fails the build. Add both.
-  If you do not speak French, say so in the PR and leave the English text in the French
-  entry for review.
+- **Tests.** Rust tests sit in a `tests` module at the end of each file, or in a
+  `tests.rs` beside it. Hangar Mobile's logic has a `*.test.ts` beside it (vitest).
+- **Translations.** `crates/hangar-i18n/dict/en.json` holds English, the reference, and
+  `fr.json` French, key for key in the same order; run
+  `node crates/hangar-i18n/tools/generate.mjs` and commit what it writes. A key missing
+  from one of them fails the generator. Add both. If you do not speak French, say so in
+  the PR and leave the English text in the French entry for review. Hangar Mobile has its
+  own dictionary, `mobile/src/i18n.ts`.
 - **Old names stay.** Some identifiers keep the project's former name `iabench` on
   purpose: the bundle identifier `com.simnjs.iabench` and the fallbacks that read files
   written before the rename. Do not rename them. Give anything new a `hangar` name.
@@ -145,8 +146,7 @@ rewriting a finished PR.
 Useful things to include:
 
 - what you do today, and where it gets in the way;
-- which agents it concerns (Claude Code, Codex, Gemini CLI, OpenCode);
-- whether it changes the MCP tools agents see, since every agent has to understand them.
+- whether it changes the MCP tools agents see, since Claude Code has to understand them.
 
 ## Agent instruction files
 

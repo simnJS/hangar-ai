@@ -55,7 +55,7 @@ note in its bar, and is saved back as a shell. Around the terminals:
 - an IDE-like window: navigator (left), pane grid, inspector (right), status bar, command palette, 33 themes, rebindable shortcuts, English and French;
 - the **Claude Code bridge**: a Claude Code plugin Hangar installs (`claude-mod/hangar-bridge`) that reports turns, permission prompts, context fill and plan usage;
 - **kits**: packages that bring a domain into Hangar (Claude Code plugin + tabs + setup commands), see `docs/kits.md`;
-- **Hangar Mobile**: a phone web app served by Hangar over the owner's Tailscale network (`remote/`, `src/mobile/`);
+- **Hangar Mobile**: a phone web app served by Hangar over the owner's Tailscale network (`remote/`, `mobile/`);
 - usage statistics, voice dictation (whisper.cpp), Discord presence, 3D model and file previews, an updater.
 
 Until this branch, it was Tauri 2 (Rust backend, ~30k lines) and React 19 with
@@ -100,7 +100,7 @@ demand. The main executable does not link a webview library at all.
 | `hangar-kit-sdk` | lib | What a kit author links: `Kit` trait, export macro, typed host calls, view builders. Compiles to wasm32. | hangar-kit-ui |
 | `hangar-kit-host` | lib | Runs kit tabs in wasmtime with limits and declared permissions; renders `hangar-kit-ui` trees with iced; `KitApi` trait the app implements. | wasmtime, iced, hangar-kit-ui (then hangar-theme, hangar-ui) |
 | `hangar-webview` | lib + bin | Lib: protocol + client the app uses (serde only). Bin (feature `engine`): tao + wry window(s), custom-scheme requests answered by the parent, `window.hangar` bridge for HTML kits. | serde; wry, tao behind `engine` |
-| `hangar-i18n` | lib | The interface strings, English and French, generated from the old `src/i18n.ts` and `src/strings/*` with the same keys; plurals, placeholders, French typography. | none |
+| `hangar-i18n` | lib | The interface strings, English and French, generated from `dict/en.json` and `dict/fr.json` (first written from the old `src/i18n.ts` and `src/strings/*`, with the same keys); plurals, placeholders, French typography. | none |
 | `hangar-model3d` | lib | The 3D model preview replacing three.js: glTF/GLB, OBJ, STL, PLY loaded off the UI thread, drawn with wgpu in an iced `shader` widget, orbit camera, framing, grid, PNG capture. | iced (its wgpu) |
 | `hangar-update` | lib | The self-updater replacing `tauri-plugin-updater`: same `latest.json`, same minisign key, per-platform install and relaunch. | ureq |
 | `hangar-app` | bin `hangar-ai` | The application: iced daemon (multi-window), global state (port of `store.tsx` and `src/lib/*`), every view (port of `src/components/*`), i18n, wiring to core events, PTYs to terminals, kits to kit-host or webview. `hangar-ai --mcp` stays the stdio MCP server. | all of the above |
@@ -124,13 +124,13 @@ People already use Hangar; switching to the native build must not lose anything.
 - **Executable name `hangar-ai`**: MCP configs written into agents' settings (`install.rs`) point at it; `hangar-ai --mcp` must keep working at the same path after an update.
 - **The endpoint file and the bridge plugin**: agents and the Claude Code mod find the running app the same way.
 - **Kits**: every existing kit keeps working. HTML tabs open in `hangar-webview` with the same `window.hangar` API and the same permissions; native tabs are an addition (manifest schema rules in kits-native.md).
-- **Hangar Mobile** keeps serving the same phone web app (`src/mobile`, built to `dist-mobile/`, embedded by `hangar-core/src/remote/assets.rs`). It is a web app because a phone browser shows it; it is not a webview inside Hangar and is out of scope for "no webview".
+- **Hangar Mobile** keeps serving the same phone web app (`mobile/`, built to `dist-mobile/`, embedded by `hangar-core/src/remote/assets.rs`). It is a web app because a phone browser shows it; it is not a webview inside Hangar and is out of scope for "no webview".
 
 ## 4. Decisions and their reasons
 
 1. **iced 0.14** — the owner's choice. Elm architecture (state, messages, update, view); multi-window through `iced::daemon`; wgpu with a tiny-skia fallback; `advanced` for custom widgets (the terminal, the pane grid's drag targets), `canvas` for charts, `svg` for icons, `markdown` + `highlighter` for chat and file previews.
 2. **Move, then edit** — the backend was moved with pure renames in one commit, then edited. Git's rename detection lets fixes made on `main` to `src-tauri/src/x.rs` still merge into `crates/hangar-core/src/x.rs`.
-3. **The old app stays readable until the end** — `src/` (React) and `src-tauri/` (now only config, icons, installer) remain on the branch as the reference for behaviour, and `src-tauri` is excluded from the workspace. They are deleted in the last wave (section 6, wave 5).
+3. **The old app stayed readable until the end** — `src/` (React) and `src-tauri/` (by then only config, icons, installer) remained on the branch as the reference for behaviour until wave 5 deleted them (section 6). They are read at tag `v1.12.1`: `git show v1.12.1:src/lib/x.ts`, `git grep <word> v1.12.1 -- src/`.
 4. **The terminal is ours, on alacritty_terminal** — `iced_term` exists but ties us to its iced version and its choices on input; the two Linux bugs that started this (latency, dead keys sticking) live exactly in the input and drawing paths, so we own them.
 5. **The webview is a separate process** — keeps WebKitGTK/WebView2/WKWebView out of the main executable, isolates a crashing page, and works on Wayland, where a webview cannot be embedded as a child of a winit window. The cost: an HTML kit tab is a window of its own rather than a tab inside the grid. Embedding on Windows/macOS can come later behind the same protocol.
 6. **Native kit tabs are WebAssembly** — a compiled plugin as a native dynamic library has no stable Rust ABI, cannot be sandboxed, and would need one build per OS and architecture. A kit compiled to `wasm32-unknown-unknown` is one file that runs everywhere, inside wasmtime limits, with only the host calls its manifest declares. That is the "Rust compilé" the owner chose, made safe.
@@ -144,12 +144,14 @@ People already use Hangar; switching to the native build must not lose anything.
 The React app is ported surface by surface into `crates/hangar-app`. The full
 map is [inventory-frontend.md](inventory-frontend.md): it lists every surface and
 logic module with its TS sources, and splits the work into packages that own
-disjoint files. Principles:
+disjoint files. Since wave 5 those sources are no longer on the branch: every TS
+path named here is read at tag `v1.12.1` (`git show v1.12.1:src/lib/keys.ts`).
+Principles:
 
 - **Logic first, with its tests.** `src/lib/*.ts` modules are mostly pure functions with vitest tests; each becomes a Rust module under `hangar-app/src/model/` with the same tests as `#[test]`s. Behaviour is defined by those tests, not by guesswork.
 - **State is one `App` struct, split by slices** that mirror `store.tsx`; every package adds its slice and its `Message` variants in its own module, behind enum variants the shell pre-declares.
 - **Views per surface** under `hangar-app/src/view/`, built only from `hangar-ui` widgets and `hangar-theme` styles.
-- **Strings**: `src/strings/*` (en, fr) become Rust tables with the same keys, so translations carry over.
+- **Strings**: `src/strings/*` (en, fr) become Rust tables with the same keys, so translations carry over; their source is now `crates/hangar-i18n/dict/*.json`.
 - **Shortcuts**: the defaults of `src/lib/keys.ts`, rebindable, saved in the same settings.
 - **Accessibility**: iced 0.14 has no screen-reader support yet (AccessKit integration is pending upstream); keyboard navigation (F6 regions, focus order) must still work. Recorded as a known gap.
 
@@ -192,10 +194,26 @@ project manager/HQ, Hangar Mobile settings, update banner and updater).
 webview helper bundled next to the main executable), CI (`.github/workflows/ci.yml`
 and `release.yml` moved from `src-tauri` to the workspace).
 
-**Wave 5 — retiring the webview app**: once the parity checklist (section 8) is
-green, delete `src/` (except `src/mobile`, moved to `mobile/`), `src-tauri/`,
-`index.html`, the Vite configs and the desktop parts of `package.json`; the site
-and the demo move or stay as their owner decides.
+**Wave 5 — retiring the webview app** ✅ (2026-11-03, on the owner's go, before the
+parity checklist of section 8 is green: PARITY.md keeps the rows that are left, and
+their TS is read at tag `v1.12.1`):
+
+- [x] Hangar Mobile moved to `mobile/` (`src/mobile` as `mobile/src`, with
+  `mobile.html`, its Vite, vitest and TypeScript configs, `public/mobile` as
+  `mobile/public`, and the desktop modules it imported, cut down to what it uses,
+  under `mobile/lib` and `mobile/remote`). It still builds into `dist-mobile/` at
+  the root, which `hangar-core` embeds.
+- [x] Deleted `src/`, `src-tauri/`, `index.html`, `vite.config.ts`,
+  `vite.demo.config.ts`, the root TypeScript and vitest configs, the browser demo
+  (`demo/`, its models moved to `assets/models/`), the Tauri-only scripts, and the
+  desktop parts of `package.json`.
+- [x] The site lost its demo section; its image serves `site/` as it is.
+- [x] The generators that read the old sources: the strings' dictionaries live in
+  `crates/hangar-i18n/dict/`; the themes' and icons' Rust tables are the source
+  (`gen-themes.mjs`, `gen-icons.mjs` deleted); `scripts/gen-hangar-ui.mjs` reads
+  `hangar-theme` (`--example kit-tokens`) and `hangar-ui`'s icons.
+- [x] `ci.yml` is the native workflow (`native.yml` deleted), with a job for
+  Hangar Mobile.
 
 ## 7. How to work on this (setup for a new agent or person)
 
@@ -210,9 +228,9 @@ scripts/native-dev.sh                            # the native Hangar, on its own
 cargo run -p hangar-term --example shell         # the terminal alone
 ```
 
-Linux build dependencies: those of the old Tauri app cover it (`libwebkit2gtk-4.1-dev`
-only for `hangar-webview --features engine`; `libasound2-dev` for voice; a C/C++
-toolchain and `cmake` for whisper.cpp).
+Linux build dependencies: `libwebkit2gtk-4.1-dev` only for `hangar-webview --features
+engine`; `libasound2-dev` for voice; `libclang-dev`, a C/C++ toolchain and `cmake` for
+whisper.cpp; `libssl-dev` (the list `ci.yml` installs).
 
 **Never run the native app on the installed Hangar's data** while porting: both
 read the same `state.json`. `scripts/native-dev.sh` sets `HANGAR_DATA_ROOT` and
@@ -233,7 +251,7 @@ Working rules:
 - One package, one worktree, one branch off `feat/native-rust`. A worktree made by the agent tooling starts from `main`: check `git merge-base --is-ancestor 44cfd25 HEAD` and, if it fails, `git reset --hard feat/native-rust` before anything else. Touch only the files your package owns, plus additions to the root `Cargo.toml` and `Cargo.lock`. Never a bare `cargo update`; keep `windows`/`windows-core` at 0.61 (see the cpal note in `crates/hangar-core/Cargo.toml`).
 - Before handing in: `cargo fmt`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `cargo test -p <crate>`.
 - The coordinator merges with `git merge --no-ff`, runs `cargo check --workspace && cargo test --workspace`, updates STATUS.md, pushes.
-- Reference for any behaviour: the TS in `src/` and its tests, the Rust in `crates/hangar-core`, `docs/kits.md`, `docs/kit-ui.md`, README.md.
+- Reference for any behaviour: the TS at tag `v1.12.1` (`src/` and its tests, through `git show v1.12.1:<path>`), the Rust in `crates/hangar-core`, `docs/kits.md`, `docs/kit-ui.md`, README.md.
 
 ## 8. Parity checklist (the definition of done)
 

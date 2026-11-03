@@ -32,22 +32,21 @@ body:
   - type: dropdown
     id: agents
     attributes:
-      label: Agents concerned
+      label: What it concerns
       multiple: true
       options:
-        - Claude Code
-        - Codex
-        - Gemini CLI
-        - OpenCode
-        - All of them
-        - None (the app itself)
+        - Claude Code panes
+        - Shell panes
+        - Hangar Mobile
+        - Kits
+        - The app itself
 
   - type: checkboxes
     id: mcp
     attributes:
       label: MCP
       options:
-        - label: This changes or adds MCP tools that agents see (board_*, memory_*, pane_*, worker_*, model_*…)
+        - label: This changes or adds MCP tools that Claude Code sees (board_*, memory_*, pane_*, worker_*, model_*…)
 
   - type: checkboxes
     id: contribute
