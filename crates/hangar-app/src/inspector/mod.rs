@@ -176,10 +176,14 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             // failure has nobody to tell.
             let host = sv.core().host().clone();
             Task::perform(
-                tokio::task::spawn_blocking(move || {
-                    hangar_core::bridge::bridge_cancel(&host, pane, Some(id));
-                }),
-                |_| Message::Noop,
+                // Started when the task runs, inside the runtime.
+                async move {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        hangar_core::bridge::bridge_cancel(&host, pane, Some(id));
+                    })
+                    .await;
+                },
+                |()| Message::Noop,
             )
         }
         other => reduce(st, m, other),
@@ -413,6 +417,6 @@ pub fn on_event(
 }
 
 #[cfg(test)]
-mod snapshot;
+pub(crate) mod snapshot;
 #[cfg(test)]
 mod tests;

@@ -10,7 +10,7 @@ use hangar_ui::section::Section;
 use hangar_ui::tail_text::tail_text;
 use hangar_ui::{Icon, icon, list};
 use iced::widget::{column, container, row, text};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Padding};
 
 use super::files_model::{FileRow, diff_segments, diff_totals, edited_rows, folder_rows};
 use super::sections::{Scene, empty_note, ink};
@@ -129,19 +129,12 @@ fn file_line<'a>(s: &Scene<'a>, line: &FileRow, open: Msg) -> Element<'a, Messag
     };
     let name_color = if line.settled { c.fg_muted } else { c.fg };
     // The directory gives way first, from its start, so the file name always
-    // shows; only a name longer than the whole row is cut. A file at the top
-    // has no directory, and an empty one would still take the room.
-    let mut path = row![].width(Length::Fill);
-    if !line.dir.is_empty() {
-        path = path.push(
-            tail_text(line.dir.clone())
-                .size(font_size::CAPTION)
-                .font(fonts::mono())
-                .color(c.fg_subtle),
-        );
-    }
-    let path: Element<'a, Message> = path
-        .push(ink(line.name.clone(), font_size::CAPTION, name_color).font(fonts::mono()))
+    // shows; only a name longer than the whole row is cut.
+    let path: Element<'a, Message> = tail_text(line.dir.clone())
+        .suffix(line.name.clone(), name_color)
+        .size(font_size::CAPTION)
+        .font(fonts::mono())
+        .color(c.fg_subtle)
         .into();
 
     let mut cells = row![

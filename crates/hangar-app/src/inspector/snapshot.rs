@@ -158,11 +158,14 @@ fn limits() -> Vec<RateLimit> {
     ]
 }
 
-fn render(
+/// Builds the interface for `element` in a window of `size` and, when pictures
+/// were asked for, draws it into `<name>-<theme>-<language>.png`. The other
+/// directory of this package (the diff view and the worktrees) uses it too.
+pub(crate) fn render(
     name: &str,
     theme: &'static Theme,
     locale: Locale,
-    width: f32,
+    size: Size,
     element: Element<'_, Message>,
 ) {
     let settings = Settings {
@@ -174,7 +177,7 @@ fn render(
     // run checks. Drawing it reads pixels back from the renderer, and
     // several of those at once crash a GPU driver: only a person asking for
     // pictures does that, one test at a time.
-    let mut ui = Simulator::with_size(settings, Size::new(width, 900.0), element);
+    let mut ui = Simulator::with_size(settings, size, element);
     let Some(folder) = std::env::var_os("HANGAR_SNAPSHOTS").map(PathBuf::from) else {
         return;
     };
@@ -241,7 +244,13 @@ fn draw(name: &str, agent: AgentId, theme_id: &str, locale: Locale, width: f64) 
         changes: Some(&changes),
         index: 1,
     };
-    render(name, theme, locale, width as f32, column_of(&scene, data));
+    render(
+        name,
+        theme,
+        locale,
+        Size::new(width as f32, 900.0),
+        column_of(&scene, data),
+    );
 }
 
 #[test]
