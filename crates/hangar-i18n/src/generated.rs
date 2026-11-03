@@ -1528,6 +1528,8 @@ pub enum Key {
     McpScopeHangarHint,
     /// `mcpScope.hangarMissing`
     McpScopeHangarMissing,
+    /// `mcpScope.held`
+    McpScopeHeld,
     /// `mcpScope.inherit`
     McpScopeInherit,
     /// `mcpScope.inheritHint`
@@ -3479,7 +3481,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1731;
+pub const KEY_COUNT: usize = 1732;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4241,6 +4243,7 @@ impl Key {
         Key::McpScopeHangar,
         Key::McpScopeHangarHint,
         Key::McpScopeHangarMissing,
+        Key::McpScopeHeld,
         Key::McpScopeInherit,
         Key::McpScopeInheritHint,
         Key::McpScopeIntro,
@@ -5977,6 +5980,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "mcpScope.hangar", en: Text::plain("Hangar.AI"), fr: Text::plain("Hangar.AI") },
     Message { id: "mcpScope.hangarHint", en: Text::plain("Always loaded: agents use it for the board, the other panes and the memory"), fr: Text::plain("Toujours chargé\u{202f}: les agents s'en servent pour le tableau, les autres panneaux et la mémoire") },
     Message { id: "mcpScope.hangarMissing", en: Text::plain("Not registered for this folder: agents only get it with servers chosen here"), fr: Text::plain("Pas enregistré pour ce dossier\u{202f}: les agents ne l'ont qu'avec des serveurs choisis ici") },
+    Message { id: "mcpScope.held", en: Text::plural("{n} agent is in the middle of a turn: it keeps its servers until the turn ends.", "{n} agents are in the middle of a turn: they keep their servers until the turns end."), fr: Text::plural("{n} agent est au milieu d'un tour\u{202f}: il garde ses serveurs jusqu'à la fin du tour.", "{n} agents sont au milieu d'un tour\u{202f}: ils gardent leurs serveurs jusqu'à la fin des tours.") },
     Message { id: "mcpScope.inherit", en: Text::plain("Claude Code's"), fr: Text::plain("Ceux de Claude Code") },
     Message { id: "mcpScope.inheritHint", en: Text::plain("Every server Claude Code is configured with for this folder."), fr: Text::plain("Tous les serveurs que Claude Code connaît pour ce dossier.") },
     Message { id: "mcpScope.intro", en: Text::plain("Each Claude Code session starts its own copy of every stdio MCP server it knows, and keeps it in memory for as long as it runs. Load only the ones this workspace needs."), fr: Text::plain("Chaque session de Claude Code lance sa propre copie de chaque serveur MCP stdio qu'il connaît, et la garde en mémoire tant qu'elle tourne. Ne charge que ceux dont ce workspace a besoin.") },
