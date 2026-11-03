@@ -114,6 +114,20 @@ mod tests {
         ids.iter().map(|id| id.to_string()).collect()
     }
 
+    /// An absolute path of the platform the tests run on, from the Unix-style
+    /// one the cases are written with. `resolve_path` and `workspace_roots`
+    /// work with `Path`, so what they build is written the platform's way
+    /// (`C:\work\app` on Windows, where `/work/app` has no drive and is not
+    /// absolute); the cases only have to start from paths that are absolute
+    /// where they run, and say what they expect in the same form.
+    fn native(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{}", path.replace('/', "\\"))
+        } else {
+            path.to_string()
+        }
+    }
+
     #[test]
     fn sends_the_union_of_what_every_live_workspace_was_granted() {
         let mut grants = RootGrants::default();
@@ -155,20 +169,26 @@ mod tests {
 
     #[test]
     fn resolves_a_path_against_the_agents_folder() {
+        let base = native("/work/app");
         assert_eq!(
-            resolve_path("/work/app", "out/shot.png"),
-            "/work/app/out/shot.png"
+            resolve_path(&base, "out/shot.png"),
+            native("/work/app/out/shot.png")
         );
         assert_eq!(
-            resolve_path("/work/app", "../shared/a.glb"),
-            "/work/shared/a.glb"
+            resolve_path(&base, "../shared/a.glb"),
+            native("/work/shared/a.glb")
         );
-        assert_eq!(resolve_path("/work/app", "/tmp/x.png"), "/tmp/x.png");
         assert_eq!(
-            resolve_path("/work/app", "C:\\shots\\one.png"),
+            resolve_path(&base, &native("/tmp/x.png")),
+            native("/tmp/x.png")
+        );
+        // A Windows drive path is absolute on every platform: it is not glued
+        // to the folder, and it is not rewritten.
+        assert_eq!(
+            resolve_path(&base, "C:\\shots\\one.png"),
             "C:\\shots\\one.png"
         );
-        assert_eq!(resolve_path("/work/app", "./a.md"), "/work/app/a.md");
+        assert_eq!(resolve_path(&base, "./a.md"), native("/work/app/a.md"));
     }
 
     #[test]
@@ -185,15 +205,15 @@ mod tests {
     fn a_workspaces_roots_are_its_folders_and_its_panes() {
         let workspace = Workspace {
             id: "w".into(),
-            cwd: "/work/app".into(),
-            extra_roots: vec!["/work/lib".into()],
+            cwd: native("/work/app"),
+            extra_roots: vec![native("/work/lib")],
             panes: vec![
                 Pane {
                     cwd: Some("../app-worktrees/fix".into()),
                     ..Pane::default()
                 },
                 Pane {
-                    cwd: Some("/work/app".into()),
+                    cwd: Some(native("/work/app")),
                     ..Pane::default()
                 },
                 Pane::default(),
@@ -202,7 +222,11 @@ mod tests {
         };
         assert_eq!(
             workspace_roots(&workspace),
-            ["/work/app", "/work/lib", "/work/app-worktrees/fix"]
+            [
+                native("/work/app"),
+                native("/work/lib"),
+                native("/work/app-worktrees/fix")
+            ]
         );
     }
 }
