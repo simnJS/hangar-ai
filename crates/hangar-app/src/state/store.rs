@@ -16,13 +16,13 @@ use std::sync::Arc;
 use super::Model;
 use super::folders::place_before;
 use super::layout::{
-    MAX_PANES, arranged_tree, insert_leaf, leaf, leaf_ids, move_leaf, normalize_tree, preset_size,
-    preset_tree, reading_order, remove_leaf, rename_leaf,
+    MAX_PANES, arranged_tree, grid_order, grid_tree, insert_leaf, leaf, move_leaf,
+    preset_terminals, preset_tree, reading_order, remove_leaf, rename_leaf,
 };
 use super::pane_names::{all_pane_names, pane_names, pick_pane_name, unique_pane_names};
 use super::types::{
     AgentId, AppState, DropZone, Pane, PaneId, PaneRole, SavedCommand, Settings, SplitDir,
-    SplitNode, Workspace, WorkspaceFolder, WorkspaceKit, WsId,
+    SplitNode, ViewPane, Workspace, WorkspaceFolder, WorkspaceKit, WsId,
 };
 use super::unread::{Kept, Unread};
 
@@ -134,6 +134,9 @@ pub enum StoreAction {
         before: Option<WsId>,
     },
     /// Keeps panes in reading order; new ones copy the focused pane's agent.
+    /// The count is of terminals: every view pane stays, laid out in the
+    /// even grid with them, and the terminals have the room `MAX_PANES`
+    /// leaves (`layout::preset_terminals`).
     ApplyPreset {
         ws: WsId,
         count: usize,
@@ -166,7 +169,23 @@ pub enum StoreAction {
         ws: WsId,
         pane: PaneId,
     },
-    /// `moveLeaf`; `Center` swaps.
+    /// A view pane (what a preview shows) for the preview entry `id`, which
+    /// is its id: beside `near` (else the last pane) on the side `dir` says,
+    /// as `AddPane` splits. Answers the id, or none at `MAX_PANES` or when
+    /// the workspace has a pane of that id already.
+    AddView {
+        ws: WsId,
+        id: PaneId,
+        near: Option<PaneId>,
+        dir: Option<SplitDir>,
+    },
+    /// A view pane goes, its sibling taking its room. Unlike a terminal, the
+    /// last one may: the terminals are what a workspace keeps.
+    CloseView {
+        ws: WsId,
+        id: PaneId,
+    },
+    /// `moveLeaf`; `Center` swaps. Terminals and views alike.
     MovePane {
         ws: WsId,
         drag: PaneId,
@@ -546,9 +565,9 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
             count,
             model_pane,
         } => {
-            let size = preset_size(count);
             let others = names_besides(&model.state, &ws);
             map_workspace(model, &ws, |current| {
+                let size = preset_terminals(count, current.view_panes.len());
                 // Reading order, not creation order: the panes seen first are
                 // those a smaller preset keeps, and those the toolbar names
                 // before closing the others (`closedByPreset`).
@@ -571,7 +590,18 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                         others.iter().cloned().chain(pane_names(&panes)).collect();
                     panes.push(make_pane(agent, names));
                 }
-                let ids: Vec<PaneId> = panes.iter().map(|pane| pane.id.clone()).collect();
+                // The views keep their place in the reading order among the
+                // terminals that stay; the new terminals come last.
+                let kept: HashSet<&str> = panes.iter().map(|pane| pane.id.as_str()).collect();
+                let mut ids: Vec<PaneId> = grid_order(current)
+                    .into_iter()
+                    .filter(|id| kept.contains(id.as_str()) || current.has_view(id))
+                    .collect();
+                for pane in &panes {
+                    if !ids.contains(&pane.id) {
+                        ids.push(pane.id.clone());
+                    }
+                }
                 let mut next = current.clone();
                 next.panes = panes;
                 next.tree = Some(preset_tree(&ids));
@@ -582,18 +612,16 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
         StoreAction::TidyLayout(ws) => {
             map_workspace(model, &ws, |current| {
                 let mut next = current.clone();
-                let tree = normalize_tree(&current.panes, current.tree.as_ref());
-                next.tree = Some(preset_tree(&leaf_ids(&tree)));
+                next.tree = Some(preset_tree(&grid_order(current)));
                 Some((next, ()))
             });
         }
 
         StoreAction::ArrangePanes(ws) => {
             map_workspace(model, &ws, |current| {
-                let order: Vec<PaneId> = reading_order(&current.panes, current.tree.as_ref())
-                    .iter()
-                    .map(|pane| pane.id.clone())
-                    .collect();
+                // The views take their place in the grid beside the lead, as
+                // the terminals do.
+                let order = grid_order(current);
                 let lead = [PaneRole::Orchestrator, PaneRole::Manager]
                     .into_iter()
                     .find_map(|role| {
@@ -632,11 +660,11 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 SplitDir::Col => DropZone::Bottom,
             };
             outcome.pane = map_workspace(model, &ws, |current| {
-                if current.panes.len() >= MAX_PANES {
+                if current.pane_count() >= MAX_PANES {
                     return None;
                 }
-                let tree = normalize_tree(&current.panes, current.tree.as_ref());
-                let ids = leaf_ids(&tree);
+                let tree = grid_tree(current);
+                let ids = grid_order(current);
                 let near = near
                     .filter(|near| ids.contains(near))
                     .or_else(|| ids.last().cloned())
@@ -670,12 +698,51 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 }
                 let mut next = current.clone();
                 next.panes.push(pane);
-                next.tree = Some(if current.panes.is_empty() {
+                next.tree = Some(if current.pane_count() == 0 {
                     leaf(id.clone())
                 } else {
                     insert_leaf(&tree, &near, &id, zone)
                 });
                 Some((next, id))
+            });
+        }
+
+        StoreAction::AddView { ws, id, near, dir } => {
+            let zone = match dir.unwrap_or(SplitDir::Row) {
+                SplitDir::Row => DropZone::Right,
+                SplitDir::Col => DropZone::Bottom,
+            };
+            outcome.pane = map_workspace(model, &ws, |current| {
+                if id.is_empty() || current.pane_count() >= MAX_PANES || current.has_leaf(&id) {
+                    return None;
+                }
+                let tree = grid_tree(current);
+                let ids = grid_order(current);
+                let near = near
+                    .filter(|near| ids.contains(near))
+                    .or_else(|| ids.last().cloned())
+                    .unwrap_or_default();
+                let mut next = current.clone();
+                next.view_panes.push(ViewPane::new(id.clone()));
+                next.tree = Some(if current.pane_count() == 0 {
+                    leaf(id.clone())
+                } else {
+                    insert_leaf(&tree, &near, &id, zone)
+                });
+                Some((next, id.clone()))
+            });
+        }
+
+        StoreAction::CloseView { ws, id } => {
+            map_workspace(model, &ws, |current| {
+                if !current.has_view(&id) {
+                    return None;
+                }
+                let mut next = current.clone();
+                next.view_panes.retain(|view| view.id != id);
+                let tree = remove_leaf(&grid_tree(current), &id);
+                next.tree = Some(tree.unwrap_or_else(|| preset_tree(&next.leaf_ids())));
+                Some((next, ()))
             });
         }
 
@@ -687,12 +754,8 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 }
                 let mut next = current.clone();
                 next.panes.retain(|p| p.id != pane);
-                let tree = remove_leaf(
-                    &normalize_tree(&current.panes, current.tree.as_ref()),
-                    &pane,
-                );
-                let ids: Vec<PaneId> = next.panes.iter().map(|p| p.id.clone()).collect();
-                next.tree = Some(tree.unwrap_or_else(|| preset_tree(&ids)));
+                let tree = remove_leaf(&grid_tree(current), &pane);
+                next.tree = Some(tree.unwrap_or_else(|| preset_tree(&next.leaf_ids())));
                 Some((next, ()))
             });
         }
@@ -706,8 +769,7 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
             if drag != target {
                 map_workspace(model, &ws, |current| {
                     let mut next = current.clone();
-                    let tree = normalize_tree(&current.panes, current.tree.as_ref());
-                    next.tree = Some(move_leaf(&tree, &drag, &target, zone));
+                    next.tree = Some(move_leaf(&grid_tree(current), &drag, &target, zone));
                     Some((next, ()))
                 });
             }
@@ -734,8 +796,8 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 next.panes[at].id = to.clone();
                 let keeps_session = !(had_session && next.panes[at].session_id.is_none());
                 // The arrangement is keyed by pane id: follow the rename.
-                let tree = normalize_tree(&current.panes, current.tree.as_ref());
-                next.tree = Some(rename_leaf(&tree, &pane, &to));
+                next.tree = Some(rename_leaf(&grid_tree(current), &pane, &to));
+
                 Some((next, keeps_session))
             });
             if let Some(keeps_session) = respawn {

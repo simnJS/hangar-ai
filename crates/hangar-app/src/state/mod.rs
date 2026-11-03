@@ -52,7 +52,9 @@ pub use store::{
     StoreAction, StoreOutcome, WorkspaceDraft, WorkspacePatch,
 };
 #[allow(unused_imports)]
-pub use types::{AgentId, AppState, Pane, PaneId, Settings, SplitDir, SplitNode, Workspace, WsId};
+pub use types::{
+    AgentId, AppState, Pane, PaneId, Settings, SplitDir, SplitNode, ViewPane, Workspace, WsId,
+};
 
 use crate::shell::{Drawer, View, WindowKind};
 

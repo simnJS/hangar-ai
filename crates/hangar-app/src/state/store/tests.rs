@@ -664,3 +664,243 @@ fn hydration_names_every_pane_uniquely_and_drops_dangling_folder_ids() {
     assert_eq!(m.workspace("two").unwrap().folder_id.as_deref(), Some("f"));
     assert_eq!(m.ui.opened_ids, ["two"]);
 }
+
+// View panes: what a preview shows, a leaf of the grid beside the terminals.
+
+/// Every leaf of the grid, terminals and views, in reading order.
+fn grid_ids(model: &Model, id: &str) -> Vec<PaneId> {
+    crate::state::layout::grid_order(ws(model, id))
+}
+
+fn add_view(model: &mut Model, w: &str, id: &str, near: Option<&str>) -> Option<PaneId> {
+    model
+        .apply(StoreAction::AddView {
+            ws: w.into(),
+            id: id.into(),
+            near: near.map(Into::into),
+            dir: None,
+        })
+        .pane
+}
+
+#[test]
+fn a_view_opens_beside_the_pane_it_is_near_and_keeps_the_terminals_terminals() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 2, &[]);
+    let ids = pane_ids(&m, &w);
+    let (a, b) = (ids[0].clone(), ids[1].clone());
+    assert_eq!(add_view(&mut m, &w, "v1", Some(&a)), Some("v1".into()));
+    assert_eq!(grid_ids(&m, &w), [a.clone(), "v1".into(), b.clone()]);
+    // `panes` is still the terminals alone, as 1.x and the agents read it.
+    assert_eq!(pane_ids(&m, &w), [a.clone(), b.clone()]);
+    assert_eq!(tree_ids(&m, &w), [a, b]);
+    // The same entry is never two panes.
+    assert_eq!(add_view(&mut m, &w, "v1", None), None);
+    assert_eq!(ws(&m, &w).view_panes.len(), 1);
+}
+
+#[test]
+fn views_count_toward_the_most_panes_a_workspace_holds() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 14, &[]);
+    assert!(add_view(&mut m, &w, "v1", None).is_some());
+    assert!(add_view(&mut m, &w, "v2", None).is_some());
+    assert_eq!(ws(&m, &w).pane_count(), MAX_PANES);
+    assert_eq!(add_view(&mut m, &w, "v3", None), None);
+    let added = m.apply(StoreAction::AddPane {
+        ws: w.clone(),
+        agent: None,
+        near: None,
+        dir: None,
+        cwd: None,
+        name: None,
+        init: None,
+    });
+    assert_eq!(added.pane, None, "a terminal finds no room either");
+}
+
+#[test]
+fn a_view_closes_giving_its_room_to_its_sibling_and_the_last_may_go() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 1, &[]);
+    let a = pane_ids(&m, &w)[0].clone();
+    add_view(&mut m, &w, "v1", Some(&a));
+    assert!(
+        m.apply(StoreAction::CloseView {
+            ws: w.clone(),
+            id: "v1".into(),
+        })
+        .changed
+    );
+    assert!(ws(&m, &w).view_panes.is_empty());
+    assert_eq!(ws(&m, &w).tree, Some(leaf(a.clone())));
+    // A terminal is not a view: CloseView leaves it.
+    assert!(
+        !m.apply(StoreAction::CloseView {
+            ws: w.clone(),
+            id: a.clone(),
+        })
+        .changed
+    );
+    // And the last terminal still stays, whatever views it has beside it.
+    add_view(&mut m, &w, "v2", None);
+    assert!(
+        !m.apply(StoreAction::ClosePane {
+            ws: w.clone(),
+            pane: a,
+        })
+        .changed
+    );
+}
+
+#[test]
+fn closing_a_terminal_keeps_the_views_where_they_are() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 3, &[]);
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "v1", Some(&ids[2]));
+    m.apply(StoreAction::ClosePane {
+        ws: w.clone(),
+        pane: ids[0].clone(),
+    });
+    assert_eq!(
+        grid_ids(&m, &w),
+        [ids[1].clone(), ids[2].clone(), "v1".into()]
+    );
+}
+
+#[test]
+fn a_view_moves_and_swaps_with_a_terminal_like_any_pane() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 2, &[]);
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "v1", Some(&ids[1]));
+    m.apply(StoreAction::MovePane {
+        ws: w.clone(),
+        drag: "v1".into(),
+        target: ids[0].clone(),
+        zone: DropZone::Center,
+    });
+    assert_eq!(
+        grid_ids(&m, &w),
+        ["v1".into(), ids[1].clone(), ids[0].clone()]
+    );
+    m.apply(StoreAction::MovePane {
+        ws: w.clone(),
+        drag: ids[0].clone(),
+        target: "v1".into(),
+        zone: DropZone::Left,
+    });
+    assert_eq!(
+        grid_ids(&m, &w),
+        [ids[0].clone(), "v1".into(), ids[1].clone()]
+    );
+}
+
+#[test]
+fn tidying_and_arranging_lay_the_views_out_with_the_terminals() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 3, &[]);
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "v1", Some(&ids[0]));
+    let before = grid_ids(&m, &w);
+    m.apply(StoreAction::TidyLayout(w.clone()));
+    assert_eq!(ws(&m, &w).tree, Some(preset_tree(&before)));
+    // The orchestrator leads; the view is one of the others.
+    let lead = ids[2].clone();
+    m.apply(StoreAction::UpdatePane {
+        ws: w.clone(),
+        pane: lead.clone(),
+        patch: Patch::new(|p: &mut Pane| p.role = Some(PaneRole::Orchestrator)),
+    });
+    m.apply(StoreAction::ArrangePanes(w.clone()));
+    let order = grid_ids(&m, &w);
+    assert_eq!(order[0], lead);
+    assert!(order.contains(&"v1".to_string()));
+    assert_eq!(order.len(), 4);
+}
+
+#[test]
+fn a_preset_counts_terminals_and_keeps_every_view() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 4, &[]);
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "v1", Some(&ids[0]));
+    m.apply(StoreAction::ApplyPreset {
+        ws: w.clone(),
+        count: 2,
+        model_pane: None,
+    });
+    assert_eq!(pane_ids(&m, &w), [ids[0].clone(), ids[1].clone()]);
+    assert_eq!(
+        grid_ids(&m, &w),
+        [ids[0].clone(), "v1".into(), ids[1].clone()]
+    );
+    // Growing: the terminals have what the views leave them.
+    for n in 2..MAX_PANES {
+        add_view(&mut m, &w, &format!("v{n}"), None);
+    }
+    let views = ws(&m, &w).view_panes.len();
+    assert_eq!(views + 2, MAX_PANES);
+    m.apply(StoreAction::ApplyPreset {
+        ws: w.clone(),
+        count: 8,
+        model_pane: None,
+    });
+    assert_eq!(ws(&m, &w).panes.len(), 2, "no room for more terminals");
+    assert_eq!(ws(&m, &w).view_panes.len(), views);
+}
+
+#[test]
+fn a_respawn_keeps_the_views_in_the_tree() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 2, &[]);
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "v1", Some(&ids[0]));
+    let to = m
+        .apply(StoreAction::RespawnPane {
+            ws: w.clone(),
+            pane: ids[0].clone(),
+            patch: Patch::none(),
+        })
+        .pane
+        .unwrap();
+    assert_eq!(grid_ids(&m, &w), [to, "v1".into(), ids[1].clone()]);
+}
+
+#[test]
+fn a_workspace_with_views_is_written_so_that_1x_reads_its_terminals() {
+    let mut m = model();
+    let w = with_workspace(&mut m, 2, &[]);
+    let before = serde_json::to_value(ws(&m, &w)).unwrap();
+    assert!(before.get("viewPanes").is_none(), "absent while empty");
+    let ids = pane_ids(&m, &w);
+    add_view(&mut m, &w, "p18f-1", Some(&ids[0]));
+    let written = serde_json::to_value(ws(&m, &w)).unwrap();
+    assert_eq!(
+        written["viewPanes"],
+        serde_json::json!([{ "id": "p18f-1" }])
+    );
+    let panes: Vec<&str> = written["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pane| pane["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(panes, [ids[0].as_str(), ids[1].as_str()]);
+    // 1.x's normalizeTree: the leaves it knows, in their order, the rest
+    // dropped; a tree it can always read.
+    let tree: SplitNode = serde_json::from_value(written["tree"].clone()).unwrap();
+    let known: Vec<PaneId> = leaf_ids(&tree)
+        .into_iter()
+        .filter(|id| ids.contains(id))
+        .collect();
+    assert_eq!(known, ids);
+    assert_eq!(
+        leaf_ids(&normalize_tree(&ws(&m, &w).panes, Some(&tree))),
+        ids
+    );
+    // And this version reads its own file back whole.
+    let read: Workspace = serde_json::from_value(written).unwrap();
+    assert_eq!(read, *ws(&m, &w));
+}

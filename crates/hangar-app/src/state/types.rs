@@ -190,6 +190,17 @@ pub struct Workspace {
     /// Overrides the global default shell.
     pub shell_id: Option<String>,
     pub tree: Option<SplitNode>,
+    /// The panes of the grid that are not terminals: what the previews show
+    /// (a file, a 3D model, a kit's tab), each a leaf of `tree` beside the
+    /// terminals. Written only while there is one.
+    ///
+    /// Hangar 1.x knows only `panes`, and everything that treats them as
+    /// terminals (their shells, the MCP pane tools, broadcast, hibernation)
+    /// keeps reading `panes` alone. 1.x carries this field over as it was
+    /// (it spreads the workspace), and its `normalizeTree` drops the leaves
+    /// it does not know, laying its terminals out again as an even grid.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub view_panes: Vec<ViewPane>,
     pub saved_commands: Vec<SavedCommand>,
     /// The navigator folder it is filed under.
     pub folder_id: Option<String>,
@@ -217,6 +228,57 @@ pub struct Workspace {
     pub worktree_hooks: Option<WorktreeHooks>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// A pane of the grid that shows a preview rather than a terminal. Its id is
+/// the id of the preview's entry it draws (`preview::store::Entry`): what it
+/// shows, its title and its state are the preview store's, which keeps the
+/// kit tabs across a restart in `kit-tabs.json`. A view whose entry does not
+/// come back (a file, which the previews never kept) is dropped once its
+/// workspace is opened (`preview::panes`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ViewPane {
+    pub id: PaneId,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl ViewPane {
+    pub fn new(id: impl Into<PaneId>) -> ViewPane {
+        ViewPane {
+            id: id.into(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+impl Workspace {
+    /// Every pane of the grid, terminals first, then the views, in the order
+    /// they were made: what the tree is normalized against
+    /// (`layout::grid_tree`).
+    pub fn leaf_ids(&self) -> Vec<PaneId> {
+        self.panes
+            .iter()
+            .map(|pane| pane.id.clone())
+            .chain(self.view_panes.iter().map(|view| view.id.clone()))
+            .collect()
+    }
+
+    /// How many panes the grid holds, terminals and views: what `MAX_PANES`
+    /// bounds.
+    pub fn pane_count(&self) -> usize {
+        self.panes.len() + self.view_panes.len()
+    }
+
+    pub fn has_view(&self, id: &str) -> bool {
+        self.view_panes.iter().any(|view| view.id == id)
+    }
+
+    /// A terminal or a view of this workspace's grid.
+    pub fn has_leaf(&self, id: &str) -> bool {
+        self.panes.iter().any(|pane| pane.id == id) || self.has_view(id)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

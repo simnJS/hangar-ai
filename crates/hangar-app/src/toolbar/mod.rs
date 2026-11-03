@@ -206,11 +206,10 @@ pub enum PresetStep {
 /// main window's active one. `None` when it is gone.
 pub fn preset_step(m: &Model, ws: &str, size: u8) -> Option<PresetStep> {
     let ws = m.workspace(ws)?;
-    let closing: Vec<(PaneId, String)> =
-        layout::closed_by_preset(&ws.panes, ws.tree.as_ref(), usize::from(size))
-            .iter()
-            .map(|pane| (pane.id.clone(), pane.name.clone()))
-            .collect();
+    let closing: Vec<(PaneId, String)> = layout::closed_by_preset_in(ws, usize::from(size))
+        .iter()
+        .map(|pane| (pane.id.clone(), pane.name.clone()))
+        .collect();
     // A smaller preset closes the panes read last. When one of them still has
     // an agent at work, waiting on you or with an answer you have not read,
     // the control, which looks like a harmless view switch, asks first.

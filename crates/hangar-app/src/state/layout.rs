@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use super::types::{DropZone, Pane, PaneId, SplitDir, SplitNode};
+use super::types::{DropZone, Pane, PaneId, SplitDir, SplitNode, Workspace};
 
 pub use super::types::MAX_PANES;
 
@@ -353,13 +353,39 @@ fn sanitized(node: &SplitNode) -> SplitNode {
 /// The tree, made to cover exactly the current panes (`normalizeTree`). A
 /// stored tree that still matches comes back as it was, ratios included;
 /// anything else is rebuilt as the even grid, in the order the person had.
+///
+/// It knows the terminals alone, as 1.x's did: the leaves of the views are
+/// unknown to it and dropped. What lays out a workspace's grid reads
+/// [`grid_tree`], which keeps them.
 pub fn normalize_tree(panes: &[Pane], tree: Option<&SplitNode>) -> SplitNode {
     let ids: Vec<PaneId> = panes.iter().map(|pane| pane.id.clone()).collect();
+    normalize_tree_ids(&ids, tree)
+}
+
+/// The workspace's grid, made to cover exactly its terminals and its views
+/// (`Workspace::leaf_ids`), by the rules of [`normalize_tree`]: what is
+/// drawn, moved, resized, numbered and laid out again.
+pub fn grid_tree(ws: &Workspace) -> SplitNode {
+    normalize_tree_ids(&ws.leaf_ids(), ws.tree.as_ref())
+}
+
+/// Every pane of the grid, terminals and views, in the order they are read
+/// on screen: what Ctrl+1…9, the next and previous pane, the presets and
+/// the agents' layout follow.
+pub fn grid_order(ws: &Workspace) -> Vec<PaneId> {
+    if ws.pane_count() == 0 {
+        return Vec::new();
+    }
+    leaf_ids(&grid_tree(ws))
+}
+
+/// [`normalize_tree`] over any set of leaf ids.
+pub fn normalize_tree_ids(ids: &[PaneId], tree: Option<&SplitNode>) -> SplitNode {
     if ids.is_empty() {
         return leaf("");
     }
     let Some(tree) = tree.map(sanitized) else {
-        return preset_tree(&ids);
+        return preset_tree(ids);
     };
     let known: HashSet<&str> = ids.iter().map(String::as_str).collect();
     let mut seen = HashSet::new();
@@ -374,7 +400,7 @@ pub fn normalize_tree(panes: &[Pane], tree: Option<&SplitNode>) -> SplitNode {
     if kept.len() == leaves.len() && kept.len() == ids.len() {
         return tree;
     }
-    kept.extend(ids.into_iter().filter(|id| !seen.contains(id)));
+    kept.extend(ids.iter().filter(|id| !seen.contains(*id)).cloned());
     preset_tree(&kept)
 }
 
@@ -402,6 +428,25 @@ pub fn closed_by_preset<'a>(
     reading_order(panes, tree)
         .into_iter()
         .skip(preset_size(count))
+        .collect()
+}
+
+/// How many terminals a preset asking for `count` leaves a workspace that
+/// holds `views` view panes: a preset sets the number of terminals and
+/// keeps every view, so the terminals have what `MAX_PANES` leaves them,
+/// and at least one.
+pub fn preset_terminals(count: usize, views: usize) -> usize {
+    preset_size(count)
+        .min(MAX_PANES.saturating_sub(views))
+        .max(1)
+}
+
+/// The terminals a preset of `count` closes in workspace `ws`, in reading
+/// order: [`closed_by_preset`] with the room its views take.
+pub fn closed_by_preset_in(ws: &Workspace, count: usize) -> Vec<&Pane> {
+    reading_order(&ws.panes, ws.tree.as_ref())
+        .into_iter()
+        .skip(preset_terminals(count, ws.view_panes.len()))
         .collect()
 }
 
@@ -1175,5 +1220,108 @@ mod tests {
         assert_eq!(arranged_tree(&order, None), preset_tree(&order));
         assert_eq!(arranged_tree(&order, Some("gone")), preset_tree(&order));
         assert_eq!(arranged_tree(&numbered(1), Some("p0")), leaf("p0"));
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    //! The views' leaves: kept by every function that lays out a grid, and
+    //! dropped by those that read the terminals alone, as 1.x does.
+
+    use super::*;
+    use crate::state::types::ViewPane;
+
+    fn workspace(terminals: &[&str], views: &[&str], tree: Option<SplitNode>) -> Workspace {
+        Workspace {
+            panes: terminals
+                .iter()
+                .map(|id| Pane {
+                    id: (*id).into(),
+                    ..Pane::default()
+                })
+                .collect(),
+            view_panes: views.iter().map(|id| ViewPane::new(*id)).collect(),
+            tree,
+            ..Workspace::default()
+        }
+    }
+
+    fn row(a: SplitNode, b: SplitNode) -> SplitNode {
+        split(SplitDir::Row, 0.3, a, b)
+    }
+
+    #[test]
+    fn the_grid_keeps_a_view_s_leaf_with_its_ratio() {
+        let tree = row(leaf("a"), split(SplitDir::Col, 0.7, leaf("k"), leaf("b")));
+        let ws = workspace(&["a", "b"], &["k"], Some(tree.clone()));
+        assert_eq!(grid_tree(&ws), tree);
+        assert_eq!(grid_order(&ws), ["a", "k", "b"]);
+        // What reads the terminals alone drops it, as 1.x's normalizeTree.
+        assert_eq!(
+            leaf_ids(&normalize_tree(&ws.panes, ws.tree.as_ref())),
+            ["a", "b"]
+        );
+        let terminals: Vec<&str> = reading_order(&ws.panes, ws.tree.as_ref())
+            .iter()
+            .map(|pane| pane.id.as_str())
+            .collect();
+        assert_eq!(terminals, ["a", "b"]);
+    }
+
+    #[test]
+    fn a_view_the_tree_lost_comes_back_last_and_a_gone_one_goes() {
+        // A tree 1.x rewrote without the view, and a leaf whose view closed.
+        let ws = workspace(&["a", "b"], &["k"], Some(row(leaf("a"), leaf("b"))));
+        assert_eq!(grid_order(&ws), ["a", "b", "k"]);
+        let ws = workspace(&["a"], &[], Some(row(leaf("a"), leaf("k"))));
+        assert_eq!(grid_tree(&ws), leaf("a"));
+    }
+
+    #[test]
+    fn moving_between_panes_reaches_a_view() {
+        let ws = workspace(
+            &["a", "b"],
+            &["k"],
+            Some(row(leaf("a"), row(leaf("k"), leaf("b")))),
+        );
+        let tree = grid_tree(&ws);
+        assert_eq!(
+            neighbor_of(&tree, "a", Direction::Right).as_deref(),
+            Some("k")
+        );
+        assert_eq!(
+            neighbor_of(&tree, "k", Direction::Right).as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            neighbor_of(&tree, "b", Direction::Left).as_deref(),
+            Some("k")
+        );
+    }
+
+    #[test]
+    fn the_agents_layout_and_the_presets_keep_the_views() {
+        let ws = workspace(&["a", "b", "c"], &["k"], None);
+        let order = grid_order(&ws);
+        assert_eq!(order, ["a", "b", "c", "k"]);
+        let arranged = arranged_tree(&order, Some("c"));
+        assert_eq!(leaf_ids(&arranged), ["c", "a", "b", "k"]);
+        assert_eq!(leaf_ids(&preset_tree(&order)), order);
+    }
+
+    #[test]
+    fn a_preset_leaves_the_terminals_what_the_views_leave_them() {
+        assert_eq!(preset_terminals(4, 0), 4);
+        assert_eq!(preset_terminals(16, 3), 13);
+        assert_eq!(preset_terminals(8, 16), 1, "at least one terminal");
+        let views: Vec<String> = (0..12).map(|n| format!("v{n}")).collect();
+        let views: Vec<&str> = views.iter().map(String::as_str).collect();
+        let ws = workspace(&["a", "b", "c", "d", "e", "f"], &views, None);
+        // Eight asked for, four fit beside twelve views: the two read last go.
+        let closed: Vec<&str> = closed_by_preset_in(&ws, 8)
+            .iter()
+            .map(|pane| pane.id.as_str())
+            .collect();
+        assert_eq!(closed, ["e", "f"]);
     }
 }
