@@ -366,13 +366,20 @@ mod tests {
         let mut runtime = Runtime::default();
         runtime.cache_in(Some(dir.clone()));
         let made = runtime.runtime().expect("an engine");
-        assert_eq!(made.cache_dir(), Some(dir.as_path()));
+        // The engine keeps the folder as the system names it for good: through
+        // `/private` on macOS, long and `\\?\`-prefixed on Windows.
+        let canonical = |path: &std::path::Path| std::fs::canonicalize(path).expect("the folder");
+        assert_eq!(made.cache_dir().map(canonical), Some(canonical(&dir)));
         // Asked again, or for another folder, it is the same engine: a cache
         // cannot be moved under modules already compiled.
         runtime.cache_in(None);
         assert_eq!(
-            runtime.runtime().expect("an engine").cache_dir(),
-            Some(dir.as_path())
+            runtime
+                .runtime()
+                .expect("an engine")
+                .cache_dir()
+                .map(canonical),
+            Some(canonical(&dir))
         );
         let _ = std::fs::remove_dir_all(&dir);
 

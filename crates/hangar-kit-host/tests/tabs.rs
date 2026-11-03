@@ -593,7 +593,13 @@ fn a_module_compiled_once_is_read_back_from_disk_by_the_next_run() {
 
     // The first run compiles, and leaves the code in the folder.
     let first = cached(&scratch.0);
-    assert_eq!(first.cache_dir(), Some(scratch.0.as_path()));
+    // Compared as the system names the folder for good: through `/private` on
+    // macOS, long and `\\?\`-prefixed on Windows.
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).expect("the folder");
+    assert_eq!(
+        first.cache_dir().map(canonical),
+        Some(canonical(&scratch.0))
+    );
     runs(&first, &first.compile(&bytes).expect("compiles"));
     let stats = first.cache_stats().expect("a cache");
     assert_eq!((stats.hits, stats.misses), (0, 1));
