@@ -1,0 +1,80 @@
+{
+  "version": 3,
+  "workspaces": [
+    {
+      "id": "w-api",
+      "name": "api",
+      "cwd": "/srv/api",
+      "extraRoots": [],
+      "panes": [
+        {
+          "id": "p-ava",
+          "name": "Ava",
+          "agent": "claude",
+          "sessionId": "s-1",
+          "cwd": null,
+          "shellId": null,
+          "title": null,
+          "role": "reviewer",
+          "taskId": null,
+          "portBase": "4100",
+          "futurePaneField": [1, 2]
+        },
+        3,
+        {
+          "id": "p-aider",
+          "name": "Ava",
+          "agent": "aider",
+          "sessionId": null,
+          "cwd": null,
+          "shellId": null,
+          "title": null
+        }
+      ],
+      "themeId": null,
+      "shellId": null,
+      "tree": null,
+      "savedCommands": [],
+      "folderId": "f-gone",
+      "detached": "yes",
+      "windowBounds": "left screen",
+      "mcp": { "mode": "everything", "enabled": [] },
+      "claudeAccount": null,
+      "futureWorkspaceField": { "kept": true }
+    },
+    {
+      "id": "w-legacy",
+      "name": "legacy",
+      "cwd": "/srv/legacy",
+      "panes": [
+        { "id": "p-one", "agent": "shell", "sessionId": null, "cwd": null, "shellId": null, "title": null },
+        { "id": "p-two", "name": "Leo", "agent": "shell", "sessionId": null, "cwd": null, "shellId": null, "title": null }
+      ],
+      "themeId": null,
+      "shellId": null,
+      "tree": {
+        "type": "split",
+        "dir": "col",
+        "ratio": 0.7,
+        "a": { "type": "pane", "index": 1 },
+        "b": { "type": "pane", "index": 0 }
+      },
+      "folderId": "f1",
+      "orchestration": { "maxWorkers": "many", "autoMerge": false }
+    },
+    "not a workspace"
+  ],
+  "folders": [{ "id": "f1", "name": "Work", "collapsed": "yes" }],
+  "activeWorkspaceId": 42,
+  "settings": {
+    "themeId": "nord",
+    "locale": "de",
+    "fontSize": "big",
+    "cursorStyle": "beam",
+    "uiScale": 300,
+    "keybindings": { "pane.split": "Mod+D" },
+    "experiments": "all",
+    "savedCommands": [{ "id": "s1", "label": "list", "command": "ls", "autoRun": "sometimes", "broadcast": false }, "junk"],
+    "futureSetting": { "x": 1 }
+  }
+}

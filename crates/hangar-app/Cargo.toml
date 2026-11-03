@@ -37,6 +37,7 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+uuid.workspace = true
 # Wall-clock dates of the memory view, the local days, weeks and hours of the
 # statistics page (as `Intl.DateTimeFormat` wrote them), the dates of the
 # settings' Hangar Mobile page, the navigator's plan resets and the times in the orchestration briefings;

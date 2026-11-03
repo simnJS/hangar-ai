@@ -31,6 +31,7 @@ impl Snapshot {
     /// The snapshot of `model` now: `asleep` and `activity` from P4's
     /// read-model, `delivering` from P18's.
     pub fn of(model: &Model) -> Snapshot {
+        let panes = &model.live.panes_logic;
         Snapshot {
             state: model.state_arc(),
             opened: model.ui.opened_ids.iter().cloned().collect(),

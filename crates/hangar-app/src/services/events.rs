@@ -91,9 +91,9 @@ pub struct ControlRequest {
 /// nothing, so a handler can answer from wherever it ends without counting.
 /// A request never answered times out on core's side (control.rs).
 ///
-/// TODO(core): inventory A6 proposed an in-process oneshot
-/// (`control::install(tx)`); core kept its `pending` map, so this answers
-/// through `control::control_reply`, which is the same from here.
+/// Inventory A6 proposed an in-process oneshot (`control::install(tx)`);
+/// core kept its `pending` map instead, so this answers through
+/// `control::control_reply` (core-api.md), which is the same from here.
 #[derive(Clone)]
 pub struct Reply {
     id: String,
