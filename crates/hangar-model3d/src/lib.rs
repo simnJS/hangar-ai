@@ -22,6 +22,35 @@
 //!   and takes the mouse;
 //! - [`CaptureJob`] takes a picture of a model with no window: an agent's
 //!   snapshot, or the capture button.
+//!
+//! In an app, a preview pane holds a [`ModelViewer`]:
+//!
+//! ```ignore
+//! // Opening a file: the task's events are folded into the viewer.
+//! let (task, cancel) = hangar_model3d::load_task(path, LoadOptions { roots: Some(allowed) });
+//! task.map(Message::ModelLoad)
+//!
+//! // update
+//! Message::ModelLoad(event) => self.viewer.apply(event),
+//! Message::Wireframe(on) => self.viewer.set_display(DisplayOptions { wireframe: on, ..self.viewer.display() }),
+//! Message::Recenter => self.viewer.recenter(),
+//! Message::Capture => {
+//!     if let Some(job) = self.viewer.capture(2.0, theme) {
+//!         return Task::perform(job.run_async(), Message::Captured);   // PNG bytes
+//!     }
+//! }
+//!
+//! // view
+//! self.viewer.view(theme).map(Message::Model)
+//!
+//! // an agent's screenshot, of any loaded model, window or not
+//! CaptureJob::snapshot(model, SnapshotAngle::Iso, 1024, 768, theme).run_async()
+//! ```
+//!
+//! The viewport draws only on iced's wgpu renderer. On its software fallback
+//! (tiny-skia) it stays empty — captures still work, they bring their own
+//! device — and a GPU error inside the widget is reported on stderr instead of
+//! taking the window down.
 
 pub mod camera;
 pub mod formats;
@@ -43,5 +72,6 @@ pub use render::offscreen::CaptureError;
 pub use stats::ModelInfo;
 pub use theme::ViewerTheme;
 pub use viewer::{
-    CaptureJob, Event, LoadState, ModelViewer, Stamp, capture_name, describe, snapshot_png,
+    CaptureJob, Event, LoadState, ModelViewer, Stamp, capture_name, describe, load_task,
+    snapshot_png,
 };

@@ -265,7 +265,7 @@ impl ModelViewer {
 
 /// Starts reading a model, as a task the app runs: its events are folded into
 /// a viewer with [`ModelViewer::apply`]. The returned token cancels the load.
-pub fn load(path: std::path::PathBuf, options: LoadOptions) -> (Task<LoadEvent>, Cancel) {
+pub fn load_task(path: std::path::PathBuf, options: LoadOptions) -> (Task<LoadEvent>, Cancel) {
     let (events, cancel) = crate::load::start(path, options);
     (Task::run(events, |event| event), cancel)
 }
