@@ -1872,6 +1872,8 @@ pub enum Key {
     ModelDownload,
     /// `model.downloadBytes`
     ModelDownloadBytes,
+    /// `model.drawFailed`
+    ModelDrawFailed,
     /// `model.empty`
     ModelEmpty,
     /// `model.emptyHint`
@@ -1928,6 +1930,8 @@ pub enum Key {
     ModelSaved,
     /// `model.size`
     ModelSize,
+    /// `model.software`
+    ModelSoftware,
     /// `model.starting`
     ModelStarting,
     /// `model.stats`
@@ -3555,7 +3559,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1769;
+pub const KEY_COUNT: usize = 1771;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4489,6 +4493,7 @@ impl Key {
         Key::ModelCopyImage,
         Key::ModelDownload,
         Key::ModelDownloadBytes,
+        Key::ModelDrawFailed,
         Key::ModelEmpty,
         Key::ModelEmptyHint,
         Key::ModelErrorTitle,
@@ -4517,6 +4522,7 @@ impl Key {
         Key::ModelSaveImage,
         Key::ModelSaved,
         Key::ModelSize,
+        Key::ModelSoftware,
         Key::ModelStarting,
         Key::ModelStats,
         Key::ModelTabs,
@@ -6263,6 +6269,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "model.copyImage", en: Text::plain("Copy the image"), fr: Text::plain("Copier l'image") },
     Message { id: "model.download", en: Text::plain("Downloading"), fr: Text::plain("Téléchargement") },
     Message { id: "model.downloadBytes", en: Text::plain("{loaded} of {total}"), fr: Text::plain("{loaded} sur {total}") },
+    Message { id: "model.drawFailed", en: Text::plain("This model could not be drawn"), fr: Text::plain("Ce modèle n'a pas pu être dessiné") },
     Message { id: "model.empty", en: Text::plain("Nothing open"), fr: Text::plain("Rien d'ouvert") },
     Message { id: "model.emptyHint", en: Text::plain("Agents open their files here with preview_show, and 3D models with model_show."), fr: Text::plain("Les agents ouvrent ici leurs fichiers avec preview_show, et leurs modèles 3D avec model_show.") },
     Message { id: "model.errorTitle", en: Text::plain("This model could not be opened"), fr: Text::plain("Impossible d'ouvrir ce modèle") },
@@ -6291,6 +6298,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "model.saveImage", en: Text::plain("Save as PNG…"), fr: Text::plain("Enregistrer en PNG…") },
     Message { id: "model.saved", en: Text::plain("Image saved"), fr: Text::plain("Image enregistrée") },
     Message { id: "model.size", en: Text::plain("Bounding box: width × height × depth"), fr: Text::plain("Boîte englobante\u{202f}: largeur × hauteur × profondeur") },
+    Message { id: "model.software", en: Text::plain("This window is drawn by the processor, which cannot show the 3D view. The capture button and the pictures agents ask for still work."), fr: Text::plain("Cette fenêtre est dessinée par le processeur, qui ne sait pas afficher la vue 3D. Le bouton de capture et les images demandées par les agents fonctionnent toujours.") },
     Message { id: "model.starting", en: Text::plain("Starting the 3D view…"), fr: Text::plain("Démarrage de la vue 3D…") },
     Message { id: "model.stats", en: Text::plain("Model statistics"), fr: Text::plain("Statistiques du modèle") },
     Message { id: "model.tabs", en: Text::plain("Open files"), fr: Text::plain("Fichiers ouverts") },

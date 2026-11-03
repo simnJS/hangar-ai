@@ -838,6 +838,9 @@ const en = {
   "model.emptyHint": "Agents open their files here with preview_show, and 3D models with model_show.",
   "model.starting": "Starting the 3D view…",
   "model.unavailable": "3D rendering is not available here",
+  "model.software":
+    "This window is drawn by the processor, which cannot show the 3D view. The capture button and the pictures agents ask for still work.",
+  "model.drawFailed": "This model could not be drawn",
   "model.lost": "The graphics card dropped the 3D view.",
   "model.restart": "Restart the 3D view",
   "model.stats": "Model statistics",
@@ -2442,6 +2445,9 @@ const fr: Record<Key, string> = {
   "model.emptyHint": "Les agents ouvrent ici leurs fichiers avec preview_show, et leurs modèles 3D avec model_show.",
   "model.starting": "Démarrage de la vue 3D…",
   "model.unavailable": "Le rendu 3D n'est pas disponible ici",
+  "model.software":
+    "Cette fenêtre est dessinée par le processeur, qui ne sait pas afficher la vue 3D. Le bouton de capture et les images demandées par les agents fonctionnent toujours.",
+  "model.drawFailed": "Ce modèle n'a pas pu être dessiné",
   "model.lost": "La carte graphique a interrompu la vue 3D.",
   "model.restart": "Relancer la vue 3D",
   "model.stats": "Statistiques du modèle",
