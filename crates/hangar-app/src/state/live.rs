@@ -4,12 +4,10 @@
 //!
 //! The shared value types (`AgentActivity`, `PaneActivity`, `PlanLimits`,
 //! `PaneInsight`, `BridgeEvent`) are declared here from the TS so that every
-//! package names the same ones; P4 (`panes_logic`) fills them in and owns
-//! their meaning. A field P4 needs to add goes here in P0b, or as a type of
-//! P4's own that these wrap.
+//! package names the same ones; P4 (`panes_logic`) filled them in and owns
+//! their meaning. P4 edited this file for those types only.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 
 use iced::window;
 use serde::{Deserialize, Serialize};
@@ -120,6 +118,16 @@ impl From<AgentActivity> for hangar_theme::AgentState {
     }
 }
 
+/// Wall-clock milliseconds since the Unix epoch, as the TS `Date.now()`.
+///
+/// Every moment P4 keeps is one of these, and every state machine is handed
+/// its `now` as one: a test sets the clock, and nothing inside the logic
+/// reads it. It is wall-clock rather than `Instant` because the inspector
+/// shows these moments as dates and clock times
+/// (`new Date(event.at).toLocaleString()`), which a monotonic instant cannot
+/// give.
+pub type EpochMs = u64;
+
 /// One pane's activity (`lib/agentState.ts`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneActivity {
@@ -127,6 +135,34 @@ pub struct PaneActivity {
     pub activity: AgentActivity,
     /// The state comes from the hangar-bridge mod rather than from a guess.
     pub bridged: bool,
+}
+
+/// How many of a workspace's agents are working, waiting, or done
+/// (`WorkspaceActivity`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkspaceActivity {
+    pub working: usize,
+    pub waiting: usize,
+    pub yours: usize,
+}
+
+/// The panes, by id, that are working, waiting, or done, in no particular
+/// order (`AgentRoster`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentRoster {
+    pub working: Vec<PaneId>,
+    pub waiting: Vec<PaneId>,
+    pub yours: Vec<PaneId>,
+}
+
+/// A pane's shell, as its header lives it (`PaneStatus` of PaneStatus.ts):
+/// `Starting` until the PTY runs, `Exited` once the shell ended.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum PaneStatus {
+    #[default]
+    Starting,
+    Running,
+    Exited,
 }
 
 /// A glyph's state: the shell's own life until it runs, then the agent's
@@ -149,6 +185,7 @@ pub struct RateLimit {
     /// `five_hour`, `seven_day`, or a gateway's own window.
     pub kind: String,
     pub percent_used: f64,
+    #[serde(default)]
     pub resets_at: Option<String>,
 }
 
@@ -156,7 +193,7 @@ pub struct RateLimit {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanLimits {
     pub limits: Vec<RateLimit>,
-    pub at: Instant,
+    pub at: EpochMs,
 }
 
 /// A prompt held until the pane's Claude Code is free (`QueuedPrompt`).
@@ -172,34 +209,118 @@ pub struct ContextGauge {
     pub model: Option<String>,
 }
 
+/// What happened in a pane, and the facts it is about, never the sentence
+/// itself (`PaneEventDetail` of paneInsight.ts). The history outlives a
+/// change of language, so it is worded only when it is shown
+/// (`panes_logic::pane_event_text`), in the language of that moment.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaneEventDetail {
+    /// `id` is the short form the pane header shows.
+    Session { id: String, resumed: bool },
+    TurnStart,
+    TurnEnd {
+        outcome: TurnOutcome,
+        /// First line of the answer, when it had one.
+        answer: Option<String>,
+    },
+    Permission { tool: Option<String> },
+    /// The file's base name, which is all a line of history has room for, and
+    /// the pane that had edited it just before, when one had.
+    Edit {
+        file: String,
+        overlap: Option<String>,
+    },
+    /// `from`: who queued it when it was not the person (`queued_by`).
+    Queued { text: String, from: Option<String> },
+    Dropped { text: String },
+    /// Claude Code quit back to its shell, or the shell itself ended.
+    Exit { what: ExitWhat },
+}
+
+impl PaneEventDetail {
+    /// The `kind` string of the TS (`PaneEventKind`), for a reader that keys
+    /// an icon or a filter on it.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            PaneEventDetail::Session { .. } => "session",
+            PaneEventDetail::TurnStart => "turn-start",
+            PaneEventDetail::TurnEnd { .. } => "turn-end",
+            PaneEventDetail::Permission { .. } => "permission",
+            PaneEventDetail::Edit { .. } => "edit",
+            PaneEventDetail::Queued { .. } => "queued",
+            PaneEventDetail::Dropped { .. } => "dropped",
+            PaneEventDetail::Exit { .. } => "exit",
+        }
+    }
+}
+
+/// How a turn ended; `Failed` covers an error and a refusal alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnOutcome {
+    Answer,
+    Aborted,
+    Failed,
+}
+
+/// What ended in an `Exit` event: the agent, or the shell under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitWhat {
+    Agent,
+    Shell,
+}
+
 /// One line of a pane's history in the inspector (`PaneEvent`).
-/// TODO(P4): the typed `PaneEventDetail` of paneInsight.ts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneEvent {
-    pub at: Instant,
-    pub kind: String,
-    pub params: Value,
+    pub at: EpochMs,
+    pub detail: PaneEventDetail,
+}
+
+/// The MCP servers a pane's Claude Code was started with (`PaneMcp`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaneMcp {
+    pub mode: PaneMcpMode,
+    /// Whether Hangar's own server went into the launch (`--mcp-config`).
+    /// False for a Claude Code started without a role: pinned later, it has
+    /// none of the board, memory or worker tools until it restarts. `None`
+    /// when the launch did not say.
+    pub hangar: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaneMcpMode {
+    /// Claude Code's own configuration.
+    Inherit,
+    /// The servers the workspace chose, Hangar's included, as they went into
+    /// the launch.
+    Custom { servers: Vec<String> },
 }
 
 /// What the inspector and the pane header know of a pane
 /// (`lib/paneInsight.ts`); `MAX_EVENTS` 40, `MAX_EDITED_FILES` 50.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PaneInsight {
+    /// The model the agent runs, as the mod or the transcript names it.
     pub model: Option<String>,
+    /// The agent's own version, from the mod's hello.
     pub agent_version: Option<String>,
-    pub session_since: Option<Instant>,
+    /// When this pane's current session started or was resumed.
+    pub session_since: Option<EpochMs>,
     pub context: Option<ContextGauge>,
+    /// What the session has cost so far, when the agent reports it.
     pub cost_usd: Option<f64>,
+    /// Prompts held until the agent is free.
     pub queue: Vec<QueuedPrompt>,
     /// Most recent first, each once.
     pub edited_files: Vec<String>,
     /// Most recent first.
     pub events: Vec<PaneEvent>,
+    /// First line of the agent's last answer.
     pub last_answer: Option<String>,
-    pub turn_started_at: Option<Instant>,
+    /// When the running turn started; `None` between turns.
+    pub turn_started_at: Option<EpochMs>,
     /// The MCP servers its Claude Code started with; `None` for other agents.
-    /// TODO(P4): the typed `PaneMcp`.
-    pub mcp: Option<Value>,
+    pub mcp: Option<PaneMcp>,
 }
 
 /// What a pane's hangar-bridge mod reports (`BridgeEvent` of
