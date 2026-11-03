@@ -275,10 +275,10 @@ machine:
 | | 1.12.1 | 2.0 |
 |---|---|---|
 | Start, cold | 0.96 s | 0.57 s |
-| Memory at rest | 238 MB | 166 MB |
-| 16 terminals printing non-stop for 30 s: memory | 8.3 GB | 249 MB |
-| 16 terminals printing non-stop for 30 s: processor | 4.4 cores | 2.7 cores |
-| Echo of a key typed while 15 terminals print | no echo within 20 s | 2.4 ms |
+| Memory at rest | 238 MiB | 166 MiB |
+| 16 terminals printing non-stop for 30 s: memory | 8.1 GiB | 249 MiB |
+| 16 terminals printing non-stop for 30 s: processor | 4.4 cores | 2.4 cores |
+| Echo of text sent to a pane while 15 others print | no echo within a minute | 2.5 ms |
 
 Each terminal parses its output on a thread of its own, and the window draws at most once
 per frame whatever they print, so a busy pane never holds up the one you type in. The method
