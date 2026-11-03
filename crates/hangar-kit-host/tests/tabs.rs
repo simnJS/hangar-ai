@@ -522,3 +522,163 @@ fn the_hello_native_example_runs() {
     assert_eq!(title, "Bonjour, en natif");
     let _ = tab.draw(KitStyle::dark());
 }
+
+/// A folder of the test's own, empty, gone with it.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Scratch {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch folder");
+        Scratch(dir)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Every file under `dir`, the cache's entries among them.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+/// The files wasmtime keeps compiled modules in, not its bookkeeping.
+fn entries_under(dir: &Path) -> Vec<PathBuf> {
+    files_under(dir)
+        .into_iter()
+        .filter(|file| {
+            file.components().any(|part| part.as_os_str() == "modules")
+                && file
+                    .extension()
+                    .is_none_or(|extension| extension != "stats")
+        })
+        .collect()
+}
+
+fn cached(dir: &Path) -> KitRuntime {
+    KitRuntime::with_cache(Limits::default(), dir).expect("an engine with a cache")
+}
+
+/// What opening a tab from a compiled module comes to: the probe starts, calls
+/// and draws.
+fn runs(runtime: &KitRuntime, module: &KitModule) {
+    let fake = Fake::granting(&["panes.read"]);
+    let (mut tab, effects) =
+        KitTab::start(runtime, module, start(&[("calls", "panes.list")]), fake);
+    assert!(tab.failure().is_none(), "{:?}", tab.failure());
+    settle(&mut tab, effects);
+    assert!(texts(&tab).contains(&"panes.list: ok".to_owned()));
+}
+
+#[test]
+fn a_module_compiled_once_is_read_back_from_disk_by_the_next_run() {
+    let scratch = Scratch::new("cache");
+    let bytes = module_bytes("hangar_kit_probe");
+
+    // The first run compiles, and leaves the code in the folder.
+    let first = cached(&scratch.0);
+    assert_eq!(first.cache_dir(), Some(scratch.0.as_path()));
+    runs(&first, &first.compile(&bytes).expect("compiles"));
+    let stats = first.cache_stats().expect("a cache");
+    assert_eq!((stats.hits, stats.misses), (0, 1));
+    assert_eq!(entries_under(&scratch.0).len(), 1, "one module was kept");
+
+    // Another run, with an engine of its own, reads that back and runs it.
+    let second = cached(&scratch.0);
+    runs(&second, &second.compile(&bytes).expect("reads it back"));
+    let stats = second.cache_stats().expect("a cache");
+    assert_eq!((stats.hits, stats.misses), (1, 0));
+
+    // A module that is another file is another entry: it misses.
+    second
+        .compile(&module_bytes("hello_native_tab"))
+        .expect("compiles");
+    let stats = second.cache_stats().expect("a cache");
+    assert_eq!((stats.hits, stats.misses), (1, 1));
+    assert_eq!(entries_under(&scratch.0).len(), 2);
+}
+
+#[test]
+fn a_cache_entry_that_cannot_be_read_is_compiled_again() {
+    let scratch = Scratch::new("cache-broken");
+    let bytes = module_bytes("hangar_kit_probe");
+    cached(&scratch.0).compile(&bytes).expect("compiles");
+    let entries = entries_under(&scratch.0);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    std::fs::write(&entries[0], b"not what was written").expect("spoils it");
+
+    let second = cached(&scratch.0);
+    runs(&second, &second.compile(&bytes).expect("compiles again"));
+    let stats = second.cache_stats().expect("a cache");
+    assert_eq!(stats.hits, 0, "{stats:?}");
+}
+
+#[test]
+fn a_module_that_breaks_the_rules_is_refused_each_time_it_is_compiled() {
+    let scratch = Scratch::new("cache-refused");
+    let runtime = cached(&scratch.0);
+    // Not WebAssembly at all, so nothing is kept for it.
+    assert!(matches!(
+        runtime.compile(b"not a module"),
+        Err(LoadError::Invalid(_))
+    ));
+    assert!(entries_under(&scratch.0).is_empty());
+    // Valid WebAssembly that imports what Hangar does not give: the cache may
+    // well hold its code, but the checks run on what comes back too.
+    let wasi = wat_like_import();
+    for _ in 0..2 {
+        assert!(matches!(
+            runtime.compile(&wasi),
+            Err(LoadError::Import { .. })
+        ));
+    }
+}
+
+/// The smallest module that imports a function Hangar does not give:
+/// `(module (import "wasi_snapshot_preview1" "fd_write" (func)))`.
+fn wat_like_import() -> Vec<u8> {
+    let mut module = b"\0asm\x01\0\0\0".to_vec();
+    // The type section: one type, `() -> ()`.
+    module.extend([1, 4, 1, 0x60, 0, 0]);
+    // The import section: one import, `wasi_snapshot_preview1.fd_write`, type 0.
+    let (host, name) = ("wasi_snapshot_preview1", "fd_write");
+    let mut import = vec![1, host.len() as u8];
+    import.extend(host.as_bytes());
+    import.push(name.len() as u8);
+    import.extend(name.as_bytes());
+    import.extend([0, 0]);
+    module.push(2);
+    module.push(import.len() as u8);
+    module.extend(import);
+    module
+}
+
+#[test]
+fn a_cache_folder_that_cannot_be_used_leaves_the_runtime_working() {
+    // A file where the folder should be: nothing can be written under it.
+    let scratch = Scratch::new("cache-unusable");
+    let blocked = scratch.0.join("blocked");
+    std::fs::write(&blocked, b"a file").expect("a file");
+    let runtime =
+        KitRuntime::with_cache(Limits::default(), blocked.join("inside")).expect("an engine");
+    let module = runtime
+        .compile(&module_bytes("hangar_kit_probe"))
+        .expect("compiles");
+    runs(&runtime, &module);
+}

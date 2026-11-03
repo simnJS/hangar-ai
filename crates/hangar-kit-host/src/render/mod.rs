@@ -18,8 +18,8 @@ use iced::alignment::{Horizontal, Vertical};
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, Row, button, canvas, checkbox, column, container, grid, image, pick_list, progress_bar,
-    rich_text, row, rule, scrollable, space, span, svg, text, text_editor, text_input, toggler,
+    Column, Row, button, canvas, column, container, grid, image, progress_bar, rich_text, row,
+    rule, scrollable, space, span, svg, text, text_editor,
 };
 
 use hangar_i18n::Key;
@@ -419,64 +419,6 @@ fn thin() -> Scrollbar {
     Scrollbar::new().width(6).scroller_width(6)
 }
 
-fn button_style(
-    style: KitStyle,
-    kind: ButtonKind,
-) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_, status| {
-        let p = style.palette;
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        let (background, text_color, edge) = match kind {
-            ButtonKind::Default => (
-                Some(if hovered { p.hover } else { p.raised }),
-                p.text,
-                Some(if hovered { p.border_hover } else { p.border }),
-            ),
-            ButtonKind::Primary => (
-                Some(if hovered {
-                    Color {
-                        a: 0.86,
-                        ..p.accent
-                    }
-                } else {
-                    p.accent
-                }),
-                p.on_accent,
-                None,
-            ),
-            ButtonKind::Danger => (
-                Some(if hovered { p.danger_soft } else { p.raised }),
-                p.danger,
-                Some(p.border),
-            ),
-            ButtonKind::Ghost => (hovered.then_some(p.hover), p.text_dim, None),
-        };
-        let disabled = status == button::Status::Disabled;
-        button::Style {
-            background: background.map(|color| {
-                Background::Color(if disabled {
-                    Color {
-                        a: color.a * 0.55,
-                        ..color
-                    }
-                } else {
-                    color
-                })
-            }),
-            text_color: if disabled { p.text_faint } else { text_color },
-            border: match edge {
-                Some(edge) => border(edge, 6.0),
-                None => Border {
-                    radius: 6.0.into(),
-                    ..Border::default()
-                },
-            },
-            shadow: Shadow::default(),
-            snap: true,
-        }
-    }
-}
-
 /// A row that takes the pointer: no surface of its own but under it, and
 /// the chosen one's.
 fn row_style(style: KitStyle, selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
@@ -496,82 +438,6 @@ fn row_style(style: KitStyle, selected: bool) -> impl Fn(&Theme, button::Status)
             },
             shadow: Shadow::default(),
             snap: true,
-        }
-    }
-}
-
-fn field_style(
-    style: KitStyle,
-    invalid: bool,
-) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
-    move |_, status| {
-        let p = style.palette;
-        let edge = match status {
-            _ if invalid => p.danger,
-            text_input::Status::Focused { .. } => p.focus,
-            text_input::Status::Hovered => p.border_hover,
-            _ => p.border,
-        };
-        text_input::Style {
-            background: Background::Color(p.field),
-            border: border(edge, 6.0),
-            icon: p.text_dim,
-            placeholder: p.text_faint,
-            value: p.text,
-            selection: p.accent_soft,
-        }
-    }
-}
-
-fn picker_style(
-    style: KitStyle,
-    kind: ButtonKind,
-) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
-    move |_, status| {
-        let p = style.palette;
-        let hovered = !matches!(status, pick_list::Status::Active);
-        let (background, text_color) = match kind {
-            ButtonKind::Ghost => (
-                if hovered { p.hover } else { Color::TRANSPARENT },
-                p.text_dim,
-            ),
-            ButtonKind::Primary => (p.accent, p.on_accent),
-            _ => (if hovered { p.hover } else { p.field }, p.text),
-        };
-        pick_list::Style {
-            text_color,
-            placeholder_color: if kind == ButtonKind::Ghost {
-                p.text_dim
-            } else {
-                p.text_faint
-            },
-            handle_color: p.text_dim,
-            background: Background::Color(background),
-            border: match kind {
-                ButtonKind::Ghost | ButtonKind::Primary => Border {
-                    radius: 6.0.into(),
-                    ..Border::default()
-                },
-                _ => border(if hovered { p.border_hover } else { p.border }, 6.0),
-            },
-        }
-    }
-}
-
-fn menu_style(style: KitStyle) -> impl Fn(&Theme) -> iced::overlay::menu::Style {
-    move |_| {
-        let p = style.palette;
-        iced::overlay::menu::Style {
-            background: Background::Color(p.float),
-            border: border(p.border, 8.0),
-            text_color: p.text,
-            selected_text_color: p.text,
-            selected_background: Background::Color(p.hover),
-            shadow: Shadow {
-                color: p.shadow,
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 16.0,
-            },
         }
     }
 }
@@ -996,15 +862,21 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                 .into()
         }
         ui::Element::Menu(w) => menu_widget(cx, w),
+        // The window's own fields (hangar-ui): the label, the hint and the
+        // error are the field's, and so is the look of each state.
         ui::Element::TextInput(w) => {
-            let mut input = text_input(&w.placeholder, &w.value)
-                .size(TextSize::Control.px())
-                .padding([5, 8])
-                .font(if w.mono { style.mono } else { style.font })
-                .width(length(w.width, Length::Fill))
-                .style(field_style(style, w.error.is_some()));
+            let seq = cx.seq;
+            let mut input = hangar_ui::input::text_field(style.theme, &w.value)
+                .placeholder(&w.placeholder)
+                .error(w.error.as_deref())
+                .width(length(w.width, Length::Fill));
+            if let Some(label) = &w.label {
+                input = input.label(label);
+            }
+            if let Some(hint) = &w.hint {
+                input = input.hint(hint);
+            }
             if let Some(handler) = w.on_input {
-                let seq = cx.seq;
                 input = input.on_input(move |value| {
                     KitMessage::Ui(UiEvent {
                         view: seq,
@@ -1016,16 +888,13 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             if let Some(handler) = w.on_submit {
                 input = input.on_submit(cx.message(handler, None));
             }
-            if w.secure {
-                input = input.secure(true);
+            if w.mono {
+                input = input.mono();
             }
-            field(
-                style,
-                w.label.as_deref(),
-                input.into(),
-                w.hint.as_deref(),
-                w.error.as_deref(),
-            )
+            if w.secure {
+                input = input.secure();
+            }
+            input.into()
         }
         ui::Element::TextArea(w) => {
             let Some(editor) = cx.widgets.editors.get(&w.id) else {
@@ -1047,19 +916,13 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                         handler,
                     })
                 })
-                .style(move |_, status| {
-                    let edge = match status {
-                        _ if invalid => p.danger,
-                        text_editor::Status::Focused { .. } => p.focus,
-                        text_editor::Status::Hovered => p.border_hover,
-                        _ => p.border,
-                    };
-                    text_editor::Style {
-                        background: Background::Color(p.field),
-                        border: border(edge, 6.0),
-                        placeholder: p.text_faint,
-                        value: p.text,
-                        selection: p.accent_soft,
+                // The look of the window's own text areas (hangar-ui's).
+                .style(move |theme, status| {
+                    let t = style.theme;
+                    if invalid {
+                        hangar_theme::style::text_editor::field_invalid(t)(theme, status)
+                    } else {
+                        hangar_theme::style::text_editor::field(t)(theme, status)
                     }
                 });
             field(
@@ -1071,20 +934,10 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             )
         }
         ui::Element::Search(w) => {
-            let mut input = text_input(&w.placeholder, &w.value)
-                .size(TextSize::Control.px())
-                .padding([5, 4])
-                .width(Length::Fill)
-                .style(move |_, _| text_input::Style {
-                    background: Background::Color(Color::TRANSPARENT),
-                    border: Border::default(),
-                    icon: p.text_dim,
-                    placeholder: p.text_faint,
-                    value: p.text,
-                    selection: p.accent_soft,
-                });
+            let seq = cx.seq;
+            let mut input = hangar_ui::input::search_field(style.theme, &w.value, &w.placeholder)
+                .clear_tip(style.t(Key::SettingsSearchClear));
             if let Some(handler) = w.on_input {
-                let seq = cx.seq;
                 input = input.on_input(move |value| {
                     KitMessage::Ui(UiEvent {
                         view: seq,
@@ -1096,28 +949,13 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             if let Some(handler) = w.on_submit {
                 input = input.on_submit(cx.message(handler, None));
             }
-            let mut parts = vec![
-                icon_image(style, ui::Icon::Search, 13.0, Some(p.text_dim)),
-                input.into(),
-            ];
-            if let (false, Some(handler)) = (w.value.is_empty(), w.on_clear) {
-                parts.push(
-                    hangar_ui::button::icon_button(style.theme, hangar_ui::Icon::Close)
-                        .small()
-                        .icon_size(12.0)
-                        .on_press(cx.message(handler, None))
-                        .into(),
-                );
+            // The clear button is the kit's: it is there when the kit named
+            // what it does (`Search::on_clear`), and not otherwise.
+            match w.on_clear {
+                Some(handler) => input = input.on_clear(cx.message(handler, None)),
+                None => input = input.clearable(false),
             }
-            container(
-                Row::with_children(parts)
-                    .spacing(4)
-                    .align_y(Alignment::Center),
-            )
-            .padding([0, 8])
-            .width(Length::Fill)
-            .style(surface(style, Some(p.field), Some(p.border), 6.0))
-            .into()
+            input.into()
         }
         ui::Element::Select(w) => {
             let options: Vec<Choice> = w
@@ -1135,20 +973,13 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             let picker: El<'a> = match w.on_select {
                 Some(handler) => {
                     let seq = cx.seq;
-                    pick_list(options, selected, move |choice: Choice| {
+                    hangar_ui::input::select(style.theme, options, selected, move |choice| {
                         KitMessage::Ui(UiEvent {
                             view: seq,
                             handler,
                             value: Some(EventValue::Text(choice.id)),
                         })
                     })
-                    .placeholder(w.placeholder.as_str())
-                    .text_size(TextSize::Control.px())
-                    .padding([5, 8])
-                    .width(length(w.width, Length::Shrink))
-                    .style(picker_style(style, ButtonKind::Default))
-                    .menu_style(menu_style(style))
-                    .into()
                 }
                 None => container(plain(
                     style,
@@ -1162,83 +993,38 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                 .style(surface(style, Some(p.field), Some(p.border), 6.0))
                 .into(),
             };
-            field(style, w.label.as_deref(), picker, None, None)
+            // A select fills its line, as a text field does (`.kit-select
+            // select { width: 100% }`).
+            let picker = container(picker).width(length(w.width, Length::Fill));
+            field(style, w.label.as_deref(), picker.into(), None, None)
         }
         ui::Element::Checkbox(w) => {
             let seq = cx.seq;
-            checkbox(w.checked)
-                .label(w.label.as_str())
-                .size(14)
-                .text_size(TextSize::Control.px())
-                .spacing(8)
-                .on_toggle_maybe(w.on_toggle.map(|handler| {
-                    move |on| {
-                        KitMessage::Ui(UiEvent {
-                            view: seq,
-                            handler,
-                            value: Some(EventValue::Bool(on)),
-                        })
-                    }
-                }))
-                .style(move |_, status| {
-                    let (checked, hovered) = match status {
-                        checkbox::Status::Active { is_checked } => (is_checked, false),
-                        checkbox::Status::Hovered { is_checked } => (is_checked, true),
-                        checkbox::Status::Disabled { is_checked } => (is_checked, false),
-                    };
-                    checkbox::Style {
-                        background: Background::Color(if checked { p.accent } else { p.field }),
-                        icon_color: p.on_accent,
-                        border: border(
-                            if checked {
-                                p.accent
-                            } else if hovered {
-                                p.border_hover
-                            } else {
-                                p.border
-                            },
-                            4.0,
-                        ),
-                        text_color: Some(p.text),
-                    }
-                })
-                .into()
+            let mut tick = hangar_ui::input::checkbox(style.theme, &w.label, w.checked);
+            if let Some(handler) = w.on_toggle {
+                tick = tick.on_toggle(move |on| {
+                    KitMessage::Ui(UiEvent {
+                        view: seq,
+                        handler,
+                        value: Some(EventValue::Bool(on)),
+                    })
+                });
+            }
+            tick.into()
         }
         ui::Element::Switch(w) => {
             let seq = cx.seq;
-            toggler(w.on)
-                .label(w.label.as_str())
-                .size(16)
-                .text_size(TextSize::Control.px())
-                .spacing(8)
-                .on_toggle_maybe(w.on_toggle.map(|handler| {
-                    move |on| {
-                        KitMessage::Ui(UiEvent {
-                            view: seq,
-                            handler,
-                            value: Some(EventValue::Bool(on)),
-                        })
-                    }
-                }))
-                .style(move |_, status| {
-                    let on = match status {
-                        toggler::Status::Active { is_toggled }
-                        | toggler::Status::Hovered { is_toggled }
-                        | toggler::Status::Disabled { is_toggled } => is_toggled,
-                    };
-                    toggler::Style {
-                        background: Background::Color(if on { p.accent } else { p.selected }),
-                        background_border_width: 1.0,
-                        background_border_color: if on { p.accent } else { p.border },
-                        foreground: Background::Color(if on { p.on_accent } else { p.text_dim }),
-                        foreground_border_width: 0.0,
-                        foreground_border_color: Color::TRANSPARENT,
-                        text_color: Some(p.text),
-                        border_radius: None,
-                        padding_ratio: 0.15,
-                    }
-                })
-                .into()
+            let mut switch = hangar_ui::input::switch(style.theme, w.on).label(&w.label);
+            if let Some(handler) = w.on_toggle {
+                switch = switch.on_toggle(move |on| {
+                    KitMessage::Ui(UiEvent {
+                        view: seq,
+                        handler,
+                        value: Some(EventValue::Bool(on)),
+                    })
+                });
+            }
+            switch.into()
         }
         ui::Element::Filter(w) => {
             let mut parts =
@@ -1698,17 +1484,18 @@ fn table_widget<'a>(cx: &Cx<'a>, w: &'a ui::Table) -> El<'a> {
         });
         let line = Row::with_children(cells)
             .spacing(8)
-            .padding([5, 8])
             .align_y(Alignment::Center);
         let selected = w.selected == Some(index as u32);
         lines.push(match w.on_row {
-            Some(handler) => button(line)
-                .padding(0)
-                .width(Length::Fill)
+            // A row that takes the pointer is the window's list row, as tall
+            // as its cells.
+            Some(handler) => hangar_ui::list::row(style.theme, line, selected)
+                .fit()
+                .padding([5.0, 8.0])
                 .on_press(cx.message(handler, Some(EventValue::Index(index as u32))))
-                .style(row_style(style, selected))
                 .into(),
             None => container(line)
+                .padding([5, 8])
                 .width(Length::Fill)
                 .style(move |_| container::Style {
                     background: selected.then_some(Background::Color(p.selected)),
@@ -1745,23 +1532,21 @@ fn tree_lines<'a>(
             .copied()
             .unwrap_or(node.open);
         let toggle: El<'a> = if node.children.is_empty() {
-            space().width(16).into()
+            space().width(20).into()
         } else {
-            let chevron = hangar_ui::icon(hangar_ui::Icon::ChevronDown, 12.0)
-                .color(p.text_dim)
+            hangar_ui::button::icon_button(style.theme, hangar_ui::Icon::ChevronDown)
+                .side(20.0)
+                .icon_size(12.0)
                 .rotate(if open {
                     0.0
                 } else {
                     -std::f32::consts::FRAC_PI_2
-                });
-            button(chevron)
-                .padding(2)
+                })
                 .on_press(KitMessage::Local(Local::Toggle {
                     tree: tree.id.clone(),
                     node: node.id.clone(),
                     open: !open,
                 }))
-                .style(button_style(style, ButtonKind::Ghost))
                 .into()
         };
         let mut label = Vec::new();
@@ -1774,18 +1559,19 @@ fn tree_lines<'a>(
                 .into(),
         );
         let selected = tree.selected.as_deref() == Some(node.id.as_str());
-        let name = button(
+        let name = hangar_ui::list::row(
+            style.theme,
             Row::with_children(label)
                 .spacing(6)
                 .align_y(Alignment::Center),
+            selected,
         )
-        .padding([3, 6])
-        .width(Length::Fill)
+        .height(24.0)
+        .padding([0.0, 6.0])
         .on_press_maybe(
             tree.on_select
                 .map(|handler| cx.message(handler, Some(EventValue::Text(node.id.clone())))),
-        )
-        .style(row_style(style, selected));
+        );
         lines.push(
             row![space().width(depth as f32 * 14.0), toggle, name]
                 .spacing(2)

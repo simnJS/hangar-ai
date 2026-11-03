@@ -323,17 +323,7 @@ impl Deps for LiveDeps {
         opened_by: String,
     ) -> BoxFuture<Result<(), String>> {
         let shared = self.shared.clone();
-        Box::pin(async move {
-            let file = shared.admit(&ws, &path).await?;
-            let request = PreviewRequest {
-                ws: ws.id.clone(),
-                path: file.path.clone(),
-                title: None,
-                opened_by: Some(opened_by),
-                reveal: true,
-            };
-            shared.open_file(&request, &file).map(drop)
-        })
+        Box::pin(async move { show_in_preview(&shared, &ws, &path, opened_by).await })
     }
 
     fn enqueue(
@@ -342,8 +332,9 @@ impl Deps for LiveDeps {
         text: String,
         from: String,
     ) -> BoxFuture<Result<(), String>> {
-        hangar_core::bridge::bridge_enqueue(&self.host, pane_id, text, Some(from));
-        Box::pin(std::future::ready(Ok(())))
+        let snapshot = self.snapshots.borrow().clone();
+        let queued = queue_for_pane(&self.host, &snapshot, pane_id, text, from).map(drop);
+        Box::pin(std::future::ready(queued))
     }
 
     fn activity(&self, pane_id: &str) -> Option<PaneActivity> {
@@ -449,6 +440,58 @@ impl Deps for LiveDeps {
     }
 }
 
+/// The file in the workspace's preview, as an agent's `preview_show` opens
+/// one: its folders granted, then what core makes of it.
+///
+/// The size is core's to judge, in `admit`: a model or a PDF above 256 MB, an
+/// image or a page above 64 MB, a text above 10 MB are refused there with the
+/// size and the limit in the message, before anything opens. The TypeScript
+/// checked the 256 MB of models here by hand, because its inspection did not.
+async fn show_in_preview(
+    shared: &Shared,
+    ws: &Workspace,
+    path: &str,
+    opened_by: String,
+) -> Result<(), String> {
+    let file = shared.admit(ws, path).await?;
+    let request = PreviewRequest {
+        ws: ws.id.clone(),
+        path: file.path.clone(),
+        title: None,
+        opened_by: Some(opened_by),
+        reveal: true,
+    };
+    shared.open_file(&request, &file).map(drop)
+}
+
+/// Queues `text` for the pane's hangar-bridge mod, unless the pane has gone
+/// since the call was checked: a prompt queued for a pane that is no longer
+/// there would wait for a mod that never comes, and the tab would be told it
+/// was sent. `bridge_enqueue` itself cannot fail; this is the one way a send
+/// does (the TypeScript awaited the command, which could throw).
+fn queue_for_pane(
+    host: &Host,
+    snapshot: &Snapshot,
+    pane_id: String,
+    text: String,
+    from: String,
+) -> Result<hangar_core::bridge::Queued, String> {
+    let there = snapshot
+        .state
+        .workspaces
+        .iter()
+        .any(|ws| ws.panes.iter().any(|pane| pane.id == pane_id));
+    if !there {
+        return Err("that pane was closed before the text could be queued for it".into());
+    }
+    Ok(hangar_core::bridge::bridge_enqueue(
+        host,
+        pane_id,
+        text,
+        Some(from),
+    ))
+}
+
 /// An image of a kit's folder or of its data folder: a relative path inside,
 /// links followed and held inside, at most 10 MB. The kit scheme's rules for a
 /// kit's own files: nothing hidden there; in its data, its own names.
@@ -489,6 +532,146 @@ fn read_image(root: &Path, raw: &str, hidden: bool) -> Result<Vec<u8>, KitError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::PreviewAccess;
+    use crate::state::types::Pane;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.canonicalize().unwrap()
+    }
+
+    fn workspace_in(dir: &Path) -> Workspace {
+        Workspace {
+            id: "w-kit-show".into(),
+            name: "demo".into(),
+            cwd: dir.to_string_lossy().into_owned(),
+            ..Workspace::default()
+        }
+    }
+
+    /// `preview.show` of `name`, as the kit API calls it; hangar-core keeps one
+    /// list of the folders it serves for the whole process, and a test of the
+    /// preview may replace it between the grant and the inspection, so a
+    /// refusal for being outside is tried again a few times.
+    async fn shown(shared: &Shared, ws: &Workspace, name: &str) -> Result<(), String> {
+        let path = Path::new(&ws.cwd).join(name).to_string_lossy().into_owned();
+        let mut answer = show_in_preview(shared, ws, &path, "Hello kit".into()).await;
+        for _ in 0..20 {
+            match &answer {
+                Err(why) if why.contains("outside") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    answer = show_in_preview(shared, ws, &path, "Hello kit".into()).await;
+                }
+                _ => break,
+            }
+        }
+        answer
+    }
+
+    #[tokio::test]
+    async fn a_model_above_256_megabytes_is_not_shown_and_the_message_says_how_big() {
+        let dir = scratch("show-big");
+        let ws = workspace_in(&dir);
+        let shared = Shared::new(None);
+        // glTF binary header, then nothing: sparse, never read.
+        let big = std::fs::File::create(dir.join("big.glb")).unwrap();
+        big.set_len(256 * 1024 * 1024 + 1).unwrap();
+        let refused = shown(&shared, &ws, "big.glb").await.unwrap_err();
+        assert!(refused.contains("big.glb"), "{refused}");
+        assert!(refused.contains("257 MB"), "{refused}");
+        assert!(refused.contains("256 MB"), "{refused}");
+        assert!(shared.list(&ws.id).is_empty(), "nothing was opened");
+
+        // At the cap itself, a model opens.
+        let small = std::fs::File::create(dir.join("small.glb")).unwrap();
+        small.set_len(1024).unwrap();
+        shown(&shared, &ws, "small.glb").await.expect("it opens");
+        let listed = shared.list(&ws.id);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].opened_by.as_deref(), Some("Hello kit"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_file_that_is_not_there_is_refused_and_opens_nothing() {
+        let dir = scratch("show-none");
+        let ws = workspace_in(&dir);
+        let shared = Shared::new(None);
+        let refused = shown(&shared, &ws, "gone.glb").await.unwrap_err();
+        assert!(refused.contains("gone.glb"), "{refused}");
+        assert!(shared.list(&ws.id).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn snapshot_with_pane(pane: &str) -> Snapshot {
+        Snapshot {
+            state: Arc::new(crate::state::AppState {
+                workspaces: vec![Workspace {
+                    id: "w1".into(),
+                    panes: vec![Pane {
+                        id: pane.into(),
+                        name: "Ava".into(),
+                        ..Pane::default()
+                    }],
+                    ..Workspace::default()
+                }],
+                ..crate::state::AppState::default()
+            }),
+            ..Snapshot::default()
+        }
+    }
+
+    fn host() -> Host {
+        Host::with_paths(hangar_core::Paths::rooted(&std::env::temp_dir()))
+    }
+
+    #[test]
+    fn a_send_is_queued_for_its_pane_under_the_kits_name() {
+        let pane = "p-kit-queue-live";
+        let queued = queue_for_pane(
+            &host(),
+            &snapshot_with_pane(pane),
+            pane.into(),
+            "Build it".into(),
+            "kit:hello-kit".into(),
+        )
+        .expect("queued");
+        let waiting = hangar_core::bridge::bridge_queue(pane.into());
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].id, queued.id);
+        assert_eq!(waiting[0].text, "Build it");
+        assert_eq!(waiting[0].from.as_deref(), Some("kit:hello-kit"));
+        hangar_core::bridge::bridge_cancel(&host(), pane.into(), None);
+    }
+
+    #[test]
+    fn a_send_to_a_pane_that_has_gone_is_reported_and_queues_nothing() {
+        let pane = "p-kit-queue-gone";
+        let refused = queue_for_pane(
+            &host(),
+            &snapshot_with_pane("another-pane"),
+            pane.into(),
+            "Build it".into(),
+            "kit:hello-kit".into(),
+        )
+        .unwrap_err();
+        assert!(refused.contains("closed"), "{refused}");
+        assert!(hangar_core::bridge::bridge_queue(pane.into()).is_empty());
+        // No workspace at all, as after the last one closed.
+        assert!(
+            queue_for_pane(
+                &host(),
+                &Snapshot::default(),
+                pane.into(),
+                "x".into(),
+                "kit:hello-kit".into()
+            )
+            .is_err()
+        );
+        assert!(hangar_core::bridge::bridge_queue(pane.into()).is_empty());
+    }
 
     #[test]
     fn an_image_is_read_from_inside_its_folder_only() {

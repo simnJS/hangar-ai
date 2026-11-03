@@ -128,7 +128,11 @@ standard library works there (collections, strings, formatting, serde); what nee
 not: no clock (use `cx.now()`), no file, no thread, no network. Those go through Hangar.
 
 A module of the example is about 500 KB in release, most of it serde_json and formatting. That is
-compiled once per file and shared by every tab opened from it.
+compiled once per file and shared by every tab opened from it. Hangar also keeps what it compiled
+in the app's cache folder (`kit-modules`), named by a hash of the module's bytes and the wasmtime
+version, so a module that has not changed opens at the next start without being compiled again
+(`KitRuntime::with_cache`); a new build of the module, or a new Hangar, simply compiles again.
+The cache is only a speed-up: if its folder cannot be used, tabs open all the same.
 
 **Testing a tab without Hangar.** `hangar_kit_sdk::testing::Harness` runs the same runtime the module
 runs, on the host, with no WebAssembly: start it, answer its calls by hand, press its buttons, read

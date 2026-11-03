@@ -26,6 +26,7 @@ pub struct Row<'a, M> {
     selected: bool,
     on_press: Option<M>,
     height: f32,
+    fit: bool,
     padding: Padding,
 }
 
@@ -41,6 +42,7 @@ pub fn row<'a, M: 'a>(
         selected,
         on_press: None,
         height: size::NAV_ROW_HEIGHT,
+        fit: false,
         padding: Padding::from([0.0, space::MD]),
     }
 }
@@ -62,6 +64,14 @@ impl<'a, M: 'a> Row<'a, M> {
         self
     }
 
+    /// As tall as its content and its [`padding`](Row::padding), for a row
+    /// whose content can wrap or hold several lines (a table's cells), which a
+    /// fixed height would cut. [`height`](Row::height) is then not used.
+    pub fn fit(mut self) -> Self {
+        self.fit = true;
+        self
+    }
+
     pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
         self.padding = padding.into();
         self
@@ -70,16 +80,18 @@ impl<'a, M: 'a> Row<'a, M> {
 
 impl<'a, M: Clone + 'a> From<Row<'a, M>> for Element<'a, M> {
     fn from(r: Row<'a, M>) -> Self {
-        button(
-            container(r.content)
-                .align_y(Alignment::Center)
-                .height(Length::Fill),
-        )
-        .padding(r.padding)
-        .width(Length::Fill)
-        .height(r.height)
-        .style(style::button::row(r.theme, r.selected))
-        .on_press_maybe(r.on_press)
-        .into()
+        let content = container(r.content).align_y(Alignment::Center);
+        let (content, outer) = if r.fit {
+            (content.height(Length::Shrink), Length::Shrink)
+        } else {
+            (content.height(Length::Fill), Length::Fixed(r.height))
+        };
+        button(content)
+            .padding(r.padding)
+            .width(Length::Fill)
+            .height(outer)
+            .style(style::button::row(r.theme, r.selected))
+            .on_press_maybe(r.on_press)
+            .into()
     }
 }

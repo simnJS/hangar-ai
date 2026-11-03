@@ -11,13 +11,20 @@
 //! ticks. Fuel would count instructions, the same on every machine, but
 //! costs more on every one of them and measures nothing a person waits on;
 //! what matters here is that the window is never held for long.
+//!
+//! Compiling is the slow part of opening a tab (a module of the example is
+//! half a megabyte of code to translate), and the same file is opened again
+//! at every start of the app. [`KitRuntime::with_cache`] keeps what wasmtime
+//! compiled on disk, so a module that has not changed is read back instead:
+//! see there for what the cache is keyed by and what it trusts.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use wasmtime::{Config, Engine, ExternType, FuncType, Module, ValType};
+use wasmtime::{Cache, CacheConfig, Config, Engine, ExternType, FuncType, Module, ValType};
 
 use hangar_kit_ui::abi::{export, import};
 
@@ -132,16 +139,75 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
+/// How the compiled-module cache has served so far: a module read back from
+/// disk is a hit, one compiled (and then written) is a miss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheStats {
+    pub hits: usize,
+    pub misses: usize,
+}
+
+/// The most the cache may hold before wasmtime's cleanup removes the oldest
+/// entries: a compiled tab is a few megabytes, and a person has a handful of
+/// kits, so this is generous and still bounded.
+const CACHE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+const CACHE_MAX_FILES: u64 = 512;
+
 /// The engine all tabs share, and its clock. Cheap to clone: one per app.
 #[derive(Clone)]
 pub struct KitRuntime {
     pub(crate) engine: Engine,
     pub(crate) limits: Arc<Limits>,
+    cache: Option<Cache>,
 }
 
 impl KitRuntime {
+    /// A runtime that compiles every module it is given, every time.
     pub fn new(limits: Limits) -> Result<KitRuntime, LoadError> {
+        Self::build(limits, None)
+    }
+
+    /// A runtime that keeps the code it compiles in `dir` and reads it back
+    /// the next time the same module is compiled, in this run or another.
+    ///
+    /// wasmtime's own module cache does it: an entry is named by a hash of the
+    /// module's bytes together with the wasmtime version that compiled it and
+    /// the engine's settings, so a new module, a new Hangar or a changed
+    /// setting simply misses, and the old entry is cleaned up in time (the
+    /// folder is capped, oldest first). `dir` must be the cache's alone.
+    ///
+    /// What it trusts: what is read back from `dir` is run as machine code,
+    /// as the app's own files are. A person's cache folder is theirs to
+    /// write, and anything that can write there can already write where the
+    /// app keeps its own state; the cache adds no more reach than that.
+    ///
+    /// A cache is only a speed-up, so a folder that cannot be used (no room,
+    /// not writable) leaves the runtime working without one, never failing.
+    pub fn with_cache(limits: Limits, dir: impl Into<PathBuf>) -> Result<KitRuntime, LoadError> {
+        let mut config = CacheConfig::new();
+        config
+            .with_directory(dir)
+            .with_files_total_size_soft_limit(CACHE_MAX_BYTES)
+            .with_file_count_soft_limit(CACHE_MAX_FILES);
+        Self::build(limits, Cache::new(config).ok())
+    }
+
+    /// What the cache has done so far; `None` for a runtime without one.
+    pub fn cache_stats(&self) -> Option<CacheStats> {
+        self.cache.as_ref().map(|cache| CacheStats {
+            hits: cache.cache_hits(),
+            misses: cache.cache_misses(),
+        })
+    }
+
+    /// Where the cache keeps its entries, if there is one.
+    pub fn cache_dir(&self) -> Option<&Path> {
+        self.cache.as_ref().map(|cache| cache.directory().as_path())
+    }
+
+    fn build(limits: Limits, cache: Option<Cache>) -> Result<KitRuntime, LoadError> {
         let mut config = Config::new();
+        config.cache(cache.clone());
         config.epoch_interruption(true);
         // A module of one memory and one thread: what wasm32-unknown-unknown
         // builds, and nothing that could share memory with another tab.
@@ -164,6 +230,7 @@ impl KitRuntime {
         Ok(KitRuntime {
             engine,
             limits: Arc::new(limits),
+            cache,
         })
     }
 

@@ -43,6 +43,19 @@ pub struct Runtime {
     runtime: Option<Result<KitRuntime, String>>,
     /// By file: its modification time when compiled, and what came of it.
     modules: HashMap<PathBuf, (Option<SystemTime>, Result<KitModule, String>)>,
+    /// Where the runtime keeps the code it compiled, from one run to the
+    /// next; none until [`Runtime::cache_in`], and none again for a runtime
+    /// made without it.
+    cache: Option<PathBuf>,
+}
+
+/// The folder of the compiled modules, under the app's cache folder: a
+/// cache's own, since wasmtime cleans up what it finds there.
+pub fn cache_dir(paths: &hangar_core::Paths) -> Option<PathBuf> {
+    paths
+        .app_cache_dir()
+        .ok()
+        .map(|dir| dir.join("kit-modules"))
 }
 
 impl std::fmt::Debug for Runtime {
@@ -61,10 +74,23 @@ pub fn modified(path: &Path) -> Option<SystemTime> {
 }
 
 impl Runtime {
+    /// Keeps compiled modules in `dir`. Only the first call before the
+    /// runtime is made counts: the engine is made once, with or without it.
+    pub fn cache_in(&mut self, dir: Option<PathBuf>) {
+        if self.runtime.is_none() {
+            self.cache = dir;
+        }
+    }
+
     pub fn runtime(&mut self) -> Result<KitRuntime, String> {
+        let cache = self.cache.clone();
         self.runtime
             .get_or_insert_with(|| {
-                KitRuntime::new(Limits::default()).map_err(|why| why.to_string())
+                match cache {
+                    Some(dir) => KitRuntime::with_cache(Limits::default(), dir),
+                    None => KitRuntime::new(Limits::default()),
+                }
+                .map_err(|why| why.to_string())
             })
             .clone()
     }
@@ -322,6 +348,55 @@ mod tests {
             kind,
             action: action.map(str::to_owned),
         })
+    }
+
+    #[test]
+    fn compiled_modules_are_kept_in_a_folder_of_the_apps_cache() {
+        let root = std::path::Path::new("/hangar-test-root");
+        let paths = hangar_core::Paths::rooted(root);
+        assert_eq!(
+            cache_dir(&paths),
+            Some(root.join("cache").join("kit-modules"))
+        );
+    }
+
+    #[test]
+    fn the_runtime_is_made_with_the_cache_it_was_given_before_it_was_made() {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-runtime-{}", std::process::id()));
+        let mut runtime = Runtime::default();
+        runtime.cache_in(Some(dir.clone()));
+        let made = runtime.runtime().expect("an engine");
+        assert_eq!(made.cache_dir(), Some(dir.as_path()));
+        // Asked again, or for another folder, it is the same engine: a cache
+        // cannot be moved under modules already compiled.
+        runtime.cache_in(None);
+        assert_eq!(
+            runtime.runtime().expect("an engine").cache_dir(),
+            Some(dir.as_path())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut plain = Runtime::default();
+        assert_eq!(plain.runtime().expect("an engine").cache_dir(), None);
+    }
+
+    #[test]
+    fn a_module_that_is_not_webassembly_is_refused_in_words() {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-module-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("tab.wasm");
+        std::fs::write(&file, b"not a module").unwrap();
+        let mut runtime = Runtime::default();
+        let refused = runtime.module(&file).err().expect("refused");
+        assert!(refused.contains("not a WebAssembly module"), "{refused}");
+        // The refusal is kept for as long as the file is not written again.
+        assert_eq!(runtime.module(&file).err(), Some(refused));
+        let missing = runtime
+            .module(&dir.join("gone.wasm"))
+            .err()
+            .expect("missing");
+        assert!(missing.contains("gone.wasm"), "{missing}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
