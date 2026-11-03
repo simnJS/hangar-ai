@@ -563,10 +563,15 @@ fn entries_under(dir: &Path) -> Vec<PathBuf> {
     files_under(dir)
         .into_iter()
         .filter(|file| {
+            // wasmtime's cache writes each entry to a `.wip-…` file it then
+            // renames, and keeps usage in `.stats` files beside the entries; on
+            // Windows a write still under way can be seen, so neither counts.
+            let name = file.file_name().map(|name| name.to_string_lossy());
             file.components().any(|part| part.as_os_str() == "modules")
                 && file
                     .extension()
                     .is_none_or(|extension| extension != "stats")
+                && !name.is_some_and(|name| name.contains(".wip"))
         })
         .collect()
 }
@@ -603,7 +608,8 @@ fn a_module_compiled_once_is_read_back_from_disk_by_the_next_run() {
     runs(&first, &first.compile(&bytes).expect("compiles"));
     let stats = first.cache_stats().expect("a cache");
     assert_eq!((stats.hits, stats.misses), (0, 1));
-    assert_eq!(entries_under(&scratch.0).len(), 1, "one module was kept");
+    let entries = entries_under(&scratch.0);
+    assert_eq!(entries.len(), 1, "one module was kept: {entries:?}");
 
     // Another run, with an engine of its own, reads that back and runs it.
     let second = cached(&scratch.0);
@@ -617,7 +623,8 @@ fn a_module_compiled_once_is_read_back_from_disk_by_the_next_run() {
         .expect("compiles");
     let stats = second.cache_stats().expect("a cache");
     assert_eq!((stats.hits, stats.misses), (1, 1));
-    assert_eq!(entries_under(&scratch.0).len(), 2);
+    let entries = entries_under(&scratch.0);
+    assert_eq!(entries.len(), 2, "{entries:?}");
 }
 
 #[test]
