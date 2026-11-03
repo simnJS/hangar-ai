@@ -10,8 +10,9 @@
 //! repeats its press, so a press that also stopped would cut every dictation
 //! short at the auto-repeat delay.
 //!
-//! The shortcut itself is the keymap's: the shell's `commands::run` must turn
-//! `CommandId::VoiceDictate` into `Message::Voice(Msg::Press)`.
+//! The shortcut itself is the keymap's: the shell's `commands::run` turns
+//! `CommandId::VoiceDictate` into `Intent::Dictate`, which `on_intent` here
+//! takes as a press.
 
 pub mod hud;
 
@@ -219,6 +220,9 @@ pub enum Msg {
     Tick,
     /// The microphone opened, or did not.
     Started(Result<(), String>),
+    /// The app has just started: a microphone the core still holds open from
+    /// before is let go (`voiceRecording`, the mount effect of `lib/voice.ts`).
+    Recover,
 }
 
 fn notice(text: String) -> Task<Message> {
@@ -236,14 +240,11 @@ fn failed(m: &Model, error: &str) -> Task<Message> {
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Press => {
-            // Dictation is an opt-in: the shortcut is only live with the
-            // setting on (`voice.dictate` was only in the handlers then).
-            if !m.settings().voice_enabled || !st.press() {
+            let Some(config) = begin(st, m) else {
                 return Task::none();
-            }
+            };
             let host = sv.core().host().clone();
             let manager = sv.core().core().voice().clone();
-            let config = voice_config(m.settings());
             Task::perform(
                 hangar_core::voice::voice_start(host, manager, config),
                 |result| Message::Voice(Msg::Started(result)),
@@ -267,6 +268,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             st.set_phase(Phase::Idle);
             failed(m, &error)
         }
+        Msg::Recover => recover(m, sv),
         Msg::Release | Msg::Blur => stop(st, m, sv, false),
         Msg::Cancel => stop(st, m, sv, true),
         Msg::Tick => {
@@ -274,6 +276,44 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
     }
+}
+
+/// What a press does here, before the microphone is asked: the configuration
+/// to record with, or `None` when the press is not a dictation. Dictation is an
+/// opt-in, so the shortcut only works with the setting on (`voice.dictate` was
+/// only in the handlers then), and only an idle gesture starts one.
+fn begin(st: &mut State, m: &Model) -> Option<VoiceConfig> {
+    if !m.settings().voice_enabled || !st.press() {
+        return None;
+    }
+    Some(voice_config(m.settings()))
+}
+
+/// Whether the core is holding a microphone open that nobody can close any
+/// more. A reload used to leave one behind in the TS, since the key that
+/// started it belonged to a window that no longer existed; here it is a
+/// previous run of the interface against a core that outlived it.
+fn stale_recording(manager: &hangar_core::voice::VoiceManager) -> bool {
+    hangar_core::voice::voice_recording(manager)
+}
+
+/// A microphone left open is dropped, not adopted: what was recorded before
+/// is not something anyone still wants typed into a pane.
+fn recover(m: &Model, sv: &Services) -> Task<Message> {
+    let host = sv.core().host().clone();
+    let manager = sv.core().core().voice().clone();
+    let config = voice_config(m.settings());
+    Task::perform(
+        async move {
+            let _ = tokio::task::spawn_blocking(move || {
+                if stale_recording(&manager) {
+                    hangar_core::voice::voice_stop(&host, &manager, config, true);
+                }
+            })
+            .await;
+        },
+        |()| Message::Noop,
+    )
 }
 
 /// `voice_stop` returns at once, but dropping the recorder joins the capture
@@ -304,7 +344,10 @@ fn send_stop(m: &Model, sv: &Services, cancel: bool) -> Task<Message> {
 /// scrolls on its own beat. While transcribing: the wave. Idle: nothing, so no
 /// timer runs and no key is read for a feature that is not in use.
 pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
-    match st.phase {
+    // Once, when the app starts, whatever the phase: `run_with` keeps the
+    // stream for as long as the same data is asked for.
+    let recover = Subscription::run_with(0u8, recovery);
+    let phase = match st.phase {
         Phase::Idle => Subscription::none(),
         Phase::Recording => Subscription::batch([
             iced::event::listen_with(|event, _status, _window| match event {
@@ -321,7 +364,16 @@ pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
             iced::time::every(TICK).map(|_| Message::Voice(Msg::Tick)),
         ]),
         Phase::Transcribing => iced::time::every(WAVE_TICK).map(|_| Message::Noop),
-    }
+    };
+    Subscription::batch([recover, phase])
+}
+
+// `Subscription::run_with` hands the builder a reference to the data it is
+// identified by.
+fn recovery(_: &u8) -> impl iced::futures::Stream<Item = Message> + use<> {
+    use iced::futures::StreamExt;
+    iced::futures::stream::once(async { Message::Voice(Msg::Recover) })
+        .chain(iced::futures::stream::pending())
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
@@ -333,12 +385,18 @@ pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Mess
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it.
 pub fn on_intent(
-    _st: &mut State,
-    _m: &mut Model,
-    _sv: &Services,
-    _intent: &Intent,
+    st: &mut State,
+    m: &mut Model,
+    sv: &Services,
+    intent: &Intent,
 ) -> Option<Task<Message>> {
-    None
+    Some(update(st, m, sv, press_of(intent)?))
+}
+
+/// The command table sends `Intent::Dictate` for the shortcut
+/// (`voice.dictate`); it is a press, which only ever starts.
+fn press_of(intent: &Intent) -> Option<Msg> {
+    matches!(intent, Intent::Dictate).then_some(Msg::Press)
 }
 
 /// The dictation's events: its phase (and what went wrong), its level, and
