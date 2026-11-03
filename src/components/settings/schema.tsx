@@ -4,6 +4,12 @@ import { LOCALES, systemLocale, type Translator } from "../../i18n";
 import { DEFAULT_AGENT_COMMANDS } from "../../lib/agents";
 import { HIBERNATE_DELAYS } from "../../lib/hibernate";
 import { buildPresence } from "../../lib/discord";
+import {
+  availableExperiments,
+  withExperiment,
+  type Experiment,
+  type Platform,
+} from "../../lib/experiments";
 import { isMac } from "../../lib/keys";
 import { THEMES, deriveChromeTokens, type TerminalTheme } from "../../themes";
 import { DiscordCard } from "./DiscordCard";
@@ -121,6 +127,8 @@ export interface SettingsContext {
   workspace: Workspace | null;
   /** Empty until the Tauri side answers — the row hides itself meanwhile. */
   version: string;
+  /** The experiments to offer. Left out, the shipped list: only tests pass their own. */
+  experiments?: readonly Experiment[];
   set: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   patchWorkspace: (patch: Partial<Workspace>) => void;
   resetSettings: () => void;
@@ -277,8 +285,20 @@ function TerminalPreview({ settings }: { settings: Settings }) {
   );
 }
 
+const PLATFORM_NAMES: Record<Platform, string> = {
+  linux: "Linux",
+  windows: "Windows",
+  macos: "macOS",
+};
+
 export function buildCategories(ctx: SettingsContext): SettingCategory[] {
   const { t, settings, shells, workspace, version, set, patchWorkspace } = ctx;
+
+  // The page only exists while there is something to put on it, so a version
+  // with no experiment shows no empty "Experimental" entry.
+  const experiments = availableExperiments(ctx.experiments);
+  const isOn = (id: string) =>
+    Array.isArray(settings.experiments) && settings.experiments.includes(id);
 
   // A workspace can pin its own theme; otherwise it follows the global one.
   const pinnedThemeId = workspace?.themeId ?? null;
@@ -1108,6 +1128,45 @@ export function buildCategories(ctx: SettingsContext): SettingCategory[] {
         },
       ],
     },
+
+    ...(experiments.length > 0
+      ? [
+          {
+            id: "experimental",
+            label: t("settings.catExperimental"),
+            icon: "bolt" as const,
+            sections: [
+              {
+                id: "experiments",
+                title: t("experiments.title"),
+                hint: t("experiments.warning"),
+                items: experiments.map((experiment) => ({
+                  id: `experiment.${experiment.id}`,
+                  kind: "toggle" as const,
+                  label: t(experiment.title),
+                  hint: [
+                    t(`experiments.stage.${experiment.stage}`),
+                    experiment.platforms
+                      ? t("experiments.onlyOn", {
+                          platforms: experiment.platforms
+                            .map((platform) => PLATFORM_NAMES[platform])
+                            .join(", "),
+                        })
+                      : null,
+                    t(experiment.hint),
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
+                  keywords: "experimental experiment experiments beta labs expérimental expérience bêta",
+                  value: isOn(experiment.id),
+                  onChange: (on: boolean) =>
+                    set("experiments", withExperiment(settings.experiments, experiment.id, on)),
+                })),
+              },
+            ],
+          },
+        ]
+      : []),
 
     {
       id: "about",
