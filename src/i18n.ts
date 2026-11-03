@@ -986,6 +986,12 @@ const en = {
   "window.elsewhereBody":
     "Its panes run there. Closing that window brings the workspace back here, agents still running.",
   "window.openFailed": "Could not open the window: {error}",
+  "window.noAnswer": "the system never showed it",
+  "state.loadFailed": "Could not read state.json: {error}",
+  "state.loadKept": "Could not read state.json ({error}). It is kept as {path}, and Hangar.AI starts empty.",
+  "state.loadHeld":
+    "Could not read state.json ({error}). It stays as it is, and nothing will be saved over it until it can be moved aside.",
+  "state.saveHeld": "Not saved, so that the unreadable state.json stays as it is: {error}",
   "window.inOwnWindow": "Open in a window of its own",
   "window.bringBack": "Bring it back here",
   "settings.agentControlSection": "Agents and panes",
@@ -2563,6 +2569,12 @@ const fr: Record<Key, string> = {
   "window.elsewhereBody":
     "Ses panneaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.",
   "window.openFailed": "Impossible d'ouvrir la fenêtre : {error}",
+  "window.noAnswer": "le système ne l'a jamais affichée",
+  "state.loadFailed": "Impossible de lire state.json : {error}",
+  "state.loadKept": "Impossible de lire state.json ({error}). Il est conservé sous {path}, et Hangar.AI démarre à vide.",
+  "state.loadHeld":
+    "Impossible de lire state.json ({error}). Il reste tel quel, et rien ne sera enregistré par-dessus tant qu'il ne pourra pas être mis de côté.",
+  "state.saveHeld": "Non enregistré, pour que le state.json illisible reste tel quel : {error}",
   "window.inOwnWindow": "Ouvert dans sa propre fenêtre",
   "window.bringBack": "Le ramener ici",
   "settings.agentControlSection": "Agents et panneaux",
