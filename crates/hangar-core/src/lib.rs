@@ -282,3 +282,93 @@ pub fn board_comment(
 ) -> Result<board::Task, String> {
     ui_store().update(&cwd, |b| board::add_comment(b, &id, &author, &text))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+
+    /// What the app needs of an async command: a future it can hand to its
+    /// executor (`iced::Task::perform` wants `Send + 'static`), which owns
+    /// what it was given rather than borrowing from the caller.
+    fn sendable<F: Future + Send + 'static>(_: impl FnOnce() -> F) {}
+
+    /// Checked when the tests compile; the closures are never called, which
+    /// is what lets `todo!()` stand for every argument.
+    #[allow(unreachable_code)]
+    #[test]
+    fn every_async_command_is_a_future_the_app_can_spawn() {
+        sendable(|| crate::chat::chat_page(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::context::context_usage(todo!(), todo!(), todo!()));
+        sendable(|| crate::delivery::delivery_cleanup(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| {
+            crate::delivery::delivery_preflight(todo!(), todo!(), todo!(), todo!(), todo!())
+        });
+        sendable(|| crate::delivery::delivery_run(todo!()));
+        sendable(|| crate::git::git_branch_delete(todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_branches(todo!()));
+        sendable(|| crate::git::git_changes(todo!(), todo!()));
+        sendable(|| crate::git_clone::git_clone(todo!(), todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::git_clone::git_clone_discard(todo!()));
+        sendable(|| crate::git::git_commits_ahead(todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_copy_untracked(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_fetch(todo!()));
+        sendable(|| crate::git::git_file_diff(todo!(), todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_repo_info(todo!()));
+        sendable(|| crate::git_clone::git_repo_ownership(todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_add(todo!(), todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_hook(todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_list(todo!()));
+        sendable(|| crate::git::git_worktree_lock(todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_migrate(todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_prune(todo!()));
+        sendable(|| crate::git::git_worktree_remove(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::git::git_worktree_unlock(todo!(), todo!()));
+        sendable(|| crate::git::git_worktrees_merged(todo!(), todo!()));
+        sendable(|| crate::kits::kit_add_folder(todo!(), todo!()));
+        sendable(|| crate::kits::kit_add_git(todo!(), todo!()));
+        sendable(|| crate::kits::kit_check_update(todo!(), todo!()));
+        sendable(|| {
+            crate::kits::commands::kit_command_run(todo!(), todo!(), todo!(), todo!(), todo!())
+        });
+        sendable(|| crate::kits::data::kit_data_read(todo!(), todo!()));
+        sendable(|| crate::kits::data::kit_data_write(todo!(), todo!(), todo!()));
+        sendable(|| crate::kit_scheme::files::kit_file_read(todo!(), todo!()));
+        sendable(|| crate::kits::files::kit_files_list(todo!(), todo!(), todo!()));
+        sendable(|| crate::kits::files::kit_files_read(todo!(), todo!()));
+        sendable(|| crate::kits::files::kit_files_read_binary(todo!(), todo!(), todo!()));
+        sendable(|| crate::kits::files::kit_files_write(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::kits::files::kit_files_write_binary(todo!(), todo!(), todo!()));
+        sendable(crate::kits::gallery::kit_gallery_list);
+        sendable(|| crate::kits::kit_inspect(todo!()));
+        sendable(|| {
+            crate::kits::loopback::kit_loopback_fetch(todo!(), todo!(), todo!(), todo!(), todo!())
+        });
+        sendable(|| crate::kits::kit_remove(todo!(), todo!()));
+        sendable(|| crate::kits::kit_setup_mark(todo!(), todo!()));
+        sendable(|| crate::kits::kit_setup_status(todo!()));
+        sendable(|| crate::kits::kit_update(todo!(), todo!()));
+        sendable(|| crate::kit_scheme::files::kit_workspace_path(todo!(), todo!()));
+        sendable(crate::kits::kits_list);
+        sendable(|| crate::model::model_allow_roots(todo!()));
+        sendable(|| crate::model::model_save_png(todo!(), todo!()));
+        sendable(|| crate::model::model_stat(todo!()));
+        sendable(|| crate::open_editor::open_in_vscode(todo!(), todo!()));
+        sendable(|| crate::preview::preview_inspect(todo!()));
+        sendable(|| crate::pty::pty_has_children(todo!(), todo!()));
+        sendable(|| crate::remote::remote_app_slots(todo!()));
+        sendable(|| crate::remote::remote_pair_start(todo!()));
+        sendable(|| crate::remote::remote_ports_listening(todo!()));
+        sendable(|| crate::remote::remote_push(todo!(), todo!(), todo!(), todo!()));
+        sendable(|| crate::remote::remote_push_subscribers(todo!()));
+        sendable(|| crate::remote::remote_set_enabled(todo!(), todo!()));
+        sendable(|| crate::remote::remote_status(todo!()));
+        sendable(|| crate::remote::remote_tailscale(todo!()));
+        sendable(|| crate::remote::remote_tailscale_serve(todo!()));
+        sendable(|| crate::stats::usage_stats(todo!(), todo!(), todo!(), todo!()));
+        sendable(crate::voice::key::voice_key_clear);
+        sendable(|| crate::voice::key::voice_key_set(todo!()));
+        sendable(crate::voice::key::voice_key_status);
+        sendable(|| crate::voice::models::voice_model_download(todo!(), todo!()));
+        sendable(|| crate::voice::voice_start(todo!(), todo!(), todo!()));
+    }
+}
