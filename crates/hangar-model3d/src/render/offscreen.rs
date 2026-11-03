@@ -93,6 +93,20 @@ fn open() -> Result<Offscreen, CaptureError> {
     Err(CaptureError::NoGpu(last))
 }
 
+/// A device for tests that draw through the window's path instead of this
+/// module's own: the same adapter search, a device of its own. `None` on a
+/// machine with no adapter, where such a test has nothing to check.
+#[cfg(test)]
+pub(crate) fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    match open() {
+        Ok(Offscreen { device, queue, .. }) => Some((device, queue)),
+        Err(error) => {
+            eprintln!("skipped, no GPU: {error}");
+            None
+        }
+    }
+}
+
 /// Draws the scene at `size` and reads it back: RGBA, 8 bits a channel, top
 /// row first, sRGB-encoded as a PNG wants it.
 pub(crate) fn render(

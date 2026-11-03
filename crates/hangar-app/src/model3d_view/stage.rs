@@ -13,12 +13,15 @@
 //! - A model that could not be opened at all: a message with the reason (the
 //!   crate's own sentence, which says what to export instead for a Draco, KTX2
 //!   or USDZ file) and Retry.
+//! - A model that is loaded and cannot be drawn (the window is drawn in
+//!   software, the GPU could not be set up, refused the model, or was lost):
+//!   a message over the blank viewport, with Restart where it can help.
 
 use iced::widget::{Space, column, container, progress_bar, row, stack, text};
 use iced::{Alignment, Background, Element, Length, Padding, alignment};
 
 use hangar_i18n::{Key, args};
-use hangar_model3d::{LoadProgress, Phase};
+use hangar_model3d::{LoadProgress, Phase, Rendering};
 use hangar_theme::{Theme, fonts, style, tokens};
 use hangar_ui::{Icon, button};
 
@@ -118,6 +121,13 @@ pub fn view<'a>(
     }
     layers = layers.push(notes);
 
+    // A viewport that cannot draw is blank: say why, over it.
+    if let Some(slot) = content
+        && let Some(message) = trouble(ctx, id, slot.viewer.rendering())
+    {
+        layers = layers.push(message);
+    }
+
     // Nothing on screen yet: why.
     if !has_content {
         layers = if entry.status == Status::Error {
@@ -145,6 +155,55 @@ pub fn view<'a>(
         };
     }
     layers.into()
+}
+
+/// What to say over a viewport that cannot draw, if it cannot
+/// (`StageMessage` for the engine's `failed` and `lost` states).
+///
+/// - Drawn by iced's software renderer: the 3D view cannot run there at all.
+///   Nothing to try, so no button; the capture button and agents' pictures
+///   still work, and the sentence says so.
+/// - The GPU could not be set up: the device's own words, and Restart, which
+///   sets it up again.
+/// - The GPU refused this model: the device's words, and Restart.
+/// - The device was lost (a reset, a driver crash): the card dropped the view,
+///   and Restart.
+fn trouble<'a>(ctx: Ctx<'a>, id: &str, rendering: Rendering) -> Option<Element<'a, Message>> {
+    let t = ctx.theme;
+    let restart = || {
+        Some((
+            ctx.t(Key::ModelRestart).into_owned(),
+            to(Msg::Restart(id.to_string())),
+        ))
+    };
+    // A reason that is empty (a refusal the device gave no words for) is not
+    // a detail.
+    let words = |reason: String| Some(reason).filter(|reason| !reason.trim().is_empty());
+    let (feel, title, detail, action) = match rendering {
+        Rendering::Starting | Rendering::Drawing => return None,
+        Rendering::Software => (
+            Feel::Warning,
+            Key::ModelUnavailable,
+            Some(ctx.t(Key::ModelSoftware).into_owned()),
+            None,
+        ),
+        Rendering::Unavailable(reason) => (
+            Feel::Danger,
+            Key::ModelUnavailable,
+            words(reason),
+            restart(),
+        ),
+        Rendering::Failed(reason) => (Feel::Danger, Key::ModelDrawFailed, words(reason), restart()),
+        Rendering::Lost(reason) => (Feel::Warning, Key::ModelLost, words(reason), restart()),
+    };
+    Some(parts::stage_message(
+        t,
+        Mark::Icon(Icon::Alert),
+        feel,
+        ctx.t(title).into_owned(),
+        detail,
+        action,
+    ))
 }
 
 /// How many of the loader's warnings are written out; the rest are counted.

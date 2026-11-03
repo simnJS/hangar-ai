@@ -9,7 +9,8 @@ use std::collections::BTreeSet;
 
 use glam::Mat4;
 
-use crate::model::{Clip, Model, Topology};
+use crate::animation::Clip;
+use crate::model::{Model, Topology};
 
 /// Above this many vertices the bounds come from each mesh's box, not its
 /// vertices.
@@ -309,16 +310,7 @@ mod tests {
 
     #[test]
     fn lists_the_clips_in_file_order_naming_the_unnamed_ones() {
-        let clips = [
-            Clip {
-                name: "Flight".into(),
-                duration: 1.0,
-            },
-            Clip {
-                name: "  ".into(),
-                duration: 1.0,
-            },
-        ];
+        let clips = [Clip::new("Flight", 1.0), Clip::new("  ", 1.0)];
         assert_eq!(clip_names(&clips), ["Flight", "Animation 2"]);
     }
 

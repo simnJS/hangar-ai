@@ -338,6 +338,71 @@ fn loads_and_draws_the_demo_hangar() {
     assert!(rows.last().unwrap() - rows.first().unwrap() > 200);
 }
 
+fn differing(a: &image::RgbaImage, b: &image::RgbaImage) -> usize {
+    a.pixels()
+        .zip(b.pixels())
+        .filter(|(a, b)| !close(**a, **b, 8))
+        .count()
+}
+
+#[test]
+fn pictures_an_animated_model_at_the_moment_asked_and_at_its_start_otherwise() {
+    use hangar_model3d::Playhead;
+    let model = model_from("slide.glb", &samples::animated_cube_glb());
+    let at = |time: f32| {
+        shoot(
+            CaptureJob::snapshot(model.clone(), SnapshotAngle::Front, 200, 150, theme())
+                .at(Some(Playhead { clip: 0, time })),
+        )
+    };
+    let (Some(start), Some(out), Some(back)) = (at(0.0), at(1.0), at(2.0)) else {
+        return;
+    };
+    assert!(
+        differing(&start, &out) > 300,
+        "the cube is somewhere else at one second"
+    );
+    assert_eq!(
+        differing(&start, &back),
+        0,
+        "and home at two: the clip loops"
+    );
+    // With no moment given, an agent's snapshot is of the first frame.
+    let Some(default) = snapshot(&model, SnapshotAngle::Front, 200, 150) else {
+        return;
+    };
+    assert_eq!(differing(&start, &default), 0);
+}
+
+#[test]
+fn pictures_a_bent_skin_and_a_morphed_mesh() {
+    use hangar_model3d::Playhead;
+    for (name, bytes) in [
+        ("skin.glb", samples::skinned_glb()),
+        ("morph.glb", samples::morphing_glb()),
+    ] {
+        let model = model_from(name, &bytes);
+        let at = |time: f32| {
+            shoot(
+                CaptureJob::snapshot(model.clone(), SnapshotAngle::Front, 160, 240, theme())
+                    .at(Some(Playhead { clip: 0, time })),
+            )
+        };
+        let (Some(start), Some(end)) = (at(0.0), at(1.0)) else {
+            return;
+        };
+        let background = image::Rgba(theme().background.into_rgba8());
+        let rows = |image: &image::RgbaImage| {
+            (0..240)
+                .filter(|&y| (0..160).any(|x| !close(*image.get_pixel(x, y), background, 12)))
+                .count()
+        };
+        // The picture keeps the framing of the rest pose, so the box that has
+        // grown three times as tall covers more rows of it.
+        assert!(rows(&end) > rows(&start) + 30, "{name}");
+    }
+}
+
 #[test]
 fn says_there_is_nothing_to_draw_without_a_model() {
     // No GPU is needed to be told that.

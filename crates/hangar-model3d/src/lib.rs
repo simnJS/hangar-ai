@@ -47,14 +47,25 @@
 //! CaptureJob::snapshot(model, SnapshotAngle::Iso, 1024, 768, theme).run_async()
 //! ```
 //!
+//! Animation: a glTF's clips play. A viewer starts the first one when a model
+//! opens, [`ModelViewer::playback`] says where it is and
+//! [`ModelViewer::set_playing`], [`ModelViewer::set_clip`] and
+//! [`ModelViewer::seek`] drive it. Node animation, skins and morph targets are
+//! all played ([`animation`]); the vertices of a deformed mesh are moved on the
+//! processor and written to the GPU each frame.
+//!
 //! The viewport draws only on iced's wgpu renderer. On its software fallback
 //! (tiny-skia) it stays empty — captures still work, they bring their own
 //! device — and a GPU error inside the widget is reported on stderr instead of
-//! taking the window down.
+//! taking the window down. None of that is silent: [`ModelViewer::rendering`]
+//! says which of them happened, for the app to put a sentence over the blank
+//! viewport, and [`ModelViewer::restart`] tries again.
 
+pub mod animation;
 pub mod camera;
 pub mod formats;
 pub mod framing;
+pub(crate) mod health;
 pub mod load;
 pub mod model;
 pub(crate) mod render;
@@ -63,6 +74,7 @@ pub mod stats;
 pub mod theme;
 pub mod viewer;
 
+pub use animation::{Clip, Playhead};
 pub use formats::{LoadError, MAX_MODEL_BYTES, ModelFormat};
 pub use framing::{Bounds, SnapshotAngle};
 pub use load::{Cancel, LoadEvent, LoadOptions, LoadProgress, Phase};
@@ -72,6 +84,6 @@ pub use render::offscreen::CaptureError;
 pub use stats::ModelInfo;
 pub use theme::ViewerTheme;
 pub use viewer::{
-    CaptureJob, Event, LoadState, ModelViewer, Stamp, capture_name, describe, load_task,
-    snapshot_png,
+    CaptureJob, Event, LoadState, ModelViewer, Playback, Rendering, Stamp, capture_name, describe,
+    load_task, snapshot_png,
 };

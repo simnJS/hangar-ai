@@ -143,7 +143,7 @@ pub(super) fn settle(
         let slot = st
             .slots
             .entry(want.id.clone())
-            .or_insert_with(|| Slot::new(want.ws.clone(), st.display));
+            .or_insert_with(|| Slot::new(want.ws.clone(), st.display, st.reduced_motion));
         slot.ws = want.ws.clone();
         if want.front && want.on_screen {
             st.clock += 1;

@@ -14,6 +14,7 @@
 mod frame;
 pub(crate) mod offscreen;
 mod pipelines;
+mod pose;
 mod upload;
 
 use std::collections::HashMap;
@@ -33,6 +34,12 @@ pub(crate) const SAMPLES: u32 = 4;
 
 /// Past this many vertices, drawing every normal costs more than it shows.
 pub const NORMALS_LIMIT: usize = 600_000;
+/// The normals follow a playing animation frame by frame up to this many
+/// vertices in a mesh (the old viewer's `LIVE_NORMALS_LIMIT`).
+pub(crate) const LIVE_NORMALS_LIMIT: usize = 150_000;
+/// The pixels of textures sent to a window's GPU in one frame, so a model
+/// with many large ones comes in over a few frames instead of holding one.
+pub(crate) const WINDOW_UPLOAD_BUDGET: usize = 16 * 1024 * 1024;
 
 /// Runs GPU work and reports what the device objected to instead of letting it
 /// panic: on the window's device, an error nobody caught takes the whole
@@ -102,6 +109,13 @@ pub(crate) struct Gpu {
     targets: HashMap<u64, frame::Target>,
     /// Counts frames, for dropping what has not been drawn in a while.
     frame: u64,
+    /// The vertices of a deformed mesh while they are being worked out, kept
+    /// from one frame to the next so that a clip does not allocate each time.
+    scratch: Vec<crate::model::Vertex>,
+    /// A test asks the next `prepare` to make something the device refuses,
+    /// the way a model too large for it would.
+    #[cfg(test)]
+    pub(crate) refuse_next: bool,
 }
 
 /// Models kept on the GPU besides the one being drawn, so tabs switch
@@ -172,6 +186,9 @@ impl Gpu {
             generation: 0,
             targets: HashMap::new(),
             frame: 0,
+            scratch: Vec::new(),
+            #[cfg(test)]
+            refuse_next: false,
         }
     }
 

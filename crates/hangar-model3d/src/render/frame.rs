@@ -15,6 +15,7 @@ use super::upload::{GpuMaterial, GpuModel};
 use super::{
     COLOR_FORMAT, CameraMatrices, DEPTH_FORMAT, DisplayOptions, Gpu, NORMALS_LIMIT, SAMPLES,
 };
+use crate::animation::Playhead;
 use crate::framing::grid_spacing;
 use crate::model::{Model, Topology};
 use crate::theme::{ViewerTheme, to_linear};
@@ -58,6 +59,13 @@ pub(crate) struct Scene<'a> {
     /// Physical pixels to a logical one, for things drawn at a size in
     /// pixels.
     pub pixel_ratio: f32,
+    /// Where in the model's animation to draw it; `None` draws the file's own
+    /// pose.
+    pub playhead: Option<Playhead>,
+    /// The pixels of textures to send to the GPU in this frame, at most (one
+    /// texture always goes): a window spreads a large model's textures over
+    /// several frames, a picture taken for an agent sends them all.
+    pub upload_budget: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -224,11 +232,25 @@ impl Gpu {
 
     /// Uploads what the scene needs and works out what to draw. `viewer`
     /// names the target the picture is drawn into, `size` is its size in
-    /// physical pixels.
-    pub(crate) fn prepare(&mut self, viewer: u64, size: (u32, u32), scene: &Scene<'_>) {
+    /// physical pixels. Returns whether textures are still waiting to go to
+    /// the GPU, which a later frame sends.
+    pub(crate) fn prepare(&mut self, viewer: u64, size: (u32, u32), scene: &Scene<'_>) -> bool {
         let max = self.device.limits().max_texture_dimension_2d;
         let size = (size.0.clamp(1, max), size.1.clamp(1, max));
 
+        #[cfg(test)]
+        if std::mem::take(&mut self.refuse_next) {
+            // A buffer past the device's limit: a validation error, as any
+            // upload the device refuses would raise.
+            let _ = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("too large"),
+                size: u64::MAX / 8,
+                usage: wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            });
+        }
+
+        let mut more = false;
         let mut gpu_model: Option<GpuModel> = None;
         if let Some(model) = scene.model {
             let uploaded = match self.models.remove(&model.id) {
@@ -239,6 +261,9 @@ impl Gpu {
         }
         if let (Some(model), Some(uploaded)) = (scene.model, gpu_model.as_mut()) {
             uploaded.last_used = self.frame;
+            more = self.upload_textures(uploaded, model, scene.upload_budget);
+            let normals = scene.display.normals && model.info.vertices <= NORMALS_LIMIT;
+            self.pose(model, uploaded, scene.playhead, normals);
             self.prepare_overlays(model, uploaded, scene.display);
         }
 
@@ -268,6 +293,7 @@ impl Gpu {
         if let (Some(model), Some(uploaded)) = (scene.model, gpu_model) {
             self.models.insert(model.id, uploaded);
         }
+        more
     }
 
     /// The buffers the wireframe and the normals draw from, made the first

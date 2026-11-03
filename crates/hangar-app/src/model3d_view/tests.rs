@@ -1090,8 +1090,34 @@ fn every_state_draws_in_both_languages_and_a_dark_and_a_light_theme() {
                 let colours = to_iced(hangar_theme::by_id_or_default(theme));
                 let _ = ui.snapshot(&colours).expect("it draws");
             }
+
+            // An animated model, and a viewport that cannot draw it.
+            let (mut h, id) = animated_scene("view-all-anim");
+            for open in [false, true] {
+                h.send(Msg::ClipsMenu(id.clone(), open));
+                let mut ui = scene_view(&mut h, &pkg, &id, locale, theme);
+                let colours = to_iced(hangar_theme::by_id_or_default(theme));
+                let _ = ui.snapshot(&colours).expect("it draws");
+            }
+            for rendering in trouble_states() {
+                h.slot(&id).viewer.pretend_rendering(rendering);
+                let mut ui = scene_view(&mut h, &pkg, &id, locale, theme);
+                let colours = to_iced(hangar_theme::by_id_or_default(theme));
+                let _ = ui.snapshot(&colours).expect("it draws");
+            }
         }
     }
+}
+
+/// Each way the viewport can be unable to draw, with the device's words.
+fn trouble_states() -> [hangar_model3d::Rendering; 4] {
+    use hangar_model3d::Rendering;
+    [
+        Rendering::Software,
+        Rendering::Unavailable("no graphics adapter was found".into()),
+        Rendering::Failed("a texture of 70000 by 70000 pixels".into()),
+        Rendering::Lost("Unknown: the card was reset".into()),
+    ]
 }
 
 #[test]
@@ -1104,6 +1130,301 @@ fn an_entry_the_store_no_longer_has_draws_the_loading_stand_in() {
         Size::new(440.0, 600.0),
     );
     assert!(has_text(&mut ui, &t(Locale::En, Key::PreviewLoading)));
+}
+
+/* ── animation ─────────────────────────────────────────────────── */
+
+/// A model that slides for two seconds ("Slide") and spins for one ("Spin"),
+/// loaded and on show.
+fn animated_scene(tag: &str) -> (Harness, String) {
+    let mut h = Harness::global(tag);
+    let id = h.show("slide.glb", &samples::animated_cube_glb());
+    h.tick();
+    h.land(&id);
+    (h, id)
+}
+
+fn playback_of(h: &Harness, id: &str) -> hangar_model3d::Playback {
+    h.slot(id).viewer.playback().expect("the model has clips")
+}
+
+#[test]
+fn a_model_with_clips_starts_playing_the_first_and_the_bar_says_where_it_is() {
+    for locale in [Locale::En, Locale::Fr] {
+        let (mut h, id) = animated_scene("anim-view");
+        let p = playback_of(&h, &id);
+        assert_eq!((p.clip, p.time, p.duration, p.playing), (0, 0.0, 2.0, true));
+
+        h.send(Msg::Seek(id.clone(), 1.25));
+        let pkg = Packages::default();
+        let mut ui = scene_view(&mut h, &pkg, &id, locale, "graphite");
+        // The clip that plays, and the time of it.
+        assert!(has_text(&mut ui, "Slide"));
+        let of = hangar_i18n::t_with(
+            locale,
+            Key::ModelTimeOf,
+            &hangar_i18n::args!(
+                "time" => format::seconds(1.25, locale),
+                "total" => format::seconds(2.0, locale)
+            ),
+        );
+        assert!(has_text(&mut ui, &of), "{of}");
+    }
+}
+
+#[test]
+fn a_model_that_stands_still_has_no_bar() {
+    let mut h = Harness::global("anim-none");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.land(&id);
+    assert!(h.slot(&id).viewer.playback().is_none());
+    let pkg = Packages::default();
+    let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+    assert!(!has_text(&mut ui, "0.0 / 0.0\u{a0}s"));
+    assert!(has_text(&mut ui, "GLB"), "the rest of the view is there");
+}
+
+#[test]
+fn the_bar_plays_pauses_picks_a_clip_and_scrubs_through_the_viewer() {
+    let (mut h, id) = animated_scene("anim-msgs");
+    h.send(Msg::PlayPause(id.clone()));
+    assert!(!playback_of(&h, &id).playing);
+    h.send(Msg::PlayPause(id.clone()));
+    assert!(playback_of(&h, &id).playing);
+
+    h.send(Msg::Seek(id.clone(), 1.5));
+    assert_eq!(playback_of(&h, &id).time, 1.5);
+    h.send(Msg::Seek(id.clone(), 99.0));
+    assert_eq!(playback_of(&h, &id).time, 2.0, "held to the clip");
+
+    h.send(Msg::ClipsMenu(id.clone(), true));
+    h.send(Msg::Clip(id.clone(), 1));
+    let p = playback_of(&h, &id);
+    assert_eq!((p.clip, p.time, p.duration, p.playing), (1, 0.0, 1.0, true));
+    assert!(!h.slot(&id).clips_menu, "picking a clip closes the menu");
+    h.send(Msg::Clip(id.clone(), 7));
+    assert_eq!(playback_of(&h, &id).clip, 1, "there is no eighth");
+
+    // A bar for a model that is gone does nothing.
+    h.send(Msg::PlayPause("not-open".into()));
+    h.send(Msg::Seek("not-open".into(), 1.0));
+    h.send(Msg::Clip("not-open".into(), 0));
+}
+
+#[test]
+fn the_clip_menu_opens_from_the_name_of_the_clip_that_plays() {
+    let (mut h, id) = animated_scene("anim-menu");
+    let pkg = Packages::default();
+    // Closed: the playing clip's name opens it, and the others are not shown.
+    {
+        let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+        assert!(!has_text(&mut ui, "Spin"), "the other clip is in the menu");
+        ui.click("Slide").expect("the clip's name");
+        let messages: Vec<Message> = ui.into_messages().collect();
+        assert!(
+            messages.iter().any(|message| matches!(
+                message,
+                Message::Model3d(Msg::ClipsMenu(found, true)) if *found == id
+            )),
+            "{messages:?}"
+        );
+    }
+    // Open, the bar still draws (the lines are in an overlay, whose
+    // mechanics are hangar-ui's menu tests') and the clip stays the same
+    // until a line is picked.
+    h.send(Msg::ClipsMenu(id.clone(), true));
+    let pkg = Packages::default();
+    let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+    let colours = to_iced(hangar_theme::by_id_or_default("graphite"));
+    let _ = ui.snapshot(&colours).expect("it draws");
+    drop(ui);
+    assert_eq!(playback_of(&h, &id).clip, 0);
+}
+
+#[test]
+fn a_reload_of_the_file_keeps_the_clip_and_the_time_the_person_was_at() {
+    let (mut h, id) = animated_scene("anim-reload");
+    h.send(Msg::Clip(id.clone(), 1));
+    h.send(Msg::Seek(id.clone(), 0.5));
+    h.send(Msg::PlayPause(id.clone()));
+    h.rewrite(&id);
+    h.tick();
+    h.land(&id);
+    let p = playback_of(&h, &id);
+    assert_eq!((p.clip, p.time, p.playing), (1, 0.5, false));
+}
+
+#[test]
+fn the_view_is_built_again_for_the_slider_only_while_a_clip_plays_in_front() {
+    let (mut h, id) = animated_scene("anim-tick");
+    let ws = h.ws.clone();
+    // The store does not know the panel is drawn yet.
+    assert!(!animating_in_front(&h.st));
+    h.shared
+        .edit(|store| store.note_screens([(ws.clone(), true)]));
+    assert!(animating_in_front(&h.st), "playing, in front, on screen");
+    // A viewport that cannot draw has no slider to move.
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(hangar_model3d::Rendering::Software);
+    assert!(!animating_in_front(&h.st));
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(hangar_model3d::Rendering::Drawing);
+    assert!(animating_in_front(&h.st));
+
+    h.shared
+        .edit(|store| store.note_screens([(ws.clone(), false)]));
+    assert!(!animating_in_front(&h.st), "the panel is hidden");
+    h.shared
+        .edit(|store| store.note_screens([(ws.clone(), true)]));
+
+    h.send(Msg::PlayPause(id.clone()));
+    assert!(!animating_in_front(&h.st), "paused");
+    h.send(Msg::PlayPause(id.clone()));
+    assert!(animating_in_front(&h.st));
+
+    // Another model comes to the front: this one is no longer watched.
+    let other = h.show("other.glb", &samples::cube_glb());
+    assert_ne!(other, id);
+    assert!(!animating_in_front(&h.st));
+    // Leave the shared store as it was found.
+    h.shared.edit(|store| store.note_screens([]));
+}
+
+#[test]
+fn a_tick_only_makes_the_shell_build_the_view_again() {
+    let mut h = Harness::new("anim-tick-msg");
+    let id = h.show("slide.glb", &samples::animated_cube_glb());
+    // A look at the store would start the read; a tick does not look.
+    h.send(Msg::Tick);
+    assert!(h.st.slots.is_empty());
+    h.tick();
+    assert!(h.slot(&id).loading(h.entry(&id).revision));
+}
+
+/* ── reduced motion ────────────────────────────────────────────── */
+
+#[test]
+fn the_systems_wish_for_less_motion_is_asked_once_and_reaches_every_viewer() {
+    let mut h = Harness::new("motion");
+    assert!(!h.st.motion_asked);
+    h.tick();
+    assert!(h.st.motion_asked, "asked at the first look");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.send(Msg::ReducedMotion(true));
+    assert!(h.st.reduced_motion);
+    // A viewer that is made afterwards starts with it too.
+    let second = h.show("second.glb", &samples::cube_glb());
+    h.tick();
+    assert!(h.st.slots.contains_key(&id) && h.st.slots.contains_key(&second));
+    h.send(Msg::ReducedMotion(false));
+    assert!(!h.st.reduced_motion);
+}
+
+/* ── a viewport that cannot draw ───────────────────────────────── */
+
+fn cube_on_show(tag: &str) -> (Harness, String) {
+    let mut h = Harness::global(tag);
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.land(&id);
+    (h, id)
+}
+
+#[test]
+fn a_viewport_that_cannot_draw_says_why_over_it_in_both_languages() {
+    use hangar_model3d::Rendering;
+    // Rendering, what is said, and whether there is a button to try again.
+    let cases: [(Rendering, Key, &str, bool); 4] = [
+        (Rendering::Software, Key::ModelUnavailable, "", false),
+        (
+            Rendering::Unavailable("no adapter was found".into()),
+            Key::ModelUnavailable,
+            "no adapter was found",
+            true,
+        ),
+        (
+            Rendering::Failed("a texture of 70000 pixels".into()),
+            Key::ModelDrawFailed,
+            "a texture of 70000 pixels",
+            true,
+        ),
+        (
+            Rendering::Lost("Unknown: the card was reset".into()),
+            Key::ModelLost,
+            "Unknown: the card was reset",
+            true,
+        ),
+    ];
+    for locale in [Locale::En, Locale::Fr] {
+        for (rendering, title, detail, restart) in &cases {
+            let (mut h, id) = cube_on_show("trouble");
+            h.slot(&id).viewer.pretend_rendering(rendering.clone());
+            let pkg = Packages::default();
+            let mut ui = scene_view(&mut h, &pkg, &id, locale, "graphite");
+            assert!(has_text(&mut ui, &t(locale, *title)), "{rendering:?}");
+            let detail = if *rendering == Rendering::Software {
+                t(locale, Key::ModelSoftware)
+            } else {
+                detail.to_string()
+            };
+            assert!(has_text(&mut ui, &detail), "{detail}");
+            // The model's own bar is still there: a capture still works.
+            assert!(has_text(&mut ui, "GLB"));
+            let button = t(locale, Key::ModelRestart);
+            assert_eq!(has_text(&mut ui, &button), *restart, "{rendering:?}");
+            if *restart {
+                ui.click(button.as_str()).expect("the restart button");
+                let messages: Vec<Message> = ui.into_messages().collect();
+                assert!(
+                    messages.iter().any(|message| matches!(
+                        message,
+                        Message::Model3d(Msg::Restart(found)) if *found == id
+                    )),
+                    "{messages:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_viewport_that_draws_says_nothing_and_a_restart_takes_the_message_away() {
+    use hangar_model3d::Rendering;
+    let (mut h, id) = cube_on_show("trouble-gone");
+    let pkg = Packages::default();
+    for quiet in [Rendering::Starting, Rendering::Drawing] {
+        h.slot(&id).viewer.pretend_rendering(quiet);
+        let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+        assert!(!has_text(&mut ui, &t(Locale::En, Key::ModelUnavailable)));
+        assert!(!has_text(&mut ui, &t(Locale::En, Key::ModelLost)));
+    }
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(Rendering::Lost("reset".into()));
+    h.send(Msg::Restart(id.clone()));
+    assert_eq!(h.slot(&id).viewer.rendering(), Rendering::Starting);
+    let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+    assert!(!has_text(&mut ui, &t(Locale::En, Key::ModelLost)));
+    // And a restart for a model that is gone does nothing.
+    drop(ui);
+    h.send(Msg::Restart("not-open".into()));
+}
+
+#[test]
+fn nothing_is_said_over_a_model_that_has_not_loaded_even_if_the_renderer_is_known_bad() {
+    // The loading card is the message while there is nothing to draw.
+    let (mut h, id) = loading_scene("trouble-loading");
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(hangar_model3d::Rendering::Software);
+    let pkg = Packages::default();
+    let mut ui = scene_view(&mut h, &pkg, &id, Locale::En, "graphite");
+    assert!(!has_text(&mut ui, &t(Locale::En, Key::ModelUnavailable)));
+    assert!(has_text(&mut ui, "cube.glb"), "the loading card is shown");
 }
 
 /// The scenes, as pictures, when `HANGAR_MODEL3D_SNAPSHOTS` names a folder.
@@ -1182,6 +1503,24 @@ fn snapshots() {
             h.fail(&id, LoadError::Read("The file was not found.".into()));
             save(
                 "reload-failed",
+                scene_view(&mut h, &pkg, &id, locale, theme_id),
+            );
+
+            // A viewport that cannot draw: one picture for each way.
+            let (mut h, id) = cube_on_show("snap-trouble");
+            let names = ["software", "unavailable", "refused", "lost"];
+            for (name, rendering) in names.into_iter().zip(trouble_states()) {
+                h.slot(&id).viewer.pretend_rendering(rendering);
+                save(name, scene_view(&mut h, &pkg, &id, locale, theme_id));
+            }
+            // And the bar of an animated model with its clips menu open.
+            let (mut h, id) = animated_scene("snap-anim");
+            h.send(Msg::Seek(id.clone(), 1.25));
+            save("playing", scene_view(&mut h, &pkg, &id, locale, theme_id));
+            h.send(Msg::PlayPause(id.clone()));
+            h.send(Msg::ClipsMenu(id.clone(), true));
+            save(
+                "paused-menu",
                 scene_view(&mut h, &pkg, &id, locale, theme_id),
             );
         }

@@ -3,13 +3,20 @@
 //!
 //! Buffers and textures are read through [`Resources`], so a `.gltf` finds its
 //! `.bin` and pictures beside it (inside the folders the app allowed) and a
-//! `.glb` carries them inside. Meshes keep the node hierarchy's placement;
-//! skinned ones are posed once, as the file's nodes stand, and drawn there.
+//! `.glb` carries them inside. Meshes keep the node hierarchy's placement.
+//!
+//! A file with animation to play also keeps the node graph (`Rig`), the
+//! keyframes (`Clip`) and, for each skinned or morphing mesh, what moves its
+//! vertices (`Deform`); its meshes still hold the vertices as the file poses
+//! them at rest, which is what everything that measures the model reads. A
+//! still file keeps none of that: skins and morph targets are applied once and
+//! dropped.
 
 use std::collections::BTreeSet;
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use gltf::Gltf;
+use gltf::animation::util::ReadOutputs;
 use gltf::buffer::Source as BufferSource;
 use gltf::image::Source as ImageSourceKind;
 use gltf::material::AlphaMode as GltfAlpha;
@@ -19,10 +26,13 @@ use gltf::texture::{MagFilter, WrappingMode};
 use super::geometry::{flat_normals_in_place, flat_shaded, strip};
 use super::resources::{ImageSource, decode_all};
 use super::{Ctx, Resources};
+use crate::animation::{
+    Attachment, Channel, Clip, Deform, Interpolation, MorphTarget, Property, Rig, RigNode, RigSkin,
+    VertexSkin, quat,
+};
 use crate::formats::LoadError;
 use crate::model::{
-    AlphaMode, Clip, Image, Instance, Material, Mesh, ModelParts, TextureRef, Topology, Vertex,
-    Wrap,
+    AlphaMode, Image, Instance, Material, Mesh, ModelParts, TextureRef, Topology, Vertex, Wrap,
 };
 
 /// Extensions a file may require that this build cannot honour, and what to
@@ -306,47 +316,67 @@ fn world_matrices(document: &gltf::Document) -> Vec<Mat4> {
 /// The matrices that pose a skin: joint in the file's coordinates, times the
 /// inverse of the pose the mesh was bound in.
 fn joint_matrices(skin: &gltf::Skin<'_>, buffers: &[Vec<u8>], world: &[Mat4]) -> Vec<Mat4> {
-    let bind: Vec<Mat4> = skin
-        .reader(|b| buffers.get(b.index()).map(Vec::as_slice))
-        .read_inverse_bind_matrices()
-        .map(|matrices| matrices.map(|m| Mat4::from_cols_array_2d(&m)).collect())
-        .unwrap_or_default();
+    let bind = inverse_bind(skin, buffers);
     skin.joints()
         .enumerate()
         .map(|(i, joint)| world[joint.index()] * bind.get(i).copied().unwrap_or(Mat4::IDENTITY))
         .collect()
 }
 
-/// Moves each vertex to where its joints put it: the blend of up to four joint
-/// matrices, weighted. A vertex nothing weighs on stays where it is.
-fn skin_vertices(
-    vertices: &mut [Vertex],
-    pose: &[Mat4],
-    joints: &[[u16; 4]],
-    weights: &[[f32; 4]],
-) {
-    for ((vertex, joints), weights) in vertices.iter_mut().zip(joints).zip(weights) {
-        let mut blended = Mat4::ZERO;
-        let mut total = 0.0;
-        for (&joint, &weight) in joints.iter().zip(weights) {
-            if weight > 0.0
-                && let Some(matrix) = pose.get(usize::from(joint))
-            {
-                blended += *matrix * weight;
-                total += weight;
+/// The matrices of the pose a skin's mesh was bound in, inverted, one for each
+/// joint the file gives one for.
+fn inverse_bind(skin: &gltf::Skin<'_>, buffers: &[Vec<u8>]) -> Vec<Mat4> {
+    skin.reader(|b| buffers.get(b.index()).map(Vec::as_slice))
+        .read_inverse_bind_matrices()
+        .map(|matrices| matrices.map(|m| Mat4::from_cols_array_2d(&m)).collect())
+        .unwrap_or_default()
+}
+
+/// How a mesh stands as the file is read, and whether to keep what moves it
+/// afterwards.
+struct Start<'a> {
+    /// The matrices of its skin in the pose the nodes are in, if it has one.
+    joints: Option<&'a [Mat4]>,
+    /// The morph weights it starts with (missing ones are zero).
+    weights: &'a [f32],
+    /// A clip of the file will play, so what moves the vertices is kept.
+    /// Without one the mesh is posed once and that is all it will be.
+    keep: bool,
+}
+
+/// The morph targets of a primitive. A target whose list of displacements does
+/// not have one for each vertex has that list dropped.
+fn morph_targets(
+    primitive: &gltf::Primitive<'_>,
+    buffers: &[Vec<u8>],
+    count: usize,
+) -> Vec<MorphTarget> {
+    let reader = primitive.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
+    reader
+        .read_morph_targets()
+        .map(|(positions, normals, _tangents)| {
+            let whole = |list: Option<Vec<[f32; 3]>>| {
+                list.filter(|list| list.len() == count).unwrap_or_default()
+            };
+            MorphTarget {
+                positions: whole(positions.map(Iterator::collect)),
+                normals: whole(normals.map(Iterator::collect)),
             }
-        }
-        if total > 1e-6 {
-            blended *= 1.0 / total;
-            let [x, y, z] = vertex.position;
-            let moved = blended * Vec4::new(x, y, z, 1.0);
-            vertex.position = [moved.x, moved.y, moved.z];
-            let normal = blended
-                .transform_vector3(Vec3::from(vertex.normal))
-                .normalize_or_zero();
-            vertex.normal = normal.to_array();
-        }
-    }
+        })
+        .collect()
+}
+
+/// Which joints move each vertex, if the primitive says (both joints and
+/// weights, one of each for every vertex).
+fn vertex_skin(
+    primitive: &gltf::Primitive<'_>,
+    buffers: &[Vec<u8>],
+    count: usize,
+) -> Option<VertexSkin> {
+    let reader = primitive.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
+    let joints: Vec<[u16; 4]> = reader.read_joints(0)?.into_u16().collect();
+    let weights: Vec<[f32; 4]> = reader.read_weights(0)?.into_f32().collect();
+    (joints.len() == count && weights.len() == count).then_some(VertexSkin { joints, weights })
 }
 
 /// One primitive as a mesh, or `None` for one the preview cannot draw (no
@@ -356,7 +386,7 @@ fn primitive_mesh(
     primitive: &gltf::Primitive<'_>,
     buffers: &[Vec<u8>],
     material: Option<usize>,
-    pose: Option<&[Mat4]>,
+    start: &Start<'_>,
     warnings: &mut Vec<String>,
 ) -> Option<Mesh> {
     let reader = primitive.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
@@ -386,15 +416,22 @@ fn primitive_mesh(
         })
         .collect();
 
-    if let Some(pose) = pose {
-        let joints: Option<Vec<[u16; 4]>> = reader.read_joints(0).map(|j| j.into_u16().collect());
-        let weights: Option<Vec<[f32; 4]>> = reader.read_weights(0).map(|w| w.into_f32().collect());
-        if let (Some(joints), Some(weights)) = (joints, weights)
-            && joints.len() == count
-            && weights.len() == count
-        {
-            skin_vertices(&mut vertices, pose, &joints, &weights);
-        }
+    // The pose the file starts in: the morph targets at their starting
+    // weights, then the skin in the pose the nodes stand in. What does it is
+    // the same code that plays a clip.
+    let targets = morph_targets(primitive, buffers, count);
+    let skin = start
+        .joints
+        .and_then(|_| vertex_skin(primitive, buffers, count));
+    let mut deform = (!targets.is_empty() || skin.is_some()).then(|| Deform {
+        positions,
+        normals: vertices.iter().map(|v| v.normal).collect(),
+        skin,
+        targets,
+        faceted: false,
+    });
+    if let Some(deform) = &deform {
+        deform.apply(start.joints, start.weights, &mut vertices);
     }
 
     let given: Option<Vec<u32>> = reader.read_indices().map(|i| i.into_u32().collect());
@@ -436,24 +473,141 @@ fn primitive_mesh(
         Mode::Points => (Topology::Points, given.clone()),
     };
 
-    if topology == Topology::Triangles && normals.is_none() {
+    let mut mesh = if topology == Topology::Triangles && normals.is_none() {
         // Faceted, which is what a glTF without normals asks for (the spec:
-        // flat shading) and what three.js drew.
-        return Some(match indices {
-            Some(indices) => Mesh::new(
-                name,
-                topology,
-                flat_shaded(&vertices, &indices),
-                None,
-                material,
-            ),
+        // flat shading) and what three.js drew. A mesh that moves has its
+        // normals worked out again from the moved triangles, and its data
+        // follows the vertices into their new places.
+        match indices {
+            Some(indices) => {
+                let unwelded = flat_shaded(&vertices, &indices);
+                deform = deform.map(|d| Deform {
+                    faceted: true,
+                    ..d.picked(&indices[..unwelded.len()])
+                });
+                Mesh::new(name, topology, unwelded, None, material)
+            }
             None => {
                 flat_normals_in_place(&mut vertices);
+                if let Some(d) = &mut deform {
+                    d.faceted = true;
+                }
                 Mesh::new(name, topology, vertices, None, material)
             }
+        }
+    } else {
+        Mesh::new(name, topology, vertices, indices, material)
+    };
+    mesh.deform = deform.filter(|_| start.keep);
+    Some(mesh)
+}
+
+/// The animations of the file, with their keyframes.
+fn read_clips(
+    document: &gltf::Document,
+    buffers: &[Vec<u8>],
+    warnings: &mut Vec<String>,
+) -> Vec<Clip> {
+    let mut clips = Vec::new();
+    for animation in document.animations() {
+        let name = animation.name().unwrap_or_default().to_string();
+        let mut duration = 0.0f32;
+        let mut channels = Vec::new();
+        let mut left_out = 0usize;
+        for channel in animation.channels() {
+            let reader = channel.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
+            let (Some(times), Some(outputs)) = (reader.read_inputs(), reader.read_outputs()) else {
+                left_out += 1;
+                continue;
+            };
+            let times: Vec<f32> = times.collect();
+            let interpolation = match channel.sampler().interpolation() {
+                gltf::animation::Interpolation::Step => Interpolation::Step,
+                gltf::animation::Interpolation::Linear => Interpolation::Linear,
+                gltf::animation::Interpolation::CubicSpline => Interpolation::CubicSpline,
+            };
+            let (property, width, values): (Property, usize, Vec<f32>) = match outputs {
+                ReadOutputs::Translations(values) => {
+                    (Property::Translation, 3, values.flatten().collect())
+                }
+                ReadOutputs::Rotations(values) => {
+                    (Property::Rotation, 4, values.into_f32().flatten().collect())
+                }
+                ReadOutputs::Scales(values) => (Property::Scale, 3, values.flatten().collect()),
+                ReadOutputs::MorphTargetWeights(values) => {
+                    // One weight for each target of the mesh, at each keyframe:
+                    // the keyframes say how many there are.
+                    let values: Vec<f32> = values.into_f32().collect();
+                    let keys = times.len()
+                        * if interpolation == Interpolation::CubicSpline {
+                            3
+                        } else {
+                            1
+                        };
+                    let width = if keys > 0 && values.len().is_multiple_of(keys) {
+                        values.len() / keys
+                    } else {
+                        0
+                    };
+                    (Property::Weights, width, values)
+                }
+            };
+            let built = Channel {
+                node: channel.target().node().index(),
+                property,
+                interpolation,
+                times,
+                values,
+                width,
+            };
+            if built.is_consistent() {
+                duration = built.times.iter().copied().fold(duration, f32::max);
+                channels.push(built);
+            } else {
+                left_out += 1;
+            }
+        }
+        if left_out > 0 {
+            warnings.push(format!(
+                "{left_out} {} of the animation {} could not be used because its data does not \
+                 match its keyframes; it plays without {}.",
+                if left_out == 1 { "channel" } else { "channels" },
+                if name.is_empty() { "(unnamed)" } else { &name },
+                if left_out == 1 { "it" } else { "them" },
+            ));
+        }
+        clips.push(Clip {
+            name,
+            duration,
+            channels,
         });
     }
-    Some(Mesh::new(name, topology, vertices, indices, material))
+    clips
+}
+
+/// Every node of the file as animation needs it: its place under its parent.
+fn rig_nodes(document: &gltf::Document) -> Vec<RigNode> {
+    let mut parents = vec![None; document.nodes().count()];
+    for node in document.nodes() {
+        for child in node.children() {
+            parents[child.index()] = Some(node.index());
+        }
+    }
+    document
+        .nodes()
+        .map(|node| {
+            let transform = node.transform();
+            let local = Mat4::from_cols_array_2d(&transform.clone().matrix());
+            let (translation, rotation, scale) = transform.decomposed();
+            RigNode {
+                parent: parents[node.index()],
+                local,
+                translation: Vec3::from(translation),
+                rotation: quat(&rotation),
+                scale: Vec3::from(scale),
+            }
+        })
+        .collect()
 }
 
 pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
@@ -493,6 +647,13 @@ pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
         ..ModelParts::default()
     };
     let world = world_matrices(&document);
+    let clips = read_clips(&document, &buffers, &mut warnings);
+    // A rig is kept only when something will move: a still model is posed
+    // once, as it was, and costs nothing more.
+    let animated = clips.iter().any(|clip| !clip.channels.is_empty());
+    // Where each instance stands in the node graph, in the order of the
+    // instances.
+    let mut attachments: Vec<Attachment> = Vec::new();
 
     // The default material a primitive gets when it names none: glTF's own,
     // white, fully metallic and rough. Made on first use.
@@ -543,10 +704,29 @@ pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
         let Some(mesh) = node.mesh() else { continue };
         let label = mesh.name().or(node.name()).unwrap_or("mesh").to_string();
 
-        if let Some(skin) = node.skin() {
-            // Posed once, as the nodes stand: the vertices come out in the
-            // file's coordinates, so the mesh stands at the origin.
-            let pose = joint_matrices(&skin, &buffers, &world);
+        // A mesh a skin or morph targets act on is made for its node alone:
+        // its vertices, and so its buffer, are its own.
+        let skin = node.skin();
+        let morphs = mesh
+            .primitives()
+            .any(|primitive| primitive.morph_targets().next().is_some());
+        if skin.is_some() || morphs {
+            // Posed as the nodes stand (a skinned mesh's vertices come out in
+            // the file's coordinates, so it stands at the origin), at its
+            // starting weights.
+            let pose = skin
+                .as_ref()
+                .map(|skin| joint_matrices(skin, &buffers, &world));
+            let weights: Vec<f32> = node
+                .weights()
+                .or_else(|| mesh.weights())
+                .map(<[f32]>::to_vec)
+                .unwrap_or_default();
+            let start = Start {
+                joints: pose.as_deref(),
+                weights: &weights,
+                keep: animated,
+            };
             for primitive in mesh.primitives() {
                 let material = material_of(&mut parts, &primitive);
                 if let Some(built) = primitive_mesh(
@@ -554,13 +734,22 @@ pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
                     &primitive,
                     &buffers,
                     material,
-                    Some(&pose),
+                    &start,
                     &mut warnings,
                 ) {
                     parts.meshes.push(built);
                     parts.instances.push(Instance {
                         mesh: parts.meshes.len() - 1,
-                        transform: Mat4::IDENTITY,
+                        transform: if skin.is_some() {
+                            Mat4::IDENTITY
+                        } else {
+                            world[node.index()]
+                        },
+                    });
+                    attachments.push(Attachment {
+                        node: node.index(),
+                        skin: skin.as_ref().map(gltf::Skin::index),
+                        weights: weights.clone(),
                     });
                 }
             }
@@ -569,11 +758,21 @@ pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
 
         if converted[mesh.index()].is_none() {
             let mut built_here = Vec::new();
+            let start = Start {
+                joints: None,
+                weights: &[],
+                keep: false,
+            };
             for primitive in mesh.primitives() {
                 let material = material_of(&mut parts, &primitive);
-                if let Some(built) =
-                    primitive_mesh(&label, &primitive, &buffers, material, None, &mut warnings)
-                {
+                if let Some(built) = primitive_mesh(
+                    &label,
+                    &primitive,
+                    &buffers,
+                    material,
+                    &start,
+                    &mut warnings,
+                ) {
                     parts.meshes.push(built);
                     built_here.push(parts.meshes.len() - 1);
                 }
@@ -585,22 +784,25 @@ pub(super) fn read(bytes: &[u8], ctx: &Ctx) -> Result<ModelParts, LoadError> {
                 mesh: mesh_index,
                 transform: world[node.index()],
             });
+            attachments.push(Attachment {
+                node: node.index(),
+                skin: None,
+                weights: Vec::new(),
+            });
         }
     }
 
-    for animation in document.animations() {
-        let mut duration = 0.0f32;
-        for channel in animation.channels() {
-            let reader = channel.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
-            if let Some(times) = reader.read_inputs() {
-                duration = times.fold(duration, f32::max);
-            }
-        }
-        parts.clips.push(Clip {
-            name: animation.name().unwrap_or_default().to_string(),
-            duration,
-        });
+    if animated {
+        let skins = document
+            .skins()
+            .map(|skin| RigSkin {
+                joints: skin.joints().map(|joint| joint.index()).collect(),
+                inverse_bind: inverse_bind(&skin, &buffers),
+            })
+            .collect();
+        parts.rig = Some(Rig::new(rig_nodes(&document), skins, attachments));
     }
+    parts.clips = clips;
     parts.warnings = warnings;
     Ok(parts)
 }
@@ -808,5 +1010,167 @@ mod tests {
         assert_eq!(m, [2.0, -0.0, 0.5, 0.0, 3.0, 0.25]);
         let quarter = uv_matrix([0.0; 2], std::f32::consts::FRAC_PI_2, [1.0; 2]);
         assert!((quarter[1] + 1.0).abs() < 1e-6 && (quarter[3] - 1.0).abs() < 1e-6);
+    }
+
+    // Animation: clips, skins and morph targets.
+
+    use crate::animation::{Interpolation, Playhead, Property};
+
+    fn glb(bytes: Vec<u8>) -> Model {
+        model_from(&bytes, ModelFormat::Glb).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn at(clip: usize, time: f32) -> Option<Playhead> {
+        Some(Playhead { clip, time })
+    }
+
+    fn height(model: &Model, head: Option<Playhead>) -> f64 {
+        model.posed_bounds(head).size()[1]
+    }
+
+    #[test]
+    fn keeps_the_keyframes_of_every_clip() {
+        let model = glb(samples::animated_cube_glb());
+        let names: Vec<_> = model.clips.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Slide", "Spin"]);
+        assert_eq!(model.clips[0].duration, 2.0);
+        assert_eq!(model.clips[1].duration, 1.0);
+        let slide = &model.clips[0].channels[0];
+        assert_eq!(slide.property, Property::Translation);
+        assert_eq!(slide.interpolation, Interpolation::Linear);
+        assert_eq!(slide.times, [0.0, 1.0, 2.0]);
+        assert_eq!(slide.values.len(), 9);
+        assert_eq!(model.clips[1].channels[0].property, Property::Rotation);
+        assert!(model.warnings.is_empty(), "{:?}", model.warnings);
+    }
+
+    #[test]
+    fn keeps_the_node_graph_only_when_something_will_move() {
+        let animated = glb(samples::animated_cube_glb());
+        let rig = animated.rig.as_ref().expect("a rig");
+        assert_eq!(rig.attachments().len(), animated.instances.len());
+        assert_eq!(rig.nodes().len(), 1);
+
+        let still = glb(samples::cube_glb());
+        assert!(still.rig.is_none());
+        assert!(still.clips.is_empty());
+    }
+
+    #[test]
+    fn plays_a_node_animation_by_moving_the_instance() {
+        let model = glb(samples::animated_cube_glb());
+        let centre = |head| model.posed_bounds(head).center();
+        assert_eq!(centre(None)[0], 0.0, "the file's own pose");
+        assert_eq!(centre(at(0, 0.0))[0], 0.0);
+        assert!((centre(at(0, 1.0))[0] - 2.0).abs() < 1e-9, "out");
+        assert!(
+            (centre(at(0, 1.5))[0] - 1.0).abs() < 1e-9,
+            "on the way back"
+        );
+        assert!((centre(at(0, 2.0))[0]).abs() < 1e-9, "home");
+        // The second clip turns it: a quarter turn at 45 degrees is as wide
+        // as the cube's diagonal on its face.
+        let width = model.posed_bounds(at(1, 0.5)).size()[0];
+        assert!((width - 2f64.sqrt()).abs() < 1e-5, "{width}");
+        // A clip the model does not have is the file's own pose.
+        assert_eq!(centre(at(9, 1.0)), centre(None));
+    }
+
+    #[test]
+    fn a_skinned_mesh_is_drawn_as_the_nodes_stand_and_bends_with_a_clip() {
+        let model = glb(samples::skinned_glb());
+        assert_eq!(model.clips[0].name, "Stretch");
+        // The mesh itself is the file's pose: the box is a unit tall.
+        assert!((model.info.size[1] - 1.0).abs() < 1e-9);
+        assert!(model.meshes[0].deform.is_some());
+        assert_eq!(model.instances[0].transform, Mat4::IDENTITY);
+        assert!((height(&model, at(0, 0.0)) - 1.0).abs() < 1e-6);
+        assert!((height(&model, at(0, 0.5)) - 2.0).abs() < 1e-6);
+        assert!((height(&model, at(0, 1.0)) - 3.0).abs() < 1e-6);
+        // The lower half stays on the floor.
+        assert!((model.posed_bounds(at(0, 1.0)).min[1] + 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_skinned_mesh_keeps_its_normals_unit_length_while_it_moves() {
+        let model = glb(samples::skinned_glb());
+        let posed = model.posed(at(0, 0.7));
+        let vertices = posed[0].vertices.as_ref().expect("bent vertices");
+        assert_eq!(vertices.len(), 24);
+        for v in vertices {
+            let n = v.normal;
+            let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!((length - 1.0).abs() < 1e-5, "{n:?}");
+        }
+    }
+
+    #[test]
+    fn a_still_skinned_file_is_posed_once_and_keeps_nothing_to_move_it() {
+        let model = glb(samples::skinned_still_glb());
+        assert!(model.rig.is_none());
+        assert!(model.meshes[0].deform.is_none());
+        assert!(model.clips.is_empty());
+        assert!((model.info.size[1] - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_morph_target_moves_vertices_with_the_weight_a_clip_gives() {
+        let model = glb(samples::morphing_glb());
+        assert_eq!(model.clips[0].name, "Grow");
+        assert!((model.info.size[1] - 1.0).abs() < 1e-9, "weight 0 at rest");
+        assert!((height(&model, at(0, 0.5)) - 2.0).abs() < 1e-6);
+        assert!((height(&model, at(0, 1.0)) - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_still_file_stands_at_the_weights_it_starts_with() {
+        let model = glb(samples::morphing_still_glb(0.5));
+        assert!(model.rig.is_none());
+        assert!((model.info.size[1] - 2.0).abs() < 1e-6, "half way up");
+        let full = glb(samples::morphing_still_glb(1.0));
+        assert!((full.info.size[1] - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_start_of_a_morph_clip_and_the_file_pose_agree() {
+        let model = glb(samples::morphing_glb());
+        assert_eq!(model.posed_bounds(at(0, 0.0)), model.posed_bounds(None));
+    }
+
+    #[test]
+    fn leaves_out_a_channel_whose_data_does_not_match_its_keyframes() {
+        // Two keyframes and only one value: cut the output accessor short.
+        let json = r#"{"asset":{"version":"2.0"},"scenes":[{"nodes":[0]}],"nodes":[{"name":"n"}],
+          "animations":[{"name":"broken","samplers":[{"input":0,"output":1}],
+                         "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+          "accessors":[{"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[1]},
+                       {"bufferView":1,"componentType":5126,"count":1,"type":"VEC3"}],
+          "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":8},{"buffer":0,"byteOffset":8,"byteLength":12}],
+          "buffers":[{"byteLength":20}]}"#;
+        let mut bin = Vec::new();
+        for value in [0.0f32, 1.0, 0.0, 0.0, 0.0] {
+            bin.extend(value.to_le_bytes());
+        }
+        let model = glb(samples::glb(json, &bin));
+        assert_eq!(model.clips.len(), 1, "it is still listed");
+        assert!(model.clips[0].channels.is_empty());
+        assert!(model.rig.is_none(), "nothing to play");
+        assert!(
+            model.warnings.iter().any(|w| w.contains("broken")),
+            "{:?}",
+            model.warnings
+        );
+    }
+
+    #[test]
+    fn shared_meshes_stay_shared_and_deformed_ones_are_one_to_a_node() {
+        // The textured cube stands on two nodes with one mesh, and is not
+        // animated: converted once.
+        let shared = glb(samples::textured_cube_glb());
+        assert_eq!(shared.meshes.len(), 1);
+        assert_eq!(shared.instances.len(), 2);
+        // The skinned box has one node and one mesh to deform.
+        let skinned = glb(samples::skinned_glb());
+        assert_eq!(skinned.meshes.len(), skinned.instances.len());
     }
 }

@@ -4,25 +4,28 @@
 //! cargo run -p hangar-model3d --example view -- <file>
 //! cargo run -p hangar-model3d --example view            # a generated sample
 //! cargo run -p hangar-model3d --example view -- --sample obj|stl|ply|gltf|glb|textured|cloud
+//! cargo run -p hangar-model3d --example view -- --sample animated|skinned|morph
 //! ```
 //!
 //! Left button turns, right button or Shift+left pans, the wheel zooms toward
 //! the pointer; click the view, then the arrow keys, + and -, and Home work
-//! too.
+//! too. A model with animation starts playing; the bar has Play and Pause, the
+//! next clip, and a slider over the clip's time.
 //!
 //! For a look without a window: `--shot out.png [--angle iso]` writes the
-//! picture an agent's snapshot would be and exits; `--window-shot out.png`
-//! opens the window, waits for the model, saves what the window drew and
-//! exits (that is how the widget is checked without a person at the screen).
+//! picture an agent's snapshot would be and exits (`--clip N --time S` takes
+//! it at a moment of a clip); `--window-shot out.png` opens the window, waits
+//! for the model, saves what the window drew and exits (that is how the widget
+//! is checked without a person at the screen).
 
 use std::path::{Path, PathBuf};
 
 use hangar_model3d::load::{self, LoadOptions};
 use hangar_model3d::{
-    CaptureError, CaptureJob, DisplayOptions, Event, LoadEvent, LoadState, ModelViewer,
+    CaptureError, CaptureJob, DisplayOptions, Event, LoadEvent, LoadState, ModelViewer, Playhead,
     SnapshotAngle, ViewerTheme, describe, samples,
 };
-use iced::widget::{button, checkbox, column, container, row, text};
+use iced::widget::{button, checkbox, column, container, row, slider, text};
 use iced::window::{self, Screenshot};
 use iced::{Element, Length, Subscription, Task, Theme, time};
 
@@ -40,6 +43,9 @@ enum Message {
     Captured(Result<Vec<u8>, CaptureError>),
     Tick,
     Shot(Screenshot),
+    Play,
+    NextClip,
+    Seek(f32),
 }
 
 struct Args {
@@ -50,6 +56,9 @@ struct Args {
     size: (u32, u32),
     display: DisplayOptions,
     light: bool,
+    /// For `--shot`: the clip and the moment of it to take the picture at.
+    clip: usize,
+    time: f32,
 }
 
 struct App {
@@ -79,6 +88,9 @@ fn sample(kind: &str) -> PathBuf {
         "cloud" => write("cloud.ply", samples::point_cloud_ply(20_000).as_bytes()),
         "gltf" => write("cube.gltf", samples::cube_gltf_with_data_uris().as_bytes()),
         "glb" => write("cube.glb", &samples::cube_glb()),
+        "animated" => write("animated.glb", &samples::animated_cube_glb()),
+        "skinned" => write("skinned.glb", &samples::skinned_glb()),
+        "morph" => write("morph.glb", &samples::morphing_glb()),
         _ => write("textured.glb", &samples::textured_cube_glb()),
     }
 }
@@ -92,6 +104,8 @@ fn parse() -> Args {
         size: (800, 600),
         display: DisplayOptions::default(),
         light: false,
+        clip: 0,
+        time: 0.0,
     };
     let mut input = std::env::args().skip(1);
     while let Some(arg) = input.next() {
@@ -116,6 +130,8 @@ fn parse() -> Args {
             "--normals" => args.display.normals = true,
             "--no-grid" => args.display.grid = false,
             "--light" => args.light = true,
+            "--clip" => args.clip = input.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+            "--time" => args.time = input.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             file => args.path = PathBuf::from(file),
         }
     }
@@ -153,7 +169,24 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Viewer(_) => {}
+            Message::Viewer(Event::Interacted) => {}
+            Message::Viewer(Event::RenderingChanged) => {
+                self.status = format!("Rendering: {:?}", self.viewer.rendering());
+                println!("{}", self.status);
+            }
+            Message::Play => {
+                if let Some(playback) = self.viewer.playback() {
+                    self.viewer.set_playing(!playback.playing);
+                }
+            }
+            Message::NextClip => {
+                if let (Some(playback), Some(model)) = (self.viewer.playback(), self.viewer.model())
+                {
+                    self.viewer
+                        .set_clip((playback.clip + 1) % model.clips.len());
+                }
+            }
+            Message::Seek(time) => self.viewer.seek(time),
             Message::Load(event) => {
                 let done = matches!(event, LoadEvent::Done(_));
                 self.viewer.apply(event);
@@ -260,6 +293,30 @@ impl App {
         ]
         .spacing(16)
         .padding(8);
+        let animation: Element<'_, Message> = match (self.viewer.playback(), self.viewer.model()) {
+            (Some(playback), Some(model)) => {
+                let name = hangar_model3d::stats::clip_names(&model.clips)
+                    .get(playback.clip)
+                    .cloned()
+                    .unwrap_or_default();
+                row![
+                    button(if playback.playing { "Pause" } else { "Play" }).on_press(Message::Play),
+                    button("Next clip").on_press(Message::NextClip),
+                    text(name),
+                    slider(
+                        0.0..=playback.duration.max(0.01),
+                        playback.time,
+                        Message::Seek
+                    )
+                    .step(0.01_f32),
+                    text(format!("{:.1} / {:.1} s", playback.time, playback.duration)),
+                ]
+                .spacing(16)
+                .padding(8)
+                .into()
+            }
+            _ => row![].into(),
+        };
         let stage: Element<'_, Message> = match self.viewer.state() {
             LoadState::Failed(error) => container(text(error.clone())).center(Length::Fill).into(),
             LoadState::Loading(progress) if self.viewer.model().is_none() => {
@@ -275,13 +332,17 @@ impl App {
         column![
             bar,
             stage,
+            animation,
             container(text(&self.status).size(13)).padding(8)
         ]
         .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if self.args.window_shot.is_some() {
+        // The widget animates the model by itself; this only brings the
+        // slider along, and takes the screenshot.
+        let playing = self.viewer.playback().is_some_and(|p| p.playing);
+        if self.args.window_shot.is_some() || playing {
             time::every(time::Duration::from_millis(50)).map(|_| Message::Tick)
         } else {
             Subscription::none()
@@ -318,7 +379,11 @@ fn shot(args: &Args, path: &Path) {
     } else {
         let camera = hangar_model3d::camera::Camera::framed(&model, f64::from(w) / f64::from(h));
         CaptureJob::from_camera(model, camera, args.display, w, h, theme_of(args.light))
-    };
+    }
+    .at(Some(Playhead {
+        clip: args.clip,
+        time: args.time,
+    }));
     match scene.run() {
         Ok(png) => write_png(path, &png),
         Err(error) => eprintln!("{error}"),
