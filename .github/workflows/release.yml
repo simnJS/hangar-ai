@@ -145,7 +145,7 @@ jobs:
       # webview helper's engine only, and for dictation: `libasound2-dev` is the
       # ALSA header set cpal captures the microphone through, and `libclang-dev`
       # is what whisper.cpp's bindings are generated with. All of them fail the
-      # build, not the run. (The list native.yml builds the workspace with.)
+      # build, not the run. (The list ci.yml builds the workspace with.)
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |

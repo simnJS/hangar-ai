@@ -99,7 +99,7 @@ WKWebView. Every bundle puts it next to `hangar-ai`, which is where
 `hangar_webview::find_helper` looks.
 
 **Linux** (`.AppImage`, `.deb`, `.rpm`). Needs `jq`, the build dependencies
-listed in `.github/workflows/native.yml`, and
+listed in `.github/workflows/ci.yml`, and
 `cargo install cargo-packager --version 0.11.8 --locked`,
 `cargo install cargo-generate-rpm --version 0.21.1 --locked`.
 
@@ -279,15 +279,13 @@ this work):
 - **`hangar-webview` has no Windows icon or version resource**: a `build.rs` there
   would make the helper's taskbar entry match.
 
-And for wave 5, when `src-tauri/` goes: the installer, its bitmaps, the icons and
-`Info.plist` now have copies under `crates/hangar-app/packaging/` (git stores the
-identical files once), and the release no longer reads `src-tauri/` at all.
-`scripts/preview.nsi`, `scripts/preview-installer.ps1` and
-`scripts/installer-art.ps1` still point at `src-tauri/installer` and
-`src-tauri/icons`; they should be repointed at `packaging/windows` and
-`packaging/icons` (the art script writes the backdrops, which would otherwise
-drift from the copies the installer is built from). `ci.yml` still builds
-`src-tauri`. Nothing checks the packaging between releases: a Linux job in
-`native.yml` that runs `packaging/windows/build.sh` with `apt install nsis` and
+Wave 5 removed `src-tauri/`: the installer, its bitmaps, the icons and
+`Info.plist` live under `crates/hangar-app/packaging/` only, and
+`scripts/installer-art.ps1` writes the NSIS backdrops there (the WiX images went,
+since no `.msi` ships). The Tauri-only installer preview
+(`scripts/preview.nsi`, `scripts/preview-installer.ps1`) went with it:
+`packaging/windows/build.sh` compiles the real script in seconds. Nothing checks
+the packaging between releases: a Linux job in `ci.yml` that runs
+`packaging/windows/build.sh` with `apt install nsis` and
 `packaging/linux/build.sh` would catch a broken installer script or packager
 configuration before a tag does.
