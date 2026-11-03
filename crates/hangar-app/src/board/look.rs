@@ -52,6 +52,13 @@ pub const THREAD_MAX_HEIGHT: f32 = 250.0;
 /// less its head and foot).
 pub const DIALOG_BODY_MAX: f32 = 560.0;
 
+/// The content of a button of a fixed height, centred in it: iced puts a
+/// button's content at its top left, which hangar-ui's buttons correct the
+/// same way.
+pub fn centred<'a, M: 'a>(content: impl Into<iced::Element<'a, M>>) -> iced::Element<'a, M> {
+    container(content).center_y(iced::Length::Fill).into()
+}
+
 /// Text in one of the theme's inks, picked at run time.
 pub fn ink(color: Color) -> impl Fn(&iced::Theme) -> iced::widget::text::Style {
     move |_| iced::widget::text::Style { color: Some(color) }

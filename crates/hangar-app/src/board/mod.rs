@@ -31,6 +31,8 @@ mod look;
 pub mod model;
 pub mod pane_task;
 mod select;
+#[cfg(test)]
+mod snapshot;
 pub mod task_dialog;
 mod view;
 

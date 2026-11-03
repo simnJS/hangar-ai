@@ -94,14 +94,14 @@ pub(super) fn group<'a>(v: &View<'a>) -> Element<'a, Message> {
     .spacing(space::SM)
     .align_y(Alignment::Center);
     if v.st.filters.active() {
-        let clear = button(
+        let clear = button(super::look::centred(
             row![
                 icon(Icon::Close, 10.0),
                 text(tr.t(Key::BoardClearFiltersShort)).size(font_size::CAPTION_LG),
             ]
             .spacing(5.0)
             .align_y(Alignment::Center),
-        )
+        ))
         .height(24.0)
         .padding([0.0, space::MD])
         .style(super::look::clear_button(t))
@@ -146,7 +146,7 @@ fn control<'a>(v: &View<'a>, kind: FilterKind) -> Element<'a, Message> {
     if !active {
         name_text = name_text.style(style::text::secondary(t));
     }
-    let face = button(
+    let face = button(super::look::centred(
         row![
             name_text,
             text(shown).size(font_size::UI).font(fonts::ui_medium()),
@@ -158,7 +158,7 @@ fn control<'a>(v: &View<'a>, kind: FilterKind) -> Element<'a, Message> {
         ]
         .spacing(space::SM)
         .align_y(Alignment::Center),
-    )
+    ))
     .height(24.0)
     .padding([0.0, 6.0])
     .style(super::look::filter_button(t, active))

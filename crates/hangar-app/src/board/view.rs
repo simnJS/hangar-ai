@@ -202,7 +202,7 @@ fn bar_full<'a>(v: &View<'a>, compact: bool) -> Element<'a, Message> {
     }
     bar = bar.push(hangar_ui::tip::bottom(
         t,
-        iced::widget::button(mcp_label)
+        iced::widget::button(look::centred(mcp_label))
             .padding([0.0, space::SM])
             .height(24.0)
             .style(look::quiet_button(t))
@@ -396,7 +396,7 @@ fn column_view<'a>(v: &View<'a>, which: Column, in_dock: bool, flow: bool) -> El
             } else {
                 Radians(std::f32::consts::FRAC_PI_2)
             });
-        let toggle = iced::widget::button(
+        let toggle = iced::widget::button(look::centred(
             row![
                 caret,
                 mark,
@@ -408,7 +408,7 @@ fn column_view<'a>(v: &View<'a>, which: Column, in_dock: bool, flow: bool) -> El
             ]
             .spacing(7.0)
             .align_y(Alignment::Center),
-        )
+        ))
         .width(Length::Fill)
         .height(24.0)
         .padding([0.0, space::SM])
