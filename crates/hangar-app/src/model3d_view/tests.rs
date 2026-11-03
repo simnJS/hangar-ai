@@ -1264,6 +1264,15 @@ fn the_view_is_built_again_for_the_slider_only_while_a_clip_plays_in_front() {
     h.shared
         .edit(|store| store.note_screens([(ws.clone(), true)]));
     assert!(animating_in_front(&h.st), "playing, in front, on screen");
+    // A viewport that cannot draw has no slider to move.
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(hangar_model3d::Rendering::Software);
+    assert!(!animating_in_front(&h.st));
+    h.slot(&id)
+        .viewer
+        .pretend_rendering(hangar_model3d::Rendering::Drawing);
+    assert!(animating_in_front(&h.st));
 
     h.shared
         .edit(|store| store.note_screens([(ws.clone(), false)]));

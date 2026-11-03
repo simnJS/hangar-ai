@@ -551,6 +551,7 @@ fn animating_in_front(st: &State) -> bool {
             slot.viewer
                 .playback()
                 .is_some_and(|playback| playback.playing)
+                && !slot.viewer.rendering().is_problem()
                 && store.entry(id).is_some_and(|entry| {
                     store.scope(&entry.workspace_id).active_id.as_deref() == Some(id.as_str())
                         && store.view().panel_shown(&entry.workspace_id)

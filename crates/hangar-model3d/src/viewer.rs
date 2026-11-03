@@ -785,12 +785,16 @@ impl shader::Program<Event> for Canvas<'_> {
                     camera.advance(seconds);
                     camera.is_moving()
                 });
-                // A playing animation asks for a frame after each one.
-                let animating = view.advance(self.viewer.model.as_deref(), seconds);
-                drop(view);
                 // The renderer has had a frame since the last look: is it
                 // drawing? A verdict is told to the app, which looks again.
                 let review = self.viewer.health.review();
+                // A playing animation asks for a frame after each one, unless
+                // nothing is being drawn (a window in software, a lost
+                // device): the clip would run on unseen, at the pace of the
+                // frames.
+                let animating = !self.viewer.health.rendering().is_problem()
+                    && view.advance(self.viewer.model.as_deref(), seconds);
+                drop(view);
                 if review.changed {
                     return Some(Action::publish(Event::RenderingChanged));
                 }
@@ -2024,6 +2028,24 @@ mod tests {
         assert!(rig.viewer.rendering().is_problem());
         // And that is the last it asks of the window.
         assert!(rig.frame(16).is_none());
+    }
+
+    #[test]
+    fn a_clip_does_not_run_on_unseen_in_a_window_that_cannot_draw_it() {
+        let mut rig = sliding();
+        for _ in 0..6 {
+            let _ = drawn(&rig);
+            rig.frame(16);
+        }
+        assert_eq!(rig.viewer.rendering(), Rendering::Software);
+        let held = playback(&rig).time;
+        assert!(
+            rig.frame(16).is_none(),
+            "no frame is asked for a picture nobody sees"
+        );
+        assert_eq!(playback(&rig).time, held);
+        // It is still playing, as far as the person's controls say.
+        assert!(playback(&rig).playing);
     }
 
     #[test]
