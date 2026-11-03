@@ -4,6 +4,8 @@
 use super::*;
 use crate::state::types::{AppState, Workspace};
 
+mod drawn;
+
 fn device(id: &str, name: &str, created: u64) -> RemoteDevice {
     RemoteDevice {
         id: id.into(),

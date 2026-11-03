@@ -83,8 +83,20 @@ fn every_category_can_be_laid_out_in_both_languages_and_a_dark_and_a_light_theme
 #[test]
 fn a_search_that_finds_something_and_one_that_finds_nothing_can_be_laid_out() {
     use hangar_i18n::Locale;
-    sheet(SettingsCategory::General, Locale::En, "graphite", "theme", MAIN);
-    sheet(SettingsCategory::General, Locale::Fr, "graphite", "thème", MAIN);
+    sheet(
+        SettingsCategory::General,
+        Locale::En,
+        "graphite",
+        "theme",
+        MAIN,
+    );
+    sheet(
+        SettingsCategory::General,
+        Locale::Fr,
+        "graphite",
+        "thème",
+        MAIN,
+    );
     sheet(
         SettingsCategory::General,
         Locale::En,

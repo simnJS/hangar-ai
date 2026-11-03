@@ -73,10 +73,7 @@ fn clicking_a_switch_flips_it() {
     });
     // Auto resume is on by default: the click turns it off. Whether it came
     // from the switch or from the text beside it, it is one change.
-    assert_eq!(
-        words,
-        ["Settings(Change(Set(AutoResume, Bool(false))))"]
-    );
+    assert_eq!(words, ["Settings(Change(Set(AutoResume, Bool(false))))"]);
 }
 
 #[test]
@@ -84,10 +81,7 @@ fn clicking_a_theme_card_picks_the_theme() {
     let words = said(SettingsCategory::Appearance, State::default(), |ui| {
         ui.click("Nord").expect("the card is on the page");
     });
-    assert_eq!(
-        words,
-        [r#"Settings(Change(Set(Theme, Text("nord"))))"#]
-    );
+    assert_eq!(words, [r#"Settings(Change(Set(Theme, Text("nord"))))"#]);
 }
 
 #[test]
@@ -109,14 +103,14 @@ fn an_armed_reset_offers_to_cancel_or_to_confirm() {
         armed: Some("reset".into()),
         ..State::default()
     };
-    // Cancel is the second "Cancel" nowhere else on the page: the first
-    // "Cancel" of an armed row.
+    // Nothing else on the About page says "Cancel" or "Confirm".
     let cancelled = said(SettingsCategory::About, armed(), |ui| {
         ui.click("Cancel").expect("the armed row offers to cancel");
     });
     assert_eq!(cancelled, ["Settings(Disarm)"]);
     let confirmed = said(SettingsCategory::About, armed(), |ui| {
-        ui.click("Confirm").expect("the armed row offers to confirm");
+        ui.click("Confirm")
+            .expect("the armed row offers to confirm");
     });
     // The one button that does it.
     assert_eq!(confirmed, ["Settings(Act(ResetSettings))"]);
@@ -163,7 +157,10 @@ fn escape_is_the_recorders_while_a_shortcut_is_being_recorded() {
             .any(|word| word.starts_with("Settings(Shortcuts(Input(Press")),
         "{words:?}"
     );
-    assert!(!words.iter().any(|word| word == "Settings(Escape)"), "{words:?}");
+    assert!(
+        !words.iter().any(|word| word == "Settings(Escape)"),
+        "{words:?}"
+    );
 }
 
 #[test]

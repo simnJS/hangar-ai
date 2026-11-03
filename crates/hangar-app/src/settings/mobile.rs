@@ -629,11 +629,7 @@ fn render<'a>(st: &'a State, ctx: Ctx<'a>, page: Page) -> Element<'a, Message> {
         if let Some(hint) = block.hint {
             head = head.push(typography::hint(t, hint));
         }
-        let rows = block
-            .rows
-            .into_iter()
-            .map(|r| row_view(st, ctx, r))
-            .collect();
+        let rows = block_rows(st, ctx, block.rows);
         stack = stack.push(
             column![
                 container(head).padding(Padding::from([0.0, space::XS])),
@@ -685,10 +681,38 @@ fn boxed<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
         .into()
 }
 
-fn row_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
+/// The rows of a block as the rows of its card. What belongs to a step (its
+/// sentences, its buttons, the address, the code) is one box with a gap of 10
+/// between its parts, as the web page drew it (`.set-row--block.mob-step`);
+/// a phone, a workspace, a slot, a switch or a lone line each have their own.
+fn block_rows<'a>(st: &'a State, ctx: Ctx<'a>, rows: Vec<Row>) -> Vec<Element<'a, Message>> {
+    fn flush<'a>(out: &mut Vec<Element<'a, Message>>, step: &mut Vec<Element<'a, Message>>) {
+        if !step.is_empty() {
+            out.push(boxed(column(std::mem::take(step)).spacing(10)));
+        }
+    }
+    let mut out = Vec::new();
+    let mut step = Vec::new();
+    for r in rows {
+        if matches!(
+            r,
+            Row::Text { .. } | Row::Rich(_) | Row::Buttons(_) | Row::Address(_) | Row::Pairing(_)
+        ) {
+            step.push(step_view(st, ctx, r));
+        } else {
+            flush(&mut out, &mut step);
+            out.push(row_view(st, ctx, r));
+        }
+    }
+    flush(&mut out, &mut step);
+    out
+}
+
+/// A part of a step.
+fn step_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
     let t = ctx.theme;
     match r {
-        Row::Text { text, tone } => boxed(match tone {
+        Row::Text { text, tone } => match tone {
             Tone::Plain => Element::from(typography::body(t, text)),
             Tone::Note => typography::hint(t, text).into(),
             Tone::Error => typography::danger(t, text).into(),
@@ -696,38 +720,44 @@ fn row_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
                 .spacing(space::LG)
                 .align_y(Alignment::Center)
                 .into(),
-        }),
-        Row::Rich(spans) => boxed(
-            row(spans.into_iter().map(|span| {
-                if span.code {
-                    container(
-                        iced::widget::text(span.text)
-                            .size(font_size::CAPTION_LG)
-                            .font(fonts::mono())
-                            .style(style::text::primary(t)),
-                    )
-                    .padding(Padding::from([1.0, space::XS]))
-                    .style(style::container::well(t))
-                    .into()
-                } else {
-                    Element::from(typography::hint(t, span.text))
-                }
-            }))
-            .align_y(Alignment::Center)
-            .wrap(),
-        ),
-        Row::Buttons(buttons) => boxed(buttons_view(ctx, buttons)),
-        Row::Address(address) => boxed(
-            container(
-                typography::mono(t, address)
-                    .size(font_size::UI_LG)
-                    .style(style::text::primary(t)),
-            )
-            .padding(Padding::from([space::MD, space::LG]))
-            .style(style::container::well(t)),
-        ),
+        },
+        Row::Rich(spans) => row(spans.into_iter().map(|span| {
+            if span.code {
+                container(
+                    iced::widget::text(span.text)
+                        .size(font_size::CAPTION_LG)
+                        .font(fonts::mono())
+                        .style(style::text::primary(t)),
+                )
+                .padding(Padding::from([1.0, space::XS]))
+                .style(style::container::well(t))
+                .into()
+            } else {
+                Element::from(typography::hint(t, span.text))
+            }
+        }))
+        .align_y(Alignment::Center)
+        .wrap()
+        .into(),
+        Row::Buttons(buttons) => buttons_view(ctx, buttons),
+        Row::Address(address) => container(
+            typography::mono(t, address)
+                .size(font_size::UI_LG)
+                .style(style::text::primary(t)),
+        )
+        .padding(Padding::from([space::MD, space::LG]))
+        .style(style::container::well(t))
+        .into(),
+        Row::Pairing(pairing) => pairing_view(st, ctx, pairing),
+        _ => column![].into(),
+    }
+}
+
+/// A row of a card that is not part of a step.
+fn row_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
+    let t = ctx.theme;
+    match r {
         Row::Switch(switch) => switch_row(ctx, switch),
-        Row::Pairing(pairing) => boxed(pairing_view(st, ctx, pairing)),
         Row::Device(device) => {
             let mut control = row![].spacing(space::LG).align_y(Alignment::Center);
             if let Some(ask) = device.ask {
@@ -743,6 +773,8 @@ fn row_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
         Row::Slot { label, hint } => form::row(t, label, iced::widget::Space::new())
             .hint(hint)
             .into(),
+        // The parts of a step are drawn by `step_view`.
+        step => boxed(step_view(st, ctx, step)),
     }
 }
 
