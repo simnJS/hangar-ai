@@ -1,0 +1,16 @@
+[package]
+name = "hello-native-tab"
+description = "The tab of the hello-native example kit: Rust, built to WebAssembly"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# A cdylib is the module Hangar loads; the rlib is for `cargo test`, which
+# runs the tab on the host with hangar_kit_sdk::testing. A kit of its own
+# repository depends on the SDK by git or by version instead of this path.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hangar-kit-sdk.workspace = true
+serde_json.workspace = true

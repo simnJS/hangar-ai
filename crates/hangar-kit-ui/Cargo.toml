@@ -8,6 +8,8 @@ repository.workspace = true
 edition = "2024"
 
 # No iced here: a kit compiles this to WebAssembly, and Hangar draws the tree
-# (hangar-kit-host).
+# (hangar-kit-host). serde_json for the untyped params and results of calls,
+# which are JSON on the wire whatever the side.
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true

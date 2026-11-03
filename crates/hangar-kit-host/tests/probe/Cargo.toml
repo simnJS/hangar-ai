@@ -1,0 +1,13 @@
+[package]
+name = "hangar-kit-probe"
+description = "A kit tab that misbehaves on demand, for hangar-kit-host's tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hangar-kit-sdk.workspace = true
+serde_json.workspace = true
