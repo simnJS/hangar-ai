@@ -883,6 +883,42 @@ async fn a_line_of_code_is_selected_with_the_pointer_and_copy_takes_only_that() 
 }
 
 #[tokio::test]
+async fn a_link_on_a_page_is_still_followed_and_selects_nothing() {
+    let mut h = Harness::new("select-link");
+    let path = h.write(
+        "README.md",
+        "# Top\n\n[jump to the code](#code)\n\n## Code\n\ntext\n",
+    );
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let pkg = Packages::default();
+    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+    let mut ui = simulate(
+        super::view_panel(&h.st, ctx, PanelMode::Expanded),
+        Size::new(900.0, 600.0),
+    );
+    ui.click("jump to the code").expect("the link is on screen");
+    let told: Vec<ViewerMsg> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        told.iter().any(|msg| matches!(msg,
+            ViewerMsg::Markdown(super::markdown::Msg::Link(href)) if href == "#code")),
+        "{told:?}"
+    );
+    assert!(
+        !told
+            .iter()
+            .any(|msg| matches!(msg, ViewerMsg::Markdown(super::markdown::Msg::Selected(_)))),
+        "a click on a link is not the start of a selection: {told:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_selection_is_let_go_when_the_source_is_toggled() {
     let mut h = Harness::new("select-toggle");
     let path = h.write("NOTES.md", "# Title\n\ntext\n");
