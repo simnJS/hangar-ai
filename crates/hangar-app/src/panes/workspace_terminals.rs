@@ -56,6 +56,10 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
                 can_close: ws.panes.len() > 1,
                 can_zoom: ws.panes.len() > 1,
                 width: width.max(PADDING_X),
+                index: order
+                    .iter()
+                    .position(|id| *id == pane.id)
+                    .unwrap_or_default(),
             },
         );
         // The outline says what the pane wants, an answer or (finished, or a

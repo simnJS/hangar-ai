@@ -118,6 +118,8 @@ pub struct Head<'a> {
     /// Zoom means something: there is more than one pane.
     pub can_zoom: bool,
     pub width: f32,
+    /// Its place in the workspace's reading order, from 0.
+    pub index: usize,
     pub shell: Option<&'a ShellInfo>,
     pub picker: Option<Picker>,
 }
@@ -133,6 +135,24 @@ fn state_tone(glyph: GlyphState) -> AgentState {
         GlyphState::Waiting => AgentState::Waiting,
         GlyphState::Yours => AgentState::Yours,
         _ => AgentState::Idle,
+    }
+}
+
+/// The name's tooltip: the shortcut that jumps to the pane, for the first
+/// nine in reading order while `pane.focusN` is bound, else the pane's name
+/// (`jumpKeys` of TerminalPane.tsx).
+fn name_tip(ctx: Ctx<'_>, pane: &Pane, index: usize) -> String {
+    let keys = crate::commands::run::FOCUS
+        .get(index)
+        .map_or("", |id| ctx.keymap.label(*id));
+    if keys.is_empty() {
+        ctx.i18n
+            .t_with(Key::PaneLabel, &args!("name" => pane.name.as_str()))
+            .into_owned()
+    } else {
+        ctx.i18n
+            .t_with(Key::PaneJump, &args!("keys" => keys))
+            .into_owned()
     }
 }
 
@@ -181,11 +201,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         state_title.clone(),
     ));
 
-    // The jump shortcut's hint is the keymap's (`pane.jump {keys}` for the
-    // first nine panes); the name alone until P7 exposes the keys.
-    let name_tip = ctx
-        .i18n
-        .t_with(Key::PaneLabel, &args!("name" => pane.name.as_str()));
+    let name_tip = name_tip(ctx, pane, head.index);
     let focused = head.focused;
     bar = bar.push(tip::bottom(
         t,
@@ -200,7 +216,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
                     style::text::muted(t)(theme)
                 }
             }),
-        name_tip.into_owned(),
+        name_tip,
     ));
 
     if let Some(branch) = logic.pane_branch(&folder_of(head.ws, pane)) {
@@ -693,6 +709,24 @@ pub fn activity_word(ctx: &Ctx<'_>, activity: AgentActivity) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_name_tells_the_key_that_jumps_to_the_first_nine_panes() {
+        let m = crate::state::Model::default();
+        let pkg = crate::app::Packages::default();
+        let ctx = crate::navigator::testing::ctx(&m, &pkg);
+        let pane = Pane {
+            name: "Ava".into(),
+            ..Pane::default()
+        };
+        let keys = ctx.keymap.label(crate::commands::CommandId::PaneFocus1);
+        assert!(!keys.is_empty(), "pane.focus1 is bound by default");
+        assert_eq!(name_tip(ctx, &pane, 0), format!("Focus with {keys}"));
+        let ninth = ctx.keymap.label(crate::commands::CommandId::PaneFocus9);
+        assert_eq!(name_tip(ctx, &pane, 8), format!("Focus with {ninth}"));
+        // The tenth has no key of its own: its name.
+        assert_eq!(name_tip(ctx, &pane, 9), "Pane Ava");
+    }
 
     #[test]
     fn a_wide_header_shows_everything() {
