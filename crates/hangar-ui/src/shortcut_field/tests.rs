@@ -148,7 +148,14 @@ mod recording {
             },
         });
         let mut ui = simulate(while_recording(&keys, &recorder));
-        assert!(ui.find("Ctrl").is_ok());
+        // The modifier is drawn as the platform writes it: `Ctrl`, or `⌃` on
+        // a Mac.
+        let ctrl = crate::shortcut::Held {
+            ctrl: true,
+            ..Default::default()
+        }
+        .segments()[0];
+        assert!(ui.find(ctrl).is_ok(), "{ctrl} is shown");
     }
 
     #[test]

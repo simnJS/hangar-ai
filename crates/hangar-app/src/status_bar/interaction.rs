@@ -108,10 +108,12 @@ fn enter_sends_now_and_alt_enter_holds_the_line_until_each_agent_is_free() {
 #[test]
 fn a_shortcut_typed_in_the_field_runs_and_does_not_also_send_the_line() {
     let model = model(View::Terminals);
-    // Ctrl+Shift+Enter splits the pane; the field would submit on it.
+    // Mod+Shift+Enter splits the pane; the field would submit on it. `Mod`
+    // is Ctrl on Windows and Linux and Cmd on a Mac, which is what
+    // `Modifiers::COMMAND` is on each.
     let messages = run(&typed(&model, "run the tests"), &model, |ui| {
         ui.click("run the tests").expect("the field is shown");
-        ui.key(Named::Enter, Modifiers::CTRL | Modifiers::SHIFT);
+        ui.key(Named::Enter, Modifiers::COMMAND | Modifiers::SHIFT);
     });
     assert!(sends(&messages).is_empty(), "{messages:?}");
 

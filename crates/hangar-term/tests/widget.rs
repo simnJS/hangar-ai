@@ -304,10 +304,13 @@ fn ctrl_shift_c_and_v_are_copy_and_paste_and_ctrl_v_only_if_configured() {
     });
     let mut h = Harness::new(terminal_view(&terminal, |a| a).into());
     h.clipboard = Clip(Some("pasted".into()));
+    // The platform's paste key: Ctrl+V, or Cmd+V on a Mac, where Ctrl+V stays
+    // the program's `^V` whatever the configuration says. `COMMAND` is iced's
+    // name for whichever of the two it is.
     let ctrl_v = h.send(key(
         Key::Character("v".into()),
         Some("\u{16}"),
-        Modifiers::CTRL,
+        Modifiers::COMMAND,
     ));
     assert!(matches!(ctrl_v.actions.as_slice(), [Action::Paste(t)] if t == "pasted"));
     assert!(ctrl_v.captured);

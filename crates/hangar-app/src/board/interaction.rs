@@ -290,8 +290,10 @@ fn the_docks_grip_is_given_the_room_the_shell_placed_for_its_window() {
     assert!(max < crate::shell::Panels::of(&m, main).dock.max);
 }
 
-/// The press of the palette's chord (Ctrl+Shift+P off macOS), which the
-/// keymap takes.
+/// The press of the palette's chord, Mod+Shift+P, which the keymap takes.
+/// `Mod` is held as Ctrl on Windows and Linux and as Cmd on a Mac, which is
+/// what `Modifiers::COMMAND` is on each: a literal Ctrl would be no shortcut
+/// at all on a Mac, and the guards would rightly let the key through.
 fn palette_chord() -> iced::Event {
     use iced::keyboard::{Event, Location, Modifiers, key::Code, key::Physical};
     iced::Event::Keyboard(Event::KeyPressed {
@@ -299,7 +301,7 @@ fn palette_chord() -> iced::Event {
         modified_key: Key::Character("P".into()),
         physical_key: Physical::Code(Code::KeyP),
         location: Location::Standard,
-        modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+        modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
         text: None,
         repeat: false,
     })
