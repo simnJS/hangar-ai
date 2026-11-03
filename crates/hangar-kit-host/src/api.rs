@@ -24,6 +24,17 @@ pub trait KitApi: Send + Sync + 'static {
     /// every call, so taking a grant back denies the next one.
     fn granted(&self) -> Vec<String>;
 
+    /// What only the app can refuse of a call whose params are right, asked
+    /// before the call counts against its rate: the workspace is still there,
+    /// the pane `panes.send` names is one of its Claude Code agents with the
+    /// bridge. `src/lib/kitApi.ts` checked those before it took from the
+    /// limit, so a page that keeps naming the wrong pane never spends the
+    /// sends of the right one. Nothing by default.
+    fn check(&self, call: &HostCall) -> Result<(), KitError> {
+        let _ = call;
+        Ok(())
+    }
+
     /// Does a call already let through. Its params are checked as
     /// `src/lib/kitApi.ts` checks them; what only the app can check (the
     /// pane exists, the path stays inside on disk, the command's rules)

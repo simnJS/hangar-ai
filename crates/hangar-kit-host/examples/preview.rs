@@ -174,7 +174,8 @@ fn boot() -> (Preview, Task<Message>) {
         KitStyle::light()
     } else {
         KitStyle::dark()
-    };
+    }
+    .with_locale(hangar_i18n::Locale::from_tag(locale).unwrap_or_default());
     let said = Said::default();
     let shot = std::env::var_os("HANGAR_PREVIEW_SHOT").map(PathBuf::from);
     let started = (|| {
@@ -287,6 +288,8 @@ fn subscription(preview: &Preview) -> Subscription<Message> {
 
 fn main() -> iced::Result {
     iced::application(boot, update, view)
+        .font(hangar_theme::fonts::INTER_VARIABLE)
+        .default_font(hangar_theme::fonts::ui())
         .title("Hangar kit preview")
         .subscription(subscription)
         .window_size((360.0, 720.0))

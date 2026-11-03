@@ -45,6 +45,9 @@
 //! helper installs for a window opened with [`kit_bridge`](OpenWindow::kit_bridge):
 //! the page's `window.parent` becomes a stand-in that speaks over `ipc`, so
 //! `/_hangar/kit.js` and the kits written for the frame run as they are.
+//! [`kit_relay`] reads what such a page posts and builds what it is told: the
+//! protocol's envelope, which the app relays to the same gate a native tab's
+//! calls go through.
 //!
 //! The helper never lets a page open a window of its own, download a file or
 //! ask for a permission; it says so with [`Event::NavigationBlocked`] and the
@@ -97,6 +100,7 @@
 
 mod base64;
 mod client;
+pub mod kit_relay;
 mod protocol;
 mod scheme;
 

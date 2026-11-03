@@ -34,6 +34,12 @@ pub enum Target {
     Workspace(WsId),
     /// « Open the project manager », the navigator's button.
     Manager,
+    /// A tab of one of the workspace's kits (`extraEntries` of App.tsx).
+    KitTab {
+        ws: WsId,
+        kit: String,
+        tab: String,
+    },
 }
 
 /// The order groups are listed in with nothing typed. Pane commands share
@@ -453,8 +459,42 @@ pub fn items(
         }
 
         // The tabs of the active workspace's kits come after the view
-        // commands (`extraEntries`); they join when the kit tabs package
-        // lists them (P16, wave 2).
+        // commands (`extraEntries`).
+        if section == Section::View
+            && let Some(ws) = active
+        {
+            let group = i18n.t(Key::KitsTabPaletteGroup).into_owned();
+            for choice in crate::kit_tabs::choices(m, ws) {
+                let title = choice.tab.title.as_str();
+                let mut keywords = vec![
+                    choice.tab.title.clone(),
+                    choice.kit_name.clone(),
+                    choice.kit_id.clone(),
+                    "kit".to_string(),
+                    "kits".to_string(),
+                    group.clone(),
+                ];
+                keywords.extend(elsewhere(
+                    locale,
+                    Key::KitsTabPaletteOpen,
+                    &args!("title" => title),
+                ));
+                list.push(
+                    Item::new(
+                        Target::KitTab {
+                            ws: ws.id.clone(),
+                            kit: choice.kit_id.clone(),
+                            tab: choice.tab.id.clone(),
+                        },
+                        group.as_str(),
+                        i18n.t_with(Key::KitsTabPaletteOpen, &args!("title" => title)),
+                    )
+                    .keywords(keywords)
+                    .icon(Icon::Window)
+                    .detail(Detail::new().plain(choice.kit_name.clone())),
+                );
+            }
+        }
     }
     list
 }

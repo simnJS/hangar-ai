@@ -290,7 +290,12 @@ impl KitTab {
     /// Hands the tab what its drawing sent.
     pub fn update(&mut self, message: KitMessage) -> Effects {
         match message {
-            KitMessage::Ui(event) => self.send(&Input::Ui(event), true),
+            KitMessage::Ui(event) => {
+                // Whatever the person did in the tab, a line of the open menu
+                // among others, the menu has done its part.
+                self.widgets.menu = None;
+                self.send(&Input::Ui(event), true)
+            }
             KitMessage::Local(local) => self.local(local),
             KitMessage::Reply(id, answer) => self.reply(id, answer),
             KitMessage::Timer(id) => self.timer(&id),
@@ -599,7 +604,11 @@ impl KitTab {
             let granted = self.api.granted();
             let now = Instant::now();
             for call in output.calls {
-                let future = match self.gate.admit(&call, &granted, gesture, now) {
+                let api = &self.api;
+                let admitted = self
+                    .gate
+                    .admit(&call, &granted, gesture, now, |call| api.check(call));
+                let future = match admitted {
                     Ok(host_call) => self.api.call(host_call),
                     Err(refusal) => ready(Err(refusal)),
                 };
@@ -629,6 +638,10 @@ impl KitTab {
             }
             Local::Toggle { tree, node, open } => {
                 self.widgets.toggled.insert((tree, node), open);
+                Effects::default()
+            }
+            Local::Menu(menu) => {
+                self.widgets.menu = menu;
                 Effects::default()
             }
             Local::Edit {

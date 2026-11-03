@@ -7,12 +7,19 @@ license.workspace = true
 repository.workspace = true
 edition = "2024"
 
-# hangar-theme and hangar-ui are being written beside this crate: until they
-# are, colours and faces come in through `KitStyle` (render/style.rs), and the
-# menu is a pick list. docs/native/kits-native.md, "Later", says what changes.
+# A kit's widgets are drawn in the theme in use, with hangar-ui's buttons,
+# icons, tooltips and menus, and the words Hangar says itself in the person's
+# language (render/style.rs).
 [dependencies]
 hangar-kit-ui.workspace = true
+hangar-theme.workspace = true
+hangar-ui.workspace = true
+hangar-i18n.workspace = true
 iced.workspace = true
 wasmtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# Drives the widgets that are hangar-ui's as a person would (render/tests.rs).
+iced_test.workspace = true

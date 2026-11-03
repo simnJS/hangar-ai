@@ -24,6 +24,7 @@ mod runtime;
 mod tab;
 
 pub use api::{CallFuture, HostCall, KitApi, LoopbackCall, ready};
+pub use gate::Gate;
 pub use message::{KitMessage, Local};
 pub use render::{KitStyle, Palette};
 pub use runtime::{KitModule, KitRuntime, Limits, LoadError};

@@ -1,8 +1,15 @@
 //! Every call of a tab passes here before the app sees it, in the order
 //! src/lib/kitApi.ts holds an HTML tab's: no more than 16 waiting, a method
 //! that exists, a permission held (read afresh), params of the right shape,
-//! a rate not exceeded. What fails answers the same codes and the same
-//! words as an HTML tab is answered.
+//! what only the app can refuse (`KitApi::check`), a rate not exceeded. What
+//! fails answers the same codes and the same words as an HTML tab is
+//! answered.
+//!
+//! It is public so that the app holds the calls of an HTML tab, relayed from
+//! its page, with this very gate: the two kinds of tab are one set of rules.
+//! A param a page leaves out and one it sends as `null` are not the same, as
+//! they were not in kitApi.ts: only the methods that take no params, and
+//! `files.list`, read a `null` as nothing.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -57,7 +64,8 @@ impl Rate {
     }
 }
 
-pub(crate) struct Gate {
+/// The calls of one tab: those waiting for their answer, and its rates.
+pub struct Gate {
     /// The calls let through and not answered yet, by id, with their method.
     waiting: HashMap<CallId, &'static str>,
     send: Rate,
@@ -69,8 +77,14 @@ pub(crate) struct Gate {
     toast: Rate,
 }
 
+impl Default for Gate {
+    fn default() -> Self {
+        Gate::new()
+    }
+}
+
 impl Gate {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Gate {
             waiting: HashMap::new(),
             send: Rate::new(limits::WRITES_PER_MINUTE),
@@ -85,23 +99,31 @@ impl Gate {
 
     /// A call is answered: it no longer counts among those waiting. False
     /// for an id that was not let through, or was answered already.
-    pub(crate) fn settle(&mut self, id: CallId) -> bool {
+    pub fn settle(&mut self, id: CallId) -> bool {
         self.waiting.remove(&id).is_some()
     }
 
     /// Forgets every call waiting: the instance they were made by is gone.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.waiting.clear();
+    }
+
+    /// How many calls are waiting for their answer.
+    pub fn waiting(&self) -> usize {
+        self.waiting.len()
     }
 
     /// Lets `call` through, as a [`HostCall`], or says why not. `gesture`:
     /// the update that made it answers a person's click or keystroke.
-    pub(crate) fn admit(
+    /// `check` is the app's own refusal of a call whose params are right
+    /// ([`KitApi::check`](crate::KitApi::check)), asked before its rate.
+    pub fn admit(
         &mut self,
         call: &Call,
         granted: &[String],
         gesture: bool,
         now: Instant,
+        check: impl FnOnce(&HostCall) -> Result<(), KitError>,
     ) -> Result<HostCall, KitError> {
         if self.waiting.len() >= limits::MAX_PENDING {
             return Err(error(
@@ -125,6 +147,7 @@ impl Gate {
             return Err(refusal(needs, &call.params, granted));
         }
         let host_call = parse(&call.method, &call.params, granted, gesture)?;
+        check(&host_call)?;
         if let HostCall::Confirm(_) = host_call
             && self
                 .waiting
@@ -238,14 +261,17 @@ fn string<'a>(
     Ok(value)
 }
 
+/// A param that may be left out; given, a string of at most `max_chars`, a
+/// `null` refused as any other value that is not one (`stringParam`).
 fn optional_string<'a>(
     params: &'a Map<String, Value>,
     key: &str,
     max_chars: usize,
+    empty: bool,
 ) -> Result<Option<&'a str>, KitError> {
     match params.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(_) => string(params, key, max_chars, true).map(Some),
+        None => Ok(None),
+        Some(_) => string(params, key, max_chars, empty).map(Some),
     }
 }
 
@@ -385,13 +411,13 @@ fn loopback(params: &Map<String, Value>) -> Result<LoopbackCall, KitError> {
         ));
     }
     let method = match params.get("method") {
-        None | Some(Value::Null) => api::HttpMethod::Get,
+        None => api::HttpMethod::Get,
         Some(Value::String(method)) if method == "GET" => api::HttpMethod::Get,
         Some(Value::String(method)) if method == "POST" => api::HttpMethod::Post,
         _ => return Err(invalid("method must be GET or POST")),
     };
     let body = match params.get("body") {
-        None | Some(Value::Null) => None,
+        None => None,
         Some(Value::String(body)) => Some(body.clone()),
         Some(_) => return Err(invalid("body must be a string")),
     };
@@ -405,7 +431,7 @@ fn loopback(params: &Map<String, Value>) -> Result<LoopbackCall, KitError> {
         return Err(invalid("body is larger than 2 MB"));
     }
     let timeout_ms = match params.get("timeoutMs") {
-        None | Some(Value::Null) => limits::LOOPBACK_TIMEOUT_MS,
+        None => limits::LOOPBACK_TIMEOUT_MS,
         Some(value) => match value.as_u64() {
             Some(ms) if (1..=limits::LOOPBACK_MAX_TIMEOUT_MS as u64).contains(&ms) => ms as u32,
             _ => {
@@ -429,7 +455,7 @@ fn loopback(params: &Map<String, Value>) -> Result<LoopbackCall, KitError> {
 /// holds them to the command's own rules.
 fn command_args(params: &Map<String, Value>) -> Result<BTreeMap<String, String>, KitError> {
     match params.get("args") {
-        None | Some(Value::Null) => Ok(BTreeMap::new()),
+        None => Ok(BTreeMap::new()),
         Some(Value::Object(args)) => args
             .iter()
             .map(|(name, value)| match value {
@@ -502,12 +528,13 @@ fn parse(
                 object(params)?
             };
             let path = match params.get("path") {
-                None | Some(Value::Null) => None,
+                None => None,
                 Some(given) if names_its_folder(given) => None,
                 given => Some(project_path(given)?),
             };
-            let pattern = optional_string(params, "pattern", limits::LIST_PATTERN_MAX_CHARS)?
-                .map(str::to_owned);
+            let pattern =
+                optional_string(params, "pattern", limits::LIST_PATTERN_MAX_CHARS, false)?
+                    .map(str::to_owned);
             HostCall::FilesList { path, pattern }
         }
         FILES_WRITE => {
@@ -520,7 +547,7 @@ fn parse(
                 return Err(invalid("text is larger than 1 MB"));
             }
             let expected = match params.get("expected") {
-                None | Some(Value::Null) => None,
+                None => None,
                 Some(Value::String(expected)) if over_bytes(expected, limits::FILE_MAX_BYTES) => {
                     return Err(invalid("expected is larger than 1 MB"));
                 }
@@ -589,7 +616,7 @@ fn parse(
             let title = string(params, "title", limits::NOTIFY_TITLE_MAX_CHARS, false)?
                 .trim()
                 .to_owned();
-            let body = optional_string(params, "body", limits::NOTIFY_BODY_MAX_CHARS)?
+            let body = optional_string(params, "body", limits::NOTIFY_BODY_MAX_CHARS, true)?
                 .unwrap_or_default()
                 .to_owned();
             HostCall::Notify { title, body }
@@ -671,6 +698,11 @@ mod tests {
         }
     }
 
+    /// The app's own check, refusing nothing.
+    fn ok(_: &HostCall) -> Result<(), KitError> {
+        Ok(())
+    }
+
     fn grant(permissions: &[&str]) -> Vec<String> {
         permissions
             .iter()
@@ -688,6 +720,7 @@ mod tests {
                 &[],
                 false,
                 now,
+                ok,
             )
             .unwrap_err();
         assert_eq!(
@@ -700,11 +733,12 @@ mod tests {
                 &[],
                 false,
                 now,
+                ok,
             )
             .unwrap_err();
         assert_eq!(refused.message, "this tab was not granted loopback:8765");
         let refused = gate
-            .admit(&call(3, "files.delete", json!({})), &[], false, now)
+            .admit(&call(3, "files.delete", json!({})), &[], false, now, ok)
             .unwrap_err();
         assert_eq!(refused.code, "unknown");
     }
@@ -721,6 +755,7 @@ mod tests {
                     &reader,
                     false,
                     now,
+                    ok,
                 )
                 .unwrap_err();
             assert_eq!(refused.code, "invalid", "{bad}");
@@ -731,6 +766,7 @@ mod tests {
                 &reader,
                 false,
                 now,
+                ok,
             )
             .unwrap();
         assert_eq!(
@@ -747,6 +783,7 @@ mod tests {
                 &writer,
                 false,
                 now,
+                ok,
             )
             .unwrap();
         assert_eq!(
@@ -762,6 +799,7 @@ mod tests {
                 &writer,
                 false,
                 now,
+                ok,
             )
             .unwrap_err();
         assert_eq!(refused.code, "invalid");
@@ -778,6 +816,7 @@ mod tests {
                 &notify,
                 false,
                 now,
+                ok,
             )
             .unwrap();
             gate.settle(id);
@@ -788,6 +827,7 @@ mod tests {
                 &notify,
                 false,
                 now,
+                ok,
             )
             .unwrap_err();
         assert_eq!(refused.code, "rate_limited");
@@ -796,26 +836,111 @@ mod tests {
                 &call(10, "notify", json!({ "title": "t" })),
                 &notify,
                 false,
-                now + MINUTE
+                now + MINUTE,
+                ok
             )
             .is_ok()
         );
         let mut gate = Gate::new();
         for id in 0..16 {
-            gate.admit(&call(id, "tab.params", json!(null)), &[], false, now)
+            gate.admit(&call(id, "tab.params", json!(null)), &[], false, now, ok)
                 .unwrap();
         }
         assert_eq!(
-            gate.admit(&call(99, "tab.params", json!(null)), &[], false, now)
+            gate.admit(&call(99, "tab.params", json!(null)), &[], false, now, ok)
                 .unwrap_err()
                 .code,
             "rate_limited"
         );
         assert!(gate.settle(3));
         assert!(
-            gate.admit(&call(99, "tab.params", json!(null)), &[], false, now)
+            gate.admit(&call(99, "tab.params", json!(null)), &[], false, now, ok)
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn the_apps_refusal_comes_before_the_rate() {
+        let mut gate = Gate::new();
+        let now = Instant::now();
+        let sender = grant(&["panes.send"]);
+        let not_claude = |call: &HostCall| match call {
+            HostCall::PanesSend { pane, .. } if pane == "Ben" => {
+                Err(KitError::new("denied", "Ben runs codex"))
+            }
+            _ => Ok(()),
+        };
+        let send = |id, pane: &str| call(id, "panes.send", json!({ "pane": pane, "text": "hi" }));
+        for id in 0..20 {
+            let refused = gate
+                .admit(&send(id, "Ben"), &sender, false, now, not_claude)
+                .unwrap_err();
+            assert_eq!(refused.code, "denied");
+        }
+        // Nothing of the refused calls waits, nor counted against the sends.
+        assert_eq!(gate.waiting(), 0);
+        assert!(
+            gate.admit(&send(99, "Ava"), &sender, false, now, not_claude)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_null_is_not_a_param_left_out() {
+        let mut gate = Gate::new();
+        let now = Instant::now();
+        let all = grant(&[
+            "files.read",
+            "files.write",
+            "notify",
+            "loopback:8765",
+            "command:ci",
+        ]);
+        let mut id = 0;
+        let mut admit = |method: &str, params: Value| {
+            id += 1;
+            let answer = gate.admit(&call(id, method, params), &all, false, now, ok);
+            if let Ok(admitted) = &answer {
+                gate.settle(id);
+                let _ = admitted;
+            }
+            answer
+        };
+        for (method, params) in [
+            (
+                "files.write",
+                json!({ "path": "a", "text": "x", "expected": null }),
+            ),
+            ("files.list", json!({ "path": null })),
+            ("files.list", json!({ "pattern": null })),
+            ("notify", json!({ "title": "t", "body": null })),
+            (
+                "loopback.fetch",
+                json!({ "port": 8765, "path": "/", "method": null }),
+            ),
+            (
+                "loopback.fetch",
+                json!({ "port": 8765, "path": "/", "body": null }),
+            ),
+            (
+                "loopback.fetch",
+                json!({ "port": 8765, "path": "/", "timeoutMs": null }),
+            ),
+            ("command.run", json!({ "name": "ci", "args": null })),
+        ] {
+            let refused = admit(method, params.clone()).unwrap_err();
+            assert_eq!(refused.code, "invalid", "{method} {params}");
+        }
+        for (method, params) in [
+            ("files.write", json!({ "path": "a", "text": "x" })),
+            ("files.list", json!({})),
+            ("files.list", Value::Null),
+            ("notify", json!({ "title": "t" })),
+            ("loopback.fetch", json!({ "port": 8765, "path": "/" })),
+            ("command.run", json!({ "name": "ci" })),
+        ] {
+            assert!(admit(method, params.clone()).is_ok(), "{method} {params}");
+        }
     }
 
     #[test]
@@ -823,14 +948,26 @@ mod tests {
         let mut gate = Gate::new();
         let now = Instant::now();
         assert_eq!(
-            gate.admit(&call(1, "ui.copy", json!({ "text": "x" })), &[], false, now)
-                .unwrap_err()
-                .code,
+            gate.admit(
+                &call(1, "ui.copy", json!({ "text": "x" })),
+                &[],
+                false,
+                now,
+                ok
+            )
+            .unwrap_err()
+            .code,
             "denied"
         );
         assert_eq!(
-            gate.admit(&call(2, "ui.copy", json!({ "text": "x" })), &[], true, now)
-                .unwrap(),
+            gate.admit(
+                &call(2, "ui.copy", json!({ "text": "x" })),
+                &[],
+                true,
+                now,
+                ok
+            )
+            .unwrap(),
             HostCall::Copy { text: "x".into() }
         );
     }
@@ -844,7 +981,8 @@ mod tests {
                 &call(1, "tab.setTitle", json!({ "title": "  Run #4 " })),
                 &[],
                 false,
-                now
+                now,
+                ok
             )
             .unwrap(),
             HostCall::TabSetTitle {
@@ -856,7 +994,8 @@ mod tests {
                 &call(2, "tab.setTitle", json!({ "title": "a\u{202e}b" })),
                 &[],
                 false,
-                now
+                now,
+                ok
             )
             .is_err()
         );
@@ -871,6 +1010,7 @@ mod tests {
                 &port,
                 false,
                 now,
+                ok,
             )
             .unwrap();
         assert!(matches!(
@@ -886,6 +1026,7 @@ mod tests {
                 &port,
                 false,
                 now,
+                ok,
             )
             .unwrap_err();
         assert_eq!(bad.code, "invalid");

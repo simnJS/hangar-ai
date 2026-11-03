@@ -112,34 +112,23 @@ pub struct KitTab {
 /// there (`kitTabs`, `kitsLoading`).
 ///
 /// The kits are the workspace's own and the ones enabled everywhere
-/// (`effectiveKits`). A tab is listed when its kit is installed and usable
-/// (readable, and its manifest names the id it is enabled by), in the order
-/// the kits were enabled (`workspaceKitTabs`). Opening one is the kit tabs
+/// (`effectiveKits`); which of their tabs may open is the kit tabs package's
+/// rule (`kit_tabs::choices`, `workspaceKitTabs`). Opening one is the kit tabs
 /// package's, through `Intent::OpenKitTab`.
 pub fn kit_tabs(m: &Model, ws: &Workspace) -> Option<(Vec<KitTab>, bool)> {
-    let enabled = crate::kits::model::effective_kits(Some(ws), Some(m.settings()));
-    if enabled.is_empty() {
+    if !crate::kit_tabs::has_kits(m, ws) {
         return None;
     }
-    let live = &m.live.kits;
-    let tabs = enabled
-        .iter()
-        .filter_map(|entry| {
-            let kit = live.find(&entry.id)?;
-            let manifest = kit
-                .manifest
-                .as_ref()
-                .filter(|manifest| kit.error.is_none() && manifest.id == entry.id)?;
-            Some(manifest.tabs.iter().map(|tab| KitTab {
-                kit_id: entry.id.clone(),
-                tab_id: tab.id.clone(),
-                title: tab.title.clone(),
-                kit: manifest.name.clone(),
-            }))
+    let tabs = crate::kit_tabs::choices(m, ws)
+        .into_iter()
+        .map(|choice| KitTab {
+            kit_id: choice.kit_id,
+            tab_id: choice.tab.id,
+            title: choice.tab.title,
+            kit: choice.kit_name,
         })
-        .flatten()
         .collect();
-    Some((tabs, live.loading()))
+    Some((tabs, m.live.kits.loading()))
 }
 
 /// What the toolbar's 3D button needs of the preview: some model is open,

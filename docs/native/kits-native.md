@@ -451,9 +451,17 @@ How a call is held, in this order, by `hangar-kit-host` before the app sees it â
    `..`, no drive or stream, no hidden part unless the tab holds both `files.read` and `files.write`
    (never `.git`), 1 024 characters; texts of 1 MB, images of 10 MB, `panes.send` of 20 000
    characters, a title of 40 and a badge of 12 on one plain line; `loopback.fetch`'s path, method,
-   body and timeout as kits.md says. `invalid`, or `bad_args` for `command.run`'s values.
-5. **Rates**: `panes.send`, `data.write`, and `files.write` with `files.writeBinary`, 10 a minute
+   body and timeout as kits.md says. `invalid`, or `bad_args` for `command.run`'s values. A param
+   left out and one sent as `null` are not the same, as they were not in kitApi.ts.
+5. **What only the app can refuse before the rate** (`KitApi::check`): the workspace gone
+   (`unavailable`), the pane `panes.send` names missing, not a Claude Code agent, or without the
+   bridge. So a page that keeps naming the wrong pane spends none of the right one's sends.
+6. **Rates**: `panes.send`, `data.write`, and `files.write` with `files.writeBinary`, 10 a minute
    each; `notify` 5; `tab.setTitle` and `tab.setBadge` 120 each; `ui.toast` 30. `rate_limited`.
+
+The gate is public (`hangar_kit_host::Gate`): the app holds an HTML tab's calls, relayed from its
+page by `hangar_webview::kit_relay`, with the same one, so the two kinds of tab are one set of rules.
+An HTML tab is answered `unknown` for the three `ui.*` methods, which a page has in its own document.
 
 Then the app does it, and answers what only it can: the pane, the file on disk where links can lead
 out, the command's own rules, `not_found`, `conflict`, `unreachable`, `busy`, `failed`. A refused call
@@ -531,9 +539,15 @@ refused call, an unreachable server, a missing file are not failures: they are a
    `event("panes.changed", {})` to every tab of the workspace when the panes change; `set_visible`,
    `set_theme`, `set_params` when those change; dropping the `KitTab` when the tab closes or its
    workspace sleeps.
-4. **`KitStyle`** from the theme in use: Hangar UI's tokens, by their names, and the interface's and
-   terminals' faces. `KitStyle::dark()` and `light()` are graphite and github-light until
-   hangar-theme gives the theme's own.
+4. **`KitStyle::new(theme, locale)`** from the hangar-theme theme in use: Hangar UI's tokens, each
+   the chrome token `tokens.json` maps it to (the values an HTML tab's theme event carries, which a
+   test holds them to), the interface's faces, and the language of the words Hangar says itself (a tab
+   that could not start, a widget it does not know). Buttons, icons, tooltips and menus are
+   hangar-ui's. `KitStyle::dark()` and `light()` are graphite and github-light.
+
+The app's side of all this is `crates/hangar-app/src/kit_tabs` (P16): one `KitApi` (`TabApi`) for
+both kinds of tab, the page shown when a module does not load, the `ui.*` calls drawn at the foot of
+the tab and in place of its page.
 
 ## Decisions taken
 
@@ -572,13 +586,10 @@ The person this was written for was not there to ask; these were decided, and ca
 
 ## Later
 
-- **hangar-theme and hangar-ui.** `hangar-kit-host` takes its colours and faces through `KitStyle`
-  and draws with iced's own widgets. Once those crates exist: `KitStyle` filled from the theme's
-  chrome tokens (the map `crates/hangar-core/kit-sdk/tokens.json` already writes), the two
-  dependencies put back in `crates/hangar-kit-host/Cargo.toml`, and hangar-ui's buttons, menu and
-  dialogs in place of the styled iced ones. The contract does not change.
-- **The menu** is an iced pick list for now: it has no separators, leaves disabled items out, and is
-  as wide as its longest item. hangar-ui's menu replaces it.
+- **The other controls**: text inputs, selects, checkboxes, switches, tables and trees are iced's
+  own, styled from `KitStyle`, not yet hangar-ui's `input::*`. The contract does not change.
+- **The failure reasons** (a module that does not load, a deadline passed) are the runtime's
+  English: what a kit's author reads. The titles and the button around them are translated.
 - **A long list** (`hangar.ui.list`, a hundred thousand lines) is not virtualised: a kit sends the
   lines in view of a `log` or `table` with a `height`. A windowed list widget, asking the kit for
   ranges, is the next widget to add.
@@ -588,6 +599,4 @@ The person this was written for was not there to ask; these were decided, and ca
   it does.
 - **The progress bar's indeterminate state** is drawn still, the **split** is not draggable, and a
   tab cannot move the focus (which an HTML tab should not do by itself either).
-- **The manifest**: schema 2 and `native` in `crates/hangar-core/src/kits/manifest.rs`, and the
-  fallback to the webview when a module cannot load.
 - **Compiled modules on disk**: wasmtime's cache, so a tab opens without compiling after a restart.
