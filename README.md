@@ -5,7 +5,7 @@
 <h1 align="center">Hangar.AI</h1>
 
 <p align="center">
-  Run many Claude Code sessions side by side in one window,<br>
+  Run many Claude Code sessions side by side in one native window,<br>
   sharing a task board and a memory over MCP, and follow and steer them from your phone.
 </p>
 
@@ -18,6 +18,7 @@
 <p align="center">
   <a href="https://hangar.simnjs.fr">Website</a> ·
   <a href="#hangar-mobile">Hangar Mobile</a> ·
+  <a href="#performance">Performance</a> ·
   <a href="#install">Download</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://discord.gg/hangarai">Discord</a>
@@ -25,11 +26,17 @@
 
 ![Hangar.AI on a workspace with an orchestrator, Iris, and two workers, Zoe and Eli, each in its own terminal. Iris says Zoe reports the coupon task is done and that she is reading the branch's changes before its delivery reaches you. Zoe has finished and left her report on the task. Eli writes the order receipt in a git worktree of its own. On the right, the inspector shows Iris's session, context use, cost and the Claude plan's usage.](.github/assets/hero.webp)
 
-<p align="center"><sub>Screenshots of a real session: Claude Code agents at work on checkout-v2, a sample repository.</sub></p>
+<p align="center"><sub>Screenshots of a real session in Hangar 1.0: Claude Code agents at work on checkout-v2, a sample repository. Hangar 2.0 draws the same interface natively.</sub></p>
 
-Hangar.AI is an open-source desktop app for Windows, macOS and Linux, written in Rust
-with a native interface (iced). It runs Claude Code, as many sessions as you need, each in a real terminal
-next to plain shells, and gives them a shared place to coordinate.
+Hangar.AI is an open-source desktop app for Windows, macOS and Linux. It runs Claude Code,
+as many sessions as you need, each in a real terminal next to plain shells, and gives them
+a shared place to coordinate.
+
+**Hangar 2.0 is native.** The whole app is written in Rust and drawn with
+[iced](https://iced.rs), with no web view in it: it starts faster, and sixteen busy
+terminals take a few hundred megabytes instead of several gigabytes
+([Performance](#performance)). It reads the data of Hangar 1.x as it is, and a 1.x install
+updates to it by itself.
 
 With **Hangar Mobile**, you follow and steer them from your phone while Hangar keeps running
 on your PC: see what waits for you in every project, answer an agent, allow or deny a
@@ -63,6 +70,8 @@ Hangar keeps them in one window, and on your phone:
 - **Orchestration (new in 1.0).** One agent plans. Workers do the work in separate git
   worktrees, and each delivery is reviewed, and run through your check command if you set
   one, before it is merged locally.
+- **Native (new in 2.0).** No web view and no browser engine in the app, so typing stays
+  instant even while every terminal prints.
 
 Hangar launches the Claude Code installed on your machine, with your accounts and your
 settings. It is not a model provider, and it has no online service of its own.
@@ -70,10 +79,12 @@ settings. It is not a model provider, and it has no online service of its own.
 ## Contents
 
 - [Features](#features)
+- [Performance](#performance)
 - [Install](#install)
 - [Getting started](#getting-started)
 - [Hangar Mobile](#hangar-mobile)
 - [How agents use Hangar's MCP server](#how-agents-use-hangars-mcp-server)
+- [Kits](#kits)
 - [Privacy](#privacy)
 - [Build from source](#build-from-source)
 - [Repository layout](#repository-layout)
@@ -188,7 +199,10 @@ chat.
 ### Agents and terminals
 
 - **Claude Code and shells.** Each pane runs Claude Code or a plain shell: PowerShell,
-  cmd, Git Bash, WSL, zsh, bash, fish, Nushell…
+  cmd, Git Bash, WSL, zsh, bash, fish, Nushell… Since 2.0, Claude Code is the only agent;
+  a pane saved with Codex, Gemini CLI or OpenCode opens as a shell in the same folder.
+- **Terminals of its own.** Hangar draws its terminals itself, on alacritty_terminal: true
+  colour, mouse modes, links, search, bracketed paste, and dead keys that compose.
 - **Session resume.** Claude Code panes reopen on the conversation they were in.
 - **Claude Code bridge.** A small mod reports turns, permission prompts, context fill and
   plan usage, so pane states are exact rather than guessed. When an agent edits a file
@@ -231,27 +245,57 @@ chat.
 
 ![The usage statistics view over 30 days, filtered on one project: tokens, API-equivalent cost, active time and sessions](.github/assets/stats.webp)
 
+### Kits and previews
+
+- **Kits** bring a domain into Hangar: a Claude Code plugin, setup commands, and tabs of
+  their own. A tab is either an HTML page or, new in 2.0, a native tab written in Rust and
+  compiled to WebAssembly, which Hangar draws in your theme. The **Library** in
+  **Settings → Kits** lists the public kits of the [hangar-ai](https://github.com/hangar-ai)
+  organization. See [Kits](#kits).
+- **Previews.** Agents show you files beside their terminal: images (animated GIF and WebP
+  too), code and text with highlighting, Markdown, PDFs, web pages, video and audio.
+- **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX) in a panel, with
+  its glTF animations, and render snapshots to check their own work.
+
+What needs a browser engine, a PDF, a web page, a video or an HTML kit tab, opens in
+`hangar-webview`, a small helper program beside Hangar, in a window of its own.
+
 ### Also
 
-- **3D preview.** Agents show you a model (glTF/GLB, OBJ, STL, PLY, FBX, USDZ) in a panel,
-  and render snapshots to check their own work.
 - **Dictation.** Hold a key, speak, and the text is typed into the focused pane. It runs
   locally with whisper.cpp, on a model downloaded once. Groq is an optional alternative, with
   its key kept in the system keychain.
 - **Discord Rich Presence**, off unless you turn it on.
+
+## Performance
+
+Hangar 1.12.1, the last release built on a web view, against Hangar 2.0, on the same Linux
+machine:
+
+| | 1.12.1 | 2.0 |
+|---|---|---|
+| Start, cold | 0.96 s | 0.57 s |
+| Memory at rest | 238 MB | 166 MB |
+| 16 terminals printing non-stop for 30 s: memory | 8.3 GB | 249 MB |
+| 16 terminals printing non-stop for 30 s: processor | 4.4 cores | 2.7 cores |
+| Echo of a key typed while 15 terminals print | no echo within 20 s | 2.4 ms |
+
+Each terminal parses its output on a thread of its own, and the window draws at most once
+per frame whatever they print, so a busy pane never holds up the one you type in. The method
+and the raw figures are in [docs/native/BENCHMARK.md](docs/native/BENCHMARK.md).
 
 ## Install
 
 Download the file for your system from the
 **[latest release](https://github.com/hangar-ai/hangar/releases/latest)**, under
 **Assets**. You only download once: after that, the app offers each new version and
-installs it in one click.
+installs it in one click. A Hangar 1.x install offers 2.0 the same way.
 
 | System | File | Notes |
 |---|---|---|
-| Windows (x64) | `Hangar.AI_<version>_x64-setup.exe` | Installs for your user only, without administrator rights. Needs WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing. |
+| Windows (x64) | `Hangar.AI_<version>_x64-setup.exe` | Installs for your user only, without administrator rights. HTML kit tabs and PDFs use WebView2, which ships with Windows 11; on Windows 10 the installer adds it if it is missing. |
 | macOS (Apple Silicon and Intel) | `Hangar.AI_<version>_universal.dmg` | One universal build for both, macOS 10.15 or later. |
-| Linux (x86_64) | `.AppImage`, `.deb` or `.rpm` | The AppImage runs without installing (`chmod +x` it first) on distributions with glibc 2.35 or later (2022 on). The `.deb` and `.rpm` need WebKitGTK 4.1, which apt and dnf install with them: `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora. |
+| Linux (x86_64) | `.AppImage`, `.deb` or `.rpm` | The AppImage runs without installing (`chmod +x` it first) on distributions with glibc 2.35 or later (2022 on). HTML kit tabs and PDFs need WebKitGTK 4.1: apt and dnf install it with the `.deb` and `.rpm`; with the AppImage, install `libwebkit2gtk-4.1-0` (Debian, Ubuntu) or `webkit2gtk4.1` (Fedora) if your system lacks it. |
 
 > [!NOTE]
 > **Windows: SmartScreen.** The installer is not code-signed, so on first run SmartScreen
@@ -265,6 +309,13 @@ installs it in one click.
 
 You also need [Claude Code](https://code.claude.com/docs/en/overview) installed and
 signed in. Hangar launches it; it does not install it.
+
+**Coming from 1.x.** Accept the update, or install 2.0 over 1.x: it uses the same folders
+and the same `state.json`, so your workspaces, boards, memory, settings, shortcuts, kits and
+Claude accounts are there. The kit tabs you had left open and each account's cached usage
+lived in the old web view, and are not carried over. The [changelog](CHANGELOG.md) lists
+what 2.0 does not do yet: mainly, there is no screen reader support, and Windows and macOS
+have been tested by CI but not yet used by a person.
 
 ## Getting started
 
@@ -372,6 +423,28 @@ data (see [Build from source](#build-from-source)):
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | scripts/native-dev.sh -- --mcp
 ```
 
+## Kits
+
+A kit links a domain, a game engine, a studio's tools, a service, to a workspace, without
+Hangar knowing anything about it. It can bring a Claude Code plugin (skills, commands,
+agents, MCP servers), setup commands that you see verbatim and run once, and tabs: pages of
+its own that talk to Hangar through a small, declared API, each permission accepted by you.
+
+- **HTML tabs** are the tabs of 1.x, with the same `window.hangar` API, the same
+  permissions, and [Hangar UI](docs/kit-ui.md), the stylesheet that makes them look like
+  Hangar. In 2.0 they open in the `hangar-webview` helper, in a window of their own.
+- **Native tabs** (new in 2.0) are Rust compiled to WebAssembly with the kit SDK,
+  `hangar-kit-sdk`. A tab describes its page as widgets, and Hangar draws them with its own,
+  in your theme and language. The module runs in a sandbox with time and memory limits, and
+  Hangar answers only the calls its manifest declares. A kit can carry both kinds, so that it
+  still opens on 1.x.
+
+Add a kit from a folder, a GitHub link or the Library. To write one, read
+[docs/kits.md](docs/kits.md) (the contract) and
+[docs/native/kits-native.md](docs/native/kits-native.md) (native tabs and the SDK), look at
+[`examples/kits/hello-native`](examples/kits/hello-native), and start from
+[`kit-template`](https://github.com/hangar-ai/kit-template).
+
 ## Privacy
 
 Hangar has no account, no telemetry and no backend. Your workspaces, the board, the memory
@@ -428,6 +501,7 @@ Then:
 ```bash
 scripts/native-dev.sh             # build and run Hangar, on data of its own under target/dev-home/
 scripts/native-dev.sh --release   # the same, optimised
+cargo build -p hangar-webview --features engine   # the helper, for HTML kit tabs and PDFs
 cargo test --workspace            # the tests
 pnpm install
 pnpm mobile:build                 # Hangar Mobile into dist-mobile/, which the next build embeds
@@ -447,20 +521,28 @@ release workflow runs them: see [docs/native/PACKAGING.md](docs/native/PACKAGING
 ## Repository layout
 
 ```
-crates/hangar-app/   the app: windows, views and state; packaging/ holds the installers' scripts and icons
-crates/hangar-core/  everything that is not drawing: PTYs, board, memory, MCP server, git, deliveries,
-                     stats, dictation, Hangar Mobile's server, the kits and their HTML SDK
+crates/hangar-app/       the app, `hangar-ai`: windows, views and state; packaging/ holds the installers
+crates/hangar-core/      everything that is not drawing: PTYs, board, memory, MCP server, git, deliveries,
+                         stats, dictation, Hangar Mobile's server, the kits and their HTML SDK
 crates/hangar-core/claude-mod/hangar-bridge/
-                     the Claude Code mod that reports session state to Hangar
-crates/              the other crates: theme, widgets, terminal, strings, kits, webview helper,
-                     3D viewer, updater (docs/native/PLAN.md)
-mobile/              Hangar Mobile, the phone app, built into dist-mobile/ and embedded in the binary
-examples/kits/       example kits
-assets/              the logo, the README's images and the sample 3D model
-site/                the website at hangar.simnjs.fr
-scripts/             the dev launcher, the kits' stylesheet generator, logo and installer art
-docs/                kits, Hangar UI, and the native port's plan and status
-.github/workflows/   CI (checks on pushes to main and feat/native-rust, and on pull requests) and Release (builds and publishes on a tag)
+                         the Claude Code mod that reports session state to Hangar
+crates/hangar-term/      the terminal widget, on alacritty_terminal
+crates/hangar-theme/     the 33 themes and the design tokens
+crates/hangar-ui/        the widgets every view is built from: buttons, menus, dialogs, the palette…
+crates/hangar-i18n/      the interface strings, English and French (dict/en.json, dict/fr.json)
+crates/hangar-kit-ui/    the widgets and events of native kit tabs, as data: the public contract
+crates/hangar-kit-sdk/   what a kit links to write a native tab
+crates/hangar-kit-host/  runs native kit tabs in wasmtime and draws them
+crates/hangar-webview/   the helper for HTML kit tabs, PDFs and web pages, and the app's client for it
+crates/hangar-model3d/   the 3D preview
+crates/hangar-update/    the updater
+mobile/                  Hangar Mobile, the phone app, built into dist-mobile/ and embedded in the binary
+examples/kits/           example kits, among them hello-native, a native tab
+assets/                  the logo, the README's images and the sample 3D models
+site/                    the website at hangar.simnjs.fr
+scripts/                 the dev launcher, the kits' stylesheet generator, logo and installer art
+docs/                    kits, Hangar UI, and the native rewrite's plan, status and contracts (docs/native/)
+.github/workflows/       CI (checks on pushes and pull requests) and Release (builds and publishes on a tag)
 ```
 
 ## Contributing
