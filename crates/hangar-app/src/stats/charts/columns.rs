@@ -42,7 +42,11 @@ pub struct Layout {
 impl Layout {
     pub fn new(width: f32, count: usize) -> Layout {
         let plot_width = (width - GUTTER - 4.0).max(0.0);
-        let slot = if count > 0 { plot_width / count as f32 } else { 0.0 };
+        let slot = if count > 0 {
+            plot_width / count as f32
+        } else {
+            0.0
+        };
         // Thin marks: a third of the slot is air, never wider than 24 px.
         let bar_width = if slot > 6.0 { slot * 0.64 } else { slot - 1.0 }.clamp(1.0, 24.0);
         Layout {
@@ -144,7 +148,10 @@ impl Columns {
                 .width(Length::Fill)
                 .height(Length::Fixed(HEIGHT));
             let mut layers = stack![chart];
-            if let Some(index) = self.active.filter(|index| *index < self.summary.series.len()) {
+            if let Some(index) = self
+                .active
+                .filter(|index| *index < self.summary.series.len())
+            {
                 let layout = Layout::new(size.width, self.summary.series.len());
                 layers = layers.push(readout(
                     self.theme,
@@ -235,7 +242,10 @@ impl canvas::Program<Message> for Columns {
                 colors.line
             };
             frame.stroke(
-                &Path::line(Point::new(GUTTER, y), Point::new(GUTTER + layout.plot_width, y)),
+                &Path::line(
+                    Point::new(GUTTER, y),
+                    Point::new(GUTTER + layout.plot_width, y),
+                ),
                 Stroke::default().with_color(color).with_width(1.0),
             );
             frame.fill_text(caption(
@@ -282,7 +292,11 @@ impl canvas::Program<Message> for Columns {
                 // A 2 px gap of the card between two kinds, taken from the
                 // lower one when it is tall enough to give it.
                 let last = at == parts.len() - 1;
-                let gap = if !last && *height > GAP + 1.0 { GAP } else { 0.0 };
+                let gap = if !last && *height > GAP + 1.0 {
+                    GAP
+                } else {
+                    0.0
+                };
                 let part = (*height - gap).max(0.0);
                 // One rounded top per column, square at the baseline.
                 let corners = if last {
@@ -356,7 +370,9 @@ impl canvas::Program<Message> for Columns {
                     Size::new(bounds.width - 2.0, bounds.height - 2.0),
                     6.0.into(),
                 ),
-                Stroke::default().with_color(colors.accent_ring).with_width(2.0),
+                Stroke::default()
+                    .with_color(colors.accent_ring)
+                    .with_width(2.0),
             );
         }
         vec![frame.into_geometry()]

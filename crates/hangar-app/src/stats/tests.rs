@@ -58,7 +58,12 @@ fn only_the_focused_chart_takes_keys() {
     let none = Modifiers::empty();
     assert_eq!(chart_key(None, true, &named(Named::ArrowLeft), none), None);
     assert_eq!(
-        chart_key(Some(ChartId::Columns), false, &named(Named::ArrowLeft), none),
+        chart_key(
+            Some(ChartId::Columns),
+            false,
+            &named(Named::ArrowLeft),
+            none
+        ),
         Some(ChartKey::Left)
     );
     assert_eq!(

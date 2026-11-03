@@ -45,7 +45,7 @@ mod view;
 
 // P20 (mobile) calls it; nothing in the window does.
 #[allow(unused_imports)]
-pub use cache::usage;
+pub use cache::{usage, worktrees_of};
 pub use charts::ChartId;
 use model::{Measure, Period, Project, Summary, SummaryOptions, TOP_SESSIONS};
 
@@ -526,9 +526,7 @@ pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
     }
     // Lives while the page is on screen, so coming back starts it again: the
     // page's "mounted".
-    let mounted = Subscription::run(|| {
-        iced::futures::stream::once(async { say(Msg::Mounted) })
-    });
+    let mounted = Subscription::run(|| iced::futures::stream::once(async { say(Msg::Mounted) }));
     if m.live.stats.refreshing {
         Subscription::batch([
             mounted,

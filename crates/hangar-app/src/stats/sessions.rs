@@ -65,7 +65,11 @@ pub fn list<'a>(
             .flatten()
             .collect::<Vec<_>>()
             .join(" · ");
-        let separator = || text("·").size(font_size::CAPTION).style(style::text::subtle(t));
+        let separator = || {
+            text("·")
+                .size(font_size::CAPTION)
+                .style(style::text::subtle(t))
+        };
         let meta = row![
             hangar_ui::tip::bottom(
                 t,
@@ -75,7 +79,10 @@ pub fn list<'a>(
                     .style(chip(t))
                     .on_press(pick(session.project.key.clone())),
                 ui.tr
-                    .t_with(Key::StatsShowOnly, &args!("name" => session.project.name.as_str()))
+                    .t_with(
+                        Key::StatsShowOnly,
+                        &args!("name" => session.project.name.as_str())
+                    )
                     .into_owned(),
             ),
             separator(),

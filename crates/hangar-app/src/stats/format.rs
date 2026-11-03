@@ -106,7 +106,10 @@ fn compact_magnitude(value: f64, rounding: Rounding, locale: Locale) -> String {
 /// One decimal below a hundred, none above: three digits at most.
 pub fn format_compact(value: f64, locale: Locale) -> String {
     let sign = if value < 0.0 { "-" } else { "" };
-    format!("{sign}{}", compact_magnitude(value, Rounding::LessPrecise, locale))
+    format!(
+        "{sign}{}",
+        compact_magnitude(value, Rounding::LessPrecise, locale)
+    )
 }
 
 /// A count in full, grouped the language's way: "1 284 093".
@@ -153,7 +156,6 @@ pub fn format_usd(value: f64, locale: Locale, exact: bool) -> String {
     let decimals = if exact || value < 10.0 { 2 } else { 0 };
     dollars(negative, &fixed(value, decimals, locale), locale)
 }
-
 
 /// An axis tick: as short as it can be and still distinct.
 pub fn format_tick(value: f64, measure: Measure, locale: Locale) -> String {
@@ -383,7 +385,9 @@ mod tests {
     fn matches_compact(text: &str, number: &str, unit: &str) -> bool {
         text.strip_prefix(number)
             .and_then(|rest| rest.strip_suffix(unit))
-            .is_some_and(|space| space.chars().count() <= 1 && space.chars().all(char::is_whitespace))
+            .is_some_and(|space| {
+                space.chars().count() <= 1 && space.chars().all(char::is_whitespace)
+            })
     }
 
     const EN: Locale = Locale::En;
@@ -394,7 +398,11 @@ mod tests {
         assert_eq!(format_compact(1_234_000.0, EN), "1.2M");
         assert_eq!(format_compact(124_500_000.0, EN), "125M");
         assert_eq!(format_compact(845_000.0, EN), "845K");
-        assert!(matches_compact(&format_compact(1_234_000.0, FR), "1,2", "M"));
+        assert!(matches_compact(
+            &format_compact(1_234_000.0, FR),
+            "1,2",
+            "M"
+        ));
         assert!(matches_compact(
             &format_compact(30_080_000_000.0, FR),
             "30,1",

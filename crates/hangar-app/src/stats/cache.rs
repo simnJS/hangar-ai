@@ -175,6 +175,67 @@ pub async fn usage(host: &Host) -> Reply {
     shared(host).fresh(REMOTE_WAIT).await
 }
 
+/// Worktrees change seldom: git is asked again after this
+/// (`WORKTREES_FRESH_MS`).
+pub const WORKTREES_FRESH_MS: i64 = 5 * 60_000;
+
+/// The worktrees of each repository `remote_stats` asked about, with when git
+/// answered. The page itself asks again at every visit, as the web page did.
+pub struct WorktreeCache {
+    seen: Mutex<std::collections::HashMap<String, (i64, Vec<String>)>>,
+    clock: fn() -> i64,
+}
+
+impl WorktreeCache {
+    pub fn new(clock: fn() -> i64) -> WorktreeCache {
+        WorktreeCache {
+            seen: Mutex::new(std::collections::HashMap::new()),
+            clock,
+        }
+    }
+
+    /// The worktree folders of the repository at `cwd`, from `ask` unless it
+    /// answered less than five minutes ago. Not a repository, or no git: the
+    /// workspace's own folders say enough, so a failure is an empty list.
+    pub async fn of<F, Fut>(&self, cwd: &str, ask: F) -> Vec<String>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<String>, String>>,
+    {
+        let now = (self.clock)();
+        let known = self
+            .seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(cwd)
+            .filter(|(at, _)| now - at < WORKTREES_FRESH_MS)
+            .map(|(_, paths)| paths.clone());
+        if let Some(paths) = known {
+            return paths;
+        }
+        let paths = ask(cwd.to_owned()).await.unwrap_or_default();
+        self.seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(cwd.to_owned(), ((self.clock)(), paths.clone()));
+        paths
+    }
+}
+
+/// What `remote_stats` reads for each workspace (P20): the folders of the
+/// worktrees of the repository at `cwd`, which count as the workspace's own.
+#[allow(dead_code)] // P20 (mobile) calls it; nothing in the window does.
+pub async fn worktrees_of(cwd: &str) -> Vec<String> {
+    static SEEN: OnceLock<WorktreeCache> = OnceLock::new();
+    SEEN.get_or_init(|| WorktreeCache::new(now_ms))
+        .of(cwd, |cwd| async move {
+            hangar_core::git::git_worktree_list(cwd)
+                .await
+                .map(|list| list.into_iter().map(|tree| tree.path).collect())
+        })
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -264,7 +325,10 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
         finish.send(()).unwrap();
-        let (first, second) = (first.await.unwrap().unwrap(), second.await.unwrap().unwrap());
+        let (first, second) = (
+            first.await.unwrap().unwrap(),
+            second.await.unwrap().unwrap(),
+        );
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert!(!cache.scanning());
@@ -330,6 +394,38 @@ mod tests {
         let wait = Duration::from_secs(5);
         assert_eq!(cache.fresh(wait).await.unwrap_err(), "no transcripts");
         assert_eq!(cache.fresh(wait).await.unwrap().generated_at, 3);
+    }
+
+    #[tokio::test]
+    async fn worktrees_are_asked_again_after_five_minutes_and_a_failure_is_an_empty_list() {
+        static NOW: AtomicI64 = AtomicI64::new(0);
+        let cache = WorktreeCache::new(|| NOW.load(Ordering::SeqCst));
+        let asked = AtomicUsize::new(0);
+        let ask = |answer: Result<Vec<String>, String>| {
+            let asked = &asked;
+            move |_: String| {
+                asked.fetch_add(1, Ordering::SeqCst);
+                async move { answer }
+            }
+        };
+        let trees = vec!["/home/me/app".to_owned(), "/home/me/app-wt".to_owned()];
+        assert_eq!(
+            cache.of("/home/me/app", ask(Ok(trees.clone()))).await,
+            trees
+        );
+        NOW.store(299_000, Ordering::SeqCst);
+        assert_eq!(cache.of("/home/me/app", ask(Ok(Vec::new()))).await, trees);
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        NOW.store(301_000, Ordering::SeqCst);
+        assert!(
+            cache
+                .of("/home/me/app", ask(Err("no git".into())))
+                .await
+                .is_empty()
+        );
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+        // Each folder has its own answer.
+        assert_eq!(cache.of("/other", ask(Ok(trees.clone()))).await, trees);
     }
 
     #[tokio::test]

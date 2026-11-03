@@ -461,10 +461,8 @@ pub fn pretty_model(model: &str) -> String {
     };
     // The regex is not anchored at the start, so a "claude-" anywhere
     // (`us.anthropic.claude-opus-4-5`) opens a match too.
-    let starts = std::iter::once(0).chain(
-        id.match_indices("claude-")
-            .map(|(at, hit)| at + hit.len()),
-    );
+    let starts =
+        std::iter::once(0).chain(id.match_indices("claude-").map(|(at, hit)| at + hit.len()));
     for start in starts {
         if let Some(label) = modern_name(&id[start..]) {
             return label;
@@ -495,13 +493,16 @@ pub fn model_label(id: &str) -> String {
             let (version, tail) = rest.split_at(version_len);
             let words_ok = tail.is_empty()
                 || (tail.starts_with('-')
-                    && tail
-                        .split('-')
-                        .skip(1)
-                        .all(|word| !word.is_empty() && word.bytes().all(|b| b.is_ascii_alphanumeric())));
+                    && tail.split('-').skip(1).all(|word| {
+                        !word.is_empty() && word.bytes().all(|b| b.is_ascii_alphanumeric())
+                    }));
             if words_ok {
                 let mut parts = vec![format!("GPT-{version}")];
-                parts.extend(tail.split('-').filter(|word| !word.is_empty()).map(capitalize));
+                parts.extend(
+                    tail.split('-')
+                        .filter(|word| !word.is_empty())
+                        .map(capitalize),
+                );
                 return parts.join(" ");
             }
         }
@@ -587,7 +588,11 @@ fn compare_labels(a: &str, b: &str) -> std::cmp::Ordering {
         .then_with(|| a.cmp(b))
 }
 
-fn count_session<K: Hash + Eq + Clone>(into: &mut HashMap<K, HashSet<usize>>, key: &K, session: usize) {
+fn count_session<K: Hash + Eq + Clone>(
+    into: &mut HashMap<K, HashSet<usize>>,
+    key: &K,
+    session: usize,
+) {
     into.entry(key.clone()).or_default().insert(session);
 }
 
@@ -603,7 +608,11 @@ pub fn summarize(stats: &UsageStats, options: &SummaryOptions<'_>) -> Summary {
         Granularity::Week => start_of_week(at),
         Granularity::Day => start_of_day(at),
     };
-    let step = if granularity == Granularity::Week { 7 } else { 1 };
+    let step = if granularity == Granularity::Week {
+        7
+    } else {
+        1
+    };
 
     // Every column of the period, empty ones included: a quiet day is a gap
     // in the chart, not a day that never happened.
@@ -620,7 +629,11 @@ pub fn summarize(stats: &UsageStats, options: &SummaryOptions<'_>) -> Summary {
     }
 
     let in_range = |at: i64| at >= range.from && at < range.to;
-    let in_previous = |at: i64| range.previous.is_some_and(|(from, to)| at >= from && at < to);
+    let in_previous = |at: i64| {
+        range
+            .previous
+            .is_some_and(|(from, to)| at >= from && at < to)
+    };
     let project_of = |session: usize| options.projects.get(session);
     let picked = |session: usize| {
         options
@@ -685,7 +698,9 @@ pub fn summarize(stats: &UsageStats, options: &SummaryOptions<'_>) -> Summary {
 
         let agent_id = agent_key(session.agent);
         let label = (options.agent_label)(session.agent);
-        ranked_entry(&mut agents, agent_id, &label, "").totals.add(row);
+        ranked_entry(&mut agents, agent_id, &label, "")
+            .totals
+            .add(row);
         count_session(&mut agent_sessions, &agent_id.to_owned(), index);
 
         let tokens = row.input + row.output + row.cache_write + row.cache_read;

@@ -31,7 +31,9 @@ fn cell<'a>(
     let words = if head {
         words.style(style::text::muted(t)).font(fonts::ui_medium())
     } else if left {
-        words.style(style::text::secondary(t)).font(fonts::ui_medium())
+        words
+            .style(style::text::secondary(t))
+            .font(fonts::ui_medium())
     } else {
         words.style(style::text::primary(t))
     };
@@ -88,7 +90,11 @@ pub fn columns<'a>(ui: Ui, summary: &Summary, measure: Measure) -> Element<'a, M
     let week = summary.granularity == Granularity::Week;
     let mut head = row![cell(
         ui,
-        ui.s(if week { Key::StatsColWeek } else { Key::StatsColDay }),
+        ui.s(if week {
+            Key::StatsColWeek
+        } else {
+            Key::StatsColDay
+        }),
         FIRST_COLUMN,
         true,
         true,

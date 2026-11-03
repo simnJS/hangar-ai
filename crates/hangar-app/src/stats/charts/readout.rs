@@ -159,7 +159,15 @@ mod tests {
                 strong: true,
             },
         ];
-        let _: Element<'_, ()> = readout(theme, 10.0, 400.0, Place::Top(4.0), "Day".into(), rows.clone());
-        let _: Element<'_, ()> = readout(theme, 390.0, 400.0, Place::Bottom(8.0), "Day".into(), rows);
+        let _: Element<'_, ()> = readout(
+            theme,
+            10.0,
+            400.0,
+            Place::Top(4.0),
+            "Day".into(),
+            rows.clone(),
+        );
+        let _: Element<'_, ()> =
+            readout(theme, 390.0, 400.0, Place::Bottom(8.0), "Day".into(), rows);
     }
 }

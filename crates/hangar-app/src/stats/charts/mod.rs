@@ -20,8 +20,8 @@ pub mod sparkline;
 pub mod ticks;
 
 use hangar_theme::{Theme, fonts};
-use iced::alignment;
 use iced::advanced::text::{Alignment, Shaping};
+use iced::alignment;
 use iced::widget::canvas;
 use iced::{Color, Pixels, Point};
 

@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use hangar_i18n::{Key, Locale, Translator, args};
-use hangar_theme::{Theme, Colors};
+use hangar_theme::{Colors, Theme};
 use iced::widget::canvas::{self, Canvas, Path, Stroke};
-use iced::widget::{column, container, responsive, row, stack, text, Space};
+use iced::widget::{Space, column, container, responsive, row, stack, text};
 use iced::{Color, Element, Length, Point, Rectangle, Renderer, Size, alignment, mouse};
 
 use super::readout::{Place, Row, readout};
@@ -14,7 +14,10 @@ use super::{Event, caption};
 use crate::message::Message;
 use crate::stats::format;
 use crate::stats::model::{Summary, heat_level};
-use hangar_theme::{style, tokens::{font_size, space}};
+use hangar_theme::{
+    style,
+    tokens::{font_size, space},
+};
 
 /// The column of weekday names.
 const LABEL_WIDTH: f32 = 40.0;
@@ -210,9 +213,8 @@ impl canvas::Program<Message> for Heatmap {
                 // The pointer leaving the grid is a CursorLeft; moving over a
                 // gap or a label changes nothing.
                 let over = over?;
-                (self.keyboard || self.active != Some(over)).then(|| {
-                    canvas::Action::publish((self.on_event)(Event::Hover(Some(over))))
-                })
+                (self.keyboard || self.active != Some(over))
+                    .then(|| canvas::Action::publish((self.on_event)(Event::Hover(Some(over)))))
             }
             mouse::Event::CursorLeft => (!self.keyboard && self.active.is_some())
                 .then(|| canvas::Action::publish((self.on_event)(Event::Hover(None)))),
@@ -296,7 +298,9 @@ impl canvas::Program<Message> for Heatmap {
                     Size::new(bounds.width - 2.0, bounds.height - 2.0),
                     6.0.into(),
                 ),
-                Stroke::default().with_color(colors.accent_ring).with_width(2.0),
+                Stroke::default()
+                    .with_color(colors.accent_ring)
+                    .with_width(2.0),
             );
         }
         vec![frame.into_geometry()]
@@ -332,9 +336,18 @@ mod tests {
         let layout = Layout::new(40.0 + 24.0 * 2.0 + 24.0 * 10.0);
         assert_eq!(layout.cell_width, 10.0);
         assert_eq!(layout.cell_at(Point::new(42.0 + 1.0, 17.0)), Some((0, 0)));
-        assert_eq!(layout.cell_at(Point::new(42.0 + 12.0 * 12.0 + 3.0, 16.0 + 17.0 * 3.0 + 4.0)), Some((3, 12)));
+        assert_eq!(
+            layout.cell_at(Point::new(
+                42.0 + 12.0 * 12.0 + 3.0,
+                16.0 + 17.0 * 3.0 + 4.0
+            )),
+            Some((3, 12))
+        );
         // The gap after a cell is still that cell.
-        assert_eq!(layout.cell_at(Point::new(42.0 + 11.0, 16.0 + 16.0)), Some((0, 0)));
+        assert_eq!(
+            layout.cell_at(Point::new(42.0 + 11.0, 16.0 + 16.0)),
+            Some((0, 0))
+        );
         // The weekday names, the hour labels, past the grid.
         assert_eq!(layout.cell_at(Point::new(10.0, 20.0)), None);
         assert_eq!(layout.cell_at(Point::new(60.0, 5.0)), None);

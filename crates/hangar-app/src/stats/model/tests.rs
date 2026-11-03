@@ -206,7 +206,10 @@ fn finds_the_workspace_with_the_deepest_root_above_a_folder() {
         project_for("C:\\dev\\application", &roots).key,
         "dir:c:/dev/application"
     );
-    assert_eq!(project_for("C:\\dev\\application", &roots).name, "application");
+    assert_eq!(
+        project_for("C:\\dev\\application", &roots).name,
+        "application"
+    );
 }
 
 #[test]
@@ -214,7 +217,10 @@ fn counts_a_panes_folder_unless_it_sits_above_the_workspace() {
     let mut app = workspace("app", "C:\\Users\\me\\dev\\app", &[]);
     app.panes = vec![pane("C:\\Users\\me"), pane("C:\\Users\\me\\dev\\app-wt")];
     let roots = workspace_roots(&[app], &HashMap::new());
-    assert_eq!(project_for("C:\\Users\\me\\dev\\app-wt", &roots).key, "ws:app");
+    assert_eq!(
+        project_for("C:\\Users\\me\\dev\\app-wt", &roots).key,
+        "ws:app"
+    );
     assert_eq!(
         project_for("C:\\Users\\me\\other", &roots).key,
         "dir:c:/users/me/other"
@@ -259,7 +265,11 @@ fn summary_rows() -> Vec<Bucket> {
 fn sums_the_period_fills_the_quiet_days_and_compares_with_the_one_before() {
     let summary = summary_of(&stats(summary_rows()), Period::D7, None, Measure::Tokens);
     assert_eq!(summary.series.len(), 7);
-    let tokens: Vec<u64> = summary.series.iter().map(|point| point.totals.tokens).collect();
+    let tokens: Vec<u64> = summary
+        .series
+        .iter()
+        .map(|point| point.totals.tokens)
+        .collect();
     assert_eq!(tokens, [0, 0, 1000, 0, 1000, 1980, 0]);
     assert_eq!(summary.totals.tokens, 3980);
     assert_eq!(summary.totals.sessions, 2);
@@ -278,10 +288,18 @@ fn ranks_by_the_measure_and_keeps_every_project_pickable_under_a_filter() {
     let data = stats(summary_rows());
     let filtered = summary_of(&data, Period::D7, Some("ws:app"), Measure::Cost);
     assert_eq!(filtered.totals.sessions, 1);
-    let keys: Vec<&str> = filtered.projects.iter().map(|row| row.key.as_str()).collect();
+    let keys: Vec<&str> = filtered
+        .projects
+        .iter()
+        .map(|row| row.key.as_str())
+        .collect();
     assert_eq!(keys, ["ws:app", "dir:c:/dev/shop"]);
     assert_eq!(filtered.projects[0].share, 1.0);
-    let agents: Vec<&str> = filtered.agents.iter().map(|row| row.label.as_str()).collect();
+    let agents: Vec<&str> = filtered
+        .agents
+        .iter()
+        .map(|row| row.label.as_str())
+        .collect();
     assert_eq!(agents, ["Claude Code"]);
     assert_eq!(filtered.sessions[0].model.as_deref(), Some("Opus 5.5"));
 }
@@ -319,10 +337,7 @@ fn orders_the_heaviest_sessions_by_the_measure() {
 
 #[test]
 fn counts_weeks_rather_than_days_past_120_days() {
-    let old = vec![
-        plain(0, add_days(at(26, 10), -200)),
-        plain(0, at(26, 10)),
-    ];
+    let old = vec![plain(0, add_days(at(26, 10), -200)), plain(0, at(26, 10))];
     let summary = summary_of(&stats(old), Period::All, None, Measure::Tokens);
     assert_eq!(summary.granularity, Granularity::Week);
     assert!(summary.series.len() > 28, "{} weeks", summary.series.len());

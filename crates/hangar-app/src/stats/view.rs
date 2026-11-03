@@ -16,9 +16,7 @@ use hangar_ui::button::{self as ui_button};
 use hangar_ui::{Icon, icon, menu, tip};
 use iced::widget::canvas::{self, Canvas, Path, Stroke};
 use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{
-    Space, button, column, container, responsive, row, rule, scrollable, text,
-};
+use iced::widget::{Space, button, column, container, responsive, row, rule, scrollable, text};
 use iced::{Element, Length, Padding, Point, Radians, Rectangle, Renderer, alignment, mouse};
 
 use super::charts::columns::Columns;
@@ -26,12 +24,9 @@ use super::charts::heatmap::Heatmap;
 use super::charts::sparkline::sparkline;
 use super::charts::{ChartId, KINDS};
 use super::format::{
-    self, format_change, format_compact, format_duration, format_integer, format_share,
-    format_usd,
+    self, format_change, format_compact, format_duration, format_integer, format_share, format_usd,
 };
-use super::model::{
-    Granularity, Measure, PERIODS, Period, Summary, agent_key, change,
-};
+use super::model::{Granularity, Measure, PERIODS, Period, Summary, agent_key, change};
 use super::ranked::{self, List};
 use super::ui::{self, Ui, measure_key, one_line};
 use super::{Computed, Msg, State, sessions, tables};
@@ -312,7 +307,9 @@ fn bar<'a>(
             (measure, ui.s(measure_key(measure)), ui.s(hint))
         })
         .collect();
-    let measure = choice(ui, measures, st.measure, |measure| msg(Msg::SetMeasure(measure)));
+    let measure = choice(ui, measures, st.measure, |measure| {
+        msg(Msg::SetMeasure(measure))
+    });
 
     // A filter on a project the period no longer has keeps its name.
     let project_name = st.project.as_ref().and_then(|key| {
@@ -367,9 +364,7 @@ fn bar<'a>(
         .flatten()
         .map(|computed| project_entries(st, ui, &computed.summary));
     let picker = menu::dropdown(t, picker, entries).on_dismiss(msg(Msg::ProjectMenu(false)));
-    let mut project = row![picker]
-        .spacing(2)
-        .align_y(alignment::Vertical::Center);
+    let mut project = row![picker].spacing(2).align_y(alignment::Vertical::Center);
     if filtered {
         project = project.push(
             ui_button::icon_button(t, Icon::Close)
@@ -464,7 +459,9 @@ fn empty_state<'a>(ui: Ui, data: &hangar_core::stats::UsageStats) -> Element<'a,
         let mut sources = column![].spacing(space::XS);
         for source in &data.sources {
             let count = if source.found {
-                ui.tr.tn(Key::StatsSourceFiles, source.files, &[]).into_owned()
+                ui.tr
+                    .tn(Key::StatsSourceFiles, source.files, &[])
+                    .into_owned()
             } else {
                 ui.s(Key::StatsSourceMissing)
             };
@@ -543,7 +540,11 @@ fn card<'a>(
 
 /// Chart or table: the same values, two ways to read them.
 fn table_toggle<'a>(ui: Ui, table: bool, on_press: Message) -> Element<'a, Message> {
-    let words = ui.s(if table { Key::StatsShowChart } else { Key::StatsShowTable });
+    let words = ui.s(if table {
+        Key::StatsShowChart
+    } else {
+        Key::StatsShowTable
+    });
     ui_button::toggle_button(ui.t, if table { Icon::Chart } else { Icon::Table }, table)
         .tip(words)
         .on_press(on_press)
@@ -552,7 +553,9 @@ fn table_toggle<'a>(ui: Ui, table: bool, on_press: Message) -> Element<'a, Messa
 
 fn legend<'a>(ui: Ui) -> Element<'a, Message> {
     let t = ui.t;
-    let mut items = row![].spacing(space::XXL).align_y(alignment::Vertical::Center);
+    let mut items = row![]
+        .spacing(space::XXL)
+        .align_y(alignment::Vertical::Center);
     for kind in KINDS.iter().rev() {
         items = items.push(
             row![
@@ -675,15 +678,11 @@ fn kpi<'a>(ui: Ui, kpi: Kpi, days: i64, since: Option<String>) -> Element<'a, Me
         _ => {}
     }
     if let Some(detail) = kpi.detail {
-        body = body.push(
-            text(detail)
-                .size(font_size::CAPTION_LG)
-                .color(if kpi.note {
-                    t.colors.fg_subtle
-                } else {
-                    t.colors.fg_muted
-                }),
-        );
+        body = body.push(text(detail).size(font_size::CAPTION_LG).color(if kpi.note {
+            t.colors.fg_subtle
+        } else {
+            t.colors.fg_muted
+        }));
     }
     container(body)
         .padding(Padding {
@@ -706,10 +705,10 @@ fn agent_label(agent: Agent) -> String {
         Agent::Claude => crate::state::types::AgentId::Claude,
         Agent::Codex => crate::state::types::AgentId::Codex,
     };
-    AGENTS
-        .iter()
-        .find(|entry| entry.id == id)
-        .map_or_else(|| agent_key(agent).to_owned(), |entry| entry.label.to_owned())
+    AGENTS.iter().find(|entry| entry.id == id).map_or_else(
+        || agent_key(agent).to_owned(),
+        |entry| entry.label.to_owned(),
+    )
 }
 
 pub(super) fn agent_name(agent: Agent) -> String {
@@ -768,7 +767,11 @@ fn content<'a>(
                 .into_owned()
         });
     let spark = |figure: &dyn Fn(&super::model::Totals) -> f64| -> Vec<f64> {
-        summary.series.iter().map(|point| figure(&point.totals)).collect()
+        summary
+            .series
+            .iter()
+            .map(|point| figure(&point.totals))
+            .collect()
     };
     let cache_share = if totals.tokens > 0 {
         totals.cache_read as f64 / totals.tokens as f64
@@ -843,12 +846,21 @@ fn content<'a>(
 
     // The period, column by column.
     let week = summary.granularity == Granularity::Week;
-    let daily_title = ui.s(if week { Key::StatsWeeklyTitle } else { Key::StatsDailyTitle });
+    let daily_title = ui.s(if week {
+        Key::StatsWeeklyTitle
+    } else {
+        Key::StatsDailyTitle
+    });
     let daily_hint = ui
         .tr
-        .t_with(Key::StatsDailyHint, &args!("measure" => measure_name.as_str()))
+        .t_with(
+            Key::StatsDailyHint,
+            &args!("measure" => measure_name.as_str()),
+        )
         .into_owned();
-    let mut actions = row![].spacing(space::XL).align_y(alignment::Vertical::Center);
+    let mut actions = row![]
+        .spacing(space::XL)
+        .align_y(alignment::Vertical::Center);
     if page_width >= NO_LEGEND_BELOW {
         actions = actions.push(legend(ui));
     }
@@ -891,7 +903,11 @@ fn content<'a>(
     if narrow {
         page = page.push(first).push(second);
     } else {
-        page = page.push(row![first, second].spacing(14).align_y(alignment::Vertical::Top));
+        page = page.push(
+            row![first, second]
+                .spacing(14)
+                .align_y(alignment::Vertical::Top),
+        );
     }
 
     page = page.push(method(ui, data));
