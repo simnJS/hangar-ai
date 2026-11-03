@@ -1,117 +1,66 @@
 #!/usr/bin/env node
-// Writes crates/hangar-i18n/src/generated.rs from the strings of the React app.
+// Writes crates/hangar-i18n/src/generated.rs from the dictionaries beside it.
 //
 //     node crates/hangar-i18n/tools/generate.mjs          write the file
 //     node crates/hangar-i18n/tools/generate.mjs --check  fail if it is stale
 //
-// The TypeScript stays the source of truth while the web app and the native one
-// live side by side: a translator edits src/i18n.ts, src/strings/*.ts or
-// src/components/accounts/strings.ts as before, runs this, and commits the
-// result. The output is committed so that building the crate needs no Node.
+// The strings live in crates/hangar-i18n/dict/en.json and fr.json, one key per
+// line, the French file in the English one's order. A translator edits them,
+// runs this, and commits the result. The output is committed so that building
+// the crate needs no Node; any Node from 18 on runs this script.
 //
-// It needs Node 22.18 or later, which strips TypeScript types on import. The
-// string modules and src/lib/typography.ts are imported as they are, so the
-// typesetting is not re-implemented here, it is the app's own. src/i18n.ts and
-// the accounts strings also hold React hooks and imports of the store, so they
-// are not imported: the two dictionary literals are cut out of the source and
-// evaluated on their own, with the string modules they spread in handed over.
+// The dictionaries were the React app's src/i18n.ts, src/strings/*.ts and
+// src/components/accounts/strings.ts (tag v1.12.1), merged as they were read:
+// the accounts strings keep the `accounts.` prefix they were given here.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { typeset } from "./typography.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const OUT = join(ROOT, "crates", "hangar-i18n", "src", "generated.rs");
-
-const read = (path) => readFileSync(join(ROOT, path), "utf8");
-const load = (path) => import(pathToFileURL(join(ROOT, path)).href);
-
-/**
- * The text of the object literal whose `{` is the last character of `marker`,
- * up to and including its matching `}`. It walks the source rather than
- * counting braces blindly because the strings hold `{name}` placeholders.
- */
-function objectLiteral(source, marker, file) {
-  const start = source.indexOf(marker);
-  if (start < 0) throw new Error(`${file}: cannot find \`${marker}\``);
-  const open = start + marker.length - 1;
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    const c = source[i];
-    if (c === '"' || c === "'" || c === "`") {
-      for (i++; source[i] !== c; i++) if (source[i] === "\\") i++;
-    } else if (c === "/" && source[i + 1] === "/") {
-      while (source[i] !== "\n") i++;
-    } else if (c === "/" && source[i + 1] === "*") {
-      i = source.indexOf("*/", i + 2) + 1;
-    } else if (c === "{") {
-      depth++;
-    } else if (c === "}" && --depth === 0) {
-      return source.slice(open, i + 1);
-    }
-  }
-  throw new Error(`${file}: \`${marker}\` is never closed`);
-}
-
-const evaluate = (literal, scope) =>
-  new Function(...Object.keys(scope), `return (${literal});`)(...Object.values(scope));
+const CRATE = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT = join(CRATE, "src", "generated.rs");
 
 /** Refuses a no-break space typed into a source: the typesetter is the only one to set them. */
-function checkHandSpacing(literal, label) {
+function checkHandSpacing(text, label) {
   // Written by hand, no-break spaces drift: some strings had them and most did
   // not. The typesetter sets them all, so the source must not hold any.
-  if (/[  ]|\\u00a0|\\u202f/i.test(literal)) {
+  if (/[  ]|\\u00a0|\\u202f/i.test(text)) {
     throw new Error(`${label}: a no-break space is typed in the source; write a plain space, the typesetter adds it`);
   }
 }
 
-const { typeset } = await load("src/lib/typography.ts");
-
-// The dictionaries, each as { en, fr } of plain objects.
-const experiments = await load("src/strings/experiments.ts");
-const kitsManage = await load("src/strings/kitsManage.ts");
-const kitsTab = await load("src/strings/kitsTab.ts");
-const worktrees = await load("src/strings/worktrees.ts");
-const workspaceFromGit = await load("src/strings/workspaceFromGit.ts");
-const paneBranch = await load("src/strings/paneBranch.ts");
-
-const i18nSource = read("src/i18n.ts");
-const spread = { experiments, kitsManage, kitsTab, worktrees, workspaceFromGit };
-const enLiteral = objectLiteral(i18nSource, "const en = {", "src/i18n.ts");
-const frLiteral = objectLiteral(i18nSource, "const fr: Record<Key, string> = {", "src/i18n.ts");
-checkHandSpacing(frLiteral, "src/i18n.ts fr");
-const main = { en: evaluate(enLiteral, spread), fr: evaluate(frLiteral, spread) };
-for (const name of [...Object.keys(spread), "paneBranch"]) checkHandSpacing(read(`src/strings/${name}.ts`), `src/strings/${name}.ts`);
-
-// The accounts components keep their strings beside them and name them
-// `settings.title`, `switcher.back`… which clash with the central dictionary's
-// own `settings.*`, so they live under an `accounts.` prefix here.
-const accountsSource = read("src/components/accounts/strings.ts");
-const accounts = {
-  en: evaluate(objectLiteral(accountsSource, "export const en = {", "accounts/strings.ts"), {}),
-  fr: evaluate(objectLiteral(accountsSource, "export const fr: Record<AccountsKey, string> = {", "accounts/strings.ts"), {}),
-};
-checkHandSpacing(accountsSource, "src/components/accounts/strings.ts");
-const prefixed = (dict, prefix) => Object.fromEntries(Object.entries(dict).map(([k, v]) => [prefix + k, v]));
-
-const sources = [
-  ["src/i18n.ts and src/strings/*.ts", main],
-  ["src/strings/paneBranch.ts", paneBranch],
-  ["src/components/accounts/strings.ts", { en: prefixed(accounts.en, "accounts."), fr: prefixed(accounts.fr, "accounts.") }],
-];
-
-const en = {};
-const fr = {};
-for (const [label, dict] of sources) {
-  const missing = Object.keys(dict.en).filter((k) => !(k in dict.fr));
-  const extra = Object.keys(dict.fr).filter((k) => !(k in dict.en));
-  if (missing.length || extra.length) {
-    throw new Error(`${label}: French lacks [${missing}] and has [${extra}] that English does not`);
+/**
+ * A dictionary file, refusing a key written twice: JSON.parse would keep the
+ * last one without a word, and the first would silently be lost.
+ */
+function readDictionary(locale) {
+  const file = `dict/${locale}.json`;
+  const text = readFileSync(join(CRATE, file), "utf8");
+  checkHandSpacing(text, file);
+  const dict = JSON.parse(text);
+  const seen = new Set();
+  for (const [, key] of text.matchAll(/^ {2}("(?:[^"\\]|\\.)*"):/gm)) {
+    const id = JSON.parse(key);
+    if (seen.has(id)) throw new Error(`${file}: key ${id} is defined twice`);
+    seen.add(id);
   }
-  for (const k of Object.keys(dict.en)) {
-    if (k in en) throw new Error(`${label}: key ${k} is defined twice`);
-    en[k] = dict.en[k];
-    fr[k] = dict.fr[k];
+  if (seen.size !== Object.keys(dict).length) {
+    throw new Error(`${file}: write one key per line, two spaces in, as the file has them`);
+  }
+  for (const [key, value] of Object.entries(dict)) {
+    if (typeof value !== "string") throw new Error(`${file}: ${key} is not a string`);
+  }
+  return dict;
+}
+
+const en = readDictionary("en");
+const fr = readDictionary("fr");
+{
+  const missing = Object.keys(en).filter((k) => !(k in fr));
+  const extra = Object.keys(fr).filter((k) => !(k in en));
+  if (missing.length || extra.length) {
+    throw new Error(`dict/fr.json lacks [${missing}] and has [${extra}] that dict/en.json does not`);
   }
 }
 
@@ -140,8 +89,8 @@ for (const key of Object.keys(en)) {
   }
 }
 
-// Typography is applied here, once, exactly as the app does when its
-// dictionaries load: `typeset` is typography.ts itself.
+// Typography is applied here, once, as the web app did when its dictionaries
+// loaded: tools/typography.mjs holds its rules.
 for (const message of messages.values()) {
   for (const locale of ["en", "fr"]) {
     const forms = message[locale];
@@ -191,9 +140,9 @@ const lines = [];
 lines.push(
   "// @generated by crates/hangar-i18n/tools/generate.mjs, do not edit.",
   "//",
-  "// Source: src/i18n.ts, src/strings/*.ts and src/components/accounts/strings.ts,",
-  "// typeset as the app typesets them (src/lib/typography.ts). Change the strings",
-  "// there and run the script again; `--check` tells whether this file is stale.",
+  "// Source: crates/hangar-i18n/dict/en.json and fr.json, typeset by",
+  "// tools/typography.mjs. Change the strings there and run the script again;",
+  "// `--check` tells whether this file is stale.",
   "",
   "use crate::dictionary::{Message, Text};",
   "",

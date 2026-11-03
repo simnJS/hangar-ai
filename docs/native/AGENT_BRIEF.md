@@ -35,7 +35,7 @@ you start; it is the same for every package.
 | `hangar-core` | Everything that is not drawing. `Host` (paths, `subscribe()` to `Event`s), `Core`, and one function per former Tauri command (core-api.md). Call blocking ones off the UI thread (`Task::perform` with `spawn_blocking`). |
 | `hangar-theme` | Colours, tokens, `style::*` functions. Views never write a colour or a size literal. |
 | `hangar-ui` | Buttons, inputs, menus, popovers, modals, toasts, tooltips, icons, the palette, list rows, gauges, state glyphs… Use these before writing a widget; if one is missing and generic, add it to hangar-ui in its own commit and say so in your report. |
-| `hangar-i18n` | Every string the person sees: `t`, `t_with`, `tn` with a `Key`. No literal UI text. A missing key: add it to the TS dictionary (`src/i18n.ts` or `src/strings/*`) and regenerate with `node crates/hangar-i18n/tools/generate.mjs`, in its own commit. |
+| `hangar-i18n` | Every string the person sees: `t`, `t_with`, `tn` with a `Key`. No literal UI text. A missing key: add it to `crates/hangar-i18n/dict/en.json` and `fr.json` (same place in both) and regenerate with `node crates/hangar-i18n/tools/generate.mjs`, in its own commit. |
 | `hangar-term` | The terminal widget. |
 | `hangar-kit-host`, `hangar-kit-ui` | Native kit tabs (WebAssembly). |
 | `hangar-webview` | The browser-engine helper process (HTML kit tabs, PDF, web pages). |
