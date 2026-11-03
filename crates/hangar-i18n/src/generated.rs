@@ -5581,7 +5581,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "control.modelClosed", en: Text::plain("{by} closed {file}"), fr: Text::plain("{by} a fermé {file}") },
     Message { id: "control.modelClosedElsewhere", en: Text::plain("{by} closed {file} in {workspace}"), fr: Text::plain("{by} a fermé {file} dans {workspace}") },
     Message { id: "control.modelShown", en: Text::plain("{by} showed you {file}"), fr: Text::plain("{by} t'a ouvert {file}") },
-    Message { id: "control.modelShownElsewhere", en: Text::plain("{by} opened {file} in the preview of {workspace}"), fr: Text::plain("{by} a ouvert {file} dans l'aperçu de {workspace}") },
+    Message { id: "control.modelShownElsewhere", en: Text::plain("{by} opened {file} in {workspace}"), fr: Text::plain("{by} a ouvert {file} dans {workspace}") },
     Message { id: "control.reset", en: Text::plain("{by} reset {pane} in {workspace}"), fr: Text::plain("{by} a réinitialisé {pane} dans {workspace}") },
     Message { id: "control.restarted", en: Text::plain("{by} restarted {pane} in {workspace}"), fr: Text::plain("{by} a relancé {pane} dans {workspace}") },
     Message { id: "control.someone", en: Text::plain("An agent"), fr: Text::plain("Un agent") },

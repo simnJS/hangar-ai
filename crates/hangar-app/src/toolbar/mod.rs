@@ -393,7 +393,7 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
                     ui_button::icon_button(t, Icon::Plus)
                         .tip(tr.t(Key::ToolbarNewTerminalHint).into_owned())
                         .keys(keys(CommandId::PaneSplit))
-                        .on_press_maybe((ws.panes.len() < MAX_PANES).then(|| {
+                        .on_press_maybe((ws.pane_count() < MAX_PANES).then(|| {
                             Message::Intent(Intent::SplitPane {
                                 ws: ws.id.clone(),
                                 near: None,

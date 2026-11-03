@@ -70,7 +70,7 @@ pub fn more_entries(
                 near: None,
                 dir: None,
             }));
-        entries.push(if ws.panes.len() >= MAX_PANES {
+        entries.push(if ws.pane_count() >= MAX_PANES {
             new.disabled().into()
         } else {
             new.into()

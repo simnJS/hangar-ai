@@ -414,16 +414,12 @@ async fn refuses_a_request_without_its_kit_and_tab_or_with_a_reveal_that_is_not_
 }
 
 #[tokio::test]
-async fn says_so_when_the_person_cannot_see_it_no_room_for_the_panel_or_another_workspace_on_screen()
- {
+async fn says_so_when_the_person_cannot_see_it_another_view_or_another_workspace_on_screen() {
     let fake = kit_setup();
     on_screen(&fake, true, false);
     let no_room = open(&fake, json!({"params": {"run": "1"}})).await.unwrap();
     assert_eq!(no_room["visible"], false);
-    contains(
-        no_room["note"].as_str().unwrap(),
-        "no room beside the terminals",
-    );
+    contains(no_room["note"].as_str().unwrap(), "but not its panes");
     on_screen(&fake, false, false);
     let elsewhere = open(&fake, json!({"params": {"run": "2"}})).await.unwrap();
     assert_eq!(elsewhere["visible"], false);
@@ -566,4 +562,38 @@ async fn still_closes_the_tab_of_a_kit_taken_off_the_workspace_since() {
         close(&fake, json!({})).await["closed"],
         json!([{"run": "1"}])
     );
+}
+
+/* ── a kit's tab as a pane of the grid ───────────────────────── */
+
+#[tokio::test]
+async fn a_tab_an_agent_opens_or_closes_is_a_pane_and_lays_the_workspace_out_again() {
+    let fake = kit_setup();
+    open(&fake, json!({"params": {"run": "1"}})).await.unwrap();
+    assert_eq!(fake.logged("views:"), ["views:w1:arrange"]);
+    // The same tab again is focused where it is: nothing is laid out.
+    let again = open(&fake, json!({"params": {"run": "1"}})).await.unwrap();
+    assert_eq!(again["outcome"], "focused");
+    assert_eq!(fake.logged("views:").last().unwrap(), "views:w1:keep");
+    close(&fake, json!({"params": {"run": "1"}})).await;
+    assert_eq!(fake.logged("views:").last().unwrap(), "views:w1:arrange");
+}
+
+#[tokio::test]
+async fn a_full_workspace_has_no_room_for_a_new_tab_but_an_open_one_is_still_focused() {
+    let fake = kit_setup();
+    open(&fake, json!({"params": {"run": "1"}})).await.unwrap();
+    fake.patch("w1", |ws| {
+        while ws.pane_count() < crate::state::types::MAX_PANES {
+            let id = format!("v{}", ws.view_panes.len());
+            ws.view_panes.push(crate::state::ViewPane::new(id));
+        }
+    });
+    let refused = open(&fake, json!({"params": {"run": "2"}}))
+        .await
+        .unwrap_err();
+    contains(&refused, "is full");
+    assert_eq!(fake.preview.tabs("w1").len(), 1, "nothing opened");
+    let focused = open(&fake, json!({"params": {"run": "1"}})).await.unwrap();
+    assert_eq!(focused["outcome"], "focused");
 }

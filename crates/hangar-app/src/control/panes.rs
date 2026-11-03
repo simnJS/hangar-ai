@@ -119,7 +119,7 @@ pub async fn pane_create(
     state: &AppState,
     port: &Port,
 ) -> Result<Value, String> {
-    if ws.panes.len() >= MAX_PANES {
+    if ws.pane_count() >= MAX_PANES {
         return Err(full(ws));
     }
     let agent = agent_arg(args.get("agent"))?;

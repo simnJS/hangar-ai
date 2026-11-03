@@ -762,7 +762,7 @@ pub async fn spawn_worker(
                 settings.max_workers
             ));
         }
-        if ws.panes.len() + pending >= MAX_PANES {
+        if ws.pane_count() + pending >= MAX_PANES {
             return Err(full(ws));
         }
         let model =

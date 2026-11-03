@@ -151,6 +151,20 @@ pub fn carry_out(
             m.live.version += 1;
             StoreOutcome::default()
         }
+        // What an agent shows is a pane of the grid: placed (or taken away)
+        // with the preview's entries, then laid out as the panes an agent
+        // opens are, the orchestrator keeping the biggest share.
+        ModelCmd::ViewsChanged { ws, arrange } => {
+            m.live.preview.sync();
+            let synced = crate::preview::panes::sync(m);
+            if let Some(words) = synced.notice(m) {
+                then = Some(Intent::Notice(Notice::Problem(words)));
+            }
+            if arrange {
+                m.apply(StoreAction::ArrangePanes(ws));
+            }
+            StoreOutcome::default()
+        }
     };
     let reply = iced::Task::future(async move {
         answer.send(Ok(outcome));
@@ -246,6 +260,12 @@ mod tests {
     /// A workspace whose first pane is the orchestrator, in the person's own
     /// layout: the orchestrator squeezed into a quarter of the window.
     fn orchestrated() -> Model {
+        orchestrated_in("w1")
+    }
+
+    /// `orchestrated`, under a workspace id of the caller's: the preview's
+    /// store is the process's, which other tests share.
+    fn orchestrated_in(id: &str) -> Model {
         use crate::state::layout::leaf;
         use crate::state::types::{Pane, PaneRole, SplitDir, SplitNode, Workspace};
         let pane = |id: &str, role| Pane {
@@ -263,7 +283,7 @@ mod tests {
         let mut m = Model::default();
         m.hydrate(AppState {
             workspaces: vec![Workspace {
-                id: "w1".into(),
+                id: id.into(),
                 name: "Shop".into(),
                 panes: vec![
                     pane("lead", Some(PaneRole::Orchestrator)),
@@ -326,6 +346,51 @@ mod tests {
     }
 
     #[test]
+    fn what_an_agent_shows_is_a_pane_beside_the_orchestrator_which_stays_the_biggest() {
+        use crate::preview::store::KitTabToOpen;
+        use crate::state::layout::{compute_layout, grid_tree};
+        let ws = "writes-views";
+        let mut m = orchestrated_in(ws);
+        let shared = m.live.preview.shared().clone();
+        let views = |m: &mut Model, arrange| {
+            let cmd = ModelCmd::ViewsChanged {
+                ws: ws.into(),
+                arrange,
+            };
+            let _ = carry_out(m, cmd, Answer::channel().0);
+        };
+        let opened: Vec<String> = (0..3)
+            .map(|n| {
+                let tab = KitTabToOpen::new(ws, "ci", "run", "Run")
+                    .params(&[("run", &n.to_string())])
+                    .opened_by("lead");
+                let id = shared.edit(|store| store.open_kit_tab(tab));
+                views(&mut m, true);
+                id
+            })
+            .collect();
+        let workspace = m.workspace(ws).unwrap();
+        assert_eq!(workspace.panes.len(), 2, "the terminals stay terminals");
+        assert_eq!(workspace.view_panes.len(), 3);
+        let grid = compute_layout(&grid_tree(workspace));
+        let area = |id: &str| grid.rects[id].width * grid.rects[id].height;
+        for id in opened.iter().map(String::as_str).chain(["dev"]) {
+            assert!(area("lead") > area(id), "{:?}", grid.rects);
+        }
+        // Closed, once the workspace's saved tabs are read: its pane goes,
+        // and the rest is laid out again.
+        shared.edit(|store| {
+            store.restore_kit_tabs(ws);
+            store.close_model(&opened[0]);
+        });
+        views(&mut m, true);
+        let workspace = m.workspace(ws).unwrap();
+        assert!(!workspace.has_view(&opened[0]));
+        assert_eq!(workspace.view_panes.len(), 2);
+        shared.edit(|store| store.close_workspace_models(ws));
+    }
+
+    #[test]
     fn says_on_screen_what_an_agent_did_in_the_persons_language() {
         let mut m = Model::default();
         let mut state = AppState::default();
@@ -344,7 +409,7 @@ mod tests {
         };
         assert_eq!(
             announcement(&m, &shown),
-            "An agent opened chair.glb in the preview of Shop"
+            "An agent opened chair.glb in Shop"
         );
         state.settings.locale = Some(Locale::Fr);
         m.hydrate(state);

@@ -133,6 +133,16 @@ pub enum ModelCmd {
         ws: WsId,
         task: String,
     },
+    /// An agent opened or closed what a preview shows (a file, a model, a
+    /// kit's tab): the workspace's view panes follow its preview
+    /// (`preview::panes::sync`), and with `arrange`, when a pane was opened
+    /// or closed rather than an open one brought forward, the workspace is
+    /// laid out again as for the panes an agent opens
+    /// (`StoreAction::ArrangePanes`).
+    ViewsChanged {
+        ws: WsId,
+        arrange: bool,
+    },
 }
 
 /// Everything an operation reaches beyond its arguments (`ControlDeps`).

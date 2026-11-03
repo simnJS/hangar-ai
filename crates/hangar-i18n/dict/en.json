@@ -858,7 +858,7 @@
   "control.reset": "{by} reset {pane} in {workspace}",
   "control.modelShown": "{by} showed you {file}",
   "control.modelClosed": "{by} closed {file}",
-  "control.modelShownElsewhere": "{by} opened {file} in the preview of {workspace}",
+  "control.modelShownElsewhere": "{by} opened {file} in {workspace}",
   "control.modelClosedElsewhere": "{by} closed {file} in {workspace}",
   "control.workspaceCreated": "{by} created the workspace {workspace} from a repository; {pane} orchestrates it",
   "control.checkSet": "{by} set the check command of {workspace}: {command}",

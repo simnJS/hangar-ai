@@ -12,12 +12,13 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 
 use crate::state::Workspace;
+use crate::state::types::MAX_PANES;
 
 use super::panes::{announce, tell};
 use super::paths::{basename, comparable, inside, resolve_path};
 use super::port::{
     EntryStatus, ModelCmd, ModelFileInfo, OpenEntry, Port, PreviewFile, PreviewHost, Showing,
-    SnapshotAngle, is_asleep,
+    SnapshotAngle, is_asleep, workspace_in,
 };
 use super::run::{effective_cwd, number_arg, on_screen};
 use super::types::{Caller, ControlEvent, same, text};
@@ -162,6 +163,38 @@ pub async fn preview_of(ws: &Workspace, port: &Port) -> Result<Arc<dyn PreviewHo
                 ws.name
             )
         })
+}
+
+/// Whether the grid of `ws` has room for one more pane: what an agent shows
+/// opens as a pane of it (`preview::panes`), and a workspace holds
+/// `MAX_PANES` at most, its terminals and its views together. Asked before
+/// anything opens, so that a refusal leaves nothing behind.
+pub(super) fn room_for_one(ws: &Workspace, port: &Port) -> Result<(), String> {
+    let snapshot = port.snapshot();
+    let count = workspace_in(&snapshot, &ws.id).map_or(ws.pane_count(), Workspace::pane_count);
+    if count >= MAX_PANES {
+        return Err(format!(
+            "\"{}\" is full: a workspace holds at most {MAX_PANES} panes, and what you show opens \
+             as one of them. Close one first (pane_close, preview_close, model_close or \
+             kit_tab_close).",
+            ws.name
+        ));
+    }
+    Ok(())
+}
+
+/// The preview's entries changed: the workspace's view panes follow, and the
+/// workspace is laid out again when a pane `opened` or closed
+/// (`ModelCmd::ViewsChanged`).
+pub(super) async fn views_changed(ws: &Workspace, port: &Port, arrange: bool) {
+    tell(
+        port,
+        ModelCmd::ViewsChanged {
+            ws: ws.id.clone(),
+            arrange,
+        },
+    )
+    .await;
 }
 
 /// `preview_inspect`'s answer, checked: a kind this window has no viewer for
@@ -374,15 +407,15 @@ pub(super) async fn sight(
     if !visible {
         notes.push(if listing.as_ref().is_some_and(|listing| listing.on_screen) {
             format!(
-                "\"{}\" is on screen, but its preview is not: another view is open, or there is no \
-                 room beside the terminals. The preview's toolbar button tells the user there is \
-                 something to see.",
+                "\"{}\" is on screen, but not its panes: another view is open (the board, the \
+                 memory or the stats). It is a pane of the grid, there when the user goes back to \
+                 the terminals.",
                 ws.name
             )
         } else {
             format!(
-                "It is open in the preview of \"{}\", which is not the workspace on screen: the user \
-                 sees it when they go to that workspace. Tell them it is there if they should look now.",
+                "It is open as a pane of \"{}\", which is not the workspace on screen: the user sees \
+                 it when they go to that workspace. Tell them it is there if they should look now.",
                 ws.name
             )
         });
@@ -496,6 +529,11 @@ async fn open_model(
     };
 
     let preview = preview_of(ws, port).await?;
+    // Shown again, it is reloaded in its pane; new, it needs a pane.
+    let new = !is_open(&preview, &file.path).await;
+    if new {
+        room_for_one(ws, port)?;
+    }
     let woke = wake_for(ws, port).await;
     let id = preview
         .show(Showing::Model {
@@ -506,6 +544,7 @@ async fn open_model(
             modified_ms: file.modified_ms,
         })
         .await?;
+    views_changed(ws, port, new).await;
     announce(
         port,
         shown(port, ws, caller.pane_name.clone(), title.clone()),
@@ -717,6 +756,7 @@ async fn close(
     preview
         .close(closing.iter().map(|entry| entry.id.clone()).collect())
         .await;
+    views_changed(ws, port, true).await;
     let titles = closing
         .iter()
         .map(|entry| entry.title.as_str())
@@ -766,6 +806,10 @@ pub async fn preview_show(
 
     let title = text(args.get("title")).unwrap_or_else(|| file.name.clone());
     let preview = preview_of(ws, port).await?;
+    let new = !is_open(&preview, &file.path).await;
+    if new {
+        room_for_one(ws, port)?;
+    }
     let woke = wake_for(ws, port).await;
     preview
         .show(Showing::File {
@@ -778,6 +822,7 @@ pub async fn preview_show(
             modified_ms: file.modified_ms,
         })
         .await?;
+    views_changed(ws, port, new).await;
     announce(
         port,
         shown(port, ws, caller.pane_name.clone(), title.clone()),
@@ -818,6 +863,15 @@ pub async fn preview_close(
         None => open.clone(),
     };
     close(ws, caller, port, &preview, open.len(), closing).await
+}
+
+/// Whether the file at `path` (core's canonical form) is open already: shown
+/// again, it reloads in its pane rather than taking another.
+async fn is_open(preview: &Arc<dyn PreviewHost>, path: &str) -> bool {
+    preview
+        .list()
+        .await
+        .is_ok_and(|listed| listed.entries.iter().any(|entry| entry.path == path))
 }
 
 /// Standard base64, padded: the PNG of a snapshot as the agent receives it.

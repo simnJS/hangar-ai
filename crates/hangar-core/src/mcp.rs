@@ -494,7 +494,7 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "model_show",
-            "description": "Show the user a 3D model in Hangar's preview panel, beside the terminals. Each workspace has its own preview, and the model opens in yours: when the user is looking at another workspace, it waits in yours without covering theirs, and the answer says so ('visible': false, with a note) — tell them where to look if they should. Call it whenever you create, export, change or find a model the user should look at, instead of handing them a file path. It reads glTF (.glb, or .gltf with its .bin and textures beside it), .obj with its .mtl, .stl, .ply, .fbx and .usdz, up to 256 MB, from your workspace's folders and its git worktrees. Showing a model that is already open brings it forward and reloads it; an open model also reloads by itself when its file changes on disk, so re-exporting is enough to refresh it. The answer says what the viewer found: format, triangles, vertices, meshes, materials, animation clip names, and the bounding box size and centre in the file's units. Check those against what you meant to build: a centimetre/metre mix-up shows as a size a hundred times off. A very large model can answer status 'loading' before it is done. To see the model yourself, call model_snapshot.",
+            "description": "Show the user a 3D model as a pane of your workspace's grid, beside the terminals, which Hangar lays out again around it. Each workspace has its own previews, and the model opens in yours: when the user is looking at another workspace, it waits in yours without covering theirs, and the answer says so ('visible': false, with a note) — tell them where to look if they should. Call it whenever you create, export, change or find a model the user should look at, instead of handing them a file path. It reads glTF (.glb, or .gltf with its .bin and textures beside it), .obj with its .mtl, .stl, .ply, .fbx and .usdz, up to 256 MB, from your workspace's folders and its git worktrees. Showing a model that is already open reloads it in its pane; an open model also reloads by itself when its file changes on disk, so re-exporting is enough to refresh it. The answer says what the viewer found: format, triangles, vertices, meshes, materials, animation clip names, and the bounding box size and centre in the file's units. Check those against what you meant to build: a centimetre/metre mix-up shows as a size a hundred times off. A very large model can answer status 'loading' before it is done. To see the model yourself, call model_snapshot.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -506,7 +506,7 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "model_snapshot",
-            "description": "Render an open 3D model to a PNG and look at it: the image comes back in the result, followed by the model's stats as text. Use it to check your own work before telling the user it is done — shape, proportions, orientation, materials, missing or black textures — and again after each change. The camera frames the model's bounding box from a fixed angle: front, back, left, right, top, bottom, or iso, a three-quarter view from above. The user's own view in the panel is left as it was. The model must be open in your workspace's preview already: call model_show first. It renders whether or not your workspace is on screen. A bigger image costs more of your context, and the default 1024×768 is enough for most checks.",
+            "description": "Render an open 3D model to a PNG and look at it: the image comes back in the result, followed by the model's stats as text. Use it to check your own work before telling the user it is done — shape, proportions, orientation, materials, missing or black textures — and again after each change. The camera frames the model's bounding box from a fixed angle: front, back, left, right, top, bottom, or iso, a three-quarter view from above. The user's own view in the model's pane is left as it was. The model must be open in your workspace's preview already: call model_show first. It renders whether or not your workspace is on screen. A bigger image costs more of your context, and the default 1024×768 is enough for most checks.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -585,7 +585,7 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "model_close",
-            "description": "Close a model in your workspace's 3D preview. Without a path it closes every model open there; other workspaces' previews are left as they are. The panel goes away with the last one. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
+            "description": "Close a model shown in your workspace. Without a path it closes every model open there; other workspaces' previews are left as they are. Its pane closes with it, and the workspace is laid out again. Call it once you are done showing a model, so it does not keep a part of the user's screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -602,7 +602,7 @@ fn preview_tool_definitions() -> Value {
     json!([
         {
             "name": "preview_show",
-            "description": "Show the person a file in Hangar's preview panel, beside the terminals: it is how you show them a render, a screenshot, a recording, a report or a page, instead of handing them a path. It shows images (.png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .avif, up to 64 MB), video (.mp4, .webm, .mov, .m4v) and audio (.mp3, .wav, .ogg, .m4a, .flac) of any length, PDF (up to 256 MB), Markdown (.md, .markdown), HTML pages (.html, .htm, up to 64 MB), text and source code in UTF-8 (.txt, .log, .json, .yaml, .csv, .ts, .rs, .py and the like, or any other UTF-8 file, up to 10 MB: a larger one is refused, so save the part worth reading to a file of its own), and 3D models as model_show opens them. The file must be in your workspace's folders or its git worktrees, and it opens in your workspace's preview. An HTML page runs its scripts in a sandbox with no access to Hangar: the images, video and audio beside it load, but not its own .js or .css files, nor anything it fetch()es, so inline its scripts and styles. Nothing is sent off the machine: Hangar reads the file where it is. The answer gives the file's kind, name and size. A file that is not what its extension says (a .jpg that is a saved error page, a binary .json) is refused with the reason, as is one over its limit. To see a 3D model yourself, call model_snapshot.",
+            "description": "Show the person a file as a pane of your workspace's grid, beside the terminals, which Hangar lays out again around it: it is how you show them a render, a screenshot, a recording, a report or a page, instead of handing them a path. It shows images (.png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .avif, up to 64 MB), video (.mp4, .webm, .mov, .m4v) and audio (.mp3, .wav, .ogg, .m4a, .flac) of any length, PDF (up to 256 MB), Markdown (.md, .markdown), HTML pages (.html, .htm, up to 64 MB), text and source code in UTF-8 (.txt, .log, .json, .yaml, .csv, .ts, .rs, .py and the like, or any other UTF-8 file, up to 10 MB: a larger one is refused, so save the part worth reading to a file of its own), and 3D models as model_show opens them. The file must be in your workspace's folders or its git worktrees, and it opens in your workspace. A workspace holds 16 panes at most, its terminals included: a new file is refused while it is full. An HTML page runs its scripts in a sandbox with no access to Hangar: the images, video and audio beside it load, but not its own .js or .css files, nor anything it fetch()es, so inline its scripts and styles. Nothing is sent off the machine: Hangar reads the file where it is. The answer gives the file's kind, name and size. A file that is not what its extension says (a .jpg that is a saved error page, a binary .json) is refused with the reason, as is one over its limit. To see a 3D model yourself, call model_snapshot.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -614,7 +614,7 @@ fn preview_tool_definitions() -> Value {
         },
         {
             "name": "preview_close",
-            "description": "Close a file in your workspace's preview panel. Without a path it closes everything open there; other workspaces' previews are left as they are. Call it once you are done showing something, so it does not keep a part of the person's screen.",
+            "description": "Close a file shown as a pane of your workspace's grid. Without a path it closes everything open there; other workspaces' previews are left as they are. Call it once you are done showing something, so it does not keep a part of the person's screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -634,12 +634,12 @@ fn kit_tool_definitions() -> Value {
     json!([
         {
             "name": "kit_tab_list",
-            "description": "List the tabs of the kits enabled on your workspace: small pages a kit brings, which you can open in Hangar's side panel beside the terminals. Each comes with its kit, its title, the kit's description, whether it is a single tab (singleton), the params it takes with their description and rule, and toReview when the person has changes to accept before any of that kit's tabs can be opened.",
+            "description": "List the tabs of the kits enabled on your workspace: small pages a kit brings, which you can open as a pane of your workspace's grid, beside the terminals. Each comes with its kit, its title, the kit's description, whether it is a single tab (singleton), the params it takes with their description and rule, and toReview when the person has changes to accept before any of that kit's tabs can be opened.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "kit_tab_open",
-            "description": "Open a kit's tab in your workspace's side panel, with params when it takes some: for instance the tab showing a CI run, with the run's id. Call kit_tab_list to learn what there is. The same params bring the tab already open forward; other params open another one, except for a singleton, whose one tab takes the new params. It never takes the keyboard from a terminal. Refused, saying why, when the kit is not enabled on your workspace or has changes to review, when it has no such tab, and when a param is not declared or does not match its rule. The answer says what happened (opened, focused or replaced) and whether the person can see it.",
+            "description": "Open a kit's tab as a pane of your workspace's grid, with params when it takes some: for instance the tab showing a CI run, with the run's id. Hangar lays the workspace out again around it. Call kit_tab_list to learn what there is. The same params focus the tab already open where it is; other params open another one, except for a singleton, whose one tab takes the new params. It never takes the keyboard from a terminal. Refused, saying why, when the kit is not enabled on your workspace or has changes to review, when it has no such tab, when a param is not declared or does not match its rule, and when the workspace already holds 16 panes. The answer says what happened (opened, focused or replaced) and whether the person can see it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -652,7 +652,7 @@ fn kit_tool_definitions() -> Value {
                     },
                     "reveal": {
                         "type": "boolean",
-                        "description": "Open the side panel if it is closed. Default true; false adds the tab without opening the panel."
+                        "description": "Say on screen that you opened it. Default true; false opens the tab's pane quietly."
                     }
                 },
                 "required": ["kit", "tab"]
@@ -660,7 +660,7 @@ fn kit_tool_definitions() -> Value {
         },
         {
             "name": "kit_tab_close",
-            "description": "Close a kit's tab in your workspace's side panel. With params, the tab holding those very params; without, every tab of it open there. Call it once you are done showing something, so it does not keep a part of the person's screen.",
+            "description": "Close a kit's tab shown as a pane of your workspace's grid. With params, the tab holding those very params; without, every tab of it open there. Call it once you are done showing something, so it does not keep a part of the person's screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

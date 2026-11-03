@@ -858,7 +858,7 @@
   "control.reset": "{by} a réinitialisé {pane} dans {workspace}",
   "control.modelShown": "{by} t'a ouvert {file}",
   "control.modelClosed": "{by} a fermé {file}",
-  "control.modelShownElsewhere": "{by} a ouvert {file} dans l'aperçu de {workspace}",
+  "control.modelShownElsewhere": "{by} a ouvert {file} dans {workspace}",
   "control.modelClosedElsewhere": "{by} a fermé {file} dans {workspace}",
   "control.workspaceCreated": "{by} a créé le workspace {workspace} depuis un dépôt ; {pane} l'orchestre",
   "control.checkSet": "{by} a défini la commande de vérification de {workspace} : {command}",

@@ -720,6 +720,12 @@ impl Fake {
             ModelCmd::RemoveWorkspace(ws) => self.push(format!("remove:{ws}")),
             ModelCmd::BeginDelivery { ws, task } => self.push(format!("begin:{ws}:{task}")),
             ModelCmd::EndDelivery { ws, task } => self.push(format!("end:{ws}:{task}")),
+            ModelCmd::ViewsChanged { ws, arrange } => {
+                self.push(format!(
+                    "views:{ws}:{}",
+                    if arrange { "arrange" } else { "keep" }
+                ));
+            }
         }
         out
     }

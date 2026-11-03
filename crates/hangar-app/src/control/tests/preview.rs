@@ -173,7 +173,7 @@ async fn opens_it_in_the_callers_own_workspace_and_says_so_when_that_one_is_not_
     );
     contains(
         result["note"].as_str().unwrap(),
-        "open in the preview of \"Shop\", which is not the workspace on screen",
+        "open as a pane of \"Shop\", which is not the workspace on screen",
     );
     let log = fake.log();
     assert!(log.contains(&"host:w2:here".into()));
@@ -183,7 +183,7 @@ async fn opens_it_in_the_callers_own_workspace_and_says_so_when_that_one_is_not_
 }
 
 #[tokio::test]
-async fn says_so_when_the_workspace_is_on_screen_but_its_preview_is_not() {
+async fn says_so_when_the_workspace_is_on_screen_but_its_grid_is_not() {
     let fake = Fake::setup();
     lock(&fake.preview.state).shown = false;
     let result = control(
@@ -195,8 +195,8 @@ async fn says_so_when_the_workspace_is_on_screen_but_its_preview_is_not() {
     .unwrap();
     matches(&result, json!({"workspace": "Hangar", "visible": false}));
     let note = result["note"].as_str().unwrap();
-    contains(note, "\"Hangar\" is on screen, but its preview is not");
-    contains(note, "toolbar button");
+    contains(note, "\"Hangar\" is on screen, but not its panes");
+    contains(note, "the board, the memory or the stats");
 }
 
 #[tokio::test]
@@ -1006,7 +1006,7 @@ async fn opens_in_the_callers_own_workspace_wakes_it_if_it_sleeps_and_says_it_is
     );
     let note = result["note"].as_str().unwrap();
     contains(note, "\"Shop\" was asleep");
-    contains(note, "open in the preview of \"Shop\"");
+    contains(note, "open as a pane of \"Shop\"");
     let log = fake.log();
     assert!(log.contains(&"open:w2".into()));
     assert!(log.contains(&"show:C:\\dev\\shop\\logo.png:logo.png:Ava:w2".into()));
@@ -1127,4 +1127,63 @@ async fn has_nothing_to_close_in_an_empty_preview_and_refuses_a_path_that_is_not
         "No open file matches \"other.png\". Open: C:\\dev\\hangar\\shot.png",
     );
     assert!(fake.logged("announce:").is_empty());
+}
+
+/* ── what is shown, as a pane of the grid ────────────────────── */
+
+#[tokio::test]
+async fn a_file_or_a_model_an_agent_opens_is_a_pane_laid_out_once_and_closing_it_too() {
+    let fake = Fake::setup();
+    control(
+        "preview_show",
+        with(from_ava(), json!({"path": "shot.png"})),
+        &fake,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fake.logged("views:"), ["views:w1:arrange"]);
+    // Shown again, it reloads in its pane: the layout stays.
+    control(
+        "preview_show",
+        with(from_ava(), json!({"path": "shot.png"})),
+        &fake,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fake.logged("views:").last().unwrap(), "views:w1:keep");
+    control(
+        "model_show",
+        with(from_ava(), json!({"path": "chair.glb"})),
+        &fake,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fake.logged("views:").last().unwrap(), "views:w1:arrange");
+    control(
+        "preview_close",
+        with(from_ava(), json!({"path": "shot.png"})),
+        &fake,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fake.logged("views:").last().unwrap(), "views:w1:arrange");
+}
+
+#[tokio::test]
+async fn a_full_workspace_has_no_room_for_another_file_and_opens_nothing() {
+    let fake = Fake::setup();
+    fake.patch("w1", |ws| {
+        while ws.pane_count() < crate::state::types::MAX_PANES {
+            let id = format!("v{}", ws.view_panes.len());
+            ws.view_panes.push(crate::state::ViewPane::new(id));
+        }
+    });
+    for (op, path) in [("preview_show", "shot.png"), ("model_show", "chair.glb")] {
+        let refused = control(op, with(from_ava(), json!({"path": path})), &fake)
+            .await
+            .unwrap_err();
+        contains(&refused, "is full: a workspace holds at most 16 panes");
+    }
+    assert!(fake.preview.ids().is_empty(), "nothing opened");
+    assert!(fake.logged("views:").is_empty());
 }

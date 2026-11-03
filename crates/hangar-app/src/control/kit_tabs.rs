@@ -11,7 +11,9 @@
 //!
 //! What a kit's tabs are and which params they take is P16's to read
 //! (`KitTabCatalog`); what is decided here is where they open and what the
-//! agent is told.
+//! agent is told. A tab opens as a pane of the workspace's grid, beside the
+//! others, and the workspace is laid out again after it, as after a pane an
+//! agent opens or closes (`ModelCmd::ViewsChanged`).
 
 use serde_json::{Value, json};
 
@@ -19,7 +21,7 @@ use crate::state::Workspace;
 
 use super::panes::announce;
 use super::port::{EntryKind, KitParams, OpenEntry, Port, Showing};
-use super::preview::{closed, preview_of, shown, sight, wake_for};
+use super::preview::{closed, preview_of, room_for_one, shown, sight, views_changed, wake_for};
 use super::run::{caller_workspace, unknown};
 use super::types::{Caller, same, text};
 
@@ -150,6 +152,10 @@ async fn open(
     let preview = preview_of(ws, port).await?;
     let before = preview.list().await?;
     let before = find_tab(&before.entries, &kit, &tab, &params, spec.singleton).cloned();
+    // A tab open already is focused where it is; a new one needs a pane.
+    if before.is_none() {
+        room_for_one(ws, port)?;
+    }
     let woke = wake_for(ws, port).await;
     let none = KitParams::new();
     let id = preview
@@ -171,6 +177,7 @@ async fn open(
         }
         Some(_) => "focused",
     };
+    views_changed(ws, port, outcome == "opened").await;
     let mut answer = json!({
         "outcome": outcome,
         "kit": kit,
@@ -180,10 +187,9 @@ async fn open(
     });
     if !reveal {
         let listing = preview.list().await.unwrap_or_default();
-        answer["visible"] =
-            json!(listing.shown && listing.active_id.as_deref() == Some(id.as_str()));
+        answer["visible"] = json!(listing.shown && listing.entries.iter().any(|e| e.id == id));
         answer["note"] = json!(
-            "Added without opening the panel: the preview's toolbar button tells the person there is something to see."
+            "Opened quietly: the tab is a pane of the grid like any other, and nothing was said on screen."
         );
         return Ok(answer);
     }
@@ -230,6 +236,7 @@ async fn close(
     preview
         .close(closing.iter().map(|(entry, _)| entry.id.clone()).collect())
         .await;
+    views_changed(ws, port, true).await;
     let titles = closing
         .iter()
         .map(|(entry, _)| entry.title.as_str())
