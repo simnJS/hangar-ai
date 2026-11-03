@@ -574,3 +574,285 @@ fn a_freshly_mounted_pane_has_done_nothing_yet() {
         (NOW, NOW, false)
     );
 }
+
+// ----- the servers a launch started Claude Code with
+
+fn custom_launch() -> PaneMcp {
+    PaneMcp {
+        mode: crate::state::live::PaneMcpMode::Custom {
+            servers: vec!["hangar".into(), "github".into()],
+        },
+        hangar: Some(true),
+    }
+}
+
+#[test]
+fn a_launch_records_the_servers_for_whoever_reads_the_insight() {
+    let (mut m, _) = one_claude();
+    assert_eq!(m.live.panes_logic.insight("p1").mcp, None);
+    assert!(m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch())));
+    assert_eq!(m.live.panes_logic.insight("p1").mcp, Some(custom_launch()));
+    // The same launch twice changes nothing, so nobody is told twice.
+    assert!(!m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch())));
+    // A launch that could not say forgets the last one's servers.
+    assert!(m.live.panes_logic.set_launch_mcp("p1", None));
+    assert_eq!(m.live.panes_logic.insight("p1").mcp, None);
+}
+
+#[test]
+fn the_servers_go_with_the_pane_unless_another_window_takes_it_over() {
+    let (mut m, _) = one_claude();
+    m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch()));
+    // Moving to another window keeps what the pane reported.
+    m.live.panes_logic.unmount_pane("p1", true);
+    assert_eq!(m.live.panes_logic.insight("p1").mcp, Some(custom_launch()));
+    // Closed, or restarted under a new id: the new one launches afresh.
+    m.live.panes_logic.unmount_pane("p1", false);
+    assert_eq!(m.live.panes_logic.insight("p1").mcp, None);
+}
+
+// ----- inside a turn
+
+#[test]
+fn a_pane_is_inside_a_turn_while_it_works_or_waits_for_an_answer() {
+    let (mut m, _) = one_claude();
+    let live = &mut m.live.panes_logic;
+    assert!(!live.is_mid_turn("p1"), "a pane that reports nothing");
+    assert!(!live.is_mid_turn("never"));
+    for (activity, inside) in [
+        (AgentActivity::Working, true),
+        (AgentActivity::Waiting, true),
+        (AgentActivity::Yours, false),
+        (AgentActivity::Idle, false),
+    ] {
+        live.seed_activity("p1", "w1", activity);
+        assert_eq!(live.is_mid_turn("p1"), inside, "{activity:?}");
+    }
+}
+
+// ----- a launch of an agent without the mod
+
+fn session_line(m: &Model, pane: &str) -> Option<PaneEventDetail> {
+    m.live
+        .panes_logic
+        .insight(pane)
+        .events
+        .first()
+        .map(|event| event.detail.clone())
+}
+
+fn without_the_mod() -> Model {
+    let (m, _) = model(vec![workspace(
+        "w1",
+        vec![
+            pane("cx", "Cy", AgentId::Codex),
+            pane("cl", "Ava", AgentId::Claude),
+            pane("sh", "Leo", AgentId::Shell),
+        ],
+    )]);
+    m
+}
+
+#[test]
+fn an_agent_without_the_mod_dates_its_session_and_words_it_when_launched() {
+    let mut m = without_the_mod();
+    let version = m.live.version;
+    launched(&mut m, "cx", None, NOW + 7);
+    let insight = m.live.panes_logic.insight("cx");
+    assert_eq!(insight.session_since, Some(NOW + 7));
+    assert_eq!(
+        session_line(&m, "cx"),
+        Some(PaneEventDetail::Session {
+            id: String::new(),
+            resumed: false
+        })
+    );
+    assert!(m.live.version > version, "readers are told");
+
+    // Resuming one names the session, short.
+    launched(&mut m, "cx", Some("3f2a9c1e-0b7d"), NOW + 9);
+    assert_eq!(m.live.panes_logic.insight("cx").session_since, Some(NOW + 9));
+    assert_eq!(
+        session_line(&m, "cx"),
+        Some(PaneEventDetail::Session {
+            id: "3f2a9c".into(),
+            resumed: true
+        })
+    );
+    assert_eq!(m.live.panes_logic.insight("cx").events.len(), 2);
+}
+
+#[test]
+fn a_claude_code_with_the_mod_leaves_it_to_its_hello() {
+    let mut m = without_the_mod();
+    assert!(m.settings().claude_bridge);
+    launched(&mut m, "cl", Some("abc"), NOW + 1);
+    let insight = m.live.panes_logic.insight("cl");
+    assert_eq!((insight.session_since, insight.events.len()), (None, 0));
+
+    // With the mod switched off nothing will say it: the launch does.
+    let mut state = m.state().clone();
+    state.settings.claude_bridge = false;
+    m.hydrate(state);
+    launched(&mut m, "cl", Some("abc"), NOW + 2);
+    assert_eq!(m.live.panes_logic.insight("cl").session_since, Some(NOW + 2));
+    assert!(matches!(
+        session_line(&m, "cl"),
+        Some(PaneEventDetail::Session { resumed: true, .. })
+    ));
+}
+
+#[test]
+fn a_shell_and_a_pane_nobody_mounted_launch_nothing() {
+    let mut m = without_the_mod();
+    let version = m.live.version;
+    launched(&mut m, "sh", None, NOW + 1);
+    launched(&mut m, "never", None, NOW + 1);
+    assert!(session_line(&m, "sh").is_none());
+    assert!(session_line(&m, "never").is_none());
+    assert_eq!(m.live.version, version);
+
+    // In the state but without a terminal: nothing to date.
+    m.live.panes_logic.unmount_pane("cx", false);
+    launched(&mut m, "cx", None, NOW + 1);
+    assert!(session_line(&m, "cx").is_none());
+}
+
+// ----- the prompts a restart carried over
+
+fn queue_host() -> hangar_core::Host {
+    let dir = std::env::temp_dir().join(format!("hangar-panes-logic-{}", std::process::id()));
+    hangar_core::Host::with_paths(hangar_core::paths::Paths::rooted(&dir))
+}
+
+fn prompt(text: &str, from: Option<&str>) -> QueuedPrompt {
+    QueuedPrompt {
+        id: String::new(),
+        text: text.into(),
+        from: from.map(str::to_string),
+    }
+}
+
+#[test]
+fn mounting_hands_the_carried_prompts_back_off_the_ui_thread() {
+    // The queue is core's, global to the process: a pane id of this test's own.
+    let pane = format!("requeue-{}", std::process::id());
+    let carried = vec![prompt("first", None), prompt("second", Some("hangar"))];
+
+    // Building the task does nothing yet; it only runs on the blocking pool.
+    let _task = requeue(queue_host(), pane.clone(), carried.clone());
+    assert!(hangar_core::bridge::bridge_queue(pane.clone()).is_empty());
+
+    // What it runs: the prompts, in the order they were held, from whom.
+    enqueue_all(&queue_host(), &pane, carried);
+    let queue = hangar_core::bridge::bridge_queue(pane.clone());
+    let held: Vec<(&str, Option<&str>)> = queue
+        .iter()
+        .map(|queued| (queued.text.as_str(), queued.from.as_deref()))
+        .collect();
+    assert_eq!(held, [("first", None), ("second", Some("hangar"))]);
+    hangar_core::bridge::bridge_cancel(&queue_host(), pane, None);
+}
+
+// ----- the sleep verdict a menu asks for
+
+/// `env_model`, with the workspace `other` the one a menu is opened on.
+fn verdict_of(m: &Model, probed: Option<&HashMap<PaneId, bool>>) -> Option<Verdict> {
+    sleep_verdict(m, "other", probed)
+}
+
+#[test]
+fn a_menu_asks_the_shells_before_it_can_say_a_workspace_may_sleep() {
+    let m = env_model();
+    // Ava has rested, Leo's shell may be running something: ask the system.
+    assert_eq!(
+        verdict_of(&m, None),
+        Some(Verdict::Probe {
+            pane_ids: vec!["leo".into()]
+        })
+    );
+    assert_eq!(
+        sleep_line(&m, "other", None),
+        Some(SleepLine::Ask(vec!["leo".into()]))
+    );
+
+    let quiet: HashMap<PaneId, bool> = [("leo".to_string(), false)].into();
+    assert_eq!(verdict_of(&m, Some(&quiet)), Some(Verdict::Sleep { agents: 1 }));
+    assert_eq!(sleep_line(&m, "other", Some(&quiet)), Some(SleepLine::Ready));
+}
+
+#[test]
+fn a_menu_is_told_why_a_workspace_stays_awake_in_the_persons_language() {
+    let mut m = env_model();
+    let busy: HashMap<PaneId, bool> = [("leo".to_string(), true)].into();
+    let Some(SleepLine::Refused(words)) = sleep_line(&m, "other", Some(&busy)) else {
+        panic!("a shell running a program keeps the workspace awake");
+    };
+    let leo = pane("leo", "Leo", AgentId::Shell);
+    let awake = Awake {
+        reason: Blocker::ShellChildren,
+        pane_id: Some("leo".into()),
+    };
+    let expected = sleep_refusal(Translator::new(m.locale()), &awake, &[leo], &|_| false);
+    assert_eq!(words, expected);
+
+    // Prompts waiting for Ava keep it awake before the shells are asked at all.
+    m.live.panes_logic.queue_changed(
+        "ava",
+        vec![Queued {
+            id: "q".into(),
+            text: "later".into(),
+            from: None,
+        }],
+        NOW,
+    );
+    assert!(matches!(
+        sleep_verdict(&m, "other", None),
+        Some(Verdict::Awake(Awake {
+            reason: Blocker::Queued,
+            ..
+        }))
+    ));
+    assert!(matches!(
+        sleep_line(&m, "other", None),
+        Some(SleepLine::Refused(_))
+    ));
+}
+
+#[test]
+fn a_menu_sees_what_the_click_will_decide_on_and_changes_nothing() {
+    let mut m = env_model();
+    // A workspace already asleep, or one that is gone.
+    let version = m.live.version;
+    let before = m.live.panes_logic.hibernation.last_touch("other");
+    let seen = sleep_verdict(&m, "other", None);
+    assert_eq!(m.live.version, version);
+    assert_eq!(m.live.panes_logic.hibernation.last_touch("other"), before);
+
+    // The click reads the same rules through the live environment.
+    let (step, ..) = env_run(&mut m, Arc::new(Snapshot::default()), |env| {
+        hibernation::begin(env, "other", SleepMode::Forced, NOW)
+    });
+    assert_eq!(
+        seen,
+        Some(Verdict::Probe {
+            pane_ids: vec!["leo".into()]
+        })
+    );
+    assert!(matches!(step, Step::Probe { ref pane_ids, .. } if pane_ids == &["leo".to_string()]));
+
+    assert_eq!(sleep_verdict(&m, "gone", None), None);
+    assert_eq!(sleep_line(&m, "gone", None), None);
+
+    m.live.panes_logic.hibernation.mark_asleep(
+        "other",
+        Asleep {
+            at: NOW,
+            agents: 1,
+        },
+    );
+    assert!(matches!(
+        sleep_line(&m, "other", None),
+        Some(SleepLine::Refused(_))
+    ));
+}

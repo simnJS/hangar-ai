@@ -35,10 +35,13 @@
 //!
 //! `Model.live.panes_logic` (`Live`): activity (`pane_activity`,
 //! `workspace_activity`, `agents_in`, `plan_limits`, `conflict`), insight
-//! (`insight`), the shell's life (`pane_status`, `state_glyph_state`),
-//! attention (`needs_attention`), hibernation (`is_asleep`, `asleep`), the
-//! branch (`pane_branch`). The shell feeds the snapshot from `activity_map`
-//! and `asleep_ids`.
+//! (`insight`, whose `mcp` is what the pane's Claude Code was launched
+//! with), whether a pane is inside a turn (`is_mid_turn`), the shell's life
+//! (`pane_status`, `state_glyph_state`), attention (`needs_attention`),
+//! hibernation (`is_asleep`, `asleep`, and for a menu `sleep_line` /
+//! `sleep_verdict`, the rules of a sleep asked for by hand read without
+//! changing anything), the branch (`pane_branch`). The shell feeds the
+//! snapshot from `activity_map` and `asleep_ids`.
 //!
 //! # What the terminal's package tells it (P5)
 //!
@@ -50,14 +53,17 @@
 //! `osc777_notification`, which also tell the parser whether to handle the
 //! code), `Key` (a key pressed, not the terminal answering its program),
 //! `Typed` (the person used a workspace on screen), `WatchSession` once the
-//! agent is launched, `Unmounted` when the terminal goes. Everything that
+//! agent is launched, `Launched` when its command was typed (it dates the
+//! session of an agent that has no mod to say so), `Unmounted` when the
+//! terminal goes. Everything that
 //! comes from core (`bridge:event`, `bridge:queue`) and the shell's end
 //! (`CoreEvent::PtyExit`, which P5 sends when a pane's shell ends by itself)
 //! arrives through `on_event` and needs nothing more from the terminal's
 //! package.
 //!
 //! A launch reads and takes from `Live` (`claim_session`, `must_resume`,
-//! `carry_resume`), through the few methods documented there.
+//! `carry_resume`) and tells it the servers it started Claude Code with
+//! (`set_launch_mcp`), through the few methods documented there.
 //!
 //! What a pane reports is worded and decided here: the activity, the badge,
 //! the notification (an `Intent::Notify`), the history, the context gauge
@@ -124,8 +130,8 @@ use self::agent_state::AgentStates;
 use self::agents::{Claims, is_resumable};
 use self::bridge_events::CarriedQueues;
 use self::hibernation::{
-    ForcedOutcome, Hibernation, Reading, SleepEnv, SleepMode, Slept, Step, begin, finish, prune,
-    put_to_sleep, settle_forced,
+    ForcedOutcome, Hibernation, Reading, SleepEnv, SleepMode, SleepRead, Slept, Step, begin,
+    finish, prune, put_to_sleep, read_forced, settle_forced,
 };
 use self::pane_branch::{
     BranchCache, Lookup, PANE_BRANCH_FOCUS_MS, PANE_BRANCH_REFRESH_MS, PANE_BRANCH_TTL_MS,
@@ -137,8 +143,8 @@ use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Focus, Notice, Notification, Region, View, WindowKind};
 use crate::state::live::{
-    AgentActivity, AgentRoster, BridgeEvent, GlyphState, PaneActivity, PaneInsight, PaneStatus,
-    PlanLimits, WorkspaceActivity,
+    AgentActivity, AgentRoster, BridgeEvent, GlyphState, PaneActivity, PaneInsight, PaneMcp,
+    PaneStatus, PlanLimits, QueuedPrompt, WorkspaceActivity,
 };
 use crate::state::types::{AgentId, AppState, Pane, PaneId, Workspace, WsId};
 use crate::state::{Model, Patch, Snapshot, StoreAction};
@@ -240,6 +246,18 @@ pub enum Msg {
         cwd: String,
         known: HashSet<String>,
     },
+    /// The agent's command was typed into the pane's shell. `resumed` is the
+    /// session id it was told to resume, `None` for a new conversation.
+    ///
+    /// This is what dates the session and puts its line in the history for
+    /// an agent that cannot say so itself: every agent but a Claude Code with
+    /// the hangar-bridge mod, whose hello does it with the id it really
+    /// landed on. So the terminal's package may send it for every launch;
+    /// that one is ignored here.
+    Launched {
+        pane: PaneId,
+        resumed: Option<String>,
+    },
 
     // ----- the package's own
     /// A window of the app gained or lost the system's focus.
@@ -309,6 +327,13 @@ impl Live {
     /// The pane's agent is waiting for an answer, rather than at work or done.
     pub fn is_waiting(&self, pane: &str) -> bool {
         self.agents.is_waiting(pane)
+    }
+
+    /// The pane's agent is inside a turn: at work, or waiting for an answer
+    /// the turn needs. What must not be restarted from under its person, and
+    /// what keeps a workspace awake (`hibernation::is_busy`).
+    pub fn is_mid_turn(&self, pane: &str) -> bool {
+        hibernation::is_busy(self.activity_or_idle(pane))
     }
 
     /// How many of a workspace's agents are working, waiting, or done.
@@ -415,6 +440,38 @@ impl Live {
     pub fn mark_awake(&mut self, workspace_id: &str) -> bool {
         self.hibernation.mark_awake(workspace_id)
     }
+
+    /// The MCP servers the pane's Claude Code was launched with
+    /// (`updatePaneInsight(pane, { mcp })` of `mcpLaunchConfig`). Written by
+    /// the launch, once the servers' file is known and before the agent
+    /// starts, and read back by the inspector's MCP row and by the servers
+    /// panel, which restarts the panes that run with something else.
+    ///
+    /// `None` forgets it, which is what a launch that could not say leaves:
+    /// the panel then counts the pane as out of date, as the TS did for a
+    /// launch it never saw. It goes with the pane when its terminal goes
+    /// (`unmount_pane`), so a restart under a new id starts without. Whether
+    /// anything changed.
+    pub fn set_launch_mcp(&mut self, pane: &str, mcp: Option<PaneMcp>) -> bool {
+        self.insights.update(pane, |insight| insight.mcp = mcp)
+    }
+}
+
+/// What another package's test needs to put a pane in a state: the reducer
+/// that normally does it is driven by core's events and the terminals.
+#[cfg(test)]
+impl Live {
+    /// The pane reports this activity, as an agent with the mod would.
+    pub(crate) fn seed_activity(&mut self, pane: &str, workspace: &str, activity: AgentActivity) {
+        self.agents.set(
+            pane,
+            PaneActivity {
+                workspace_id: workspace.to_string(),
+                activity,
+                bridged: true,
+            },
+        );
+    }
 }
 
 /// The glyph a pane shows: its shell's life until it runs, then its agent's
@@ -435,6 +492,114 @@ pub fn state_glyph_state(m: &Model, pane: &PaneId) -> GlyphState {
             AgentActivity::Idle => GlyphState::Idle,
         },
     }
+}
+
+// ----- the prompts a restart carried over
+
+/// Hands prompts back to core's queue for a pane, in the order they were held.
+/// Off the UI thread: the queue sits behind a lock that the bridge's own
+/// threads take for as long as a mod's request lasts, and a pane mounting
+/// must not wait on one.
+fn requeue(host: hangar_core::Host, pane: PaneId, carried: Vec<QueuedPrompt>) -> Task<Message> {
+    if carried.is_empty() {
+        return Task::none();
+    }
+    Task::perform(
+        async move {
+            // A blocking task that panicked has nobody to tell: the prompts
+            // are what is lost, as when the queue itself fails.
+            let _ = tokio::task::spawn_blocking(move || enqueue_all(&host, &pane, carried)).await;
+        },
+        |()| Message::Noop,
+    )
+}
+
+/// The blocking half of `requeue`.
+fn enqueue_all(host: &hangar_core::Host, pane: &str, carried: Vec<QueuedPrompt>) {
+    for prompt in carried {
+        hangar_core::bridge::bridge_enqueue(host, pane.to_string(), prompt.text, prompt.from);
+    }
+}
+
+// ----- the sleep verdict, for a menu
+
+/// The model as a sleep environment that can only be read: what a menu asks
+/// as it opens, drawn from the shared model (`sleep.verdict` of
+/// `useHibernation`).
+struct ModelRead<'a>(&'a Model);
+
+impl SleepRead for ModelRead<'_> {
+    fn state(&self) -> &AppState {
+        self.0.state()
+    }
+    fn active(&self) -> Option<&str> {
+        self.0.state().active_workspace_id.as_deref()
+    }
+    fn opened_ids(&self) -> &[WsId] {
+        &self.0.ui.opened_ids
+    }
+    fn recent(&self) -> &[WsId] {
+        &self.0.live.panes_logic.recent
+    }
+    fn store(&self) -> &Hibernation {
+        &self.0.live.panes_logic.hibernation
+    }
+    fn queued(&self, pane_id: &str) -> usize {
+        self.0.live.panes_logic.insights.get(pane_id).queue.len()
+    }
+    fn delivering(&self, workspace_id: &str) -> bool {
+        self.0.live.control.is_delivering(workspace_id)
+    }
+}
+
+/// What a workspace's « Put to sleep » line is, as a menu draws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SleepLine {
+    /// The rules say it may go.
+    Ready,
+    /// The rules say it may go, but for these shells: whether they run
+    /// something is for the system to say (`pty_has_children`). The line
+    /// stays live meanwhile, as in the TS; ask them as the menu opens and
+    /// read again with the answer in `probed`.
+    Ask(Vec<PaneId>),
+    /// It stays awake, and this is why, worded for the line's tooltip.
+    Refused(String),
+}
+
+/// Whether the workspace may be put to sleep now, by the rules of a sleep
+/// asked for by hand (`sleep.verdict(id)`): read from the model as it stands,
+/// changing nothing. `probed` is what the system said the shells run, once
+/// asked. `None` when the workspace is gone.
+pub fn sleep_verdict(
+    m: &Model,
+    workspace_id: &str,
+    probed: Option<&HashMap<PaneId, bool>>,
+) -> Option<Verdict> {
+    read_forced(&ModelRead(m), workspace_id, probed).map(|reading| reading.verdict)
+}
+
+/// The verdict as the navigator's menu wants it (`sleepEntry` of Sidebar.tsx):
+/// greyed with the reason when a rule says no, live otherwise. `None` when
+/// the workspace is gone.
+pub fn sleep_line(
+    m: &Model,
+    workspace_id: &str,
+    probed: Option<&HashMap<PaneId, bool>>,
+) -> Option<SleepLine> {
+    let reading = read_forced(&ModelRead(m), workspace_id, probed)?;
+    Some(match reading.verdict {
+        Verdict::Sleep { .. } => SleepLine::Ready,
+        Verdict::Probe { pane_ids } => SleepLine::Ask(pane_ids),
+        Verdict::Awake(awake) => {
+            let live = &m.live.panes_logic;
+            SleepLine::Refused(sleep_refusal(
+                Translator::new(m.locale()),
+                &awake,
+                &reading.workspace.panes,
+                &|pane| live.is_waiting(pane),
+            ))
+        }
+    })
 }
 
 // ----- the model, read for the machines
@@ -634,7 +799,7 @@ struct LiveEnv<'a> {
     shown: Vec<WsId>,
 }
 
-impl SleepEnv for LiveEnv<'_> {
+impl SleepRead for LiveEnv<'_> {
     fn state(&self) -> &AppState {
         self.state
     }
@@ -650,9 +815,6 @@ impl SleepEnv for LiveEnv<'_> {
     fn store(&self) -> &Hibernation {
         self.store
     }
-    fn store_mut(&mut self) -> &mut Hibernation {
-        self.store
-    }
     fn queued(&self, pane_id: &str) -> usize {
         self.insights.get(pane_id).queue.len()
     }
@@ -661,6 +823,12 @@ impl SleepEnv for LiveEnv<'_> {
             .delivering
             .get(workspace_id)
             .is_some_and(|runs| !runs.is_empty())
+    }
+}
+
+impl SleepEnv for LiveEnv<'_> {
+    fn store_mut(&mut self) -> &mut Hibernation {
+        self.store
     }
     fn unmount(&mut self, workspace_id: &str) {
         self.opened_ids.retain(|id| id != workspace_id);
@@ -878,17 +1046,15 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             live.mount_pane(&pane, &ws.id, &found.name, now);
             // A restart gave this pane a new id: the prompts still queued for
             // the old one come along.
-            for carried in live.carried.take(&carry_key(&ws.id, &found.name), now) {
-                hangar_core::bridge::bridge_enqueue(
-                    sv.core().host(),
-                    pane.clone(),
-                    carried.text,
-                    carried.from,
-                );
-            }
+            let carried: Vec<QueuedPrompt> =
+                live.carried.take(&carry_key(&ws.id, &found.name), now);
+            let requeued = requeue(sv.core().host().clone(), pane.clone(), carried);
             bump(m);
             // A pane asks once on mount.
-            ask_branch(m, &folder_of(&ws, &found), now, PANE_BRANCH_TTL_MS)
+            Task::batch([
+                requeued,
+                ask_branch(m, &folder_of(&ws, &found), now, PANE_BRANCH_TTL_MS),
+            ])
         }
         Msg::Unmounted { pane, handing_over } => {
             let live = &m.live.panes_logic;
@@ -958,6 +1124,10 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                     .watches
                     .insert(pane, SessionWatch::new(agent, cwd, known, now));
             }
+            Task::none()
+        }
+        Msg::Launched { pane, resumed } => {
+            launched(m, &pane, resumed.as_deref(), now);
             Task::none()
         }
         Msg::WindowFocus { window, focused } => {
@@ -1031,6 +1201,22 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
     }
+}
+
+/// The agent's command was typed into a pane's shell: dates its session and
+/// words it in the history, for an agent that has no mod to do it.
+fn launched(m: &mut Model, pane: &str, resumed: Option<&str>, now: EpochMs) {
+    let Some((info, _)) = inputs(m, pane, now) else {
+        return;
+    };
+    // A Claude Code with the mod says it all in its hello, with the id it
+    // really landed on; a plain shell launched nothing.
+    let says_itself = info.agent == AgentId::Claude && m.settings().claude_bridge;
+    if says_itself || info.agent == AgentId::Shell {
+        return;
+    }
+    m.live.panes_logic.launched(&info, resumed, now);
+    bump(m);
 }
 
 /// Gives a pane's inputs to a machine step and runs what it asks.
