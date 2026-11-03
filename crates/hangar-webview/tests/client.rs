@@ -46,8 +46,14 @@ impl Fake {
     }
 
     fn say_raw(&mut self, line: &str) {
-        writeln!(self.output, "{line}").unwrap();
-        self.output.flush().unwrap();
+        self.try_say_raw(line).unwrap();
+    }
+
+    /// A line the client may already have stopped listening for: once it has
+    /// dropped its end, the write fails with a broken pipe, which is the point.
+    fn try_say_raw(&mut self, line: &str) -> std::io::Result<()> {
+        writeln!(self.output, "{line}")?;
+        self.output.flush()
     }
 
     fn ready(&mut self) {
@@ -327,7 +333,9 @@ fn a_body_of_megabytes_passes_without_blocking_the_sender() {
 fn a_helper_of_another_protocol_is_refused_and_not_heard_again() {
     let (client, events, mut helper) = fake_helper();
     helper.say_raw(r#"{"type":"ready","protocol":999,"version":"far future","engine":"x"}"#);
-    helper.say(&Event::Opened { window: "w".into() });
+    // The client may have refused the helper and closed its end before this
+    // second line is written; whether it arrives or not, it must not be heard.
+    let _ = helper.try_say_raw(&Event::Opened { window: "w".into() }.to_line());
 
     let Event::Error { code, message, .. } = next(&events) else {
         panic!("not an error")
