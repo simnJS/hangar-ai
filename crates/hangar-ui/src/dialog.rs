@@ -185,8 +185,7 @@ impl<'a, M: Clone + 'a> From<Dialog<'a, M>> for Element<'a, M> {
         if let Some(id) = d.body_id {
             scroll = scroll.id(id);
         }
-        let body = container(scroll)
-        .max_height(d.body_max_height);
+        let body = container(scroll).max_height(d.body_max_height);
 
         let mut foot = row![].spacing(space::MD).align_y(Alignment::Center);
         if let Some(lead) = d.lead {
