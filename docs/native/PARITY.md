@@ -1,89 +1,97 @@
 # Hangar, native — parity audit
 
-An audit of `feat/native-rust` against the old React app, by reading the code. Use it to decide what to fix before the parity checklist (PLAN.md §8) can be ticked. It was written on 2026-11-03 at commit `4fe0c10`.
+An audit of `feat/native-rust` against the old React app, by reading the code. Use it to decide what to fix before the parity checklist (PLAN.md §8) can be ticked. It was first written on 2026-11-03 at commit `4fe0c10`. **It was re-graded the same day at `c4949b1`**, after the fix wave: P15, P16 (kit tabs), P17's 3D view, P20 (Hangar Mobile, window side), packaging, WP1–WP8 (the first version's §7) and the final integration pass.
 
 How it was checked:
-- **Reading.** Every surface, command, setting, control op and event in [inventory-frontend.md](inventory-frontend.md) was compared, with the TypeScript in `src/` as the reference.
-- **Tests.** `cargo test -p hangar-app` passes 2408 tests, with 0 failures and 3 ignored.
-- **Dead-code pass.** `main.rs` allows dead code crate-wide, which hides providers nobody calls. `cargo rustc -p hangar-app --profile=check -- --force-warn dead_code` lists 144 items; the seams it shows are in §5.2.
-- **One real run.** The app ran through `scripts/native-dev.sh` on a temporary `HANGAR_DEV_HOME`, with a copy of `state/fixtures/typical.json` changed to shell panes only, and `HANGAR_DEV_SCREENSHOT`. The main window drew three live shells, the navigator, the toolbar, the board dock and the broadcast bar, in French. After quitting, no process was left and `state.json` was unchanged.
+- **Reading.** Every surface, command, setting, control op and event in [inventory-frontend.md](inventory-frontend.md) was compared, with the TypeScript in `src/` as the reference. In this pass every row that was not `done` was read again in the current code.
+- **Tests.** `cargo test -p hangar-app` passes 2951 tests, with 0 failures and 3 ignored (it was 2408). The workspace's other crates were not re-run here; STATUS records them green.
+- **Dead-code pass.** `main.rs:12` still allows dead code crate-wide. `cargo rustc -p hangar-app --profile=check -- --force-warn dead_code` now lists 122 items (it was 144). They are mostly constants and pure ports that tests use, see §5.2.
+- **Marker pass.** `grep -rn "TODO(P" crates/` finds nothing (there were 27).
+- **One real run.** The app ran through `scripts/native-dev.sh` on a temporary `HANGAR_DEV_HOME`, with a copy of `state/fixtures/typical.json` changed to shell panes only (it has `site` detached). The main window drew three live shells, the navigator with `site` marked as detached, the toolbar, the board dock and the broadcast bar (with its `Ctrl+Shift+B` hint), in French. `workspace_list` over the control endpoint reported `site` as `open` and `pane_list` showed its pane running, with its shell process alive. This is gap 3 of the first audit, closed. After the run `state.json` was byte for byte unchanged and no pane process was left.
+- **Two reviewers for §2.7 and §2.8.** The preview, viewer, kit tab and 3D surfaces were not in the first audit's rows. Two readers graded them from the code and ran the tests of those packages (`preview::` 245 pass, `kit_tabs::` 176, `model3d_view::` 59, `hangar-model3d` 145, `hangar-kit-host` 25, `hangar-core` `kits::` 203, all green). I re-checked four of their findings in the code: a GPU failure is only logged (`hangar-model3d/src/viewer.rs:750, 793`); `KHR_mesh_quantization` is refused (`hangar-model3d/src/load/gltf.rs:33`); the helper window is never opened unfocused (`hangar-webview/src/engine.rs` has no `with_focused`); an absolute Markdown image path is read as written (`preview/model.rs:610`).
 
-**P15 (preview) merged while this audit ran** (`22ef8a2`). Its items are classified from the merged code but were not run. Still out of scope, marked *in flight*: P16 (kit tabs), P17's 3D view in the app, P20 (Hangar Mobile, window side), packaging.
-
-All paths are under `crates/hangar-app/src/` unless a crate is named.
+Evidence is a file and line, or a test name. A row that says *code only* has no test of its own. All paths are under `crates/hangar-app/src/` unless a crate is named.
 
 Statuses:
-- **done**: works as the TS did.
+- **done**: works as the TS did, or as a recorded decision (§0.3) says it should.
 - **partial**: simplified, or part of it is missing.
 - **missing**: no code.
 - **regressed**: the native app does it wrong, or worse than the TS, in a way that matters.
+- **in flight**: no row has this status any more. The column stays in the tables so they can be compared with the first audit.
 
 ---
 
 ## 0. Summary
 
-### Counts
+### 0.1 Counts
 
-Each row of the tables below counts once.
+Each row of the tables below counts once. The first 13 areas are the 690 rows of the first audit, graded again. The last two areas (§2.7, §2.8) are surfaces the first audit left out because they were still being written; they add 126 rows.
 
 | Area | done | partial | missing | regressed | in flight |
 |---|---|---|---|---|---|
-| Shell frame (§1 of the inventory) | 19 | 4 | 0 | 1 | 0 |
-| Chrome, navigator, palette, dialogs, accounts (§2.1) | 136 | 12 | 15 | 6 | 1 |
-| Inspector, diff, worktrees, memory, MCP, orchestration panel, stats, board (§2.2, §2.3/1) | 77 | 14 | 1 | 4 | 0 |
-| Settings, effect of each of the 53 rows (§2.3/2–3) | 42 | 10 | 1 | 0 | 0 |
+| Shell frame (§1 of the inventory) | 22 | 2 | 0 | 0 | 0 |
+| Chrome, navigator, palette, dialogs, accounts (§2.1) | 165 | 3 | 2 | 0 | 0 |
+| Inspector, diff, worktrees, memory, MCP, orchestration panel, stats, board (§2.2, §2.3/1) | 91 | 4 | 1 | 0 | 0 |
+| Settings, effect of each of the 53 rows (§2.3/2–3) | 51 | 1 | 1 | 0 | 0 |
 | Kits management (§2.4/1.1–1.3) | 10 | 0 | 0 | 0 | 0 |
-| Terminal pane and pane grid (§4) | 53 | 7 | 3 | 2 | 0 |
-| Logic modules ported with their tests (§3) | 56 | 3 | 0 | 0 | 5 |
-| Commands (§1.10, 88) | 70 | 0 | 0 | 18 | 0 |
-| Control ops (27) | 20 | 1 | 0 | 0 | 6 |
-| Engines (13) | 10 | 2 | 0 | 0 | 1 |
-| Core events (16) | 14 | 1 | 0 | 0 | 1 |
-| Control hooks (5) | 3 | 0 | 0 | 0 | 2 |
-| `Intent` variants (59) | 54 | 3 | 0 | 1 | 1 |
-| **Total (690 rows)** | **564** | **57** | **20** | **32** | **17** |
+| Terminal pane and pane grid (§4) | 58 | 5 | 2 | 0 | 0 |
+| Logic modules ported with their tests (§3) | 61 | 3 | 0 | 0 | 0 |
+| Commands (§1.10, 88) | 88 | 0 | 0 | 0 | 0 |
+| Control ops (27) | 27 | 0 | 0 | 0 | 0 |
+| Engines (13) | 13 | 0 | 0 | 0 | 0 |
+| Core events (16) | 16 | 0 | 0 | 0 | 0 |
+| Control hooks (5) | 5 | 0 | 0 | 0 | 0 |
+| `Intent` variants (59) | 59 | 0 | 0 | 0 | 0 |
+| **The 690 rows of the first audit, now** | **666** | **18** | **6** | **0** | **0** |
+| *The same 690 rows, first audit* | *564* | *57* | *20* | *32* | *17* |
+| Preview panel and file viewers (§2.7, 51 rows, new) | 26 | 21 | 2 | 2 | 0 |
+| Kit tabs and 3D viewer (§2.8, 75 rows, new) | 48 | 17 | 7 | 3 | 0 |
+| **Total (816 rows)** | **740** | **56** | **15** | **5** | **0** |
 
-The 32 regressed rows come from 11 causes, listed below. Fifteen of the rows are the pane-focus commands, which share one cause (gap 8).
+All 32 regressed rows of the first audit are closed (11 causes, §0.2). The 5 regressed rows now are all in §2.7 and §2.8: two helper-window behaviours, an unchecked Markdown image path, and two silent failures of the 3D viewer.
 
-### The top gaps, most harmful first
+Most of the 6 missing and about half of the 18 partial rows among the first 690 are iced 0.14 limits (no keyboard focus on buttons, no text selection). The rest are `letterSpacing` (two rows), pane opacity, the link modifier, the trust prompt's 60 lines, and three small duplicates or untested paths.
 
-1. **Kits whose hooks changed since they were accepted still load into Claude Code panes.**
-   - The pane launch keeps its own copy of `effectiveKits` (`panes/controller.rs:146-159`).
-   - P14's `kits::model::{pane_kits, load_pane_kits, kit_issue_notes}` exist but are dead code.
-   - So a GitHub kit's new hooks run without the person's consent, and the `warnHooks` note is never shown.
-2. **A detached workspace window acts on the main window's active workspace.**
-   - The toolbar's Restart all, Reset agents and presets use `m.active_workspace()` (`toolbar/mod.rs:116,147,260,272`).
-   - So does the status bar's broadcast, which types text plus Enter (`status_bar/mod.rs:159,198,263`).
-   - So do the board and dock, including their writes (`board/mod.rs:241,674,788`), and the inspector's git polling (`inspector/mod.rs:310`).
-   - In the TS each window's App had its own workspace.
-3. **A workspace detached when the app last quit reopens with an empty grid.**
-   - Only the active workspace joins `ui.opened_ids` (`app/shell.rs:325-330`, `state/store.rs:324-328`).
-   - P5 spawns PTYs only for `opened_ids` (`panes/mod.rs:869-876`).
-   - So its panes never start until the workspace is picked in the navigator.
-4. **Needs-you cannot open.** Nothing writes `live.signals.needs_you` (`state/live.rs:99`; only tests do), and the shell closes the panel after every message while it is 0 (`app/shell.rs:374-376`). For the same reason `view.needsYou` is never live (`commands/run.rs:162`).
-5. **Voice dictation cannot start.**
-   - `voice.dictate` sends `Intent::Dictate` (`commands/run.rs:295`), and no package handles it (`voice/mod.rs:335-342` returns `None`).
-   - Nothing sends `voice::Msg::Press`.
-   - The key is taken and does nothing. The seed `HANGAR_DEV_VOICE` hides this in screenshots.
-6. **The MCP servers panel restarts every Claude Code pane**, mid-turn ones included, and never says "up to date". `running_mcp` returns `None` and `is_working` returns `false` (`mcp/servers_panel.rs:88-97`). For the same reason the inspector's MCP row never shows (`inspector/sections.rs:236`): `PaneInsight.mcp` has no writer. The launch's MCP is in `panes::Live::report(pane).mcp` (`panes/mod.rs:121-125`).
-7. **No shortcut is shown anywhere in the chrome.** The one function every tooltip and hint asks is a stub that returns `""` (`navigator/reads.rs:118-121`), although `KeymapIndex::label/title` exist (`keymap/index.rs:182,189`).
-8. **Keyboard regressions.**
-   - Mod+, opens the settings through `Action::ToggleSettings` (`commands/run.rs:283`, `app/shell.rs:174-188`), bypassing the settings package's sync. The first category click goes back to General, the cards are not loaded, and closing the sheet with the key leaves its subscriptions running.
-   - Ctrl+Tab, Alt+arrows and Mod+1…9 go through `focus_pane`, which clears every overlay of the main window (`app/shell.rs:511-520`). A dialog closes and loses what was typed.
-   - Only one text field asks the keymap first (`keymap::guard` at `saved_commands/dialog.rs:289,295`). Elsewhere a shortcut acts in the field and also runs: Mod+Shift+Enter in the broadcast bar sends the line and splits a pane.
-9. **Three paths can lose `state.json`, and one write can lose a panel edit.**
-   - A load error other than a JSON parse error (I/O, invalid UTF-8) is not quarantined (`hangar-core/src/store.rs:83`). The app then starts empty (`app.rs:332-335`), and the next change saves the empty state over the file.
-   - A document whose root is not an object reads as the empty state (`state/lenient.rs:38-55`), and the same overwrite follows.
-   - So does a document that fails even the lenient read.
-   - `workspace_set_check` writes an `orchestration` block built from a snapshot, which can overwrite a panel edit made in between (`control/workspace.rs:205-216`).
-10. **Integration seams left open.**
-    - There are 27 `TODO(P…)` markers. 25 name a package that has merged, and a provider now exists for 22 of them (§5.1).
-    - The shell's and P4's real providers are dead code while local copies run: `state::roles::orchestration_of`, `state::layout::closed_by_preset`, `state::pane_names::pick_pane_names` and `panes_logic::find_agent_pane` are never called (§5.2).
-    - `Intent::AnnounceRole` has no handler (§5.3).
+### 0.2 The first audit's top gaps, and where each stands
 
-The other regressions:
-- The doubled separator and "Claude account" heading in the navigator and pane menus (`navigator/menu.rs:209-214`, `pane_menu/mod.rs:333`).
-- In the detached window, the board-target and inspector-polling rows (counted under gap 2).
+| # | Gap | Now | Evidence |
+|---|---|---|---|
+| 1 | Kits whose hooks changed since they were accepted loaded into Claude Code panes | closed (WP1) | `panes/controller.rs:169-190` reads `load_pane_kits_with`; only accepted ids reach the spawn and the MCP scope; tests `controller.rs:980, 1033, 1043, 1054` |
+| 2 | A detached window acted on the main window's workspace | closed (WP4, WP5, WP6) | `toolbar/per_window.rs:70, 122, 154, 189, 206`; `status_bar/tests.rs:99, 124`; `board/mod.rs:1229, 1277`; `inspector/mod.rs:410` |
+| 3 | A workspace detached at the last quit reopened empty | closed (WP2) | `app/shell.rs:964`, test `app/shell/tests.rs:54`; live run today |
+| 4 | Needs-you could not open | closed (WP3) | `needs_you/mod.rs:200`; tests `needs_you/tests.rs:125, 140, 160, 175`; `commands/run.rs:169` |
+| 5 | Voice dictation could not start | closed (WP3) | `voice/mod.rs:387-399`; tests `voice/tests.rs:174, 182, 192`. Not driven by real keys |
+| 6 | The MCP panel restarted mid-turn panes and never said "up to date" | closed (WP5; decision §0.3) | `mcp/servers_panel.rs:86`; tests `mcp/servers_panel/tests.rs:117, 129, 142, 158, 170` |
+| 7 | No shortcut shown anywhere in the chrome | closed (WP4) | `navigator/reads.rs` `binding`; tests `navigator/reads/tests.rs:45, 54, 67`, `toolbar/per_window.rs:238, 283` |
+| 8 | Keyboard: Mod+, bypassed the sheet, pane-focus keys closed dialogs, shortcuts acted in fields | closed (WP2, WP8, integration pass) | `commands/run.rs:304, 394`; `app/shell.rs:38, 1087`; tests `app/shell/tests.rs:133, 156, 174` |
+| 9 | Three paths could lose `state.json`; `set_check` could lose a panel edit | closed (WP2, WP7) | `hangar-core/src/store.rs` (`Rescue`, `HELD`), tests `store.rs:309, 329, 340, 362, 392`; `state/lenient.rs:57`, test `:352`; `control/tests/workspace.rs:411` |
+| 10 | Integration seams: 27 `TODO(P…)`, dead providers, `AnnounceRole` unhandled | closed (WP4–WP8, integration pass) | §5 |
+
+### 0.3 Decisions recorded in STATUS that change what parity means
+
+| Decision | Old app | Native | Effect on the grading |
+|---|---|---|---|
+| The MCP panel leaves a mid-turn Claude pane alone, names it, and restarts it once its turn ends | warned, then restarted it anyway | `mcp/servers_panel.rs`, key `mcpScope.held` | Rows are `done`; behaviour differs on purpose |
+| Programs in a pane can neither write nor read the clipboard (OSC 52) | ignored OSC 52 too | `panes/look.rs:55-63` (`Osc52::Disabled`; hangar-term's own default is `CopyOnly`), test `look.rs:130` | Equal to the old app. An agent that relies on OSC 52 to copy over SSH or tmux gets nothing; copy stays an explicit action |
+| A pane opened to log in to an account starts with no kits | code passed every kit on, against its own comment | `panes/controller.rs`, test `:1043` | `done`, as the comment intended |
+| HTML kit tabs and PDFs open in their own window (the helper is a separate process) | inline iframe | `hangar-webview`; in practice HTML pages, video and audio too | §2.7 and §2.8 rows are `partial`; the helper's window behaviour is gap 4 below |
+| Native kits are WebAssembly only | none | `hangar-kit-host` | A new capability, not graded against the old app |
+| The MCP install and the login item refuse whenever `HANGAR_DATA_ROOT` is set; an isolated run leaves Claude Code's trust list alone | wrote the real files | `hangar-core/src/install.rs:170`, `autostart.rs:67`, `Paths::isolated()` | Closes the dev-machine risks of §6. Release builds never set it |
+| Links open only for `http` and `https`, on Ctrl or Cmd plus click (integration pass, in the log only) | xterm's web-links addon opened any matching URL on a plain click | `panes/mod.rs:471`, `hangar-term/src/links.rs:188`, `pointer.rs:140-148` | The consent hole is closed; the modifier is a difference to decide (row "Web links", §7 WP-H) |
+| The old app stays on the branch until wave 5; the native release number is the owner's call (`examples/kits/hello-native` asks for `>=1.12.1`, kits-native.md assumes 2.0.0) | – | – | No row |
+
+### 0.4 The top gaps now, most harmful first
+
+1. **Windows and macOS have never run the app, and CI is red on all three platforms.**
+   - The first complete CI run had 3 failures on macOS (keymap guard tests assume Ctrl; Mod is Cmd there), 3 on Windows (Unix paths in preview-root tests, a webview serving test) and 1 on Ubuntu (a `hangar-model3d` capture compared with a render the runner's software GPU draws differently). A fix package is running in another worktree.
+   - Packaging is verified on Linux only. Installing a package, an update from a real old install and the real signing key were not tried (PACKAGING.md).
+2. **Nothing has been compared with the old app on real data, and only two kinds of agent have run.** The parity pass of the inventory (§8.1) is not done. Codex, Gemini CLI and OpenCode panes never ran in the real app. Dictation was never driven by its key and a microphone. Mobile was tried with a fake phone, never with a push to a real one or a real landing. The key dispatcher is checked by unit tests only (AltGr is a guess, `keymap/chord.rs:366-373`).
+3. **The 3D viewer shows still models only.** No clip plays (`model3d_view/animation_bar.rs` is drawn disabled). Draco, meshopt, KTX2, USDZ and `KHR_mesh_quantization` are refused where three.js read them. Skinned meshes stay in rest pose. A GPU failure, a lost device or iced's software renderer leaves a blank viewport with no message and no Restart.
+4. **PDF, HTML pages, video, audio and HTML kit tabs live in their own OS window.** That window opens by itself when an agent shows one, is never opened unfocused (so it may take the keyboard from a terminal), is not tied to the panel, the tab or the workspace being on screen, and media keeps playing when hidden.
+5. **The 2D viewers lose features.** AVIF does not open; animated GIF and WebP show their first frame; code, Markdown and the diff cannot be selected (Copy takes everything); web images in Markdown are links; a Markdown file can show any local image path.
+6. **No keyboard focus on buttons and no accessibility tree** (iced 0.14). The toolbar's views group, the stats segments, F6 inside regions, the first action of Needs-you, the account rename and the preview tabs have no keyboard walk. Screen-reader roles and labels exist nowhere; the old app had aria.
+7. **Terminal differences.** `letterSpacing` does nothing, an unfocused pane is not dimmed, links need Ctrl/Cmd+click where the old app took a plain click, the kitty keyboard protocol is on by default (programs that negotiate it get other key bytes than under xterm.js), dividers cannot be resized by key, and the trust prompt is looked for in 60 lines of history, not the viewport.
+8. **Kit tab leftovers.** Native tabs' text inputs, selects and tables are iced's own; compiled modules are not cached on disk; the HTML host has never been tested with the real `kit.js` under its CSP (`hangar-webview/tests/engine.rs` is ignored); `preview.show` lacks the 256 MB cap; `panes.send` hides a failed enqueue; `panes.changed` can be a second late.
 
 ---
 
@@ -91,24 +99,24 @@ The other regressions:
 
 | Checklist item | Status | What holds it back |
 |---|---|---|
-| Opens on the same data: workspaces, panes, boards, memory, settings, theme, language, shortcuts | partial | Round trip done and checked (a run left the file unchanged). Detached workspaces reopen empty (gap 3); the load-error overwrite (gap 9); the localStorage usage cache is not migrated (accepted in the inventory, §9.1). |
-| Panes run every agent and shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume | partial | Code covers all of them; only Claude Code and shells have run in the real app. Links need Ctrl+click and open any scheme (§6). The file-drop highlight is untested. Non-bridged agents never record a `session` event or `sessionSince` (`panes/controller.rs:671-676`). |
-| Typing without latency; US-International dead keys | partial | 3–4.5 ms echo measured; dead keys pass widget tests; the 16-busy-pane benchmark has not been run. Every terminal action re-hashes and re-publishes every pane (`panes/mod.rs:195-207, 789-853`). |
-| Exact pane states from the bridge; context and plan gauges | done | 217 tests in `panes_logic`. |
-| Navigator, inspector (all panels), status bar, palette, menus, F6, every shortcut rebindable | partial | Gaps 2, 6, 7 and 8. Rebinding itself is done. |
-| Board, needs-you, memory view | regressed | Needs-you cannot open (gap 4); the board writes to the wrong workspace from a detached window. Memory is done. |
-| Orchestrator mode end to end | partial | Engines and ops done. Land gives no row feedback; P19 ignores detached workspaces (`orchestration/live.rs:113,403`); `AnnounceRole` has no handler; `set_check` race (§4). |
-| Project manager (HQ) | done | `project_*` ops, manager feed, open manager. |
-| Settings: every row of the old schema, Experimental included | partial | All 53 rows, with the same keys and defaults. `letterSpacing` has no effect; the voice rows reach nothing (gap 5); Mod+, bypasses the sheet's sync (gap 8). |
-| Accounts, MCP servers panel and installs, agent instructions | partial | Accounts and installs done; MCP servers restart regressed (gap 6). |
-| Stats with charts; diff view; worktree panel; git clone with consent | done | Small partials: no stale dimming, no text selection in the diff, tabs drawn as 4 spaces. |
-| Kits: list, add, update, setup, activation; HTML tabs; native tabs | partial | Management is done. The launch ignores held hooks (gap 1). Tabs are P16, in flight. |
-| Previews: images, text and code, video, PDF, 3D | partial | P15 merged (not run here); the toolbar's preview toggle reads a stub (`navigator/reads.rs:158-161`); 3D is P17, in flight. |
-| Voice dictation (local and Groq) and its HUD | regressed | It cannot start (gap 5). |
-| Hangar Mobile: pairing, devices, Tailscale, push, keep-awake, autostart | in flight | The settings side is done (`settings/mobile*.rs`); the window side (`remote_*` ops, push, `Hook::Mobile`) is P20. |
-| Notifications with click back, Discord, updater, multi-window | partial | Notifications, Discord and the updater are done; multi-window has gaps 2 and 3. |
+| Opens on the same data: workspaces, panes, boards, memory, settings, theme, language, shortcuts | done | Round trip checked by tests and by a real run (the file stayed byte for byte). Detached workspaces mount at boot, and every load error moves the file aside. The localStorage usage cache is not migrated (accepted, inventory §9.1). Not yet compared with the old app on a real file (§7 WP-A) |
+| Panes run every agent and shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume | partial | Only Claude Code and shells have run in the real app. Links need Ctrl/Cmd+click. File-drop highlight untested |
+| Typing without latency; US-International dead keys | done | Release build, 16 panes looping coloured `ls`: a typed byte reaches the terminal in about 3 ms with 15 busy panes, UI thread 26% of a core, 60 fps (STATUS, integration pass). Dead keys pass widget tests, not tried on a real layout |
+| Exact pane states from the bridge; context and plan gauges | done | 217 tests in `panes_logic` |
+| Navigator, inspector (all panels), status bar, palette, menus, F6, every shortcut rebindable | partial | All wired and per window. No keyboard focus on iced buttons: F6 stops at regions, the toolbar's views group has no arrow walk |
+| Board, needs-you, memory view | done | Board Tab-between-cards missing (iced) |
+| Orchestrator mode end to end | partial | Engines, ops and UI done and each checked in a dev app; a real landing (it launches a Claude review) and a real orchestrator with workers have not run together |
+| Project manager (HQ) | done | |
+| Settings: every row of the old schema, Experimental included | partial | All 53 rows work except `letterSpacing` (no effect) |
+| Accounts, MCP servers panel and installs, agent instructions | done | |
+| Stats with charts; diff view; worktree panel; git clone with consent | done | Small partials: no text selection in the diff, no keyboard walk of the stats segments, no sticky table header; two copies of worktree naming |
+| Kits: list, add, update, setup, activation; HTML tabs; native tabs | partial | Management and the launch consent are done. Tabs: §2.8 |
+| Previews: images, text and code, video, PDF, 3D | partial | §2.7, §2.8: AVIF, animated images, no inline video/PDF/HTML, 3D animation and compressed formats |
+| Voice dictation (local and Groq) and its HUD | done | Not driven by its key and a microphone |
+| Hangar Mobile: pairing, devices, Tailscale, push, keep-awake, autostart | done | Window side checked against a fake paired phone and curl; no real phone or push |
+| Notifications with click back, Discord, updater, multi-window | done | A window last on a second screen reopens centred (iced cannot list screens) |
 | 33 themes, English and French | done | |
-| Packages, CI | in flight | Out of scope. |
+| Packages, CI | partial | Linux packages verified; CI red on 7 tests; Windows and macOS never run (gap 1) |
 
 ---
 
@@ -116,231 +124,227 @@ The other regressions:
 
 ### 2.1 Shell frame (inventory §1.1–1.11)
 
+All 24 rows. Rows that were `done` in the first audit are unchanged.
+
 | Item | Status | Evidence | What the TS does that native does not |
 |---|---|---|---|
-| `hangar-ai --mcp` as a stdio server with no window | done | `main.rs:59-63` | – |
-| A debug build refuses the installed app's data | done | `main.rs:64-67`, `dev_guard` | – |
-| Core start: PATH, bridge mod, kit and account watchers, board API and endpoint, Mobile | done | `app.rs:204`, `hangar-core/src/lib.rs` | – |
+| `hangar-ai --mcp` as a stdio server with no window | done | `main.rs:57-62` | – |
+| A debug build refuses the installed app's data | done | `main.rs:64`, `dev_guard` (`main.rs:80`) | – |
+| Core start: PATH, bridge mod, kit and account watchers, board API and endpoint, Mobile | done | `app.rs:212 boot`, `hangar-core/src/lib.rs` | – |
 | Boot screen until the state is in | done | `shell/placeholder.rs:18`, `shell/frame.rs:59` | – |
-| Load and hydrate: unique names, dangling folder ids, legacy trees, defaults | done | `app.rs:328-360`, `state/store.rs:322-336`, `state/lenient.rs` | – |
-| Save: 400 ms debounce, never before hydration, an older write never lands after a newer one, flush on quit | done | `app.rs:364-406, 433-447`, `state/persist.rs` | – |
-| Unknown fields, explicit nulls, malformed values written back | done | `state/lenient.rs`, `state/unread.rs`, `state/roundtrip_tests.rs`; checked by a real run | – |
-| Load failure other than a parse error | partial | `hangar-core/src/store.rs:83`, `state/lenient.rs:50-55` | Same hole as the TS: starts empty and later overwrites (gap 9) |
-| Agents and shells detected once | done | `app.rs:244` | – |
-| A notification's click raises the window and lands on the pane | done | `app.rs:412-423` | – |
-| Detached windows reopened at boot | regressed | `app.rs:341-352`, `app/shell.rs:325-330`, `panes/mod.rs:869-876` | The window opens, but its panes never start (gap 3) |
-| Detach: flag set, main window moves to the next workspace, window opened | done | `app/shell.rs:895-916` | – |
-| Detach failure: revert, then the `window.openFailed` notice | partial | no code (grepped `openFailed`) | – |
-| A workspace window's close reattaches; the main window's close quits | done | `app/shell.rs:217-223, 920-941` | – |
-| Bounds remembered after a pause; reopened where they were | partial | `app/shell.rs:993-1025` | iced cannot list screens, so a window from a second screen reopens centred (STATUS) |
-| Deleting a workspace closes its window | done | `app/shell.rs:381-394` | – |
-| Placeholders: "no workspace" and "shown in its own window" (Show, Bring back) | done | `shell/placeholder.rs:28, 61` | – |
-| F6 regions: order, empty ones skipped, Shift+F6 | partial | `shell/regions.rs:78-120` | No focus inside regions: iced buttons take no focus |
-| Side panels docked or as drawers; drawers close on Escape, a press outside, or their toggle | done | `shell/side_panels.rs`, `shell/drawer.rs`, `app.rs:555-572` | – |
-| Escape closes one overlay, only when nothing else took it | done | `app.rs:545-553, 579-594` | – |
+| Load and hydrate: unique names, dangling folder ids, legacy trees, defaults | done | `app.rs:344 booted`, `state/store.rs:316-336`, `state/lenient.rs` | – |
+| Save: 400 ms debounce, never before hydration, an older write never lands after a newer one, flush on quit | done | `app.rs:378-421`, `:447 quit`, `state/persist.rs` | – |
+| Unknown fields, explicit nulls, malformed values written back | done | `state/lenient.rs`, `state/unread.rs`, `state/roundtrip_tests.rs`; real run | – |
+| Load failure of any kind | **done** (was partial) | `hangar-core/src/store.rs` (`Rescue`, `LoadError`, `HELD`, `set_aside`); tests `store.rs:309` (not UTF-8), `:329` (not an object), `:340` (a BOM is no error), `:362` (cannot be moved: never written over), `:392`; `state/lenient.rs:57 read_checked`, test `:352`; `app.rs:196` | The TS started empty and overwrote the file |
+| Agents and shells detected once | done | `app.rs:256` | – |
+| A notification's click raises the window and lands on the pane | done | `app.rs:422 core_event` | – |
+| Detached windows reopened at boot | **done** (was regressed) | `app/shell.rs:964 open_workspace_window`, `state/mod.rs:226-239` (a window opened mounts its workspace); test `app/shell/tests.rs:54`; real run: `site` open, its pane running | – |
+| Detach: flag set, main window moves to the next workspace, window opened | done | `app/shell.rs:884 detach` | – |
+| Detach failure: revert, then the `window.openFailed` notice | **done** (was partial) | `app/shell.rs:995 open_timed_out`, `:1120 undo_open`, `shell/windows.rs:58` (10 s); tests `app/shell/tests.rs:87` (with notice), `:114` (at boot, quiet) | – |
+| A workspace window's close reattaches; the main window's close quits | done | `app/shell.rs:211-245`, `:910 reattach`; `app.rs:447 quit` | – |
+| Bounds remembered after a pause; reopened where they were | partial | `app/shell.rs:1008-1040`, `shell/windows.rs:123` | iced cannot list screens, so a window from a second screen reopens centred |
+| Deleting a workspace closes its window | done | `app/shell.rs:366` (orphaned windows closed) | – |
+| Placeholders: "no workspace" and "shown in its own window" | done | `shell/placeholder.rs:28, 61` | – |
+| F6 regions: order, empty ones skipped, Shift+F6 | partial | `shell/regions.rs:78-120`, `app/shell.rs:794-869` | No focus inside regions: iced buttons take no focus |
+| Side panels docked or as drawers | done | `shell/side_panels.rs`, `shell/drawer.rs` | – |
+| Escape closes one overlay | done | `app.rs:594 key`, `app/shell.rs:459 close_overlay` | – |
 | Notices (6 s, three kinds); chord hint | done | `shell/notice.rs:52-76`, `shell/frame.rs:283` | – |
-| A theme per window; `uiScale` as the scale factor | done | `app.rs:508-532` | – |
-| Shutdown: PTYs killed, Mobile marked stopped, deliveries cancelled, endpoint cleared, Discord stopped | done | `app.rs:433-447`, `hangar-core/src/lib.rs:184-197` | No signal handling (§6) |
-| Each window keeps its own view, overlays, drawer and focus | done | `app/shell.rs:270-307` | – |
+| A theme per window; `uiScale` as the scale factor | done | `app.rs:522-546` | – |
+| Shutdown: PTYs killed, Mobile stopped, deliveries cancelled, endpoint cleared, Discord stopped | done | `app.rs:447 quit`; SIGTERM, SIGINT and SIGHUP quit like closing the window, a second one exits at once (`app.rs:621-680`, Unix; Ctrl+C elsewhere); `pty::kill_all` kills each pane's process group (`hangar-core/src/pty.rs:773`, test `:1291`) | – |
+| Each window keeps its own view, overlays, drawer and focus | done | `app/shell.rs:275-307, 1050-1085` | – |
 
 ### 2.2 Chrome, navigator, palette, dialogs, accounts (§2.1)
 
-Only rows that are not done are listed. Every other item of §2.1 is done, 136 rows in all, with evidence on file in the audit notes:
-- the navigator tree, rows, folders, rename, keyboard and drag;
-- the toolbar's lead, presets and confirmations;
-- the broadcast send, the update banner and the HUD drawing;
-- the palette;
-- the saved commands;
-- the session picker;
-- the workspace dialog in both modes, and the git flow with its 14 steps and consent queue;
-- the consent card;
-- accounts.
+Of 170 rows, 136 were `done` in the first audit and still are: the navigator tree, rows, folders, rename, keyboard and drag; the toolbar's lead, presets and confirmations; the broadcast send, the update banner and the HUD drawing; the palette; the saved commands; the workspace dialog in both modes and the git flow with its 14 steps; the consent card; accounts. The 34 rows below were not `done`.
 
-| Surface | Item | Status | Evidence | What the TS does that native does not |
+| Surface | Item | Was → now | Evidence | What the TS does that native does not |
 |---|---|---|---|---|
-| Navigator | Asleep moon | missing | `navigator/reads.rs:168-171` returns `None` | The moon on a sleeping workspace |
-| Navigator | Bound keys in tooltips | missing | `navigator/reads.rs:118-121` | Every shortcut hint |
-| Navigator | Filter bar: a press on the field focuses the input | partial | `navigator/view.rs:820-932` | – |
-| Navigator | Menu › Sleep: disabled with a reason, probe on open | partial | `navigator/menu.rs:256-265` (TODO) | P4 refuses on click with a notice instead |
-| Navigator | Menu › Claude account section | regressed | `navigator/menu.rs:209-214`, plus `accounts/menu_items.rs:91-94` | Separator and heading shown twice |
-| Navigator | Plan meters | partial | `navigator/mod.rs:105-110, 903-917` | Keeps its own copy of the plan instead of P4's |
-| Toolbar | Arrow keys on the views group | missing | `toolbar/mod.rs:14-16` | – |
-| Toolbar | Capsule: tool asked, last answer | partial | `toolbar/activity.rs:29-82` (its own `Glance`) | – |
-| Toolbar | Capsule: the pane's board task | missing | `toolbar/activity.rs:223-228` | `taskForPane` |
-| Toolbar | Capsule: context chip | partial | `toolbar/activity.rs:282-299` | – |
-| Toolbar | Kits button and menu | missing (listing), in flight (opening, P16) | `navigator/reads.rs:141-144` | – |
-| Toolbar | Preview / 3D toggle | missing | `navigator/reads.rs:158-161`, `toolbar/mod.rs:367` | P15 has merged; `preview::Live::{has_preview, panel_open, unseen}` (`preview/mod.rs:257-276`) |
-| Toolbar | Shortcut hints | missing | `navigator/reads.rs:118` | – |
-| Toolbar | Which workspace it acts on | regressed | `toolbar/mod.rs:116,147,260,272` | Gap 2 |
-| Status bar | Branch polling | partial | `status_bar/mod.rs:192-218` | Gated on focus rather than visibility |
-| Status bar | Dictation and broadcast key hints | missing | `status_bar/mod.rs:319-340` | – |
-| Status bar | Which workspace it acts on; one broadcast text for all windows | regressed | `status_bar/mod.rs:159,198,263,270` | Gap 2 |
-| Needs-you | The panel opens; `view.needsYou` | regressed | `app/shell.rs:374-376`, `commands/run.rs:162` | Gap 4 |
-| Needs-you | Landing busy state | partial | `needs_you/mod.rs:44-47` (a 45 s timer) | `useDelivering` |
-| Needs-you | Inline land error on the row | missing | `Msg::LandFailed` is never sent | – |
-| Needs-you | First action autofocused | missing | iced has no focus | – |
-| Needs-you | Boards | partial | `needs_you/mod.rs:156-173` (its own `board_load`) | – |
-| Voice | `voice.dictate` starts a recording | regressed | `voice/mod.rs:335-342` | Gap 5 |
-| Voice | `voice_recording` check at start | missing | only in `hangar-core/src/voice/mod.rs:198` | – |
-| Palette | Active workspace when it is detached | partial | `palette/sources.rs:268` | The TS read a detached active workspace as none |
-| Palette | Kit-tab entries | in flight (P16) | `palette/sources.rs:492-494` | – |
-| Saved commands | A run from the menu touches the workspace | missing | `saved_commands/mod.rs:98-114` | Hibernation does not see runs from the menu |
-| Session picker | Full-id tooltip; untitled rows in italics | partial | `session_picker/mod.rs:326-412` | – |
-| Session picker | Keyboard row scrolled into view | missing | no `scroll_to` | – |
-| Pane menu | Account items | regressed | `pane_menu/mod.rs:333` | Two separators in a row |
-| Workspace dialog | Enter submits from any field | partial | `workspace_dialog/view.rs:204, 266` | – |
-| Workspace dialog | Initial focus | missing | no code | – |
-| Workspace dialog | Clone progress | partial | `workspace_dialog/view.rs:333-349` | An unknown percentage shows 0 instead of an indeterminate bar |
-| Accounts | Switcher's ask dialog; inline rename (Escape, autofocus) | partial | `accounts/switcher.rs:261-306`, `accounts/settings_page.rs:543-565` | – |
-| Accounts | Switcher's workspace | partial | `accounts/switcher.rs:57-62` | Reads the active workspace |
+| Navigator | Asleep moon | missing → done | `navigator/view.rs:619`, `navigator/reads.rs:169` (`panes_logic.asleep()`); test `navigator/reads/tests.rs:39` covers the absent case only | – |
+| Navigator | Bound keys in tooltips | missing → done | `navigator/reads.rs` `binding`; `navigator/view.rs:244, 905, 913`; tests `navigator/reads/tests.rs:45, 54, 67` | – |
+| Navigator | Filter bar: a press on the field focuses the input | partial → partial | `navigator/view.rs:816 filter_bar` | iced limit |
+| Navigator | Menu › Sleep: disabled with a reason, probe on open | partial → done | `navigator/menu.rs:264-268`, `navigator/sleep.rs`; tests `navigator/sleep/tests.rs:35, 51` | – |
+| Navigator | Menu › Claude account section | regressed → done | `navigator/menu.rs:84, 218-221`; tests `navigator/tests.rs:504`, `pane_menu/tests.rs:63, 87, 101` | – |
+| Navigator | Plan meters | partial → done | `navigator/reads.rs` `plan` → `panes_logic.plan_limits()`; `HANGAR_DEV_PLAN` only while no pane has reported | – |
+| Toolbar | Arrow keys on the views group | missing → missing | `toolbar/mod.rs:14-16` | iced buttons take no focus |
+| Toolbar | Capsule: tool asked, last answer, context chip | partial → done | `toolbar/activity.rs:44-70, 114-116, 230` read `panes_logic.insight`; tests `toolbar/activity/tests.rs` | – |
+| Toolbar | Capsule: the pane's board task | missing → done | `toolbar/activity.rs:121, 173` (`board::Live::task_for_pane`) | – |
+| Toolbar | Kits button and menu | in flight → done | `navigator/reads.rs` `kit_tabs`; tests `navigator/reads/tests.rs:150, 157, 166, 191, 205`; opening is P16 (§2.8) | – |
+| Toolbar | Preview / 3D toggle | missing → done | `navigator/reads.rs` `models` (reads `Panels::of`); tests `navigator/reads/tests.rs:232, 271, 285` | – |
+| Toolbar | Shortcut hints | missing → done | `toolbar/mod.rs:331`; tests `toolbar/per_window.rs:238, 283` | – |
+| Toolbar | Which workspace it acts on | regressed → done | `toolbar/per_window.rs`; tests `:70, 99, 122, 154, 189, 206, 220` | – |
+| Status bar | Branch polling | partial → partial | `status_bar/mod.rs:215-250` | Beats for windows that have the focus, where the TS read visibility; test `status_bar/tests.rs:161` |
+| Status bar | Dictation and broadcast key hints | missing → done | `status_bar/mod.rs:365-380, 465` | – |
+| Status bar | Which workspace it acts on; one broadcast text per window | regressed → done | `status_bar/tests.rs:99, 112, 124` | – |
+| Needs-you | The panel opens; `view.needsYou` | regressed → done | `needs_you/mod.rs:200` writes `live.signals.needs_you`; tests `needs_you/tests.rs:125, 140, 160, 175`; `HANGAR_DEV_NEEDS_YOU_OPEN` removed | – |
+| Needs-you | Landing busy state | partial → done | `needs_you/mod.rs:51, 103, 208` (`control::Live::task_delivering`); tests `needs_you/tests.rs:50, 61` | – |
+| Needs-you | Inline land error on the row | missing → done | `control/mod.rs:265-300` sends `Msg::LandFailed`; test `control/tests/delivery.rs:1014` | – |
+| Needs-you | First action autofocused | missing → missing | no code | iced has no focus |
+| Needs-you | Boards | partial → done | `needs_you/mod.rs` reads `board::Live`; test `needs_you/tests.rs:217` | – |
+| Voice | `voice.dictate` starts a recording | regressed → done | `commands/run.rs:318`, `voice/mod.rs:387-399`; tests `voice/tests.rs:174, 182, 192` | Not driven by real keys |
+| Voice | `voice_recording` check at start | missing → done | `voice/mod.rs:292-304` (a microphone left open is released at start), code only | – |
+| Palette | Active workspace when it is detached | partial → done | `palette/mod.rs:107` (`window_workspace`) | – |
+| Palette | Kit-tab entries | in flight → done | `palette/sources.rs:466-490` | – |
+| Saved commands | A run from the menu touches the workspace | missing → done | `panes_logic/mod.rs:1537` (`RunSavedCommand` touches) | – |
+| Session picker | Full-id tooltip; untitled rows in italics | partial → done | `session_picker/mod.rs:305-411` | – |
+| Session picker | Keyboard row scrolled into view | missing → done | `session_picker/mod.rs:72` (`scroll_to`) | – |
+| Pane menu | Account items | regressed → done | `pane_menu/mod.rs:338-352`; tests `pane_menu/tests.rs:63, 87, 101` | – |
+| Workspace dialog | Enter submits from any field | partial → done | `workspace_dialog/view.rs:210, 273, 309, 386`; `hooks.rs:93` | – |
+| Workspace dialog | Initial focus | missing → done | the dialog's layer puts the keyboard in the first field; `workspace_dialog/mod.rs:319` for a source switch | – |
+| Workspace dialog | Clone progress | partial → done | `workspace_dialog/mod.rs:125-142, 741`; test `workspace_dialog/tests.rs:820` (indeterminate bar) | – |
+| Accounts | Switcher's ask dialog; inline rename (Escape, autofocus) | partial → partial | `accounts/switcher.rs:263`, `accounts/settings_page.rs:543-565` | The rename field has no autofocus and no Escape |
+| Accounts | Switcher's workspace | partial → done | `accounts/switcher.rs:57-62` (`ctx.workspace()`) | – |
 
 ### 2.3 Inspector, diff, worktrees, memory, MCP, orchestration panel, stats (§2.2) and board (§2.3/1)
 
-Only rows that are not done are listed; the other 77 are done. All done:
-- memory;
-- the MCP install panel;
-- the worktree panel (including every destructive step, each confirmed inline);
-- the diff view, except text selection;
-- the board's columns, cards, filters, drag and task dialog;
-- the charts.
+Of 96 rows, 77 were `done` and still are: memory, the MCP install panel, the worktree panel with every confirmed step, the diff view (except selection), the board's columns, cards, filters, drag and task dialog, the charts. The 16 rows below were not.
 
-| Surface | Item | Status | Evidence | Gap |
+| Surface | Item | Was → now | Evidence | Gap |
 |---|---|---|---|---|
-| Inspector | Width grip | partial | `inspector/mod.rs:139-169, 248-265` | Writes the setting on every pointer move; clamped to 240–440 rather than the panel's real maximum |
-| Inspector | `shown`, which gates the git polling and the clock | partial | `inspector/mod.rs:134-136` | Wrong in drawer mode: polling and the clock keep running |
-| Inspector | Session › MCP row and its "Change" link | regressed | `inspector/sections.rs:236-237` | Gap 6 |
-| Inspector | Changed files in a detached window | partial | `inspector/mod.rs:310` | Uses the main window's active workspace |
-| Diff view | Text selection; tabs | partial | `git_ui/diff_view.rs:47-57` | Tabs drawn as 4 spaces |
-| MCP servers | "Up to date" and "Restart N agents" | regressed | `mcp/servers_panel.rs:88-90` | Gap 6 |
-| MCP servers | Busy warning before a restart | regressed | `mcp/servers_panel.rs:95-97` | Gap 6 |
-| Orchestration | Worker badge's task title | partial | `orchestration_ui/mod.rs:84-133, 320` | Refreshed only when the workspace's own board changes, so a title edited from a worktree goes stale |
-| Stats | Keyboard walk of the segmented controls; stale dimming; sticky header | partial | `stats/view.rs:281-453, 542` | iced limits |
-| Board | Which workspace's board | regressed | `board/mod.rs:240-242, 673-690, 787-798` | Gap 2: a detached window writes to another workspace's `board.json` |
-| Board | 30 s clock | partial | `board/mod.rs:246-252` | Ignores the dock when it is a drawer |
-| Board | Skeleton fade-in; focus after the dialog | partial | `board/view.rs:553-645`, `board/task_dialog.rs:332-335` | – |
-| Board | Tab between cards | missing | STATUS P12 | Needs a shell `focus_next` |
-| Board | Dock grip | partial | `board/dock.rs:28-110` | Writes the setting on every move; keeps its own copy of the maximum-width rule |
-| Libraries | `worktrees.ts` | partial | `git_ui/worktrees/naming.rs:16-60` and `orchestration/worker.rs:62-300` | Two copies |
-| Libraries | `orchestration.ts` | partial | `orchestration_ui/actions.rs:74-102`, `orchestration_ui/form.rs:28-75` | Copies `state::roles` |
+| Inspector | Width grip | partial → done | `inspector/mod.rs:159-235` (`panel_drag`, saved on release); tests `inspector/tests.rs:130, 152, 213, 238, 253` | – |
+| Inspector | `shown`, which gates the git polling and the clock | partial → done | `inspector/mod.rs:162 shown_in` → `Panels::of`; test `inspector/tests.rs:990` | – |
+| Inspector | Session › MCP row and "Change" | regressed → done | `inspector/sections.rs:236`; `panes_logic/mod.rs:458` (writer); test `inspector/tests.rs:853` | – |
+| Inspector | Changed files in a detached window | partial → done | `inspector/mod.rs:410` (`window_workspace`); `inspector/tests.rs:59 with_detached` | – |
+| Diff view | Text selection; tabs | partial → partial | `git_ui/diff_view.rs:56` (`TAB_STOP = 8`) | No text selection (iced) |
+| MCP servers | "Up to date" and "Restart N agents" | regressed → done | `mcp/servers_panel.rs:86 running_mcp`, `mcp/scope.rs:162 needs_restart`; tests `servers_panel/tests.rs:117, 129` | – |
+| MCP servers | Busy warning before a restart | regressed → done (decision §0.3) | `mcp/servers_panel.rs:111-140`; tests `servers_panel/tests.rs:142, 158, 170` | Mid-turn panes are held, not warned about |
+| Orchestration | Worker badge's task title | partial → done | `orchestration_ui/badge.rs:130` reads `board::Live` | – |
+| Stats | Keyboard walk of the segmented controls; stale dimming; sticky header | partial → partial | `stats/view.rs:90-97` (stale veil, done) | Keyboard walk and sticky header: iced limits |
+| Board | Which workspace's board | regressed → done | `board/mod.rs:1229, 1277`; `board/interaction.rs:224` | – |
+| Board | 30 s clock | partial → done | `board/mod.rs:280` (`Panels::of(...).dock.shown`) | – |
+| Board | Skeleton fade-in; focus after the dialog | partial → partial | `board/view.rs:567`, `board/task_dialog.rs` | – |
+| Board | Tab between cards | missing → missing | – | Needs a shell `focus_next` |
+| Board | Dock grip | partial → done | `board/dock.rs`; tests `board/interaction.rs:188, 260`; commit `0720f5c` | – |
+| Libraries | `worktrees.ts` | partial → partial | `git_ui/worktrees/naming.rs:45`, `orchestration/worker.rs:299` | Two copies of the naming |
+| Libraries | `orchestration.ts` | partial → done | `orchestration_ui/actions.rs`, `form.rs`, `panel.rs` use `state::roles` | – |
 
 ### 2.4 Settings (§2.3/2–3)
 
-Every one of the 53 rows exists, with the TS key, default, range and category (`settings/schema.rs`; defaults at `state/types.rs:432-487`). Reset keeps `voiceApiKey`, `kitsEverywhere`, `projectsFolder` and unknown fields (`state/store.rs:734-748`). Keybinding overrides are kept verbatim, including ids this version does not know (`keymap/bindings.rs:164-199`). Integer fields stay integers.
+All 53 rows exist, with the TS key, default, range and category (`settings/schema.rs`; defaults at `state/types.rs:432-487`). 51 are wired.
 
-Only the effects that are not done are listed. The other 42 are wired: locale, projectsFolder, autoResume, claudeBridge, launchDelayMs, hibernation, agentPaneControl, agentCommands, uiScale, panels, theme, the terminal font, padding, cursor, scrollback, shells, notifications, Mobile, Discord, Shortcuts, experiments, About.
-
-| Key | Effect | Evidence | Gap |
+| Key | Was → now | Evidence | Gap |
 |---|---|---|---|
-| letterSpacing | missing | `panes/look.rs:74-78`; `hangar-term/src/lib.rs:203` | hangar-term has no letter spacing |
-| termPreview | partial | `settings/previews.rs:306` | Ignores letterSpacing |
-| voiceEnabled | partial | `commands/run.rs:113` | The key becomes live but dictation never starts (gap 5) |
-| voiceEngine, voiceModel, voiceCloudModel, voiceLanguage, voiceSubmit, voiceCleanup, voiceCleanupModel, voiceCleanupHint | partial | `voice/mod.rs:68-82` | Configured, but unreachable (gap 5); the model download works |
+| letterSpacing | missing → missing | `panes/look.rs:81` ("no counterpart in hangar-term yet"); `hangar-term/src/lib.rs:204` | hangar-term has no letter spacing |
+| termPreview | partial → partial | `settings/previews.rs:306` | Ignores letterSpacing |
+| voiceEnabled | partial → done | `commands/run.rs:121`; `voice/tests.rs:182, 192` | – |
+| voiceEngine, voiceModel, voiceCloudModel, voiceLanguage, voiceSubmit, voiceCleanup, voiceCleanupModel, voiceCleanupHint | partial → done | `voice/mod.rs` `voice_config`; `voice/tests.rs:182` | Never run with a microphone here |
 
-The Shortcuts editor is done: search, conflicts, two-step reset all, custom tag, add, remove, reset, "also bound" with free, and a recorder that suspends the dispatcher. `voiceUnload` runs on the UI thread.
+The Shortcuts editor is done. Reset keeps `voiceApiKey`, `kitsEverywhere`, `projectsFolder` and unknown fields (`state/store.rs:735-748`).
 
 ### 2.5 Kits management (§2.4/1.1–1.3)
 
-All 10 rows are done:
-- the workspace kits section;
-- the activation dialog;
-- accept, which stores the inspected hashes;
-- setup commands, run only on a click of Run, in a visible pane closed on failure;
-- the kit icon;
-- the installed list;
-- "on all workspaces" with review;
-- remove, on a second click;
-- add from a folder or from GitHub;
-- the library.
-
-Evidence is in `kits/update.rs`, `kits/views/*`, `kits/setup.rs` and `kits/gallery.rs`. The launch-time gap is gap 1, counted under §2.6.
+All 10 rows are done (`kits/update.rs`, `kits/views/*`, `kits/setup.rs`, `kits/gallery.rs`). The launch-time hook consent is closed (§0.2 gap 1).
 
 ### 2.6 Terminal pane and pane grid (§4)
 
-Only rows that are not done are listed; the other 53 are done. All done:
-- the terminal options and palette;
-- live restyle;
-- Shift+Enter in agent panes and Ctrl+V;
-- the key filter;
-- dead keys, in tests;
-- spawn, mount and unmount, respawn and exit;
-- accounts noted on launch and exit (`panes/controller.rs:320, 553, 723, 740`);
-- the MCP scope launch;
-- login panes;
-- the bridge reducer and notices;
-- `agentCommands`, `launchDelayMs`, `autoResume` and `--resume`;
-- role restart;
-- the queue;
-- broadcast;
-- file drop;
-- search;
-- selection and scroll;
-- focus reporting;
-- hibernation;
-- `TerminalAccess`;
-- tree algebra, divider drag, header drag, zoom;
-- gauge and glyph.
+Of 65 rows, 53 were `done` and still are. The 12 rows below were not.
 
-All nine `panes_logic::Msg` messages are sent by P5.
-
-| Item | Status | Evidence | What the TS does that native does not |
+| Item | Was → now | Evidence | What the TS does that native does not |
 |---|---|---|---|
-| letterSpacing | missing | `panes/look.rs:77-78` | – |
-| Unfocused pane dimmed to 0.94 | partial | no opacity code | – |
-| Web links | partial | `hangar-term/src/pointer.rs:141-147`, `hangar-term/src/links.rs:172`, `panes/mod.rs:423-426` | Plain click and http(s) only; native needs Ctrl+click and opens file, ssh and git links too (§6) |
-| Kits held for changed hooks | regressed | `panes/controller.rs:146-159` | Gap 1 |
-| Trust prompt detection | partial | `panes_logic/mod.rs:1064-1068` | Reads 60 lines including history, where the TS read the viewport only |
-| Role panes: permission mode and allowed tools | partial | `panes/controller.rs:646, 663-668` | Reads the raw `ws.orchestration`; `orchestrationOf` dropped modes that are not offered |
-| Non-bridged agents: `session` event and `sessionSince` at launch | missing | `panes/controller.rs:671-676` (TS `TerminalPane.tsx:1098-1102`) | – |
-| File-drop highlight | partial | `panes/grid.rs:560-573` | Untested |
-| Detached workspace mounted at boot | regressed | gap 3 | – |
-| Divider keyboard and aria labels | missing | STATUS P5 | – |
-| Header name tooltip `pane.jump {keys}` | partial | `panes/header.rs:184-185` | – |
-| Zoom bar: Escape after Tab | partial | `panes/zoom_bar.rs` | iced buttons take no focus |
+| letterSpacing | missing → missing | `panes/look.rs:81` | – |
+| Unfocused pane dimmed to 0.94 | partial → partial | no opacity code in `panes/grid.rs` or hangar-term | – |
+| Web links | partial → partial | `panes/mod.rs:471` (`is_web_link`), `hangar-term/src/links.rs:188`, tests `links.rs:366, 383`, `pointer.rs:615` | Only `http` and `https` open now (the consent risk is closed). Opens on Ctrl/Cmd+click; the old app's addon opened on a plain click, and inventory §1.3 asked for a click |
+| Kits held for changed hooks | regressed → done | `panes/controller.rs:169-190`; tests `:980, 1033, 1043, 1054` | – |
+| Trust prompt detection | partial → partial | `panes_logic/mod.rs:1284` (`TRUST_LOOK_LINES = 60`) | Reads 60 lines including history; the TS read the viewport only |
+| Role panes: permission mode and allowed tools | partial → done | `panes/controller.rs:210-214` (`state::roles::orchestration_of`); tests `:1094, 1111, 1121` | – |
+| Non-bridged agents: `session` event and `sessionSince` | missing → done | `panes/controller.rs:699` sends `Logic::Launched`; `panes_logic/mod.rs:1140, 1219` | – |
+| File-drop highlight | partial → partial | `panes/grid.rs:798` | Untested with a real drag |
+| Detached workspace mounted at boot | regressed → done | §2.1 | – |
+| Divider keyboard and aria labels | missing → missing | STATUS P5 | iced has no focusable separator |
+| Header name tooltip `pane.jump {keys}` | partial → done | `panes/header.rs:144-154`, test `:714` | – |
+| Zoom bar: Escape after Tab | partial → partial | `panes/zoom_bar.rs` | iced buttons take no focus |
 
-Logic modules (§3): 56 of the TS modules are ported with at least as many tests. Three are partial:
-- `windows`: most of it dropped by design;
-- `typography`: applied when the dictionaries are generated, with no runtime module;
-- `kitActivation`: 52 Rust cases for 82 TS ones.
+Logic modules (§3): 61 of 64 are ported with at least as many tests. The five that were in flight are done: `kitTabs` (37 TS cases) and `kitApi` (104) are in `kit_tabs/` (176 tests); `remote*` and `activityLog` are in `mobile/` (149 tests, STATUS counts the same); `hangarUi` stays a script-generated sheet served by `hangar-core/src/kit_scheme.rs` (its vitest stays on the TS side). Three are partial: `windows` (most of it dropped by design), `typography` (applied when the dictionaries are generated, no runtime module), `kitActivation` (52 Rust cases for 82 TS ones). `webgl` is dropped (n/a).
 
-Five rows are in flight: `kitTabs`, `kitApi` and `hangarUi` (P16), and `remote*` and `activityLog` (P20). `webgl` is dropped (n/a).
+### 2.7 Preview panel and file viewers (§2.4/1.5–1.6) — new rows
+
+Graded by reading. 51 rows: 26 done, 21 partial, 2 missing, 2 regressed. P15's own gaps in STATUS are included. `cargo test -p hangar-app preview::` passes 245, with 2 ignored (the real-helper ones, which need an engine and a display).
+
+Done (26): tab click and close; tab icons (`preview/tabs.rs:143-200`); the grip's drag, release and double-click reset (`grip.rs`, tests `the_grip_draws_the_panel_where_the_pointer_is_and_saves_on_release`, `escape_drops_the_grip…`); drawer focus take and return (`shell/drawer.rs`); expand, collapse, hide and the three modes (`panel.rs:36-110`); empty state; kind detection and size caps (`hangar-core/src/preview.rs`); a viewer rebuilt per `id:revision`; text head of 256 KiB with BOM, CRLF and partial line; 5000 lines with notes and gutter; Copy; pretty-JSON and language chips; `languageOf` (10 names, 67 extensions); Markdown safe render, links, heading ids, source toggle and inert-link notice; image fit, zoom range, pan, double-click, keys, bar; loop and speed of the player; media error with Show in folder; PDF Open in default app; `inlineOnly` sibling refusal; the 300 ms settle and the missing-file note; notices of 2.2 s and 6 s.
+
+| Feature | Status | Evidence | What the old app does that native does not |
+|---|---|---|---|
+| Tab keys (←, →, Home, End, Delete) | partial | `preview/mod.rs:1320, 1388` (only while focus is `Region::Model`); test `the_keys_of_the_strip_move_between_tabs` sends messages, not keys | Reached by F6 or a drawer, not by clicking a tab; with an image in front F6 lands on the image stage, so the tabs are out of reach |
+| Tooltips and the "by" label | partial | `preview/tabs.rs:84-140, 228-262`, no test | Rules match the TS |
+| Active tab scrolled into view | partial | `preview/mod.rs:506 strip_to`; test `the_strip_scrolls_to_the_tab_in_front` | Snaps by index; tabs have varied widths, so one can end half hidden |
+| Grip ±24 keys, role, tooltip | partial | `preview/grip.rs:19, 101, 146` | Arrows work only after a press on the grip; no tooltip or separator role |
+| Escape collapses an expanded panel | partial | `preview/mod.rs:1347, 1391`, no test | Window-wide, not only inside the panel |
+| Hide with focus inside → pane | partial | `app/shell.rs:771 after_docked_close`, no test | – |
+| Wrap toggle | partial | `preview/mod.rs:913` | The scroll snaps to the top |
+| Highlighting languages | partial | `preview/highlight.rs` (`syntect` via `two-face`); test `knows_a_grammar_for_every_language_a_file_is_named_after` | No PowerShell grammar; 9 colour classes |
+| Markdown `#anchor` scroll | partial | `preview/markdown.rs`, `mod.rs:1001-1005`; tests parse only | Never run |
+| Markdown images: relative, absolute, `data:` | partial | `preview/markdown.rs:100`; tests `loads_a_relative_image_from_beside_the_file…`, `an_inline_image_is_read_from_its_bytes` | A local `.svg` goes to iced's raster widget, which cannot decode it; GIF is a first frame; AVIF fails |
+| Markdown http(s) and `//` images | partial | `preview/markdown.rs` `Page::image`; test `a_web_image_is_a_link_not_a_download` | Shown as an alt-text link, never fetched (badges, screenshots) |
+| Markdown image path safety | **regressed** | `preview/model.rs:599-626`, `preview/markdown.rs:100` (no root, no size cap); a test accepts `../art/logo.svg` | The old scheme refused anything outside the allowed folders and capped images at 64 MB. A hostile README can draw any local image path (`/dev/zero`, a UNC share). It only displays the image; nothing leaves the machine |
+| Image wheel zoom, Ctrl and pinch | partial | `preview/image_stage.rs:86`; test `the_wheel_zooms_by_its_distance_and_a_pinch_in_finer_steps` | Trackpad pinch never arrives (iced 0.14) |
+| Checkerboard backdrop, pixelated from zoom 3 | partial | `preview/image_stage.rs:161` | No test |
+| SVG without a size, failure message | partial | `preview/image_stage.rs:211 measure` | A broken SVG becomes a blank 512² stage, never "Image failed" |
+| Animated images | partial | `preview/image.rs` header; STATUS P15 | GIF and animated WebP show their first frame |
+| AVIF | missing | `hangar-core/src/preview.rs` lists `.avif`; no decoder in `Cargo.lock` | The tab opens to the "Image failed" card |
+| Video and audio player | partial | `preview/windowed.rs`, `webview.rs:379` | Opens in a separate window (§0.3); the panel shows a card with Focus, Reopen, Show in folder |
+| Pause when hidden | missing | no code in `preview/` or `hangar-webview/src` | Playback goes on after a tab switch, a hidden panel or another workspace |
+| Helper window: lifecycle and focus | **regressed** | `preview/mod.rs:725-750` (opens once when in front and shown), `preview/webview.rs reconcile` (closes only when the entry is gone), `hangar-webview/src/engine.rs:199, 299` (focus is only ever set, never withheld) | An agent that shows a PDF, page or video opens a window that may take the keyboard from a terminal, and it is not tied to the panel, the tab or the workspace being on screen. Not observed live |
+| PDF inline or message | partial | `preview/webview.rs:407, 620`; tests `a_pdf_the_engine_draws_stays_open`, `a_pdf_the_engine_cannot_draw_is_closed_and_said_so` | The window opens first and closes after the engine says it has no viewer (a flash on WebKitGTK); no real engine run |
+| HTML page | partial | `preview/webview.rs:379`, core CSP | Its own window, not an iframe; a link click opens the browser |
+| HTML reload, source toggle, "isolated" chip | partial | `preview/windowed.rs:97` | Reload only while the window is open; in source mode it does not re-read the source |
+| File watch every 1.5 s while shown | partial | `preview/mod.rs:109, 1227, 1374`; no test drives `Tick` | No check that the window is hidden or minimised |
+| Info strip | partial | `preview/viewer.rs info`, `parts.rs byte_size`, no assertion | No dropping of items below 460 and 360 px |
+
+Not in the inventory, also missing: keyboard scrolling of code and Markdown (iced's scrollable has none), text selection, accessibility roles (tablist, separator, application), a travelling loading bar (it is static), Markdown front matter (iced's parser hides a `---` block where markdown-it printed it).
+
+### 2.8 Kit tabs and the 3D viewer (§2.4/1.4, 1.7, 1.8) — new rows
+
+Graded by reading. 75 rows: 48 done, 17 partial, 7 missing, 3 regressed. Tests pass: `kit_tabs::` 176, `model3d_view::` 59, `hangar-model3d` 134 + 11 capture, `hangar-kit-host` 25, `hangar-webview` kit 7, `hangar-core` `kits::` 203 and `kit_scheme` 17. The helper's end-to-end test (`hangar-webview/tests/engine.rs`) is ignored.
+
+Done (48): native WebAssembly tab (`hangar-kit-host/src/tab.rs`, tests `a_real_module_starts_calls_and_draws`, `the_hello_native_example_runs`); the CSP and scheme (`hangar-core/src/kit_scheme.rs`, test `the_policy_isolates_the_page_and_allows_its_own_files_only`); id and method validation; the 16-pending `rate_limited`; the 18 methods except `preview.show` (`kit_tabs/api.rs:185-419`; each has permission, limit and error-code tests, e.g. `refuses_a_port_not_granted_even_with_another_loopback_granted`); events `tab.params` and `theme`; permissions re-read per call; stale GitHub-kit command grants; the five tab states as logic; reload; the isolated chip's words; Rust-side limits; 3D recenter with its 420 ms glide; the four toggles and the 600k normals limit; capture save and the capture at 2× up to 4096; banners; the loading card; the info strip; mouse and keyboard controls; renderer; camera and framing; grid and axes; wireframe; the LRU of 3 models; camera kept on reload and re-framed on resize; render on demand; glb/gltf, OBJ+MTL, STL, PLY; clay and material standardisation; texture wait and readable errors; snapshots (angles, size, theme background, the user's camera untouched; `a_snapshot_of_a_model_in_memory_is_taken_from_every_angle_off_screen`); one load per model, a newer revision aborting the old; the cross-window protocols (replaced by direct calls through `PreviewAccess`, `services/preview.rs:67`) and the grant of model roots for a kit's `preview.show` (`preview/access.rs:253`).
+
+| Feature | Status | Evidence | What the old app does that native does not |
+|---|---|---|---|
+| HTML tab hosting | partial | `kit_tabs/bridge.rs:93, 123`, `kit_tabs/mod.rs:558-590`, `hangar-webview/src/kit_bridge.js`; the end-to-end test is ignored and uses a stand-in SDK | A separate 1000×720 window opened only while the tab is in front of a shown panel. The real `kit.js` under the sandbox CSP and the relay have never run together under a test |
+| Fallback "Shown as a page" | partial | `kit_tabs/mod.rs:484-557`, `view.rs:140-153`; test `modules_that_break_the_abi_do_not_load` | The fallback branch itself is untested |
+| Host check: source and origin | partial | `kit_tabs/api.rs:518-524`, `kit_relay.rs is_kit_document` | There is no iframe: trust is the helper window id and the page URL prefix |
+| `preview.show` | partial | `kit_tabs/deps.rs:319` → `preview/access.rs:266`; test `opens_the_file_rust_resolved_under_the_kits_name` (fakes) | No 256 MB cap and no "too large for the preview" message; the real `show_file` is untested |
+| Event `panes.changed` | partial | `kit_tabs/mod.rs:642-692`; only the gate is tested | Driven by a 1 s tick, where the TS followed activity live |
+| States drawn as StageMessages | partial | `kit_tabs/view.rs:166-199`, no render test | – |
+| Lazy creation of restored tabs | partial | `kit_tabs/tabs.rs:196`; test `keeps_a_restored_tab_unloaded_while_it_is_hidden_and_loads_it_once_shown` | An HTML page also waits until it is in front of a shown panel, even when an agent opened it (the TS loaded those at once to follow a CI run) |
+| "Left" detection | partial | `kit_tabs/bridge.rs:135-146`, `view.rs:269`, no test | A navigation outside the kit is blocked rather than shown as "left" |
+| Focus guard (`frameTookKeyboard`) | **regressed** | no `with_focused(false)` anywhere; `hangar-webview/src/engine.rs:299` | A window for an agent-opened tab can take the keyboard from a terminal when the panel is on screen |
+| Capture: copy image | partial | `model3d_view/capture.rs`, `services/clipboard.rs` (arboard); no test | Not live-checked |
+| Canvas focusable (`role=application`) | partial | `hangar-model3d/src/viewer.rs:592` | Focus on click only; no F6, no role |
+| Reload overlay (slim bar and chip) | partial | `model3d_view/stage.rs:121`, no assertion | – |
+| StageMessage "unavailable" | **regressed** | `hangar-model3d/src/viewer.rs:750, 793` (`eprintln!` only) | The old app said WebGL was unavailable; the viewport is now blank without a word |
+| StageMessage "context lost" + Restart | missing | `ModelLost` and `ModelRestart` are never used | No device-loss handling |
+| Software GPU (tiny-skia) fallback | **regressed** | `hangar-model3d/src/lib.rs:50` | On iced's tiny-skia the viewport is blank with no message; captures and snapshots still work through the offscreen adapter (`offscreen.rs:58`) |
+| Animation play and pause | missing | `model3d_view/animation_bar.rs`: the button has no `on_press` | – |
+| Clip select | partial | `animation_bar.rs`: names listed, items disabled with a reason | Cannot switch clip |
+| Scrub | missing | static `progress_bar(.., 0.0)` | – |
+| Time label | partial | `format::seconds(0.0)` | Always "0.0 / duration" |
+| Animation (mixer, loop, autoplay, kept on reload) | missing | `hangar-model3d/src/load/gltf.rs:591` keeps a clip's name and length, not its tracks | No playback; nothing kept on reload |
+| Lighting | partial | `hangar-model3d/src/render/shaders/mesh.wgsl:134-177` (analytic sky and ground, 0.8 and 1.6) | No PMREM `RoomEnvironment`; not compared with the old look |
+| Reduced-motion recenter | partial | `hangar-model3d` `set_reduced_motion` is never called (`model3d_view/mod.rs:40`) | The camera always glides |
+| `compileAsync` and the upload budget | missing | `hangar-model3d/src/render/frame.rs:230` uploads at the first frame | A big model may stall one frame |
+| Draco, meshopt, KTX2 | missing | `hangar-model3d/src/load/gltf.rs:30-40` refuses with an export hint; KTX2 drops the texture with a warning | three.js read all three. `KHR_mesh_quantization` is now refused too, and `hangar-model3d/Cargo.toml` enables only 4 glTF extensions (clearcoat, transmission, ior, specular, volume and sheen are not read) |
+| FBX | partial | `hangar-model3d/src/load/fbx.rs`, 5 tests | Binary 7.x only; no animation or skins |
+| USDZ | missing | `hangar-model3d/src/load/mod.rs` returns Unsupported | – |
+| Skinned meshes | partial | `hangar-model3d/src/load/gltf.rs:322 skin_vertices` (rest pose) | No animation, no morph targets |
+
+Not in the inventory, also missing: `KitTabView.showFile`'s 256 MB refusal (see `preview.show`), `Deps::enqueue` swallows the outcome of `bridge_enqueue` (`kit_tabs/deps.rs:345`; the TS awaited it), limits count code points where the TS counted UTF-16 units (more lenient for emoji), the iframe `title` hint naming the kit, and the snapshot's three retries when a file is rewritten while loading (native waits up to 40 s for the latest revision, `model3d_view/snapshots.rs`).
 
 ---
 
 ## 3. Commands (§1.10)
 
-All 88 default bindings match `shortcuts.ts` on Windows/Linux and on macOS (`keymap/bindings.rs:23-156`).
+All 88 default bindings match `shortcuts.ts` on Windows/Linux and on macOS (`keymap/bindings.rs:23-156`). The dispatcher follows every rule of §1.10 (`keymap/dispatch.rs`). Its caveats: AltGr is guessed as "Ctrl+Alt with printable text" (`keymap/chord.rs:366-373`), and it has been checked by unit tests only, never with real key presses.
 
-The dispatcher follows every rule of §1.10 (`keymap/dispatch.rs`):
-- the 1600 ms sequence timeout, with the chord hint;
-- the field rules;
-- the first live command wins; unbound keys pass through;
-- a prefix is held; a sequence that leads nowhere swallows its last key;
-- only `view.palette` is live while the palette is open;
-- the recorder suspends it;
-- duplicate and shadow conflicts are found.
+All 88 commands are `done` now. The 18 that were `regressed`:
 
-Its gaps:
-- AltGr is guessed as "Ctrl+Alt with printable text" (`keymap/chord.rs:370-374`).
-- It has been checked by unit tests only.
-- Field guards cover one dialog (gap 8).
+| # | Commands | Was → now | Evidence |
+|---|---|---|---|
+| 13–27 | `pane.next`, `pane.prev`, `pane.focusLeft/Right/Up/Down`, `pane.focus1`…`9` | regressed → done | `commands/run.rs:394` sends `Intent::SelectPane`, which leaves overlays open; `app/shell.rs:1087 select_pane`; tests `app/shell/tests.rs:133, 156` |
+| 49 | `view.settings` | regressed → done | `commands/run.rs:304` → `Intent::OpenSettings(None)` / `CloseOverlay`; test `app/shell/tests.rs:174` |
+| 66 | `view.needsYou` | regressed → done | `commands/run.rs:169`; test `needs_you/tests.rs:140` |
+| 88 | `voice.dictate` | regressed → done | `commands/run.rs:318`; test `voice/tests.rs:174` |
 
-| # | Commands | Status | Evidence | Gap |
-|---|---|---|---|---|
-| 1–3 | `pane.split`, `pane.splitRight`, `pane.splitDown` | done | `app/shell.rs:550-577` | Live in a workspace with no tree |
-| 4–12 | close, restart, restartAll, resetAll (arms only), tidy, sessions, zoom, pin and unpin orchestrator | done | `app/shell.rs:89-131`; `orchestration_ui/mod.rs:302` | – |
-| 13–14 | `pane.next`, `pane.prev` | regressed | `commands/run.rs:376-385` → `app/shell.rs:499-524` | Closes the main window's overlays (gap 8) |
-| 15–18 | `pane.focusLeft/Right/Up/Down` | regressed | `commands/run.rs:428-431` | Same |
-| 19–27 | `pane.focus1`…`9` | regressed | `commands/run.rs:375` | Same |
-| 28–31 | `pane.swap*` | done | `commands/run.rs:433-447` | – |
-| 32–48 | `workspace.*`: next, prev, new, mcpServers, newOrchestrator, orchestration, stopWorkers, sleep, go1–9 | done | `commands/run.rs:300-317`; packages' `on_intent` | – |
-| 49 | `view.settings` | regressed | `commands/run.rs:283`, `app/shell.rs:174-188` | Bypasses the settings package (gap 8) |
-| 50–60, 63–65, 67 | shortcuts, palette, navigator, inspector, focus, regions, the four views, board dock, mcp, broadcast | done | `app/shell.rs:30-71, 656-823`; `status_bar/mod.rs:221` | – |
-| 61–62 | `view.modelPreview`, `view.closeModels` | done (since P15, not run) | `app/shell.rs:705`; `preview/mod.rs:1418` | – |
-| 66 | `view.needsYou` | regressed | `commands/run.rs:162` | Never live (gap 4) |
-| 68–74 | `terminal.*` | done | `panes/mod.rs:535-570` | – |
-| 75–83 | `command.run1`…`9` | done | `saved_commands/mod.rs:282-291` | – |
-| 84–87 | zoom in, out, reset; fullscreen | done | `commands/run.rs:273-293`; `app/shell.rs:189-200` | – |
-| 88 | `voice.dictate` | regressed | `commands/run.rs:295` | No handler (gap 5) |
+The pane commands now need a tree (`commands/run.rs:176`). The other 70 are unchanged: pane split, close, restart, tidy, pane zoom and swap; workspace; views; terminal; saved commands; interface zoom; fullscreen (`app/shell.rs`, `commands/run.rs`, packages' `on_intent`).
 
 ---
 
@@ -348,164 +352,75 @@ Its gaps:
 
 General points:
 - Core keeps the per-op timeouts (`hangar-core/src/control.rs:89-101`).
-- `agentPaneControl` is honoured for agents only (`control/run.rs:31`).
-- Requests that arrive before the state loads get the TS text word for word (`app.rs:153-155, 265-270`).
+- `agentPaneControl` is honoured for agents only (`control/run.rs:32`).
+- Requests that arrive before the state loads get the TS text word for word.
 - Refusal texts match `control.ts`, `managerControl.ts` and `deliveryControl.ts`.
-- Engines never touch `Model`: their writes go through `Msg::Model` and are answered after the snapshot is republished (`control/writes.rs:133-136`).
+- Engines never touch `Model`: their writes go through `Msg::Model`, answered after the snapshot is republished.
 
-| Op(s) | Status | Evidence | Gap |
-|---|---|---|---|
-| `workspace_list`, `pane_list`, `pane_create`, `pane_close`, `pane_restart`, `pane_read`, `pane_focus`, `workspace_window` | done | `control/panes.rs` | `pane_close` may close any pane, as in the TS |
-| `pane_send` | done | `control/panes.rs:24, 411-419` (120 ms between paste and Enter) | – |
-| `workspace_create` | done | `control/workspace.rs:42`; P8's flow hook (`app/hooks.rs:19-22`) | – |
-| `workspace_set_check` | done | `control/workspace.rs:178-216` | Its write can lose a panel edit (gap 9) |
-| `preview_show`, `preview_close` | done (since P15, not run) | `preview/mod.rs:714-723` installs `Hook::Preview` | – |
-| `model_show`, `model_snapshot`, `model_close` | in flight (P17) | `control/preview.rs`; `control/live.rs:421-545` fallback | – |
-| `kit_tab_list`, `kit_tab_open`, `kit_tab_close` | in flight (P16) | `control/kit_tabs.rs:54, 68, 144, 200` | – |
-| `worker_spawn`, `worker_stop` | done | `orchestration/worker.rs:716, 1303` | A narrow race on a respawned worker (`worker.rs:1327, 1371`) |
-| `worker_list` | partial | `orchestration/worker.rs:1156` | Ignores detached workspaces (`orchestration/live.rs:113, 403` read `snapshot.opened` only) |
-| `delivery_submit`, `delivery_status` | done | `control/delivery.rs:470, 772` | – |
-| `project_list`, `project_status`, `project_send` | done | `control/manager.rs:24, 93` | – |
-
-| Engine | Status | Evidence / gap |
+| Op(s) | Was → now | Evidence |
 |---|---|---|
-| orchestratorEvents: 10 s tick, board debounce, quiet during the orchestrator's own turn | done | `orchestration/runtime.rs:42, 119-145`; `orchestration/events.rs:218-232, 971-981` |
-| managerEvents feed | done | `orchestration/manager_feed.rs:404-418` (the phone push is P20) |
-| 5 s ticker (activity log) | in flight (P20) | `orchestration/runtime.rs:44, 233-241` |
-| Briefing | done | `control/mod.rs:207` → `control/engines.rs:28` |
-| announceRole | partial | Inferred from `PinOrchestrator` (`orchestration/mod.rs:179-201`); `Intent::AnnounceRole` has no handler |
-| deliveryRuns read-model | partial | Read-model done (`control/mod.rs:115-161`); Needs-you's « Fusionner » ignores it |
-| Check, separate reviewer, per-repository queue, land, three failures → needs-you | done | `control/delivery.rs:813-1163`; `hangar-core/src/delivery.rs:1126, 1556` |
-| Worker spawn in worktrees, all-or-nothing undo | done | `orchestration/worker.rs:855-1051` |
-| Restart notes | done | `control/writes.rs:57-70` |
-| `touch` keep-awake | done | `control/run.rs:57-59` → `panes_logic/mod.rs:942` |
-| Delivery cancel on shutdown | done | `app.rs:446` → `hangar-core/src/lib.rs:184-197` |
-| Stop all workers | done | `orchestration/mod.rs:157`, `orchestration/worker.rs:1496` |
+| `workspace_list`, `pane_list`, `pane_create`, `pane_close`, `pane_restart`, `pane_read`, `pane_focus`, `workspace_window`, `pane_send`, `workspace_create` | done | `control/panes.rs`, `control/workspace.rs`. `workspace_list` and `pane_list` checked over curl in today's run |
+| `workspace_set_check` | done | `control/workspace.rs:218` writes `check_command` only; test `control/tests/workspace.rs:411` |
+| `preview_show`, `preview_close` | done | `preview/mod.rs:751-760` installs `Hook::Preview` |
+| `model_show`, `model_snapshot`, `model_close` | in flight → done | `control/run.rs:86-88`, `control/preview.rs:443`; four angles, a rewritten file and a corrupt file checked over the control endpoint (STATUS P17) |
+| `kit_tab_list`, `kit_tab_open`, `kit_tab_close` | in flight → done | `control/kit_tabs.rs`; `Hook::KitTabs` at `kit_tabs/mod.rs:404`; checked with curl (STATUS P16) |
+| `worker_spawn`, `worker_stop` | done | `orchestration/worker.rs:716, 1305`. The respawn race at `worker.rs:1327, 1371` is unchanged, very low |
+| `worker_list` | partial → done | `orchestration/live.rs:431-437 is_open` uses `control::port::is_open`; test `live.rs:455` |
+| `delivery_submit`, `delivery_status` | done | `control/delivery.rs` |
+| `project_list`, `project_status`, `project_send` | done | `control/manager.rs` |
 
-Events: `services/events.rs:137-166` matches every core `Event` with no wildcard. Under load, events are logged and dropped (`events.rs:208-210`); a control request lost that way only times out on core's side.
-
-| Event | Consumers | Status |
+| Engine | Was → now | Evidence |
 |---|---|---|
-| `pty:output` | each pane's sink, by design | done |
-| `pty:exit` | `panes_logic`, `panes`, `orchestration` | done |
-| `bridge:event` | `panes_logic`, `panes`, `toolbar`, `status_bar`, `navigator`, `accounts`, `orchestration` | done |
-| `bridge:queue` | `panes_logic`, `panes` | done |
-| `board:changed` | `board`, `orchestration`, `needs_you`, `orchestration_ui` | done |
-| `memory:changed` | `memory` | done |
-| `kits:changed` | `kits` | done |
-| `accounts:changed` | `accounts` | done |
-| `git-clone:progress` | `workspace_dialog` | done |
-| `voice:phase`, `voice:level`, `voice:text`, `voice:download` | `voice`, `settings` | done |
-| `control:request`, `control:internal` | `Message::Control(Msg::Request)` | done |
-| `notification-activated` | `app.rs:412` | done |
-| `window:close-requested` | `app/shell.rs:217` | done |
-| file drag and drop | `panes`, `panes_logic` | done |
-| `remote:changed` | `settings` only | partial (P20) |
-| `remote:shared` | none | in flight (P20) |
+| orchestratorEvents, managerEvents, briefing, check/reviewer/queue/land, worker spawn and undo, restart notes, `touch`, delivery cancel, stop all workers | done | unchanged |
+| 5 s ticker (activity log) | in flight → done | `orchestration/runtime.rs:364`, `mobile/activity_log.rs` |
+| announceRole | partial → done | `orchestration/mod.rs:184-195` handles `Intent::AnnounceRole`; the inference from `PinOrchestrator` is gone; a refused pin tells no session |
+| deliveryRuns read-model | partial → done | `needs_you/mod.rs:51, 103, 208` read `control::Live::task_delivering` |
 
-| Hook | Installed by | Status |
+| Event | Was → now | Consumers |
 |---|---|---|
-| `Hook::Orchestration` | `control/mod.rs:88-97` | done |
-| `Hook::FromGit` | `app/hooks.rs:19-22` | done |
-| `Hook::Preview` | `preview/mod.rs:714-723` (P15) | done |
-| `Hook::KitTabs` | none | in flight (P16) |
-| `Hook::Mobile` | none; `mobile/mod.rs` is still the stub | in flight (P20) |
+| `remote:changed` | partial → done | `settings/mod.rs:544`, `mobile/mod.rs:148` |
+| `remote:shared` | in flight → done | `mobile/mod.rs:149`, `mobile/push.rs` |
+| the other 14 | done | unchanged; `services/events.rs:137-166` has no wildcard |
 
-Snapshot: `opened`, `asleep`, `activity` and `delivering` are filled from the real read-models (`state/snapshot.rs:33-43`). `orchestration::port` now re-exports P18's `Caller` and `Announcement`.
+| Hook | Now |
+|---|---|
+| `Hook::Orchestration`, `Hook::FromGit`, `Hook::Preview` | done |
+| `Hook::KitTabs` | done (`kit_tabs/mod.rs:404`) |
+| `Hook::Mobile` | done (`mobile/mod.rs:93`) |
+
+Intents: all 59 have a handler. `Dictate` (`voice/mod.rs:399`), `AnnounceRole` (`orchestration/mod.rs:191`), `Land` (`control/mod.rs:265-300` also sends `LandFailed`) and `OpenKitTab` (`kit_tabs/mod.rs:871`) are done. `PaneRespawned` needs no handler and its doc now says so (`message.rs:236-246`).
+
+Snapshot: `opened`, `asleep`, `activity` and `delivering` are filled from the real read-models (`state/snapshot.rs:33-43`).
 
 ---
 
 ## 5. Integration seams
 
-### 5.1 Every `TODO(P…)` marker
+### 5.1 `TODO(P…)` markers
 
-| # | Marker | Named package merged? | Provider now | Action |
-|---|---|---|---|---|
-| 1 | `board/agent_pane.rs:18` TODO(P4) | yes | `panes_logic::find_agent_pane` (`panes_logic/agent_pane.rs:44`, dead code) | Delete the file; call P4's |
-| 2 | `board/dock.rs:45` TODO(P0b) | yes | `shell::side_panels::Panels::of(m, w).dock.max`, or `ctx.panels()` | Replace `max_width`, `room` and `dock_room` (`board/mod.rs:353-360`) |
-| 3 | `control/delivery.rs:411` TODO(P8) | yes | `accounts::model::launch_account_with` (`accounts/model.rs:114`) | Replace the copy |
-| 4 | `control/live.rs:424` TODO(P15) | yes (`22ef8a2`) | `Hook::Preview` from `preview/hosts.rs` | Keep `AccessHost` only as the before-hook fallback, or delete it |
-| 5 | `control/run.rs:110` TODO(P0b) | yes | `state::layout::reading_order` / `normalize_tree` (`state/layout.rs:309, 336`) | Replace `ordered` |
-| 6 | `control/run.rs:356` TODO(P0b) | yes | `state::roles::orchestration_of` (`state/roles.rs:37`, dead code) | Replace the third copy |
-| 7 | `inspector/sources.rs:41` TODO(P0b) | yes | `state::layout::reading_order` | Replace |
-| 8 | `mcp/servers_panel.rs:84` TODO(P4) | yes | `m.live.panes.report(&pane.id).and_then(\|r\| r.mcp.as_ref())` (`panes/mod.rs:121-125`); `PaneInsight.mcp` has no writer | Read it and map `PaneMcpMode` to `McpMode` (gap 6) |
-| 9 | `mcp/servers_panel.rs:94` TODO(P4) | yes | `m.live.panes_logic.activity_or_idle(id) == Working` (`panes_logic/mod.rs:298`) | Replace |
-| 10 | `navigator/clock.rs:7` TODO(P9) | yes | `inspector::format::{prose_time, reset_when}` (`inspector/format.rs:210, 333`) | Delete `clock.rs` |
-| 11 | `navigator/menu.rs:257` TODO(P4) | yes | `panes_logic::hibernate::{forced_sleep_verdict, sleep_refusal}` exist, but no synchronous `Live` accessor | P4 to expose a verdict, then the navigator reads it |
-| 12 | `navigator/model.rs:105` TODO(P0b) | yes | `state::layout::{reading_order, closed_by_preset}` (`closed_by_preset` is dead code) | Delete the copies (also used by `toolbar/mod.rs:36,150`, `toolbar/activity.rs:21,139`) |
-| 13 | `navigator/model.rs:324` TODO(P0b) | yes | `state::folders::sidebar_order` | Delete the copy (used by `needs_you/mod.rs:34,138,153`) |
-| 14 | `navigator/mod.rs:107` TODO(P4) | yes | `panes_logic::Live::plan_limits()` (`panes_logic/mod.rs:330`) | Drop `State::plan` |
-| 15 | `navigator/reads.rs:115` TODO(P7) | yes | `KeymapIndex::label` / `title` (`keymap/index.rs:182, 189`) | Gap 7 |
-| 16 | `navigator/reads.rs:138` TODO(P14, P16) | P14 yes, P16 no | `kits::Live` plus `kits::model::effective_kits` (`kits/model.rs:248`, dead code) for the list | List now; opening a tab waits for P16 |
-| 17 | `navigator/reads.rs:156` TODO(P15) | yes | `preview::Live::{has_preview, panel_open, unseen}` (`preview/mod.rs:257-276`) | Draw the toggle |
-| 18 | `navigator/reads.rs:165` TODO(P4) | yes | `panes_logic::Live::asleep()` (`panes_logic/mod.rs:364`) | The moon |
-| 19 | `navigator/reads.rs:8` TODO(P4) | yes | `activity_or_idle`, `workspace_activity`, `bridged_count` (`panes_logic/mod.rs:298-325`) | Replace the glyph-based reads |
-| 20 | `needs_you/mod.rs:15` TODO(P12) | yes | `board::Live::{tasks, boards_of}` (`board/cache.rs:60, 71`) | Drop `State::boards` |
-| 21 | `services/clipboard.rs:4` TODO(P17) | no (in flight) | – | – |
-| 22 | `services/preview.rs:33` TODO(P15) | yes | filled by `preview/access.rs:394` | Delete the marker |
-| 23 | `shell/ui.rs:4` TODO(hangar-ui) | yes | hangar-ui has no `CloseReason` or menu-entry type | Keep the types; drop the TODO, or move them to hangar-ui |
-| 24 | `toolbar/activity.rs:223` TODO(P4, P12) | yes | `board::Live::task_for_pane` (`board/cache.rs:84`) | The capsule's task |
-| 25 | `toolbar/activity.rs:29` TODO(P4) | yes | `panes_logic::Live::insight(id)` (`panes_logic/mod.rs:341`) | Drop `Glance` |
-| 26 | `toolbar/mod.rs:367` TODO(P15) | yes | as #17 | – |
-| 27 | `workspace_dialog/folder.rs:115` TODO(P0b) | yes | `state::pane_names::pick_pane_names` (`state/pane_names.rs:49`, dead code) | Delete the 48-name copy |
+None are left in `crates/` (the first audit counted 27; 25 named merged packages). All were closed: the board and orchestration, control, inspector, MCP, navigator, needs-you, toolbar and workspace-dialog markers by calling the real provider (`panes_logic::find_agent_pane`, `Panels::of`, `state::layout`, `state::roles`, `state::folders`, `state::pane_names`, `accounts::model::launch_account_with`, `board::Live`, the keymap's `first_binding`, `kit_tabs::choices`, `panes_logic::asleep()` and `plan_limits()`); the clipboard and preview services by `services::clipboard` (commit `2c772a2`) and the preview access (`787e068`); `shell/ui.rs` by keeping its two types, which hangar-ui has no counterpart for (`c53f5cc`). `board/agent_pane.rs` and `navigator/clock.rs` are deleted.
 
-The untagged "TODO of P0b" at `settings/mod.rs:25` (Escape while the search is full) is likely resolved: the shell only takes an Escape nothing else captured (`app.rs:545-553`).
+### 5.2 Local copies and dead code
 
-### 5.2 Local copies that should call the real one
+Most copies of the first audit are gone: every provider listed there is now called, except for the few below. `cargo rustc ... --force-warn dead_code` lists 122 items.
 
-The dead-code pass shows the providers below are never called, while copies run:
-
-| Real provider (dead code) | Copies in use |
+| Left | Where |
 |---|---|
-| `state::roles::{orchestration_of, orchestration_defaults, ORCHESTRATION_PERMISSION_MODES, ORCHESTRATION_ALLOWED_TOOLS, manager_of, hq_of}` | `control/run.rs:356-396`, `orchestration/roles.rs`, `orchestration_ui/actions.rs:74-102`, `orchestration_ui/form.rs:28-75`, `panes/controller.rs:55, 646`, `git_flow/deps.rs:228-234` |
-| `state::layout::closed_by_preset` | `navigator/model.rs:138-141` |
-| `state::pane_names::pick_pane_names` | `workspace_dialog/folder.rs:109-156` |
-| `panes_logic::find_agent_pane`, `PaneTarget` | `board/agent_pane.rs` |
-| `kits::model::{pane_kits, load_pane_kits, kit_issue_notes, effective_kits}` | `panes/controller.rs:146-159, 455` (gap 1) |
-| `control::Live::task_delivering` (live), `control::delivery::{delivery_state, delivering_in}` (dead code, for P20) | `needs_you/mod.rs:44-47` (a 45 s timer) |
-| `state::layout::reading_order` | `navigator/model.rs:89`, `inspector/sources.rs:43`, `palette/sources.rs:212`, `control/run.rs:110` |
-| `state::folders::sidebar_order` | `navigator/model.rs:326`, `palette/sources.rs:234` |
-| `panes_logic::state_glyph_state`, `context_gauge::format_tokens`, `folder_of` | `panes/status.rs:20`, `panes/gauge.rs:15`, `panes/controller.rs:139` |
-| `Model::window_workspace` / `ctx.workspace()` | `inspector/sources.rs:30-35`, `palette/mod.rs:201-209`, plus the `active_workspace()` reads of gap 2 |
-| `shell::side_panels::Panels::of` | `inspector/mod.rs:134`, `board/mod.rs:246, 353-360`, `board/dock.rs:45-67` |
-| `board::Live::tasks` | `orchestration_ui/mod.rs:84-133` (its own title cache) |
-| `orchestration_ui::actions::pin_refusal` | `pane_menu/mod.rs:142-150` (`can_pin`) |
-| hangar-term's OSC 9/777 parsers (the ones that run) | `panes_logic/pane_agent.rs:131, 147` (dead code) |
-| none yet (worktree naming twice; the inventory wanted it in hangar-core) | `git_ui/worktrees/naming.rs`, `orchestration/worker.rs:62-300` |
+| Worktree naming twice (the inventory wanted it in hangar-core) | `git_ui/worktrees/naming.rs:45`, `orchestration/worker.rs:299` |
+| A raw read of `ws.orchestration` | `git_flow/deps.rs:228-234` (`state::roles::orchestration_of` would do) |
+| `hangar_core::model::allowed_roots` is `pub(crate)`; the 3D view recomputes the roots | `model3d_view`, `hangar-core/src/model.rs` |
+| The `AccessHost` fallback, kept on purpose until the preview hook is installed | `control/live.rs:422` |
+| Dead: old synchronous hibernation (`decide`, `sweep`, `force_sleep`), `DropTracker`, `osc9_notification`/`osc777_notification` (hangar-term's parsers run), `sleep_verdict`, `focus_entry` | `panes_logic/hibernation.rs:480-622`, `panes_logic/file_drop.rs:213`, `panes_logic/pane_agent.rs:131, 147`, `panes_logic/mod.rs:580, 1517` |
+| Dead: 18 constants and functions that hangar-core owns | `kits/model.rs:217-487` |
+| Dead: the shell's `stub*` helpers, `state::lenient::{app_state, read}`, and about 60 more small items | `shell/placeholder.rs:95-126`, `state/lenient.rs:39, 46` |
 
-### 5.3 Intents nobody handles
+### 5.3 Intents, hooks, `Live` read-models
 
-The audit checked all 59 variants of `Intent`. 54 have a real handler in the shell (`app/shell.rs:25-161`) or in a package's `on_intent`.
+All 59 intents are handled (§4). All 5 hooks are installed. `live.signals.needs_you` is written (`needs_you/mod.rs:200`). `PaneInsight.mcp` is written (`panes_logic/mod.rs:458`, from `panes/controller.rs:546`).
 
-| Intent | Sent by | Handled by | Status |
-|---|---|---|---|
-| `Dictate` | `commands/run.rs:295` | nobody | regressed (gap 5) |
-| `AnnounceRole` | `orchestration_ui/mod.rs:178` | nobody. P19 infers it from `PinOrchestrator` before P10's refusal is known (`orchestration/mod.rs:179-201`), so a refused pin can queue a role message | partial |
-| `PaneRespawned` | `app/shell.rs:314-321` | no explicit handler. P5 respawns through `sync`. The doc (`message.rs:241-242`) says P4 handles it; it does not, and need not: the TS carried the resume only from the control path | partial (fix the doc) |
-| `Land` | `needs_you/mod.rs:207` | `control/mod.rs:241-288` | partial: an error becomes a notice; `needs_you::Msg::LandFailed` is never sent |
-| `OpenKitTab` | `toolbar/menus.rs:365` | shell (view and drawer) | in flight (P16) |
+### 5.4 Debug-only seeds
 
-### 5.4 Hooks not installed
-
-`Hook::KitTabs` (P16) and `Hook::Mobile` (P20) are in flight. The other three are installed (§4).
-
-### 5.5 `Live` read-models nothing fills
-
-- `live.signals.needs_you` (`state/live.rs:99`) has no writer outside tests (gap 4).
-- `PaneInsight.mcp` (`state/live.rs:406`) has no writer. The launch's MCP lives in `panes::Live` (gap 6).
-- The 22 unit `Live` structs (`pub struct Live;`) are not read by anyone, which is fine.
-
-### 5.6 Debug-only seeds
-
-Every seed is behind `cfg!(debug_assertions)`, so no release build reads one:
-`HANGAR_DEV_ACTIVITY`, `_FOCUSED_PANE`, `_PLAN`, `_NAV_MENU`, `_NAV_RENAME`, `_NAV_DRAG`, `_NEEDS_YOU_OPEN`, `_VOICE`, `_UPDATE_BANNER`, `_SETTINGS`, `_PREVIEW`, `_SCREENSHOT`.
-
-Three of them cover over a gap in screenshots:
-- `HANGAR_DEV_NEEDS_YOU_OPEN` hides gap 4.
-- `HANGAR_DEV_VOICE` hides gap 5.
-- `HANGAR_DEV_ACTIVITY` overrides P4's real activity in debug builds.
-
-Remove them once the gaps are fixed.
+Every seed is behind `cfg!(debug_assertions)`, so no release build reads one. Left: `HANGAR_DEV_SCREENSHOT`, `_SCREENSHOT_AFTER_MS`, `_PREVIEW`, `_MODEL3D_CAPTURE`, `_USE_REAL_DATA`, `_SETTINGS`, `_KIT_TABS`, `_VOICE` (HUD only; the real press works), `_UPDATE_BANNER`, `_PLAN` (only while no pane has reported), `_NAV_RENAME`, `_NAV_MENU`, `_NAV_DRAG`, `_FOCUSED_PANE`. `HANGAR_DEV_NEEDS_YOU_OPEN` and `HANGAR_DEV_ACTIVITY`, which hid gaps, are gone.
 
 ---
 
@@ -513,188 +428,144 @@ Remove them once the gaps are fixed.
 
 ### Data
 
-| Risk | Where | Severity | Fix |
-|---|---|---|---|
-| A read error other than a parse error (I/O, invalid UTF-8, permissions), a non-object root, or a lenient-read failure starts the app empty, and the next change overwrites `state.json`. The TS had the same hole. | `hangar-core/src/store.rs:83`; `state/lenient.rs:38-55`; `app.rs:332-335` | medium (rare, total loss) | Quarantine on every load error, or refuse to save until the person acts, with a notice |
-| `workspace_set_check` writes a whole `orchestration` block built from a snapshot over a panel edit made in between | `control/workspace.rs:205-216` | low | Set only `check_command` inside the patch |
-| The inspector and dock grips write the settings on every pointer move: a save is scheduled and the snapshot republished each time | `inspector/mod.rs:248-253`, `board/mod.rs:569` | cost only | Commit on release, as the TS did |
-| Boards written from a detached window go to another workspace's `board.json` | `board/mod.rs:335-343, 457-478` | medium | Gap 2 |
-| A dev build writes the person's real files outside `HANGAR_DATA_ROOT` | see the list below | medium for dev machines | In debug builds with `HANGAR_DATA_ROOT` set, refuse or ask before the MCP install and autostart |
-
-What a dev build writes outside `HANGAR_DATA_ROOT`:
-- **The MCP install panel** writes the dev binary (`current_exe`, `hangar-core/src/install.rs:153`) into `~/.claude.json`, `~/.codex`, `~/.gemini`, Cursor and VS Code. This replaces the installed app's entry.
-- **The Mobile autostart switch** rewrites `~/.config/autostart/Hangar.AI.desktop` to point at the dev binary (`hangar-core/src/autostart.rs`).
-- **The git-clone trust step** edits `~/.claude.json` (`git_flow/deps.rs:174-190`). The TS did this too.
-
-Checked and safe:
-- The state, the endpoint, the mods and the accounts go under the dev home.
-- `account_remove` and `discard_clone` are guarded.
-- Destructive git operations are confirmed inline.
-- A run on the fixture changed nothing in `state.json`.
+| Risk | Was → now | Where |
+|---|---|---|
+| A read error, a non-object root or a lenient-read failure started the app empty and the next change overwrote `state.json` | medium → closed | `hangar-core/src/store.rs` (set aside byte for byte; if it cannot be moved every save is refused with a notice), `state/lenient.rs:57`, `app.rs:196`; tests `store.rs:309, 329, 362, 392` |
+| `workspace_set_check` could overwrite a panel edit | low → closed | `control/workspace.rs:218`; test `control/tests/workspace.rs:411` |
+| Grips wrote the settings on every pointer move | cost → closed | inspector, board dock and preview grips draw from `panel_drag` and save once on release; Escape cancels |
+| Boards written from a detached window went to another workspace | medium → closed | `board/mod.rs:1229, 1277` |
+| A dev build wrote the person's real files | medium → closed | MCP install and login item refuse whenever `HANGAR_DATA_ROOT` is set (`hangar-core/src/install.rs:170`, `autostart.rs:67`); a clone in an isolated run leaves `~/.claude.json` alone (`Paths::isolated()`) |
+| A Markdown file can show any local image path | new, low | `preview/model.rs:599-626`: no root check, no size cap (gap 5, §7 WP-F) |
 
 ### Processes
 
-| Risk | Where | Severity |
+| Risk | Was → now | Where |
 |---|---|---|
-| In a detached window, Restart all, Reset agents and the presets that close panes kill another workspace's agents. Broadcast types text plus Enter into them. | `toolbar/mod.rs:147, 260, 558-560`; `status_bar/mod.rs:159-170` | high (gap 2) |
-| "Restart N agents" in the MCP servers panel respawns every Claude Code pane, mid-turn ones included, with no warning | `mcp/servers_panel.rs:155-164` | medium (gap 6) |
-| Quit and close kill only the shell (`child.kill()`, no process group), and nothing handles SIGTERM or SIGINT. Processes that ignore SIGHUP survive. The old app was the same. | `hangar-core/src/pty.rs:746-752` | low |
-| The engine's mutex is held across a tick that reads every board; `pty_kill` and `pty_alive` run on async threads | `orchestration/runtime.rs:180-191, 247-259`; `orchestration/live.rs:183-189` | low (stalls, not kills) |
-| `stop_worker` can miss a worker respawned in that instant, then force-remove its worktree | `orchestration/worker.rs:1327, 1371` | very low |
+| Restart all, Reset agents and presets from a detached window hit another workspace; broadcast typed into it | high → closed | `toolbar/per_window.rs`, `status_bar/tests.rs:124` |
+| "Restart N agents" respawned mid-turn panes | medium → closed (decision §0.3) | `mcp/servers_panel.rs` |
+| Quit killed only the shell; no signal handling | low → closed | `hangar-core/src/pty.rs:773`, `app.rs:621`; SIGTERM leaves no pane process (STATUS) |
+| The engine's mutex held across a board read; `pty_kill` on async threads | low → closed | `orchestration/live.rs:40` (`spawn_blocking`); STATUS WP7 |
+| `stop_worker` can miss a worker respawned in that instant, then force-remove its worktree | very low → open | `orchestration/worker.rs:1327, 1371` |
+| A helper window can take the keyboard from a terminal | new, medium (not observed) | `hangar-webview/src/engine.rs`; gap 4 |
+| A test crash (SIGSEGV) about 1 run in 6 when several `iced_test` simulators draw at once | new, low | Mobile page fixed by taking turns; WP8 saw it twice at 32 threads. If it returns, serialize the simulators crate-wide |
 
 ### Commands without consent
 
-| Risk | Where | Severity |
+| Risk | Was → now | Where |
 |---|---|---|
-| A GitHub kit's changed hooks run without being accepted again | `panes/controller.rs:146-159` | **high** (gap 1) |
-| Ctrl+click on a link opens any URI: `file:`, `ssh:`, `git:` and any OSC 8 target, through `open::that_detached`. The TS opened web links only. | `panes/mod.rs:423-426`; `hangar-term/src/links.rs:172` | medium |
-| Programs may write the clipboard (OSC 52). The TS ignored OSC 52. | `panes/pty_link.rs:158-161`; `panes/mod.rs:527` | low (decide, then record the decision in STATUS) |
-| Kitty keyboard protocol on by default: agents that negotiate it get other key encodings than under xterm.js | `hangar-term/src/config.rs` | behaviour change |
+| A GitHub kit's changed hooks ran without being accepted again | **high** → closed | `panes/controller.rs:169-190`; tests `:980, 1033` |
+| Ctrl+click opened any URI (`file:`, `ssh:`, OSC 8 targets) | medium → closed | `panes/mod.rs:471`, `hangar-term/src/links.rs:188` (`http` and `https` only) |
+| Programs may write the clipboard (OSC 52) | low → decided | Disabled (`panes/look.rs:55-63`), as in the old app |
+| Kitty keyboard protocol on by default | behaviour change → open | `hangar-term/src/config.rs:81`; `panes/look.rs` does not turn it off |
 
-Checked and safe:
-- Setup commands run only on a click of Run.
-- Saved commands run only on a click or a shortcut.
-- `tailscale serve` runs only from its button.
-- The updater installs only after Restart.
-- Removing a kit takes two clicks.
-
-Note about this audit's own run: the scratchpad is shared, and its `devhome/data/state.json` (a scratch copy, not the installed app's) was overwritten once before the run moved to its own folder.
+Checked and safe: setup commands run only on a click of Run; saved commands only on a click or a shortcut; `tailscale serve` only from its button; the updater installs only after Restart; removing a kit takes two clicks; a wasm kit tab has no WASI and only `hangar.log` and `hangar.now` as imports, and the same permission codes and messages as `kitApi.ts`.
 
 ---
 
-## 7. Fix list: work packages for parallel agents
+## 7. Remaining work: packages for parallel agents
 
-The packages own disjoint files and are listed most valuable first. Each one reads this file, then PACKAGES.md. Every package ends with `cargo test -p hangar-app`, `cargo clippy -p hangar-app --all-targets -- -D warnings`, and a run through `scripts/native-dev.sh` with a temporary `HANGAR_DEV_HOME`.
+The packages own disjoint files and are listed most valuable first. Where two need one file, the package says who owns which part or who goes first. WP-A is not code and runs first, because most of the numbers above come from reading; WP-J runs last, because it deletes in files the others own. Each package reads this file, then `crates/hangar-app/PACKAGES.md` and the rows it names, and ends with `cargo test -p hangar-app` (plus the crates it touches), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, and where the app is involved a run through `scripts/native-dev.sh` with `HANGAR_DEV_HOME` set to a temporary folder (a debug build refuses to start without it; put a copy of `state/fixtures/typical.json` at `$HANGAR_DEV_HOME/data/state.json`). A package that changes a row's status updates this file. Agents' worktrees are cut from `main`: check `git merge-base --is-ancestor 44cfd25 HEAD` and reset onto `feat/native-rust` first.
 
-### WP1 — Pane launch safety (`panes/**`)
+### WP-A — Run it for real (owns no source files; findings become rows here)
 
-1. Launch kits through `kits::model::load_pane_kits`. Spawn and write the MCP scope with `ids` only. Show `held` with `kit_issue_notes` (the `KitsManageWarnHooks` note). Delete `kits_of` and `kit_notes` (`controller.rs:146-159, 455`).
-2. Take the permission mode and allowed tools from `state::roles::{orchestration_of, ORCHESTRATION_ALLOWED_TOOLS}` (`controller.rs:55, 646`).
-3. Open http and https links only (`mod.rs:423`).
-4. Drop OSC 52 clipboard writes, or put them behind a setting, and record the decision (`pty_link.rs:158`).
-5. Replace the copies of `state_glyph_state`, `format_tokens` and `folder_of` with P4's.
-6. Skip `sync`/`publish` for terminal actions other than Resize and Pressed (`mod.rs:195-207`).
-7. Put the terminal search field behind `keymap::guard`.
+1. Copy a real `state.json` into a dev home and run the native app beside the old one: navigator, toolbar, panes, boards, memory, settings, themes, shortcuts, detached windows. Compare what each shows.
+2. Open Codex, Gemini CLI and OpenCode panes: launch, resume, state glyph, trust prompt, Shift+Enter.
+3. Real keys: Mod+Alt+V with voice on (and a microphone), AltGr and AZERTY digits, US-International dead keys, Mod+, then a category click, F6 and Shift+F6.
+4. An orchestrator with two workers in a scratch repo, to a real landing (it launches a Claude review).
+5. The 3D capture's clipboard copy and save dialog; a Markdown file with a relative `.svg`; a file dropped on a pane.
+6. Hangar Mobile with a real paired phone: a push and the `remote_*` calls.
 
-Verify:
-- A new controller test: a git kit with unaccepted hooks is not in `ids` and its note is shown.
-- In a dev home with such a kit, the pane prints the warning.
-- Ctrl+click on a `file://` link does nothing.
+Verify: every defect found is a new row in §2.
 
-### WP2 — Shell: windows, keys, persistence (`app.rs`, `app/**`, `commands/**`, `shell/**`, `state/**`, `message.rs` docs, `main.rs`; `hangar-core/src/{store.rs, pty.rs, install.rs, autostart.rs}`)
+### WP-B — Windows, macOS and CI (`.github/workflows/**`, `scripts/*.ps1`, `scripts/preview.nsi`, `crates/hangar-app/packaging/**`, `docs/native/PACKAGING.md`, `crates/hangar-webview/build.rs`)
 
-1. A workspace whose window opens (at boot or on detach) joins `ui.opened_ids` (`app/shell.rs:966-991`, `state/store.rs:322-328`).
-2. Revert a detach whose window fails to open, with the `window.openFailed` notice.
-3. Make `view.settings` go through `Intent::OpenSettings(None)` / `Intent::CloseOverlay`, so the sheet syncs (`commands/run.rs:283`).
-4. Pane-focus commands record the focus without clearing overlays. Keep the full landing (`focus_pane`) for notifications, the board and Needs-you; append an intent if one is needed (`commands/run.rs:367-431`).
-5. Keep a broadcast text per window in `ui` (with its parked copy), and give `status_bar` an accessor to read.
-6. On load errors that were not quarantined, and on the lenient read's fallback to empty, do not save until the person acts. Show a notice. In core, quarantine on read errors too.
-7. Route SIGTERM and SIGINT to `quit`; make `pty::kill_all` kill the process group.
-8. In debug builds with `HANGAR_DATA_ROOT` set, `install::mcp_install` and `autostart::set_enabled` refuse with a clear error.
-9. Fix the `PaneRespawned` doc. Decide `shell/ui.rs`'s TODO.
-10. Make pane commands need a tree.
+1. Get CI green: the 7 failing tests of the first run (macOS keymap guard tests, Windows path and webview-serving tests, the Ubuntu `hangar-model3d` capture). Another agent is on it: read `git log` before starting.
+2. Add a Linux packaging smoke job: install the `.deb` in a container, run `hangar-ai --version`, check `hangar-webview` sits beside it.
+3. Point `scripts/preview*.ps1|nsi` at the native layout (they still name `src-tauri/`); give `hangar-webview` its Windows icon resource.
+4. On real machines: install, start, detach a workspace, open a PDF and an HTML kit tab (WebView2, WKWebView), update from an old install, sign with the real key.
 
-Verify:
-- A headless test boots `typical.json`, where `site` is detached, and finds `site` in `opened_ids` and its pane spawned.
-- `pane.focus2` with Settings open keeps the overlay.
-- Mod+, then a category click stays on that category.
-- A truncated, non-UTF-8 `state.json` in a dev home is not overwritten.
+Verify: a CI run with every job green; the checklist of PACKAGING.md ticked on Windows and macOS.
 
-### WP3 — Needs-you and voice (`needs_you/**`, `voice/**`)
+### WP-C — Helper windows (`crates/hangar-webview/src/{engine,protocol,client}.rs`, `crates/hangar-app/src/preview/{webview,windowed}.rs`, `crates/hangar-app/src/kit_tabs/{bridge,view}.rs`)
 
-1. Write `m.live.signals.needs_you` with the item count whenever the items are computed.
-2. Read boards from `board::Live`, and the landing state from `m.live.control.task_delivering`.
-3. Handle `Intent::Dictate` as `Msg::Press`. Check `voice_recording` at start.
-4. Remove `HANGAR_DEV_NEEDS_YOU_OPEN` once the panel opens for real.
+0. First, move the helper-window code out of `preview/mod.rs` (the reconcile and opening at `:725-750`, the media probes at `:1104`) into `preview/windowed.rs`, so that WP-F can own the rest of `preview/mod.rs`. `kit_tabs/mod.rs:558-590` (where an HTML tab's window opens) is WP-C's; the rest of that file is WP-I's.
+1. Add a `focus` flag to the `open` command and open unfocused (tao `with_focused(false)`) whenever an agent or hook opened the window.
+2. Tie each window to being seen: when the panel hides, another tab is in front, or the workspace leaves the screen or sleeps, hide or close the window and bring it back on show (`preview/mod.rs:725-750`).
+3. Pause audio and video when hidden (`eval` of `pause()`). Read a media error from the page's event, not two polls (`preview/mod.rs:1104`).
+4. Ask the engine for `pdfViewerEnabled` before showing a PDF window (no flash).
+5. HTML reload in source mode re-reads the source.
+6. Run the two ignored real-helper tests in CI under a virtual display, plus one test that loads a page with the real `kit.js` under the CSP through the relay.
 
-Verify:
-- A test: a model with a waiting pane and a needs-you task makes `view.needsYou` live, and the panel stays open after `OpenNeedsYou`.
-- A test: `Intent::Dictate` starts the press.
-- A dev run with voice enabled shows the HUD on Mod+Alt+V.
+Verify: a test that a hidden panel closes its helper windows; a dev run where an agent shows a PDF while a terminal has the focus (over `preview_show`) and the terminal keeps it.
 
-### WP4 — Chrome reads and per-window chrome (`navigator/**`, `toolbar/**`, `status_bar/**`, `palette/**`, `pane_menu/**`, `saved_commands/**`, `accounts/switcher.rs`)
+### WP-D — The 3D viewer's behaviour (`crates/hangar-model3d/src/{viewer,camera,render,load/gltf}*`, `crates/hangar-app/src/model3d_view/**`)
 
-1. `navigator/reads.rs`:
-   - `binding` from `ctx.keymap.label` and `title`;
-   - activity and counts from `panes_logic`;
-   - `asleep_at` from `panes_logic.asleep()`;
-   - the kits list from `kits::Live` and `effective_kits`;
-   - `models` from `preview::Live`.
-2. Delete the copies in `navigator/model.rs` and `navigator/clock.rs`. Take the plan from `panes_logic.plan_limits()`, and worker counts from `state::roles::workers_of`.
-3. Toolbar capsule: P4's insight, and `board::Live::task_for_pane`.
-4. Act on the window's own workspace: `ctx.workspace()` in views, `m.window_workspace(focused)` in `update` (the rows of gap 2 in these directories).
-5. Remove the doubled account separators. `can_pin` → `pin_refusal`. A saved-command run from the menu goes through `Intent::RunSavedCommand`.
-6. Put `keymap::guard` on the broadcast input, the palette field and the navigator filter.
+1. Keep a clip's tracks (`load/gltf.rs:591` keeps only the name and length), sample them in the viewer, apply skins and morph targets, autoplay the first clip, keep clip and time on reload; give `animation_bar.rs` its messages (play, clip select, scrub, time).
+2. Show a StageMessage for "GPU unavailable" (`viewer.rs:750, 793` only log), for a lost device with Restart (`ModelLost`, `ModelRestart` are unused), and for iced's software renderer.
+3. Call `set_reduced_motion` (`model3d_view/mod.rs:40`); spread texture uploads over frames (`hangar-model3d/src/render/frame.rs:230`).
+4. Decide whether to match the old look (PMREM environment) and compare side by side.
 
-Verify:
-- iced_test: a tooltip carries the binding.
-- A two-window test: Restart all from a detached window respawns only that workspace's panes.
-- A screenshot with a sleeping workspace shows the moon.
+Verify: `cargo test -p hangar-model3d -p hangar-app model3d_view::`; an animated glb plays in a dev run; `model_snapshot` of it over the control endpoint.
 
-### WP5 — Pane read-models, MCP panel and inspector (`panes_logic/**`, `mcp/**`, `inspector/**`)
+### WP-E — 3D formats (`crates/hangar-model3d/src/load/{draco,meshopt,ktx2,usd,fbx}.rs` new or edited, and the table at `load/gltf.rs:30-40`; start after WP-D merges its change to `gltf.rs`)
 
-1. `running_mcp` from `panes::Live::report(id).mcp`, mapped onto `scope::PaneMcp`. `is_working` from `activity_or_idle`. The inspector's MCP row reads the same provider.
-2. Inspector:
-   - `reading_order` from `state::layout`;
-   - the window's own workspace (`mod.rs:310`, `sections.rs:823`);
-   - `shown` and the width cap from `Panels::of`;
-   - commit the grip on release.
-3. `panes_logic`:
-   - move `bridge_enqueue` in `Mounted` to `spawn_blocking`;
-   - expose a synchronous sleep verdict for the navigator's menu;
-   - add `Msg::Launched{pane, resumed}`, which records the session event and `sessionSince` for agents without the bridge. Afterwards, WP1 adds the one call in `panes/controller.rs`.
+1. Draco, meshopt, KTX2/basis and `KHR_mesh_quantization` in glTF; the extensions clearcoat, transmission, ior, specular, volume and sheen.
+2. USDZ (an `openusd` feature, off by default if it is heavy); ASCII FBX.
 
-Verify:
-- A test of `needs_restart` with a known launch: "up to date" shows, and only stale panes are in Restart.
-- An inspector test shows the MCP row.
+Verify: a fixture of each, drawn by the capture tests; the refusal sentences (`gltf.rs:30`) go away only when the format reads.
 
-### WP6 — Board and orchestration UI (`board/**`, `orchestration_ui/**`)
+### WP-F — 2D viewers (`crates/hangar-app/src/preview/{image,image_stage,markdown,markdown/**,text,code_lines,highlight,viewer,model,tabs,grip,panel,parts,mod}.rs` — `mod.rs` after WP-C's step 0 —, `crates/hangar-core/src/model.rs` for `allowed_roots`, `crates/hangar-ui/src/selectable.rs` new)
 
-1. The board and dock use the window's workspace; messages carry the cwd (`board/mod.rs:240-242, 673-690, 787-798`).
-2. `board_shown` and the dock's maximum from `Panels::of`; commit the grip on release.
-3. Delete `board/agent_pane.rs` and call `panes_logic::find_agent_pane`.
-4. `orchestration_ui` takes `state::roles`; the badge's titles come from `board::Live`.
-5. Put `keymap::guard` on the add-card field and the task dialog's fields.
+1. Open AVIF (the extension is already accepted by `hangar-core/src/preview.rs`); play animated GIF and WebP.
+2. Markdown: read local images only under the allowed roots and under a size cap (make `hangar_core::model::allowed_roots` `pub`); decode a local `.svg`; decide on `http(s)` images (fetch with a cap, or keep the link) and write the decision in STATUS; stop hiding front matter.
+3. A selectable text widget in `hangar-ui` (new file) for code, Markdown and the diff (`git_ui/diff_view.rs`), so Copy can copy a selection.
+4. Tab strip: arrow keys after a click, scroll to the tab by its real position (`mod.rs:506`), Escape only inside the panel. Smaller: a PowerShell grammar, the wrap toggle keeps the scroll, a travelling loading bar, a "failed" card for a broken SVG, the info strip's container steps, `preview.show`-style size caps in `open_file`.
 
-Verify:
-- A two-window test: a card added in a detached window lands on that workspace's board.
-- A worker badge follows a title edited from its worktree.
+Verify: the tests of `preview::`; a README with a `../` and an absolute image path draws neither.
 
-### WP7 — Control and orchestration seams (`control/**`, `orchestration/**`)
+### WP-G — Keyboard focus and accessibility (`crates/hangar-ui/**` except WP-F's `selectable.rs`, `shell/regions.rs`, `toolbar/mod.rs`, `stats/view.rs`, `needs_you/view.rs`, `board/view.rs`, `accounts/settings_page.rs`, `navigator/view.rs`, `panes/zoom_bar.rs`)
 
-1. `workspace_set_check` patches `check_command` only.
-2. `control/run.rs`'s `ordered` and `orchestration_of` → `state::layout` / `state::roles`. `control/delivery.rs`'s `launch_account` → `accounts::model::launch_account_with`.
-3. A Land that fails also sends `needs_you::Msg::LandFailed`.
-4. Orchestration:
-   - handle `Intent::AnnounceRole`, and drop the inference from `PinOrchestrator`;
-   - use `control::port::is_open` for detached workspaces (`orchestration/live.rs:113, 403`);
-   - run `pty_kill` and `pty_alive` on `spawn_blocking`;
-   - do not hold the engine mutex across the board reads;
-   - `orchestration/roles.rs` → `state::roles`.
-5. Decide whether to keep the `AccessHost` fallback now that P15 installs `Hook::Preview`.
+1. Decide first, in STATUS: a focusable button and segmented control in hangar-ui built on iced's `Focusable` operation, or waiting for an accessibility tree in iced. iced 0.14 has neither.
+2. Then give a ring, Enter and Space to buttons; the arrow walk to the toolbar's views group and the stats segments; F6 focus inside regions; the first action of Needs-you; autofocus and Escape for the account rename; a press on the navigator filter; Tab between board cards (a shell `focus_next`); the zoom bar's Escape.
+3. Screen-reader names and roles where the toolkit allows.
 
-Verify:
-- A refused pin queues no role message.
-- A panel edit made during `set_check` survives.
-- `worker_list` reports a detached workspace's workers as running.
+Verify: `iced_test` walks of each control.
 
-### WP8 — Field guards and small partials (`settings/**`, `workspace_dialog/**`, `memory/**`, `kits/**`, `git_ui/**`, `stats/**`)
+### WP-H — Terminal (`crates/hangar-term/**`, `crates/hangar-app/src/panes/{look,grid,mod}.rs`, `crates/hangar-app/src/panes_logic/mod.rs`, `services/terminals.rs`, `settings/previews.rs`)
 
-1. Put `keymap::guard` around the settings search, every workspace dialog field, the memory search and composer, the kits library filter, and the worktree create form.
-2. Workspace dialog:
-   - pane names from `state::pane_names::pick_pane_names`;
-   - Enter submits from every field;
-   - focus the first field on open;
-   - an unknown clone percentage shows an indeterminate bar.
-3. Session picker and diff partials, where iced allows.
+1. `letterSpacing` in hangar-term and in the settings preview (`settings/previews.rs`).
+2. The unfocused pane at 0.94 opacity (pane opacity in hangar-term).
+3. Decide, with a real agent, plain click versus Ctrl/Cmd+click for links, and the kitty keyboard default (`hangar-term/src/config.rs:81`): compare the bytes Claude Code and Codex receive with xterm.js's.
+4. Keyboard resize of dividers (a key handler under F6 on the grid).
+5. The trust prompt looked for in the viewport only: `TerminalAccess::screen_text` and `panes_logic/mod.rs:1284`.
+6. Check the file-drop highlight with a real drag; selection foreground colour; fractional scaling.
 
-Verify: `iced_test`: Mod+Shift+Enter in a guarded field runs the shortcut and types nothing.
+Verify: hangar-term tests; the widget tests of `panes::`.
 
-### Later, needing work outside these files
+### WP-I — Kit tab leftovers (`crates/hangar-app/src/kit_tabs/{api,deps,mod,native,tabs,catalog}.rs`, `crates/hangar-kit-host/**`, `crates/hangar-kit-sdk/**`, `crates/hangar-core/src/kits/**`)
 
-- `letterSpacing` and unfocused-pane opacity in hangar-term.
-- Keyboard resizing of dividers (iced has no focusable separator).
-- A synchronous trust-prompt read of the viewport only: `TerminalAccess::screen_text` (`services/terminals.rs`, after WP2) and `panes/hub.rs` (after WP1).
-- The 16-busy-pane benchmark.
-- Running Codex, Gemini CLI and OpenCode panes in the real app.
-- The parity pass the inventory plans (§8.1, wave 2): the old app beside the new one on a copy of a real `state.json`.
+1. `preview.show`: the 256 MB cap and its message (`deps.rs:319`); `panes.send` reports a failed `bridge_enqueue` (`deps.rs:345`); `panes.changed` driven by activity events, not the 1 s tick (`mod.rs:642`).
+2. Cache compiled wasm modules on disk; draw a native tab's text inputs, selects, tables and trees with hangar-ui widgets (the kit-host renderer).
+3. Tests for the `unloadable` fallback, the StageMessages, "left" detection, `reconcile`.
+4. Decide the release number for kits with `schema: 2` (kits-native.md says 2.0.0; the branch is 1.12.1).
+
+Verify: `cargo test -p hangar-app kit_tabs:: -p hangar-kit-host`; the `hello-native` example kit still opens.
+
+### WP-J — Cleanup, last and alone (`crates/hangar-app/src/{main.rs,kits/model.rs,kits/setup.rs,panes_logic/{hibernation,file_drop,pane_agent,mod}.rs,git_ui/worktrees/naming.rs,orchestration/worker.rs,git_flow/deps.rs,status_bar/mod.rs}` and whichever file holds a dead item; `crates/hangar-core/src/worktrees.rs` new)
+
+1. Delete the 122 dead items or put them under `#[cfg(test)]`, then remove `#![allow(dead_code, unused_variables)]` from `main.rs:12` so the compiler guards them.
+2. One worktree naming, in hangar-core (`git_ui/worktrees/naming.rs:45`, `orchestration/worker.rs:299`).
+3. `stop_worker` race (`orchestration/worker.rs:1305-1375`); `git_flow/deps.rs:228-234` through `state::roles`.
+4. The status bar's git beat on window visibility, not focus (`status_bar/mod.rs:244`).
+5. If the SIGSEGV flake returns, serialize `iced_test` simulators crate-wide.
+
+Verify: the whole workspace builds with no `allow(dead_code)`.
+
+### Decisions the owner should make
+
+- Native release number (kits-native.md assumes 2.0.0).
+- Plain click or Ctrl/Cmd+click for terminal links; kitty keyboard protocol on or off by default.
+- Whether PDF, HTML, video and audio should stay in their own window or be drawn in the panel (a native PDF renderer, a bundled pdf.js); the helper-window behaviour of WP-C holds either way.
+- Whether web images in Markdown should be fetched.
+- Whether an unfinished 3D format set (no Draco, no USDZ) blocks parity, or is documented as a change.
+- Whether iced stays on 0.14 without keyboard focus and accessibility, or the project moves to something that has them.
