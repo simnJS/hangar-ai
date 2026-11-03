@@ -79,6 +79,26 @@ export const en = {
   "kitsTab.left": "This tab left its page.",
   "kitsTab.leftHint":
     "A kit's tab only speaks to Hangar from the page it opened on, so the page it went to was closed. Reload the tab to start again.",
+  // A page of a kit, which a browser engine draws in a window of its own.
+  "kitsTab.windowHint":
+    "A browser engine draws this kit's page, in a window of its own, so that it stays apart from Hangar.",
+  // A native tab: WebAssembly, drawn by Hangar itself.
+  "kitsTab.nativeIsolatedHint":
+    "This tab of the kit {kit} runs sealed off: it reaches neither Hangar nor the network, only what the workspace granted it: {permissions}.",
+  "kitsTab.nativeIsolatedNothing":
+    "This tab of the kit {kit} runs sealed off: it reaches neither Hangar nor the network, and the workspace granted it nothing.",
+  "kitsTab.native.starting": "Starting the tab…",
+  "kitsTab.native.notStarted": "This tab could not start",
+  "kitsTab.native.stopped": "This tab stopped",
+  "kitsTab.native.startAgain": "Start it again",
+  "kitsTab.native.newer": "A part of this tab needs a newer Hangar.",
+  "kitsTab.native.imageNeedsData": "This image needs data.read",
+  "kitsTab.native.imageTooLarge": "This image is larger than 10 MB",
+  "kitsTab.native.confirm": "Confirm",
+  "kitsTab.native.cancel": "Cancel",
+  "kitsTab.fallback": "Shown as a page",
+  "kitsTab.fallbackHint":
+    "This Hangar could not load the tab's module, so it shows the kit's page instead: {reason}",
 } as const;
 
 export const fr: Record<keyof typeof en, string> = {
@@ -143,4 +163,22 @@ export const fr: Record<keyof typeof en, string> = {
   "kitsTab.left": "Cet onglet a quitté sa page.",
   "kitsTab.leftHint":
     "L'onglet d'un kit ne parle à Hangar que depuis la page où il s'est ouvert : la page où il est allé a donc été fermée. Recharge l'onglet pour repartir.",
+  "kitsTab.windowHint":
+    "Un moteur de navigateur dessine la page de ce kit, dans une fenêtre à part, pour qu'elle reste à l'écart de Hangar.",
+  "kitsTab.nativeIsolatedHint":
+    "Cet onglet du kit {kit} tourne à l'écart : il n'atteint ni Hangar ni le réseau, seulement ce que le workspace lui a accordé : {permissions}.",
+  "kitsTab.nativeIsolatedNothing":
+    "Cet onglet du kit {kit} tourne à l'écart : il n'atteint ni Hangar ni le réseau, et le workspace ne lui a rien accordé.",
+  "kitsTab.native.starting": "Démarrage de l'onglet…",
+  "kitsTab.native.notStarted": "Cet onglet n'a pas pu démarrer",
+  "kitsTab.native.stopped": "Cet onglet s'est arrêté",
+  "kitsTab.native.startAgain": "Le relancer",
+  "kitsTab.native.newer": "Une partie de cet onglet demande un Hangar plus récent.",
+  "kitsTab.native.imageNeedsData": "Cette image demande data.read",
+  "kitsTab.native.imageTooLarge": "Cette image dépasse 10 Mo",
+  "kitsTab.native.confirm": "Confirmer",
+  "kitsTab.native.cancel": "Annuler",
+  "kitsTab.fallback": "Affiché comme page",
+  "kitsTab.fallbackHint":
+    "Ce Hangar n'a pas pu charger le module de l'onglet : il montre la page du kit à la place : {reason}",
 };

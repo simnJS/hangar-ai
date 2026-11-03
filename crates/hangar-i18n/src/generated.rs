@@ -1390,6 +1390,10 @@ pub enum Key {
     KitsTabDisabledHint,
     /// `kitsTab.everywhereReviewCommands`
     KitsTabEverywhereReviewCommands,
+    /// `kitsTab.fallback`
+    KitsTabFallback,
+    /// `kitsTab.fallbackHint`
+    KitsTabFallbackHint,
     /// `kitsTab.filesSecrets`
     KitsTabFilesSecrets,
     /// `kitsTab.isolated`
@@ -1420,6 +1424,28 @@ pub enum Key {
     KitsTabMissing,
     /// `kitsTab.missingHint`
     KitsTabMissingHint,
+    /// `kitsTab.native.cancel`
+    KitsTabNativeCancel,
+    /// `kitsTab.native.confirm`
+    KitsTabNativeConfirm,
+    /// `kitsTab.native.imageNeedsData`
+    KitsTabNativeImageNeedsData,
+    /// `kitsTab.native.imageTooLarge`
+    KitsTabNativeImageTooLarge,
+    /// `kitsTab.native.newer`
+    KitsTabNativeNewer,
+    /// `kitsTab.native.notStarted`
+    KitsTabNativeNotStarted,
+    /// `kitsTab.native.startAgain`
+    KitsTabNativeStartAgain,
+    /// `kitsTab.native.starting`
+    KitsTabNativeStarting,
+    /// `kitsTab.native.stopped`
+    KitsTabNativeStopped,
+    /// `kitsTab.nativeIsolatedHint`
+    KitsTabNativeIsolatedHint,
+    /// `kitsTab.nativeIsolatedNothing`
+    KitsTabNativeIsolatedNothing,
     /// `kitsTab.paletteGroup`
     KitsTabPaletteGroup,
     /// `kitsTab.paletteOpen`
@@ -1458,6 +1484,8 @@ pub enum Key {
     KitsTabTabParams,
     /// `kitsTab.tools`
     KitsTabTools,
+    /// `kitsTab.windowHint`
+    KitsTabWindowHint,
     /// `manager.created`
     ManagerCreated,
     /// `manager.failed`
@@ -3479,7 +3507,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1731;
+pub const KEY_COUNT: usize = 1745;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4172,6 +4200,8 @@ impl Key {
         Key::KitsTabDisabled,
         Key::KitsTabDisabledHint,
         Key::KitsTabEverywhereReviewCommands,
+        Key::KitsTabFallback,
+        Key::KitsTabFallbackHint,
         Key::KitsTabFilesSecrets,
         Key::KitsTabIsolated,
         Key::KitsTabIsolatedHint,
@@ -4187,6 +4217,17 @@ impl Key {
         Key::KitsTabMenuNone,
         Key::KitsTabMissing,
         Key::KitsTabMissingHint,
+        Key::KitsTabNativeCancel,
+        Key::KitsTabNativeConfirm,
+        Key::KitsTabNativeImageNeedsData,
+        Key::KitsTabNativeImageTooLarge,
+        Key::KitsTabNativeNewer,
+        Key::KitsTabNativeNotStarted,
+        Key::KitsTabNativeStartAgain,
+        Key::KitsTabNativeStarting,
+        Key::KitsTabNativeStopped,
+        Key::KitsTabNativeIsolatedHint,
+        Key::KitsTabNativeIsolatedNothing,
         Key::KitsTabPaletteGroup,
         Key::KitsTabPaletteOpen,
         Key::KitsTabPermCommand,
@@ -4206,6 +4247,7 @@ impl Key {
         Key::KitsTabTabHint,
         Key::KitsTabTabParams,
         Key::KitsTabTools,
+        Key::KitsTabWindowHint,
         Key::ManagerCreated,
         Key::ManagerFailed,
         Key::ManagerFailedWith,
@@ -5908,6 +5950,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "kitsTab.disabled", en: Text::plain("This kit is no longer enabled on this workspace."), fr: Text::plain("Ce kit n'est plus activé sur ce workspace.") },
     Message { id: "kitsTab.disabledHint", en: Text::plain("Enable it again on the workspace to use this tab."), fr: Text::plain("Réactive-le sur le workspace pour te servir de cet onglet.") },
     Message { id: "kitsTab.everywhereReviewCommands", en: Text::plain("Changed commands to accept: this kit's tabs run none of them until then."), fr: Text::plain("Commandes modifiées à accepter\u{202f}: les onglets de ce kit n'en lancent aucune d'ici là.") },
+    Message { id: "kitsTab.fallback", en: Text::plain("Shown as a page"), fr: Text::plain("Affiché comme page") },
+    Message { id: "kitsTab.fallbackHint", en: Text::plain("This Hangar could not load the tab's module, so it shows the kit's page instead: {reason}"), fr: Text::plain("Ce Hangar n'a pas pu charger le module de l'onglet\u{202f}: il montre la page du kit à la place\u{202f}: {reason}") },
     Message { id: "kitsTab.filesSecrets", en: Text::plain("This tab can both read and change your project's files, so it can also read hidden files such as .env, and the secrets they hold. Its page has no network of its own, but the kit's code can pass them on: to an agent with panes.send, and to whatever else the tab holds."), fr: Text::plain("Cet onglet peut à la fois lire et modifier les fichiers de votre projet\u{202f}: il peut donc aussi lire les fichiers cachés comme .env, et les secrets qu'ils contiennent. Sa page n'a pas de réseau, mais le code du kit peut les transmettre\u{202f}: à un agent avec panes.send, et à tout ce que l'onglet détient d'autre.") },
     Message { id: "kitsTab.isolated", en: Text::plain("Runs isolated"), fr: Text::plain("Exécuté à l'écart") },
     Message { id: "kitsTab.isolatedHint", en: Text::plain("This page of the kit {kit} runs in a frame of its own: it reaches neither Hangar nor the network, only what the workspace granted it: {permissions}."), fr: Text::plain("Cette page du kit {kit} tourne dans un cadre à part\u{202f}: elle n'atteint ni Hangar ni le réseau, seulement ce que le workspace lui a accordé\u{202f}: {permissions}.") },
@@ -5923,6 +5967,17 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "kitsTab.menuNone", en: Text::plain("No kit enabled on this workspace has tabs."), fr: Text::plain("Aucun kit activé sur ce workspace n'a d'onglet.") },
     Message { id: "kitsTab.missing", en: Text::plain("This tab is no longer in an installed kit."), fr: Text::plain("Cet onglet ne fait plus partie d'un kit installé.") },
     Message { id: "kitsTab.missingHint", en: Text::plain("The kit was removed, or an update took this tab out of it."), fr: Text::plain("Le kit a été retiré, ou une mise à jour en a retiré cet onglet.") },
+    Message { id: "kitsTab.native.cancel", en: Text::plain("Cancel"), fr: Text::plain("Annuler") },
+    Message { id: "kitsTab.native.confirm", en: Text::plain("Confirm"), fr: Text::plain("Confirmer") },
+    Message { id: "kitsTab.native.imageNeedsData", en: Text::plain("This image needs data.read"), fr: Text::plain("Cette image demande data.read") },
+    Message { id: "kitsTab.native.imageTooLarge", en: Text::plain("This image is larger than 10 MB"), fr: Text::plain("Cette image dépasse 10 Mo") },
+    Message { id: "kitsTab.native.newer", en: Text::plain("A part of this tab needs a newer Hangar."), fr: Text::plain("Une partie de cet onglet demande un Hangar plus récent.") },
+    Message { id: "kitsTab.native.notStarted", en: Text::plain("This tab could not start"), fr: Text::plain("Cet onglet n'a pas pu démarrer") },
+    Message { id: "kitsTab.native.startAgain", en: Text::plain("Start it again"), fr: Text::plain("Le relancer") },
+    Message { id: "kitsTab.native.starting", en: Text::plain("Starting the tab…"), fr: Text::plain("Démarrage de l'onglet…") },
+    Message { id: "kitsTab.native.stopped", en: Text::plain("This tab stopped"), fr: Text::plain("Cet onglet s'est arrêté") },
+    Message { id: "kitsTab.nativeIsolatedHint", en: Text::plain("This tab of the kit {kit} runs sealed off: it reaches neither Hangar nor the network, only what the workspace granted it: {permissions}."), fr: Text::plain("Cet onglet du kit {kit} tourne à l'écart\u{202f}: il n'atteint ni Hangar ni le réseau, seulement ce que le workspace lui a accordé\u{202f}: {permissions}.") },
+    Message { id: "kitsTab.nativeIsolatedNothing", en: Text::plain("This tab of the kit {kit} runs sealed off: it reaches neither Hangar nor the network, and the workspace granted it nothing."), fr: Text::plain("Cet onglet du kit {kit} tourne à l'écart\u{202f}: il n'atteint ni Hangar ni le réseau, et le workspace ne lui a rien accordé.") },
     Message { id: "kitsTab.paletteGroup", en: Text::plain("Kits"), fr: Text::plain("Kits") },
     Message { id: "kitsTab.paletteOpen", en: Text::plain("Open the kit tab {title}"), fr: Text::plain("Ouvrir l'onglet de kit {title}") },
     Message { id: "kitsTab.permCommand", en: Text::plain("run the command {name} on your computer, with your logins"), fr: Text::plain("lancer la commande {name} sur votre ordinateur, avec vos identifiants") },
@@ -5942,6 +5997,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "kitsTab.tabHint", en: Text::plain("{title}, a tab of the kit {kit}"), fr: Text::plain("{title}, un onglet du kit {kit}") },
     Message { id: "kitsTab.tabParams", en: Text::plain("With {params}"), fr: Text::plain("Avec {params}") },
     Message { id: "kitsTab.tools", en: Text::plain("Tools of the kit tab {title}"), fr: Text::plain("Outils de l'onglet de kit {title}") },
+    Message { id: "kitsTab.windowHint", en: Text::plain("A browser engine draws this kit's page, in a window of its own, so that it stays apart from Hangar."), fr: Text::plain("Un moteur de navigateur dessine la page de ce kit, dans une fenêtre à part, pour qu'elle reste à l'écart de Hangar.") },
     Message { id: "manager.created", en: Text::plain("The project manager is in the HQ"), fr: Text::plain("Le chef de projet est dans le QG") },
     Message { id: "manager.failed", en: Text::plain("Could not open the project manager"), fr: Text::plain("Impossible d'ouvrir le chef de projet") },
     Message { id: "manager.failedWith", en: Text::plain("Could not open the project manager: {error}"), fr: Text::plain("Impossible d'ouvrir le chef de projet\u{202f}: {error}") },
