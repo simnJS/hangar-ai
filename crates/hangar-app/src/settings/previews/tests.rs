@@ -77,3 +77,63 @@ fn the_browse_dialog_opens_on_the_folder_already_chosen() {
     assert_eq!(browse_start(Some("/no/such/folder/anywhere")), home);
     assert_eq!(browse_start(Some("   ")), home);
 }
+
+// ---- The terminal preview ---------------------------------------------------------------------------
+
+/// The width the preview's text is laid out at: a text in a container, in a
+/// window of its own, found by its id.
+fn width_of(spacing: f32, content: &str) -> f32 {
+    use iced::widget::Id;
+    use iced_test::Simulator;
+    let id = Id::new("spaced");
+    let font = font_of("monospace");
+    let line = iced::widget::text::LineHeight::Relative(1.3);
+    let view: Element<'_, Message> = container(spaced_text(
+        content,
+        13.0,
+        font,
+        line,
+        Color::WHITE,
+        spacing,
+    ))
+    .id(id.clone())
+    .into();
+    let mut ui = Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(900.0, 100.0),
+        view,
+    );
+    ui.find(id)
+        .expect("the preview text is laid out")
+        .bounds()
+        .width
+}
+
+#[test]
+fn a_letter_spacing_widens_the_preview_text_by_that_much_for_each_character() {
+    let content = "0123456789 => != -> |&";
+    let chars = content.chars().count() as f32;
+    let plain = width_of(0.0, content);
+    let wide = width_of(3.0, content);
+    let tight = width_of(-1.0, content);
+    // Every character, the last one included.
+    assert!(
+        (wide - plain - 3.0 * chars).abs() < 1.0,
+        "{plain} -> {wide}"
+    );
+    // A tightening one takes its pixel from between the characters.
+    assert!(
+        (plain - tight - (chars - 1.0)).abs() < 1.0,
+        "{plain} -> {tight}"
+    );
+}
+
+#[test]
+fn the_preview_spaces_what_the_panes_space() {
+    let spaced = |letter_spacing| Settings {
+        letter_spacing,
+        ..Settings::default()
+    };
+    assert_eq!(crate::panes::letter_spacing_of(&spaced(1.5)), 1.5);
+    assert_eq!(crate::panes::letter_spacing_of(&spaced(f64::NAN)), 0.0);
+}

@@ -58,9 +58,20 @@ pub fn palette(theme: &Theme) -> Palette {
 ///   to paste into another shell, is not worth the convenience. The person
 ///   copies with the selection, as before. Offering it back would take a
 ///   setting, which the TS never had.
+/// - The kitty keyboard protocol is off. xterm.js 6.0 has none, so no program
+///   in the old terminal ever got to ask for it: Claude Code sends the query
+///   (`CSI ? u`, then `CSI c` to learn whether anyone answered) and, with no
+///   answer, reads the classic encoding, which the tests in hangar-term's
+///   `xterm_keys.rs` pin to xterm.js's own. Answering it would hand every
+///   agent that supports the protocol a different set of bytes for Escape,
+///   Enter with a modifier, Ctrl+letter and the rest than the ones they were
+///   used with here, for a gain (telling Shift+Enter from Enter) that
+///   `shift_enter` already gives agent panes. Turning it on would be a
+///   setting of its own.
 pub fn config(settings: &Settings, agent: AgentId) -> Config {
     Config {
         osc52: Osc52::Disabled,
+        kitty_keyboard: false,
         scrollback: usize::try_from(settings.scrollback).unwrap_or(usize::MAX),
         cursor_shape: match settings.cursor_style {
             CursorStyle::Block => CursorShape::Block,
@@ -78,8 +89,7 @@ pub fn config(settings: &Settings, agent: AgentId) -> Config {
     }
 }
 
-/// Font, size and line height as the settings write them. Letter spacing has
-/// no counterpart in hangar-term yet (its "Not done" list).
+/// Font, size, line height and letter spacing as the settings write them.
 pub fn font(settings: &Settings) -> Font {
     let size = if settings.font_size.is_finite() && settings.font_size > 0.0 {
         settings.font_size as f32
@@ -91,7 +101,11 @@ pub fn font(settings: &Settings) -> Font {
     } else {
         1.3
     };
+    // `letterSpacing` went to xterm.js as it stood, a number of pixels (the
+    // slider offers -1 to 3 in halves); hangar-term takes care of a value
+    // that is not one.
     Font::from_css_stack(&settings.font_family, size, line_height)
+        .with_letter_spacing(settings.letter_spacing as f32)
 }
 
 pub fn look(settings: &Settings, ws: &Workspace, agent: AgentId) -> Look {
@@ -152,6 +166,109 @@ mod tests {
     }
 
     #[test]
+    fn a_program_that_asks_for_the_kitty_protocol_gets_the_classic_keys_as_under_xterm_js() {
+        use hangar_term::{
+            Event, KeyEventKind, KeyOptions, KeyPress, TermMode, Terminal, encode_key,
+        };
+        use iced::keyboard::key::{Named, NativeCode, Physical};
+        use iced::keyboard::{Key, Location, Modifiers};
+
+        let press = |key: Key, modifiers: Modifiers| KeyPress {
+            modified_key: key.clone(),
+            key,
+            physical_key: Physical::Unidentified(NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            kind: KeyEventKind::Press,
+        };
+        for agent in [AgentId::Shell, AgentId::Claude, AgentId::Codex] {
+            let config = config(&Settings::default(), agent);
+            let options = KeyOptions {
+                alt_sends_escape: config.alt_sends_escape,
+                shift_enter: config.shift_enter.clone(),
+            };
+            let mut terminal = Terminal::new(config, 80, 24);
+            // What Claude Code does at start, then what a program does once it
+            // has an answer: ask for the flags, and push the first ones.
+            let events = terminal.feed(b"\x1b[?u\x1b[>1u\x1b[>31u\x1b[c");
+            let answers: Vec<&[u8]> = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Write(bytes) => Some(bytes.as_slice()),
+                    _ => None,
+                })
+                .collect();
+            // Only the device attributes are answered; xterm.js answered no
+            // more, so the program concludes there is no protocol.
+            assert_eq!(answers.len(), 1, "{agent:?}: {answers:?}");
+            assert!(answers[0].ends_with(b"c"), "{agent:?}: {answers:?}");
+            assert!(
+                !terminal
+                    .mode()
+                    .intersects(TermMode::KITTY_KEYBOARD_PROTOCOL),
+                "{agent:?}"
+            );
+
+            // So the keys are the classic ones: Escape is one byte, Ctrl+C
+            // the interrupt, and Shift+Enter what the agent panes bind it to.
+            let bytes = |key: Key, modifiers: Modifiers| {
+                encode_key(&press(key, modifiers), terminal.mode(), &options)
+            };
+            assert_eq!(
+                bytes(Key::Named(Named::Escape), Modifiers::empty()),
+                Some(b"\x1b".to_vec())
+            );
+            assert_eq!(
+                bytes(Key::Named(Named::Enter), Modifiers::empty()),
+                Some(b"\r".to_vec())
+            );
+            let mut ctrl_c = press(Key::Character("c".into()), Modifiers::CTRL);
+            ctrl_c.text = Some("\u{3}".into());
+            assert_eq!(
+                encode_key(&ctrl_c, terminal.mode(), &options),
+                Some(b"\x03".to_vec())
+            );
+            let shift_enter = bytes(Key::Named(Named::Enter), Modifiers::SHIFT);
+            let expected = (agent != AgentId::Shell).then(|| b"\x1b\r".to_vec());
+            assert_eq!(shift_enter, expected.or(Some(b"\r".to_vec())), "{agent:?}");
+        }
+        // The same bytes, in a terminal that does offer the protocol: the
+        // program is answered and the keys become `CSI u`. This is the
+        // difference the setting above avoids.
+        let mut open = Terminal::new(Config::default(), 80, 24);
+        open.feed(b"\x1b[>1u");
+        assert!(open.mode().intersects(TermMode::KITTY_KEYBOARD_PROTOCOL));
+    }
+
+    #[test]
+    fn selected_text_keeps_its_colour_and_stays_readable_in_every_theme() {
+        // No theme sets `selectionForeground`, as in the old terminal, so the
+        // text under a selection is drawn in the colour it had: the palette
+        // carries no colour for it, and the selection is the theme's
+        // background colour for selected text.
+        let rgb = |color: iced::Color| {
+            let [r, g, b, _] = color.into_rgba8();
+            hangar_theme::Rgb(r, g, b)
+        };
+        let mut worst = (f64::MAX, "");
+        for theme in hangar_theme::themes() {
+            let palette = palette(theme);
+            assert_eq!(palette.selection_background, theme.terminal.selection);
+            let ratio = hangar_theme::contrast_ratio(
+                rgb(palette.foreground),
+                rgb(palette.selection_background),
+            );
+            if ratio < worst.0 {
+                worst = (ratio, theme.id);
+            }
+        }
+        // WCAG's floor for large text; xterm.js made no promise, and the
+        // dimmest pairs of the 33 themes are above it.
+        assert!(worst.0 >= 3.0, "{worst:?}");
+    }
+
+    #[test]
     fn the_default_cursor_is_a_bar() {
         let settings = Settings::default();
         assert_eq!(
@@ -177,6 +294,27 @@ mod tests {
             theme_of(&settings, &plain).id,
             hangar_theme::by_id_or_default(&settings.theme_id).id
         );
+    }
+
+    #[test]
+    fn the_font_carries_the_letter_spacing_of_the_settings() {
+        let mut settings = Settings::default();
+        assert_eq!(font(&settings).letter_spacing, 0.0);
+        settings.letter_spacing = 1.5;
+        assert_eq!(font(&settings).letter_spacing, 1.5);
+        settings.letter_spacing = -1.0;
+        assert_eq!(font(&settings).letter_spacing, -1.0);
+        // A hand-edited file may hold anything; the terminal stays usable.
+        settings.letter_spacing = f64::NAN;
+        assert_eq!(font(&settings).letter_spacing, 0.0);
+        settings.letter_spacing = 1e9;
+        assert_eq!(font(&settings).letter_spacing, 13.0);
+        // And the look, which is compared to know when to restyle, changes
+        // with it: no pane would be restyled otherwise.
+        let ws = Workspace::default();
+        let before = look(&Settings::default(), &ws, AgentId::Shell);
+        settings.letter_spacing = 2.0;
+        assert_ne!(look(&settings, &ws, AgentId::Shell), before);
     }
 
     #[test]

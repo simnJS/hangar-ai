@@ -15,6 +15,21 @@ use crate::panes::term_widget::pane_terminal;
 use crate::panes::{Msg, Picker, State, look, search};
 use crate::state::types::{Pane, Workspace};
 
+/// How opaque a terminal is when its pane is not the focused one
+/// (`.pane:not(.pane--focused) .pane__term { opacity: 0.94 }`): the panes you
+/// are not typing into step back a little, only a little, as a theme's dim
+/// output is often near 3:1 already. The TS faded the change in over a
+/// transition (`--dur`, 140 ms); here it is at once, since a frame of the
+/// old look costs nothing and the fade would keep the window redrawing.
+pub const UNFOCUSED_OPACITY: f32 = 0.94;
+
+/// What a pane's terminal is drawn over, and how opaque it is, for a pane
+/// that is `focused` or not. The pane's own background (`var(--bg)`) is what
+/// shows through.
+pub fn dimming(focused: bool, theme: &hangar_theme::Theme) -> Option<(iced::Color, f32)> {
+    (!focused).then_some((theme.colors.bg, UNFOCUSED_OPACITY))
+}
+
 /// Where the pane stands in its grid.
 pub struct Placing {
     pub focused: bool,
@@ -67,7 +82,11 @@ pub fn view<'a>(
 
     // Shortcuts reach the app before the program: the keymap says which.
     let filter = Box::new(crate::keymap::terminal_filter(ctx));
-    let terminal = pane_terminal(&rt.link, &pane.id, rt.look.padding, filter);
+    let mut terminal = pane_terminal(&rt.link, &pane.id, rt.look.padding, filter)
+        .scale(crate::panes::scale_of(st, ctx.window, ctx.metrics.scale));
+    if let Some((behind, opacity)) = dimming(placing.focused, t) {
+        terminal = terminal.dimmed(behind, opacity);
+    }
     let mut body = stack![terminal].width(Length::Fill).height(Length::Fill);
     if let Some(open) = &rt.search {
         let status = rt.link.lock().search_status();
@@ -128,4 +147,19 @@ fn note_row<'a>(ctx: Ctx<'a>, pane: &'a str, note: &'a str) -> Element<'a, Messa
         ..container::Style::default()
     })
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_panes_that_are_not_focused_step_back() {
+        let theme = hangar_theme::default_theme();
+        assert_eq!(dimming(true, theme), None);
+        let (behind, opacity) = dimming(false, theme).expect("an unfocused pane");
+        // The pane's background shows through, at 0.94.
+        assert_eq!(behind, theme.colors.bg);
+        assert_eq!(opacity, 0.94);
+    }
 }
