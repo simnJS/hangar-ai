@@ -9,6 +9,8 @@ pub mod activation;
 pub mod activation_model;
 pub mod gallery;
 pub mod settings;
+#[cfg(test)]
+mod snapshot;
 pub mod workspace_section;
 
 use iced::widget::{column, container, row, text};

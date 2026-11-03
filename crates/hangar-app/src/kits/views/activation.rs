@@ -44,37 +44,9 @@ pub fn view<'a>(
     kit_id: &'a str,
     _ws: Option<&'a WsId>,
 ) -> Element<'a, Message> {
-    let Some(activation) = st.activation.as_ref().filter(|a| a.kit == kit_id) else {
+    let Some((kit, model, peek)) = model_of(st, ctx, kit_id) else {
         return Space::new().into();
     };
-    let Some(kit) = ctx.model.live.kits.find(kit_id) else {
-        return Space::new().into();
-    };
-    let entry = activation.entry(ctx.model, &st.draft);
-    let workspace_name = activation
-        .setup_workspace()
-        .and_then(|ws| ctx.model.workspace(ws))
-        .map(|ws| ws.name.as_str());
-    let input = ActivationInput {
-        kit,
-        inspection: activation.inspection.as_ref(),
-        steps: activation.steps.as_deref(),
-        entry: entry.as_ref(),
-        // The workspace is named when the kit is enabled on that workspace; for
-        // "everywhere" it is only where a setup step runs.
-        workspace_name: match activation.target {
-            Target::Workspace(_) => workspace_name,
-            Target::Draft | Target::Everywhere => None,
-        },
-        everywhere: activation.target == Target::Everywhere,
-        can_run: activation.setup_workspace().is_some(),
-        os: current_os(),
-        running: activation.running.as_deref(),
-        ran: activation.ran.as_ref(),
-        error: activation.error.as_deref(),
-    };
-    let model = ActivationModel::build(ctx.i18n, &input);
-    let peek = activation.ran.is_some();
     let close = Message::Intent(Intent::CloseOverlay);
 
     let mut card = dialog(ctx.theme, model.title.clone(), body(ctx, kit, &model))
@@ -108,6 +80,42 @@ pub fn view<'a>(
     } else {
         dialog::over(ctx.theme, Space::new(), Some(card)).into()
     }
+}
+
+/// What the dialog says for the open activation of this kit, the kit it is
+/// about, and whether it has stepped aside.
+pub(super) fn model_of<'a>(
+    st: &'a State,
+    ctx: Ctx<'a>,
+    kit_id: &str,
+) -> Option<(&'a KitInfo, ActivationModel, bool)> {
+    let activation = st.activation.as_ref().filter(|a| a.kit == kit_id)?;
+    let kit = ctx.model.live.kits.find(kit_id)?;
+    let entry = activation.entry(ctx.model, &st.draft);
+    let workspace_name = activation
+        .setup_workspace()
+        .and_then(|ws| ctx.model.workspace(ws))
+        .map(|ws| ws.name.as_str());
+    let input = ActivationInput {
+        kit,
+        inspection: activation.inspection.as_ref(),
+        steps: activation.steps.as_deref(),
+        entry: entry.as_ref(),
+        // The workspace is named when the kit is enabled on that workspace; for
+        // "everywhere" it is only where a setup step runs.
+        workspace_name: match activation.target {
+            Target::Workspace(_) => workspace_name,
+            Target::Draft | Target::Everywhere => None,
+        },
+        everywhere: activation.target == Target::Everywhere,
+        can_run: activation.setup_workspace().is_some(),
+        os: current_os(),
+        running: activation.running.as_deref(),
+        ran: activation.ran.as_ref(),
+        error: activation.error.as_deref(),
+    };
+    let model = ActivationModel::build(ctx.i18n, &input);
+    Some((kit, model, activation.ran.is_some()))
 }
 
 /// The dialog's body.
