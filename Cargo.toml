@@ -60,6 +60,17 @@ unicode-normalization = "0.1"
 # Dates in the local time zone (hangar-core and hangar-update already use it).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 usvg = { version = "0.45", default-features = false }
+# The frames of an animated GIF or WebP, which the preview plays itself: iced
+# draws still pictures only. The crate and both decoders are already built
+# for iced's `image` feature and hangar-model3d; only the animation API of
+# them is used here, and the PNG encoder for the tests' fixtures.
+image = { version = "0.25", default-features = false, features = ["gif", "webp", "png"] }
+# AVIF, which the preview reads itself (iced's image feature has no AV1
+# decoder): the container by `avif-parse`, the pictures by `re_rav1d`, a Rust
+# port of dav1d. Its assembly is off, so no `nasm` is needed to build the
+# app: a still picture decodes in a moment without it.
+avif-parse = "2"
+re_rav1d = { version = "0.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # The clipboard with pictures in it: iced's own is text only, and the 3D
 # view copies its capture as an image. The Wayland feature lets it use a
 # compositor's data-control protocol; X11 (XWayland) is what it falls back on.

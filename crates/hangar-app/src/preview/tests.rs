@@ -18,7 +18,6 @@ use hangar_theme::{fonts, to_iced};
 
 use super::access::Shared;
 use super::highlight;
-use super::image::Bytes;
 use super::image_stage::Measured;
 use super::model::{self, FileKind, Size as FrameSize};
 use super::store::Status;
@@ -204,7 +203,7 @@ impl Harness {
             .expect("open")
             .path
             .clone();
-        let bytes: Bytes = super::image::read(Path::new(&path)).expect("readable");
+        let bytes = super::image::read(Path::new(&path)).expect("readable");
         self.viewer(id, ViewerMsg::Bytes(Ok(bytes)));
         // What the stage tells once the renderer has the picture.
         let natural = match image_size(&path) {

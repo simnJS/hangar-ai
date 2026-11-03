@@ -17,7 +17,7 @@ use hangar_theme::{style, tokens};
 use super::code_lines;
 use super::glyph::Glyph;
 use super::highlight::Lines;
-use super::image::{self, Bytes, Picture};
+use super::image::{self, Loaded as Pictured, Picture};
 use super::markdown::{self, Rendered};
 use super::model::{self, FileKind, Kind, language_of};
 use super::parts::{self, Notice};
@@ -65,7 +65,7 @@ pub enum ViewerMsg {
     /// Reads the text again.
     Retry,
     /// An image's bytes, or why they could not be read.
-    Bytes(Result<Bytes, String>),
+    Bytes(Result<Pictured, String>),
     ToggleSource,
     ToggleWrap,
     /// The lines scrolled: which rows to build next.

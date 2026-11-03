@@ -6,11 +6,11 @@
 //! fitted it follows the panel's size; once the person zooms or moves it, it
 //! keeps their framing.
 //!
-//! An animated GIF shows its first frame: iced draws still images, and the
-//! frames of a GIF are not played.
+//! An animated GIF or WebP plays: `decode.rs` makes its frames off the UI
+//! thread and the stage shows the one the clock says (`image_stage.rs`). An
+//! AVIF is decoded there too, to pixels.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use iced::widget::{container, text};
 use iced::{Element, Length};
@@ -19,15 +19,13 @@ use hangar_i18n::{Key, Number, args};
 use hangar_theme::{style, tokens};
 use hangar_ui::Icon;
 
+use super::decode;
+pub use super::decode::{Bytes, Loaded};
 use super::glyph::Glyph;
 use super::image_stage::{Gesture, Measured, NUDGE, Pic, Stage, StageKey};
 use super::model::{self, FIT_MARGIN, ImageFrame, Size, ZOOM_STEP, fit_zoom, zoom_around};
 use super::parts::{self, Feel, Mark};
 use crate::ctx::Ctx;
-
-/// The bytes of an image, read off the UI thread.
-#[derive(Debug, Clone)]
-pub struct Bytes(pub Arc<Vec<u8>>);
 
 /// What the image viewer is told.
 #[derive(Debug, Clone)]
@@ -43,21 +41,30 @@ pub enum Msg {
     ActualSize,
 }
 
-/// Reads an image file whole. Its handle is made from the bytes, not from the
-/// path: the renderer keys what it decoded on the handle, and a path that is
-/// rewritten must not come back from its cache.
-pub fn read(path: &Path) -> Result<Bytes, String> {
-    std::fs::read(path)
-        .map(|bytes| Bytes(Arc::new(bytes)))
-        .map_err(|err| format!("{}: {err}", path.display()))
+/// Reads an image file whole, and decodes what the renderer cannot: the
+/// frames of an animation, an AVIF. Its handle is made from the bytes, not
+/// from the path: the renderer keys what it decoded on the handle, and a path
+/// that is rewritten must not come back from its cache.
+pub fn read(path: &Path) -> Result<Loaded, String> {
+    let bytes = decode::read_file(path)?;
+    // An SVG is drawn from its source by the stage, whatever its bytes say.
+    if model::has_source(&path.to_string_lossy()) {
+        return Ok(Loaded::Encoded(Bytes(std::sync::Arc::new(bytes))));
+    }
+    decode::load(bytes).map_err(|why| format!("{}: {why}", path.display()))
 }
 
-/// The picture for these bytes: vector for an SVG, raster for the rest.
-pub fn pic_of(path: &str, bytes: &Bytes) -> Pic {
-    if model::has_source(path) {
-        Pic::Vector(iced::widget::svg::Handle::from_memory(bytes.0.to_vec()))
-    } else {
-        Pic::Raster(iced::widget::image::Handle::from_bytes(bytes.0.to_vec()))
+/// The picture for what was read: vector for an SVG, raster for the rest.
+pub fn pic_of(path: &str, loaded: &Loaded) -> Pic {
+    match loaded {
+        Loaded::Encoded(bytes) if model::has_source(path) => {
+            Pic::Vector(iced::widget::svg::Handle::from_memory(bytes.0.to_vec()))
+        }
+        Loaded::Encoded(bytes) => {
+            Pic::Raster(iced::widget::image::Handle::from_bytes(bytes.0.to_vec()))
+        }
+        Loaded::Pixels(handle, ..) => Pic::Raster(handle.clone()),
+        Loaded::Animated(animation) => Pic::Animated(animation.clone()),
     }
 }
 
@@ -374,11 +381,13 @@ mod tests {
         assert_eq!(percent(Locale::En, 32.0), "3,200%");
     }
 
+    fn encoded(bytes: &[u8]) -> Loaded {
+        Loaded::Encoded(Bytes(std::sync::Arc::new(bytes.to_vec())))
+    }
+
     #[test]
     fn an_svg_is_vector_and_the_rest_raster() {
-        let bytes = Bytes(Arc::new(
-            b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
-        ));
+        let bytes = encoded(b"<svg xmlns='http://www.w3.org/2000/svg'/>");
         assert!(matches!(pic_of("a/logo.svg", &bytes), Pic::Vector(_)));
         assert!(matches!(pic_of("a/shot.png", &bytes), Pic::Raster(_)));
     }
@@ -389,7 +398,7 @@ mod tests {
         // decoded on it, so a file rewritten in place (the same path) is
         // decoded afresh, where a handle made from the path would be served
         // from the renderer's memory.
-        let bytes = Bytes(Arc::new(vec![1, 2, 3]));
+        let bytes = encoded(&[1, 2, 3]);
         let before = pic_of("a/shot.png", &bytes);
         let after = pic_of("a/shot.png", &bytes);
         assert_ne!(before, after);

@@ -55,7 +55,9 @@
 //! `Helper::route`.
 
 pub mod access;
+pub mod avif;
 pub mod code_lines;
+pub mod decode;
 pub mod dev;
 pub mod glyph;
 pub mod grip;
