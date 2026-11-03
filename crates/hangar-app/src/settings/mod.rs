@@ -570,17 +570,21 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
         .collect();
     let active = visible.into_iter().find(|c| Some(c.id) == active_id);
 
-    let search_field = input::search_field(
-        t,
-        &st.query,
-        match ctx.i18n.t(Key::SettingsSearch) {
-            std::borrow::Cow::Borrowed(words) => words,
-            std::borrow::Cow::Owned(_) => "",
-        },
-    )
-    .clear_tip(ctx.t(Key::SettingsSearchClear).into_owned())
-    .on_input(|text| Message::Settings(Msg::Query(text)))
-    .on_clear(Message::Settings(Msg::ClearQuery));
+    // Guarded: a shortcut such as Mod+Shift+Enter is the keymap's even here.
+    let search_field = crate::keymap::guard(
+        ctx,
+        input::search_field(
+            t,
+            &st.query,
+            match ctx.i18n.t(Key::SettingsSearch) {
+                std::borrow::Cow::Borrowed(words) => words,
+                std::borrow::Cow::Owned(_) => "",
+            },
+        )
+        .clear_tip(ctx.t(Key::SettingsSearchClear).into_owned())
+        .on_input(|text| Message::Settings(Msg::Query(text)))
+        .on_clear(Message::Settings(Msg::ClearQuery)),
+    );
 
     let mut nav = column![].spacing(1);
     for (id, label, icon_name, count) in entries {
@@ -733,5 +737,7 @@ fn hairline<'a>(color: iced::Color) -> Element<'a, Message> {
         .into()
 }
 
+#[cfg(test)]
+pub(crate) mod guard_testing;
 #[cfg(test)]
 mod tests;
