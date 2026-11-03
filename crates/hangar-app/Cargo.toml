@@ -37,3 +37,7 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+
+[dev-dependencies]
+# Draws and drives views headless (the P8 views are checked with it).
+iced_test.workspace = true
