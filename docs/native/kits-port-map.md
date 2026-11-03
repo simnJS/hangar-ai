@@ -163,8 +163,10 @@ text inputs, the comment and "Send to" fields, the foot, `ui.confirm` before dro
   .fill(ink).ink(ink.contrast()).fallback((x - r - pad, y))`, with `line = default_stroke(w, h)`.
 - Zoom → `.zoom(None)` for Fit (`on_fit` gives its scale for the label), `.zoom(Some(z))` inside
   `scroll(…).axis(Axis::Both)` past it; the steps of `logic.stepZoom` stay the kit's.
-- Undo on Ctrl+Z → `shortcut("mod+z", Undo)` (it also comes while a note field has the focus:
-  ignore it when the last update was a keystroke in a field, or accept it, as decided).
+- Undo on Ctrl+Z → `shortcut("mod+z", Undo)`. It also comes while a note's field has the focus
+  (iced's fields have no undo of their own), which the page ignored: the kit keeps which note was
+  typed in last, set by the field's `on_input` and cleared by a press on the canvas, and ignores the
+  shortcut while one is.
 - Export → `cx.call(api::CanvasExport::of(&canvas, ".hangar/annotations/20251031-211456.png"),
   …)`: Hangar draws it, scales it down to fit 10 MB, writes it new (`conflict` → the next name, as
   `logic.names` does). Its answer's `width`, `height` and `scale` go in the JSON.
