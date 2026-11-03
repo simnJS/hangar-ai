@@ -2093,3 +2093,6 @@ fn failure_page<'a>(style: KitStyle, failure: &'a Failure, logs: Vec<&'a LogEntr
         .width(Length::Fill)
         .into()
 }
+
+#[cfg(test)]
+mod tests;

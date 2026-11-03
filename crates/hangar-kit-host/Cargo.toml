@@ -19,3 +19,7 @@ iced.workspace = true
 wasmtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# Drives the widgets that are hangar-ui's as a person would (render/tests.rs).
+iced_test.workspace = true
