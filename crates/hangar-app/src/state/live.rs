@@ -101,6 +101,19 @@ pub struct Signals {
     /// P6: how many items Needs-you lists; `view.needsYou` is live while
     /// there are some.
     pub needs_you: usize,
+    /// P9, P12, P15: a side panel's grip is held, and this is the width the
+    /// panel is drawn at meanwhile, in points (the setting's unit). Its
+    /// package writes the setting once, when the grip is let go, and clears
+    /// this: the frame (`Panels::of`) follows the pointer without a store
+    /// action, a save and a snapshot for every move of it.
+    pub panel_drag: Option<PanelDrag>,
+}
+
+/// A side panel's width while its grip is held (`Signals::panel_drag`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelDrag {
+    pub panel: Drawer,
+    pub width: f32,
 }
 
 /// A workspace's preview panel (the panel part of `lib/modelStore.ts`).

@@ -263,20 +263,26 @@ impl Panels {
             m.ui.body_width
                 .get(&w)
                 .map_or(f32::INFINITY, |width| width * scale);
+        // A grip held: that panel follows the pointer, and its setting is
+        // written once the grip is let go.
+        let width = |panel: Drawer, saved: f64| match m.live.signals.panel_drag {
+            Some(drag) if drag.panel == panel => drag.width,
+            _ => saved as f32,
+        };
         let sides = place(SidePanelsInput {
             room,
             scale,
             inspector: PanelInput {
                 open: settings.inspector_open,
-                width: settings.inspector_width as f32,
+                width: width(Drawer::Inspector, settings.inspector_width),
             },
             dock: terminals.then_some(PanelInput {
                 open: settings.board_dock_open,
-                width: settings.board_dock_width as f32,
+                width: width(Drawer::Dock, settings.board_dock_width),
             }),
             model: (terminals && models_open && !model_expanded).then_some(PanelInput {
                 open: preview.open,
-                width: settings.model_panel_width as f32,
+                width: width(Drawer::Model, settings.model_panel_width),
             }),
         });
         let slot = |place: PanelPlace, shown: bool| Slot {
@@ -651,5 +657,42 @@ mod tests {
         assert_eq!(sides.model.width, 440.0);
         assert_eq!(sides.dock.width, 420.0);
         assert_eq!(sides.inspector.max, INSPECTOR_MAX);
+    }
+
+    /// A held grip is drawn where the pointer is, before any setting is
+    /// written: the save comes once, on release.
+    #[test]
+    fn a_held_grip_is_drawn_at_its_width_while_the_setting_waits() {
+        use crate::state::{AppState, PanelDrag};
+        let mut m = Model::default();
+        let w = window::Id::unique();
+        m.window_opened(w, WindowKind::Main);
+        m.hydrate(AppState {
+            workspaces: vec![crate::state::Workspace {
+                id: "w1".into(),
+                ..Default::default()
+            }],
+            active_workspace_id: Some("w1".into()),
+            ..AppState::default()
+        });
+        let saved = m.settings().inspector_width as f32;
+        let revision = m.revision();
+        assert_eq!(Panels::of(&m, w).inspector.width, saved);
+
+        m.live.signals.panel_drag = Some(PanelDrag {
+            panel: Drawer::Inspector,
+            width: 400.0,
+        });
+        let panels = Panels::of(&m, w);
+        assert_eq!(panels.inspector.width, 400.0);
+        // The other panels keep their settings' widths.
+        assert_eq!(panels.dock.width, m.settings().board_dock_width as f32);
+        assert_eq!(m.revision(), revision);
+        // Still clamped as the setting would be.
+        m.live.signals.panel_drag = Some(PanelDrag {
+            panel: Drawer::Inspector,
+            width: 9000.0,
+        });
+        assert_eq!(Panels::of(&m, w).inspector.width, INSPECTOR_MAX);
     }
 }

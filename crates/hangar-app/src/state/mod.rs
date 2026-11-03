@@ -42,8 +42,8 @@ pub struct Loaded {
 // packages land.
 #[allow(unused_imports)]
 pub use live::{
-    AgentActivity, BridgeEvent, GlyphState, Live, PaneActivity, PaneInsight, PlanLimits,
-    PreviewPanel, Signals, Ui, WindowUi,
+    AgentActivity, BridgeEvent, GlyphState, Live, PaneActivity, PaneInsight, PanelDrag,
+    PlanLimits, PreviewPanel, Signals, Ui, WindowUi,
 };
 pub use snapshot::Snapshot;
 #[allow(unused_imports)]
