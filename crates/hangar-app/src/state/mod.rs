@@ -223,17 +223,6 @@ impl Model {
         ws.panes.iter().find(|pane| &pane.id == id)
     }
 
-    /// What window `w`'s broadcast field holds. Each window has its own, as
-    /// each Tauri window's App had its own `broadcast`: the focused one's is
-    /// `ui.broadcast`, the others' wait in `ui.parked`.
-    pub fn broadcast_in(&self, w: window::Id) -> &str {
-        if self.is_focused_window(w) {
-            &self.ui.broadcast
-        } else {
-            self.ui.parked.get(&w).map_or("", |p| p.broadcast.as_str())
-        }
-    }
-
     /// Workspace `ws` is drawn from now on: it joins `ui.opened_ids`, so its
     /// panes start and stay alive while it is hidden. The main window mounts
     /// a workspace when it is first shown there (App.tsx's `openedIds`); a

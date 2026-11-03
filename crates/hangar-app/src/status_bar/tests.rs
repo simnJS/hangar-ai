@@ -109,6 +109,18 @@ fn each_window_holds_its_own_line() {
 }
 
 #[test]
+fn a_window_that_closes_takes_its_line_with_it() {
+    let (_, main, own) = two_windows();
+    let mut st = State::default();
+    st.set_broadcast_text(main, "run the tests".into());
+    st.set_broadcast_text(own, "ls -la".into());
+    st.forget(own);
+    assert_eq!(st.broadcast_text(own), "");
+    assert_eq!(st.broadcast_text(main), "run the tests");
+    assert!(!st.broadcast.contains_key(&own));
+}
+
+#[test]
 fn a_send_from_a_workspace_window_reaches_that_workspace_and_empties_only_its_field() {
     let (model, main, own) = two_windows();
     let mut st = State::default();
