@@ -30,10 +30,9 @@ use serde::{Deserialize, Serialize};
 
 use hangar_core::board::Task;
 
-use super::roles::{orchestrator, workers_of};
 use super::text::{MAX_TEXT, is_hangar_author, minutes, one_line, same_name, task_ref};
 use crate::state::live::{BridgeEvent, TurnPhase};
-use crate::state::roles::NEEDS_YOU_LABEL;
+use crate::state::roles::{NEEDS_YOU_LABEL, orchestrator_of, workers_of};
 use crate::state::types::{AppState, Pane, PaneId, Workspace, WsId};
 use crate::state::{AgentActivity, PaneActivity};
 
@@ -913,7 +912,7 @@ fn orchestrated(state: &AppState) -> Vec<(Workspace, Pane)> {
     state
         .workspaces
         .iter()
-        .filter_map(|ws| orchestrator(ws).map(|pane| (ws.clone(), pane.clone())))
+        .filter_map(|ws| orchestrator_of(ws).map(|pane| (ws.clone(), pane.clone())))
         .collect()
 }
 
@@ -965,7 +964,7 @@ impl OrchestratorEngine {
         let Some(ws) = workspace_in(&state, workspace_id) else {
             return;
         };
-        let Some(orchestrator) = orchestrator(&ws) else {
+        let Some(orchestrator) = orchestrator_of(&ws) else {
             return;
         };
         // Starting and stopping workers is the orchestrator's own doing when
@@ -1031,7 +1030,7 @@ impl OrchestratorEngine {
         }
         let state = io.state();
         let ws = workspace_in(&state, workspace_id);
-        let orchestrator = ws.as_ref().and_then(|ws| orchestrator(ws).cloned());
+        let orchestrator = ws.as_ref().and_then(|ws| orchestrator_of(ws).cloned());
         let (Some(ws), Some(orchestrator)) = (ws, orchestrator) else {
             let s = self.space(workspace_id);
             s.pending.clear();
@@ -1088,7 +1087,7 @@ impl OrchestratorEngine {
         let Some(current) = workspace_in(&state, &ws.id) else {
             return Ok(());
         };
-        let Some(orchestrator) = orchestrator(&current).cloned() else {
+        let Some(orchestrator) = orchestrator_of(&current).cloned() else {
             return Ok(());
         };
         let busy = self.in_turn(io, &orchestrator);
@@ -1211,7 +1210,7 @@ impl OrchestratorEngine {
             let Some(ws) = workspace_in(&state, &w.workspace_id) else {
                 continue;
             };
-            if orchestrator(&ws).is_none() || w.exit_sent {
+            if orchestrator_of(&ws).is_none() || w.exit_sent {
                 continue;
             }
             if workers_of(&ws)
@@ -1337,7 +1336,7 @@ impl OrchestratorEngine {
         self.space(workspace_id).timer = None;
         let state = io.state();
         let ws = workspace_in(&state, workspace_id)?;
-        let orchestrator = orchestrator(&ws)?.clone();
+        let orchestrator = orchestrator_of(&ws)?.clone();
         self.send(io, &ws, &orchestrator, now)
     }
 

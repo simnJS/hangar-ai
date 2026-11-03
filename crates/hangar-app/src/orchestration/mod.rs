@@ -29,7 +29,6 @@ pub mod live;
 pub mod manager_feed;
 pub mod port;
 pub mod projects;
-pub mod roles;
 pub mod runtime;
 pub mod text;
 pub mod worker;
@@ -228,4 +227,27 @@ pub fn on_event(
         _ => {}
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::types::{OrchestrationSettings, Workspace};
+
+    #[test]
+    fn reads_the_settings_through_the_shells_roles_with_the_branch_trimmed() {
+        // What the engine's own copy held to; the shell's `orchestration_of`
+        // is the one read now, for the workers' base branch and the
+        // deliveries' target.
+        let ws = Workspace {
+            orchestration: Some(OrchestrationSettings {
+                branch: Some("  develop ".into()),
+                ..OrchestrationSettings::default()
+            }),
+            ..Workspace::default()
+        };
+        assert_eq!(
+            crate::state::roles::orchestration_of(&ws).branch.as_deref(),
+            Some("develop")
+        );
+    }
 }

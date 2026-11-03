@@ -28,10 +28,9 @@ use serde::{Deserialize, Serialize};
 use hangar_core::board::Task;
 
 use super::events::{EngineIo, timing::*};
-use super::roles::manager_of;
 use super::text::{MAX_TEXT, is_hangar_author, one_line, task_ref};
 use crate::state::AgentActivity;
-use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
+use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL, manager_of};
 use crate::state::types::{AppState, Pane, PaneId, PaneRole, Workspace, WsId};
 
 /// What waits for the person (`ManagerEvent`): the four things the phone's
