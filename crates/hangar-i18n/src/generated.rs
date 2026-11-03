@@ -2370,6 +2370,36 @@ pub enum Key {
     PreviewZoomIn,
     /// `preview.zoomOut`
     PreviewZoomOut,
+    /// `push.boardDone`
+    PushBoardDone,
+    /// `push.boardDoneMany`
+    PushBoardDoneMany,
+    /// `push.boardDoneOne`
+    PushBoardDoneOne,
+    /// `push.files`
+    PushFiles,
+    /// `push.list`
+    PushList,
+    /// `push.paneWaits`
+    PushPaneWaits,
+    /// `push.paneWaitsBody`
+    PushPaneWaitsBody,
+    /// `push.panesWait`
+    PushPanesWait,
+    /// `push.question`
+    PushQuestion,
+    /// `push.questions`
+    PushQuestions,
+    /// `push.readyToLand`
+    PushReadyToLand,
+    /// `push.readyToLandMany`
+    PushReadyToLandMany,
+    /// `push.sharedFile`
+    PushSharedFile,
+    /// `push.sharedImage`
+    PushSharedImage,
+    /// `push.sharedWhat`
+    PushSharedWhat,
     /// `search.case`
     SearchCase,
     /// `search.close`
@@ -3479,7 +3509,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1731;
+pub const KEY_COUNT: usize = 1746;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4662,6 +4692,21 @@ impl Key {
         Key::PreviewZoom,
         Key::PreviewZoomIn,
         Key::PreviewZoomOut,
+        Key::PushBoardDone,
+        Key::PushBoardDoneMany,
+        Key::PushBoardDoneOne,
+        Key::PushFiles,
+        Key::PushList,
+        Key::PushPaneWaits,
+        Key::PushPaneWaitsBody,
+        Key::PushPanesWait,
+        Key::PushQuestion,
+        Key::PushQuestions,
+        Key::PushReadyToLand,
+        Key::PushReadyToLandMany,
+        Key::PushSharedFile,
+        Key::PushSharedImage,
+        Key::PushSharedWhat,
         Key::SearchCase,
         Key::SearchClose,
         Key::SearchDown,
@@ -6398,6 +6443,21 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "preview.zoom", en: Text::plain("Zoom"), fr: Text::plain("Zoom") },
     Message { id: "preview.zoomIn", en: Text::plain("Zoom in"), fr: Text::plain("Zoomer") },
     Message { id: "preview.zoomOut", en: Text::plain("Zoom out"), fr: Text::plain("Dézoomer") },
+    Message { id: "push.boardDone", en: Text::plain("Every task is done"), fr: Text::plain("Toutes les tâches sont faites") },
+    Message { id: "push.boardDoneMany", en: Text::plain("{where}: {n} tasks on the board"), fr: Text::plain("{where}\u{202f}: {n} tâches au tableau") },
+    Message { id: "push.boardDoneOne", en: Text::plain("{where}: 1 task on the board"), fr: Text::plain("{where}\u{202f}: 1 tâche au tableau") },
+    Message { id: "push.files", en: Text::plain("{n} files for you"), fr: Text::plain("{n} fichiers pour vous") },
+    Message { id: "push.list", en: Text::plain("{where}: {list}"), fr: Text::plain("{where}\u{202f}: {list}") },
+    Message { id: "push.paneWaits", en: Text::plain("{pane} waits for you"), fr: Text::plain("{pane} vous attend") },
+    Message { id: "push.paneWaitsBody", en: Text::plain("{where}: a permission or a question"), fr: Text::plain("{where}\u{202f}: une permission ou une question") },
+    Message { id: "push.panesWait", en: Text::plain("{n} panes wait for you"), fr: Text::plain("{n} panneaux vous attendent") },
+    Message { id: "push.question", en: Text::plain("A question for you"), fr: Text::plain("Une question pour vous") },
+    Message { id: "push.questions", en: Text::plain("{n} questions for you"), fr: Text::plain("{n} questions pour vous") },
+    Message { id: "push.readyToLand", en: Text::plain("Ready to merge"), fr: Text::plain("Prête à fusionner") },
+    Message { id: "push.readyToLandMany", en: Text::plain("{n} ready to merge"), fr: Text::plain("{n} prêtes à fusionner") },
+    Message { id: "push.sharedFile", en: Text::plain("{pane} sent you a file"), fr: Text::plain("{pane} vous a envoyé un fichier") },
+    Message { id: "push.sharedImage", en: Text::plain("{pane} sent you an image"), fr: Text::plain("{pane} vous a envoyé une image") },
+    Message { id: "push.sharedWhat", en: Text::plain("{where}: {what}"), fr: Text::plain("{where}\u{202f}: {what}") },
     Message { id: "search.case", en: Text::plain("Match case ({keys})"), fr: Text::plain("Respecter la casse ({keys})") },
     Message { id: "search.close", en: Text::plain("Close ({keys})"), fr: Text::plain("Fermer ({keys})") },
     Message { id: "search.down", en: Text::plain("Match below ({keys})"), fr: Text::plain("Résultat en dessous ({keys})") },
