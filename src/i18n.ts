@@ -1338,6 +1338,10 @@ const en = {
   "mcpScope.upToDate": "Every agent already runs with this choice.",
   "mcpScope.busy_one": "{n} agent is still working and will be interrupted.",
   "mcpScope.busy_other": "{n} agents are still working and will be interrupted.",
+  "mcpScope.held_one":
+    "{n} agent is in the middle of a turn: it keeps its servers until the turn ends.",
+  "mcpScope.held_other":
+    "{n} agents are in the middle of a turn: they keep their servers until the turns end.",
   "mcpScope.restart_one": "Restart the agent",
   "mcpScope.restart_other": "Restart {n} agents",
   "mcpScope.restartNone": "Restart the agents",
@@ -2935,6 +2939,10 @@ const fr: Record<Key, string> = {
   "mcpScope.upToDate": "Tous les agents tournent déjà avec ce choix.",
   "mcpScope.busy_one": "{n} agent travaille encore : il sera interrompu.",
   "mcpScope.busy_other": "{n} agents travaillent encore : ils seront interrompus.",
+  "mcpScope.held_one":
+    "{n} agent est au milieu d'un tour : il garde ses serveurs jusqu'à la fin du tour.",
+  "mcpScope.held_other":
+    "{n} agents sont au milieu d'un tour : ils gardent leurs serveurs jusqu'à la fin des tours.",
   "mcpScope.restart_one": "Relancer l'agent",
   "mcpScope.restart_other": "Relancer les {n} agents",
   "mcpScope.restartNone": "Relancer les agents",

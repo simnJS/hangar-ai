@@ -17,7 +17,7 @@ use hangar_ui::tail_text::tail_text;
 use hangar_ui::{Icon, icon, tip};
 use iced::widget::text::{self, Text};
 use iced::widget::{button, column, container, mouse_area, row, space as filler};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding, mouse};
+use iced::{Alignment, Background, Border, Color, Element, Length, Padding, mouse, window};
 
 use super::format;
 use super::sources::{self, TaskCard};
@@ -263,7 +263,7 @@ pub(super) fn session<'a>(
 
 /// The servers a custom launch named, joined; `None` when the pane inherits
 /// Claude Code's own (`PaneMcp`).
-fn mcp_servers(mcp: &PaneMcp) -> Option<String> {
+pub(super) fn mcp_servers(mcp: &PaneMcp) -> Option<String> {
     match &mcp.mode {
         PaneMcpMode::Inherit => None,
         PaneMcpMode::Custom { servers } => Some(servers.join(", ")),
@@ -813,14 +813,14 @@ pub(super) fn activity<'a>(
 
 // ---- The clock ----------------------------------------------------------------------------
 
-/// Whether something on screen counts time, so that the half-minute clock
-/// is worth running: a start time or a cost "over" it, or a task in `doing`,
-/// in a section that is not folded.
-pub(super) fn counts_time(m: &Model) -> bool {
-    if !super::shown(m) {
+/// Whether something on screen in window `w` counts time, so that the
+/// half-minute clock is worth running: a start time or a cost "over" it, or a
+/// task in `doing`, in a section that is not folded.
+pub(super) fn counts_time(m: &Model, w: window::Id) -> bool {
+    if !super::shown_in(m, w) {
         return false;
     }
-    let Some(ws) = m.active_workspace() else {
+    let Some(ws) = m.window_workspace(w) else {
         return false;
     };
     let Some((pane, _)) = sources::focused_pane(m, ws) else {
