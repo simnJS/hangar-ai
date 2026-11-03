@@ -203,6 +203,7 @@ pub struct SearchField<'a, M> {
     on_submit: Option<M>,
     id: Option<Id>,
     clear_tip: String,
+    clearable: bool,
     width: Length,
 }
 
@@ -220,6 +221,7 @@ pub fn search_field<'a, M>(
         on_submit: None,
         id: None,
         clear_tip: String::from("Clear"),
+        clearable: true,
         width: Length::Fill,
     }
 }
@@ -253,6 +255,14 @@ impl<'a, M> SearchField<'a, M> {
         self
     }
 
+    /// Whether the clear button is there at all (it is, by default). A field
+    /// whose owner keeps the text elsewhere and has no way to clear it leaves
+    /// the button out.
+    pub fn clearable(mut self, clearable: bool) -> Self {
+        self.clearable = clearable;
+        self
+    }
+
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
@@ -264,7 +274,7 @@ impl<'a, M: Clone + 'a> From<SearchField<'a, M>> for Element<'a, M> {
         let t = field.theme;
         // Emptying the field is a message the caller already handles, when it
         // has not named one for the button.
-        let clear = if field.value.is_empty() {
+        let clear = if field.value.is_empty() || !field.clearable {
             None
         } else {
             field.on_clear.clone().or_else(|| {
