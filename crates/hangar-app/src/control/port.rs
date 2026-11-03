@@ -175,6 +175,12 @@ pub trait AppPort: Send + Sync + 'static {
     /// `tokio::time::sleep` in the app; nothing in the tests.
     fn sleep(&self, ms: u64) -> BoxFuture<()>;
 
+    /// Runs `task` in the background, as the TS's `void promise` did: a
+    /// delivery after its answer, a watch on a new orchestrator's pane.
+    fn spawn(&self, task: BoxFuture<()>) {
+        tokio::spawn(task);
+    }
+
     /// Epoch milliseconds now; fixed in the tests.
     fn now_ms(&self) -> u64 {
         super::types::now_ms()
