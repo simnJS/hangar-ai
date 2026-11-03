@@ -18,7 +18,9 @@ use crate::message::Message;
 use crate::panes::grid::{Grid, Slot};
 use crate::panes::header::PADDING_X;
 use crate::panes::zoom_bar::{self, Other};
-use crate::panes::{State, focused_pane, keyboard_free, terminal_pane, view_pane, zoomed_pane};
+use crate::panes::{
+    State, focus_on_panes, focused_pane, keyboard_free, terminal_pane, view_pane, zoomed_pane,
+};
 use crate::state::layout as geometry;
 use crate::state::types::SplitDir;
 use crate::state::{AgentActivity, Workspace};
@@ -159,7 +161,8 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
             .find(|id| Some(*id) == focused.as_ref()),
         size,
         move |count| tr.tn(Key::DropPaste, count, &[]).into_owned(),
-    );
+    )
+    .keyboard_elsewhere(!focus_on_panes(ctx.model));
     // The boundaries take keys only where the keyboard is the grid's: no
     // dialog open over it, no field holding it.
     if keyboard_free(ctx.model) {

@@ -965,11 +965,16 @@ fn keyboard_pane(m: &Model) -> Option<PaneId> {
 
 /// Nothing else holds the keyboard: no dialog, no other region, no field.
 fn keyboard_free(m: &Model) -> bool {
-    m.ui.overlays.is_empty()
-        && matches!(
-            m.ui.focus,
-            None | Some(Focus::Terminal(_)) | Some(Focus::Region(Region::Main))
-        )
+    m.ui.overlays.is_empty() && focus_on_panes(m)
+}
+
+/// Whether the focus is the panes', and not the sidebar's tree, a drawer's or
+/// a field's.
+fn focus_on_panes(m: &Model) -> bool {
+    matches!(
+        m.ui.focus,
+        None | Some(Focus::Terminal(_)) | Some(Focus::Region(Region::Main))
+    )
 }
 
 // ---- Keeping the panes in line with the model -------------------------------

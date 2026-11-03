@@ -90,6 +90,9 @@ pub struct Grid<'a> {
     tree: SplitNode,
     handles: Vec<Handle>,
     focused: Option<&'a PaneId>,
+    /// The keyboard is somewhere else than the grid (the sidebar's tree, a
+    /// field): a press on the focused pane has to bring it back too.
+    keyboard_elsewhere: bool,
     /// The size the panes' state last heard of, to tell it when it changes.
     known: Option<Size>,
     drop_label: Box<dyn Fn(usize) -> String + 'a>,
@@ -131,6 +134,7 @@ impl<'a> Grid<'a> {
             tree,
             handles,
             focused,
+            keyboard_elsewhere: false,
             known,
             drop_label: Box::new(drop_label),
             boundary_label: None,
@@ -157,6 +161,13 @@ impl<'a> Grid<'a> {
     /// grid takes keys only when the app says it is where they go.
     pub fn boundary_keys(mut self, label: impl Fn(&Handle) -> String + 'a) -> Self {
         self.boundary_label = Some(Box::new(label));
+        self
+    }
+
+    /// Says the keyboard is not the grid's, so a press on the focused pane
+    /// asks for the focus as a press on any other one does.
+    pub fn keyboard_elsewhere(mut self, elsewhere: bool) -> Self {
+        self.keyboard_elsewhere = elsewhere;
         self
     }
 
@@ -943,7 +954,9 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
             && let Some(index) = self.slot_at(layout, position)
         {
             let pane = self.ids[index];
-            if self.focused != Some(pane) {
+            // The pane the workspace remembers is not always the one with the
+            // keyboard: after a click in the sidebar it keeps the arrows.
+            if self.focused != Some(pane) || self.keyboard_elsewhere {
                 self.publish(shell, Msg::Focus(self.ws.clone(), pane.clone()));
             }
             let slot = layout.children().nth(index).map(|child| child.bounds());
@@ -1459,6 +1472,26 @@ mod tests {
         at(&mut ui, 103.0, 12.0);
         release(&mut ui);
         assert!(!panes(ui).iter().any(|msg| matches!(msg, Msg::Move { .. })));
+    }
+
+    #[test]
+    fn a_press_on_the_focused_pane_takes_the_keyboard_back_from_elsewhere() {
+        let (ws, ids) = ids();
+        let focuses = |elsewhere: bool| {
+            let mut ui = simulate(grid(&ws, &ids, None).keyboard_elsewhere(elsewhere));
+            at(&mut ui, 100.0, 200.0);
+            press(&mut ui);
+            release(&mut ui);
+            panes(ui)
+                .iter()
+                .filter(|msg| matches!(msg, Msg::Focus(_, pane) if pane == "a"))
+                .count()
+        };
+        // `a` is the workspace's focused pane: with the keyboard on the grid
+        // there is nothing to ask for; after a click in the sidebar's tree
+        // the press has to bring the arrows back to it.
+        assert_eq!(focuses(false), 0);
+        assert_eq!(focuses(true), 1);
     }
 
     #[test]
