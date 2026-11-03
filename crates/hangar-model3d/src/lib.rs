@@ -8,6 +8,12 @@
 //! hangar-core's `model.rs`, so this crate takes a path and trusts the app to
 //! have checked it.
 //!
+//! Formats: glTF and GLB (the one agents are told to export; Draco, meshopt
+//! and KTX2 are not decoded), OBJ with its `.mtl`, STL (binary and ASCII), PLY
+//! (ASCII and both binary byte orders, with vertex colours, and point clouds),
+//! and binary FBX 7.x. USDZ, the old viewer's last format, is not read yet:
+//! asking for one says so, and what to export instead.
+//!
 //! The pieces, in the order a model goes through them:
 //!
 //! - [`load`] reads a file into a [`Model`] on a thread of its own;

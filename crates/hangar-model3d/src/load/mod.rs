@@ -6,6 +6,7 @@
 //! are not streamable and the cap on a file's size (`MAX_MODEL_BYTES`) is what
 //! bounds the memory one load can take.
 
+mod fbx;
 mod geometry;
 mod gltf;
 mod obj;
@@ -184,7 +185,8 @@ pub fn load_bytes(
             ModelFormat::Stl => stl::read(bytes, &ctx)?,
             _ => ply::read(bytes, &ctx)?,
         },
-        Parser::Fbx | Parser::Usd => {
+        Parser::Fbx => fbx::read(bytes, &ctx)?,
+        Parser::Usd => {
             return Err(LoadError::Unsupported(format!(
                 "{} files are not supported by this build of the preview: export the model as \
                  .glb and show that file.",
