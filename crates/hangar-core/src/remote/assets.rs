@@ -15,8 +15,10 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
+/// The repository's dist-mobile/, two levels above this crate (build.rs
+/// watches it for a release build).
 #[derive(RustEmbed)]
-#[folder = "../dist-mobile/"]
+#[folder = "../../dist-mobile/"]
 #[allow_missing = true]
 struct Pwa;
 
