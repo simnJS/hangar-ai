@@ -1279,4 +1279,50 @@ mod across_a_restart {
         again.reload_kit_tab(&id);
         assert!(!again.scope("ws").entries[0].kit().unwrap().restored);
     }
+
+    #[test]
+    fn a_tab_comes_back_under_its_own_id_which_is_its_panes() {
+        let saved = Memory::default();
+        let mut before = start(&saved);
+        let id = before.open_kit_tab(ci().params(&[("run", "1")]));
+        assert_eq!(
+            saved.read("ws").unwrap()[0]["id"],
+            serde_json::json!(id),
+            "kept in kit-tabs.json"
+        );
+        let mut after = start(&saved);
+        after.restore_kit_tabs("ws");
+        assert_eq!(after.scope("ws").entries[0].id, id);
+        assert!(after.is_restored("ws"));
+        // An id an entry has already is never given twice, the saved one
+        // giving way (a run started in the same millisecond as the last).
+        let mut third = start(&saved);
+        let other = third.open_kit_tab(KitTabToOpen::new("other", "ci", "run", "Run"));
+        third.restore_kit_tabs("ws");
+        let restored = third.scope("ws").entries[0].id.clone();
+        assert_ne!(restored, other);
+        assert_eq!(third.entries().filter(|entry| entry.id == other).count(), 1);
+    }
+
+    #[test]
+    fn a_tab_saved_before_the_tabs_were_panes_comes_back_under_a_new_id() {
+        let saved = Memory::default();
+        saved.0.lock().unwrap().insert(
+            "ws".into(),
+            serde_json::json!([{
+                "kitId": "ci", "tabId": "run", "path": "kit:ci/run", "title": "Run",
+                "titled": false, "params": {}, "openedBy": null
+            }]),
+        );
+        let mut store = start(&saved);
+        store.restore_kit_tabs("ws");
+        let entry = &store.scope("ws").entries[0];
+        assert!(entry.id.starts_with('p'), "{}", entry.id);
+        assert!(entry.kit().unwrap().restored);
+        // From now on it is saved with it.
+        assert_eq!(
+            saved.read("ws").unwrap()[0]["id"],
+            serde_json::json!(entry.id)
+        );
+    }
 }

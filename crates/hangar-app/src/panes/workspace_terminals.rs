@@ -210,6 +210,81 @@ mod tests {
         }
     }
 
+    /// A workspace of one terminal, Ava, and a kit's tab beside it as a view
+    /// pane, its entry in the process's preview store (which the views read
+    /// through the model) under a workspace id no other test uses.
+    fn terminal_and_kit_tab() -> (crate::state::Model, crate::app::Packages, String) {
+        use crate::preview::store::KitTabToOpen;
+        use crate::state::layout::leaf;
+        use crate::state::types::{AgentId, AppState, Pane, SplitNode};
+        let ws = "grid-kit-pane".to_string();
+        let mut m = crate::navigator::testing::model_of(AppState {
+            workspaces: vec![crate::state::Workspace {
+                id: ws.clone(),
+                name: "Shop".into(),
+                panes: vec![Pane {
+                    id: "ava".into(),
+                    name: "Ava".into(),
+                    agent: AgentId::Shell,
+                    ..Pane::default()
+                }],
+                ..crate::state::Workspace::default()
+            }],
+            active_workspace_id: Some(ws.clone()),
+            ..AppState::default()
+        });
+        let shared = m.live.preview.shared().clone();
+        let id = shared.edit(|store| {
+            store.close_workspace_models(&ws);
+            store.open_kit_tab(KitTabToOpen::new(ws.clone(), "ci-kit", "runs", "CI runs"))
+        });
+        m.live.preview.sync();
+        crate::preview::panes::sync(&mut m);
+        let workspace = m.workspace(&ws).unwrap();
+        assert!(workspace.has_view(&id));
+        assert_eq!(
+            workspace.tree,
+            Some(SplitNode::Split {
+                dir: SplitDir::Row,
+                ratio: 0.5,
+                a: Box::new(leaf("ava")),
+                b: Box::new(leaf(id.clone())),
+            }),
+            "beside the terminal, along its longer side"
+        );
+        let mut pkg = crate::app::Packages::default();
+        let rt = crate::panes::controller::mounted(workspace, &workspace.panes[0]);
+        pkg.panes.panes.insert("ava".into(), rt);
+        (m, pkg, id)
+    }
+
+    #[test]
+    fn a_grid_draws_a_terminal_and_a_kit_tab_and_a_press_in_the_tab_focuses_its_pane() {
+        use crate::navigator::testing::{ctx, simulate};
+        let (m, pkg, id) = terminal_and_kit_tab();
+        let ws = m.workspace("grid-kit-pane").unwrap();
+        let ctx = ctx(&m, &pkg);
+        let mut ui = simulate(view(&pkg.panes, ctx, ws));
+        let _ = ui
+            .snapshot(&hangar_theme::to_iced(ctx.theme))
+            .expect("it draws");
+        // Both headers: the terminal's name, the tab's title.
+        assert!(ui.find("Ava").is_ok());
+        assert!(ui.find("CI runs").is_ok());
+        // A press in the tab's pane gives it the focus, as in a terminal.
+        ui.click("CI runs").expect("the tab's header is there");
+        let focused: Vec<String> = ui
+            .into_messages()
+            .filter_map(|message| match message {
+                Message::Panes(crate::panes::Msg::Focus(_, pane)) => Some(pane),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(focused, std::slice::from_ref(&id));
+        let shared = m.live.preview.shared().clone();
+        shared.edit(|store| store.close_workspace_models("grid-kit-pane"));
+    }
+
     #[test]
     fn a_boundary_is_named_after_the_panes_on_its_two_sides_in_both_languages() {
         let names: HashMap<&str, &str> = [("a", "Ava"), ("b", "Leo"), ("c", "Mia")]

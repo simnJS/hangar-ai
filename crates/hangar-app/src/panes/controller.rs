@@ -870,6 +870,39 @@ pub fn role_restart_answered(
     Task::none()
 }
 
+/// A mounted pane without its shell, for what the launch does once the spawn
+/// answers, and for the views drawn headless.
+#[cfg(test)]
+pub(crate) fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
+    let link = PaneLink::new(
+        pane.id.clone(),
+        Terminal::new(hangar_term::Config::default(), 80, 24),
+        Arc::new(hangar_core::pty::PtyManager::default()),
+    );
+    PaneRt {
+        ws: ws.id.clone(),
+        name: pane.name.clone(),
+        agent: pane.agent,
+        link,
+        status: PaneStatus::Starting,
+        notes: Vec::new(),
+        dismissed: HashSet::new(),
+        search: None,
+        last_query: String::new(),
+        account: None,
+        mcp: None,
+        launched_role: pane.role,
+        role_handled: false,
+        pending: None,
+        resume: None,
+        owed: false,
+        mcp_arg: None,
+        look: look::look(&crate::state::Settings::default(), ws, pane.agent),
+        focused: false,
+        launch: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hangar_core::kits::{GitSource, IssueReason, Source};
@@ -929,37 +962,7 @@ mod tests {
         KitChoice::of(&settings, &ws)
     }
 
-    /// A mounted pane without its shell, for what the launch does once the
-    /// spawn answers.
-    fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
-        let link = PaneLink::new(
-            pane.id.clone(),
-            Terminal::new(hangar_term::Config::default(), 80, 24),
-            Arc::new(hangar_core::pty::PtyManager::default()),
-        );
-        PaneRt {
-            ws: ws.id.clone(),
-            name: pane.name.clone(),
-            agent: pane.agent,
-            link,
-            status: PaneStatus::Starting,
-            notes: Vec::new(),
-            dismissed: HashSet::new(),
-            search: None,
-            last_query: String::new(),
-            account: None,
-            mcp: None,
-            launched_role: pane.role,
-            role_handled: false,
-            pending: None,
-            resume: None,
-            owed: false,
-            mcp_arg: None,
-            look: look::look(&Settings::default(), ws, pane.agent),
-            focused: false,
-            launch: None,
-        }
-    }
+    use super::mounted;
 
     fn report(kit_issues: Vec<KitLaunchIssue>) -> SpawnReport {
         SpawnReport {

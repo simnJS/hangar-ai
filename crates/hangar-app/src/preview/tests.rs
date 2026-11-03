@@ -68,8 +68,14 @@ fn uuid_like() -> u64 {
 
 impl Harness {
     fn new(tag: &str) -> Harness {
+        Harness::with_saved(tag, None)
+    }
+
+    /// A harness whose store keeps its kit tabs in `saved`, as the app's
+    /// does in `kit-tabs.json`.
+    fn with_saved(tag: &str, saved: Option<Box<dyn super::store::SavedTabs>>) -> Harness {
         let dir = scratch(tag);
-        let shared = Shared::new(None);
+        let shared = Shared::new(saved);
         let mut model = Model::default();
         // The main window: the shell decides, from it, which panels are on
         // screen.
@@ -580,6 +586,94 @@ async fn the_person_opening_a_file_lands_on_its_pane() {
     assert_eq!(task.units(), 1, "the focus is asked for");
 }
 
+/// Kit tabs kept across a restart, in memory.
+#[derive(Clone, Default)]
+struct Saved(Arc<std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>>);
+
+impl super::store::SavedTabs for Saved {
+    fn read(&self, workspace: &str) -> Option<serde_json::Value> {
+        self.0.lock().unwrap().get(workspace).cloned()
+    }
+
+    fn write(&mut self, workspace: &str, tabs: Option<&[super::store::SavedKitTab]>) {
+        let mut map = self.0.lock().unwrap();
+        match tabs {
+            Some(tabs) => {
+                map.insert(workspace.into(), serde_json::to_value(tabs).unwrap());
+            }
+            None => {
+                map.remove(workspace);
+            }
+        }
+    }
+
+    fn workspaces(&self) -> Vec<String> {
+        self.0.lock().unwrap().keys().cloned().collect()
+    }
+}
+
+#[tokio::test]
+async fn kit_tabs_come_back_as_the_panes_they_were_and_older_ones_as_new_panes() {
+    use crate::state::{SplitDir, StoreAction};
+    let saved = Saved::default();
+    saved.0.lock().unwrap().insert(
+        WORKSPACE.into(),
+        serde_json::json!([
+            {"id": "p-kit-1", "kitId": "ci", "tabId": "run", "path": "kit:ci/run",
+             "title": "Runs", "titled": false, "params": {}, "openedBy": null},
+            // Saved by a version whose tabs were in a side panel: no id.
+            {"kitId": "ci", "tabId": "logs", "path": "kit:ci/logs",
+             "title": "Logs", "titled": false, "params": {}, "openedBy": null}
+        ]),
+    );
+    let mut h = Harness::with_saved("restart", Some(Box::new(saved.clone())));
+    // state.json as the last run left it: the tab's pane right of the
+    // terminal, at the width the person dragged it to.
+    h.model.apply(StoreAction::AddView {
+        ws: WORKSPACE.into(),
+        id: "p-kit-1".into(),
+        near: Some("pane-1".into()),
+        dir: Some(SplitDir::Row),
+    });
+    let tree = crate::state::layout::with_ratio(&crate::state::layout::grid_tree(h.ws()), &[], 0.3);
+    h.model
+        .apply(StoreAction::SetTree(WORKSPACE.into(), tree.clone()));
+    h.model.mount(WORKSPACE);
+    h.tick();
+
+    let ws = h.ws();
+    let ids: Vec<&str> = h
+        .model
+        .live
+        .preview
+        .scope(WORKSPACE)
+        .unwrap()
+        .entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert!(ids.contains(&"p-kit-1"), "under the id its pane has");
+    assert_eq!(ws.view_panes.len(), 2, "the older tab is a pane too");
+    let logs = ids.iter().find(|id| **id != "p-kit-1").unwrap();
+    assert!(ws.has_view(logs));
+    // The person's layout is where it was: the old tab's pane is split for
+    // the new one, the boundary they dragged has not moved.
+    assert_eq!(
+        crate::state::layout::ratio_at(ws.tree.as_ref().unwrap(), &[]),
+        0.3
+    );
+    assert_eq!(crate::state::layout::grid_order(ws)[0], "pane-1");
+    // And from now on both are saved under their panes' ids.
+    let kept = super::store::SavedTabs::read(&saved, WORKSPACE).unwrap();
+    let kept: Vec<&str> = kept
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tab| tab["id"].as_str().unwrap())
+        .collect();
+    assert!(kept.contains(&"p-kit-1") && kept.contains(logs));
+}
+
 #[tokio::test]
 async fn closing_the_previews_of_a_workspace_closes_every_pane() {
     let mut h = Harness::new("close-all");
@@ -737,9 +831,12 @@ fn click_thrice(h: &Harness, target: &str, size: Size) -> Vec<ViewerMsg> {
     let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
     let id = only_entry(h);
     let mut ui = simulate(h.body(ctx, &id), size);
-    for _ in 0..3 {
-        ui.click(target).expect("the text is on screen");
-    }
+    // The second and third clicks in one go, where the pointer went for the
+    // first: three clicks are a triple click only within the double-click
+    // delay, which a machine busy with the other tests could otherwise let
+    // pass between two lookups of the text.
+    ui.click(target).expect("the text is on screen");
+    let _ = ui.simulate(iced_test::simulator::click().chain(iced_test::simulator::click()));
     ui.into_messages()
         .filter_map(|message| match message {
             Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),

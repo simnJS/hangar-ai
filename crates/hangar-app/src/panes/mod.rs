@@ -25,7 +25,7 @@
 //! Output, Bell, Notification, Key, Typed, WatchSession}`) and draws what it
 //! publishes.
 
-mod controller;
+pub(crate) mod controller;
 mod gauge;
 
 mod grid;
