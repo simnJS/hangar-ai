@@ -186,8 +186,11 @@ mod tests {
                 .collect()
         }
 
-        /// What is written on what, as (what, colour, background).
-        fn pairs(theme: &Theme) -> (Vec<(String, Rgb, Rgb)>, Vec<(String, Rgb, Rgb)>) {
+        /// What is written on what: (what, colour, background).
+        type Pair = (String, Rgb, Rgb);
+
+        /// The words, then the shapes, a theme's components write.
+        fn pairs(theme: &Theme) -> (Vec<Pair>, Vec<Pair>) {
             let t = tokens(theme);
             let k = |name: &str| t[name];
             let flat = |name: &str, on: Rgb| over(theme.colors.get(&kit_source(name)).unwrap(), on);
@@ -281,7 +284,7 @@ mod tests {
             map["colors"][token].as_str().unwrap().to_owned()
         }
 
-        fn failing(pairs: Vec<(String, Rgb, Rgb)>, min: f64) -> Vec<String> {
+        fn failing(pairs: Vec<Pair>, min: f64) -> Vec<String> {
             pairs
                 .into_iter()
                 .filter_map(|(what, color, background)| {
