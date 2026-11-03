@@ -678,6 +678,19 @@ impl ManagerFeed {
         self.watch_panes(io, now);
     }
 
+    /// The boards a tick or a timer of this feed reads: every project's but
+    /// the HQ's, while someone hears what waits for the person. The runtime
+    /// reads them before it locks the feed.
+    pub fn watched_boards(&self, io: &dyn EngineIo) -> Vec<String> {
+        if self.stopped || !self.listened(io) {
+            return Vec::new();
+        }
+        Self::watched(&io.state())
+            .into_iter()
+            .map(|ws| ws.cwd)
+            .collect()
+    }
+
     /// An agent changed a board: they are read again shortly.
     pub fn board_changed(&mut self, io: &dyn EngineIo, now: u64) {
         if self.stopped || self.board_timer.is_some() || !self.listened(io) {

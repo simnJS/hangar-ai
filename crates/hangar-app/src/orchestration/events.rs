@@ -1331,6 +1331,18 @@ impl OrchestratorEngine {
         self.watch_workers(io, now);
     }
 
+    /// The boards a tick or a timer of this engine reads: every orchestrated
+    /// workspace's. The runtime reads them before it locks the engine.
+    pub fn watched_boards(&self, io: &dyn EngineIo) -> Vec<String> {
+        if self.stopped {
+            return Vec::new();
+        }
+        orchestrated(&io.state())
+            .into_iter()
+            .map(|(ws, _)| ws.cwd)
+            .collect()
+    }
+
     /// Sends what is pending now, waits and holds aside (tests, `flush`).
     pub fn flush(&mut self, io: &dyn EngineIo, workspace_id: &str, now: u64) -> Option<String> {
         self.space(workspace_id).timer = None;
