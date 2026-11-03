@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hangar.AI
+Comment=Terminal multiplexer for CLI coding agents, with a shared task board
+Exec=hangar-ai
+Icon=hangar-ai
+Terminal=false
+Categories=Development;
+Keywords=terminal;agent;AI;Claude;Codex;Gemini;
+StartupWMClass=hangar-ai
