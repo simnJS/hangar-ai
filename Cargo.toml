@@ -54,7 +54,6 @@ unicode-normalization = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 usvg = { version = "0.45", default-features = false }
 iced_test = "0.14"
-# The versions hangar-core already builds. hangar-app's orchestration engine
-# reads plans with regex and writes the briefings' wall-clock times with chrono.
+# The version hangar-core already builds: hangar-app's orchestration engine
+# reads plans with it.
 regex = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
