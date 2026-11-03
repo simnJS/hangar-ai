@@ -1,4 +1,9 @@
-//! `hangar-kit.json`, schema 1: what a kit says it is and brings.
+//! `hangar-kit.json`, schemas 1 and 2: what a kit says it is and brings.
+//!
+//! Schema 2 only adds native tabs (docs/native/kits-native.md): a tab whose
+//! `entry` is a `.wasm` module. A schema-1 kit may still bring a module beside
+//! its HTML `entry`, in the tab's `native` field, so it opens on a Hangar that
+//! reads schema 1 only.
 //!
 //! Read field by field rather than through a derive, so a manifest that is
 //! wrong in three places is told about all three at once, each by the path of
@@ -18,8 +23,15 @@ use serde_json::{Map, Value};
 
 pub const FILE: &str = "hangar-kit.json";
 
-/// The only schema this Hangar reads.
-pub const SCHEMA: u64 = 1;
+/// The newest schema this Hangar reads; a higher one needs a newer Hangar.
+pub const SCHEMA: u64 = 2;
+
+/// The first schema a native tab (a `.wasm` `entry`) is allowed in.
+pub const NATIVE_SCHEMA: u64 = 2;
+
+/// The largest native module a kit may ship: the limit of any file of the
+/// kit that its scheme serves.
+pub const MAX_MODULE_BYTES: u64 = crate::kit_scheme::MAX_BYTES;
 
 /// What a kit's tab may ask Hangar for, accepted by the person when the kit
 /// is enabled on a workspace. Closed: beside these, only `loopback:<port>`
@@ -152,7 +164,15 @@ pub struct Manifest {
 pub struct Tab {
     pub id: String,
     pub title: String,
+    /// What the tab is: an `.html` page (served by `kit_scheme`) or, under
+    /// schema 2, a `.wasm` module (run by the native host, never served as a
+    /// page). Normalized, and checked to be a file inside the kit.
     pub entry: String,
+    /// A `.wasm` module beside an HTML `entry`: what this Hangar runs instead
+    /// of the page, which an older Hangar (ignoring the field) opens, and which
+    /// this one opens only when the module cannot be loaded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub permissions: Vec<String>,
@@ -174,7 +194,48 @@ pub struct TabParam {
     pub pattern: Option<String>,
 }
 
+/// What this Hangar opens a tab as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabKind {
+    /// A page, served by the kit scheme to a browser engine.
+    Html,
+    /// A WebAssembly module, drawn by Hangar itself.
+    Native,
+}
+
+/// Whether a normalized path names a WebAssembly module.
+pub fn is_module(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".wasm")
+}
+
 impl Tab {
+    /// `Native` when the tab has a module, whether as its `entry` or in
+    /// `native`: the native Hangar runs it, and `page` is the way back when it
+    /// cannot.
+    pub fn kind(&self) -> TabKind {
+        if self.module().is_some() {
+            TabKind::Native
+        } else {
+            TabKind::Html
+        }
+    }
+
+    /// The module to run, relative to the kit, if the tab has one.
+    pub fn module(&self) -> Option<&str> {
+        if is_module(&self.entry) {
+            Some(&self.entry)
+        } else {
+            self.native.as_deref()
+        }
+    }
+
+    /// The page the kit scheme serves for the tab, if it has one: the HTML
+    /// `entry`, which a tab with a `native` module keeps as its fallback. A
+    /// tab whose `entry` is a module has none.
+    pub fn page(&self) -> Option<&str> {
+        (!is_module(&self.entry)).then_some(self.entry.as_str())
+    }
+
     /// The first value of `params` its rule refuses, said for the caller.
     /// Asked before the window hears of a `kit_tab_open`: this is where a rule
     /// runs in linear time, whatever the kit wrote, and the window must not
@@ -365,6 +426,7 @@ pub fn parse(text: &str, root: &Path) -> Result<Manifest, String> {
     };
     let mut check = Check {
         root,
+        schema: None,
         problems: Vec::new(),
         declared_commands: HashSet::new(),
     };
@@ -408,6 +470,9 @@ pub fn version_of(text: &str) -> Option<(String, String)> {
 
 struct Check<'a> {
     root: &'a Path,
+    /// The manifest's schema once it has been read right, `None` while it is
+    /// missing or wrong (which is reported once, where it is read).
+    schema: Option<u64>,
     problems: Vec<String>,
     /// Every name under `commands`, well-formed or not: a tab naming one that
     /// is wrong is told about it there, not a second time here.
@@ -490,7 +555,11 @@ impl Check<'_> {
 
     fn manifest(&mut self, object: &Map<String, Value>) -> Manifest {
         let schema = match object.get("schema") {
-            Some(Value::Number(number)) if number.as_u64() == Some(SCHEMA) => SCHEMA,
+            Some(Value::Number(number)) if matches!(number.as_u64(), Some(1..=SCHEMA)) => {
+                let schema = number.as_u64().unwrap_or(SCHEMA);
+                self.schema = Some(schema);
+                schema
+            }
             Some(Value::Number(number)) if number.as_u64().is_some_and(|n| n > SCHEMA) => {
                 self.problem(
                     "schema",
@@ -503,7 +572,7 @@ impl Check<'_> {
                 SCHEMA
             }
             Some(_) => {
-                self.problem("schema", format!("must be {SCHEMA}"));
+                self.problem("schema", format!("must be 1 or {SCHEMA}"));
                 SCHEMA
             }
         };
@@ -640,20 +709,22 @@ impl Check<'_> {
             let title = self.required_text(tab, "title", &at);
             let entry = self
                 .required(tab, "entry", &at)
-                .and_then(|raw| self.file(&raw, &field(&at, "entry"), &[".html"]));
+                .and_then(|raw| self.entry(&raw, &field(&at, "entry")));
+            let native = self.native(tab, entry.as_deref(), &at);
             let icon = self
                 .optional(tab, "icon", &at)
                 .and_then(|raw| self.file(&raw, &field(&at, "icon"), &[".svg", ".png"]));
             let permissions = self.permissions(tab, &at);
             let params = self.tab_params(tab, &at);
             let singleton = self.tab_singleton(tab, &at);
-            if let (Some(title), Some(entry), Some(permissions), Some(params)) =
-                (title, entry, permissions, params)
+            if let (Some(title), Some(entry), Some(permissions), Some(params), Some(native)) =
+                (title, entry, permissions, params, native)
             {
                 tabs.push(Tab {
                     id,
                     title,
                     entry,
+                    native,
                     icon,
                     permissions,
                     params,
@@ -662,6 +733,71 @@ impl Check<'_> {
             }
         }
         tabs
+    }
+
+    /// A tab's `entry`: an HTML page, or a module, which only schema 2 allows.
+    fn entry(&mut self, raw: &str, at: &str) -> Option<String> {
+        let entry = self.file(raw, at, &[".html", ".wasm"])?;
+        if !is_module(&entry) {
+            return Some(entry);
+        }
+        // A manifest whose schema is missing or wrong already said so; one
+        // more problem about it here would only repeat it.
+        if self.schema.is_some_and(|schema| schema < NATIVE_SCHEMA) {
+            self.problem(
+                at,
+                format!("a native tab needs \"schema\": {NATIVE_SCHEMA}"),
+            );
+            return None;
+        }
+        self.module_size(&entry, at).then_some(entry)
+    }
+
+    /// A tab's `native` module: beside an HTML `entry`, in either schema. The
+    /// outer `None` is a tab that is wrong; the inner one, a tab with no
+    /// module of its own. `entry` is `None` when the entry was wrong, which
+    /// was reported there.
+    fn native(
+        &mut self,
+        tab: &Map<String, Value>,
+        entry: Option<&str>,
+        at: &str,
+    ) -> Option<Option<String>> {
+        let at = field(at, "native");
+        let raw = match tab.get("native") {
+            None | Some(Value::Null) => return Some(None),
+            Some(Value::String(raw)) => raw.as_str(),
+            Some(_) => {
+                self.problem(&at, "must be a string");
+                return None;
+            }
+        };
+        if entry.is_some_and(is_module) {
+            self.problem(
+                &at,
+                "is for a tab with an HTML entry, and this tab's entry is already a module",
+            );
+            return None;
+        }
+        let module = self.file(raw, &at, &[".wasm"])?;
+        self.module_size(&module, &at).then_some(Some(module))
+    }
+
+    /// A module is read whole into memory, so it is held to the limit of any
+    /// file the kit scheme serves.
+    fn module_size(&mut self, module: &str, at: &str) -> bool {
+        let size = inside(self.root, module)
+            .ok()
+            .and_then(|real| fs::metadata(real).ok())
+            .map_or(0, |metadata| metadata.len());
+        if size > MAX_MODULE_BYTES {
+            self.problem(
+                at,
+                format!("is larger than {} MB", MAX_MODULE_BYTES / (1024 * 1024)),
+            );
+            return false;
+        }
+        true
     }
 
     /// `params`: what a caller may pass a tab, by name. `None` when one is wrong.
@@ -1298,6 +1434,229 @@ mod tests {
         );
     }
 
+    fn native_kit(schema: u64, tab: Value) -> Value {
+        let mut base =
+            json!({ "id": "t", "title": "T", "permissions": ["panes.read", "data.write"] });
+        for (key, value) in tab.as_object().unwrap() {
+            base[key] = value.clone();
+        }
+        with(minimal(), json!({ "schema": schema, "tabs": [base] }))
+    }
+
+    #[test]
+    fn a_html_tab_is_a_page_under_either_schema() {
+        let kit = Folder::new("html-tab");
+        kit.file("tab.html", "");
+        for schema in [1, 2] {
+            let manifest = kit
+                .parse(&native_kit(schema, json!({ "entry": "tab.html" })))
+                .unwrap();
+            assert_eq!(manifest.schema, schema);
+            let tab = &manifest.tabs[0];
+            assert_eq!(tab.kind(), TabKind::Html);
+            assert_eq!((tab.page(), tab.module()), (Some("tab.html"), None));
+        }
+    }
+
+    #[test]
+    fn a_wasm_entry_is_a_native_tab_under_schema_2() {
+        let kit = Folder::new("native-tab");
+        kit.file("tabs/hello.wasm", "\0asm");
+        let manifest = kit
+            .parse(&native_kit(2, json!({ "entry": "tabs\\.\\Hello.WASM" })))
+            .unwrap_err();
+        assert!(
+            manifest.starts_with("tabs[0].entry: not found"),
+            "{manifest}"
+        );
+
+        let manifest = kit
+            .parse(&native_kit(2, json!({ "entry": "./tabs//hello.wasm" })))
+            .unwrap();
+        let tab = &manifest.tabs[0];
+        assert_eq!(manifest.schema, 2);
+        assert_eq!(tab.kind(), TabKind::Native);
+        assert_eq!(tab.entry, "tabs/hello.wasm");
+        assert_eq!(tab.module(), Some("tabs/hello.wasm"));
+        assert_eq!(tab.page(), None, "nothing for the kit scheme to serve");
+        assert_eq!(tab.native, None);
+        assert_eq!(tab.permissions, vec!["panes.read", "data.write"]);
+    }
+
+    #[test]
+    fn a_schema_1_tab_may_bring_a_module_beside_its_page() {
+        let kit = Folder::new("native-field");
+        kit.file("tabs/ci/index.html", "")
+            .file("tabs/ci.wasm", "\0asm");
+        for schema in [1, 2] {
+            let manifest = kit
+                .parse(&native_kit(
+                    schema,
+                    json!({ "entry": "tabs/ci/index.html", "native": "tabs\\ci.wasm" }),
+                ))
+                .unwrap();
+            let tab = &manifest.tabs[0];
+            assert_eq!(tab.kind(), TabKind::Native, "this Hangar runs the module");
+            assert_eq!(tab.module(), Some("tabs/ci.wasm"));
+            assert_eq!(tab.page(), Some("tabs/ci/index.html"), "the way back");
+            assert_eq!(tab.permissions, vec!["panes.read", "data.write"]);
+        }
+    }
+
+    #[test]
+    fn a_wasm_entry_under_schema_1_is_refused_and_says_why() {
+        let kit = Folder::new("native-schema-1");
+        kit.file("tabs/hello.wasm", "\0asm");
+        let why = problems(kit.parse(&native_kit(1, json!({ "entry": "tabs/hello.wasm" }))));
+        assert_eq!(why, "tabs[0].entry: a native tab needs \"schema\": 2");
+        // Without a schema at all, that is the one problem said.
+        let mut manifest = native_kit(1, json!({ "entry": "tabs/hello.wasm" }));
+        manifest.as_object_mut().unwrap().remove("schema");
+        assert_eq!(problems(kit.parse(&manifest)), "schema: is missing");
+    }
+
+    #[test]
+    fn a_native_field_is_checked_like_an_entry() {
+        let kit = Folder::new("native-field-wrong");
+        kit.file("tab.html", "")
+            .file("tab.wasm", "\0asm")
+            .file("notes.txt", "");
+        let wrong = |tab: Value| problems(kit.parse(&native_kit(1, tab)));
+        assert_eq!(
+            wrong(json!({ "entry": "tab.html", "native": "tab.html" })),
+            "tabs[0].native: must be a .wasm file"
+        );
+        assert_eq!(
+            wrong(json!({ "entry": "tab.html", "native": "missing.wasm" })),
+            "tabs[0].native: not found in the kit folder"
+        );
+        assert_eq!(
+            wrong(json!({ "entry": "tab.html", "native": 3 })),
+            "tabs[0].native: must be a string"
+        );
+        assert_eq!(
+            wrong(json!({ "entry": "tab.html", "native": "../tab.wasm" })),
+            "tabs[0].native: must not climb out with `..`"
+        );
+        // A module as the entry is already the module.
+        let why = kit
+            .parse(&native_kit(
+                2,
+                json!({ "entry": "tab.wasm", "native": "tab.wasm" }),
+            ))
+            .unwrap_err();
+        assert!(
+            why.starts_with("tabs[0].native: is for a tab with an HTML entry"),
+            "{why}"
+        );
+        // Null is as absent as it is elsewhere in the manifest.
+        let manifest = kit
+            .parse(&native_kit(
+                1,
+                json!({ "entry": "tab.html", "native": null }),
+            ))
+            .unwrap();
+        assert_eq!(manifest.tabs[0].kind(), TabKind::Html);
+    }
+
+    #[test]
+    fn a_module_that_leaves_the_kit_is_refused() {
+        let kit = Folder::new("native-escape");
+        for entry in [
+            "../x.wasm",
+            "tabs/../../x.wasm",
+            "/etc/x.wasm",
+            "C:\\x.wasm",
+        ] {
+            for tab in [
+                json!({ "entry": entry }),
+                json!({ "entry": "t.html", "native": entry }),
+            ] {
+                let at = if tab.get("native").is_some() {
+                    "native"
+                } else {
+                    "entry"
+                };
+                kit.file("t.html", "");
+                let why = problems(kit.parse(&native_kit(2, tab)));
+                assert!(
+                    why.starts_with(&format!("tabs[0].{at}: ")),
+                    "{entry}: {why}"
+                );
+                assert!(!why.contains("not found"), "{entry}: {why}");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_module_out_of_the_kit_is_refused() {
+        let kit = Folder::new("native-symlink");
+        let outside = Folder::new("native-symlink-target");
+        outside.file("tab.wasm", "\0asm");
+        std::os::unix::fs::symlink(&outside.root, kit.root.join("web")).unwrap();
+        kit.file("t.html", "");
+        for tab in [
+            json!({ "entry": "web/tab.wasm" }),
+            json!({ "entry": "t.html", "native": "web/tab.wasm" }),
+        ] {
+            assert!(problems(kit.parse(&native_kit(2, tab))).contains("outside the kit folder"));
+        }
+    }
+
+    #[test]
+    fn a_module_is_held_to_the_size_of_a_kit_file() {
+        let kit = Folder::new("native-size");
+        let big = fs::File::create(kit.root.join("big.wasm")).unwrap();
+        big.set_len(MAX_MODULE_BYTES + 1).unwrap();
+        kit.file("t.html", "");
+        for (tab, at) in [
+            (json!({ "entry": "big.wasm" }), "entry"),
+            (json!({ "entry": "t.html", "native": "big.wasm" }), "native"),
+        ] {
+            assert_eq!(
+                problems(kit.parse(&native_kit(2, tab))),
+                format!("tabs[0].{at}: is larger than 64 MB")
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_is_not_a_module_and_the_other_way_round() {
+        let kit = Folder::new("native-extension");
+        kit.file("tab.html", "").file("notes.txt", "");
+        let why = problems(kit.parse(&native_kit(2, json!({ "entry": "notes.txt" }))));
+        assert_eq!(why, "tabs[0].entry: must be a .html or .wasm file");
+    }
+
+    #[test]
+    fn the_hello_native_example_s_manifest_reads() {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/kits/hello-native")
+                .join(FILE),
+        )
+        .expect("the example's manifest");
+        // The module is built by the example's build.sh, so a stand-in here.
+        let kit = Folder::new("hello-native");
+        kit.file("tabs/hello.wasm", "\0asm");
+        let manifest = parse(&text, &kit.root).unwrap();
+        assert_eq!((manifest.schema, manifest.id.as_str()), (2, "hello-native"));
+        assert_eq!(manifest.hangar.as_deref(), Some(">=2.0.0"));
+        let tab = &manifest.tabs[0];
+        assert_eq!((tab.id.as_str(), tab.kind()), ("hello", TabKind::Native));
+        assert_eq!(tab.module(), Some("tabs/hello.wasm"));
+        assert_eq!(
+            tab.permissions,
+            ["panes.read", "panes.send", "data.read", "data.write"]
+        );
+        // Without its module, the same manifest says so at the entry.
+        let empty = Folder::new("hello-native-unbuilt");
+        assert!(parse(&text, &empty.root)
+            .unwrap_err()
+            .starts_with("tabs[0].entry: not found"));
+    }
+
     #[test]
     fn a_kit_without_a_plugin_folder_brings_none() {
         let kit = Folder::new("noplugin");
@@ -1342,7 +1701,11 @@ mod tests {
             problems(kit.parse(&with(minimal(), json!({ "version": "1.0" })))).contains("semver")
         );
         assert!(
-            problems(kit.parse(&with(minimal(), json!({ "schema": 2 })))).contains("newer Hangar")
+            problems(kit.parse(&with(minimal(), json!({ "schema": 3 })))).contains("newer Hangar")
+        );
+        assert!(
+            problems(kit.parse(&with(minimal(), json!({ "schema": 0 }))))
+                .contains("must be 1 or 2")
         );
         assert!(
             problems(kit.parse(&with(minimal(), json!({ "hangar": "soon" })))).contains("hangar")

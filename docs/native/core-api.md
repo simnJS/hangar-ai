@@ -1318,6 +1318,32 @@ Invoked as `kit_setup_mark` from `src/lib/kits.ts`. Now `hangar_core::kits::kit_
 pub async fn kit_setup_mark(id: String, step_id: String) -> Result<Vec<StepStatus>, String>
 ```
 
+#### The manifest's tabs: HTML and native
+
+New in the native port (docs/native/kits-native.md, "The manifest"); `KitInfo.manifest` is a `kits::Manifest` and nothing about the commands above changes. `hangar-kit.json` reads schema **1 and 2** (`kits::manifest::SCHEMA` is now 2, the newest read; a higher number is still the error `schema: 3 needs a newer Hangar (this one reads 2)`, and any other value `schema: must be 1 or 2`).
+
+```rust
+pub struct Tab {
+    pub id: String, pub title: String,
+    pub entry: String,           // an .html page, or under schema 2 a .wasm module; normalized, inside the kit
+    pub native: Option<String>,  // a .wasm module beside an HTML entry (serialized only when set)
+    pub icon: Option<String>, pub permissions: Vec<String>,
+    pub params: BTreeMap<String, TabParam>, pub singleton: bool,
+}
+pub enum TabKind { Html, Native }                 // re-exported as kits::TabKind
+impl Tab {
+    pub fn kind(&self) -> TabKind;                // Native when the tab has a module, as `entry` or as `native`
+    pub fn module(&self) -> Option<&str>;         // the .wasm to give to hangar_kit_host::KitRuntime::compile
+    pub fn page(&self) -> Option<&str>;           // the .html the kit scheme serves; None for a .wasm entry
+}
+```
+
+- `permissions`, `params` and `singleton` are the same for both kinds, checked by the same rules.
+- A `.wasm` `entry` under schema 1 is the manifest error `tabs[0].entry: a native tab needs "schema": 2`. `native` is accepted under both schemas, beside an HTML `entry` only (`tabs[0].native: is for a tab with an HTML entry, …` otherwise).
+- `entry` and `native` are normalized like every manifest path and refused when absolute, when they climb out with `..`, or when a link leads out of the kit folder; they must exist, and a module is at most 64 MB (`tabs[0].native: is larger than 64 MB`). The module is a path to give the host, never bytes: the manifest reads no module.
+- A native Hangar opens `module()`; when it cannot be loaded (an ABI it does not read, a module it refuses) it falls back to `page()` in the webview helper, when the tab has one. That fallback is the shell's, not hangar-core's.
+- New helpers in `kits::manifest` (module private, as before): `NATIVE_SCHEMA`, `MAX_MODULE_BYTES`, `is_module(path)`.
+
 ### Kit tabs' calls
 
 What a kit's tab asks through the SDK (docs/kits.md), checked by the window against what the person granted the kit before the call (src/lib/kitApi.ts). The `kits::*` ones answer `Err(kits::TabError { code, message })`, `code` one of the `TabError::*` constants — `invalid`, `not_found`, `unreachable`, `failed`, `denied`, `unavailable`, `bad_args`, `busy`, `conflict`, `unsupported` — which the window passed on to the page as is.
@@ -1853,6 +1879,10 @@ pub fn hangar_core::kit_scheme::serve(request: &http::Request<Vec<u8>>, origins:
   for an installed, usable kit, and `/_hangar/kit.js`, `/_hangar/kit-ui.js`,
   `/_hangar/kit.css`, `/_hangar/inter.woff2` for every tab (docs/kits.md,
   docs/kit-ui.md). Every answer carries a `sandbox` Content-Security-Policy.
+  A `.wasm` file that is the `entry` of a native tab (`Tab::page()` is `None`)
+  is refused with `403` and a sentence saying Hangar runs it itself: it is no
+  page. Any other `.wasm` of the kit is served (`application/wasm`), including
+  the `native` module beside an HTML `entry`, since a page may load its own.
 - `origins` are the origins of the pages the caller serves Hangar's own
   interface from: the only pages allowed to `fetch` these files with an
   `Origin` header. The Tauri window's were `tauri://localhost`,
