@@ -46,6 +46,7 @@
 //! | [`keycap`] | `keycap`, `binding`: shortcuts drawn as caps |
 //! | [`layer`] | the overlay every floating thing is made of: `modal`, `palette`, `dropdown`, `context` |
 //! | [`menu`] | `item`, `heading`, `separator`, `dropdown`, `context_menu`: drop-down and context menus |
+//! | [`menu_select`](mod@menu_select) | a closed field that opens a menu: a choice among grouped options, some of them unavailable and saying why |
 //! | [`dialog`] | `dialog(t, title, body)` and `over(t, page, dialog)`: modal dialogs |
 //! | [`palette`] | `Palette<T>`: the command palette, generic over what it lists |
 //! | [`matching`] | the palette's matching and ranking (`src/lib/paletteMatch.ts`) |
@@ -55,6 +56,7 @@
 //! | [`panel`] | `header`, `panel`: a bar with a title and actions |
 //! | [`split`] | `split`: two regions with a draggable divider |
 //! | [`tabs`] | `strip`: document tabs with close crosses |
+//! | [`tail_text`](mod@tail_text) | `tail_text`: one line that loses its beginning, not its end (a path in a narrow cell) |
 //! | [`list`] | `row`: a list row with selection and hover |
 //! | [`badge`] | `badge`, `count`, `tag` |
 //! | [`glyph`] | `state`: an agent's state; `gauge`: the context ring |
@@ -94,6 +96,7 @@ pub mod list;
 pub mod matching;
 pub mod menu;
 pub mod menu_nav;
+pub mod menu_select;
 pub mod palette;
 pub mod panel;
 pub mod section;
@@ -101,6 +104,7 @@ pub mod shortcut;
 pub mod shortcut_field;
 pub mod split;
 pub mod tabs;
+pub mod tail_text;
 pub mod text;
 pub mod tip;
 pub mod toast;
