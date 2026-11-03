@@ -70,7 +70,9 @@ fn with_detached() -> (Model, window::Id) {
     m.hydrate(state);
     m.ui.focus_by_workspace.insert("d".into(), "d2".into());
     let own = window::Id::unique();
-    m.live.windows.insert(own, WindowKind::Workspace("d".into()));
+    m.live
+        .windows
+        .insert(own, WindowKind::Workspace("d".into()));
     (m, own)
 }
 
@@ -152,7 +154,10 @@ mod width {
             },
         );
         let drag = st.drag.expect("pressed");
-        assert_eq!((drag.from_x, drag.from_width, drag.max), (600.0, 296.0, 440.0));
+        assert_eq!(
+            (drag.from_x, drag.from_width, drag.max),
+            (600.0, 296.0, 440.0)
+        );
 
         send(&mut st, &mut m, Msg::GripMoved(560.0));
         assert_eq!(m.settings().inspector_width, 336.0);

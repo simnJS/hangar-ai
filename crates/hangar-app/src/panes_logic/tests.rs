@@ -590,10 +590,18 @@ fn custom_launch() -> PaneMcp {
 fn a_launch_records_the_servers_for_whoever_reads_the_insight() {
     let (mut m, _) = one_claude();
     assert_eq!(m.live.panes_logic.insight("p1").mcp, None);
-    assert!(m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch())));
+    assert!(
+        m.live
+            .panes_logic
+            .set_launch_mcp("p1", Some(custom_launch()))
+    );
     assert_eq!(m.live.panes_logic.insight("p1").mcp, Some(custom_launch()));
     // The same launch twice changes nothing, so nobody is told twice.
-    assert!(!m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch())));
+    assert!(
+        !m.live
+            .panes_logic
+            .set_launch_mcp("p1", Some(custom_launch()))
+    );
     // A launch that could not say forgets the last one's servers.
     assert!(m.live.panes_logic.set_launch_mcp("p1", None));
     assert_eq!(m.live.panes_logic.insight("p1").mcp, None);
@@ -602,7 +610,9 @@ fn a_launch_records_the_servers_for_whoever_reads_the_insight() {
 #[test]
 fn the_servers_go_with_the_pane_unless_another_window_takes_it_over() {
     let (mut m, _) = one_claude();
-    m.live.panes_logic.set_launch_mcp("p1", Some(custom_launch()));
+    m.live
+        .panes_logic
+        .set_launch_mcp("p1", Some(custom_launch()));
     // Moving to another window keeps what the pane reported.
     m.live.panes_logic.unmount_pane("p1", true);
     assert_eq!(m.live.panes_logic.insight("p1").mcp, Some(custom_launch()));
@@ -671,7 +681,10 @@ fn an_agent_without_the_mod_dates_its_session_and_words_it_when_launched() {
 
     // Resuming one names the session, short.
     launched(&mut m, "cx", Some("3f2a9c1e-0b7d"), NOW + 9);
-    assert_eq!(m.live.panes_logic.insight("cx").session_since, Some(NOW + 9));
+    assert_eq!(
+        m.live.panes_logic.insight("cx").session_since,
+        Some(NOW + 9)
+    );
     assert_eq!(
         session_line(&m, "cx"),
         Some(PaneEventDetail::Session {
@@ -695,7 +708,10 @@ fn a_claude_code_with_the_mod_leaves_it_to_its_hello() {
     state.settings.claude_bridge = false;
     m.hydrate(state);
     launched(&mut m, "cl", Some("abc"), NOW + 2);
-    assert_eq!(m.live.panes_logic.insight("cl").session_since, Some(NOW + 2));
+    assert_eq!(
+        m.live.panes_logic.insight("cl").session_since,
+        Some(NOW + 2)
+    );
     assert!(matches!(
         session_line(&m, "cl"),
         Some(PaneEventDetail::Session { resumed: true, .. })
@@ -777,8 +793,14 @@ fn a_menu_asks_the_shells_before_it_can_say_a_workspace_may_sleep() {
     );
 
     let quiet: HashMap<PaneId, bool> = [("leo".to_string(), false)].into();
-    assert_eq!(verdict_of(&m, Some(&quiet)), Some(Verdict::Sleep { agents: 1 }));
-    assert_eq!(sleep_line(&m, "other", Some(&quiet)), Some(SleepLine::Ready));
+    assert_eq!(
+        verdict_of(&m, Some(&quiet)),
+        Some(Verdict::Sleep { agents: 1 })
+    );
+    assert_eq!(
+        sleep_line(&m, "other", Some(&quiet)),
+        Some(SleepLine::Ready)
+    );
 }
 
 #[test]
@@ -844,13 +866,10 @@ fn a_menu_sees_what_the_click_will_decide_on_and_changes_nothing() {
     assert_eq!(sleep_verdict(&m, "gone", None), None);
     assert_eq!(sleep_line(&m, "gone", None), None);
 
-    m.live.panes_logic.hibernation.mark_asleep(
-        "other",
-        Asleep {
-            at: NOW,
-            agents: 1,
-        },
-    );
+    m.live
+        .panes_logic
+        .hibernation
+        .mark_asleep("other", Asleep { at: NOW, agents: 1 });
     assert!(matches!(
         sleep_line(&m, "other", None),
         Some(SleepLine::Refused(_))

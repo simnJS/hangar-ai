@@ -138,15 +138,8 @@ pub fn shell_of<'a>(m: &'a Model, ws: &Workspace, pane: &Pane) -> Option<&'a She
     )
 }
 
-/// The folder a pane's shell opens in. P4 has the same rule
-/// (`panes_logic::folder_of`), private to its module: this copy goes once P4
-/// makes it public, which is a change in P4's files, not in this package's.
-pub fn folder_of(ws: &Workspace, pane: &Pane) -> String {
-    pane.cwd
-        .clone()
-        .filter(|cwd| !cwd.is_empty())
-        .unwrap_or_else(|| ws.cwd.clone())
-}
+/// The folder a pane's shell opens in: P4's rule, the one every package uses.
+pub use crate::panes_logic::folder_of;
 
 /// What a pane's kits are decided from: its workspace's entries and the ones
 /// turned on everywhere, with their grants, as the model held them when the
@@ -552,6 +545,9 @@ pub fn spawned(
     rt.link.resize(columns, rows);
     rt.mcp = report.mcp.clone();
     rt.mcp_arg = report.mcp_arg.clone();
+    // The inspector's MCP row and the MCP panel's "is it up to date" read the
+    // servers a pane started with from P4's read-model, not from here.
+    m.live.panes_logic.set_launch_mcp(&id, report.mcp.clone());
 
     let Some((ws, pane)) = find(m, &rt.ws, &id) else {
         return status(&id, PaneStatus::Running);
@@ -692,11 +688,18 @@ pub fn launch_ready(
         allowed_tools: &tools,
         model: pane.model.as_deref(),
     };
+    let mut launched = None;
     if let Some(command) = launch_command(rt.agent, resume.as_deref(), &options) {
         if let Some(id) = &resume {
             m.live.panes_logic.claim_session(id);
         }
         rt.link.write(format!("{command}\r").into_bytes());
+        // Dates the launch for the pane's agent state (P4 ignores it where
+        // the bridge or a shell says more).
+        launched = Some(Task::done(Message::PanesLogic(Logic::Launched {
+            pane: id.clone(),
+            resumed: resume.clone(),
+        })));
     }
     if forget {
         m.apply(StoreAction::UpdatePane {
@@ -707,17 +710,22 @@ pub fn launch_ready(
     }
     // Followed for as long as the pane lives, resumed or not: /new inside
     // the agent opens another transcript, and the pane has to follow it.
-    if is_resumable(rt.agent) {
+    let watch = if is_resumable(rt.agent) {
         let mut known = known;
         known.extend(resume);
-        return Task::done(Message::PanesLogic(Logic::WatchSession {
+        Task::done(Message::PanesLogic(Logic::WatchSession {
             pane: id,
             agent: rt.agent,
             cwd: folder_of(&ws, &pane),
             known,
-        }));
+        }))
+    } else {
+        Task::none()
+    };
+    match launched {
+        Some(launched) => Task::batch([launched, watch]),
+        None => watch,
     }
-    Task::none()
 }
 
 /// The login pane's shell has settled.
