@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytemuck::{Pod, Zeroable};
 use glam::{DMat4, DVec3, Mat4};
 
+use crate::animation::{Clip, Deform, Playhead, Rig};
 use crate::formats::ModelFormat;
 use crate::framing::{Bounds, Vec3, radius_of};
 use crate::stats::{ModelInfo, model_info};
@@ -68,9 +69,15 @@ pub struct DrawRange {
 pub struct Mesh {
     pub name: String,
     pub topology: Topology,
+    /// The vertices as the file leaves them: a skinned mesh is posed as its
+    /// nodes stand, a morphing one at its starting weights. Everything that
+    /// measures the model (bounds, statistics, framing) reads these.
     pub vertices: Vec<Vertex>,
     pub indices: Option<Vec<u32>>,
     pub ranges: Vec<DrawRange>,
+    /// What moves the vertices when a clip plays; `None` for a mesh nothing
+    /// deforms, which is nearly all of them.
+    pub deform: Option<Deform>,
     bounds: Bounds,
 }
 
@@ -111,6 +118,7 @@ impl Mesh {
             vertices,
             indices,
             ranges,
+            deform: None,
             bounds,
         }
     }
@@ -279,14 +287,6 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-/// An animation the file holds. Only its name and length are read: the
-/// preview shows models still, and lists what the file would play.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Clip {
-    pub name: String,
-    pub duration: f32,
-}
-
 /// What a loader hands to [`Model::new`].
 #[derive(Clone, Debug, Default)]
 pub struct ModelParts {
@@ -295,6 +295,9 @@ pub struct ModelParts {
     pub materials: Vec<Material>,
     pub images: Vec<Image>,
     pub clips: Vec<Clip>,
+    /// The node graph the clips move; `None` when none of them has anything
+    /// to play, and for the formats that have no animation.
+    pub rig: Option<Rig>,
     /// Things that did not stop the model from opening but are missing from
     /// it: a texture that could not be decoded, an extension that was
     /// ignored.
@@ -315,6 +318,7 @@ pub struct Model {
     pub materials: Vec<Material>,
     pub images: Vec<Image>,
     pub clips: Vec<Clip>,
+    pub rig: Option<Rig>,
     pub warnings: Vec<String>,
     /// What the info strip lists and an agent is told, measured in the file's
     /// own coordinates, before any turn upright.
@@ -341,6 +345,7 @@ impl Model {
             materials,
             images,
             clips,
+            rig,
             warnings,
         } = parts;
         let root = if format.plan().z_up {
@@ -357,6 +362,7 @@ impl Model {
             materials,
             images,
             clips,
+            rig,
             warnings,
             info: ModelInfo::default(),
             root,
@@ -471,6 +477,78 @@ impl Model {
     pub fn material(&self, index: Option<usize>) -> Option<&Material> {
         index.and_then(|i| self.materials.get(i))
     }
+
+    /// The instances as `at` (a clip and a moment in it) puts them, on the
+    /// processor: for tests, and for anyone who wants the numbers a picture
+    /// is made from. The renderer does the same on its own buffers.
+    pub fn posed(&self, at: Option<Playhead>) -> Vec<PosedInstance> {
+        let Some(rig) = &self.rig else {
+            return self
+                .instances
+                .iter()
+                .map(|instance| PosedInstance {
+                    matrix: self.display_transform(instance),
+                    vertices: None,
+                })
+                .collect();
+        };
+        let playing = at.and_then(|head| self.clips.get(head.clip).map(|clip| (clip, head.time)));
+        let pose = rig.pose(playing);
+        self.instances
+            .iter()
+            .enumerate()
+            .map(|(index, instance)| {
+                let mesh = &self.meshes[instance.mesh];
+                let vertices = mesh.deform.as_ref().zip(rig.attachments().get(index)).map(
+                    |(deform, attachment)| {
+                        let joints = attachment.skin.map(|skin| rig.joint_matrices(skin, &pose));
+                        let mut vertices = mesh.vertices.clone();
+                        deform.apply(joints.as_deref(), rig.weights(index, &pose), &mut vertices);
+                        vertices
+                    },
+                );
+                PosedInstance {
+                    matrix: self.root * rig.instance_matrix(index, &pose),
+                    vertices,
+                }
+            })
+            .collect()
+    }
+
+    /// The box around the model as displayed in a pose.
+    pub fn posed_bounds(&self, at: Option<Playhead>) -> Bounds {
+        let posed = self.posed(at);
+        let points = self
+            .instances
+            .iter()
+            .zip(&posed)
+            .flat_map(|(instance, posed)| {
+                let matrix = DMat4::from_cols_array(&posed.matrix.to_cols_array().map(f64::from));
+                let vertices = posed
+                    .vertices
+                    .as_deref()
+                    .unwrap_or(&self.meshes[instance.mesh].vertices);
+                vertices
+                    .iter()
+                    .map(move |v| {
+                        matrix
+                            .transform_point3(DVec3::from(v.position.map(f64::from)))
+                            .to_array()
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Bounds::around(points)
+    }
+}
+
+/// An instance in a pose.
+#[derive(Clone, Debug)]
+pub struct PosedInstance {
+    /// File to display: where the instance stands.
+    pub matrix: Mat4,
+    /// The mesh's vertices as the pose bends them; `None` for a mesh no clip
+    /// deforms, which is drawn as the mesh holds it.
+    pub vertices: Option<Vec<Vertex>>,
 }
 
 #[cfg(test)]

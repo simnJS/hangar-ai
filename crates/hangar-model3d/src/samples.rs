@@ -6,6 +6,12 @@ use std::fmt::Write as _;
 
 use crate::model::Vertex;
 
+mod animated;
+
+pub use animated::{
+    animated_cube_glb, morphing_glb, morphing_still_glb, skinned_glb, skinned_still_glb,
+};
+
 /// The eight corners of a cube of side one centred on the origin: bit 0 is +X,
 /// bit 1 is +Y, bit 2 is +Z.
 pub const CORNERS: [[f32; 3]; 8] = [

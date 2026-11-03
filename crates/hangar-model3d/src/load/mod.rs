@@ -27,7 +27,7 @@ use crate::model::{Instance, Model, ModelParts};
 
 use resources::Resources;
 
-pub(crate) use geometry::face_normal;
+pub(crate) use geometry::{face_normal, flat_normals_in_place};
 pub use resources::{decode_image, percent_decode};
 
 /// How a load is run.

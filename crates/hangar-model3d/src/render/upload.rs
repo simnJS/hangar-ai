@@ -3,7 +3,7 @@
 //! stands. Made once, the first time a device draws the model, and dropped
 //! when the model is.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Weak};
 
 use bytemuck::{Pod, Zeroable};
@@ -82,6 +82,21 @@ pub(super) struct GpuInstance {
     pub offset: u32,
 }
 
+/// A texture a material reads: the model's image, and whether its pixels are
+/// colours (decoded from sRGB) or data.
+pub(super) type TextureKey = (usize, bool);
+
+/// Which pose the instances and deformed meshes of a model were last put in,
+/// so that a frame at the same time (the camera moved, the clip is paused)
+/// does not do the work again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PoseKey {
+    /// The clip and the bits of the time in it; `None` for the file's own pose.
+    pub at: Option<(usize, u32)>,
+    /// The normals' lines follow the pose too.
+    pub normals: bool,
+}
+
 pub(super) struct GpuModel {
     pub source: Weak<Model>,
     pub meshes: Vec<GpuMesh>,
@@ -94,6 +109,17 @@ pub(super) struct GpuModel {
     /// one must not be taken for this one's.
     pub generation: u64,
     pub last_used: u64,
+    /// The instances whose mesh a clip deforms.
+    pub deformables: Vec<usize>,
+    pub posed: Option<PoseKey>,
+    /// The textures on the GPU so far. A model is drawn as soon as its
+    /// geometry is there, with the textures that have arrived and the
+    /// materials' plain colours for the rest, and the others follow a few
+    /// each frame (`Gpu::upload_textures`).
+    pub textures: HashMap<TextureKey, wgpu::TextureView>,
+    pub waiting: VecDeque<TextureKey>,
+    /// For each material (the default one last), the textures it reads.
+    pub needs: Vec<Vec<TextureKey>>,
 }
 
 impl GpuModel {
@@ -285,16 +311,18 @@ impl Gpu {
         texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 
+    /// The bind group of a material over the textures that are on the GPU so
+    /// far: one a texture is still on its way for reads the material's plain
+    /// factors, until a later rebuild.
     fn material_bind_group(
         &mut self,
         material: &Material,
-        model: &Model,
-        textures: &mut HashMap<(usize, bool), wgpu::TextureView>,
-        encoder: &mut wgpu::CommandEncoder,
+        textures: &HashMap<TextureKey, wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         let mut flags = 0u32;
         let mut slot = |gpu: &mut Gpu, reference: Option<TextureRef>, srgb: bool, bit: u32| {
-            let Some(reference) = reference else {
+            let view = reference.and_then(|r| textures.get(&(r.image, srgb)));
+            let (Some(reference), Some(view)) = (reference, view) else {
                 return (
                     gpu.dummy_view.clone(),
                     gpu.sampler(SamplerKey {
@@ -303,13 +331,9 @@ impl Gpu {
                     }),
                 );
             };
-            let view = textures
-                .entry((reference.image, srgb))
-                .or_insert_with(|| gpu.texture(&model.images[reference.image], srgb, encoder))
-                .clone();
             flags |= bit;
             (
-                view,
+                view.clone(),
                 gpu.sampler(SamplerKey {
                     wrap: reference.wrap,
                     nearest: reference.nearest,
@@ -383,26 +407,33 @@ impl Gpu {
         })
     }
 
-    /// Puts a model on the GPU.
+    /// Puts a model's geometry on the GPU, and its materials as plain colours.
+    /// The textures come after, a few at a time ([`Gpu::upload_textures`]), so
+    /// that a model with many large ones does not hold a frame for as long as
+    /// it takes to send them all.
     pub(super) fn upload(&mut self, model: &Arc<Model>) -> GpuModel {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("model3d upload"),
-            });
-        let mut textures = HashMap::new();
         let mut materials: Vec<GpuMaterial> = Vec::new();
+        let mut needs: Vec<Vec<TextureKey>> = Vec::new();
+        let mut waiting = VecDeque::new();
+        let mut queued = HashSet::new();
+        let nothing = HashMap::new();
         // The last one is the default, for ranges that name none.
         let clay = Material::clay(false);
         for material in model.materials.iter().chain([&clay]) {
-            let bind_group = self.material_bind_group(material, model, &mut textures, &mut encoder);
+            let wanted = textures_of(material);
+            for &key in &wanted {
+                if queued.insert(key) {
+                    waiting.push_back(key);
+                }
+            }
+            needs.push(wanted);
+            let bind_group = self.material_bind_group(material, &nothing);
             materials.push(GpuMaterial {
                 bind_group,
                 blend: material.alpha == AlphaMode::Blend,
                 double_sided: material.double_sided,
             });
         }
-        self.queue.submit([encoder.finish()]);
         let default_material = materials.len() - 1;
 
         let meshes: Vec<GpuMesh> = model
@@ -416,7 +447,12 @@ impl Gpu {
                         &self.device,
                         "model3d vertices",
                         &mesh.vertices,
-                        wgpu::BufferUsages::VERTEX,
+                        // A mesh a clip deforms is written again each frame.
+                        if mesh.deform.is_some() {
+                            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST
+                        } else {
+                            wgpu::BufferUsages::VERTEX
+                        },
                     ),
                     vertex_count: mesh.vertices.len() as u32,
                     indices: mesh.indices.as_ref().map(|indices| Counted {
@@ -475,9 +511,21 @@ impl Gpu {
         let objects_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("model3d objects"),
             contents: &objects,
-            usage: wgpu::BufferUsages::UNIFORM,
+            // Written again when a clip moves the instances.
+            usage: if model.rig.is_some() {
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+            } else {
+                wgpu::BufferUsages::UNIFORM
+            },
         });
         self.generation += 1;
+        let deformables = model
+            .instances
+            .iter()
+            .enumerate()
+            .filter(|(_, instance)| model.meshes[instance.mesh].deform.is_some())
+            .map(|(index, _)| index)
+            .collect();
 
         GpuModel {
             source: Arc::downgrade(model),
@@ -487,7 +535,61 @@ impl Gpu {
             objects: objects_buffer,
             generation: self.generation,
             last_used: self.frame,
+            deformables,
+            posed: None,
+            textures: HashMap::new(),
+            waiting,
+            needs,
         }
+    }
+
+    /// Sends some of the textures that are still waiting, as many as fit in
+    /// `budget` bytes of pixels (always at least one, or a texture larger than
+    /// the budget would never go), and rebuilds the materials that read them.
+    /// Returns whether there are more to send.
+    pub(super) fn upload_textures(
+        &mut self,
+        uploaded: &mut GpuModel,
+        model: &Model,
+        budget: usize,
+    ) -> bool {
+        if uploaded.waiting.is_empty() {
+            return false;
+        }
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("model3d textures"),
+            });
+        let mut spent = 0usize;
+        let mut arrived: Vec<TextureKey> = Vec::new();
+        while let Some(&key) = uploaded.waiting.front() {
+            let Some(image) = model.images.get(key.0) else {
+                uploaded.waiting.pop_front();
+                continue;
+            };
+            let cost = image.width as usize * image.height as usize * 4;
+            if spent > 0 && spent.saturating_add(cost) > budget {
+                break;
+            }
+            uploaded.waiting.pop_front();
+            let view = self.texture(image, key.1, &mut encoder);
+            uploaded.textures.insert(key, view);
+            arrived.push(key);
+            spent = spent.saturating_add(cost);
+        }
+        self.queue.submit([encoder.finish()]);
+
+        let clay = Material::clay(false);
+        for (index, wanted) in uploaded.needs.iter().enumerate() {
+            if !wanted.iter().any(|key| arrived.contains(key)) {
+                continue;
+            }
+            let material = model.materials.get(index).unwrap_or(&clay);
+            uploaded.materials[index].bind_group =
+                self.material_bind_group(material, &uploaded.textures);
+        }
+        !uploaded.waiting.is_empty()
     }
 
     /// The wireframe's line indices for one mesh: the edges of the triangles
@@ -536,29 +638,177 @@ impl Gpu {
     /// A segment out of every vertex along its normal, as a vertex buffer of
     /// positions.
     pub(super) fn normal_lines(&self, source: &crate::model::Mesh, length: f32) -> Option<Counted> {
-        if source.topology != Topology::Triangles || source.vertices.is_empty() {
+        if source.topology != Topology::Triangles {
             return None;
         }
-        let mut positions: Vec<[f32; 3]> = Vec::with_capacity(source.vertices.len() * 2);
-        for Vertex {
-            position, normal, ..
-        } in &source.vertices
-        {
-            positions.push(*position);
-            positions.push([
-                position[0] + normal[0] * length,
-                position[1] + normal[1] * length,
-                position[2] + normal[2] * length,
-            ]);
+        self.normal_lines_of(&source.vertices, length)
+    }
+
+    /// The same for vertices that are not the mesh's own: the ones a clip
+    /// has moved.
+    pub(super) fn normal_lines_of(&self, vertices: &[Vertex], length: f32) -> Option<Counted> {
+        if vertices.is_empty() {
+            return None;
         }
+        let positions = normal_positions(vertices, length);
         Some(Counted {
             buffer: buffer(
                 &self.device,
                 "model3d normals",
                 &positions,
-                wgpu::BufferUsages::VERTEX,
+                // Written again while a clip deforms the mesh.
+                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             ),
             count: positions.len() as u32,
         })
+    }
+}
+
+/// The two ends of a segment out of each vertex along its normal.
+pub(super) fn normal_positions(vertices: &[Vertex], length: f32) -> Vec<[f32; 3]> {
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vertices.len() * 2);
+    for Vertex {
+        position, normal, ..
+    } in vertices
+    {
+        positions.push(*position);
+        positions.push([
+            position[0] + normal[0] * length,
+            position[1] + normal[1] * length,
+            position[2] + normal[2] * length,
+        ]);
+    }
+    positions
+}
+
+/// The textures a material reads, each once, in the order of its slots.
+fn textures_of(material: &Material) -> Vec<TextureKey> {
+    let mut keys: Vec<TextureKey> = Vec::new();
+    for (reference, srgb) in [
+        (material.base_color_texture, true),
+        (material.metallic_roughness_texture, false),
+        (material.normal_texture, false),
+        (material.occlusion_texture, false),
+        (material.emissive_texture, true),
+    ] {
+        if let Some(reference) = reference {
+            let key = (reference.image, srgb);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+    }
+    keys
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::formats::ModelFormat;
+    use crate::load::{Cancel, LoadOptions, load_bytes};
+    use crate::render::{CameraMatrices, DisplayOptions, Scene, offscreen};
+    use crate::samples;
+    use crate::theme::ViewerTheme;
+
+    fn textured() -> Arc<Model> {
+        Arc::new(
+            load_bytes(
+                "textured.glb",
+                ModelFormat::Glb,
+                &samples::textured_cube_glb(),
+                std::path::Path::new("."),
+                &LoadOptions::default(),
+                &Cancel::default(),
+                &mut |_| {},
+            )
+            .unwrap(),
+        )
+    }
+
+    fn scene<'a>(model: &'a Arc<Model>, theme: &'a ViewerTheme, budget: usize) -> Scene<'a> {
+        Scene {
+            model: Some(model),
+            camera: CameraMatrices {
+                view_proj: glam::Mat4::IDENTITY,
+                eye: [0.0, 0.0, 5.0],
+            },
+            display: DisplayOptions::default(),
+            theme,
+            pixel_ratio: 1.0,
+            playhead: None,
+            upload_budget: budget,
+        }
+    }
+
+    #[test]
+    fn lists_what_each_material_reads_once_and_by_the_kind_of_its_pixels() {
+        let model = textured();
+        let keys = textures_of(&model.materials[0]);
+        // The colour map is read as colours, the normal map as data.
+        assert_eq!(keys.len(), 2);
+        assert!(keys.iter().any(|&(_, srgb)| srgb));
+        assert!(keys.iter().any(|&(_, srgb)| !srgb));
+        assert!(textures_of(&Material::default()).is_empty());
+    }
+
+    #[test]
+    fn sends_textures_a_few_at_a_time_and_all_at_once_when_asked_to() {
+        let Some((device, queue)) = offscreen::test_device() else {
+            return;
+        };
+        let mut gpu = Gpu::new(&device, &queue);
+        let theme = ViewerTheme::dark();
+
+        // A budget smaller than any texture still lets one through a frame.
+        let model = textured();
+        assert!(
+            gpu.prepare(1, (64, 64), &scene(&model, &theme, 1)),
+            "one went and one waits"
+        );
+        assert_eq!(gpu.models[&model.id].textures.len(), 1);
+        assert_eq!(gpu.models[&model.id].waiting.len(), 1);
+        assert!(
+            !gpu.prepare(1, (64, 64), &scene(&model, &theme, 1)),
+            "the last one went"
+        );
+        assert_eq!(gpu.models[&model.id].textures.len(), 2);
+        assert!(gpu.models[&model.id].waiting.is_empty());
+        // Nothing more to do: the frames after cost nothing here.
+        assert!(!gpu.prepare(1, (64, 64), &scene(&model, &theme, 1)));
+
+        // A picture taken for an agent has no frames to spread them over.
+        let other = textured();
+        assert!(!gpu.prepare(2, (64, 64), &scene(&other, &theme, usize::MAX)));
+        assert_eq!(gpu.models[&other.id].textures.len(), 2);
+    }
+
+    #[test]
+    fn a_budget_that_fits_two_textures_sends_both_in_a_frame() {
+        let Some((device, queue)) = offscreen::test_device() else {
+            return;
+        };
+        let mut gpu = Gpu::new(&device, &queue);
+        let theme = ViewerTheme::dark();
+        let model = textured();
+        // The pictures are 2 by 2 pixels: 16 bytes each.
+        assert!(!gpu.prepare(1, (64, 64), &scene(&model, &theme, 32)));
+        assert_eq!(gpu.models[&model.id].textures.len(), 2);
+    }
+
+    #[test]
+    fn rebuilds_a_material_when_its_texture_arrives_and_not_before() {
+        let Some((device, queue)) = offscreen::test_device() else {
+            return;
+        };
+        let mut gpu = Gpu::new(&device, &queue);
+        let theme = ViewerTheme::dark();
+        let model = textured();
+        gpu.prepare(1, (64, 64), &scene(&model, &theme, 1));
+        let uploaded = &gpu.models[&model.id];
+        // Which materials wait on a texture that has not come yet.
+        let waiting: Vec<_> = uploaded.waiting.iter().copied().collect();
+        assert!(uploaded.needs[0].iter().any(|key| waiting.contains(key)));
+        // The default material reads none and is never rebuilt.
+        assert!(uploaded.needs.last().unwrap().is_empty());
     }
 }
