@@ -2447,6 +2447,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hangar-i18n"
+version = "1.12.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hangar-kit-host"
 version = "1.12.1"
 dependencies = [
