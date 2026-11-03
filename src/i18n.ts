@@ -784,6 +784,7 @@ const en = {
   "board.dockExpand": "Open the full board",
   "board.dockHide": "Hide the board panel",
   "board.dockResize": "Resize the board panel · double-click for the default width",
+  "board.addDetails": "Add with details…",
 
   "model.panel": "Preview",
   "model.toggleHint": "Show or hide the preview of what agents opened",
@@ -1000,6 +1001,12 @@ const en = {
   "task.deleteConfirm": "Confirm",
   "task.close": "Close",
   "task.labels": "Labels",
+  "task.new": "New task",
+  "task.create": "Create",
+  "task.owns": "Files it owns",
+  "task.ownsHint": "one path or pattern per line; its worker changes nothing else",
+  "task.addDependency": "Add a dependency…",
+  "task.removeDependency": "Remove this dependency",
 
   "memory.entries_one": "{n} entry",
   "memory.entries_other": "{n} entries",
@@ -2341,6 +2348,7 @@ const fr: Record<Key, string> = {
   "board.dockExpand": "Ouvrir le tableau en entier",
   "board.dockHide": "Masquer le tableau latéral",
   "board.dockResize": "Redimensionner le tableau latéral · double-clic pour la largeur par défaut",
+  "board.addDetails": "Ajouter avec des détails…",
 
   "model.panel": "Aperçu",
   "model.toggleHint": "Afficher ou masquer l'aperçu de ce que les agents ont ouvert",
@@ -2557,6 +2565,12 @@ const fr: Record<Key, string> = {
   "task.deleteConfirm": "Confirmer",
   "task.close": "Fermer",
   "task.labels": "Labels",
+  "task.new": "Nouvelle tâche",
+  "task.create": "Créer",
+  "task.owns": "Fichiers qui lui sont réservés",
+  "task.ownsHint": "un chemin ou un motif par ligne ; son agent ne modifie rien d'autre",
+  "task.addDependency": "Ajouter une dépendance…",
+  "task.removeDependency": "Retirer cette dépendance",
 
   "memory.entries_one": "{n} entrée",
   "memory.entries_other": "{n} entrées",
