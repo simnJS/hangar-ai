@@ -16,11 +16,14 @@
 //!
 //! - Read the model with `port.snapshot()`; write it with
 //!   `port.apply(ModelCmd::…).await`, which answers once the UI thread has
-//!   applied it and republished the snapshot.
-//! - Install your handlers once hydrated: send
-//!   `Message::Control(control::Msg::Install(Hook::…))` through the inbox.
-//!   Until then the bus answers your operations with the TS's own "not in
-//!   this window" refusals.
+//!   applied it and republished the snapshot. Without a port, send
+//!   `Message::Control(control::Msg::Model(cmd, answer))` yourself, as P19's
+//!   runtime does.
+//! - P19's runtime is on the bus as soon as its handle is in
+//!   `Model.live.orchestration` (engines.rs). Any other package installs its
+//!   handlers once hydrated: `Message::Control(control::Msg::Install(Hook::…))`
+//!   through the inbox. Until then the bus answers their operations with the
+//!   TS's own "not in this window" refusals.
 //! - P20 runs the person's pane operations with `control::run_as_person`,
 //!   lands with `control::delivery::land_delivery`, and reads a delivery's
 //!   state with `control::delivery::delivery_state`.

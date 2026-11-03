@@ -25,6 +25,7 @@
 
 pub mod delivery;
 pub mod delivery_text;
+mod engines;
 mod kit_tabs;
 mod live;
 mod manager;
@@ -68,6 +69,8 @@ pub struct State {
     shared: Arc<live::Shared>,
     /// The port the operations run against, made on the first request.
     port: Option<Port>,
+    /// P19's runtime is installed on the bus.
+    engines: bool,
 }
 
 impl State {
@@ -77,6 +80,20 @@ impl State {
                 Arc::new(live::LivePort::new(sv.clone(), self.shared.clone())) as Port
             })
             .clone()
+    }
+
+    /// P19's runtime starts on hydration and leaves its handle in
+    /// `Model.live.orchestration`: from then on it answers `worker_*`, the
+    /// briefing, the projects, and hears the deliveries' events.
+    fn sync_engines(&mut self, m: &Model) {
+        if self.engines {
+            return;
+        }
+        if let Some(handle) = m.live.orchestration.handle() {
+            self.shared
+                .install(Hook::Orchestration(Arc::new(handle.clone())));
+            self.engines = true;
+        }
     }
 }
 
@@ -158,6 +175,7 @@ pub enum Msg {
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    st.sync_engines(m);
     match msg {
         Msg::Request(request) => {
             let port = st.port(sv);
@@ -226,6 +244,7 @@ pub fn on_intent(
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
+    st.sync_engines(m);
     let Intent::Land { ws, task } = intent else {
         return None;
     };
@@ -275,6 +294,9 @@ pub fn on_event(
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    let _ = (st, m, sv, event);
+    // The first events after hydration come before any request: the runtime
+    // is on the bus by the time an agent asks.
+    st.sync_engines(m);
+    let _ = (sv, event);
     None
 }

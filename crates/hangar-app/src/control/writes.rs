@@ -244,7 +244,10 @@ mod tests {
         );
         state.settings.locale = Some(Locale::Fr);
         m.hydrate(state);
-        assert_eq!(announcement(&m, &created), "Ava a ouvert Reviewer dans Shop");
+        assert_eq!(
+            announcement(&m, &created),
+            "Ava a ouvert Reviewer dans Shop"
+        );
         assert!(announcement(&m, &shown).starts_with("Un agent a ouvert chair.glb dans"));
     }
 }

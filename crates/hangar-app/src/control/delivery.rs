@@ -36,7 +36,9 @@ use super::delivery_text::{
 use super::paths::resolve_path;
 use super::port::{DeliveryDeps, ModelCmd, Port, workspace_in};
 use super::run::{orchestration_of, unknown};
-use super::types::{Caller, DeliveryOutcomeKind, DeliveryState, OrchestratorEvent, text};
+use super::types::{
+    Caller, DeliveryOutcomeKind, DeliveryState, OrchestratorEvent, outcome_name, outcome_of, text,
+};
 
 /// Failed deliveries of one task before it goes to the person.
 pub const MAX_FAILED_DELIVERIES: usize = 3;
@@ -871,7 +873,7 @@ async fn deliver(
     let _ = settle(ws, pane, task, &request, &outcome, port, delivery).await;
     port.deliveries().settle(
         &task.id,
-        outcome.outcome.into(),
+        outcome_of(outcome.outcome),
         headline(&outcome.detail),
         port.now_ms(),
     );
@@ -903,7 +905,7 @@ async fn settle(
         .find(|entry| entry.id == task.id)
         .unwrap_or_else(|| task.clone());
     let (target, branch) = (request.target.as_str(), request.branch.as_str());
-    let kind: DeliveryOutcomeKind = outcome.outcome.into();
+    let kind = outcome_of(outcome.outcome);
     let post = |detail: String| {
         port.post_event(
             &ws.id,
@@ -1097,7 +1099,7 @@ async fn settle(
             &task.id,
             HANGAR,
             &failed_comment(
-                kind.as_str(),
+                outcome_name(kind),
                 failures,
                 MAX_FAILED_DELIVERIES,
                 &outcome.detail,

@@ -166,139 +166,41 @@ impl ControlEvent {
     }
 }
 
-/// How a delivery ended (`DeliveryOutcomeKind`): core's `delivery::Kind`, and
-/// `done` for a worker in a folder that is not a git repository, which has
-/// nothing to merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DeliveryOutcomeKind {
-    Landed,
-    Done,
-    Ready,
-    Conflict,
-    CheckFailed,
-    ChangesRequested,
-    Dirty,
-    Stale,
-    Error,
-}
+/// What happened in a workspace that its orchestrator hears about, and how a
+/// delivery ended: P19's (`orchestration::events`), one set for both. The
+/// worker and delivery operations post them (`AppPort::post_event`); P19's
+/// engine makes the rest from the boards and the panes.
+pub use crate::orchestration::events::{DeliveryOutcome as DeliveryOutcomeKind, OrchestratorEvent};
 
-impl DeliveryOutcomeKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DeliveryOutcomeKind::Landed => "landed",
-            DeliveryOutcomeKind::Done => "done",
-            DeliveryOutcomeKind::Ready => "ready",
-            DeliveryOutcomeKind::Conflict => "conflict",
-            DeliveryOutcomeKind::CheckFailed => "checkFailed",
-            DeliveryOutcomeKind::ChangesRequested => "changesRequested",
-            DeliveryOutcomeKind::Dirty => "dirty",
-            DeliveryOutcomeKind::Stale => "stale",
-            DeliveryOutcomeKind::Error => "error",
-        }
+/// The word the board's comments and the TS's state name an outcome by
+/// (`checkFailed`, `landed`…), as it serializes.
+pub fn outcome_name(outcome: DeliveryOutcomeKind) -> &'static str {
+    match outcome {
+        DeliveryOutcomeKind::Landed => "landed",
+        DeliveryOutcomeKind::Done => "done",
+        DeliveryOutcomeKind::Ready => "ready",
+        DeliveryOutcomeKind::Conflict => "conflict",
+        DeliveryOutcomeKind::CheckFailed => "checkFailed",
+        DeliveryOutcomeKind::ChangesRequested => "changesRequested",
+        DeliveryOutcomeKind::Dirty => "dirty",
+        DeliveryOutcomeKind::Stale => "stale",
+        DeliveryOutcomeKind::Error => "error",
     }
 }
 
-impl From<hangar_core::delivery::Kind> for DeliveryOutcomeKind {
-    fn from(kind: hangar_core::delivery::Kind) -> Self {
-        use hangar_core::delivery::Kind;
-        match kind {
-            Kind::Landed => DeliveryOutcomeKind::Landed,
-            Kind::Ready => DeliveryOutcomeKind::Ready,
-            Kind::Conflict => DeliveryOutcomeKind::Conflict,
-            Kind::CheckFailed => DeliveryOutcomeKind::CheckFailed,
-            Kind::ChangesRequested => DeliveryOutcomeKind::ChangesRequested,
-            Kind::Dirty => DeliveryOutcomeKind::Dirty,
-            Kind::Stale => DeliveryOutcomeKind::Stale,
-            Kind::Error => DeliveryOutcomeKind::Error,
-        }
+/// Core's verdict on a delivery, as the orchestrator is told it.
+pub fn outcome_of(kind: hangar_core::delivery::Kind) -> DeliveryOutcomeKind {
+    use hangar_core::delivery::Kind;
+    match kind {
+        Kind::Landed => DeliveryOutcomeKind::Landed,
+        Kind::Ready => DeliveryOutcomeKind::Ready,
+        Kind::Conflict => DeliveryOutcomeKind::Conflict,
+        Kind::CheckFailed => DeliveryOutcomeKind::CheckFailed,
+        Kind::ChangesRequested => DeliveryOutcomeKind::ChangesRequested,
+        Kind::Dirty => DeliveryOutcomeKind::Dirty,
+        Kind::Stale => DeliveryOutcomeKind::Stale,
+        Kind::Error => DeliveryOutcomeKind::Error,
     }
-}
-
-/// What happened in a workspace that its orchestrator hears about
-/// (`OrchestratorEvent` of orchestratorEvents.ts). The worker and delivery
-/// operations post them (`AppPort::post_event`); P19's event engine makes the
-/// rest from the boards and the panes, journals them and tells the
-/// orchestrator.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum OrchestratorEvent {
-    #[serde(rename_all = "camelCase")]
-    WorkerStarted {
-        worker: String,
-        task_id: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    WorkerStopped {
-        worker: String,
-        task_id: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    WorkerExited {
-        worker: String,
-        task_id: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    WorkerWaiting {
-        worker: String,
-        task_id: Option<String>,
-        for_ms: u64,
-    },
-    #[serde(rename_all = "camelCase")]
-    WorkerIdle {
-        worker: String,
-        task_id: Option<String>,
-        for_ms: u64,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskMoved {
-        task_id: String,
-        title: String,
-        from: String,
-        to: String,
-        by: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskCommented {
-        task_id: String,
-        title: String,
-        by: String,
-        text: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskNeedsYou {
-        task_id: String,
-        title: String,
-        reason: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskBlocked {
-        task_id: String,
-        title: String,
-        by: String,
-        reason: String,
-        human_only: bool,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskUnblocked {
-        task_id: String,
-        title: String,
-        how: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    TaskRecheckDue {
-        task_id: String,
-        title: String,
-        reason: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    Delivery {
-        task_id: String,
-        title: String,
-        worker: String,
-        outcome: DeliveryOutcomeKind,
-        detail: String,
-    },
 }
 
 /// Where a task's delivery stands (`DeliveryState` of deliveryControl.ts),
@@ -316,7 +218,7 @@ pub struct DeliveryState {
 impl DeliveryState {
     /// `running`, or the outcome, as the TS wrote the state.
     pub fn state(&self) -> &'static str {
-        self.outcome.map_or("running", DeliveryOutcomeKind::as_str)
+        self.outcome.map_or("running", outcome_name)
     }
 }
 

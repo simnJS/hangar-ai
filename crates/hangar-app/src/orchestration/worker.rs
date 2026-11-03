@@ -29,7 +29,7 @@ use hangar_core::board::Task;
 use hangar_core::git::{Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree};
 
 use super::events::{JournalEntry, OrchestratorEvent};
-use super::port::{AnnounceKind, Announcement, Caller, NewPane, WorkerInit};
+use super::port::{Announcement, Caller, NewPane, WorkerInit};
 use super::roles::{all_pane_names, orchestration_of, orchestrator, pick_pane_name, workers_of};
 use crate::state::PaneActivity;
 use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
@@ -848,8 +848,7 @@ async fn start_steps(start: &Start<'_>, port: &impl WorkerPort, undo: &mut Vec<U
     });
     port.enqueue(&id, &brief, by.unwrap_or("hangar")).await?;
 
-    port.announce(Announcement {
-        kind: AnnounceKind::Created,
+    port.announce(Announcement::Created {
         by: by.map(str::to_string),
         pane: start.name.clone(),
         workspace: ws.name.clone(),
@@ -1193,8 +1192,7 @@ pub async fn stop_worker(
         }
     }
 
-    port.announce(Announcement {
-        kind: AnnounceKind::Closed,
+    port.announce(Announcement::Closed {
         by: by.map(str::to_string),
         pane: pane.name.clone(),
         workspace: ws.name.clone(),

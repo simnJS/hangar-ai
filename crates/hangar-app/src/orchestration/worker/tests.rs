@@ -226,11 +226,7 @@ impl WorkerPort for World {
     }
 
     fn announce(&self, a: Announcement) {
-        let kind = match a.kind {
-            AnnounceKind::Created => "created",
-            AnnounceKind::Closed => "closed",
-        };
-        self.push(format!("announce:{kind}:{}:{}", a.pane, a.by.as_deref().unwrap_or("null")));
+        self.push(format!("announce:{}:{}:{}", a.kind(), a.subject(), a.by().unwrap_or("null")));
     }
 
     async fn add_pane(&self, workspace_id: &str, new: NewPane) -> Option<PaneId> {
