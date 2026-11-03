@@ -3461,7 +3461,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1721;
+pub const KEY_COUNT: usize = 1722;
 
 impl Key {
     /// Every key, in the order of their ids.
