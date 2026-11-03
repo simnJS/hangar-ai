@@ -28,11 +28,11 @@ use super::webview::{StartError, WebMsg, WinState};
 use super::{Env, Live, Msg, State, link, reconcile, text, viewer_update};
 use crate::app::Packages;
 use crate::ctx::{Ctx, Metrics};
-use crate::message::Message;
-use crate::services::inbox;
+use crate::message::{Intent, Message};
 use crate::services::preview::PreviewRequest;
-use crate::shell::PanelMode;
-use crate::state::{AppState, Model, Pane, Workspace};
+use crate::services::{PreviewAccess, inbox};
+use crate::shell::{PanelMode, WindowKind};
+use crate::state::{AppState, Model, Pane, PreviewPanel, Workspace};
 
 /// hangar-core keeps one list of the folders it serves for the whole process:
 /// the tests that grant folders take turns.
@@ -72,6 +72,12 @@ impl Harness {
         let dir = scratch(tag);
         let shared = Shared::new(None);
         let mut model = Model::default();
+        // The main window: the shell decides, from it, which panels are on
+        // screen.
+        model
+            .live
+            .windows
+            .insert(window::Id::unique(), WindowKind::Main);
         model.hydrate(AppState {
             workspaces: vec![Workspace {
                 id: WORKSPACE.into(),
@@ -411,13 +417,199 @@ async fn the_unseen_dot_goes_out_once_the_panel_is_on_screen() {
     h.tick();
     // The panel is open in the terminals view: it is on screen.
     assert!(!h.model.live.preview.unseen(WORKSPACE));
-    h.send(Msg::SetPanel(WORKSPACE.into(), Some(false), None));
+    assert!(!h.signals().unseen);
+    h.shell_toggles(|panel| panel.open = false);
     h.shared
         .edit(|store| store.reload_model(&only_entry(&h), 5, None));
     h.tick();
     assert!(h.model.live.preview.unseen(WORKSPACE), "closed, it is news");
-    h.send(Msg::SetPanel(WORKSPACE.into(), Some(true), None));
+    assert!(h.signals().unseen, "and the toolbar's button says so");
+    h.shell_toggles(|panel| panel.open = true);
     assert!(!h.model.live.preview.unseen(WORKSPACE));
+    assert!(!h.signals().unseen);
+}
+
+/* ── the shell's panel ─────────────────────────────────────────── */
+
+impl Harness {
+    /// The signals the shell reads of the workspace's preview.
+    fn signals(&self) -> PreviewPanel {
+        self.model
+            .live
+            .signals
+            .preview
+            .get(WORKSPACE)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// What the shell's toggles do (`TogglePreview`, `ClosePreviewPanel`,
+    /// `TogglePreviewExpand`): they write the signals, then this package
+    /// looks (`on_intent` does, after each intent).
+    fn shell_toggles(&mut self, toggle: impl FnOnce(&mut PreviewPanel)) {
+        toggle(
+            self.model
+                .live
+                .signals
+                .preview
+                .entry(WORKSPACE.into())
+                .or_default(),
+        );
+        self.tick();
+    }
+}
+
+#[tokio::test]
+async fn the_shell_is_told_how_many_tabs_there_are_and_what_is_news() {
+    let mut h = Harness::new("signals");
+    assert_eq!(h.signals(), PreviewPanel::default());
+    let one = h.show(&h.write("one.txt", "1")).await;
+    let panel = h.signals();
+    assert_eq!(panel.entries, 1);
+    assert!(panel.open, "an agent showing a file opens the panel");
+    assert!(!panel.expanded);
+    assert!(!panel.unseen, "it is on screen, docked");
+    h.show(&h.write("two.txt", "2")).await;
+    assert_eq!(h.signals().entries, 2);
+
+    // Closed, a change is news.
+    h.shell_toggles(|panel| panel.open = false);
+    h.shared.edit(|store| store.reload_model(&one, 5, None));
+    h.tick();
+    assert!(h.signals().unseen);
+
+    // The last tab going takes the panel with it.
+    h.send(Msg::Close(WORKSPACE.into(), one));
+    assert_eq!(h.signals().entries, 1);
+    let two = only_entry(&h);
+    h.send(Msg::Close(WORKSPACE.into(), two));
+    assert!(!h.model.live.signals.preview.contains_key(WORKSPACE));
+}
+
+#[tokio::test]
+async fn what_the_shells_toggles_write_reaches_the_store() {
+    let mut h = Harness::new("toggles");
+    h.show(&h.write("one.txt", "1")).await;
+    let scope = |h: &Harness| h.shared.read(|store| store.scope(WORKSPACE).clone());
+
+    h.shell_toggles(|panel| panel.open = false);
+    assert!(!scope(&h).panel_open);
+
+    // Expanding opens it too, as the shell's toggle does.
+    h.shell_toggles(|panel| {
+        panel.open = true;
+        panel.expanded = true;
+    });
+    let held = scope(&h);
+    assert!(held.panel_open && held.expanded);
+    assert!(h.signals().expanded);
+
+    // The toolbar's button while expanded closes the panel, and a closed
+    // panel is not expanded.
+    h.shell_toggles(|panel| panel.open = false);
+    let held = scope(&h);
+    assert!(!held.panel_open && !held.expanded);
+    assert!(!h.signals().expanded, "the shell is told it is not");
+}
+
+#[tokio::test]
+async fn an_agent_revealing_a_tab_opens_the_panel_the_shell_draws() {
+    let mut h = Harness::new("reveal");
+    let one = h.show(&h.write("one.txt", "1")).await;
+    h.show(&h.write("two.txt", "2")).await;
+    h.shell_toggles(|panel| panel.open = false);
+    assert!(!h.signals().open);
+
+    PreviewAccess::reveal(&*h.shared, &WORKSPACE.to_string(), &one);
+    h.tick();
+    assert!(h.signals().open);
+    assert_eq!(only_entry(&h), one);
+}
+
+#[tokio::test]
+async fn when_both_move_the_stores_word_stands() {
+    let mut h = Harness::new("both");
+    h.show(&h.write("one.txt", "1")).await;
+    // The shell expanded the panel at the moment an agent closed it.
+    h.model
+        .live
+        .signals
+        .preview
+        .get_mut(WORKSPACE)
+        .unwrap()
+        .expanded = true;
+    h.shared
+        .edit(|store| store.set_model_panel(WORKSPACE, Some(false), None));
+    h.tick();
+    let panel = h.signals();
+    assert!(!panel.open && !panel.expanded);
+    let held = h.shared.read(|store| store.scope(WORKSPACE).clone());
+    assert!(!held.panel_open && !held.expanded);
+}
+
+#[tokio::test]
+async fn the_shell_clearing_the_news_marks_the_tabs_seen() {
+    let mut h = Harness::new("cleared");
+    let id = h.show(&h.write("one.txt", "1")).await;
+    h.shell_toggles(|panel| panel.open = false);
+    h.shared.edit(|store| store.reload_model(&id, 5, None));
+    h.tick();
+    assert!(h.shared.read(|store| store.scope(WORKSPACE).unseen));
+    // The shell had the preview on screen as a drawer for a moment.
+    h.shell_toggles(|panel| panel.unseen = false);
+    assert!(!h.shared.read(|store| store.scope(WORKSPACE).unseen));
+    assert!(!h.signals().unseen);
+}
+
+#[tokio::test]
+async fn closing_the_previews_of_a_workspace_closes_every_tab_and_the_panel() {
+    let mut h = Harness::new("close-all");
+    let page = h.write("page.html", "<p>hi</p>");
+    let first = h.show(&h.write("one.txt", "1")).await;
+    let second = h.show(&page).await;
+    h.read_text(&first);
+    assert!(h.st.windows.get(&second).is_some());
+
+    let intent = Intent::ClosePreviews(WORKSPACE.into());
+    assert!(super::heard(&mut h.st, &mut h.model, &h.env, &intent).is_some());
+    // The shell stops drawing the panel at once; the rest follows the store.
+    assert!(!h.model.live.signals.preview.contains_key(WORKSPACE));
+    h.tick();
+    assert!(!h.model.live.preview.has_preview(WORKSPACE));
+    assert!(h.st.viewers.is_empty());
+    assert!(h.st.windows.get(&second).is_none());
+}
+
+#[tokio::test]
+async fn the_hook_for_the_control_bus_goes_out_once_the_state_is_read() {
+    use crate::control::Hook;
+
+    let mut h = Harness::new("hook");
+    h.model.live.hydrated = false;
+    assert!(super::hook_to_install(&mut h.st, &h.model).is_none());
+    h.model.live.hydrated = true;
+    let Some(Hook::Preview(hosts)) = super::hook_to_install(&mut h.st, &h.model) else {
+        panic!("the previews' hosts");
+    };
+    assert!(
+        super::hook_to_install(&mut h.st, &h.model).is_none(),
+        "once"
+    );
+
+    // What an agent shows through it is what the person has in front of them.
+    let id = h.show(&h.write("one.txt", "1")).await;
+    let host = hosts.host(&WORKSPACE.to_string(), false).expect("a host");
+    let listing = host.list().await.expect("listed");
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].id, id);
+    assert_eq!(listing.active_id.as_deref(), Some(id.as_str()));
+    // And the panel is drawn there: the shell said so.
+    assert!(listing.on_screen);
+    assert!(listing.shown);
+    h.shell_toggles(|panel| panel.open = false);
+    let listing = host.list().await.expect("listed");
+    assert!(listing.on_screen);
+    assert!(!listing.shown, "closed, nobody sees the file");
 }
 
 #[tokio::test]
@@ -667,4 +859,48 @@ async fn snapshots() {
         }
         let _ = std::fs::remove_dir_all(&h.dir);
     }
+
+    // Every file open at once: the strip, with a code file in front.
+    let mut h = Harness::new("snap-all");
+    let mut first = None;
+    for scene in scenes {
+        let copied = h.dir.join(scene);
+        std::fs::copy(source.join(scene), &copied).expect("a sample");
+        let id = h.show(&copied.to_string_lossy()).await;
+        first.get_or_insert_with(|| id.clone());
+        if scene == "main.rs" {
+            h.read_text(&id);
+        }
+    }
+    let rust = h
+        .model
+        .live
+        .preview
+        .scope(WORKSPACE)
+        .and_then(|scope| scope.entries.iter().find(|entry| entry.title == "main.rs"))
+        .map(|entry| entry.id.clone())
+        .expect("main.rs is open");
+    h.send(Msg::Activate(WORKSPACE.into(), rust));
+    h.send(Msg::Web(WebMsg::Started(Err(StartError::Missing))));
+    let pkg = Packages::default();
+    for mode in [
+        ("docked", PanelMode::Docked { width: 480.0 }),
+        ("expanded", PanelMode::Expanded),
+    ] {
+        let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+        let mut ui = simulate(
+            super::view_panel(&h.st, ctx, mode.1),
+            Size::new(if mode.0 == "docked" { 480.0 } else { 1100.0 }, 620.0),
+        );
+        let snapshot = ui.snapshot(&to_iced(ctx.theme)).expect("it draws");
+        let stem = format!("all-{}", mode.0);
+        for old in std::fs::read_dir(&out).unwrap().flatten() {
+            let name = old.file_name().to_string_lossy().into_owned();
+            if name.starts_with(&format!("{stem}-")) && name.ends_with(".png") {
+                let _ = std::fs::remove_file(old.path());
+            }
+        }
+        snapshot.matches_image(out.join(&stem)).expect("written");
+    }
+    let _ = std::fs::remove_dir_all(&h.dir);
 }

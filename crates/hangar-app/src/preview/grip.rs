@@ -23,7 +23,7 @@ pub const WIDTH: f32 = 5.0;
 
 /// What the grip says.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Event2 {
+pub enum GripEvent {
     /// The pointer took hold.
     Begin,
     /// The pointer is this many pixels to the left of where it took hold
@@ -38,11 +38,11 @@ pub enum Event2 {
 
 pub struct Grip<'a, M> {
     colour: Color,
-    on_event: Box<dyn Fn(Event2) -> M + 'a>,
+    on_event: Box<dyn Fn(GripEvent) -> M + 'a>,
 }
 
 impl<'a, M> Grip<'a, M> {
-    pub fn new(t: &hangar_theme::Theme, on_event: impl Fn(Event2) -> M + 'a) -> Self {
+    pub fn new(t: &hangar_theme::Theme, on_event: impl Fn(GripEvent) -> M + 'a) -> Self {
         Grip {
             colour: t.colors.accent,
             on_event: Box::new(on_event),
@@ -101,11 +101,11 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Grip<'_, M> {
                     state.last_click = Some(click);
                     if click.kind() == click::Kind::Double {
                         state.dragging = false;
-                        shell.publish((self.on_event)(Event2::Reset));
+                        shell.publish((self.on_event)(GripEvent::Reset));
                     } else {
                         state.dragging = true;
                         state.start = point.x;
-                        shell.publish((self.on_event)(Event2::Begin));
+                        shell.publish((self.on_event)(GripEvent::Begin));
                     }
                     shell.capture_event();
                     shell.request_redraw();
@@ -115,13 +115,13 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Grip<'_, M> {
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) if state.dragging => {
-                shell.publish((self.on_event)(Event2::Drag(state.start - position.x)));
+                shell.publish((self.on_event)(GripEvent::Drag(state.start - position.x)));
                 shell.capture_event();
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.dragging => {
                 state.dragging = false;
-                shell.publish((self.on_event)(Event2::End));
+                shell.publish((self.on_event)(GripEvent::End));
                 shell.capture_event();
                 shell.request_redraw();
             }
@@ -135,7 +135,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Grip<'_, M> {
                     Key::Named(Named::ArrowRight) => -KEY_STEP,
                     _ => return,
                 };
-                shell.publish((self.on_event)(Event2::Nudge(step)));
+                shell.publish((self.on_event)(GripEvent::Nudge(step)));
                 shell.capture_event();
             }
             _ => {}
@@ -212,13 +212,6 @@ fn model_min() -> f64 {
     f64::from(crate::shell::side_panels::MODEL_MIN)
 }
 
-/// The widest the panel may be in a window `body` points wide, leaving the
-/// terminals the room they always keep, and never less than its least.
-pub fn max_width(body: f64, scale: f64) -> f64 {
-    let room = (body - f64::from(crate::shell::side_panels::TERMINALS_MIN)) / scale.max(0.1);
-    room.max(model_min())
-}
-
 /// The default width a double click goes back to.
 pub fn default_width() -> f64 {
     crate::state::Settings::default().model_panel_width
@@ -239,15 +232,6 @@ mod tests {
         assert_eq!(dragged_width(440.0, -400.0, 900.0), 320.0);
         assert_eq!(dragged_width(440.0, 900.0, 700.0), 700.0);
         assert_eq!(clamp_width(412.4, 900.0), 412.0);
-        // The room can leave less than the least; the least wins.
-        assert_eq!(max_width(500.0, 1.0), 320.0);
-    }
-
-    #[test]
-    fn the_terminals_keep_their_room() {
-        assert_eq!(max_width(1360.0, 1.0), 720.0);
-        // A larger interface scales the room and the width alike.
-        assert_eq!(max_width(1560.0, 1.3), (1560.0 - 640.0) / 1.3);
     }
 
     #[test]

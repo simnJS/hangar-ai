@@ -374,13 +374,25 @@ pub type KitTabWatcher = Box<dyn FnMut(&KitTabParams, Option<&KitTabCaller>) + S
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WatchId(u64);
 
-/// The workspace this window has on screen, and whether its preview panel is
-/// on screen with it (`noteModelView`): kept for the agents' answers, since
+/// The workspaces the windows have on screen (the main window's active one and
+/// every workspace in a window of its own), and whether the preview panel is
+/// on screen with each (`noteModelView`): kept for the agents' answers, since
 /// a file shown elsewhere is not one the user can see.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
-    pub workspace_id: Option<WsId>,
-    pub panel_shown: bool,
+    screens: BTreeMap<WsId, bool>,
+}
+
+impl View {
+    /// A window has the workspace on screen.
+    pub fn on_screen(&self, workspace: &str) -> bool {
+        self.screens.contains_key(workspace)
+    }
+
+    /// And its preview panel is drawn there: what is in front can be seen.
+    pub fn panel_shown(&self, workspace: &str) -> bool {
+        self.screens.get(workspace).copied().unwrap_or(false)
+    }
 }
 
 pub struct Store {
@@ -1164,12 +1176,12 @@ impl Store {
 
     /* ── what the window shows ───────────────────────────────────── */
 
-    /// Which workspace this window has on screen, and whether its preview
-    /// panel is on screen with it (`noteModelView`).
-    pub fn note_view(&mut self, workspace: Option<WsId>, panel_shown: bool) {
+    /// Which workspaces the windows have on screen, and whether the preview
+    /// panel is on screen with each (`noteModelView`). It changes nothing a
+    /// view draws: nobody is woken.
+    pub fn note_screens(&mut self, screens: impl IntoIterator<Item = (WsId, bool)>) {
         self.view = View {
-            workspace_id: workspace,
-            panel_shown,
+            screens: screens.into_iter().collect(),
         };
     }
 

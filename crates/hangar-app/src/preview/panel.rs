@@ -17,20 +17,21 @@ use super::grip::{self, Grip};
 use super::store::{Body, EMPTY, Entry};
 use super::{Msg, State, tabs, viewer};
 use crate::ctx::Ctx;
-use crate::message::Message;
-use crate::shell::{PanelMode, WindowKind};
+use crate::message::{Intent, Message};
+use crate::shell::PanelMode;
 use crate::state::WsId;
 
-/// The workspace a window shows: its own for a workspace window, else the one
-/// the main window has on screen.
+/// The workspace a window draws: its own for a workspace window, else the one
+/// the main window has on screen (the shell's rule).
 pub fn window_workspace<'a>(ctx: Ctx<'a>) -> Option<&'a WsId> {
-    match ctx.model.live.windows.get(&ctx.window) {
-        Some(WindowKind::Workspace(id)) => Some(id),
-        _ => ctx.model.state().active_workspace_id.as_ref(),
-    }
+    ctx.model
+        .window_workspace(ctx.window)
+        .map(|workspace| &workspace.id)
 }
 
-/// The panel for `mode`.
+/// The panel for `mode`. Its two buttons are the shell's intents: it decides
+/// whether the panel is a drawer to end, a docked panel to close, or an
+/// expanded one to put back.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, mode: PanelMode) -> Element<'a, Message> {
     let t = ctx.theme;
     let Some(ws) = window_workspace(ctx) else {
@@ -46,28 +47,24 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, mode: PanelMode) -> Element<'a, Mes
             row![
                 button::toggle_button(
                     t,
-                    if scope.expanded {
+                    if expanded {
                         Icon::Collapse
                     } else {
                         Icon::Expand
                     },
-                    scope.expanded,
+                    expanded,
                 )
-                .tip(if scope.expanded {
+                .tip(if expanded {
                     ctx.t(Key::ModelCollapse)
                 } else {
                     ctx.t(Key::ModelExpand)
                 })
                 .small()
-                .on_press(Message::Preview(Msg::SetPanel(
-                    ws.clone(),
-                    Some(true),
-                    Some(!scope.expanded),
-                ))),
+                .on_press(Message::Intent(Intent::TogglePreviewExpand)),
                 button::icon_button(t, Icon::Close)
                     .tip(ctx.t(Key::ModelHide))
                     .small()
-                    .on_press(Message::Preview(Msg::Hide(ws.clone()))),
+                    .on_press(Message::Intent(Intent::ClosePreviewPanel)),
             ]
             .spacing(2)
             .align_y(Alignment::Center)

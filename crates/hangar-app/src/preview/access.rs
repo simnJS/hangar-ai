@@ -239,12 +239,11 @@ impl Shared {
         self.read(|store| {
             let scope = store.scope(workspace);
             let view: &View = store.view();
-            let on_screen = view.workspace_id.as_deref() == Some(workspace);
             ListView {
                 entries: scope.entries.iter().map(preview_entry).collect(),
                 active_id: scope.active_id.clone(),
-                on_screen,
-                shown: on_screen && view.panel_shown,
+                on_screen: view.on_screen(workspace),
+                shown: view.panel_shown(workspace),
             }
         })
     }
@@ -357,8 +356,37 @@ impl Shared {
         Ok(self.edit(|store| store.show_file_with(shown, request.reveal)))
     }
 
-    fn owns(&self, workspace: &str, id: &str) -> bool {
+    /// Whether the workspace's preview has the entry open.
+    pub fn owns(&self, workspace: &str, id: &str) -> bool {
         self.read(|store| store.scope(workspace).entry(id).is_some())
+    }
+
+    /// The entry once it has loaded or failed, or `None` past `timeout`, or
+    /// when it is not open in that workspace (`whenSettled`).
+    pub fn settle(&self, ws: &WsId, id: &str, timeout: Duration) -> BoxFuture<Option<Entry>> {
+        let Some(me) = self.me.upgrade() else {
+            return Box::pin(std::future::ready(None));
+        };
+        let (ws, id) = (ws.clone(), id.to_string());
+        let mut changes = self.changes.subscribe();
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            loop {
+                let settled = me.read(|store| {
+                    let entry = store.scope(&ws).entry(&id)?;
+                    Some((entry.status != Status::Loading).then(|| entry.clone()))
+                });
+                match settled {
+                    None => return None,
+                    Some(Some(entry)) => return Some(entry),
+                    Some(None) => {}
+                }
+                match tokio::time::timeout_at(deadline, changes.changed()).await {
+                    Ok(Ok(())) => {}
+                    _ => return None,
+                }
+            }
+        })
     }
 }
 
@@ -463,29 +491,8 @@ impl PreviewAccess for Shared {
         id: &str,
         timeout: Duration,
     ) -> BoxFuture<Option<PreviewEntry>> {
-        let Some(me) = self.me.upgrade() else {
-            return Box::pin(std::future::ready(None));
-        };
-        let (ws, id) = (ws.clone(), id.to_string());
-        let mut changes = self.changes.subscribe();
-        Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + timeout;
-            loop {
-                let settled = me.read(|store| {
-                    let entry = store.scope(&ws).entry(&id)?;
-                    Some((entry.status != Status::Loading).then(|| preview_entry(entry)))
-                });
-                match settled {
-                    None => return None,
-                    Some(Some(entry)) => return Some(entry),
-                    Some(None) => {}
-                }
-                match tokio::time::timeout_at(deadline, changes.changed()).await {
-                    Ok(Ok(())) => {}
-                    _ => return None,
-                }
-            }
-        })
+        let settled = self.settle(ws, id, timeout);
+        Box::pin(async move { settled.await.map(|entry| preview_entry(&entry)) })
     }
 
     fn snapshot(
@@ -691,7 +698,7 @@ mod tests {
     #[test]
     fn opening_in_its_own_workspace_whatever_is_on_screen_and_saying_what_is() {
         let shared = shared();
-        shared.edit(|store| store.note_view(Some("w1".into()), true));
+        shared.edit(|store| store.note_screens([("w1".into(), true)]));
         let id = shared.edit(|store| {
             let mut file = model_file("C:/dev/shop/chair.glb");
             file.workspace_id = "w2".into();
@@ -701,12 +708,16 @@ mod tests {
         assert_eq!(listed.active_id.as_deref(), Some(id.as_str()));
         assert!(!listed.on_screen);
         assert!(!listed.shown);
-        shared.edit(|store| store.note_view(Some("w2".into()), false));
+        shared.edit(|store| store.note_screens([("w2".into(), false)]));
         let listed = shared.list_view("w2");
         assert!(listed.on_screen);
         assert!(!listed.shown);
-        shared.edit(|store| store.note_view(Some("w2".into()), true));
+        // A workspace in a window of its own is on screen with the main
+        // window's.
+        shared.edit(|store| store.note_screens([("w1".into(), false), ("w2".into(), true)]));
         assert!(shared.list_view("w2").shown);
+        assert!(shared.list_view("w1").on_screen);
+        assert!(!shared.list_view("w1").shown);
         assert!(shared.list_view("w1").entries.is_empty());
     }
 
