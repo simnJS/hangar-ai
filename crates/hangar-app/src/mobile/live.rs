@@ -370,10 +370,17 @@ impl Runtime {
                 write_log(&log, remote.as_deref());
             });
         }
-        let ticking = inner.clone();
+        // What the ticker keeps, without the handle it is handed: the
+        // runtime holds the ticker, which holding the runtime would keep
+        // alive for good.
+        let (services, log, remote) = (
+            inner.services.clone(),
+            inner.log.clone(),
+            inner.remote.clone(),
+        );
         inner.handle.add_ticker(Box::new(move |handle, now| {
-            let gathered = Gathered::of(&ticking.services, handle);
-            let (log, remote) = (ticking.log.clone(), ticking.remote.clone());
+            let gathered = Gathered::of(&services, handle);
+            let (log, remote) = (log.clone(), remote.clone());
             tokio::task::spawn_blocking(move || {
                 locked(&log).tick(&gathered, now);
                 write_log(&log, remote.as_deref());
