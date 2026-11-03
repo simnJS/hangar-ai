@@ -43,6 +43,7 @@ pub mod api;
 mod bridge;
 pub mod catalog;
 pub mod deps;
+mod dev;
 mod native;
 pub mod tabs;
 mod view;
@@ -109,6 +110,8 @@ pub struct State {
     helper_starting: bool,
     /// Numbers the windows, each open being a window of its own.
     windows: u64,
+    /// `HANGAR_DEV_KIT_TABS` has been looked at (dev.rs).
+    dev_done: bool,
 }
 
 impl Default for State {
@@ -125,6 +128,7 @@ impl Default for State {
             routed: false,
             helper_starting: false,
             windows: 0,
+            dev_done: false,
         }
     }
 }
@@ -399,6 +403,22 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         ))));
     }
     st.installed.sync(m.live.kits.installed.as_deref());
+    // A debug build asked to open tabs, once the kits are read.
+    if !st.dev_done && m.live.kits.installed.is_some() {
+        st.dev_done = true;
+        if let Some(ws) = m.active_workspace().cloned() {
+            for (kit, tab) in dev::requested() {
+                let Some(choice) = choices(m, &ws)
+                    .into_iter()
+                    .find(|choice| choice.kit_id == kit && choice.tab.id == tab)
+                else {
+                    continue;
+                };
+                let open = KitTabToOpen::new(ws.id.clone(), kit, tab, choice.tab.title);
+                st.shared.edit(|store| store.open_kit_tab(open));
+            }
+        }
+    }
     m.live.preview.sync();
     let installed = st.installed.get();
     let view = st.shared.read(|store| store.view().clone());
