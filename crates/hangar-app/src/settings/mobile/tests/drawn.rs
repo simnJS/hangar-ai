@@ -23,6 +23,11 @@ fn lay_out(st: &State) {
 /// HANGAR_SETTINGS_SNAPSHOTS=/tmp/settings cargo test -p hangar-app settings::mobile
 /// ```
 fn lay_out_as(st: &State, stem: Option<&str>) {
+    // Several simulators drawing this page at once (one per test thread)
+    // crashed the test process now and then with SIGSEGV after every test
+    // had passed, and never one at a time: they take turns.
+    static DRAWING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _turn = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut model = Model::default();
     model.hydrate(AppState {
         workspaces: vec![Workspace {
