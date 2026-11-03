@@ -45,3 +45,6 @@ open = "5.4"
 # (WebKitGTK, WebView2, WKWebView) and tao gives it its windows.
 wry = "0.57"
 tao = "0.37"
+unicode-normalization = "0.1"
+usvg = { version = "0.45", default-features = false }
+iced_test = "0.14"

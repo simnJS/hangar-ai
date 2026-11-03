@@ -252,3 +252,97 @@ pub fn link(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
         }
     }
 }
+
+/// A button with nothing around it that only changes the colour of its text:
+/// the title row of a folding section (`.insp-section__toggle`), which sits
+/// in a column of other things and must not light up like a tool.
+pub fn plain(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
+    move |_, status| {
+        let c = &t.colors;
+        let text = match status {
+            Status::Active => c.fg_muted,
+            Status::Hovered | Status::Pressed => c.fg,
+            Status::Disabled => faded(c.fg_muted),
+        };
+        Style {
+            background: None,
+            text_color: text,
+            border: Border::default(),
+            shadow: Shadow::default(),
+            ..Style::default()
+        }
+    }
+}
+
+/// An icon button that can be switched on (a toolbar's view toggles): quiet
+/// when off like [`icon`], lit with the accent as text on the selection's
+/// colour when on, so it reads as pressed in.
+pub fn toggle(t: &Theme, on: bool) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
+    move |_, status| {
+        let c = &t.colors;
+        let look = |background: Option<Color>, text: Color| Look {
+            background,
+            text,
+            border: rounded(radius::MD),
+            shadow: Shadow::default(),
+        };
+        if on {
+            return by_status(
+                status,
+                look(Some(c.surface_active), c.accent_hi),
+                look(Some(c.surface_active), brightness(c.accent_hi, 1.1)),
+                look(Some(c.surface_active), brightness(c.accent_hi, 0.9)),
+            );
+        }
+        by_status(
+            status,
+            look(None, c.fg_muted),
+            look(Some(c.surface_hover), c.fg),
+            look(Some(c.surface_active), c.fg),
+        )
+    }
+}
+
+/// A tab of a strip of document tabs (`.model-tab`): the one in front takes
+/// the panel's own surface and joins it, the others sit back on the header
+/// and light up a little under the pointer.
+pub fn tab_strip(t: &Theme, active: bool) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
+    move |_, status| {
+        let c = &t.colors;
+        let look = |background: Option<Color>, text: Color| Look {
+            background,
+            text,
+            border: rounded(radius::NONE),
+            shadow: Shadow::default(),
+        };
+        if active {
+            let front = look(Some(c.chrome), c.fg);
+            return match status {
+                Status::Disabled => front.disabled(),
+                _ => front.style(),
+            };
+        }
+        by_status(
+            status,
+            look(None, c.fg_muted),
+            look(Some(with_alpha(c.line, c.line.a * 0.6)), c.fg),
+            look(Some(c.line), c.fg),
+        )
+    }
+}
+
+/// A row of the command palette. The chosen one (the keyboard's, or the
+/// pointer's, since the palette moves one with the other) is one solid accent
+/// bar with everything on it in the accent's own foreground.
+pub fn palette_row(t: &Theme, chosen: bool) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
+    move |_, _| {
+        let c = &t.colors;
+        Style {
+            background: chosen.then_some(Background::Color(c.accent)),
+            text_color: if chosen { c.accent_fg } else { c.fg },
+            border: rounded(radius::MD),
+            shadow: Shadow::default(),
+            ..Style::default()
+        }
+    }
+}

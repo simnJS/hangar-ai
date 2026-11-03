@@ -10,3 +10,10 @@ edition = "2024"
 [dependencies]
 iced.workspace = true
 hangar-theme.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+# Only to check that every icon is an SVG a renderer can read.
+usvg.workspace = true
+# A headless window to drive the widgets with real events.
+iced_test.workspace = true

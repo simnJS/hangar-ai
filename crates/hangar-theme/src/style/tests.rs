@@ -2,16 +2,18 @@
 
 use iced::widget::button::Status;
 use iced::widget::{
-    button, checkbox, container, pick_list, progress_bar, scrollable, text, text_input, toggler,
-    tooltip,
+    button, checkbox, container, pick_list, progress_bar, scrollable, slider, text, text_editor,
+    text_input, toggler, tooltip,
 };
 use iced::{Background, Color, Element, Shadow};
 
+use super::Tone;
 use super::toggler as toggler_style;
 use super::{brightness, faded};
 use super::{button as button_style, checkbox as checkbox_style, container as container_style};
 use super::{pick_list as pick_list_style, progress_bar as progress_bar_style, rule};
 use super::{scrollable as scrollable_style, text as text_style, text_input as text_input_style};
+use super::{slider as slider_style, text_editor as text_editor_style};
 use crate::{Rgb, TEXT_CONTRAST, contrast_ratio, default_theme, themes};
 
 /// Every style function has to fit the `.style(..)` of the widget it is for;
@@ -41,6 +43,21 @@ fn the_functions_plug_into_the_widgets_they_are_for() {
         .style(progress_bar_style::accent(t))
         .into();
     let _: Element<'_, ()> = iced::widget::rule::horizontal(1).style(rule::sep(t)).into();
+    let _: Element<'_, u8> = slider(0..=10, 5_u8, |value| value)
+        .style(slider_style::default(t))
+        .into();
+    let content = text_editor::Content::new();
+    let _: Element<'_, ()> = text_editor(&content)
+        .style(text_editor_style::field(t))
+        .into();
+    let _: Element<'_, ()> = button("x").style(button_style::tab_strip(t, true)).into();
+    let _: Element<'_, ()> = button("x").style(button_style::toggle(t, true)).into();
+    let _: Element<'_, ()> = button("x").style(button_style::plain(t)).into();
+    let _: Element<'_, ()> = button("x").style(button_style::palette_row(t, true)).into();
+    let _: Element<'_, ()> = container("x").style(container_style::kbd(t)).into();
+    let _: Element<'_, ()> = container("x")
+        .style(container_style::toast(t, Tone::Danger))
+        .into();
 }
 
 #[test]
@@ -115,4 +132,53 @@ fn brightness_scales_the_channels_and_stops_at_white() {
 #[test]
 fn a_disabled_colour_keeps_45_percent_of_its_alpha() {
     assert!((faded(Color::from_rgba(1.0, 1.0, 1.0, 0.5)).a - 0.225).abs() < 1e-6);
+}
+
+#[test]
+fn an_invalid_field_keeps_the_danger_edge_even_while_it_has_the_keyboard() {
+    let t = default_theme();
+    for status in [
+        text_input::Status::Active,
+        text_input::Status::Hovered,
+        text_input::Status::Focused { is_hovered: false },
+    ] {
+        let look = text_input_style::field_invalid(t)(&iced::Theme::Dark, status);
+        assert_eq!(look.border.color, t.colors.danger, "{status:?}");
+    }
+}
+
+#[test]
+fn the_palette_row_is_the_accent_only_when_chosen() {
+    let t = default_theme();
+    let chosen = button_style::palette_row(t, true)(&iced::Theme::Dark, Status::Active);
+    let other = button_style::palette_row(t, false)(&iced::Theme::Dark, Status::Hovered);
+    assert_eq!(chosen.background, Some(Background::Color(t.colors.accent)));
+    assert_eq!(chosen.text_color, t.colors.accent_fg);
+    assert_eq!(other.background, None);
+}
+
+#[test]
+fn the_slider_knob_is_white_in_every_theme() {
+    for theme in themes() {
+        let look = slider_style::default(theme)(&iced::Theme::Dark, slider::Status::Active);
+        assert_eq!(
+            look.handle.background,
+            Background::Color(Color::WHITE),
+            "{}",
+            theme.id
+        );
+        assert_eq!(
+            look.rail.backgrounds.0,
+            Background::Color(theme.colors.accent)
+        );
+    }
+}
+
+#[test]
+fn a_front_tab_takes_the_panels_surface_in_every_state() {
+    let t = default_theme();
+    for status in [Status::Active, Status::Hovered, Status::Pressed] {
+        let look = button_style::tab_strip(t, true)(&iced::Theme::Dark, status);
+        assert_eq!(look.background, Some(Background::Color(t.colors.chrome)));
+    }
 }
