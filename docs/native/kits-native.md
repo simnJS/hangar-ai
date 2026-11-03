@@ -418,7 +418,7 @@ typed (`api::PanesList`, `api::FilesWrite`…), each with its `METHOD` and the t
 | Method              | Params                                       | Needs                     | Result |
 | ------------------- | -------------------------------------------- | ------------------------- | ------ |
 | `workspace.info`    | —                                            | `workspace.read`          | `{ id, name, folder }` |
-| `panes.list`        | —                                            | `panes.read`              | `[{ name, agent, role, state, canSend }]` |
+| `panes.list`        | —                                            | `panes.read`              | `[{ name, agent, role, state, canSend }]`, `agent` being `claude` or `shell` |
 | `panes.send`        | `{ pane, text }`                             | `panes.send`              | `{ queued: true, pane }` |
 | `files.read`        | `{ path }`                                   | `files.read`              | the text |
 | `files.readBinary`  | `{ path }`                                   | `files.read`              | `{ base64, mime }` |

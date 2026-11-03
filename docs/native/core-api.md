@@ -457,28 +457,30 @@ The window's answer to a control request, internal or not. An id nobody waits fo
 Invoked as `list_sessions` from `src/lib/ipc.ts`. Now `hangar_core::sessions::list_sessions`, sync.
 
 ```rust
-pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession>
+pub fn list_sessions(cwd: String) -> Vec<AgentSession>
 ```
+
+The Claude Code conversations kept for `cwd`, newest first. The TS passed an agent id as well; Claude Code is the only agent since the owner's decision of 2026-11-03, so the argument is gone (Codex's rollouts are no longer listed).
 
 #### `session_exists`
 
 Invoked as `session_exists` from `src/lib/ipc.ts`. Now `hangar_core::sessions::session_exists`, sync.
 
 ```rust
-pub fn session_exists(agent: String, id: String) -> Option<bool>
+pub fn session_exists(id: String) -> Option<bool>
 ```
 
-Whether the conversation a pane is about to resume has a transcript left: `Some(false)` only when it is nowhere on disk, `None` when that cannot be told. Claude Code takes its session id at startup but writes nothing until the first message. A pane reset and then left alone keeps an id with no conversation behind it, and `--resume` on that id only prints "No conversation found". Every project directory is searched, not just the pane's: a transcript filed under another spelling of the path is still worth handing to the agent.
+Whether the conversation a pane is about to resume has a transcript left: `Some(false)` only when it is nowhere on disk, `None` when that cannot be told. Claude Code takes its session id at startup but writes nothing until the first message. A pane reset and then left alone keeps an id with no conversation behind it, and `--resume` on that id only prints "No conversation found". Every project directory is searched, not just the pane's: a transcript filed under another spelling of the path is still worth handing to the agent. Only Claude Code's transcripts are looked for; the TS's agent argument is gone.
 
 #### `detect_agents`
 
-Invoked as `detect_agents` from `src/lib/ipc.ts`. Now `hangar_core::sessions::detect_agents`, sync.
+Invoked as `detect_agents` from `src/lib/ipc.ts`. Now `hangar_core::sessions::claude_installed`, sync.
 
 ```rust
-pub fn detect_agents() -> Vec<String>
+pub fn claude_installed() -> bool
 ```
 
-Reports which agent CLIs are actually on PATH, so the UI can grey out the rest.
+Whether Claude Code is on PATH, so the UI can say so where it offers it. Codex, Gemini CLI and OpenCode are no longer looked for (owner's decision, 2026-11-03).
 
 #### `context_usage`
 
@@ -486,13 +488,12 @@ Invoked as `context_usage` from `src/lib/ipc.ts`. Now `hangar_core::context::con
 
 ```rust
 pub async fn context_usage(
-    agent: String,
     session_id: String,
     cwd: String,
 ) -> Option<ContextUsage>
 ```
 
-Where the pane's agent stands in its context window, according to the agent's own transcript. `None` covers every "show nothing" case: an agent without a usable transcript, a session not written yet, a file with no usage line so far.
+Where the pane's Claude Code stands in its context window, according to its own transcript. `None` covers every "show nothing" case: a session not written yet, a file with no usage line so far. The TS's agent argument is gone: Codex rollouts are no longer read.
 
 #### `chat_page`
 
@@ -525,6 +526,7 @@ pub async fn usage_stats(
 ```
 
 - Errors: only the blocking task's join error. `cached_only: Some(true)` answers from the cache without scanning the transcripts.
+- Note: reads Claude Code's transcripts only (`~/.claude/projects/` of every account); Codex rollouts are no longer read, so no zstd decoding, and the price table covers Anthropic's models only.
 
 ### Shells, state file, folders
 
@@ -1142,6 +1144,8 @@ Invoked as `mcp_targets` from `src/lib/board.ts`. Now `hangar_core::install::mcp
 pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus>
 ```
 
+- Note: one target, `claude-code` (the project's `.mcp.json`). The Codex, Gemini CLI, Cursor and VS Code targets the TS listed are gone (owner's decision, 2026-11-03).
+
 #### `mcp_install`
 
 Invoked as `mcp_install` from `src/lib/board.ts`. Now `hangar_core::install::mcp_install`, sync.
@@ -1150,7 +1154,7 @@ Invoked as `mcp_install` from `src/lib/board.ts`. Now `hangar_core::install::mcp
 pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport>
 ```
 
-- Note: never errs: one `InstallReport { id, ok, message, path }` per target.
+- Note: never errs: one `InstallReport { id, ok, message, path }` per target. `claude-code` is the only target; installing it also approves the server in `~/.claude/settings.json`.
 
 #### `mcp_manual_commands`
 
@@ -1163,7 +1167,7 @@ pub fn mcp_manual_commands(workspace_cwd: String) -> Result<serde_json::Value, S
 Shown in the UI so the user can register the server by hand if they prefer.
 
 - Errors: `std::env::current_exe`'s error.
-- Note: `{ executable, claude, codex, workspace }`: the `claude mcp add` and `codex mcp add` lines to run by hand.
+- Note: `{ executable, claude, workspace }`: the `claude mcp add` line to run by hand. The TS's `codex mcp add` line is gone.
 - Note: the window never invoked it by itself: src/lib/board.ts names it in a list of commands.
 
 #### `mcp_servers`
@@ -1519,7 +1523,7 @@ Invoked as `write_agent_instructions` from `src/lib/board.ts`. Now `hangar_core:
 pub fn write_agent_instructions(workspace_cwd: String) -> Vec<InstructionReport>
 ```
 
-- Note: never errs: one `InstructionReport { path, ok, message }` per file.
+- Note: never errs: one `InstructionReport { path, ok, message }` per file: `CLAUDE.md` and `.gitignore`. `AGENTS.md`, which the TS wrote too for the other agents, is no longer written.
 
 #### `agent_instructions_status`
 
@@ -1529,7 +1533,7 @@ Invoked as `agent_instructions_status` from `src/lib/board.ts`. Now `hangar_core
 pub fn agent_instructions_status(workspace_cwd: String) -> bool
 ```
 
-Lets the UI show whether the playbook is already in place.
+Lets the UI show whether the playbook is already in place, in `CLAUDE.md`.
 
 ### Notifications
 
