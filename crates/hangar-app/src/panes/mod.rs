@@ -1104,6 +1104,46 @@ mod tests {
         }
     }
 
+    /// The link a Ctrl+click at `column` of the first row reports, in a
+    /// pane's terminal that printed `text`.
+    fn ctrl_click(text: &str, column: i32) -> Option<String> {
+        use crate::state::types::{AgentId, Settings};
+        use hangar_term::{Button, CellPos, Pointer, Side, Terminal};
+        let config = look::config(&Settings::default(), AgentId::Claude);
+        let mut terminal = Terminal::new(config, 60, 3);
+        terminal.feed(text.as_bytes());
+        let events = terminal.perform(Action::Pointer(Pointer::Down {
+            button: Button::Left,
+            at: CellPos {
+                column,
+                row: 0,
+                side: Side::Left,
+            },
+            modifiers: iced::keyboard::Modifiers::CTRL,
+        }));
+        events.into_iter().find_map(|event| match event {
+            TermEvent::OpenLink(link) => Some(link.uri),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_ctrl_click_on_a_file_link_or_a_hyperlink_elsewhere_opens_nothing() {
+        // The terminal reports each as a link; the pane opens none of them.
+        let file = ctrl_click("see file:///etc/passwd now\r\n", 8);
+        assert_eq!(file.as_deref(), Some("file:///etc/passwd"));
+        assert!(!is_web_link(&file.unwrap()));
+        let marked = ctrl_click(
+            "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
+            2,
+        );
+        assert_eq!(marked.as_deref(), Some("ssh://attacker.example/x"));
+        assert!(!is_web_link(&marked.unwrap()));
+        // A web link still opens.
+        let web = ctrl_click("see https://hangar.ai/docs now\r\n", 8);
+        assert!(is_web_link(&web.expect("a link")));
+    }
+
     #[test]
     fn only_a_measure_or_a_press_settles_the_panes() {
         let link = || {
