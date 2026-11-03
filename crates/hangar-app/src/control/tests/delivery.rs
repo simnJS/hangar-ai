@@ -37,6 +37,8 @@ struct FakeDelivery {
     tested: Mutex<Option<Tested>>,
     preflight_tasks: Mutex<Vec<Option<String>>>,
     running: Mutex<Vec<Running>>,
+    /// How many times the accounts were listed.
+    listed_accounts: Mutex<usize>,
 }
 
 fn ready<T: Send + 'static>(value: T) -> BoxFuture<T> {
@@ -123,6 +125,7 @@ impl DeliveryDeps for FakeDelivery {
     }
 
     fn accounts(&self) -> BoxFuture<Result<Vec<Account>, String>> {
+        *lock(&self.listed_accounts) += 1;
         ready(Ok(vec![Account {
             id: "work".into(),
             label: "Work".into(),
@@ -310,6 +313,7 @@ fn setup() -> Setup {
         tested: Mutex::new(None),
         preflight_tasks: Mutex::new(vec![]),
         running: Mutex::new(vec![]),
+        listed_accounts: Mutex::new(0),
     });
     let events = Arc::new(Events::default());
     *lock(&fake.delivery) = Some(delivery.clone());
@@ -556,6 +560,36 @@ async fn reviews_on_the_workspaces_claude_account_and_on_nothing_when_it_is_the_
             "{account:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn asks_for_the_accounts_only_when_a_level_names_one_other_than_main() {
+    let s = setup();
+    s.now(Kind::Conflict, "conflict", |_| {});
+    // Nothing named, or main: the review runs on main without a listing.
+    for account in [None, Some("main")] {
+        s.fake
+            .patch("w1", |ws| ws.claude_account = account.map(str::to_string));
+        s.submit(json!({})).await.unwrap();
+        s.fake.settle().await;
+    }
+    assert_eq!(*lock(&s.delivery.listed_accounts), 0);
+    // The person's default names one: it has to be found, and the
+    // workspace's main still wins over it.
+    lock(&s.fake.state).settings.claude_account = Some("work".into());
+    s.fake
+        .patch("w1", |ws| ws.claude_account = Some("main".into()));
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    assert_eq!(*lock(&s.delivery.listed_accounts), 1);
+    assert_eq!(s.runs().last().unwrap().claude_account, None);
+    s.fake.patch("w1", |ws| ws.claude_account = None);
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    assert_eq!(
+        s.runs().last().unwrap().claude_account.as_deref(),
+        Some("work")
+    );
 }
 
 #[tokio::test]
