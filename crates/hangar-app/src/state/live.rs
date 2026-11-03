@@ -49,6 +49,79 @@ pub struct Ui {
     pub focus: Option<Focus>,
     /// The window that last had the system's focus: where a command runs.
     pub focused_window: Option<window::Id>,
+
+    /// What had the keyboard when the open drawer opened, to give it back
+    /// when it closes on Escape (shell/drawer.rs).
+    pub drawer_opener: Option<Focus>,
+    /// What had the keyboard when each overlay opened, parallel to
+    /// `overlays`: closing one gives the keyboard back.
+    pub overlay_openers: Vec<Option<Focus>>,
+    /// The view, drawer and focus of every window but the focused one. Each
+    /// window has its own, as each Tauri window had its own App: `view`,
+    /// `drawer` and `focus` above are the focused window's, and trade places
+    /// with these when the focus moves (`Model::view_in`).
+    pub parked: HashMap<window::Id, WindowUi>,
+    /// Where the pointer is, for the drawers' "a press outside closes it".
+    pub pointer: Pointer,
+}
+
+/// A window's own transient state, while another window has the focus.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WindowUi {
+    pub view: View,
+    pub drawer: Option<Drawer>,
+    pub drawer_opener: Option<Focus>,
+    pub focus: Option<Focus>,
+}
+
+/// Over which of the frame's parts the pointer is, as their mouse areas
+/// report it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pointer {
+    /// Over the open drawer.
+    pub over_drawer: bool,
+    /// Over the toolbar, whose buttons toggle the drawers themselves
+    /// (`data-drawer-toggle`): a press there is theirs, not an outside one.
+    pub over_toolbar: bool,
+}
+
+/// What packages tell the shell, that the shell needs for the frame, the
+/// command table or the snapshot and must not read from a package's own
+/// `Live` (it would depend on every package's types). Each field names the
+/// package that writes it; the shell only reads.
+#[derive(Debug, Default)]
+pub struct Signals {
+    /// P15: each workspace's preview panel. A workspace with no entry has
+    /// nothing open.
+    pub preview: HashMap<WsId, PreviewPanel>,
+    /// P6: how many items Needs-you lists; `view.needsYou` is live while
+    /// there are some.
+    pub needs_you: usize,
+    /// P4: every pane's activity, for the snapshot (`Snapshot::activity`).
+    pub activity: HashMap<PaneId, PaneActivity>,
+    /// P4: the workspaces put to sleep, for the snapshot.
+    pub asleep: HashSet<WsId>,
+    /// P18: the deliveries running, for the snapshot.
+    pub delivering: Delivering,
+}
+
+/// A workspace's preview panel (the panel part of `lib/modelStore.ts`).
+///
+/// `entries` and `unseen` are P15's to write. `open` and `expanded` are
+/// written by the shell's toggles (`Intent::TogglePreview`,
+/// `ClosePreviewPanel`, `TogglePreviewExpand`), which decide drawer or
+/// docked, and by P15 when it reveals an entry (`setModelPanel(ws, {open})`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PreviewPanel {
+    /// How many entries (models, files, kit tabs) are open.
+    pub entries: usize,
+    /// Docked beside the terminals; ignored while it does not fit, where the
+    /// drawer is `ui.drawer`.
+    pub open: bool,
+    /// Over the whole work area.
+    pub expanded: bool,
+    /// Something an agent opened or changed waits behind the toolbar button.
+    pub unseen: bool,
 }
 
 /// `Model.live`: every package's shared read-model, and the shell's own.
@@ -60,6 +133,8 @@ pub struct Live {
     pub windows: HashMap<window::Id, WindowKind>,
     /// Bumped whenever a read-model changes, so views can cache on it.
     pub version: u64,
+    /// What packages tell the shell (see `Signals`).
+    pub signals: Signals,
 
     pub panes_logic: crate::panes_logic::Live,
     pub panes: crate::panes::Live,

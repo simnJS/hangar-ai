@@ -9,103 +9,279 @@
 //!
 //! So the JSON is cleaned before it is parsed: each struct's keys are tried
 //! one at a time against the struct's own derived `Deserialize`, and a key
-//! whose value does not parse is dropped, so that field takes its default
+//! whose value does not parse is taken out, so that field takes its default
 //! (`DEFAULT_SETTINGS` for the settings). Nested structs are cleaned first,
-//! and an element of a list that is not even an object is dropped from the
-//! list, so one bad pane costs that pane and not the workspace.
+//! one element of a list at a time, so one bad pane costs that pane's bad
+//! field and not the workspace; an element that is not even an object is
+//! taken out of its list.
 //!
-//! What is dropped is gone on the next save, where the TS would have kept it
-//! as written. That is the price of typed fields, and a value nothing could
-//! read is not much of a loss; each drop is printed.
+//! Nothing taken out is lost: each comes back as a `Kept`, which the model
+//! holds (`unread.rs`) and writes back into the file on every save until the
+//! app writes that field itself, as the TS kept it by spreading.
 //!
-//! TODO(P0b): the hydration fix-ups of `store.tsx:287` (unique pane names,
-//! folder ids that name no folder) run after this, in `store.rs`.
+//! One shape is translated rather than set aside: a legacy `tree` whose
+//! leaves stored a pane's index (`{type: "pane", index: 1}`), which the TS
+//! mapped onto pane ids each time it read the tree (`migrate`, layout.ts).
+//! It is mapped once here, so the typed tree holds ids.
 
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use super::types::{AppState, OrchestrationSettings, Pane, Settings, Workspace};
+use super::layout;
+use super::types::{
+    AppState, OrchestrationSettings, Pane, SavedCommand, Settings, SplitNode, Workspace,
+    WorkspaceFolder,
+};
+use super::unread::{self, Kept, Owner};
 
-/// `state.json`'s JSON as an `AppState`, whatever it holds. A document that is
-/// not an object at all reads as the empty state.
-pub fn app_state(mut value: Value) -> AppState {
-    clean_app_state(&mut value);
-    serde_json::from_value(value).unwrap_or_else(|err| {
-        // Cleaning leaves only keys that parsed one by one, so this means a
-        // combination of them failed, which the derives here cannot produce.
-        eprintln!("state.json could not be read even leniently ({err}); starting empty");
-        AppState::default()
-    })
+/// `state.json`'s JSON as an `AppState`, whatever it holds; what could not be
+/// read is dropped. A document that is not an object reads as the empty state.
+pub fn app_state(value: Value) -> AppState {
+    read(value).0
 }
 
-fn clean_app_state(value: &mut Value) {
+/// `state.json`'s JSON as an `AppState`, and the values it held that no field
+/// could read, to be written back (`Unread`).
+pub fn read(mut value: Value) -> (AppState, Vec<Kept>) {
+    let mut kept = Vec::new();
+    clean_app_state(&mut value, &mut kept);
+    let state: AppState = match serde_json::from_value(value.clone()) {
+        Ok(state) => state,
+        Err(err) => {
+            // Cleaning leaves only keys that parsed one by one, so this means
+            // a combination of them failed, which the derives here cannot
+            // produce.
+            eprintln!("state.json could not be read even leniently ({err}); starting empty");
+            return (AppState::default(), Vec::new());
+        }
+    };
+    if let Ok(written) = serde_json::to_value(&state) {
+        explicit_nulls(&value, &written, &mut kept);
+    }
+    (state, kept)
+}
+
+/// The `null`s of `?: T | null` fields (`taskId`, `model`, `portBase`,
+/// `claudeAccount`…): read as `None`, which the typed struct leaves out of
+/// the file, where the TS kept the `null` it read. Each comes back as a value
+/// set aside, so it is written as it was until the app sets the field.
+fn explicit_nulls(read: &Value, written: &Value, kept: &mut Vec<Kept>) {
+    let mut owners = vec![Owner::Root, Owner::Settings];
+    let ids = |list: Option<&Value>| -> Vec<String> {
+        list.and_then(Value::as_array)
+            .map(|items| items.iter().map(id_of).collect())
+            .unwrap_or_default()
+    };
+    owners.extend(ids(read.get("folders")).into_iter().map(Owner::Folder));
+    owners.extend(
+        ids(read.get("settings").and_then(|s| s.get("savedCommands")))
+            .into_iter()
+            .map(Owner::SettingsCommand),
+    );
+    for ws in read
+        .get("workspaces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = id_of(ws);
+        owners.push(Owner::Workspace(id.clone()));
+        owners.push(Owner::Orchestration(id.clone()));
+        owners.extend(
+            ids(ws.get("panes"))
+                .into_iter()
+                .map(|pane| Owner::Pane(id.clone(), pane)),
+        );
+        owners.extend(
+            ids(ws.get("savedCommands"))
+                .into_iter()
+                .map(|command| Owner::Command(id.clone(), command)),
+        );
+    }
+    for owner in owners {
+        let (Some(before), Some(after)) = (
+            unread::locate(read, &owner),
+            unread::locate(written, &owner),
+        ) else {
+            continue;
+        };
+        for (key, value) in before {
+            if value.is_null() && !after.contains_key(key) {
+                kept.push(Kept::Field {
+                    owner: owner.clone(),
+                    key: key.clone(),
+                    raw: Value::Null,
+                });
+            }
+        }
+    }
+}
+
+fn clean_app_state(value: &mut Value, kept: &mut Vec<Kept>) {
     let Some(map) = value.as_object_mut() else {
+        eprintln!("state.json is not an object; starting empty");
         *value = Value::Object(Map::new());
         return;
     };
     if let Some(list) = map.get_mut("workspaces") {
-        clean_list(list, "workspaces", clean_workspace);
+        clean_list(list, &Owner::Root, "workspaces", kept, clean_workspace);
     }
     if let Some(list) = map.get_mut("folders") {
-        clean_list(list, "folders", |_| {});
+        clean_list(list, &Owner::Root, "folders", kept, |folder, kept| {
+            clean_object::<WorkspaceFolder>(folder, Owner::Folder(id_of(folder)), kept);
+        });
     }
     if let Some(settings) = map.get_mut("settings") {
-        clean_settings(settings);
+        clean_settings(settings, kept);
     }
-    drop_unreadable::<AppState>(map, "state");
+    drop_unreadable::<AppState>(map, &Owner::Root, kept);
 }
 
-fn clean_workspace(value: &mut Value) {
+fn clean_workspace(value: &mut Value, kept: &mut Vec<Kept>) {
+    let ws = id_of(value);
     let Some(map) = value.as_object_mut() else {
         return;
     };
     if let Some(list) = map.get_mut("panes") {
-        clean_list(list, "panes", |pane| {
-            if let Some(map) = pane.as_object_mut() {
-                drop_unreadable::<Pane>(map, "pane");
-            }
-        });
+        clean_list(
+            list,
+            &Owner::Workspace(ws.clone()),
+            "panes",
+            kept,
+            |pane, kept| {
+                let owner = Owner::Pane(ws.clone(), id_of(pane));
+                clean_object::<Pane>(pane, owner, kept);
+            },
+        );
     }
     if let Some(list) = map.get_mut("savedCommands") {
-        clean_list(list, "savedCommands", |_| {});
+        clean_list(
+            list,
+            &Owner::Workspace(ws.clone()),
+            "savedCommands",
+            kept,
+            |command, kept| {
+                let owner = Owner::Command(ws.clone(), id_of(command));
+                clean_object::<SavedCommand>(command, owner, kept);
+            },
+        );
     }
     if let Some(Value::Object(orchestration)) = map.get_mut("orchestration") {
-        drop_unreadable::<OrchestrationSettings>(orchestration, "orchestration");
+        drop_unreadable::<OrchestrationSettings>(
+            orchestration,
+            &Owner::Orchestration(ws.clone()),
+            kept,
+        );
     }
-    drop_unreadable::<Workspace>(map, "workspace");
+    migrate_tree(map);
+    drop_unreadable::<Workspace>(map, &Owner::Workspace(ws), kept);
 }
 
-fn clean_settings(value: &mut Value) {
+/// A tree that does not read as a `SplitNode` but that `migrate` makes sense
+/// of (a legacy one, by pane index) is replaced by what it means.
+fn migrate_tree(workspace: &mut Map<String, Value>) {
+    let Some(tree) = workspace.get("tree") else {
+        return;
+    };
+    if tree.is_null() || serde_json::from_value::<SplitNode>(tree.clone()).is_ok() {
+        return;
+    }
+    let ids: Vec<String> = workspace
+        .get("panes")
+        .and_then(Value::as_array)
+        .map(|panes| {
+            panes
+                .iter()
+                .map(|pane| {
+                    pane.get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(migrated) = layout::migrate(tree, &ids)
+        && let Ok(value) = serde_json::to_value(migrated)
+    {
+        workspace.insert("tree".into(), value);
+    }
+}
+
+fn clean_settings(value: &mut Value, kept: &mut Vec<Kept>) {
     let Some(map) = value.as_object_mut() else {
         return;
     };
     if let Some(list) = map.get_mut("savedCommands") {
-        clean_list(list, "settings.savedCommands", |_| {});
+        clean_list(
+            list,
+            &Owner::Settings,
+            "savedCommands",
+            kept,
+            |command, kept| {
+                let owner = Owner::SettingsCommand(id_of(command));
+                clean_object::<SavedCommand>(command, owner, kept);
+            },
+        );
     }
-    drop_unreadable::<Settings>(map, "settings");
+    drop_unreadable::<Settings>(map, &Owner::Settings, kept);
 }
 
-/// Cleans each element of a list and drops those that are not objects. A
-/// value that is not a list is left for `drop_unreadable` to drop.
-fn clean_list(list: &mut Value, what: &str, clean: impl Fn(&mut Value)) {
+/// The `id` an object of the file goes by, as its typed struct will read it:
+/// the string, or empty when it has none that reads.
+fn id_of(value: &Value) -> String {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn clean_object<T: DeserializeOwned>(value: &mut Value, owner: Owner, kept: &mut Vec<Kept>) {
+    if let Some(map) = value.as_object_mut() {
+        drop_unreadable::<T>(map, &owner, kept);
+    }
+}
+
+/// Cleans each element of a list and takes out those that are not objects. A
+/// value that is not a list is left for `drop_unreadable` to set aside.
+fn clean_list(
+    list: &mut Value,
+    owner: &Owner,
+    key: &'static str,
+    kept: &mut Vec<Kept>,
+    mut clean: impl FnMut(&mut Value, &mut Vec<Kept>),
+) {
     let Some(items) = list.as_array_mut() else {
         return;
     };
-    items.retain(|item| {
-        let keep = item.is_object();
-        if !keep {
-            eprintln!("state.json: dropped an entry of {what} that is not an object: {item}");
+    let mut objects = Vec::with_capacity(items.len());
+    for item in items.drain(..) {
+        if item.is_object() {
+            objects.push(item);
+        } else {
+            eprintln!("state.json: kept aside an entry of {key} that is not an object: {item}");
+            kept.push(Kept::Item {
+                owner: owner.clone(),
+                list: key,
+                raw: item,
+            });
         }
-        keep
-    });
-    for item in items {
-        clean(item);
     }
+    for item in &mut objects {
+        clean(item, kept);
+    }
+    *items = objects;
 }
 
-/// Drops every key of `map` whose value `T` cannot read, trying each alone:
-/// with `#[serde(default)]` on `T`, the others are then simply missing.
-fn drop_unreadable<T: DeserializeOwned>(map: &mut Map<String, Value>, what: &str) {
+/// Takes out every key of `map` whose value `T` cannot read, trying each
+/// alone: with `#[serde(default)]` on `T`, the others are then simply
+/// missing.
+fn drop_unreadable<T: DeserializeOwned>(
+    map: &mut Map<String, Value>,
+    owner: &Owner,
+    kept: &mut Vec<Kept>,
+) {
     let unreadable: Vec<String> = map
         .iter()
         .filter(|(key, value)| {
@@ -116,8 +292,13 @@ fn drop_unreadable<T: DeserializeOwned>(map: &mut Map<String, Value>, what: &str
         .map(|(key, _)| key.clone())
         .collect();
     for key in unreadable {
-        if let Some(value) = map.remove(&key) {
-            eprintln!("state.json: dropped {what}.{key}, which could not be read: {value}");
+        if let Some(raw) = map.remove(&key) {
+            eprintln!("state.json: kept aside {owner:?}.{key}, which could not be read: {raw}");
+            kept.push(Kept::Field {
+                owner: owner.clone(),
+                key,
+                raw,
+            });
         }
     }
 }
@@ -125,7 +306,7 @@ fn drop_unreadable<T: DeserializeOwned>(map: &mut Map<String, Value>, what: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::types::{AgentId, SplitNode};
+    use crate::state::types::{AgentId, SplitDir};
     use serde_json::json;
 
     #[test]
@@ -151,7 +332,8 @@ mod tests {
                          "keybindings": {"some.futureCommand": ["Ctrl+Q"]}},
             "topLevelFuture": 1
         });
-        let state = app_state(file.clone());
+        let (state, kept) = read(file.clone());
+        assert!(kept.is_empty());
         let ws = &state.workspaces[0];
         assert_eq!(ws.panes[0].agent, AgentId::Claude);
         assert!(matches!(ws.tree, Some(SplitNode::Split { .. })));
@@ -179,12 +361,13 @@ mod tests {
 
     #[test]
     fn a_bad_value_costs_its_field_and_nothing_else() {
-        let state = app_state(json!({
+        let (state, kept) = read(json!({
             "workspaces": [
                 {"id": "w1", "name": 5, "panes": [{"id": "p1", "agent": "aider"}, 3],
                  "orchestration": {"maxWorkers": "many", "autoMerge": false}},
                 "not a workspace"
             ],
+            "folders": [{"id": "f1", "name": "Work", "collapsed": "yes"}, {"id": "f2"}],
             "settings": {"fontSize": "big", "uiScale": 110, "experiments": "all"}
         }));
         assert_eq!(state.workspaces.len(), 1);
@@ -197,9 +380,67 @@ mod tests {
         let orchestration = ws.orchestration.as_ref().unwrap();
         assert_eq!(orchestration.max_workers, 3);
         assert!(!orchestration.auto_merge);
+        // One folder's bad field does not cost the others.
+        assert_eq!(state.folders.len(), 2);
+        assert_eq!(state.folders[0].name, "Work");
+        assert!(!state.folders[0].collapsed);
         assert_eq!(state.settings.font_size, 13.0);
         assert_eq!(state.settings.ui_scale, 110.0);
         assert!(state.settings.experiments.is_empty());
+
+        // And all of it is kept, by where it was.
+        let has = |owner: Owner, key: &str, raw: Value| {
+            kept.contains(&Kept::Field {
+                owner,
+                key: key.into(),
+                raw,
+            })
+        };
+        assert!(has(Owner::Workspace("w1".into()), "name", json!(5)));
+        assert!(has(
+            Owner::Pane("w1".into(), "p1".into()),
+            "agent",
+            json!("aider")
+        ));
+        assert!(has(
+            Owner::Orchestration("w1".into()),
+            "maxWorkers",
+            json!("many")
+        ));
+        assert!(has(Owner::Folder("f1".into()), "collapsed", json!("yes")));
+        assert!(has(Owner::Settings, "fontSize", json!("big")));
+        assert!(has(Owner::Settings, "experiments", json!("all")));
+        assert!(kept.contains(&Kept::Item {
+            owner: Owner::Workspace("w1".into()),
+            list: "panes",
+            raw: json!(3)
+        }));
+        assert!(kept.contains(&Kept::Item {
+            owner: Owner::Root,
+            list: "workspaces",
+            raw: json!("not a workspace")
+        }));
+    }
+
+    #[test]
+    fn a_legacy_tree_by_pane_index_reads_as_ids() {
+        let (state, kept) = read(json!({
+            "workspaces": [{
+                "id": "w", "panes": [{"id": "a"}, {"id": "b"}],
+                "tree": {"type": "split", "dir": "col", "ratio": 0.6,
+                         "a": {"type": "pane", "index": 1}, "b": {"type": "pane", "index": 0}}
+            }]
+        }));
+        assert!(kept.is_empty());
+        assert_eq!(
+            state.workspaces[0].tree,
+            Some(SplitNode::Split {
+                dir: SplitDir::Col,
+                ratio: 0.6,
+                a: Box::new(layout::leaf("b")),
+                b: Box::new(layout::leaf("a")),
+            })
+        );
     }
 
     #[test]

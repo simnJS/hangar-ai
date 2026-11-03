@@ -28,17 +28,16 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The snapshot of `model` now.
-    ///
-    /// TODO(P4, P18): `asleep` and `activity` come from `panes_logic::Live`,
-    /// `delivering` from `control::Live`, once those hold them.
+    /// The snapshot of `model` now. `asleep` and `activity` are what P4
+    /// writes in `live.signals`, `delivering` what P18 writes there.
     pub fn of(model: &Model) -> Snapshot {
+        let signals = &model.live.signals;
         Snapshot {
             state: model.state_arc(),
             opened: model.ui.opened_ids.iter().cloned().collect(),
-            asleep: HashSet::new(),
-            activity: HashMap::new(),
-            delivering: Delivering::new(),
+            asleep: signals.asleep.clone(),
+            activity: signals.activity.clone(),
+            delivering: signals.delivering.clone(),
             hydrated: model.live.hydrated,
         }
     }
