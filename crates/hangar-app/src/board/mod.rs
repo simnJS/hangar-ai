@@ -361,6 +361,10 @@ fn dock_room(m: &Model) -> f32 {
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     let abandoned = if msg.leaves_the_add_field() {
+        // The field that was asked for is left, unless it is the next one.
+        if !matches!(msg, Msg::StartAdding(_) | Msg::Draft(..)) {
+            st.adding = None;
+        }
         flush_drafts(st, m, msg.keeps_draft_of())
     } else {
         Task::none()
