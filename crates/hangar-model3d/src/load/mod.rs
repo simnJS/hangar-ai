@@ -251,7 +251,7 @@ fn read_whole(
 }
 
 /// What a running load reports.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum LoadEvent {
     Progress(LoadProgress),
     /// The last event: the model, or why it could not be read.

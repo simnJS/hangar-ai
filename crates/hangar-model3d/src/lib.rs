@@ -7,17 +7,35 @@
 //! the backend side (which folders may be read, saving a capture) stays in
 //! hangar-core's `model.rs`, so this crate takes a path and trusts the app to
 //! have checked it.
+//!
+//! The pieces, in the order a model goes through them:
+//!
+//! - [`load`] reads a file into a [`Model`] on a thread of its own;
+//! - [`ModelViewer`] holds what one pane shows — the model, the camera, the
+//!   display toggles — and [`ModelViewer::view`] is the widget that draws it
+//!   and takes the mouse;
+//! - [`CaptureJob`] takes a picture of a model with no window: an agent's
+//!   snapshot, or the capture button.
 
+pub mod camera;
 pub mod formats;
 pub mod framing;
 pub mod load;
 pub mod model;
+pub(crate) mod render;
 pub mod samples;
 pub mod stats;
 pub mod theme;
+pub mod viewer;
 
 pub use formats::{LoadError, MAX_MODEL_BYTES, ModelFormat};
 pub use framing::{Bounds, SnapshotAngle};
+pub use load::{Cancel, LoadEvent, LoadOptions, LoadProgress, Phase};
 pub use model::Model;
+pub use render::DisplayOptions;
+pub use render::offscreen::CaptureError;
 pub use stats::ModelInfo;
 pub use theme::ViewerTheme;
+pub use viewer::{
+    CaptureJob, Event, LoadState, ModelViewer, Stamp, capture_name, describe, snapshot_png,
+};
