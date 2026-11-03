@@ -392,7 +392,6 @@ fn chat_of(
 /// One page of a Claude Code session's conversation: the newest without
 /// `before`, else the one before that cursor. `None` while the session has
 /// no transcript yet.
-#[tauri::command]
 pub async fn chat_page(
     session_id: String,
     cwd: String,

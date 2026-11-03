@@ -9,8 +9,9 @@ edition = "2021"
 
 # What src-tauri/ was, without Tauri: the window asked for each of these
 # through a `#[tauri::command]`, and the native app calls them as functions
-# (docs/native/PLAN.md, "hangar-core"). Events the window listened to go
-# through `host::Events` instead of `AppHandle::emit`.
+# (docs/native/PLAN.md, "hangar-core"; docs/native/core-api.md lists them).
+# Events the window listened to are `host::Event`s, sent on the bus
+# `Host::subscribe` hands out, instead of `AppHandle::emit`.
 [lib]
 name = "hangar_core"
 
@@ -28,12 +29,20 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "json
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
 toml_edit = "0.25.13"
-# Hangar at login, an option of the Mobile settings (remote/mod.rs): the
-# window never calls the plugin, the settings' own commands do. Held at 2.5.1:
-# 2.6 and later need a newer tauri than the one locked, and take dozens of
-# crates with them (among them `windows` 0.62, which cpal cannot build with —
-# see below).
+# Hangar at login, an option of the Mobile settings (remote/mod.rs, autostart.rs):
+# the window never asks for it, the settings' own commands do. The crate
+# tauri-plugin-autostart 2.5.1 wrapped, at the version it locked, so the login
+# item the Tauri app made is the one found, enabled and removed here.
+auto-launch = "=0.5.0"
 discord-rich-presence = "1.1.0"
+# The request and response the two schemes are answered with (model.rs,
+# kit_scheme.rs): what wry's custom protocols and tauri's spoke, and what axum
+# already compiles at this version.
+http = "1"
+# Links and PDFs handed to the system (opener.rs), as tauri-plugin-opener did,
+# with the feature that plugin built it with: ShellExecute on Windows, rather
+# than a trip through `cmd`.
+open = { workspace = true, features = ["shellexecute-on-windows"] }
 # Microphone capture for dictation.
 #
 # On Windows this one needs its lockfile left alone: cpal takes `windows` and
@@ -146,9 +155,23 @@ ece-native = "0.5"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Desktop notifications without a click to answer (notify.rs), as
+# tauri-plugin-notification showed them: through notify-rust, which speaks to
+# the notification server over zbus on Linux (pure Rust, no libdbus) and to the
+# Notification Center on macOS. Windows has its toast crate below.
+[target.'cfg(not(windows))'.dependencies]
+notify-rust = "4.11"
+
+# A file shown in the file manager (opener.rs): its D-Bus interface, asked as
+# tauri-plugin-opener asked it. zbus is in the tree already, for notify-rust
+# and the keyring, with the executor its blocking calls run on.
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
 # Toasts that answer a click, which tauri-plugin-notification does not expose —
 # see notify.rs. Already in the tree underneath that plugin, so this only names
-# a crate that was being compiled anyway.
+# a crate that was being compiled anyway; notify-rust drew its Windows toasts
+# with it too, so the plain ones are shown with it here, without notify-rust.
 #
 # Held at 0.7 deliberately: 0.8 moved to `windows` 0.62, which is the version
 # that pulls the pair apart for cpal (see above). 0.7 wants 0.61, the version

@@ -266,7 +266,6 @@ fn update_gitignore(root: &Path) -> InstructionReport {
     }
 }
 
-#[tauri::command]
 pub fn write_agent_instructions(workspace_cwd: String) -> Vec<InstructionReport> {
     let root = PathBuf::from(&workspace_cwd);
     if !root.is_dir() {
@@ -287,7 +286,6 @@ pub fn write_agent_instructions(workspace_cwd: String) -> Vec<InstructionReport>
 }
 
 /// Lets the UI show whether the playbook is already in place.
-#[tauri::command]
 pub fn agent_instructions_status(workspace_cwd: String) -> bool {
     let root = PathBuf::from(workspace_cwd);
     TARGET_FILES.iter().any(|file| {

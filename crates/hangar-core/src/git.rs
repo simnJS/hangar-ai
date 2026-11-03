@@ -95,15 +95,16 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
 
 /// Runs a git-shaped task on the blocking pool and hands its answer back.
 ///
-/// Every command below goes through this because a synchronous
-/// `#[tauri::command]` runs on the main thread — the one the window, and every
-/// pane's IPC, lives on. A `git fetch` against a slow remote, or the checkout
-/// a `worktree add` performs, would freeze the whole app for its duration;
-/// voice_start draws the same line for the same reason.
+/// Every command below goes through this because a synchronous command runs
+/// where it is called — the Tauri window called them on the main thread, the
+/// one the window, and every pane's IPC, lived on. A `git fetch` against a
+/// slow remote, or the checkout a `worktree add` performs, would freeze the
+/// whole app for its duration; voice_start draws the same line for the same
+/// reason.
 pub(crate) async fn off_thread<T: Send + 'static>(
     task: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(task)
+    tokio::task::spawn_blocking(task)
         .await
         .map_err(|e| e.to_string())?
 }
@@ -407,7 +408,6 @@ fn repo_info(dir: &Path) -> RepoInfo {
 
 /// Never fails: a missing git and a directory outside any repository are
 /// answers, and the UI needs to be able to draw both.
-#[tauri::command]
 pub async fn git_repo_info(path: String) -> RepoInfo {
     off_thread(move || Ok(repo_info(Path::new(&path))))
         .await
@@ -514,7 +514,6 @@ fn list_worktrees(dir: &Path) -> Result<Vec<Worktree>, GitError> {
     Ok(worktrees)
 }
 
-#[tauri::command]
 pub async fn git_worktree_list(path: String) -> Result<Vec<Worktree>, String> {
     off_thread(move || Ok(list_worktrees(Path::new(&path))?)).await
 }
@@ -636,7 +635,6 @@ fn merged_worktrees(dir: &Path, held: &[String]) -> Result<Vec<MergedWorktree>, 
     Ok(found)
 }
 
-#[tauri::command]
 pub async fn git_worktrees_merged(
     path: String,
     held_folders: Vec<String>,
@@ -736,7 +734,6 @@ fn parse_branches(listing: &str) -> Vec<Branch> {
 }
 
 /// Every branch of the repository, most recently committed to first.
-#[tauri::command]
 pub async fn git_branches(path: String) -> Result<Vec<Branch>, String> {
     off_thread(move || {
         let listing = run_git(
@@ -757,7 +754,6 @@ pub async fn git_branches(path: String) -> Result<Vec<Branch>, String> {
 /// `--all` because the panel offers one button and a repository is allowed more
 /// than one remote, and `--prune` so a branch someone deleted upstream stops
 /// being offered here as something to check out.
-#[tauri::command]
 pub async fn git_fetch(path: String) -> Result<(), String> {
     off_thread(move || {
         run_git(Path::new(&path), &["fetch", "--all", "--prune"])?;
@@ -786,7 +782,6 @@ fn not_fully_merged(message: &str) -> bool {
     message.to_lowercase().contains("not fully merged")
 }
 
-#[tauri::command]
 pub async fn git_branch_delete(
     path: String,
     branch: String,
@@ -824,7 +819,6 @@ pub async fn git_branch_delete(
     .await
 }
 
-#[tauri::command]
 pub async fn git_worktree_add(
     path: String,
     worktree_path: String,
@@ -1162,7 +1156,6 @@ fn remove_worktree(
     }
 }
 
-#[tauri::command]
 pub async fn git_worktree_remove(
     path: String,
     worktree_path: String,
@@ -1442,7 +1435,6 @@ fn run_configured_hook(
 /// The `postCreate` command, run in a worktree that exists by now. Resolves
 /// with what it did; a failing hook is a report, never an error, and never
 /// undoes the worktree. `None` when no command is set.
-#[tauri::command]
 pub async fn git_worktree_hook(
     path: String,
     worktree_path: String,
@@ -1459,7 +1451,6 @@ pub async fn git_worktree_hook(
     .await
 }
 
-#[tauri::command]
 pub async fn git_worktree_prune(path: String) -> Result<(), String> {
     off_thread(move || {
         run_git(Path::new(&path), &["worktree", "prune"])?;
@@ -1474,7 +1465,6 @@ pub async fn git_worktree_prune(path: String) -> Result<(), String> {
 ///
 /// No `--reason`: this is a toggle in a panel with nowhere to type one, and
 /// Git Worktree Manager (MIT) locks the same way.
-#[tauri::command]
 pub async fn git_worktree_lock(path: String, worktree_path: String) -> Result<(), String> {
     off_thread(move || {
         run_git(Path::new(&path), &["worktree", "lock", &worktree_path])?;
@@ -1483,7 +1473,6 @@ pub async fn git_worktree_lock(path: String, worktree_path: String) -> Result<()
     .await
 }
 
-#[tauri::command]
 pub async fn git_worktree_unlock(path: String, worktree_path: String) -> Result<(), String> {
     off_thread(move || {
         run_git(Path::new(&path), &["worktree", "unlock", &worktree_path])?;
@@ -1649,7 +1638,6 @@ fn migrate_changes(source: &Path, target: &Path) -> Result<MigrateResult, GitErr
 
 /// « Bring changes back »: `worktree_path`'s uncommitted work into the main
 /// checkout of the repository `path` belongs to.
-#[tauri::command]
 pub async fn git_worktree_migrate(
     path: String,
     worktree_path: String,
@@ -1877,7 +1865,6 @@ fn copy_entries(from: &Path, to: &Path, entries: &[String], patterns: &[String])
 /// `ignored_only` leaves out the files git does not ignore: a worker's
 /// worktree (lib/workerControl.ts) gets its `.env` without an untracked file
 /// that a `git add -A` would put on its branch.
-#[tauri::command]
 pub async fn git_copy_untracked(
     from: String,
     to: String,
@@ -1952,7 +1939,6 @@ fn commits_ahead(dir: &Path, base: &str, head: &str) -> Result<u32, GitError> {
 
 /// `commits_ahead` for the window (lib/workerControl.ts): whether a worker's
 /// branch still holds work its target branch does not.
-#[tauri::command]
 pub async fn git_commits_ahead(path: String, base: String, head: String) -> Result<u32, String> {
     off_thread(move || Ok(commits_ahead(Path::new(&path), &base, &head)?)).await
 }
@@ -2339,13 +2325,11 @@ fn file_diff(
 /// What changed in the working tree holding `path`: tracked changes against
 /// HEAD — or against where `base` forked, to take in the branch's commits too —
 /// plus the untracked files.
-#[tauri::command]
 pub async fn git_changes(path: String, base: Option<String>) -> Result<Changes, String> {
     off_thread(move || Ok(changes(Path::new(&path), base.as_deref())?)).await
 }
 
 /// The unified diff of one file of `git_changes`, read-only.
-#[tauri::command]
 pub async fn git_file_diff(
     path: String,
     file: String,

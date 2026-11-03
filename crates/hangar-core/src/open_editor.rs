@@ -17,7 +17,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 
-/// What came of it. Expected outcomes are values; only a broken IPC rejects.
+/// What came of it. Expected outcomes are values: the call itself never fails.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum EditorOutcome {
@@ -169,9 +169,8 @@ fn open(cwd: &str, from_code_workspace: bool) -> EditorOutcome {
     }
 }
 
-#[tauri::command]
 pub async fn open_in_vscode(cwd: String, from_code_workspace: bool) -> EditorOutcome {
-    tauri::async_runtime::spawn_blocking(move || open(&cwd, from_code_workspace))
+    tokio::task::spawn_blocking(move || open(&cwd, from_code_workspace))
         .await
         .unwrap_or_else(|err| EditorOutcome::Failed {
             error: err.to_string(),

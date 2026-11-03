@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Manager};
+use crate::host::Host;
 
 /// Bundle identifiers this app has shipped under before.
 ///
@@ -63,18 +63,17 @@ pub(crate) fn quarantine(path: &Path) -> Option<PathBuf> {
 }
 
 /// The frontend owns the state schema; Rust only persists it atomically.
-fn state_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
+fn state_path(host: &Host) -> Result<PathBuf, String> {
+    let dir = host
+        .paths()
         .app_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("state.json"))
 }
 
-#[tauri::command]
-pub fn load_state(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
-    let path = state_path(&app)?;
+pub fn load_state(host: &Host) -> Result<Option<serde_json::Value>, String> {
+    let path = state_path(host)?;
     if !path.exists() {
         adopt_previous_state(&path);
     }
@@ -114,9 +113,8 @@ pub fn load_state(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
     }
 }
 
-#[tauri::command]
-pub fn save_state(app: AppHandle, state: serde_json::Value) -> Result<(), String> {
-    write_state(&state_path(&app)?, &state)
+pub fn save_state(host: &Host, state: serde_json::Value) -> Result<(), String> {
+    write_state(&state_path(host)?, &state)
 }
 
 fn write_state(path: &Path, state: &serde_json::Value) -> Result<(), String> {
@@ -127,12 +125,10 @@ fn write_state(path: &Path, state: &serde_json::Value) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
 pub fn dir_exists(path: String) -> bool {
     std::path::Path::new(&path).is_dir()
 }
 
-#[tauri::command]
 pub fn home_dir() -> String {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().into_owned())

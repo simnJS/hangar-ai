@@ -201,7 +201,6 @@ pub(crate) fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
-#[tauri::command]
 pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
     match agent.as_str() {
         "claude" => claude_sessions(&cwd),
@@ -220,7 +219,6 @@ pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
 /// conversation found". Every project directory is searched, not just the
 /// pane's: a transcript filed under another spelling of the path is still
 /// worth handing to the agent.
-#[tauri::command]
 pub fn session_exists(agent: String, id: String) -> Option<bool> {
     // Joined into a path below: anything but a plain id is not ours to judge.
     if id.is_empty()
@@ -277,7 +275,6 @@ fn codex_transcript_exists(root: &Path, id: &str) -> Option<bool> {
 }
 
 /// Reports which agent CLIs are actually on PATH, so the UI can grey out the rest.
-#[tauri::command]
 pub fn detect_agents() -> Vec<String> {
     // Without this the answer on macOS is "none of them": a bundled app is
     // handed the bare system PATH, and no agent CLI installs into it.

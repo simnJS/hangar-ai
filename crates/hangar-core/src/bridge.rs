@@ -8,7 +8,7 @@
 //!
 //! From then on the mod reports what the session does — turns, permission
 //! dialogs, context and plan usage, edits — to the API, which relays each
-//! report to the window as a `bridge:event`. The mod also pulls prompts queued
+//! report to the window as an `Event::BridgeEvent` (`bridge:event`). The mod also pulls prompts queued
 //! here for its pane, and submits them once its session is idle.
 //!
 //! Only Claude Code has mods. Every other agent, and a Claude Code that cannot
@@ -30,7 +30,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use portable_pty::CommandBuilder;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+
+use crate::host::{Event, Host};
 
 /// The mod, as `claude --plugin-dir` expects to find it on disk.
 const MOD_FILES: &[(&str, &str)] = &[
@@ -283,69 +284,59 @@ fn inbox() -> MutexGuard<'static, Inbox> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-#[derive(Clone, Serialize)]
+/// What is queued for a pane, after it changed: `Event::BridgeQueue`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct QueueChanged {
-    pane_id: String,
-    pending: Vec<Queued>,
+pub struct QueueChanged {
+    pub pane_id: String,
+    pub pending: Vec<Queued>,
 }
 
-fn queue_changed(app: &AppHandle, pane_id: &str, pending: Vec<Queued>) {
-    let _ = app.emit(
-        "bridge:queue",
-        QueueChanged {
-            pane_id: pane_id.to_string(),
-            pending,
-        },
-    );
+fn queue_changed(host: &Host, pane_id: &str, pending: Vec<Queued>) {
+    let _ = host.emit(Event::BridgeQueue(QueueChanged {
+        pane_id: pane_id.to_string(),
+        pending,
+    }));
 }
 
-#[tauri::command]
-pub fn bridge_enqueue(
-    app: AppHandle,
-    pane_id: String,
-    text: String,
-    from: Option<String>,
-) -> Queued {
-    enqueue_from(&app, &pane_id, text, from)
+pub fn bridge_enqueue(host: &Host, pane_id: String, text: String, from: Option<String>) -> Queued {
+    enqueue_from(host, &pane_id, text, from)
 }
 
 /// Queues `text` for a pane; `from` as on `Queued`.
-pub fn enqueue_from(app: &AppHandle, pane_id: &str, text: String, from: Option<String>) -> Queued {
+pub fn enqueue_from(host: &Host, pane_id: &str, text: String, from: Option<String>) -> Queued {
     let (queued, pending) = {
         let mut inbox = inbox();
         let queued = inbox.push(pane_id, text, from);
         (queued, inbox.pending(pane_id))
     };
-    queue_changed(app, pane_id, pending);
+    queue_changed(host, pane_id, pending);
     queued
 }
 
-#[tauri::command]
-pub fn bridge_cancel(app: AppHandle, pane_id: String, id: Option<String>) {
+pub fn bridge_cancel(host: &Host, pane_id: String, id: Option<String>) {
     let pending = {
         let mut inbox = inbox();
         inbox.cancel(&pane_id, id.as_deref());
         inbox.pending(&pane_id)
     };
-    queue_changed(&app, &pane_id, pending);
+    queue_changed(host, &pane_id, pending);
 }
 
-#[tauri::command]
 pub fn bridge_queue(pane_id: String) -> Vec<Queued> {
     inbox().pending(&pane_id)
 }
 
 /// The mod's pull: the oldest prompt for its pane, handed out once; with
 /// `labelled`, the oldest an agent or Hangar sent (see `Inbox::pop`).
-pub fn take_next(app: &AppHandle, pane_id: &str, labelled: bool) -> Option<Queued> {
+pub fn take_next(host: &Host, pane_id: &str, labelled: bool) -> Option<Queued> {
     let (next, pending) = {
         let mut inbox = inbox();
         let next = inbox.pop(pane_id, labelled);
         (next, inbox.pending(pane_id))
     };
     if next.is_some() {
-        queue_changed(app, pane_id, pending);
+        queue_changed(host, pane_id, pending);
     }
     next
 }

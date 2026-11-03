@@ -13,7 +13,8 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+
+use crate::host::{Event, Host};
 
 /// Where a model's files are expected, once installed.
 const HOST: &str = "https://huggingface.co";
@@ -76,13 +77,14 @@ pub struct ModelInfo {
     pub installed: bool,
 }
 
-#[derive(Clone, Serialize)]
+/// A download, as it goes: `Event::VoiceDownload`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Progress {
-    id: String,
-    received: u64,
-    total: u64,
-    done: bool,
+pub struct Progress {
+    pub id: String,
+    pub received: u64,
+    pub total: u64,
+    pub done: bool,
 }
 
 /// The catalogue entry an id names.
@@ -101,9 +103,9 @@ fn entry(id: &str) -> Option<&'static Catalogue> {
 }
 
 /// Where a model lives once installed.
-pub fn model_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
+pub fn model_dir(host: &Host, id: &str) -> Result<PathBuf, String> {
+    let dir = host
+        .paths()
         .app_data_dir()
         .map_err(|err| format!("no app data dir: {err}"))?;
     Ok(dir.join("models").join(id))
@@ -112,8 +114,8 @@ pub fn model_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
 /// A model counts as installed only with every file present. A download
 /// interrupted half way leaves a directory that would otherwise look ready and
 /// fail at load, which is a much worse moment to find out.
-fn installed(app: &AppHandle, model: &Catalogue) -> bool {
-    let Ok(dir) = model_dir(app, model.id) else {
+fn installed(host: &Host, model: &Catalogue) -> bool {
+    let Ok(dir) = model_dir(host, model.id) else {
         return false;
     };
     model.files.iter().all(|file| dir.join(file).is_file())
@@ -121,14 +123,14 @@ fn installed(app: &AppHandle, model: &Catalogue) -> bool {
 
 /// Whether a catalogue id is ready to be loaded. Checked before the microphone
 /// opens, so a missing download is reported to someone who has not spoken yet.
-pub fn is_installed(app: &AppHandle, id: &str) -> bool {
-    entry(id).is_some_and(|model| installed(app, model))
+pub fn is_installed(host: &Host, id: &str) -> bool {
+    entry(id).is_some_and(|model| installed(host, model))
 }
 
 /// The checkpoint itself. whisper.cpp loads one file, but it is kept inside the
 /// model's own directory anyway: that is what the staged download renames into
 /// place, and what makes a future model with several files no different.
-pub fn model_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+pub fn model_file(host: &Host, id: &str) -> Result<PathBuf, String> {
     let model = entry(id).ok_or_else(|| format!("unknown model {id}"))?;
     let file = model
         .files
@@ -137,11 +139,10 @@ pub fn model_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     // `model.id`, not `id`: the two differ when an old settings file named a
     // checkpoint this build no longer carries, and every path has to land on
     // the directory `installed` checks and `download` fills.
-    Ok(model_dir(app, model.id)?.join(file))
+    Ok(model_dir(host, model.id)?.join(file))
 }
 
-#[tauri::command]
-pub fn voice_models(app: AppHandle) -> Vec<ModelInfo> {
+pub fn voice_models(host: &Host) -> Vec<ModelInfo> {
     CATALOGUE
         .iter()
         .map(|model| ModelInfo {
@@ -150,7 +151,7 @@ pub fn voice_models(app: AppHandle) -> Vec<ModelInfo> {
             approx_bytes: model.approx_bytes,
             languages: model.languages.to_string(),
             license: model.license.to_string(),
-            installed: installed(&app, model),
+            installed: installed(host, model),
         })
         .collect()
 }
@@ -166,8 +167,8 @@ pub fn voice_models(app: AppHandle) -> Vec<ModelInfo> {
 /// Failures are ignored on purpose. This is housekeeping — a file held open by
 /// something else is worth nothing to report and not worth failing a download
 /// that has already succeeded.
-fn sweep(app: &AppHandle) {
-    let Ok(dir) = app.path().app_data_dir().map(|dir| dir.join("models")) else {
+fn sweep(host: &Host) {
+    let Ok(dir) = host.paths().app_data_dir().map(|dir| dir.join("models")) else {
         return;
     };
     let Ok(entries) = fs::read_dir(&dir) else {
@@ -185,21 +186,20 @@ fn sweep(app: &AppHandle) {
     }
 }
 
-/// Downloads a model, reporting progress on `voice:download`.
-#[tauri::command]
-pub async fn voice_model_download(app: AppHandle, id: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || download(&app, &id))
+/// Downloads a model, reporting progress as `Event::VoiceDownload`.
+pub async fn voice_model_download(host: Host, id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || download(&host, &id))
         .await
         .map_err(|err| format!("download thread failed: {err}"))?
 }
 
-fn download(app: &AppHandle, id: &str) -> Result<(), String> {
+fn download(host: &Host, id: &str) -> Result<(), String> {
     let model = entry(id).ok_or_else(|| format!("unknown model {id}"))?;
     // See `model_file`: the resolved entry decides where this goes, so a stale
     // id cannot fill a directory nothing will ever read.
     let id = model.id;
-    let target = model_dir(app, id)?;
-    if installed(app, model) {
+    let target = model_dir(host, id)?;
+    if installed(host, model) {
         return Ok(());
     }
 
@@ -241,15 +241,12 @@ fn download(app: &AppHandle, id: &str) -> Result<(), String> {
 
     let mut received = 0u64;
     let mut last_report = std::time::Instant::now();
-    let _ = app.emit(
-        "voice:download",
-        Progress {
-            id: id.to_string(),
-            received,
-            total,
-            done: false,
-        },
-    );
+    let _ = host.emit(Event::VoiceDownload(Progress {
+        id: id.to_string(),
+        received,
+        total,
+        done: false,
+    }));
 
     for file in model.files {
         let url = format!("{HOST}/{}/resolve/main/{file}", model.repo);
@@ -275,17 +272,14 @@ fn download(app: &AppHandle, id: &str) -> Result<(), String> {
 
             if last_report.elapsed() >= PROGRESS_INTERVAL {
                 last_report = std::time::Instant::now();
-                let _ = app.emit(
-                    "voice:download",
-                    Progress {
-                        id: id.to_string(),
-                        received,
-                        // A server that under-reported would otherwise show a
-                        // bar past its own end.
-                        total: total.max(received),
-                        done: false,
-                    },
-                );
+                let _ = host.emit(Event::VoiceDownload(Progress {
+                    id: id.to_string(),
+                    received,
+                    // A server that under-reported would otherwise show a
+                    // bar past its own end.
+                    total: total.max(received),
+                    done: false,
+                }));
             }
         }
     }
@@ -297,16 +291,13 @@ fn download(app: &AppHandle, id: &str) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     fs::rename(&staging, &target).map_err(|err| format!("cannot install the model: {err}"))?;
-    sweep(app);
+    sweep(host);
 
-    let _ = app.emit(
-        "voice:download",
-        Progress {
-            id: id.to_string(),
-            received,
-            total: received.max(1),
-            done: true,
-        },
-    );
+    let _ = host.emit(Event::VoiceDownload(Progress {
+        id: id.to_string(),
+        received,
+        total: received.max(1),
+        done: true,
+    }));
     Ok(())
 }

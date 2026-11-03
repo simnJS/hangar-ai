@@ -9,18 +9,30 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
 
 use crate::board::{self, BoardStore, NewTask, TaskPatch};
 use crate::control::ControlError;
+use crate::host::{Event, Host};
 use crate::memory::{self, MemoryPatch, NewMemory};
+
+/// What the API reaches of the app, which it found through the `AppHandle`
+/// before: the host, to tell the window and find the memory; the panes, for
+/// the hooks' route to check a caller against; Hangar Mobile, for an agent's
+/// shares, when it could be opened.
+#[derive(Clone)]
+pub struct Reach {
+    pub host: Host,
+    pub pty: Arc<crate::pty::PtyManager>,
+    pub remote: Option<Arc<crate::remote::Remote>>,
+}
 
 pub struct ApiState {
     /// Borrowed from the app's single store: the UI and the agents must
     /// contend for the same lock, otherwise claims are not actually atomic.
     pub store: &'static BoardStore,
     pub token: String,
-    pub app: AppHandle,
+    pub host: Host,
+    pub remote: Option<Arc<crate::remote::Remote>>,
 }
 
 #[derive(Deserialize)]
@@ -63,7 +75,9 @@ fn authorize_token(
 
 /// Tells the UI to reload the board it is showing.
 fn notify(state: &ApiState, cwd: &str) {
-    let _ = state.app.emit("board:changed", cwd);
+    let _ = state.host.emit(Event::BoardChanged {
+        cwd: cwd.to_string(),
+    });
 }
 
 async fn get_board(
@@ -212,11 +226,11 @@ struct MemoryQuery {
 fn memory_dir(
     state: &ApiState,
 ) -> Result<std::path::PathBuf, (StatusCode, Json<serde_json::Value>)> {
-    memory::dir(&state.app).map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e))
+    memory::dir(&state.host).map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e))
 }
 
 fn memory_changed(state: &ApiState) {
-    memory::notify_changed(&state.app);
+    memory::notify_changed(&state.host);
 }
 
 /// A refused mutation is the caller's to fix (400); a memory file that could
@@ -365,9 +379,10 @@ async fn bridge_event(
             crate::bridge::record_edit(&pane, name, file);
         }
     }
-    let _ = state
-        .app
-        .emit("bridge:event", json!({ "paneId": pane, "event": event }));
+    let _ = state.host.emit(Event::BridgeEvent {
+        pane_id: pane,
+        event,
+    });
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -386,7 +401,7 @@ async fn bridge_next(
     Query(q): Query<NextQuery>,
 ) -> ApiResult {
     authorize(&state, &headers)?;
-    let message = crate::bridge::take_next(&state.app, &pane, q.labelled);
+    let message = crate::bridge::take_next(&state.host, &pane, q.labelled);
     Ok(Json(json!({ "message": message })))
 }
 
@@ -400,7 +415,7 @@ async fn bridge_briefing(
     Path(pane): Path<String>,
 ) -> ApiResult {
     authorize(&state, &headers)?;
-    let briefing = crate::orchestrator::briefing(&state.app, &pane)
+    let briefing = crate::orchestrator::briefing(&state.host, &pane)
         .await
         .map_err(|err| match err {
             crate::control::ControlError::Refused(message) => {
@@ -460,9 +475,9 @@ async fn control(
         args["callerCwd"] = json!(q.cwd);
     }
     let answer = if op == KIT_TAB_OPEN {
-        ask_kit_tab_open(&state.app, args).await
+        ask_kit_tab_open(&state.host, args).await
     } else {
-        crate::control::ask(&state.app, &op, args).await
+        crate::control::ask(&state.host, &op, args).await
     };
     answer.map(Json).map_err(control_failed)
 }
@@ -490,11 +505,11 @@ const KIT_TAB_OPEN: &str = "kit_tab_open";
 /// Holds a `kit_tab_open`'s values to the rules of the kit as it is on disk, and
 /// asks the window. A kit Rust cannot read, or a tab it does not have, is the
 /// window's to refuse, which it does by name.
-async fn ask_kit_tab_open(app: &AppHandle, args: Value) -> Result<Value, ControlError> {
+async fn ask_kit_tab_open(host: &Host, args: Value) -> Result<Value, ControlError> {
     if let Some(refusal) = kit_param_refusal(&args).await {
         return Err(ControlError::Refused(refusal));
     }
-    crate::control::ask(app, KIT_TAB_OPEN, args).await
+    crate::control::ask(host, KIT_TAB_OPEN, args).await
 }
 
 async fn kit_param_refusal(args: &Value) -> Option<String> {
@@ -612,15 +627,12 @@ async fn phone_share(
     if body.path.trim().is_empty() {
         return Err(bad(StatusCode::BAD_REQUEST, "missing 'path'"));
     }
-    let remote = state
-        .app
-        .try_state::<Arc<crate::remote::Remote>>()
-        .ok_or_else(|| {
-            bad(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Hangar Mobile is unavailable",
-            )
-        })?;
+    let remote = state.remote.as_ref().ok_or_else(|| {
+        bad(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Hangar Mobile is unavailable",
+        )
+    })?;
     let share = remote
         .share(crate::remote::NewShare {
             source: std::path::PathBuf::from(body.path),
@@ -639,29 +651,25 @@ async fn health() -> impl IntoResponse {
 
 /// Binds on an ephemeral loopback port and returns it, so nothing has to
 /// negotiate a fixed port that might already be taken.
-pub async fn start(
-    app: AppHandle,
-    store: &'static BoardStore,
-    token: String,
-) -> Result<u16, String> {
+pub async fn start(reach: Reach, store: &'static BoardStore, token: String) -> Result<u16, String> {
+    let Reach { host, pty, remote } = reach;
     let kit_tabs = kit_tab_router(KitTabRoute {
         token: token.clone(),
-        pane_alive: {
-            let app = app.clone();
-            Box::new(move |pane| {
-                app.try_state::<crate::pty::PtyManager>()
-                    .is_some_and(|manager| crate::pty::pane_alive(&manager, pane))
-            })
-        },
+        pane_alive: Box::new(move |pane| crate::pty::pane_alive(&pty, pane)),
         open: {
-            let app = app.clone();
+            let host = host.clone();
             Box::new(move |args| {
-                let app = app.clone();
-                Box::pin(async move { ask_kit_tab_open(&app, args).await })
+                let host = host.clone();
+                Box::pin(async move { ask_kit_tab_open(&host, args).await })
             })
         },
     });
-    let state = Arc::new(ApiState { store, token, app });
+    let state = Arc::new(ApiState {
+        store,
+        token,
+        host,
+        remote,
+    });
 
     let router = Router::new()
         .route("/health", get(health))
@@ -698,7 +706,7 @@ pub async fn start(
         .map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
 

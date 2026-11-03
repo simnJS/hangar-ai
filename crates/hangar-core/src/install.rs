@@ -361,7 +361,6 @@ fn registration(target: &Target, path: &PathBuf) -> Option<Registration> {
     }
 }
 
-#[tauri::command]
 pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
     TARGETS
         .iter()
@@ -382,7 +381,6 @@ pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
         .collect()
 }
 
-#[tauri::command]
 pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport> {
     TARGETS
         .iter()
@@ -426,6 +424,17 @@ pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport
             }
         })
         .collect()
+}
+
+/// Shown in the UI so the user can register the server by hand if they prefer.
+pub fn mcp_manual_commands(workspace_cwd: String) -> Result<serde_json::Value, String> {
+    let exe = executable()?;
+    Ok(json!({
+        "executable": exe,
+        "claude": format!("claude mcp add {SERVER_KEY} --scope project -- \"{exe}\" --mcp"),
+        "codex": format!("codex mcp add {SERVER_KEY} -- \"{exe}\" --mcp"),
+        "workspace": workspace_cwd,
+    }))
 }
 
 #[cfg(test)]
@@ -528,16 +537,4 @@ mod tests {
         assert!(registration(&JSON_TARGET, &path).is_none());
         fs::remove_dir_all(path.parent().unwrap()).ok();
     }
-}
-
-/// Shown in the UI so the user can register the server by hand if they prefer.
-#[tauri::command]
-pub fn mcp_manual_commands(workspace_cwd: String) -> Result<serde_json::Value, String> {
-    let exe = executable()?;
-    Ok(json!({
-        "executable": exe,
-        "claude": format!("claude mcp add {SERVER_KEY} --scope project -- \"{exe}\" --mcp"),
-        "codex": format!("codex mcp add {SERVER_KEY} -- \"{exe}\" --mcp"),
-        "workspace": workspace_cwd,
-    }))
 }

@@ -181,7 +181,6 @@ pub fn fetch(call: Call) -> Result<Answer, TabError> {
 }
 
 /// `loopback.fetch`. The window checked the tab holds `loopback:<port>`.
-#[tauri::command]
 pub async fn kit_loopback_fetch(
     port: u16,
     path: String,

@@ -15,9 +15,9 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tauri::AppHandle;
 
 use crate::control::{self, ControlError};
+use crate::host::Host;
 
 /// A window that answers at all answers in milliseconds: the briefing is two
 /// small file reads. A pane's session waits on it as it starts.
@@ -30,9 +30,9 @@ const MAX_CONTEXT_CHARS: usize = 32_000;
 
 /// The role section and the state a pane's mod adds to its session, or None
 /// for a pane with no part in an orchestration.
-pub async fn briefing(app: &AppHandle, pane_id: &str) -> Result<Option<Value>, ControlError> {
+pub async fn briefing(host: &Host, pane_id: &str) -> Result<Option<Value>, ControlError> {
     let answer = control::ask_internal(
-        app,
+        host,
         "orchestrator_briefing",
         json!({ "paneId": pane_id }),
         ANSWER_TIMEOUT,

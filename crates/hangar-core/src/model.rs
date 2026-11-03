@@ -21,14 +21,13 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 use std::time::UNIX_EPOCH;
 
+use http::{header, response::Builder, Method, Request, Response, StatusCode};
 use serde::Serialize;
-use tauri::http::{header, response::Builder, Method, Request, Response, StatusCode};
-use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 
-/// Registered in lib.rs. Windows' webview reaches it as
-/// `http://hangar-model.localhost/…`, the other platforms as
-/// `hangar-model://localhost/…`; `modelUrl` in src/lib/modelFiles.ts builds
-/// both.
+/// The scheme's name, for the webview that registers it with `serve`.
+/// Windows' webview reaches it as `http://hangar-model.localhost/…`, the
+/// other platforms as `hangar-model://localhost/…`; `modelUrl` in
+/// src/lib/modelFiles.ts builds both.
 pub const SCHEME: &str = "hangar-model";
 
 /// What the viewer opens, as `MODEL_FORMATS` in src/lib/modelFiles.ts.
@@ -316,7 +315,6 @@ pub(crate) fn modified_ms(metadata: &Metadata) -> u64 {
 /// time an agent shows a model, with the folders of every workspace that has
 /// one open, so a model shown earlier for another workspace keeps loading its
 /// textures and reloading when its file changes.
-#[tauri::command]
 pub async fn model_allow_roots(roots: Vec<String>) -> Result<(), String> {
     // Canonicalizing touches the disk, a network share's included: off the
     // main thread, like every git command.
@@ -333,15 +331,14 @@ pub struct ModelFile {
     /// `\\?\C:\…` Windows canonicalizes to. It is the string the window keys
     /// an open model by and builds its URL from, so the same file always
     /// comes back as the same string.
-    path: String,
-    size: u64,
+    pub path: String,
+    pub size: u64,
     /// Epoch milliseconds. The panel polls this to reload a rewritten model.
-    modified_ms: u64,
+    pub modified_ms: u64,
 }
 
 /// Size and modification time of a model the window is about to show or is
 /// watching, or the reason it may not read it.
-#[tauri::command]
 pub async fn model_stat(path: String) -> Result<ModelFile, String> {
     let roots = allowed_roots();
     crate::git::off_thread(move || {
@@ -386,7 +383,6 @@ fn png_capture(path: &str, data: &str) -> Result<(PathBuf, Vec<u8>), String> {
 
 /// Writes a capture of the 3D preview to the file the user chose in the
 /// save dialog.
-#[tauri::command]
 pub async fn model_save_png(path: String, data: String) -> Result<(), String> {
     let (target, bytes) = png_capture(&path, &data)?;
     crate::git::off_thread(move || {
@@ -434,25 +430,6 @@ fn path_from_url(url_path: &str) -> Result<PathBuf, (StatusCode, String)> {
         return Err((StatusCode::FORBIDDEN, "'..' is not allowed".to_string()));
     }
     Ok(path)
-}
-
-/// The origins Hangar's own pages load from: the bundled app (Windows serves
-/// it as `http://tauri.localhost`, the others as `tauri://localhost`), and the
-/// dev server during `tauri dev`.
-fn app_origins(config: &tauri::Config) -> Vec<String> {
-    let mut origins: Vec<String> = [
-        "tauri://localhost",
-        "http://tauri.localhost",
-        "https://tauri.localhost",
-    ]
-    .map(String::from)
-    .to_vec();
-    if tauri::is_dev() {
-        if let Some(url) = &config.build.dev_url {
-            origins.push(url.origin().ascii_serialization());
-        }
-    }
-    origins
 }
 
 /// The part of a file a `Range` header asks for.
@@ -539,11 +516,11 @@ pub(crate) fn finish(builder: Builder, body: Vec<u8>) -> Response<Vec<u8>> {
 
 /// Answers one request to the scheme.
 ///
-/// Tauri's responder takes a whole body at once, so a file cannot be streamed
-/// to the webview: it is read in one pass into a buffer sized from its
-/// metadata — never through base64 — and `serve` runs this off the webview's
-/// thread. The size cap bounds that buffer; a `Range` request reads only the
-/// part it asks for.
+/// A response holds its whole body at once, as Tauri's responder took it, so a
+/// file cannot be streamed to the webview: it is read in one pass into a
+/// buffer sized from its metadata — never through base64 — and `serve`'s
+/// caller runs this off the window's thread. The size cap bounds that buffer;
+/// a `Range` request reads only the part it asks for.
 pub(crate) fn answer(
     request: &Request<Vec<u8>>,
     roots: &[PathBuf],
@@ -689,19 +666,21 @@ pub(crate) fn answer(
     finish(builder, body)
 }
 
-/// The `hangar-model` handler registered in lib.rs. Tauri calls it on the
-/// webview's thread, so the work moves to the blocking pool: a 200 MB model
-/// read there would freeze every pane while it lasted.
-pub fn serve<R: Runtime>(
-    ctx: UriSchemeContext<'_, R>,
-    request: Request<Vec<u8>>,
-    responder: UriSchemeResponder,
-) {
-    let origins = app_origins(ctx.app_handle().config());
-    let roots = allowed_roots();
-    tauri::async_runtime::spawn_blocking(move || {
-        responder.respond(answer(&request, &roots, &origins));
-    });
+/// The `hangar-model` scheme's answer to one request, from the folders
+/// `model_allow_roots` last allowed: what a webview registering the scheme
+/// hands back, and what the native preview asks for directly.
+///
+/// `origins` are those of the pages Hangar's own interface is served from in
+/// that webview — the Tauri window's were `tauri://localhost` and
+/// `http(s)://tauri.localhost`, and its dev server's during `tauri dev`. Only
+/// they may `fetch` a file; a request without an Origin, which is not a
+/// cross-origin `fetch`, is answered whatever they are.
+///
+/// It reads the file where it is called: a 200 MB model read on the window's
+/// thread would freeze every pane while it lasted, so the caller runs it off
+/// that thread, as Tauri's handler moved it to the blocking pool.
+pub fn serve(request: &Request<Vec<u8>>, origins: &[String]) -> Response<Vec<u8>> {
+    answer(request, &allowed_roots(), origins)
 }
 
 #[cfg(test)]
@@ -802,6 +781,16 @@ pub(crate) mod tests {
             .get(name)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
+    }
+
+    /// The scheme as a webview asks it: a page that is not one of the host's
+    /// own is refused before any folder is looked at.
+    #[test]
+    fn serve_lets_only_the_host_s_own_pages_fetch() {
+        let request = get("/nowhere/chair.glb", Some("https://example.com"), None);
+        let refused = serve(&request, &["hangar://localhost".to_string()]);
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        assert_eq!(refused.body().as_slice(), b"this page may not read models");
     }
 
     #[test]
