@@ -139,6 +139,7 @@ fn run(m: &Model, target: Target) -> Task<Message> {
             intent(Intent::ActivateWorkspace(ws)).chain(intent(Intent::SetView(View::Terminals)))
         }
         Target::Manager => intent(Intent::OpenManager),
+        Target::KitTab { ws, kit, tab } => intent(Intent::OpenKitTab { ws, kit, tab }),
     }
 }
 
