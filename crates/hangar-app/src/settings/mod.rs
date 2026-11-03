@@ -10,8 +10,10 @@
 //! placeholder bodies. The directory is this package's own; replace the
 //! bodies, add files, keep the signatures the shell calls.
 
+pub mod discord;
 pub mod experiments;
 mod format;
+mod mobile_model;
 
 use iced::{Element, Subscription, Task};
 
