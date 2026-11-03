@@ -10,5 +10,6 @@ edition = "2024"
 [dependencies]
 iced.workspace = true
 alacritty_terminal.workspace = true
+
+[dev-dependencies]
 portable-pty.workspace = true
-hangar-theme.workspace = true
