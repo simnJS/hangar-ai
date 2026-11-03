@@ -20,8 +20,10 @@
 //! write, and the raw value comes back in the file. The app goes on reading
 //! the default, as it does today, so the only trace is in the file.
 //!
-//! Entries of a list that were not even objects (a `3` among the panes) are
-//! kept too, and written back at the end of their list.
+//! Entries of a list that did not read (a `3` among the panes, a number among
+//! the names of a custom MCP list) are kept too, and written back at the end
+//! of their list; the rest of the list reads without them, as the TS readers
+//! filtered them out (`workspaceMcp` kept the strings).
 
 use serde_json::{Map, Value};
 
@@ -40,6 +42,8 @@ pub enum Owner {
     Workspace(WsId),
     /// A workspace's `orchestration`.
     Orchestration(WsId),
+    /// A workspace's `mcp`.
+    Mcp(WsId),
     Pane(WsId, PaneId),
     /// One of a workspace's `savedCommands`.
     Command(WsId, String),
@@ -55,10 +59,12 @@ pub enum Kept {
         key: String,
         raw: Value,
     },
-    /// An entry of `owner`'s list `list` that was not an object.
+    /// An entry of `owner`'s list `list` that did not read as one: not an
+    /// object among objects, not a string among strings. The rest of the
+    /// list reads without it.
     Item {
         owner: Owner,
-        list: &'static str,
+        list: String,
         raw: Value,
     },
 }
@@ -125,7 +131,7 @@ impl Unread {
                 }
                 Kept::Item { owner, list, raw } => {
                     if let Some(Value::Array(items)) =
-                        locate_mut(state, owner).and_then(|object| object.get_mut(*list))
+                        locate_mut(state, owner).and_then(|object| object.get_mut(list.as_str()))
                     {
                         items.push(raw.clone());
                     }
@@ -180,6 +186,7 @@ pub(super) fn locate<'v>(state: &'v Value, owner: &Owner) -> Option<&'v Map<Stri
         Owner::Orchestration(ws) => by_id(root.get("workspaces"), ws)?
             .get("orchestration")?
             .as_object(),
+        Owner::Mcp(ws) => by_id(root.get("workspaces"), ws)?.get("mcp")?.as_object(),
         Owner::Pane(ws, pane) => by_id(by_id(root.get("workspaces"), ws)?.get("panes"), pane),
         Owner::Command(ws, id) => {
             by_id(by_id(root.get("workspaces"), ws)?.get("savedCommands"), id)
@@ -199,6 +206,9 @@ fn locate_mut<'v>(state: &'v mut Value, owner: &Owner) -> Option<&'v mut Map<Str
         Owner::Workspace(ws) => by_id_mut(root.get_mut("workspaces"), ws),
         Owner::Orchestration(ws) => by_id_mut(root.get_mut("workspaces"), ws)?
             .get_mut("orchestration")?
+            .as_object_mut(),
+        Owner::Mcp(ws) => by_id_mut(root.get_mut("workspaces"), ws)?
+            .get_mut("mcp")?
             .as_object_mut(),
         Owner::Pane(ws, pane) => by_id_mut(
             by_id_mut(root.get_mut("workspaces"), ws)?.get_mut("panes"),
@@ -264,7 +274,7 @@ mod tests {
                 field(Owner::Workspace("w".into()), "mcp", json!("on")),
                 Kept::Item {
                     owner: Owner::Workspace("w".into()),
-                    list: "panes",
+                    list: "panes".into(),
                     raw: json!(3),
                 },
             ],
@@ -280,7 +290,7 @@ mod tests {
         let unread = Unread::settle(
             vec![Kept::Item {
                 owner: Owner::Workspace("w".into()),
-                list: "panes",
+                list: "panes".into(),
                 raw: json!(3),
             }],
             &settled,

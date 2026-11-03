@@ -107,7 +107,11 @@ fn a_hand_edited_file_loads_whole() {
     );
     assert_eq!(api.detached, None);
     assert_eq!(api.window_bounds, None);
-    assert_eq!(api.mcp, None);
+    // A mode it does not know reads as inheriting, as `workspaceMcp` read it.
+    assert_eq!(
+        api.mcp.as_ref().map(|mcp| mcp.mode),
+        Some(super::types::McpMode::Inherit)
+    );
     // Hydration: unique names, and a folder that is gone is the top level.
     let names: Vec<&str> = state
         .workspaces

@@ -30,7 +30,7 @@ use serde_json::{Map, Value};
 use super::layout;
 use super::types::{
     AppState, OrchestrationSettings, Pane, SavedCommand, Settings, SplitNode, Workspace,
-    WorkspaceFolder,
+    WorkspaceFolder, WorkspaceMcp,
 };
 use super::unread::{self, Kept, Owner};
 
@@ -87,6 +87,7 @@ fn explicit_nulls(read: &Value, written: &Value, kept: &mut Vec<Kept>) {
         let id = id_of(ws);
         owners.push(Owner::Workspace(id.clone()));
         owners.push(Owner::Orchestration(id.clone()));
+        owners.push(Owner::Mcp(id.clone()));
         owners.extend(
             ids(ws.get("panes"))
                 .into_iter()
@@ -172,6 +173,9 @@ fn clean_workspace(value: &mut Value, kept: &mut Vec<Kept>) {
             &Owner::Orchestration(ws.clone()),
             kept,
         );
+    }
+    if let Some(Value::Object(mcp)) = map.get_mut("mcp") {
+        drop_unreadable::<WorkspaceMcp>(mcp, &Owner::Mcp(ws.clone()), kept);
     }
     migrate_tree(map);
     drop_unreadable::<Workspace>(map, &Owner::Workspace(ws), kept);
@@ -263,7 +267,7 @@ fn clean_list(
             eprintln!("state.json: kept aside an entry of {key} that is not an object: {item}");
             kept.push(Kept::Item {
                 owner: owner.clone(),
-                list: key,
+                list: key.to_string(),
                 raw: item,
             });
         }
@@ -282,24 +286,47 @@ fn drop_unreadable<T: DeserializeOwned>(
     owner: &Owner,
     kept: &mut Vec<Kept>,
 ) {
+    let reads = |key: &str, value: Value| {
+        let mut alone = Map::new();
+        alone.insert(key.to_string(), value);
+        serde_json::from_value::<T>(Value::Object(alone)).is_ok()
+    };
     let unreadable: Vec<String> = map
         .iter()
-        .filter(|(key, value)| {
-            let mut alone = Map::new();
-            alone.insert((*key).clone(), (*value).clone());
-            serde_json::from_value::<T>(Value::Object(alone)).is_err()
-        })
+        .filter(|(key, value)| !reads(key, (*value).clone()))
         .map(|(key, _)| key.clone())
         .collect();
     for key in unreadable {
-        if let Some(raw) = map.remove(&key) {
-            eprintln!("state.json: kept aside {owner:?}.{key}, which could not be read: {raw}");
-            kept.push(Kept::Field {
-                owner: owner.clone(),
-                key,
-                raw,
-            });
+        let Some(raw) = map.remove(&key) else {
+            continue;
+        };
+        // A list that reads once the entries that do not are out of it (a
+        // number among names) keeps the rest, as the TS readers filtered
+        // them (`workspaceMcp` kept the strings of a custom list).
+        if let Value::Array(items) = &raw {
+            let (good, bad): (Vec<Value>, Vec<Value>) = items
+                .iter()
+                .cloned()
+                .partition(|item| reads(&key, Value::Array(vec![item.clone()])));
+            if !good.is_empty() && reads(&key, Value::Array(good.clone())) {
+                for item in bad {
+                    eprintln!("state.json: kept aside an entry of {owner:?}.{key}: {item}");
+                    kept.push(Kept::Item {
+                        owner: owner.clone(),
+                        list: key.clone(),
+                        raw: item,
+                    });
+                }
+                map.insert(key, Value::Array(good));
+                continue;
+            }
         }
+        eprintln!("state.json: kept aside {owner:?}.{key}, which could not be read: {raw}");
+        kept.push(Kept::Field {
+            owner: owner.clone(),
+            key,
+            raw,
+        });
     }
 }
 
@@ -412,12 +439,12 @@ mod tests {
         assert!(has(Owner::Settings, "experiments", json!("all")));
         assert!(kept.contains(&Kept::Item {
             owner: Owner::Workspace("w1".into()),
-            list: "panes",
+            list: "panes".into(),
             raw: json!(3)
         }));
         assert!(kept.contains(&Kept::Item {
             owner: Owner::Root,
-            list: "workspaces",
+            list: "workspaces".into(),
             raw: json!("not a workspace")
         }));
     }
@@ -441,6 +468,42 @@ mod tests {
                 b: Box::new(layout::leaf("a")),
             })
         );
+    }
+
+    #[test]
+    fn a_list_keeps_the_entries_that_read_and_sets_the_others_aside() {
+        let (state, kept) = read(json!({
+            "workspaces": [{
+                "id": "w", "mcp": {"mode": "custom", "enabled": ["hangar", 5, "github"]},
+                "extraRoots": ["/a", null]
+            }],
+            "settings": {"experiments": [7]}
+        }));
+        let ws = &state.workspaces[0];
+        let mcp = ws
+            .mcp
+            .as_ref()
+            .expect("a custom list with a number in it is still custom");
+        assert_eq!(mcp.mode, crate::state::types::McpMode::Custom);
+        assert_eq!(mcp.enabled, ["hangar", "github"]);
+        assert_eq!(ws.extra_roots, ["/a"]);
+        assert!(state.settings.experiments.is_empty());
+        assert!(kept.contains(&Kept::Item {
+            owner: Owner::Mcp("w".into()),
+            list: "enabled".into(),
+            raw: json!(5)
+        }));
+        assert!(kept.contains(&Kept::Item {
+            owner: Owner::Workspace("w".into()),
+            list: "extraRoots".into(),
+            raw: Value::Null
+        }));
+        // Nothing in it reads: the whole value is set aside.
+        assert!(kept.contains(&Kept::Field {
+            owner: Owner::Settings,
+            key: "experiments".into(),
+            raw: json!([7])
+        }));
     }
 
     #[test]
