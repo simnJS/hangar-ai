@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated bundle on macOS, and ignored everywhere else.
+
+  Dictation records through the system audio API rather than the webview, so
+  macOS gates it behind TCC — and an app that reaches for the microphone with
+  no usage description in its Info.plist is not refused, it is killed. This
+  string is what the permission dialog shows the first time the shortcut is
+  held down.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Hangar.AI uses the microphone to type what you dictate into the focused terminal pane.</string>
+  </dict>
+</plist>

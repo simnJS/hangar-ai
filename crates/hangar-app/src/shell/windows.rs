@@ -33,6 +33,31 @@ pub const WORKSPACE_MIN_SIZE: Size = Size::new(640.0, 420.0);
 /// (App.tsx: 700 ms after a move or a resize).
 pub const BOUNDS_SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
 
+/// The name the desktop knows the app's windows by, and their icon.
+///
+/// On Linux the application id is what a compositor matches against the
+/// `.desktop` entry (`hangar-ai.desktop`, `StartupWMClass=hangar-ai`, see
+/// docs/native/PACKAGING.md): without it the dock shows a generic icon and
+/// never groups the windows under Hangar. The icon is the one the installers
+/// carry, for the systems that take it from the window rather than from the
+/// entry (X11, Windows' title bar).
+fn base() -> Settings {
+    #[allow(unused_mut)]
+    let mut settings = Settings {
+        icon: window::icon::from_file_data(
+            include_bytes!("../../packaging/icons/128x128.png"),
+            None,
+        )
+        .ok(),
+        ..Settings::default()
+    };
+    #[cfg(target_os = "linux")]
+    {
+        settings.platform_specific.application_id = "hangar-ai".into();
+    }
+    settings
+}
+
 /// The main window, centred. Its close request is the app's end, which the
 /// shell handles itself (core shutdown, last save) before exiting.
 pub fn main_settings() -> Settings {
@@ -41,7 +66,7 @@ pub fn main_settings() -> Settings {
         min_size: Some(MAIN_MIN_SIZE),
         position: Position::Centered,
         exit_on_close_request: false,
-        ..Settings::default()
+        ..base()
     }
 }
 
@@ -54,7 +79,7 @@ pub fn workspace_settings() -> Settings {
         min_size: Some(WORKSPACE_MIN_SIZE),
         position: Position::Centered,
         exit_on_close_request: false,
-        ..Settings::default()
+        ..base()
     }
 }
 

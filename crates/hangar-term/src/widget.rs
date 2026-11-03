@@ -1404,10 +1404,22 @@ where
     } else {
         Point::new(position.x + width / 2.0, position.y)
     };
+    // iced 0.14's text cache lays every `fill_text` out with cosmic-text's
+    // default wrapping, whatever `wrapping` says, so a run whose glyphs add
+    // up to a hair more than `columns × cell.width` (the measured advance is
+    // a float, and so is their sum) had its last character wrapped onto the
+    // row below. A run laid out from its left edge gets a cell of room to
+    // spare; the clip still stops it at the widget's edge. A centred one is
+    // a single character, which cannot wrap.
+    let bounds = if run.flowing {
+        width + cell.width
+    } else {
+        width
+    };
     renderer.fill_text(
         Text {
             content: run.text.clone(),
-            bounds: Size::new(width, cell.height),
+            bounds: Size::new(bounds, cell.height),
             size: Pixels(size),
             line_height: text::LineHeight::Absolute(Pixels(cell.height)),
             font: fonts.pick(run.style.bold, run.style.italic),
