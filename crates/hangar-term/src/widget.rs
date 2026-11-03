@@ -140,6 +140,7 @@ impl Bindings {
 }
 
 type Intercept<'a, Message> = Box<dyn Fn(&KeyPress) -> Option<Message> + 'a>;
+type KeyFilter<'a> = Box<dyn Fn(&KeyPress) -> bool + 'a>;
 
 /// A terminal as a widget.
 ///
@@ -149,7 +150,7 @@ pub struct TerminalView<'a, Message, Theme = iced::Theme, Renderer = iced::Rende
     terminal: &'a Terminal,
     on_action: Box<dyn Fn(Action) -> Message + 'a>,
     intercept: Option<Intercept<'a, Message>>,
-    key_filter: Option<Box<dyn Fn(&KeyPress) -> bool + 'a>>,
+    key_filter: Option<KeyFilter<'a>>,
     bindings: Bindings,
     padding: Padding,
     scale_factor: Option<f32>,
@@ -352,11 +353,10 @@ impl State {
         Renderer: text::Renderer<Font = iced::Font>,
     {
         let font = terminal.font();
-        if let Some(m) = &self.measured {
-            if m.font == *font && m.scale == scale {
+        if let Some(m) = &self.measured
+            && m.font == *font && m.scale == scale {
                 return m.cell;
             }
-        }
         let fonts = Fonts::new(font);
         let cell = measure_cell::<Renderer>(font, fonts.regular, scale);
         self.measured = Some(Measured {
@@ -754,9 +754,9 @@ where
 
                 // The scrollbar takes the press before the grid does.
                 let (rows, history, offset) = scroll_numbers(terminal);
-                if button == Button::Left && self.scrollbar {
-                    if let Some(bar) = scrollbar(area, rows, history, offset) {
-                        if bar.hot_zone().contains(position) {
+                if button == Button::Left && self.scrollbar
+                    && let Some(bar) = scrollbar(area, rows, history, offset)
+                        && bar.hot_zone().contains(position) {
                             let grab = if bar.thumb.contains(position) {
                                 position.y - bar.thumb.y
                             } else {
@@ -772,8 +772,6 @@ where
                             shell.capture_event();
                             return;
                         }
-                    }
-                }
 
                 if button == Button::Middle && !terminal.mouse_reporting(state.modifiers) {
                     if let Some(text) = clipboard.read(clipboard::Kind::Primary).filter(|t| !t.is_empty()) {
@@ -1013,14 +1011,20 @@ where
             }
 
             // Text.
-            let ligatures = measured.font.ligatures;
+            let setup = TextSetup {
+                cell,
+                fonts: &measured.fonts,
+                size: measured.font.size,
+                ligatures: measured.font.ligatures,
+                clip: bounds,
+            };
             for (row, slot) in cache.plans.iter().enumerate() {
                 let Some((_, plan)) = slot else { continue };
                 for run in &plan.runs {
                     if run.column >= columns {
                         continue;
                     }
-                    fill_run(renderer, run, at(run.column, row), cell, &measured.fonts, measured.font.size, ligatures, bounds);
+                    fill_run(renderer, run, at(run.column, row), &setup);
                 }
             }
 
@@ -1031,7 +1035,7 @@ where
                 let now = state.now.get().unwrap_or_else(Instant::now);
                 let visible = !(terminal.has_focus() && terminal.cursor_blinks()) || {
                     let from = state.blink_from.get().unwrap_or(now);
-                    ((now - from).as_millis() / BLINK.as_millis()) % 2 == 0
+                    ((now - from).as_millis() / BLINK.as_millis()).is_multiple_of(2)
                 };
                 if visible && cursor_view.column < columns {
                     draw_cursor(
@@ -1057,8 +1061,8 @@ where
             // The scrollbar.
             if self.scrollbar {
                 let (rows_n, history, offset) = scroll_numbers(terminal);
-                if let Some(bar) = scrollbar(area, rows_n, history, offset) {
-                    if offset > 0 || state.over_scrollbar || state.thumb_grab.is_some() {
+                if let Some(bar) = scrollbar(area, rows_n, history, offset)
+                    && (offset > 0 || state.over_scrollbar || state.thumb_grab.is_some()) {
                         let active = state.over_scrollbar || state.thumb_grab.is_some();
                         let radius = SCROLLBAR_WIDTH / 2.0;
                         renderer.fill_quad(
@@ -1070,7 +1074,6 @@ where
                             Color { a: if active { 0.50 } else { 0.30 }, ..palette.foreground },
                         );
                     }
-                }
             }
         });
     }
@@ -1207,18 +1210,20 @@ fn rounded(bounds: Rectangle, radius: f32) -> Quad {
     }
 }
 
-fn fill_run<Renderer>(
-    renderer: &mut Renderer,
-    run: &Run,
-    position: Point,
+/// What text is set with, which is the same for every run of a frame.
+struct TextSetup<'a> {
     cell: CellSize,
-    fonts: &Fonts,
+    fonts: &'a Fonts,
     size: f32,
     ligatures: bool,
     clip: Rectangle,
-) where
+}
+
+fn fill_run<Renderer>(renderer: &mut Renderer, run: &Run, position: Point, setup: &TextSetup<'_>)
+where
     Renderer: text::Renderer<Font = iced::Font>,
 {
+    let TextSetup { cell, fonts, size, ligatures, clip } = *setup;
     // `iced` anchors centred text at the middle of its bounds, not at their
     // left edge.
     let width = run.columns as f32 * cell.width;

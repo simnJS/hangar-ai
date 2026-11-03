@@ -168,8 +168,8 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
     let mut decoration: Option<DecorationSpan> = None;
 
     let flush = |open: &mut Option<OpenRun>, plan: &mut RowPlan| {
-        if let Some(run) = open.take() {
-            if !run.text.is_empty() {
+        if let Some(run) = open.take()
+            && !run.text.is_empty() {
                 plan.runs.push(Run {
                     column: run.start,
                     columns: run.start_columns(),
@@ -178,7 +178,6 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
                     flowing: true,
                 });
             }
-        }
     };
 
     for column in 0..terminal.columns {

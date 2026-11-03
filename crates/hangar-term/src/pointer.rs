@@ -113,12 +113,11 @@ impl Terminal {
         // Ctrl, or Cmd on macOS, turns a click on a link into opening it. It
         // is checked before anything else so that following a link never
         // starts a selection.
-        if modifiers.control() || modifiers.logo() {
-            if let Some(hit) = links::link_at(&self.term, self.grid_point(at)) {
+        if (modifiers.control() || modifiers.logo())
+            && let Some(hit) = links::link_at(&self.term, self.grid_point(at)) {
                 events.push(Event::OpenLink(hit.link));
                 return;
             }
-        }
 
         let now = Instant::now();
         let count = match self.pointer.last_click {
@@ -197,14 +196,13 @@ impl Terminal {
             }
             return;
         }
-        if self.config.copy_on_select {
-            if let Some(text) = self.selection_text() {
+        if self.config.copy_on_select
+            && let Some(text) = self.selection_text() {
                 events.push(Event::SetClipboard {
                     target: ClipboardTarget::Primary,
                     text,
                 });
             }
-        }
     }
 
     /// Alt+click moves the cursor of a shell prompt to the cell clicked, by

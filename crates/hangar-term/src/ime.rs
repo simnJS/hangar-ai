@@ -89,8 +89,8 @@ impl InputState {
         // The same text was just committed by the input method: this event is
         // the other half of that keystroke. Only the other road counts, since
         // a key held down repeats faster than the window is long.
-        if let Some(last) = &self.last_text {
-            if last.road == Road::InputMethod
+        if let Some(last) = &self.last_text
+            && last.road == Road::InputMethod
                 && press.text.as_deref() == Some(last.text.as_str())
                 && bytes == last.text.as_bytes()
                 && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
@@ -98,7 +98,6 @@ impl InputState {
                 self.last_text = None;
                 return None;
             }
-        }
         // Something was typed, so no composition is still going on.
         self.preedit = None;
         self.last_text = match &press.text {
@@ -132,15 +131,14 @@ impl InputState {
                 if text.is_empty() {
                     return None;
                 }
-                if let Some(last) = &self.last_text {
-                    if last.road == Road::KeyEvent
+                if let Some(last) = &self.last_text
+                    && last.road == Road::KeyEvent
                         && last.text == text
                         && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
                     {
                         self.last_text = None;
                         return None;
                     }
-                }
                 self.last_text = Some(Typed {
                     text: text.clone(),
                     at: now,

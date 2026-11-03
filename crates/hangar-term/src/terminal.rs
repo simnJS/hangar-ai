@@ -914,9 +914,10 @@ mod tests {
     #[test]
     fn the_background_colour_query_is_answered_from_the_palette() {
         let mut term = terminal(20, 4);
-        let mut palette = Palette::default();
-        palette.background = iced::Color::from_rgb8(0x12, 0x34, 0x56);
-        term.set_palette(palette);
+        term.set_palette(Palette {
+            background: iced::Color::from_rgb8(0x12, 0x34, 0x56),
+            ..Palette::default()
+        });
         let events = term.feed(b"\x1b]11;?\x07");
         assert_eq!(writes(&events), b"\x1b]11;rgb:1212/3434/5656\x07");
     }

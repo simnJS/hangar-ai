@@ -250,11 +250,10 @@ fn legacy(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<
 
     // The keypad in application mode sends its own sequences, and only then:
     // otherwise its keys are the digits and operators they show.
-    if press.location == Location::Numpad && mode.contains(TermMode::APP_KEYPAD) && !logo {
-        if let Some(byte) = keypad_application(press) {
+    if press.location == Location::Numpad && mode.contains(TermMode::APP_KEYPAD) && !logo
+        && let Some(byte) = keypad_application(press) {
             return Some(vec![0x1b, b'O', byte]);
         }
-    }
 
     if let Key::Named(named) = &press.key {
         if let Some(sequence) = sequence_of(*named) {
@@ -294,11 +293,10 @@ fn legacy(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<
     // text is the point, and neither modifier is meant for the program.
     let alt_gr = ctrl && alt && typed_text(press).is_some();
 
-    if ctrl && !alt_gr {
-        if let Some(code) = latin_char(press).and_then(control_code) {
+    if ctrl && !alt_gr
+        && let Some(code) = latin_char(press).and_then(control_code) {
             return Some(with_escape(vec![code], escape));
         }
-    }
 
     if let Some(text) = typed_text(press) {
         return Some(with_escape(text.as_bytes().to_vec(), escape && !alt_gr));
@@ -439,8 +437,8 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
     };
 
     // Keys that have a classic sequence keep its shape.
-    if let Key::Named(named) = &press.key {
-        if let Some(sequence) = sequence_of(*named) {
+    if let Key::Named(named) = &press.key
+        && let Some(sequence) = sequence_of(*named) {
             if param == 1 && event == 1 {
                 return Some(encode_sequence(sequence, m, mode));
             }
@@ -452,7 +450,6 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
                 Sequence::Tilde(n) => format!("\x1b[{n}{field}~").into_bytes(),
             });
         }
-    }
 
     let plain_modifiers = !(m.control() || m.alt() || m.logo());
     let code = kitty_code(press);
@@ -495,15 +492,12 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
     }
 
     let mut number = code.to_string();
-    if report_alternates && m.shift() {
-        if let Key::Character(c) = &press.modified_key {
-            if let Some(shifted) = c.chars().next() {
-                if shifted as u32 != code {
+    if report_alternates && m.shift()
+        && let Key::Character(c) = &press.modified_key
+            && let Some(shifted) = c.chars().next()
+                && shifted as u32 != code {
                     number = format!("{code}:{}", shifted as u32);
                 }
-            }
-        }
-    }
 
     let mut out = format!("\x1b[{number}");
     let text_field = if report_all && report_text && !released {

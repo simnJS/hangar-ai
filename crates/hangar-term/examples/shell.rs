@@ -66,7 +66,10 @@ struct Shell {
 
 /// What the reader thread sends the subscription. A subscription is built
 /// from a plain function, so the receiver waits here to be picked up.
-static OUTPUT: OnceLock<Mutex<Option<mpsc::UnboundedReceiver<Option<Vec<u8>>>>>> = OnceLock::new();
+static OUTPUT: OnceLock<Mutex<Option<Output>>> = OnceLock::new();
+
+/// `None` is the end of the output: the process exited.
+type Output = mpsc::UnboundedReceiver<Option<Vec<u8>>>;
 
 impl Shell {
     fn boot() -> Self {
