@@ -20,9 +20,9 @@ use crate::message::Message;
 use crate::palette::sources::{COMMAND_RUN, workspace_of};
 use crate::state::{CommandScope, PaneId};
 
-/// The menu's width bounds, a pane menu's (`.cmd-menu`).
-pub const MIN_WIDTH: f32 = 232.0;
-pub const MAX_WIDTH: f32 = 320.0;
+/// The menu's width (`.cmd-menu`): fixed, so that a long command truncates
+/// inside its row instead of widening the menu.
+const WIDTH: f32 = 300.0;
 
 fn send(msg: Msg) -> Message {
     Message::SavedCommands(msg)
@@ -122,7 +122,7 @@ pub fn dropdown<'a>(
 ) -> Element<'a, Message> {
     let content = open.then(|| {
         menu::menu(ctx.theme, menu_entries(ctx, pane))
-            .width_between(MIN_WIDTH, MAX_WIDTH)
+            .width_between(WIDTH, WIDTH)
             .into()
     });
     layer::dropdown(anchor, content)

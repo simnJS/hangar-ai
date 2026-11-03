@@ -524,4 +524,209 @@ mod tests {
         assert_eq!(outcome, Outcome::Pass);
         assert!(!asked);
     }
+
+    mod as_the_window_asks {
+        use super::*;
+        use iced::keyboard::key::{Code, Named};
+
+        /// What `Mod` is held as on the platform the tests run on.
+        fn platform_mod() -> Modifiers {
+            match Platform::current() {
+                Platform::Mac => Modifiers::LOGO,
+                Platform::Other => Modifiers::CTRL,
+            }
+        }
+
+        fn pressed(
+            key: Key,
+            code: Code,
+            modifiers: Modifiers,
+            status: iced::event::Status,
+        ) -> subscription::Event {
+            subscription::Event::Interaction {
+                window: window::Id::unique(),
+                event: iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                    modified_key: key.clone(),
+                    key,
+                    physical_key: Physical::Code(code),
+                    location: keyboard::Location::Standard,
+                    modifiers,
+                    text: None,
+                    repeat: false,
+                }),
+                status,
+            }
+        }
+
+        fn letter(c: &str, code: Code, modifiers: Modifiers) -> subscription::Event {
+            pressed(
+                Key::Character(c.into()),
+                code,
+                modifiers,
+                iced::event::Status::Ignored,
+            )
+        }
+
+        fn gate(armed: bool, suspended: bool) -> KeyPresses {
+            KeyPresses {
+                index: Arc::new(KeymapIndex::default()),
+                armed,
+                suspended,
+            }
+        }
+
+        #[test]
+        fn typing_never_becomes_a_message() {
+            let gate = gate(false, false);
+            assert!(
+                gate.message(letter("a", Code::KeyA, Modifiers::empty()))
+                    .is_none()
+            );
+            assert!(
+                gate.message(letter("a", Code::KeyA, Modifiers::SHIFT))
+                    .is_none()
+            );
+            assert!(
+                gate.message(pressed(
+                    Key::Named(Named::Enter),
+                    Code::Enter,
+                    Modifiers::empty(),
+                    iced::event::Status::Captured
+                ))
+                .is_none()
+            );
+            // Ctrl+S starts no binding: the shell's XOFF stays the shell's.
+            assert!(
+                gate.message(letter("s", Code::KeyS, platform_mod()))
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn the_start_of_a_binding_does_and_says_whether_a_widget_used_it() {
+            let gate = gate(false, false);
+            let palette = letter("p", Code::KeyP, platform_mod() | Modifiers::SHIFT);
+            assert!(matches!(
+                gate.message(palette),
+                Some(Message::Keymap(Msg::Key { field: false, .. }))
+            ));
+            let in_a_field = pressed(
+                Key::Named(Named::F6),
+                Code::F6,
+                Modifiers::empty(),
+                iced::event::Status::Captured,
+            );
+            assert!(matches!(
+                gate.message(in_a_field),
+                Some(Message::Keymap(Msg::Key { field: true, .. }))
+            ));
+        }
+
+        #[test]
+        fn a_half_typed_sequence_hears_every_key_and_a_recorder_none() {
+            assert!(
+                gate(true, false)
+                    .message(letter("s", Code::KeyS, platform_mod()))
+                    .is_some()
+            );
+            assert!(
+                gate(true, false)
+                    .message(letter("a", Code::KeyA, Modifiers::empty()))
+                    .is_some()
+            );
+            assert!(
+                gate(false, true)
+                    .message(letter("p", Code::KeyP, platform_mod() | Modifiers::SHIFT))
+                    .is_none()
+            );
+        }
+
+        fn takes_press(
+            model: &Model,
+            key: Key,
+            code: Code,
+            modifiers: Modifiers,
+            field: bool,
+        ) -> bool {
+            takes(
+                model,
+                window::Id::unique(),
+                &key,
+                Physical::Code(code),
+                modifiers,
+                None,
+                field,
+                false,
+            )
+        }
+
+        #[test]
+        fn a_terminal_lets_the_live_shortcuts_through_and_keeps_the_rest() {
+            let model = Model::default();
+            let p = || Key::Character("p".into());
+            assert!(takes_press(
+                &model,
+                p(),
+                Code::KeyP,
+                platform_mod() | Modifiers::SHIFT,
+                false
+            ));
+            assert!(takes_press(
+                &model,
+                Key::Named(Named::F6),
+                Code::F6,
+                Modifiers::empty(),
+                false
+            ));
+            assert!(!takes_press(
+                &model,
+                p(),
+                Code::KeyP,
+                Modifiers::empty(),
+                false
+            ));
+            assert!(!takes_press(
+                &model,
+                Key::Character("c".into()),
+                Code::KeyC,
+                platform_mod(),
+                false
+            ));
+        }
+
+        #[test]
+        fn while_the_palette_is_open_only_its_own_key_is_taken() {
+            let mut model = Model::default();
+            model.ui.overlays.push(Overlay::Palette);
+            let p = Key::Character("p".into());
+            assert!(takes_press(
+                &model,
+                p,
+                Code::KeyP,
+                platform_mod() | Modifiers::SHIFT,
+                true
+            ));
+            assert!(!takes_press(
+                &model,
+                Key::Named(Named::F6),
+                Code::F6,
+                Modifiers::empty(),
+                true
+            ));
+        }
+
+        #[test]
+        fn a_recorder_has_every_key() {
+            let mut model = Model::default();
+            model.live.keymap.dispatcher.suspend(1);
+            let p = Key::Character("p".into());
+            assert!(!takes_press(
+                &model,
+                p,
+                Code::KeyP,
+                platform_mod() | Modifiers::SHIFT,
+                false
+            ));
+        }
+    }
 }
