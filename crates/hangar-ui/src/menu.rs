@@ -85,6 +85,11 @@ const ACTION: f32 = 20.0;
 #[must_use]
 pub struct Item<M> {
     label: String,
+    /// The label is code, set in the mono face: a saved command with no name.
+    mono: bool,
+    /// A second, quieter text after the label, in the mono face: the command
+    /// a saved command runs.
+    detail: Option<String>,
     icon: Option<Icon>,
     glyph: Option<GlyphState>,
     shortcut: Option<String>,
@@ -111,6 +116,8 @@ pub struct Action<M> {
 pub fn item<M>(label: impl Into<String>) -> Item<M> {
     Item {
         label: label.into(),
+        mono: false,
+        detail: None,
         icon: None,
         glyph: None,
         shortcut: None,
@@ -124,6 +131,21 @@ pub fn item<M>(label: impl Into<String>) -> Item<M> {
 }
 
 impl<M> Item<M> {
+    /// Sets the label in the mono face, for a line whose label is code.
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
+    }
+
+    /// A second text after the label, smaller, quieter and in the mono face,
+    /// as the saved-commands menu shows the command under a name. Empty is
+    /// left out.
+    pub fn detail(mut self, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        self.detail = (!detail.is_empty()).then_some(detail);
+        self
+    }
+
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
         self
@@ -197,6 +219,14 @@ impl<M> Item<M> {
             danger: true,
         });
         self
+    }
+
+    fn label_font(&self) -> Font {
+        if self.mono {
+            fonts::mono()
+        } else {
+            fonts::ui()
+        }
     }
 
     /// The highlight can land on it.
@@ -398,7 +428,10 @@ impl<M: Clone> Menu<'_, M> {
             .iter()
             .map(|entry| match entry {
                 Entry::Item(item) => {
-                    let label = text_width(&item.label, font_size::BODY, fonts::ui());
+                    let label = text_width(&item.label, font_size::BODY, item.label_font())
+                        + item.detail.as_ref().map_or(0.0, |detail| {
+                            GAP + text_width(detail, font_size::LABEL, fonts::mono())
+                        });
                     let end = if item.actions.is_empty() {
                         item.shortcut.as_ref().map_or(0.0, |keys| {
                             // The gap before the keys is wider than the one
@@ -873,7 +906,7 @@ impl<M: Clone> Menu<'_, M> {
             renderer,
             &item.label,
             font_size::BODY,
-            fonts::ui(),
+            item.label_font(),
             text_color,
             Line {
                 anchor: Point::new(x, middle),
@@ -881,6 +914,27 @@ impl<M: Clone> Menu<'_, M> {
                 clip: room,
             },
         );
+        if let Some(detail) = &item.detail {
+            let from = x + text_width(&item.label, font_size::BODY, item.label_font()) + GAP;
+            if from < end {
+                draw_text(
+                    renderer,
+                    detail,
+                    font_size::LABEL,
+                    fonts::mono(),
+                    keys_color,
+                    Line {
+                        anchor: Point::new(from, middle),
+                        align: alignment::Horizontal::Left,
+                        clip: Rectangle {
+                            x: from,
+                            width: end - from,
+                            ..room
+                        },
+                    },
+                );
+            }
+        }
     }
 }
 

@@ -37,7 +37,16 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
-# Wall-clock dates of the memory view and the local days, weeks and hours of
-# the statistics page (as `Intl.DateTimeFormat` wrote them); the same build
-# hangar-core already uses.
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Wall-clock dates of the memory view, the local days, weeks and hours of the
+# statistics page (as `Intl.DateTimeFormat` wrote them) and the times in the
+# orchestration briefings; the same build hangar-core already uses.
+chrono.workspace = true
+# The orchestration engine (P19): plan statuses, and task titles folded to
+# ASCII for branch names.
+regex.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+# Draws a package's views without a window, for the snapshot tests packages keep
+# to look at what they built (kits/views/snapshot.rs).
+iced_test.workspace = true
