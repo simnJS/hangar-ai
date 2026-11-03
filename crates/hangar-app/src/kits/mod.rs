@@ -18,7 +18,11 @@ use crate::services::{CoreEvent, Services};
 use crate::shell::{Region, placeholder};
 use crate::state::{Model, WsId};
 
+pub mod activation;
+pub mod gallery;
+pub mod icon;
 pub mod model;
+pub mod setup;
 #[cfg(test)]
 mod testing;
 
@@ -40,6 +44,8 @@ pub struct Live {
     pub installed: Option<Vec<KitInfo>>,
     /// Why the last read failed; cleared by the next one that works.
     pub error: Option<String>,
+    /// The kits' own icons, read from their folders (`icon::kit_icon` draws one).
+    pub icons: icon::Icons,
 }
 
 impl Live {
