@@ -563,6 +563,136 @@ impl KitApi for NoImages {
 
 /* ── what the kits' native tabs added: a canvas, shortcuts, long logs ── */
 
+/// What the kits' ports added, drawn into `HANGAR_KIT_SNAPSHOTS` to be
+/// looked at, as `snapshots` draws the fields: a header with a back button,
+/// a canvas with a pin and a label turned at its edge, swatches, radio
+/// buttons, a rich row, a banner with a title, a diff, a numbered editor.
+#[test]
+fn snapshots_of_what_the_ports_added() {
+    let Some(folder) = std::env::var_os("HANGAR_KIT_SNAPSHOTS") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    let mut back = ui::Button::icon_only(ui::Icon::ArrowLeft, "Back");
+    back.on_press = Some(HandlerId(1));
+    let header = ui::Header::new("Run #4521").lead(back);
+    let line = ui::default_stroke(360.0, 160.0);
+    let pin = (300.0, 60.0);
+    let canvas = ui::Canvas::new("shot", 360.0, 160.0)
+        .zoom(Some(1.0))
+        .mark(ui::Mark::arrow((20.0, 20.0), (140.0, 90.0)).ink(ui::Ink::Red))
+        .mark(ui::Mark::rect(160.0, 20.0, 100.0, 60.0).ink(ui::Ink::Blue))
+        .mark(ui::Mark::path([
+            ui::Point::new(30.0, 130.0),
+            ui::Point::new(60.0, 115.0),
+            ui::Point::new(90.0, 140.0),
+        ]))
+        .mark(ui::Mark::circle(pin, 3.4 * line).fill(ui::Ink::Magenta))
+        .mark(
+            ui::Mark::text(pin, "1", 4.25 * line)
+                .bold()
+                .align(ui::Align::Center)
+                .ink(ui::Ink::Magenta.contrast()),
+        )
+        .mark(
+            ui::Mark::text(
+                (pin.0 + 3.4 * line + 4.0, pin.1),
+                "Login button",
+                3.6 * line,
+            )
+            .fill(ui::Ink::Magenta)
+            .ink(ui::Ink::Magenta.contrast())
+            .fallback((pin.0 - 3.4 * line - 4.0, pin.1)),
+        );
+    let swatches = ui::Row::new(
+        ui::Ink::NAMED[..5]
+            .iter()
+            .map(|ink| {
+                ui::Swatch::new(*ink, "ink")
+                    .selected(*ink == ui::Ink::Red)
+                    .into()
+            })
+            .collect(),
+    )
+    .spacing(6.0);
+    let mut radio = ui::Radio::new(
+        vec![
+            ui::SelectOption::new("mine", "Yours"),
+            ui::SelectOption::new("disk", "On disk"),
+        ],
+        Some("mine".into()),
+    )
+    .horizontal();
+    radio.on_select = Some(HandlerId(2));
+    let row = ui::ListItem::new("TODO: cache the token")
+        .sub("src/auth.rs:42")
+        .lead(ui::Glyph::new(Status::Waiting, "waiting"))
+        .body(ui::Text::new("Ava, 3 days ago").small().dim())
+        .body(ui::Banner::new(Notice::Warning, "The agent is busy").title("Not sent."));
+    let diff = ui::Log::new(vec![
+        ui::LogLine::new("@@ -1,3 +1,3 @@").kind(LineKind::Head),
+        ui::LogLine::new(" a = 1").number(1),
+        ui::LogLine::new("-b = 2").kind(LineKind::Removed).number(2),
+        ui::LogLine::new("+b = 3").kind(LineKind::Added).number(2),
+    ]);
+    let area = ui::TextArea::new("editor", "[package]\nname = \"x\"\nversion = 0.1\n")
+        .line_numbers()
+        .height(70.0)
+        .mark(ui::LineMark::new(3, Notice::Error));
+    let page = ui::Element::Column({
+        let mut column = ui::Column::new(vec![
+            header.into(),
+            canvas.into(),
+            swatches.into(),
+            radio.into(),
+            ui::List::new(vec![row]).group().into(),
+            diff.into(),
+            area.into(),
+            ui::Progress::new(None).into(),
+        ]);
+        column.spacing = Some(8.0);
+        column.padding = Some(ui::Padding::All(12.0));
+        column
+    });
+    let mut widgets = WidgetState::default();
+    widgets.sync(
+        &ui::abi::View {
+            seq: 7,
+            root: page.clone(),
+        },
+        &NoImages,
+        &[],
+        &crate::tab::Held::default(),
+    );
+    for (name, style) in [("dark", KitStyle::dark()), ("light", KitStyle::light())] {
+        let cx = Cx {
+            style,
+            seq: 7,
+            widgets: &widgets,
+            ns: 1,
+        };
+        let settings = Settings {
+            fonts: vec![Cow::Borrowed(hangar_theme::fonts::INTER_VARIABLE)],
+            default_font: hangar_theme::fonts::ui(),
+            ..Settings::default()
+        };
+        let body = container(element(&cx, &page))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(Background::Color(style.palette.bg)),
+                ..Default::default()
+            });
+        let mut drawn = Simulator::with_size(settings, Size::new(420.0, 820.0), body);
+        let snapshot = drawn
+            .snapshot(&hangar_theme::to_iced(style.theme))
+            .expect("a snapshot");
+        snapshot
+            .matches_image(folder.join(format!("kit-ports-{name}.png")))
+            .expect("written");
+    }
+}
+
 fn sketch() -> ui::Canvas {
     let mut canvas = ui::Canvas::new("shot", 200.0, 100.0)
         .zoom(Some(1.0))

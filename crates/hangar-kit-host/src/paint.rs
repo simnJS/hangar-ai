@@ -73,9 +73,17 @@ fn font(bold: bool) -> &'static FontRef<'static> {
     if bold { heavy } else { regular }
 }
 
+/// The scale of a text `size` pixels to the em, as iced and a canvas size
+/// one: ab_glyph's scale is the height from the ascent to the descent,
+/// which for Inter is 1.21 em.
+fn em(font: &FontRef<'static>, size: f32) -> PxScale {
+    let units = font.units_per_em().unwrap_or(1000.0);
+    PxScale::from(size * font.height_unscaled() / units)
+}
+
 /// The glyphs of a line of text and where each starts, from 0.
 fn shape_line(text: &str, size: f32, bold: bool) -> (Vec<(GlyphId, f32)>, f32) {
-    let scaled = font(bold).as_scaled(PxScale::from(size));
+    let scaled = font(bold).as_scaled(em(font(bold), size));
     let mut caret = 0.0;
     let mut previous: Option<GlyphId> = None;
     let mut glyphs = Vec::new();
@@ -421,7 +429,8 @@ fn draw(pixmap: &mut Pixmap, prims: &[Prim], scale: f32) {
 /// each glyph's outline filled by its coverage, over what is there.
 fn draw_text(pixmap: &mut Pixmap, x: f32, y: f32, text: &str, size: f32, bold: bool, rgb: [u8; 3]) {
     let font = font(bold);
-    let scaled = font.as_scaled(PxScale::from(size));
+    let scale = em(font, size);
+    let scaled = font.as_scaled(scale);
     // The middle of the line is halfway between the ascent and the descent,
     // as a canvas's `textBaseline = "middle"` puts it.
     let baseline = y + (scaled.ascent() + scaled.descent()) / 2.0;
@@ -429,7 +438,7 @@ fn draw_text(pixmap: &mut Pixmap, x: f32, y: f32, text: &str, size: f32, bold: b
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let pixels = pixmap.pixels_mut();
     for (id, caret) in glyphs {
-        let glyph = id.with_scale_and_position(PxScale::from(size), point(x + caret, baseline));
+        let glyph = id.with_scale_and_position(scale, point(x + caret, baseline));
         let Some(outline) = font.outline_glyph(glyph) else {
             continue;
         };
