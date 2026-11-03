@@ -64,15 +64,15 @@ pub const OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10)
 /// docs/native/PACKAGING.md): without it the dock shows a generic icon and
 /// never groups the windows under Hangar. The icon is the one the installers
 /// carry, for the systems that take it from the window rather than from the
-/// entry (X11, Windows' title bar).
+/// entry (X11, Windows' title bar): on Linux the launcher's own rounded tile.
 fn base() -> Settings {
+    #[cfg(target_os = "linux")]
+    const ICON: &[u8] = include_bytes!("../../packaging/icons/linux/128x128.png");
+    #[cfg(not(target_os = "linux"))]
+    const ICON: &[u8] = include_bytes!("../../packaging/icons/128x128.png");
     #[allow(unused_mut)]
     let mut settings = Settings {
-        icon: window::icon::from_file_data(
-            include_bytes!("../../packaging/icons/128x128.png"),
-            None,
-        )
-        .ok(),
+        icon: window::icon::from_file_data(ICON, None).ok(),
         ..Settings::default()
     };
     #[cfg(target_os = "linux")]

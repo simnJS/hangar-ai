@@ -197,7 +197,7 @@ has to change in the repository settings.
 | The feed and the key | Same URL (`ENDPOINT`), same `latest.json` shape, signed by the same private key; `hangar-update` and the plugin verify the same `.sig` text. Checked with a key made by cargo-packager's `signer generate` (the same format as `tauri signer generate`) through `hangar-update`'s `verify_file`; the shipped `PUBKEY` is read by it too. The real key could not be tried here. |
 | Asset names | The Tauri build's, in every row of section 1; the download page links to them. |
 | Identifier, product name, executable | `com.simnjs.iabench`, `Hangar.AI`, `hangar-ai` (so `hangar-ai --mcp`, found by agents' MCP configs, stays at `/usr/bin/hangar-ai`, `…/Hangar.AI.app/Contents/MacOS/hangar-ai`, `%LOCALAPPDATA%\Hangar.AI\hangar-ai.exe`). |
-| `.deb` | Package `hangar-ai`, so `dpkg -i` upgrades the old one. It depends on `libwebkit2gtk-4.1-0` and GTK as the old one did, and now on `libasound2`, `libstdc++6`, `libc6`. The desktop file is `hangar-ai.desktop` (the old one was `Hangar.AI.desktop`; dpkg removes it), with `StartupWMClass=hangar-ai`; icons in the same `hicolor` folders. |
+| `.deb` | Package `hangar-ai`, so `dpkg -i` upgrades the old one. It depends on `libwebkit2gtk-4.1-0` and GTK as the old one did, and now on `libasound2`, `libstdc++6`, `libc6`. The desktop file is `hangar-ai.desktop` (the old one was `Hangar.AI.desktop`; dpkg removes it), with `StartupWMClass=hangar-ai`. Icons go in the `hicolor` folders, from 16 to 512 px plus `scalable/apps/hangar-ai.svg`: a rounded tile with room around it, as GNOME and KDE draw app icons (`packaging/icons/linux/`, rendered from its SVG by `render.sh`). |
 | `.rpm` | Package `Hangar.AI`, as the Tauri build named it, so `rpm -U` upgrades. Requires are written by soname (`libasound.so.2`, `libstdc++.so.6`, `libgtk-3.so.0`, `libwebkit2gtk-4.1.so.0`) rather than the ldd scan cargo-generate-rpm does by default, which would list the build machine's own ICU and GStreamer sonames. |
 | AppImage | A single file the updater renames over `$APPIMAGE`, as before. Its own `AppRun` (`packaging/linux/AppRun`) replaces the packager's, which exported `PYTHONHOME` and `PYTHONPATH` into the image and so broke every Python started in a pane. The image bundles no libraries; it is 20 MB, not 91. |
 | Windows | Per-user (`currentUser`), `%LOCALAPPDATA%\Hangar.AI`, the same uninstall and `Software\simnjs\Hangar.AI` registry keys, so it finds the old install and replaces it in place. `/P /R /UPDATE /ARGS …` are read by the script as before. The migration of installs under the earlier names stays. The look is `theme.nsh` and the backdrops, copied. WebView2 is still fetched when missing (the helper needs it for HTML kit tabs and PDFs), not for the app. |
@@ -275,7 +275,8 @@ this work):
   `window::Settings::platform_specific.application_id` to `"hangar-ai"` for the
   main window on Linux.
 - **The window icon** for X11 and Windows title bars, from
-  `packaging/icons/icon.png`; the executable's own icon is handled by `build.rs`.
+  `packaging/icons/linux/128x128.png` on Linux and `packaging/icons/128x128.png`
+  elsewhere; the executable's own icon is handled by `build.rs`.
 - **`hangar-webview` has no Windows icon or version resource**: a `build.rs` there
   would make the helper's taskbar entry match.
 

@@ -103,10 +103,18 @@ homepage = "https://github.com/hangar-ai/hangar"
 category = "DeveloperTool"
 longDescription = """
 Hangar runs Claude Code and shells side by side, each in a real terminal pane, around a shared task board and memory that every Claude Code reads and writes over Hangar's MCP server."""
+# The PNGs are the Linux ones (the .deb puts each in the hicolor folder of its
+# size, the AppImage takes the largest): a rounded tile with room around it, as
+# GNOME and KDE draw app icons, rendered from packaging/icons/linux/hangar-ai.svg.
 icons = [
-  "packaging/icons/32x32.png",
-  "packaging/icons/128x128.png",
-  "packaging/icons/128x128@2x.png",
+  "packaging/icons/linux/16x16.png",
+  "packaging/icons/linux/24x24.png",
+  "packaging/icons/linux/32x32.png",
+  "packaging/icons/linux/48x48.png",
+  "packaging/icons/linux/64x64.png",
+  "packaging/icons/linux/128x128.png",
+  "packaging/icons/linux/256x256.png",
+  "packaging/icons/linux/512x512.png",
   "packaging/icons/icon.icns",
   "packaging/icons/icon.ico",
 ]
@@ -135,6 +143,8 @@ depends = [
 # installs the same file. StartupWMClass is the window class the compositor
 # matches windows to.
 desktopTemplate = "packaging/linux/hangar-ai.desktop"
+# The scalable icon, which docks draw at whatever size they need.
+files = { "packaging/icons/linux/hangar-ai.svg" = "usr/share/icons/hicolor/scalable/apps/hangar-ai.svg" }
 
 [package.metadata.packager.appimage]
 # The host provides every library (see docs/native/PACKAGING.md, "AppImage"):
@@ -177,9 +187,15 @@ assets = [
   { source = "target/release/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
   { source = "target/release/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
   { source = "crates/hangar-app/packaging/linux/hangar-ai.desktop", dest = "/usr/share/applications/hangar-ai.desktop", mode = "644" },
-  { source = "crates/hangar-app/packaging/icons/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/hangar-ai.png", mode = "644" },
-  { source = "crates/hangar-app/packaging/icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/hangar-ai.png", mode = "644" },
-  { source = "crates/hangar-app/packaging/icons/128x128@2x.png", dest = "/usr/share/icons/hicolor/256x256/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/24x24.png", dest = "/usr/share/icons/hicolor/24x24/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/48x48.png", dest = "/usr/share/icons/hicolor/48x48/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/64x64.png", dest = "/usr/share/icons/hicolor/64x64/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/hangar-ai.png", mode = "644" },
+  { source = "crates/hangar-app/packaging/icons/linux/hangar-ai.svg", dest = "/usr/share/icons/hicolor/scalable/apps/hangar-ai.svg", mode = "644" },
 ]
 
 # What the two executables need from the system, as the .deb's Depends lists it.

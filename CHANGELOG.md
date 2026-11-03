@@ -60,6 +60,10 @@ around the terminals, and needs a fraction of the memory and processor it did.
   your theme, with the buttons your desktop shows, on its side (GNOME's button layout). Drag
   it to move the window, double-click it to maximise, right-click it for the window menu;
   the edges resize the window, and its corners are rounded as GNOME's own windows are.
+- **A Linux icon shaped like the others.** The dock and the app grid now show Hangar on a
+  rounded tile with room around it, the shape GNOME and KDE give their own app icons,
+  instead of a square from edge to edge; the packages carry it from 16 to 512 px and as an
+  SVG.
 - **Agents' panes are laid out, not stacked.** A pane an agent opens or closes (through
   Hangar's MCP server, or the orchestrator's workers) no longer halves the pane beside it,
   which ended in a row of slivers: the workspace is laid out again, with the orchestrator
