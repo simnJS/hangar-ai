@@ -5,7 +5,7 @@
 //! PNG is written in that folder under the name the dialog would propose.
 //!
 //! ```text
-//! HANGAR_DEV_PREVIEW=/work/app/demo/models/sample.glb \
+//! HANGAR_DEV_PREVIEW=$PWD/assets/models/sample.glb \
 //!   HANGAR_DEV_MODEL3D_CAPTURE=/tmp/captures scripts/native-dev.sh
 //! ```
 //!

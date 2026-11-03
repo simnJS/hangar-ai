@@ -307,14 +307,10 @@ fn draws_a_stl_standing_upright() {
 
 #[test]
 fn loads_and_draws_the_demo_hangar() {
-    // A real model: a hangar, a drone over it, 147 meshes and 32 materials. It
-    // is the old viewer's demo file, so it is there unless the demo is gone.
+    // A real model: a hangar, a drone over it, 147 meshes and 32 materials.
+    // It is the old viewer's demo file, kept as the repository's sample.
     let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/models/sample.glb");
-    if !path.exists() {
-        eprintln!("skipped, no demo model");
-        return;
-    }
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models/sample.glb");
     let model = Arc::new(load(&path).unwrap());
     assert_eq!(
         (
