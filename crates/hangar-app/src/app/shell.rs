@@ -1061,7 +1061,6 @@ fn swap_window_ui(m: &mut Model, to: window::Id) {
         drawer: ui.drawer.take(),
         drawer_opener: ui.drawer_opener.take(),
         focus: ui.focus.take(),
-        broadcast: std::mem::take(&mut ui.broadcast),
     };
     ui.parked.insert(from, leaving);
     ui.pointer = Default::default();
@@ -1077,7 +1076,6 @@ fn load_window_ui(ui: &mut crate::state::Ui, w: window::Id) {
     ui.drawer = mine.drawer;
     ui.drawer_opener = mine.drawer_opener;
     ui.focus = mine.focus;
-    ui.broadcast = mine.broadcast;
 }
 
 /// `Intent::SelectPane` (App.tsx's `focusPane`): the pane becomes its

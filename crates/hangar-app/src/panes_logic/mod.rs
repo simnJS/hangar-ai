@@ -214,9 +214,11 @@ pub enum Msg {
         pane: PaneId,
         status: PaneStatus,
     },
-    /// A chunk of output was written to the terminal.
+    /// These panes wrote output to their terminals since the last such
+    /// message: the panes look once a frame while output flows, and say so
+    /// in one message for all of them.
     Output {
-        pane: PaneId,
+        panes: Vec<PaneId>,
     },
     Bell {
         pane: PaneId,
@@ -1095,9 +1097,12 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
             Task::none()
         }
-        Msg::Output { pane } => {
-            // The hot path: a write per chunk and nothing to redraw for it.
-            m.live.panes_logic.note_output(&pane, now);
+        Msg::Output { panes } => {
+            // The hot path: a write per pane a frame and nothing to redraw
+            // for it.
+            for pane in &panes {
+                m.live.panes_logic.note_output(pane, now);
+            }
             Task::none()
         }
         Msg::Bell { pane } => with_pane(m, &pane, now, |live, info, amb| live.bell(info, amb)),
@@ -1547,19 +1552,27 @@ pub fn on_intent(
             // way to sleep. Everything is read and asked at the click.
             Some(decide_next(st, m, sv, ws, SleepMode::Forced, now))
         }
-        // A pane that takes the focus shows the branch it is on as soon as
-        // it is looked at.
-        Intent::FocusPane { ws, pane, .. } => {
-            let folder = m.workspace(ws).and_then(|w| {
-                w.panes
-                    .iter()
-                    .find(|p| p.id == *pane)
-                    .map(|p| folder_of(w, p))
-            })?;
-            Some(ask_branch(m, &folder, now, PANE_BRANCH_FOCUS_MS))
-        }
-        _ => None,
+        _ => focused_branch(m, intent, now),
     }
+}
+
+/// A pane that takes the focus shows the branch it is on as soon as it is
+/// looked at: the full landing (`FocusPane`: a notification, the board,
+/// Needs-you, the palette) and the keyboard's move from pane to pane
+/// (`SelectPane`: `pane.focus1`…, `pane.next`, the arrows) alike. Everything
+/// else the focus drives here is read from the model by `sync_active`, which
+/// runs before every intent.
+fn focused_branch(m: &mut Model, intent: &Intent, now: EpochMs) -> Option<Task<Message>> {
+    let (Intent::FocusPane { ws, pane, .. } | Intent::SelectPane { ws, pane }) = intent else {
+        return None;
+    };
+    let folder = m.workspace(ws).and_then(|w| {
+        w.panes
+            .iter()
+            .find(|p| p.id == *pane)
+            .map(|p| folder_of(w, p))
+    })?;
+    Some(ask_branch(m, &folder, now, PANE_BRANCH_FOCUS_MS))
 }
 
 /// Every core event, after the shell's own handling of it.

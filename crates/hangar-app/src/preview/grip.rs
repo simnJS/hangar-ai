@@ -30,6 +30,8 @@ pub enum GripEvent {
     /// (negative to the right): how much wider the panel wants to be.
     Drag(f32),
     End,
+    /// Escape while it was held: the drag is dropped.
+    Cancel,
     /// A double click.
     Reset,
     /// An arrow key: this many points wider (negative: narrower).
@@ -126,6 +128,17 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Grip<'_, M> {
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                shell.request_redraw();
+            }
+            // Captured, so the shell does not also close an overlay or the
+            // drawer on the same press.
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Escape),
+                ..
+            }) if state.dragging => {
+                state.dragging = false;
+                shell.publish((self.on_event)(GripEvent::Cancel));
+                shell.capture_event();
                 shell.request_redraw();
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if state.focused => {

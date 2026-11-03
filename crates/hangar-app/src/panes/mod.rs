@@ -91,6 +91,9 @@ pub struct State {
     /// The signature of the model the last sync brought the panes in line
     /// with.
     synced: u64,
+    /// Output is flowing: the panes are looked at every frame
+    /// ([`Msg::Frame`]) rather than woken by each one.
+    ticking: bool,
 }
 
 /// The pickers of a header.
@@ -138,6 +141,8 @@ pub enum Msg {
     Term(PaneId, Action),
     /// What the panes' reader threads said since the last batch.
     Hub(Vec<HubEvent>),
+    /// A frame while output flows: which panes printed since the last.
+    Frame,
     /// The model changed under the panes: bring them in line.
     Sync,
     /// The terminal had its time to measure itself: start the shell.
@@ -204,10 +209,10 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             task
         };
     }
-    // Output is the hot path, many batches a second while agents stream:
-    // nothing other packages read changes with it.
-    let quiet =
-        matches!(&msg, Msg::Hub(events) if events.iter().all(|e| e.kind == HubKind::Output));
+    // Output is the hot path, a frame's worth while agents stream: nothing
+    // other packages read changes with it.
+    let quiet = matches!(&msg, Msg::Frame)
+        || matches!(&msg, Msg::Hub(events) if events.iter().all(|e| e.kind == HubKind::Output));
     let task = handle(st, m, sv, msg);
     if quiet {
         return task;
@@ -228,6 +233,7 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         // `update` takes these itself; here only for the match to be whole.
         Msg::Term(pane, action) => term_action(st, m, sv, pane, action).0,
         Msg::Hub(events) => hub_events(st, m, sv, events),
+        Msg::Frame => printed(frame(st)),
         Msg::Sync => sync(st, m, sv),
         Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
             Some(rt) => controller::start(rt, sv, &st.channel),
@@ -424,19 +430,6 @@ fn term_settles(measured: bool, events: &[TermEvent]) -> bool {
             .any(|event| matches!(event, TermEvent::Pressed))
 }
 
-/// Whether a link a terminal reported is one Hangar opens: a web link, as
-/// xterm.js's web-links addon was the only one the TS opened. A detected
-/// `file:`, `ssh:` or `git:` URL, or whatever target an `OSC 8` hyperlink
-/// names, would hand the system's handler for that scheme anything a
-/// program printed, on one click.
-fn is_web_link(uri: &str) -> bool {
-    let Some((scheme, rest)) = uri.split_once("://") else {
-        return false;
-    };
-    (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
-        && !rest.is_empty()
-}
-
 /// What a terminal widget did, applied, and what the terminal said back;
 /// with whether the panes have to be brought in line after it
 /// ([`term_settles`]).
@@ -469,9 +462,13 @@ fn term_action(
                 ClipboardTarget::Clipboard => iced::clipboard::write(text),
                 ClipboardTarget::Primary => iced::clipboard::write_primary(text),
             }),
-            // Web links open in the system browser (inventory §9.2); any
-            // other does nothing (`is_web_link`).
-            TermEvent::OpenLink(link) if is_web_link(&link.uri) => {
+            // Web links open in the system browser (inventory §9.2), as
+            // xterm.js's web-links addon was the only one the TS opened. The
+            // terminal reports no other (a `file:`, `ssh:` or `git:` URL, or
+            // a hyperlink elsewhere, would hand the system's handler for its
+            // scheme anything a program printed); this checks it again
+            // right before the opener.
+            TermEvent::OpenLink(link) if hangar_term::is_web_link(&link.uri) => {
                 let _ = open::that_detached(&link.uri);
             }
             TermEvent::Pressed => {
@@ -542,8 +539,49 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
     Task::batch(tasks)
 }
 
-/// What the reader threads said: output (one wake-up per pane per batch),
-/// an exit, a bell, a notification.
+/// The panes that printed since the last look, which this one is.
+fn take_outputs(st: &State) -> Vec<PaneId> {
+    st.panes
+        .iter()
+        .filter(|(_, rt)| rt.link.take_output())
+        .map(|(pane, _)| pane.clone())
+        .collect()
+}
+
+/// The pane logic hears which panes printed, in one message.
+fn printed(panes: Vec<PaneId>) -> Task<Message> {
+    if panes.is_empty() {
+        Task::none()
+    } else {
+        logic(Logic::Output { panes })
+    }
+}
+
+/// A frame while output flows (`ticking`): the panes that printed since the
+/// last are told to the pane logic, and the redraw that follows this message
+/// draws what they printed. A frame that finds every pane quiet ends the
+/// ticking, and the next chunk wakes the window again. The flag the sinks
+/// share is cleared before the last look, so a chunk printed meanwhile is
+/// either seen by it or sends a wake-up (`pty_link::Waker`).
+fn frame(st: &mut State) -> Vec<PaneId> {
+    if !st.ticking {
+        return Vec::new();
+    }
+    let mut panes = take_outputs(st);
+    if panes.is_empty() {
+        st.channel.rest();
+        panes = take_outputs(st);
+        if panes.is_empty() {
+            st.ticking = false;
+        } else {
+            st.channel.stay_awake();
+        }
+    }
+    panes
+}
+
+/// What the reader threads said: output (one wake-up for every pane, which
+/// starts the ticking), an exit, a bell, a notification.
 fn hub_events(
     st: &mut State,
     m: &mut Model,
@@ -552,15 +590,19 @@ fn hub_events(
 ) -> Task<Message> {
     let mut tasks = Vec::new();
     for event in events {
+        // Whichever pane sent it, even one closed since: the wake-up is
+        // every pane's, and only a frame that finds them quiet lets the
+        // next one through.
+        if event.kind == HubKind::Output {
+            st.ticking = true;
+            continue;
+        }
         let Some(rt) = st.panes.get_mut(&event.pane) else {
             continue;
         };
         let pane = event.pane;
         match event.kind {
-            HubKind::Output => {
-                rt.link.take_wake();
-                tasks.push(logic(Logic::Output { pane }));
-            }
+            HubKind::Output => {}
             HubKind::Exit => controller::exited(rt, m, sv),
             HubKind::Bell => tasks.push(logic(Logic::Bell { pane })),
             // OSC 9 and OSC 777, already read by hangar-term (ConEmu's
@@ -575,6 +617,11 @@ fn hub_events(
                 tasks.push(logic(Logic::Notification { pane, message }));
             }
         }
+    }
+    // What printed is told at once rather than at the next frame: the first
+    // chunk after a quiet spell is what an agent starting a turn looks like.
+    if st.ticking {
+        tasks.push(printed(take_outputs(st)));
     }
     Task::batch(tasks)
 }
@@ -620,6 +667,13 @@ fn open_finder(st: &mut State, pane: &PaneId) -> Task<Message> {
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let mut subscriptions = vec![st.channel.subscription()];
+    // While output flows, every frame looks at the panes; a window the
+    // system draws no frames for (minimised, hidden) is looked at four times
+    // a second, so the pane logic still hears what its agents print.
+    if st.ticking {
+        subscriptions.push(iced::window::frames().map(|_| Message::Panes(Msg::Frame)));
+        subscriptions.push(iced::time::every(HIDDEN_FRAME).map(|_| Message::Panes(Msg::Frame)));
+    }
     // Whatever changed the model outside this package's own messages (a store
     // action of the shell, an engine's command, a hydration, a sleep) is
     // caught here: the subscription is rebuilt after every update, and a
@@ -762,6 +816,9 @@ pub fn terminal_access(st: &State) -> Arc<dyn TerminalAccess> {
 
 /// A grid's size before it has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
+
+/// How often the panes are looked at while output flows and no frame comes.
+const HIDDEN_FRAME: std::time::Duration = std::time::Duration::from_millis(250);
 
 // ---- Where the panes stand --------------------------------------------------
 
@@ -1076,34 +1133,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn only_web_links_open() {
-        for uri in [
-            "https://example.com/page?q=1",
-            "http://localhost:5173",
-            "HTTPS://EXAMPLE.COM",
-        ] {
-            assert!(is_web_link(uri), "{uri}");
-        }
-        for uri in [
-            "file:///etc/passwd",
-            "file://host/share",
-            "ssh://git@github.com/x/y",
-            "git://github.com/x/y",
-            "ftp://example.com",
-            "smb://server/share",
-            "javascript:alert(1)",
-            "mailto:someone@example.com",
-            "https://",
-            "https:example.com",
-            " https://example.com",
-            "/home/me/file.txt",
-            "",
-        ] {
-            assert!(!is_web_link(uri), "{uri}");
-        }
-    }
-
     /// The link a Ctrl+click at `column` of the first row reports, in a
     /// pane's terminal that printed `text`.
     fn ctrl_click(text: &str, column: i32) -> Option<String> {
@@ -1129,19 +1158,18 @@ mod tests {
 
     #[test]
     fn a_ctrl_click_on_a_file_link_or_a_hyperlink_elsewhere_opens_nothing() {
-        // The terminal reports each as a link; the pane opens none of them.
-        let file = ctrl_click("see file:///etc/passwd now\r\n", 8);
-        assert_eq!(file.as_deref(), Some("file:///etc/passwd"));
-        assert!(!is_web_link(&file.unwrap()));
-        let marked = ctrl_click(
-            "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
-            2,
+        // A pane's terminal reports neither as a link (nor underlines it).
+        assert_eq!(ctrl_click("see file:///etc/passwd now\r\n", 8), None);
+        assert_eq!(
+            ctrl_click(
+                "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
+                2,
+            ),
+            None
         );
-        assert_eq!(marked.as_deref(), Some("ssh://attacker.example/x"));
-        assert!(!is_web_link(&marked.unwrap()));
         // A web link still opens.
         let web = ctrl_click("see https://hangar.ai/docs now\r\n", 8);
-        assert!(is_web_link(&web.expect("a link")));
+        assert!(hangar_term::is_web_link(&web.expect("a link")));
     }
 
     #[test]

@@ -9,9 +9,13 @@
 //! that something changed. So the parsing of every pane's output happens on
 //! that pane's own thread, sixteen busy panes in parallel, and the UI thread
 //! only draws: it never queues bytes behind a message nor parses them between
-//! two frames. What the window is told is a wake-up, sent once until the
-//! window has taken it ([`PaneLink::take_wake`]), so a pane printing a build
-//! log costs one message per frame at most, not one per read.
+//! two frames. What the window is told is a wake-up, and only one is ever on
+//! its way for all the panes together ([`Waker`]): the first chunk after a
+//! quiet spell sends it, and from then on the window looks at every pane
+//! itself, once a frame ([`PaneLink::take_output`]), until a frame finds them
+//! all quiet. A message makes iced build the whole interface again (every
+//! view, then the layout), so sixteen panes printing a build log cost that
+//! once a frame, not once for every chunk that lands between two frames.
 //!
 //! The terminal's answers to the program's queries (cursor position, device
 //! attributes, colours) come out of the same feed and go straight to the
@@ -61,14 +65,25 @@ pub enum HubKind {
 /// The sending half of the window's channel, cloned into every sink.
 pub type HubSender = tokio_mpsc::UnboundedSender<HubEvent>;
 
+/// What a sink wakes the window with: the channel, and the flag every pane
+/// shares that says the window already knows output is coming, because a
+/// wake-up is on its way or it is looking at the panes every frame. Set by
+/// the sink that sends the wake-up, cleared by the window once a frame finds
+/// every pane quiet (`HubChannel::rest`).
+#[derive(Debug, Clone)]
+pub struct Waker {
+    pub sender: HubSender,
+    pub awake: Arc<AtomicBool>,
+}
+
 /// What the writer thread does, in order.
 enum Job {
     Write(Vec<u8>),
     Resize(u16, u16),
 }
 
-/// One pane's terminal, its writer, and the flag that keeps its wake-ups to
-/// one in flight.
+/// One pane's terminal, its writer, and the flag that says it printed since
+/// the window last looked.
 pub struct PaneLink {
     pub id: PaneId,
     terminal: Arc<Mutex<Terminal>>,
@@ -124,18 +139,19 @@ impl PaneLink {
         let _ = self.jobs.send(Job::Resize(columns, rows));
     }
 
-    /// Takes the wake-up: the next chunk the pane prints sends another.
-    pub fn take_wake(&self) {
-        self.woken.store(false, Ordering::Release);
+    /// Whether the pane printed since the last look, which this look is.
+    pub fn take_output(&self) -> bool {
+        self.woken.swap(false, Ordering::AcqRel)
     }
 
     /// The sink `pty_spawn` is handed: it feeds the terminal on the reader
-    /// thread and wakes the window.
-    pub fn sink(&self, hub: HubSender) -> PtySink {
+    /// thread and wakes the window, unless it is awake already.
+    pub fn sink(&self, waker: Waker) -> PtySink {
         let terminal = self.terminal.clone();
         let jobs = self.jobs.clone();
         let woken = self.woken.clone();
         let id = self.id.clone();
+        let Waker { sender: hub, awake } = waker;
         Box::new(move |event| match event {
             PtyEvent::Output(output) => {
                 let events = terminal
@@ -163,9 +179,12 @@ impl PaneLink {
                         kind,
                     });
                 }
-                // After the feed, so a window that takes the wake-up draws
-                // at least this chunk.
-                if !woken.swap(true, Ordering::AcqRel) {
+                // After the feed, so a window that looks draws at least this
+                // chunk. The pane's own flag first: the window clears the
+                // shared one before it looks at the panes' (`Msg::Frame`), so
+                // a chunk it did not see either finds the shared one clear
+                // and wakes it, or is seen by its last look.
+                if !woken.swap(true, Ordering::AcqRel) && !awake.swap(true, Ordering::AcqRel) {
                     let _ = hub.send(HubEvent {
                         pane: id.clone(),
                         kind: HubKind::Output,
@@ -244,6 +263,11 @@ mod tests {
             pty.clone(),
         );
         let (hub, mut wakes) = tokio_mpsc::unbounded_channel();
+        let awake = Arc::new(AtomicBool::new(false));
+        let waker = Waker {
+            sender: hub,
+            awake: awake.clone(),
+        };
         let shell = ShellInfo {
             id: "sh".into(),
             label: "sh".into(),
@@ -252,7 +276,7 @@ mod tests {
         };
         hangar_core::pty::pty_spawn(
             &pty,
-            link.sink(hub),
+            link.sink(waker),
             id.clone(),
             std::env::temp_dir().to_string_lossy().into_owned(),
             Some(shell),
@@ -285,7 +309,7 @@ mod tests {
         }
         assert!(seen, "the echo reached the terminal");
 
-        // One wake-up stands until the window takes it.
+        // One wake-up, however many chunks came, until the window rests.
         let mut outputs = 0;
         while let Ok(event) = wakes.try_recv() {
             assert_eq!(event.pane, id);
@@ -294,7 +318,28 @@ mod tests {
             }
         }
         assert_eq!(outputs, 1);
-        link.take_wake();
+        assert!(link.take_output(), "it printed");
+        assert!(!link.take_output(), "and was looked at");
+        // Still awake: more output is the window's to find, with no message.
+        link.write(b"echo awake\r".to_vec());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !link.take_output() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !matches!(
+                wakes.try_recv(),
+                Ok(HubEvent {
+                    kind: HubKind::Output,
+                    ..
+                })
+            ),
+            "no wake-up while the window is awake"
+        );
+        // At rest, the next chunk wakes it again.
+        awake.store(false, Ordering::Release);
+        let _ = link.take_output();
         link.write(b"echo again\r".to_vec());
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut woken = false;

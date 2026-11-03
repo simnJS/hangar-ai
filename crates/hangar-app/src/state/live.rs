@@ -31,9 +31,6 @@ pub struct Ui {
     pub confirm_reset: bool,
     pub confirm_stop_workers: bool,
     pub needs_you_open: bool,
-    /// The focused window's broadcast input; the other windows' wait in
-    /// `parked` (`Model::broadcast_in`).
-    pub broadcast: String,
     /// The one-line notice at the bottom, with the id its expiry names.
     pub notice: Option<(u64, Notice)>,
     /// The chords of a shortcut sequence typed so far, as P7 formats them for
@@ -73,9 +70,6 @@ pub struct WindowUi {
     pub drawer: Option<Drawer>,
     pub drawer_opener: Option<Focus>,
     pub focus: Option<Focus>,
-    /// What its broadcast field holds: a line typed in one window and left
-    /// there is not sent from, or shown in, another.
-    pub broadcast: String,
 }
 
 /// Over which of the frame's parts the pointer is, as their mouse areas

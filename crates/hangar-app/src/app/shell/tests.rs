@@ -171,26 +171,6 @@ fn selecting_a_pane_gives_its_terminal_the_keyboard_and_ends_a_drawer() {
 }
 
 #[test]
-fn each_window_keeps_its_own_broadcast_text() {
-    let (mut m, main) = model();
-    let (ws, _) = add(&mut m, 1);
-    let own = window::Id::unique();
-    m.window_opened(own, WindowKind::Workspace(ws));
-    m.ui.broadcast = "npm test".into();
-
-    swap_window_ui(&mut m, own);
-    assert_eq!(m.ui.broadcast, "");
-    assert_eq!(m.broadcast_in(own), "");
-    assert_eq!(m.broadcast_in(main), "npm test");
-
-    m.ui.broadcast = "git pull".into();
-    swap_window_ui(&mut m, main);
-    assert_eq!(m.ui.broadcast, "npm test");
-    assert_eq!(m.broadcast_in(own), "git pull");
-    assert_eq!(m.broadcast_in(main), "npm test");
-}
-
-#[test]
 fn the_settings_sheet_is_found_wherever_it_is_in_the_stack() {
     assert!(!has_settings(&[Overlay::Palette]));
     assert!(has_settings(&[

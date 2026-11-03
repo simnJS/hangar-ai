@@ -123,7 +123,7 @@ included, and set up its state in `on_intent(Intent::OpenOverlay(…))`.
 | P5 | `panes` | `Panes` | `view_workspace(st, ctx, ws, hidden)` for every opened workspace; `terminal_access(st) -> Arc<dyn TerminalAccess>` once at boot | region `main` (terminals view) | Terminals and PTY links live in `State`, never in a window. `pty_spawn` takes a `PtySink`: push output into a channel your subscription drains. Hidden workspaces draw nothing but keep consuming output. |
 | P6 | `navigator` | `Navigator` | `view(st, ctx)` | region `navigator` | Main window only. Embeds `accounts::badge`. |
 | P6 | `toolbar` | `Toolbar` | `view(st, ctx)` | region `toolbar` | Embeds `needs_you::button(&ctx.pkg.needs_you, ctx)`, `accounts::switcher(&ctx.pkg.accounts, ctx)`. |
-| P6 | `status_bar` | `StatusBar` | `view(st, ctx)` | region `status` | The broadcast input is `m.ui.broadcast`. |
+| P6 | `status_bar` | `StatusBar` | `view(st, ctx)` | region `status` | The broadcast text is the package's own, one per window (`status_bar::State::broadcast_text`); a send is `Intent::Broadcast` with the text. |
 | P6 | `needs_you` | `NeedsYou` | `button(st, ctx)` (embedded) | – | Panel open flag is `m.ui.needs_you_open`. |
 | P6 | `update_banner` | `UpdateBanner` | `view(st, ctx)`, floating top centre | – | Draw nothing when idle. Updater: `hangar-update`. |
 | P6 | `voice` | `Voice` | `hud(st, ctx)`, floating bottom centre | – | Draw nothing when idle. `CoreEvent::Voice*`. |

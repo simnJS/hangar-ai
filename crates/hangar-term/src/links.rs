@@ -1,7 +1,11 @@
 //! Links in the grid: `OSC 8` hyperlinks and URLs spotted in the text.
 //!
 //! A hyperlink is whatever the program marked, and carries its own target. A
-//! detected link is a URL found in the characters. Both are looked up under
+//! detected link is a URL found in the characters. Either is a link only when
+//! it points at the web (`http`, `https`; [`is_web_link`]): that is all a
+//! click opens, as xterm.js's web-links addon was all the old app had, and a
+//! link underlined under the pointer that a click then ignores promises what
+//! it does not do. Both are looked up under
 //! the pointer when it moves, never for the whole screen: a screenful of
 //! output is rarely hovered over, and scanning it all on every frame is the
 //! kind of cost a terminal has to avoid.
@@ -120,6 +124,11 @@ fn hyperlink_range<T>(
     let grid = term.grid();
     let at = |i: usize| grid[cells[i]].hyperlink();
     let hyperlink = at(target)?;
+    // A hyperlink elsewhere than the web is not a link; the text it marks
+    // may still hold a web address of its own.
+    if !is_web_link(hyperlink.uri()) {
+        return None;
+    }
     let mut start = target;
     while start > 0 && at(start - 1).as_ref() == Some(&hyperlink) {
         start -= 1;
@@ -165,12 +174,23 @@ fn spans_of(cells: &[Point], wide: &[bool]) -> Vec<Span> {
     spans
 }
 
-/// The schemes taken for links. Narrow on purpose: `foo://` followed by text
-/// is often a path or a pattern in output, and a link that opens nothing is
-/// worse than one that is not underlined.
-const SCHEMES: &[&str] = &[
-    "http", "https", "ftp", "ftps", "file", "ssh", "sftp", "git", "ws", "wss",
-];
+/// The schemes taken for links: the web's alone. A `file:`, `ssh:` or `git:`
+/// URL a program prints would hand the system's handler for that scheme
+/// whatever was printed, on one click, so none of them opens, and a link
+/// that opens nothing is worse than one that is not underlined. `foo://`
+/// followed by text is often a path or a pattern in output anyway.
+const SCHEMES: &[&str] = &["http", "https"];
+
+/// Whether `uri` is a link a click opens: an `http` or `https` address with
+/// something after the `//`. What the terminal reports as a link
+/// ([`Event::OpenLink`](crate::Event::OpenLink), the underline under the
+/// pointer) always is one; an app that opens links can check again with this.
+pub fn is_web_link(uri: &str) -> bool {
+    let Some((scheme, rest)) = uri.split_once("://") else {
+        return false;
+    };
+    SCHEMES.iter().any(|web| scheme.eq_ignore_ascii_case(web)) && !rest.is_empty()
+}
 
 /// The ranges of `chars` that are URLs.
 pub(crate) fn find_urls(chars: &[char]) -> Vec<Range<usize>> {
@@ -317,8 +337,50 @@ mod tests {
     }
 
     #[test]
-    fn schemes_are_case_insensitive_and_file_urls_work() {
+    fn schemes_are_case_insensitive_and_only_the_web_s_are_links() {
         assert_eq!(urls("HTTPS://HANGAR.AI/X"), ["HTTPS://HANGAR.AI/X"]);
-        assert_eq!(urls("file:///home/me/a.txt"), ["file:///home/me/a.txt"]);
+        // Nothing opens these, so nothing underlines them.
+        for other in [
+            "file:///home/me/a.txt",
+            "ssh://git@github.com/x/y",
+            "git://github.com/x/y",
+            "sftp://host/x",
+            "ftp://example.com/x",
+            "wss://example.com/socket",
+        ] {
+            assert!(urls(&format!("see {other} now")).is_empty(), "{other}");
+        }
+        assert_eq!(
+            urls("file:///a and https://hangar.ai/b"),
+            ["https://hangar.ai/b"]
+        );
+    }
+
+    #[test]
+    fn only_web_links_open() {
+        for uri in [
+            "https://example.com/page?q=1",
+            "http://localhost:5173",
+            "HTTPS://EXAMPLE.COM",
+        ] {
+            assert!(is_web_link(uri), "{uri}");
+        }
+        for uri in [
+            "file:///etc/passwd",
+            "file://host/share",
+            "ssh://git@github.com/x/y",
+            "git://github.com/x/y",
+            "ftp://example.com",
+            "smb://server/share",
+            "javascript:alert(1)",
+            "mailto:someone@example.com",
+            "https://",
+            "https:example.com",
+            " https://example.com",
+            "/home/me/file.txt",
+            "",
+        ] {
+            assert!(!is_web_link(uri), "{uri}");
+        }
     }
 }

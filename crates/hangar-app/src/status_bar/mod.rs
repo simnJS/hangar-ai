@@ -83,7 +83,10 @@ pub struct State {
     /// it, as every window does at start.
     unfocused: HashSet<window::Id>,
     /// What each window's broadcast field holds. Not persisted, and not shared
-    /// between windows: each one's App had its own (`useState("")`).
+    /// between windows: each one's App had its own (`useState("")`). This is
+    /// the only copy: a send carries the text in `Intent::Broadcast`, and
+    /// nothing else (the palette's `view.broadcast`, the phone's ops) reads
+    /// the field. A window that closes takes its line with it.
     broadcast: HashMap<window::Id, String>,
 }
 
@@ -101,6 +104,12 @@ impl State {
     /// What the window's broadcast field holds.
     pub fn broadcast_text(&self, window: window::Id) -> &str {
         self.broadcast.get(&window).map_or("", String::as_str)
+    }
+
+    /// A window closed: its line and its focus are nobody's any more.
+    fn forget(&mut self, window: window::Id) {
+        self.unfocused.remove(&window);
+        self.broadcast.remove(&window);
     }
 
     fn set_broadcast_text(&mut self, window: window::Id, text: String) {
@@ -138,6 +147,8 @@ pub enum Msg {
     Repo(String, Option<Repo>),
     /// A window gained or lost the system's focus.
     Focus(window::Id, bool),
+    /// A window closed: what it held is let go.
+    Closed(window::Id),
 }
 
 /// What a send comes to: the line the window holds, for the workspace that
@@ -194,6 +205,10 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
             }
             Task::none()
         }
+        Msg::Closed(window) => {
+            st.forget(window);
+            Task::none()
+        }
     }
 }
 
@@ -208,6 +223,7 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         Event::Window(window::Event::Unfocused) => {
             Some(Message::StatusBar(Msg::Focus(window, false)))
         }
+        Event::Window(window::Event::Closed) => Some(Message::StatusBar(Msg::Closed(window))),
         _ => None,
     });
     Subscription::batch(

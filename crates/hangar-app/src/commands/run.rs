@@ -237,7 +237,8 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     live
 }
 
-const FOCUS: [CommandId; 9] = [
+/// `pane.focus1`…`pane.focus9`: the pane at that place in reading order.
+pub(crate) const FOCUS: [CommandId; 9] = [
     CommandId::PaneFocus1,
     CommandId::PaneFocus2,
     CommandId::PaneFocus3,

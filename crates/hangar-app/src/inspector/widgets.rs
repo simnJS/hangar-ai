@@ -14,7 +14,7 @@ use iced::advanced::{Clipboard, Shell, Widget};
 use iced::widget::{canvas, column, container, progress_bar, row, space as filler, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Point, Radians, Rectangle, Size,
-    mouse,
+    keyboard, mouse,
 };
 
 use super::files_model::DiffSegment;
@@ -226,6 +226,8 @@ pub struct GripEvents<M> {
     /// The pointer moved while it was held, to this x.
     pub moved: Box<dyn Fn(f32) -> M>,
     pub released: M,
+    /// Escape while it was held: the drag is dropped.
+    pub cancelled: M,
     /// A second press close behind the first.
     pub reset: M,
 }
@@ -320,6 +322,17 @@ impl<M: Clone, T> Widget<M, T, iced::Renderer> for Grip<M> {
                 shell.capture_event();
                 shell.request_redraw();
             }
+            // Captured, so the shell does not also close an overlay or a
+            // drawer on the same press.
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) if state.held => {
+                state.held = false;
+                shell.publish(self.events.cancelled.clone());
+                shell.capture_event();
+                shell.request_redraw();
+            }
             _ => {}
         }
     }
@@ -387,6 +400,7 @@ mod tests {
         Pressed(i32),
         Moved(i32),
         Released,
+        Cancelled,
         Reset,
     }
 
@@ -395,6 +409,7 @@ mod tests {
             pressed: Box::new(|x| Msg::Pressed(x as i32)),
             moved: Box::new(|x| Msg::Moved(x as i32)),
             released: Msg::Released,
+            cancelled: Msg::Cancelled,
             reset: Msg::Reset,
         }
     }
@@ -451,6 +466,54 @@ mod tests {
                 Msg::Moved((GRIP_X - 40.0) as i32),
                 Msg::Moved((GRIP_X - 80.0) as i32),
                 Msg::Released,
+            ]
+        );
+    }
+
+    fn escape() -> Event {
+        let key = keyboard::Key::Named(keyboard::key::Named::Escape);
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn escape_lets_go_of_a_held_grip_without_a_release() {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            Size::new(800.0, 400.0),
+            at_the_edge(),
+        );
+        ui.point_at(Point::new(GRIP_X, 100.0));
+        drive(
+            &mut ui,
+            vec![
+                // Not held: Escape is somebody else's.
+                escape(),
+                moved(GRIP_X),
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                moved(GRIP_X - 40.0),
+                escape(),
+                // Let go already: neither the move nor the release says more.
+                moved(GRIP_X - 80.0),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ],
+        );
+        let messages: Vec<Msg> = ui.into_messages().collect();
+        assert_eq!(
+            messages,
+            vec![
+                Msg::Pressed(GRIP_X as i32),
+                Msg::Moved((GRIP_X - 40.0) as i32),
+                Msg::Cancelled,
             ]
         );
     }

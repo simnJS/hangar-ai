@@ -49,8 +49,8 @@ use iced::{Element, Point, Subscription, Task};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{BoardVariant, Overlay, Panels, Region, View};
-use crate::state::{Model, Patch, Settings, StoreAction, Workspace};
+use crate::shell::{BoardVariant, Drawer, Overlay, Panels, Region, View};
+use crate::state::{Model, PanelDrag, Patch, Settings, StoreAction, Workspace};
 
 use actions::{After, Draft, Edit, Errors, Mutation};
 pub use cache::Live;
@@ -376,6 +376,19 @@ fn move_task(st: &mut State, m: &Model, cwd: &str, id: &str, to: Column) -> Task
     )
 }
 
+/// The grip is let go of, or dropped: the dock goes back to being drawn at
+/// its setting. Another panel's held grip is not the board's to let go.
+fn end_grip(st: &mut State, m: &mut Model) {
+    st.grip = None;
+    if m.live
+        .signals
+        .panel_drag
+        .is_some_and(|drag| drag.panel == Drawer::Dock)
+    {
+        m.live.signals.panel_drag = None;
+    }
+}
+
 fn set_dock_width(m: &mut Model, width: f32) {
     if (m.settings().board_dock_width - f64::from(width)).abs() < 0.5 {
         return;
@@ -565,7 +578,7 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::GripReset => {
-            st.grip = None;
+            end_grip(st, m);
             set_dock_width(m, dock::default_width());
             Task::none()
         }
@@ -582,17 +595,25 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
 fn pointer_event(st: &mut State, m: &mut Model, pointer: Pointer) -> Task<Message> {
     if let Some(grip) = &mut st.grip {
         // The width is saved once, when the pointer is let go, as the TS did:
-        // every move saved the settings and republished the snapshot. The
-        // pointer's travel is kept meanwhile. Escape or the window losing the
-        // focus drops it, and the panel keeps the width it had.
+        // every move saved the settings and republished the snapshot.
+        // Meanwhile the frame draws the dock at the width the pointer has
+        // reached (`live.signals.panel_drag`, read by `Panels::of`). Escape
+        // or the window losing the focus drops it, and the panel keeps the
+        // width it had.
         match pointer {
-            Pointer::Moved(at) => grip.moved_to(at.x),
+            Pointer::Moved(at) => {
+                grip.moved_to(at.x);
+                m.live.signals.panel_drag = Some(PanelDrag {
+                    panel: Drawer::Dock,
+                    width: grip.pending(),
+                });
+            }
             Pointer::Released => {
                 let width = grip.pending();
-                st.grip = None;
+                end_grip(st, m);
                 set_dock_width(m, width);
             }
-            Pointer::Cancelled => st.grip = None,
+            Pointer::Cancelled => end_grip(st, m),
         }
         return Task::none();
     }
@@ -782,7 +803,7 @@ fn react(st: &mut State, m: &mut Model, intent: &Intent) -> Option<Task<Message>
         Intent::SetView(_) | Intent::OpenBoard(_) | Intent::ToggleDock | Intent::CloseDock => {
             st.open_filter = None;
             st.press = None;
-            st.grip = None;
+            end_grip(st, m);
             st.adding = None;
             st.composing.clear();
             st.toast = None;
@@ -1389,13 +1410,67 @@ mod tests {
                 Msg::Pointer(Pointer::Moved(Point::new(x, 50.0))),
             );
         }
-        // Nothing is written while the pointer travels.
+        // Nothing is written while the pointer travels, but the frame draws
+        // the dock where the pointer is.
         assert_eq!(saved(&m), before);
         assert_eq!(m.revision(), revision);
+        assert_eq!(held(&m), Some(before as f32 + 60.0));
+        let main = iced::window::Id::unique();
+        m.live.windows.insert(main, crate::shell::WindowKind::Main);
+        assert_eq!(Panels::of(&m, main).dock.width, before as f32 + 60.0);
         step(&mut st, &mut m, Msg::Pointer(Pointer::Released));
         assert_eq!(saved(&m), before + 60.0);
         assert!(st.grip.is_none());
+        assert_eq!(held(&m), None);
         assert_eq!(m.revision(), revision + 1);
+    }
+
+    /// The width the frame is told to draw the dock at while its grip is
+    /// held.
+    fn held(m: &Model) -> Option<f32> {
+        m.live
+            .signals
+            .panel_drag
+            .filter(|drag| drag.panel == Drawer::Dock)
+            .map(|drag| drag.width)
+    }
+
+    #[test]
+    fn leaving_the_board_drops_a_held_grip() {
+        let (mut st, mut m) = setup();
+        let before = m.settings().board_dock_width;
+        step(
+            &mut st,
+            &mut m,
+            Msg::GripPress {
+                at: Point::new(1000.0, 50.0),
+                width: before as f32,
+                max: 800.0,
+            },
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(900.0, 50.0))),
+        );
+        assert!(held(&m).is_some());
+        let _ = react(&mut st, &mut m, &Intent::CloseDock);
+        assert!(st.grip.is_none());
+        assert_eq!(held(&m), None);
+        assert_eq!(m.settings().board_dock_width, before);
+    }
+
+    #[test]
+    fn letting_go_leaves_another_panel_s_held_grip_alone() {
+        let (mut st, mut m) = setup();
+        let inspector = PanelDrag {
+            panel: Drawer::Inspector,
+            width: 300.0,
+        };
+        m.live.signals.panel_drag = Some(inspector);
+        step(&mut st, &mut m, Msg::GripReset);
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Cancelled));
+        assert_eq!(m.live.signals.panel_drag, Some(inspector));
     }
 
     #[test]
@@ -1416,9 +1491,11 @@ mod tests {
             &mut m,
             Msg::Pointer(Pointer::Moved(Point::new(900.0, 50.0))),
         );
+        assert_eq!(held(&m), Some(before as f32 + 100.0));
         step(&mut st, &mut m, Msg::Pointer(Pointer::Cancelled));
         assert_eq!(m.settings().board_dock_width, before);
         assert!(st.grip.is_none());
+        assert_eq!(held(&m), None);
     }
 
     #[test]

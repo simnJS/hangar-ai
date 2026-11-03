@@ -5,9 +5,7 @@
 //! its own at twice the panel's size, so the person's framing is kept and the
 //! result is sharp on a dense screen. This file only moves it.
 
-use std::borrow::Cow;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
 use base64::Engine as _;
 use chrono::{Datelike, Local, Timelike};
@@ -67,9 +65,11 @@ pub async fn deliver(
                 .await
                 .map_err(|error| error.to_string())?
                 .map_err(|error| error.to_string())?;
-            tokio::task::spawn_blocking(move || copy_image(pixels, width, height))
-                .await
-                .map_err(|error| error.to_string())??;
+            tokio::task::spawn_blocking(move || {
+                crate::services::clipboard::write_image(pixels, width, height)
+            })
+            .await
+            .map_err(|error| error.to_string())??;
             Ok(Done::Copied)
         }
         Destination::Dialog => {
@@ -110,32 +110,6 @@ pub async fn save(path: PathBuf, png: Vec<u8>) -> Result<Done, String> {
     let encoded = base64::engine::general_purpose::STANDARD.encode(&png);
     hangar_core::model::model_save_png(path.to_string_lossy().into_owned(), encoded).await?;
     Ok(Done::Saved(path))
-}
-
-/// The process's clipboard. On Linux the contents are only served while the
-/// `Clipboard` that set them is alive, so one is kept for the whole run
-/// instead of one per copy.
-fn clipboard() -> &'static Mutex<Option<arboard::Clipboard>> {
-    static CLIPBOARD: OnceLock<Mutex<Option<arboard::Clipboard>>> = OnceLock::new();
-    CLIPBOARD.get_or_init(|| Mutex::new(None))
-}
-
-fn copy_image(pixels: Vec<u8>, width: u32, height: u32) -> Result<(), String> {
-    let mut held = clipboard()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if held.is_none() {
-        // Not remembered when it fails, so the next copy tries again.
-        *held = Some(arboard::Clipboard::new().map_err(|error| error.to_string())?);
-    }
-    let clipboard = held.as_mut().ok_or("no clipboard")?;
-    clipboard
-        .set_image(arboard::ImageData {
-            width: width as usize,
-            height: height as usize,
-            bytes: Cow::Owned(pixels),
-        })
-        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

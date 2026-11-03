@@ -23,6 +23,9 @@ pub struct Placing {
     pub can_zoom: bool,
     /// The pane's width on screen, for the header's breakpoints.
     pub width: f32,
+    /// Its place in the workspace's reading order, from 0: the first nine
+    /// are reached with `pane.focus1`…`9`.
+    pub index: usize,
 }
 
 pub fn view<'a>(
@@ -51,6 +54,7 @@ pub fn view<'a>(
             can_close: placing.can_close,
             can_zoom: placing.can_zoom,
             width: placing.width,
+            index: placing.index,
             shell: shell_of(ctx.model, ws, pane),
             picker: picker.filter(|p| matches!(p, Picker::Agent | Picker::Shell)),
         },

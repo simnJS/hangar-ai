@@ -101,8 +101,8 @@ use crate::control::{self, Hook};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, PreviewAccess, Services};
-use crate::shell::{Focus, PanelMode, Panels, Region};
-use crate::state::{Model, Patch, PreviewPanel, Settings, StoreAction, WsId};
+use crate::shell::{Drawer, Focus, PanelMode, Panels, Region};
+use crate::state::{Model, PanelDrag, Patch, PreviewPanel, Settings, StoreAction, WsId};
 
 /// How often the file in front is looked at for a newer version
 /// (`WATCH_MS`).
@@ -117,10 +117,12 @@ const PROBE: Duration = Duration::from_millis(1500);
 /// How often the package looks for the state to have been read.
 const HYDRATION: Duration = Duration::from_millis(250);
 
-/// A drag of the grip: the width it started from, in points.
+/// A drag of the grip: the width it started from and the one the pointer
+/// has reached, in points.
 #[derive(Debug, Clone, Copy)]
 struct Dragging {
     start: f64,
+    to: f64,
 }
 
 /// The package's UI state; lives in `App.pkg.preview`.
@@ -536,30 +538,52 @@ fn tab_key(st: &mut State, m: &Model, key: TabKey) -> Task<Message> {
     Task::none()
 }
 
-/// The grip moves the width of the panel as it goes: the shell sizes the
-/// region from the setting, and the save waits for the model to be still. The
-/// widest it may be is what the shell leaves it beside the terminals and the
-/// other panels (`Slot::max`).
+/// While the grip is held, the panel is drawn at the width the pointer has
+/// reached (`live.signals.panel_drag`, which `Panels::of` reads) and nothing
+/// is written; the setting is saved once, on release, as the TS did, instead
+/// of a save and a snapshot for every move. Escape drops the drag and the
+/// panel keeps its width. The widest it may be is what the shell leaves it
+/// beside the terminals and the other panels (`Slot::max`).
 fn grip_event(st: &mut State, m: &mut Model, event: grip::GripEvent) -> Task<Message> {
     let width = m.settings().model_panel_width;
     let Some((_, panels)) = focused(m) else {
+        end_grip(st, m);
         return Task::none();
     };
     let max = f64::from(panels.model.max);
     let wanted = match event {
         grip::GripEvent::Begin => {
-            st.grip = Some(Dragging { start: width });
-            return Task::none();
-        }
-        grip::GripEvent::End => {
-            st.grip = None;
+            let start = grip::clamp_width(width, max);
+            st.grip = Some(Dragging { start, to: start });
             return Task::none();
         }
         grip::GripEvent::Drag(moved) => {
-            let start = st.grip.map_or(width, |held| held.start);
-            grip::dragged_width(start, f64::from(moved), max)
+            if let Some(held) = st.grip.as_mut() {
+                held.to = grip::dragged_width(held.start, f64::from(moved), max);
+                let to = held.to;
+                m.live.signals.panel_drag = Some(PanelDrag {
+                    panel: Drawer::Model,
+                    width: to as f32,
+                });
+            }
+            return Task::none();
         }
-        grip::GripEvent::Reset => grip::default_width(),
+        grip::GripEvent::End => {
+            let held = st.grip;
+            end_grip(st, m);
+            match held {
+                Some(held) => held.to,
+                None => return Task::none(),
+            }
+        }
+        grip::GripEvent::Cancel => {
+            end_grip(st, m);
+            return Task::none();
+        }
+        grip::GripEvent::Reset => {
+            end_grip(st, m);
+            grip::default_width()
+        }
         grip::GripEvent::Nudge(step) => grip::clamp_width(width + f64::from(step), max),
     };
     if (wanted - width).abs() >= 0.5 {
@@ -568,6 +592,19 @@ fn grip_event(st: &mut State, m: &mut Model, event: grip::GripEvent) -> Task<Mes
         )));
     }
     Task::none()
+}
+
+/// The grip is let go of, or dropped: the panel goes back to being drawn at
+/// its setting. Another panel's held grip is not the preview's to let go.
+fn end_grip(st: &mut State, m: &mut Model) {
+    st.grip = None;
+    if m.live
+        .signals
+        .panel_drag
+        .is_some_and(|drag| drag.panel == Drawer::Model)
+    {
+        m.live.signals.panel_drag = None;
+    }
 }
 
 /* ── what to do after each change ──────────────────────────────── */
