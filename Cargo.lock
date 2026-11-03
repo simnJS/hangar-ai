@@ -3300,6 +3300,7 @@ dependencies = [
  "hangar-theme",
  "iced",
  "iced_test",
+ "png 0.18.1",
  "unicode-normalization",
  "usvg",
 ]
