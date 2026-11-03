@@ -125,3 +125,118 @@ mod opening {
         assert_eq!(m.ui.overlays, vec![Overlay::Worktrees("w".into())]);
     }
 }
+
+/// The overlays as the shell draws them (`shell::overlay::view`): in the
+/// window's stack, over the page, asking for themselves to be closed when
+/// Escape is pressed.
+mod as_the_shell_draws_them {
+    use iced::keyboard::{self, Key, key::Named};
+    use iced::{Event, Settings, Size, window};
+    use iced_test::Simulator;
+
+    use super::*;
+    use crate::app::Packages;
+    use crate::ctx::{Ctx, Metrics};
+
+    fn escape() -> Event {
+        let key = Key::Named(Named::Escape);
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// What the overlay answers to Escape.
+    fn after_escape(packages: &Packages, m: &Model, overlay: &Overlay) -> Vec<Message> {
+        let ctx = Ctx {
+            model: m,
+            pkg: packages,
+            i18n: hangar_i18n::Translator::new(hangar_i18n::Locale::En),
+            theme: hangar_theme::default_theme(),
+            metrics: Metrics::default(),
+            keymap: &m.live.keymap.index,
+            window: window::Id::unique(),
+            now: std::time::Instant::now(),
+        };
+        let mut ui = Simulator::with_size(
+            Settings::default(),
+            Size::new(900.0, 700.0),
+            crate::shell::overlay::view(ctx, overlay),
+        );
+        let _ = ui.simulate([escape()]);
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn escape_closes_the_changes_overlay() {
+        let m = model();
+        let mut packages = Packages::default();
+        let _ = open_diff(&mut packages.git_ui, &m, &"w".to_string(), None);
+        let overlay = Overlay::Diff {
+            ws: "w".into(),
+            pane: None,
+        };
+        let answered = after_escape(&packages, &m, &overlay);
+        assert!(
+            answered
+                .iter()
+                .any(|message| matches!(message, Message::GitUi(Msg::CloseDiff))),
+            "{answered:?}"
+        );
+    }
+
+    #[test]
+    fn escape_closes_the_worktree_panel() {
+        let m = model();
+        let mut packages = Packages::default();
+        let _ = open_worktrees(&mut packages.git_ui, &m, &"w".to_string());
+        let answered = after_escape(&packages, &m, &Overlay::Worktrees("w".into()));
+        assert!(
+            answered
+                .iter()
+                .any(|message| matches!(message, Message::GitUi(Msg::Wt(WtMsg::Close)))),
+            "{answered:?}"
+        );
+    }
+
+    #[test]
+    fn escape_over_a_row_s_changes_gives_the_panel_back_instead_of_closing_it() {
+        let m = model();
+        let mut packages = Packages::default();
+        let _ = open_worktrees(&mut packages.git_ui, &m, &"w".to_string());
+        let panel = packages.git_ui.worktrees.as_mut().unwrap();
+        let _ = worktrees::update(
+            panel,
+            &mut model(),
+            WtMsg::ShowChanges("/work/storefront-worktrees/feat-x".into()),
+        );
+        let answered = after_escape(&packages, &m, &Overlay::Worktrees("w".into()));
+        assert!(
+            answered
+                .iter()
+                .any(|message| matches!(message, Message::GitUi(Msg::Wt(WtMsg::CloseDiff)))),
+            "{answered:?}"
+        );
+        assert!(
+            !answered
+                .iter()
+                .any(|message| matches!(message, Message::GitUi(Msg::Wt(WtMsg::Close)))),
+            "{answered:?}"
+        );
+    }
+
+    #[test]
+    fn an_overlay_whose_state_is_not_set_up_draws_nothing_and_does_not_panic() {
+        let m = model();
+        let packages = Packages::default();
+        let answered = after_escape(&packages, &m, &Overlay::Worktrees("w".into()));
+        assert!(answered.is_empty());
+    }
+}
