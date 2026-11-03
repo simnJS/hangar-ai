@@ -160,7 +160,7 @@ fn asks_for_the_icons_the_cache_does_not_hold_and_for_nothing_twice() {
     assert!(icons.of(&newer).is_none());
 
     icons.forget("hello-kit");
-    assert_eq!(icons.missing(&[with_icon.clone()]).len(), 1);
+    assert_eq!(icons.missing(std::slice::from_ref(&with_icon)).len(), 1);
 }
 
 #[test]
