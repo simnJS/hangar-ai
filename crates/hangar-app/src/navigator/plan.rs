@@ -92,7 +92,11 @@ pub fn hint(tr: Translator, limits: &[RateLimit], now: chrono::NaiveDateTime) ->
 pub fn take(limits: &[RateLimit]) -> Option<PlanLimits> {
     (!limits.is_empty()).then(|| PlanLimits {
         limits: limits.to_vec(),
-        at: std::time::Instant::now(),
+        // Wall-clock milliseconds, as the shared `PlanLimits` keeps every moment
+        // (state/live.rs): the inspector shows them as clock times.
+        at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis() as u64),
     })
 }
 
