@@ -37,7 +37,12 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+# Wall-clock dates of the memory view and the local days, weeks and hours of
+# the statistics page (as `Intl.DateTimeFormat` wrote them); the same build
+# hangar-core already uses.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
-# Draws and drives views headless (the P8 views are checked with it).
+# Draws a package's views without a window, for the snapshot tests packages keep
+# to look at what they built (kits/views/snapshot.rs).
 iced_test.workspace = true
