@@ -1,11 +1,12 @@
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use hangar_webview::{CloseReason, Header, PageLoadState};
 
 use super::*;
-use crate::preview::model::FileKind;
+use crate::preview::model::{FileKind, model_url};
 use crate::preview::store::{ShowFile, Store, What};
 
 /// A helper's output that never ends until the test lets go of its sender.
@@ -452,6 +453,19 @@ fn header<'a>(response: &'a SchemeResponse, name: &str) -> Option<&'a str> {
         .map(|header| header.value.as_str())
 }
 
+/// Where the helper asks for `file` of the folder `dir`: the address the
+/// platform builds for the folder's real path (`model_url`), as it does for
+/// every file the preview shows. Windows' `canonicalize` puts `\\?\` before
+/// the path, which no address can carry; hangar-core hands the app its paths
+/// without it, so it is taken off here too. Pasting the path into a
+/// `hangar-model://localhost…` address by hand would be no address at all on
+/// Windows, where the path has a drive and backslashes.
+fn address(dir: &Path, file: &str) -> String {
+    let real = dir.canonicalize().unwrap().to_string_lossy().into_owned();
+    let plain = real.strip_prefix(r"\\?\").unwrap_or(&real);
+    model_url(&format!("{plain}/{file}"))
+}
+
 #[tokio::test]
 async fn serves_a_page_from_the_folders_the_preview_may_read_and_nothing_else() {
     let _turn = crate::preview::tests::ROOTS.lock().await;
@@ -471,13 +485,7 @@ async fn serves_a_page_from_the_folders_the_preview_may_read_and_nothing_else() 
         .await
         .unwrap();
 
-    let page = answer(&request(
-        &format!(
-            "hangar-model://localhost{}/index.html",
-            dir.canonicalize().unwrap().display()
-        ),
-        &[],
-    ));
+    let page = answer(&request(&address(&dir, "index.html"), &[]));
     assert_eq!(page.request, 7);
     assert_eq!(page.status, 200);
     assert!(page.body.starts_with(b"<!doctype html>"));
@@ -489,34 +497,19 @@ async fn serves_a_page_from_the_folders_the_preview_may_read_and_nothing_else() 
     );
 
     let range = answer(&request(
-        &format!(
-            "hangar-model://localhost{}/notes.txt",
-            dir.canonicalize().unwrap().display()
-        ),
+        &address(&dir, "notes.txt"),
         &[("Range", "bytes=2-5")],
     ));
     assert_eq!(range.status, 206);
     assert_eq!(range.body, b"2345");
     assert_eq!(header(&range, "content-range"), Some("bytes 2-5/10"));
 
-    let refused = answer(&request(
-        &format!(
-            "hangar-model://localhost{}/secret.txt",
-            outside.canonicalize().unwrap().display()
-        ),
-        &[],
-    ));
+    let refused = answer(&request(&address(&outside, "secret.txt"), &[]));
     assert!(refused.status >= 400, "{}", refused.status);
     assert!(refused.body != b"no");
 
     // A page's own `fetch` carries an Origin, and is refused.
-    let fetched = answer(&request(
-        &format!(
-            "hangar-model://localhost{}/notes.txt",
-            dir.canonicalize().unwrap().display()
-        ),
-        &[("Origin", "null")],
-    ));
+    let fetched = answer(&request(&address(&dir, "notes.txt"), &[("Origin", "null")]));
     assert!(fetched.status >= 400, "{}", fetched.status);
 
     let _ = std::fs::remove_dir_all(&dir);

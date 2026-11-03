@@ -1,6 +1,12 @@
-//! Pictures of models, drawn on whatever GPU the machine has. A machine with
-//! none (a CI runner) skips these: the drawing itself cannot be checked
-//! without one.
+//! Pictures of models, drawn on whatever adapter the machine has. A machine
+//! with none skips these: the drawing itself cannot be checked without one.
+//!
+//! A CI runner has no GPU but usually a software rasterizer (Mesa's lavapipe,
+//! WARP on Windows), and the pictures are then drawn by it. Anti-aliased edges
+//! and faint lines differ from one rasterizer to another by a few hundred
+//! pixels, so what is asserted here is a colour with room around it, a shape,
+//! or a picture that is not blank, never one picture's pixel count against
+//! another's when the two are close.
 
 use std::sync::Arc;
 
@@ -108,8 +114,37 @@ fn leaves_the_floor_out_when_looking_from_below() {
         off_background(&above) > 3000,
         "the cube and a floor under it"
     );
-    // From below there is the cube's underside and nothing else.
-    assert!(off_background(&below) < off_background(&above));
+    // From below there is the cube's underside and nothing else: what is not
+    // the background is one solid rectangle with background all around it. A
+    // floor would run its lines across the picture, past the cube's edges and
+    // out to the border, so the rectangle would reach the border or be full of
+    // holes. (The picture from above cannot be set against this one by its
+    // count of drawn pixels: the cube alone is nearly as large face-on as it
+    // is from the corner, and the floor's faint lines add less than what one
+    // rasterizer's anti-aliasing takes from the other's.)
+    let background = theme().background.into_rgba8();
+    let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
+    let mut drawn = 0u32;
+    for (x, y, pixel) in below.enumerate_pixels() {
+        if !close(*pixel, image::Rgba(background), 3) {
+            (left, top, right, bottom) = (left.min(x), top.min(y), right.max(x), bottom.max(y));
+            drawn += 1;
+        }
+    }
+    assert!(drawn > 0, "the cube's underside is drawn");
+    let (width, height) = below.dimensions();
+    assert!(
+        left > 0 && top > 0 && right < width - 1 && bottom < height - 1,
+        "background all around the underside: it spans {left}..={right} by {top}..={bottom} \
+         of a {width} by {height} picture"
+    );
+    // The corners of the rectangle may be covered too little to be told from
+    // the background; the rest of it is not.
+    let area = (right + 1 - left) * (bottom + 1 - top);
+    assert!(
+        u64::from(drawn) * 100 >= u64::from(area) * 99,
+        "the underside fills its rectangle: {drawn} of {area} pixels"
+    );
 }
 
 #[test]
