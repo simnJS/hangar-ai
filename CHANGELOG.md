@@ -67,9 +67,11 @@ around the terminals, and needs a fraction of the memory and processor it did.
 - **Images paste into Claude Code.** With an image on the clipboard (a screenshot), Ctrl+V
   in a pane now reaches Claude Code, which attaches the image as it does in any other
   terminal; before, Hangar took the key to paste text and, finding none, did nothing.
-- **A click in a pane gives it the arrows back.** After a click in the sidebar, a click in the
-  pane that was already the workspace's own left the keyboard on the sidebar, so the arrows
-  walked the workspaces instead of Claude Code's choices.
+- **The arrows and Escape stay in the pane.** The sidebar's filter answered Down and Escape
+  wherever they were typed, so the first Down arrow in Claude Code's choices took the
+  keyboard to the workspace list; the status bar's line took Alt+Enter the same way, the
+  board's new-card field Escape. Those fields now hear keys only while they have the
+  keyboard. A click in a pane also always takes the keyboard back from the sidebar.
 - **Agents' panes are laid out, not stacked.** A pane an agent opens or closes (through
   Hangar's MCP server, or the orchestrator's workers) no longer halves the pane beside it,
   which ended in a row of slivers: the workspace is laid out again, with the orchestrator

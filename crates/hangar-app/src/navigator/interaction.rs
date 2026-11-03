@@ -225,6 +225,23 @@ fn down_in_the_filter_goes_to_the_list_and_escape_clears_it() {
 }
 
 #[test]
+fn the_filter_leaves_the_arrows_and_escape_alone_while_a_pane_has_the_keyboard() {
+    // Nothing clicked in the sidebar: the keys are a pane's, typed into Claude
+    // Code's choices, and must not take the keyboard to the list.
+    let messages = run(&State::default(), &model(), |ui| {
+        ui.key(Named::ArrowDown, Modifiers::empty());
+        ui.key(Named::Escape, Modifiers::empty());
+    });
+    let seen = navigator_messages(&messages);
+    assert!(
+        !seen
+            .iter()
+            .any(|msg| matches!(msg, Msg::FilterDown | Msg::FilterEscape)),
+        "{seen:?}"
+    );
+}
+
+#[test]
 fn typing_in_the_filter_sends_the_text() {
     let messages = run(&State::default(), &model(), |ui| {
         ui.click("Filter").unwrap();

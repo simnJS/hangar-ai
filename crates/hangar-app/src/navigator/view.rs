@@ -541,7 +541,7 @@ fn rename_field<'a>(f: &Frame<'a>, draft: &'a str) -> Element<'a, Message> {
         .on_input(|draft| msg(Msg::RenameInput(draft)))
         .on_submit(msg(Msg::RenameSubmit))
         .style(style::text_input::field(t));
-    keys::on_key(input, |key, _| match key {
+    keys::on_field_key(input, |key, _| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
             Some(msg(Msg::RenameCancel))
         }
@@ -835,7 +835,7 @@ fn filter_bar<'a>(f: &Frame<'a>) -> Element<'a, Message> {
         .width(Length::Fill)
         .on_input(|query| msg(Msg::Query(query)))
         .style(style::text_input::bare(t));
-    let input = keys::on_key(input, |key, _| match key {
+    let input = keys::on_field_key(input, |key, _| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
             Some(msg(Msg::FilterDown))
         }

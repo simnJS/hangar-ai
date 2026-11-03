@@ -16,11 +16,18 @@
 //! inside (a text field would move its caret on an arrow) nor to the window's
 //! shortcuts. A key it does not answer goes on as if the wrapper were not
 //! there.
+//!
+//! [`on_key`] hears every key pressed in the window, which suits a page or a
+//! dialog that is only there while it is in use. A field that stays on screen
+//! beside the terminals takes [`on_field_key`], which hears keys only while
+//! the field has the keyboard: otherwise the arrows and the Escape typed in a
+//! pane would be its.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
-use iced::advanced::widget::{Operation, Tree};
+use iced::advanced::widget::operation::Focusable;
+use iced::advanced::widget::{Id, Operation, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::keyboard::{self, Key, Modifiers};
 use iced::{Element, Event, Length, Rectangle, Size, Vector, mouse};
@@ -46,6 +53,24 @@ pub fn on_keyboard<'a, M: 'a>(
     Element::new(OnKey {
         content: content.into(),
         handler: Box::new(handler),
+        focused_only: false,
+    })
+}
+
+/// [`on_key`] for a field: the key presses `handler` answers are turned into
+/// messages only while the field (or a field inside `content`) has the
+/// keyboard.
+pub fn on_field_key<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
+    handler: impl Fn(&Key, Modifiers) -> Option<M> + 'a,
+) -> Element<'a, M> {
+    Element::new(OnKey {
+        content: content.into(),
+        handler: Box::new(move |event| match event {
+            keyboard::Event::KeyPressed { key, modifiers, .. } => handler(key, *modifiers),
+            _ => None,
+        }),
+        focused_only: true,
     })
 }
 
@@ -55,6 +80,36 @@ type Handler<'a, M> = Box<dyn Fn(&keyboard::Event) -> Option<M> + 'a>;
 struct OnKey<'a, M> {
     content: Element<'a, M>,
     handler: Handler<'a, M>,
+    /// Only while something inside has the keyboard ([`on_field_key`]).
+    focused_only: bool,
+}
+
+/// Whether a focusable widget the operation walks has the keyboard.
+struct AnyFocused(bool);
+
+impl Operation for AnyFocused {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Focusable) {
+        self.0 |= state.is_focused();
+    }
+}
+
+impl<M> OnKey<'_, M> {
+    fn content_focused(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+    ) -> bool {
+        let mut found = AnyFocused(false);
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, &mut found);
+        found.0
+    }
 }
 
 impl<M> Widget<M, iced::Theme, iced::Renderer> for OnKey<'_, M> {
@@ -97,6 +152,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for OnKey<'_, M> {
         viewport: &Rectangle,
     ) {
         if let Event::Keyboard(keyboard_event) = event
+            && (!self.focused_only || self.content_focused(tree, layout, renderer))
             && let Some(message) = (self.handler)(keyboard_event)
         {
             shell.publish(message);
@@ -180,5 +236,63 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for OnKey<'_, M> {
             viewport,
             translation,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::keyboard::key::Named;
+    use iced::widget::{column, container, text_input};
+    use iced::{Element, Length};
+
+    use super::*;
+    use crate::testing::{Drive, simulate};
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Msg {
+        Typed(String),
+        Down,
+    }
+
+    type KeyHandler = fn(&Key, Modifiers) -> Option<Msg>;
+    type Wrap<'a> = fn(Element<'a, Msg>, KeyHandler) -> Element<'a, Msg>;
+
+    /// A field at the top, wrapped as `wrap` does, above room that holds
+    /// nothing: where the keyboard is when a pane has it.
+    fn screen<'a>(wrap: Wrap<'a>) -> Element<'a, Msg> {
+        let field = text_input("filter", "").on_input(Msg::Typed).width(200);
+        let down = |key: &Key, _: Modifiers| {
+            matches!(key, Key::Named(Named::ArrowDown)).then_some(Msg::Down)
+        };
+        column![
+            wrap(field.into(), down),
+            container("").width(Length::Fill).height(Length::Fill),
+        ]
+        .into()
+    }
+
+    fn downs(messages: impl Iterator<Item = Msg>) -> usize {
+        messages.filter(|msg| *msg == Msg::Down).count()
+    }
+
+    #[test]
+    fn a_field_hears_its_keys_only_while_it_has_the_keyboard() {
+        let mut ui = simulate(screen(|field, down| on_field_key(field, down)));
+        // The keyboard is elsewhere: the arrow is not the field's.
+        assert_eq!(ui.key(Named::ArrowDown), iced::event::Status::Ignored);
+        // A click in the field gives it the keyboard.
+        ui.click_at(20.0, 10.0);
+        assert_eq!(ui.key(Named::ArrowDown), iced::event::Status::Captured);
+        // A click elsewhere takes it away again.
+        ui.click_at(400.0, 400.0);
+        assert_eq!(ui.key(Named::ArrowDown), iced::event::Status::Ignored);
+        assert_eq!(downs(ui.into_messages()), 1);
+    }
+
+    #[test]
+    fn a_page_hears_its_keys_wherever_the_keyboard_is() {
+        let mut ui = simulate(screen(|field, down| on_key(field, down)));
+        assert_eq!(ui.key(Named::ArrowDown), iced::event::Status::Captured);
+        assert_eq!(downs(ui.into_messages()), 1);
     }
 }

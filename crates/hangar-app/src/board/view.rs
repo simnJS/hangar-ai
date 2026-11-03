@@ -537,7 +537,7 @@ fn add_field<'a>(
     // Escape empties what was typed, and goes no further.
     let has_draft = !draft.is_empty();
     let cleared_on = cwd.clone();
-    let field = hangar_ui::keys::on_key(field, move |key, _| match key {
+    let field = hangar_ui::keys::on_field_key(field, move |key, _| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) if has_draft => {
             Some(Message::Board(Msg::ClearDraft(cleared_on.clone(), column)))
         }

@@ -476,7 +476,7 @@ fn broadcast<'a>(
     // Alt+Enter holds the line until each agent is done. The key is spent here
     // so the field's own Enter does not also send it at once.
     let held = send(true);
-    let input = keys::on_key(input, move |key, modifiers| match key {
+    let input = keys::on_field_key(input, move |key, modifiers| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) if modifiers.alt() => {
             Some(held.clone())
         }

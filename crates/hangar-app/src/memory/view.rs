@@ -157,7 +157,7 @@ fn bar<'a>(
     let search = crate::keymap::guard(ctx, search);
     // Escape empties the field first, the way a search field does.
     let escapes = !st.query.is_empty();
-    let search = keys::on_key(search, move |key, _| match key {
+    let search = keys::on_field_key(search, move |key, _| match key {
         Key::Named(Named::Escape) if escapes => Some(msg(Msg::ClearQuery)),
         _ => None,
     });
