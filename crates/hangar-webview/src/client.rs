@@ -75,7 +75,12 @@ pub struct SpawnOptions {
 
 impl SpawnOptions {
     pub fn new(program: impl Into<PathBuf>) -> Self {
-        Self { program: program.into(), args: Vec::new(), envs: Vec::new(), stderr: Stderr::default() }
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+            envs: Vec::new(),
+            stderr: Stderr::default(),
+        }
     }
 
     pub fn arg(mut self, arg: impl Into<OsString>) -> Self {
@@ -103,7 +108,11 @@ pub fn find_helper() -> Option<PathBuf> {
     }
     let name = format!("hangar-webview{}", std::env::consts::EXE_SUFFIX);
     let exe = std::env::current_exe().ok()?;
-    exe.ancestors().skip(1).take(2).map(|folder| folder.join(&name)).find(|path| path.is_file())
+    exe.ancestors()
+        .skip(1)
+        .take(2)
+        .map(|folder| folder.join(&name))
+        .find(|path| path.is_file())
 }
 
 /// The events waiting from a helper, to be taken by one reader.
@@ -130,7 +139,11 @@ struct QueueState {
 impl Queue {
     fn new() -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(QueueState { events: VecDeque::new(), closed: false, waker: None }),
+            state: Mutex::new(QueueState {
+                events: VecDeque::new(),
+                closed: false,
+                waker: None,
+            }),
             arrived: Condvar::new(),
         })
     }
@@ -181,7 +194,11 @@ impl Events {
             if state.closed {
                 return None;
             }
-            state = self.queue.arrived.wait(state).unwrap_or_else(PoisonError::into_inner);
+            state = self
+                .queue
+                .arrived
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -200,7 +217,12 @@ impl Events {
             if left.is_zero() {
                 return Err(RecvTimeoutError::Timeout);
             }
-            state = self.queue.arrived.wait_timeout(state, left).unwrap_or_else(PoisonError::into_inner).0;
+            state = self
+                .queue
+                .arrived
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
     }
 
@@ -282,7 +304,10 @@ impl Client {
     /// of one. Whatever `reader` yields is read as the helper's output, and
     /// every command is written to `writer`, which is closed when the client
     /// is dropped.
-    pub fn from_io(reader: impl Read + Send + 'static, writer: impl Write + Send + 'static) -> (Client, Events) {
+    pub fn from_io(
+        reader: impl Read + Send + 'static,
+        writer: impl Write + Send + 'static,
+    ) -> (Client, Events) {
         Self::start(reader, writer, None)
     }
 
@@ -307,7 +332,14 @@ impl Client {
             .spawn(move || write_lines(writer, outgoing, closing))
             .expect("a thread starts");
 
-        (Client { lines, closed, child }, Events { queue })
+        (
+            Client {
+                lines,
+                closed,
+                child,
+            },
+            Events { queue },
+        )
     }
 
     /// Queue a command for the helper. It returns at once; [`Closed`] means the
@@ -332,34 +364,55 @@ impl Client {
     }
 
     pub fn navigate(&self, window: &str, url: &str) -> Result<(), Closed> {
-        self.send(Command::Navigate { window: window.into(), url: url.into() })
+        self.send(Command::Navigate {
+            window: window.into(),
+            url: url.into(),
+        })
     }
 
     /// Run a script, forgetting what it gives.
     pub fn eval(&self, window: &str, script: &str) -> Result<(), Closed> {
-        self.send(Command::Eval { window: window.into(), script: script.into(), token: None })
+        self.send(Command::Eval {
+            window: window.into(),
+            script: script.into(),
+            token: None,
+        })
     }
 
     /// Run a script and have its value come back as an [`Event::EvalResult`]
     /// with this token.
     pub fn eval_with_token(&self, window: &str, script: &str, token: &str) -> Result<(), Closed> {
-        self.send(Command::Eval { window: window.into(), script: script.into(), token: Some(token.into()) })
+        self.send(Command::Eval {
+            window: window.into(),
+            script: script.into(),
+            token: Some(token.into()),
+        })
     }
 
     pub fn post_message(&self, window: &str, message: Value) -> Result<(), Closed> {
-        self.send(Command::PostMessage { window: window.into(), message })
+        self.send(Command::PostMessage {
+            window: window.into(),
+            message,
+        })
     }
 
     pub fn set_title(&self, window: &str, title: &str) -> Result<(), Closed> {
-        self.send(Command::SetTitle { window: window.into(), title: title.into() })
+        self.send(Command::SetTitle {
+            window: window.into(),
+            title: title.into(),
+        })
     }
 
     pub fn focus(&self, window: &str) -> Result<(), Closed> {
-        self.send(Command::Focus { window: window.into() })
+        self.send(Command::Focus {
+            window: window.into(),
+        })
     }
 
     pub fn close(&self, window: &str) -> Result<(), Closed> {
-        self.send(Command::Close { window: window.into() })
+        self.send(Command::Close {
+            window: window.into(),
+        })
     }
 
     /// Answer a [`SchemeRequest`](crate::SchemeRequest).
@@ -374,6 +427,8 @@ impl Client {
 
     /// How the helper left, once it has: waits up to `timeout` for it. `None`
     /// for a client with no process of its own, or a helper still running.
+    /// It blocks the calling thread, so a task on an executor calls it from a
+    /// thread meant for blocking (`spawn_blocking`), or with a timeout of zero.
     pub fn wait(&self, timeout: Duration) -> Option<ExitStatus> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -392,6 +447,11 @@ impl Client {
         }
     }
 
+    /// The helper's process id, for a client that started one.
+    pub fn id(&self) -> Option<u32> {
+        lock(&self.child).as_ref().map(Child::id)
+    }
+
     /// Stop the helper now, without asking.
     pub fn kill(&self) {
         if let Some(child) = lock(&self.child).as_mut() {
@@ -406,13 +466,17 @@ impl Drop for Client {
         // closes its input when `lines` goes, which says the same if the line
         // does not get through.
         let _ = self.send(Command::Quit);
-        let Some(child) = lock(&self.child).take() else { return };
+        let Some(child) = lock(&self.child).take() else {
+            return;
+        };
         // The wait is not ours to spend: whoever dropped the client may be a UI
         // thread.
-        let spawned = thread::Builder::new().name("hangar-webview-reaper".into()).spawn({
-            let mut child = child;
-            move || leave(&mut child)
-        });
+        let spawned = thread::Builder::new()
+            .name("hangar-webview-reaper".into())
+            .spawn({
+                let mut child = child;
+                move || leave(&mut child)
+            });
         drop(spawned);
     }
 }
@@ -434,7 +498,11 @@ fn leave(child: &mut Child) {
 /// ends, and so does this, which closes the helper's input.
 fn write_lines(mut writer: impl Write, lines: Receiver<String>, closed: Arc<AtomicBool>) {
     for line in lines {
-        if writer.write_all(line.as_bytes()).and_then(|()| writer.flush()).is_err() {
+        if writer
+            .write_all(line.as_bytes())
+            .and_then(|()| writer.flush())
+            .is_err()
+        {
             closed.store(true, Ordering::Release);
             return;
         }
@@ -459,7 +527,10 @@ fn read_events(
         let line = match std::str::from_utf8(&raw) {
             Ok(line) => line.trim_end_matches(['\r', '\n']),
             Err(_) => {
-                queue.push(Event::error(ErrorCode::BadEvent, "the helper wrote a line that is not UTF-8"));
+                queue.push(Event::error(
+                    ErrorCode::BadEvent,
+                    "the helper wrote a line that is not UTF-8",
+                ));
                 continue;
             }
         };
@@ -467,7 +538,9 @@ fn read_events(
             continue;
         }
         match Event::from_line(line) {
-            Ok(Event::Ready { protocol, version, .. }) if protocol != PROTOCOL_VERSION => {
+            Ok(Event::Ready {
+                protocol, version, ..
+            }) if protocol != PROTOCOL_VERSION => {
                 // A helper of another protocol cannot be trusted to mean what
                 // its lines say, so it is not listened to any further.
                 queue.push(Event::error(
@@ -482,7 +555,10 @@ fn read_events(
             Ok(event) => queue.push(event),
             Err(error) => {
                 let shown: String = line.chars().take(200).collect();
-                queue.push(Event::error(ErrorCode::BadEvent, format!("{error}: {shown}")));
+                queue.push(Event::error(
+                    ErrorCode::BadEvent,
+                    format!("{error}: {shown}"),
+                ));
             }
         }
     }

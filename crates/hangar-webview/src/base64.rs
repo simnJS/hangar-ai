@@ -37,12 +37,24 @@ impl std::error::Error for DecodeError {}
 pub fn encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let [a, b, c] = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let [a, b, c] = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let group = (u32::from(a) << 16) | (u32::from(b) << 8) | u32::from(c);
         out.push(ALPHABET[(group >> 18) as usize & 63] as char);
         out.push(ALPHABET[(group >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { ALPHABET[(group >> 6) as usize & 63] as char } else { PAD as char });
-        out.push(if chunk.len() > 2 { ALPHABET[group as usize & 63] as char } else { PAD as char });
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(group >> 6) as usize & 63] as char
+        } else {
+            PAD as char
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[group as usize & 63] as char
+        } else {
+            PAD as char
+        });
     }
     out
 }
@@ -84,7 +96,8 @@ pub fn decode(text: &str) -> Result<Vec<u8>, DecodeError> {
             } else if padding > 0 {
                 return Err(DecodeError::Padding);
             } else {
-                sextets[position] = value(byte).ok_or(DecodeError::Character(index * 4 + position))?;
+                sextets[position] =
+                    value(byte).ok_or(DecodeError::Character(index * 4 + position))?;
             }
         }
         let word = (sextets[0] << 18) | (sextets[1] << 12) | (sextets[2] << 6) | sextets[3];

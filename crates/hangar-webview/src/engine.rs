@@ -21,7 +21,10 @@ use tao::event::{Event as LoopEvent, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 use tao::window::{Window, WindowBuilder, WindowId};
 use wry::http::{HeaderName, HeaderValue, Response, StatusCode};
-use wry::{NewWindowResponse, PageLoadEvent, PermissionResponse, RequestAsyncResponder, WebView, WebViewBuilder};
+use wry::{
+    NewWindowResponse, PageLoadEvent, PermissionResponse, RequestAsyncResponder, WebView,
+    WebViewBuilder,
+};
 
 use crate::output::Emitter;
 
@@ -68,7 +71,11 @@ pub fn run(emitter: Emitter) -> ! {
     let panicking = emitter.clone();
     std::panic::set_hook(Box::new(move |info| {
         previous(info);
-        panicking.error(None, ErrorCode::Other, format!("the helper panicked: {info}"));
+        panicking.error(
+            None,
+            ErrorCode::Other,
+            format!("the helper panicked: {info}"),
+        );
         panicking.flush();
     }));
 
@@ -98,7 +105,11 @@ pub fn run(emitter: Emitter) -> ! {
                 *flow = ControlFlow::Exit;
             }
             LoopEvent::UserEvent(UserEvent::Command(command)) => engine.command(command, target),
-            LoopEvent::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
+            LoopEvent::WindowEvent {
+                window_id,
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
                 if let Some(id) = engine.by_loop_id.get(&window_id).cloned() {
                     engine.close(&id, CloseReason::User);
                 }
@@ -157,10 +168,15 @@ impl Engine {
                 if let Some(open) = self.window(&window)
                     && let Err(error) = open.webview.load_url(&url)
                 {
-                    self.emitter.error(Some(&window), ErrorCode::NavigateFailed, error.to_string());
+                    self.emitter
+                        .error(Some(&window), ErrorCode::NavigateFailed, error.to_string());
                 }
             }
-            Command::Eval { window, script, token } => self.eval(&window, &script, token),
+            Command::Eval {
+                window,
+                script,
+                token,
+            } => self.eval(&window, &script, token),
             Command::PostMessage { window, message } => {
                 // The message is parsed again inside the page, from a string
                 // literal, and not written there as an object literal: a key like
@@ -199,43 +215,63 @@ impl Engine {
     fn window(&self, id: &str) -> Option<&Open> {
         let found = self.windows.get(id);
         if found.is_none() {
-            self.emitter.error(Some(id), ErrorCode::UnknownWindow, format!("no window {id} is open"));
+            self.emitter.error(
+                Some(id),
+                ErrorCode::UnknownWindow,
+                format!("no window {id} is open"),
+            );
         }
         found
     }
 
     fn eval(&self, window: &str, script: &str, token: Option<String>) {
-        let Some(open) = self.window(window) else { return };
+        let Some(open) = self.window(window) else {
+            return;
+        };
         let result = match token {
             None => open.webview.evaluate_script(script),
             Some(token) => {
                 let emitter = self.emitter.clone();
                 let id = window.to_string();
-                open.webview.evaluate_script_with_callback(script, move |raw| {
-                    // The engine hands back JSON text; an engine that hands back
-                    // something else still gets its answer through, as a string.
-                    let result = if raw.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw))
-                    };
-                    emitter.emit(Event::EvalResult { window: id.clone(), token: token.clone(), result });
-                })
+                open.webview
+                    .evaluate_script_with_callback(script, move |raw| {
+                        // The engine hands back JSON text; an engine that hands back
+                        // something else still gets its answer through, as a string.
+                        let result = if raw.is_empty() {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw))
+                        };
+                        emitter.emit(Event::EvalResult {
+                            window: id.clone(),
+                            token: token.clone(),
+                            result,
+                        });
+                    })
             }
         };
         if let Err(error) = result {
-            self.emitter.error(Some(window), ErrorCode::EvalFailed, error.to_string());
+            self.emitter
+                .error(Some(window), ErrorCode::EvalFailed, error.to_string());
         }
     }
 
     fn open(&mut self, open: OpenWindow, target: &EventLoopWindowTarget<UserEvent>) {
         let id = open.window.clone();
         if self.windows.contains_key(&id) {
-            self.emitter.error(Some(&id), ErrorCode::DuplicateWindow, format!("window {id} is already open"));
+            self.emitter.error(
+                Some(&id),
+                ErrorCode::DuplicateWindow,
+                format!("window {id} is already open"),
+            );
             return;
         }
         if let Some(bad) = open.schemes.iter().find(|name| !valid_scheme_name(name)) {
-            self.emitter.error(Some(&id), ErrorCode::OpenFailed, format!("{bad:?} cannot be a custom scheme"));
+            self.emitter.error(
+                Some(&id),
+                ErrorCode::OpenFailed,
+                format!("{bad:?} cannot be a custom scheme"),
+            );
             return;
         }
         match self.build(&open, target) {
@@ -244,14 +280,22 @@ impl Engine {
                 self.windows.insert(id.clone(), built);
                 self.emitter.emit(Event::Opened { window: id });
             }
-            Err(message) => self.emitter.error(Some(&id), ErrorCode::OpenFailed, message),
+            Err(message) => self
+                .emitter
+                .error(Some(&id), ErrorCode::OpenFailed, message),
         }
     }
 
     /// The window and webview for `open`. Every handler is bound to the window's
     /// id, so what a page does is always reported as that window's.
-    fn build(&self, open: &OpenWindow, target: &EventLoopWindowTarget<UserEvent>) -> Result<Open, String> {
-        let (width, height) = open.size.map_or(DEFAULT_SIZE, |size| (size.width, size.height));
+    fn build(
+        &self,
+        open: &OpenWindow,
+        target: &EventLoopWindowTarget<UserEvent>,
+    ) -> Result<Open, String> {
+        let (width, height) = open
+            .size
+            .map_or(DEFAULT_SIZE, |size| (size.width, size.height));
         let window = WindowBuilder::new()
             .with_title(open.title.as_str())
             .with_inner_size(LogicalSize::new(f64::from(width), f64::from(height)))
@@ -275,7 +319,11 @@ impl Engine {
         let emitter = self.emitter.clone();
         let window_id = id.to_string();
         builder = builder.with_new_window_req_handler(move |url, _| {
-            emitter.emit(Event::NavigationBlocked { window: window_id.clone(), url, new_window: true });
+            emitter.emit(Event::NavigationBlocked {
+                window: window_id.clone(),
+                url,
+                new_window: true,
+            });
             NewWindowResponse::Deny
         });
 
@@ -296,13 +344,20 @@ impl Engine {
                 PageLoadEvent::Started => PageLoadState::Started,
                 PageLoadEvent::Finished => PageLoadState::Finished,
             };
-            emitter.emit(Event::PageLoad { window: window_id.clone(), state, url });
+            emitter.emit(Event::PageLoad {
+                window: window_id.clone(),
+                state,
+                url,
+            });
         });
 
         let emitter = self.emitter.clone();
         let window_id = id.to_string();
         builder = builder.with_document_title_changed_handler(move |title| {
-            emitter.emit(Event::TitleChanged { window: window_id.clone(), title });
+            emitter.emit(Event::TitleChanged {
+                window: window_id.clone(),
+                title,
+            });
         });
 
         if let Some(prefixes) = &open.allow_navigation {
@@ -312,7 +367,11 @@ impl Engine {
             builder = builder.with_navigation_handler(move |url| {
                 let allowed = allowed.allows(&url);
                 if !allowed {
-                    emitter.emit(Event::NavigationBlocked { window: window_id.clone(), url, new_window: false });
+                    emitter.emit(Event::NavigationBlocked {
+                        window: window_id.clone(),
+                        url,
+                        new_window: false,
+                    });
                 }
                 allowed
             });
@@ -322,29 +381,40 @@ impl Engine {
             let emitter = self.emitter.clone();
             let pending = self.pending.clone();
             let requests = self.requests.clone();
-            builder = builder.with_asynchronous_custom_protocol(scheme.clone(), move |window, request, responder| {
-                // The request is parked here under a number of ours and told to
-                // the parent, so the page waits and the helper does not.
-                let number = requests.fetch_add(1, Ordering::Relaxed) + 1;
-                let (head, body) = request.into_parts();
-                let headers = head
-                    .headers
-                    .iter()
-                    .map(|(name, value)| Header::new(name.as_str(), String::from_utf8_lossy(value.as_bytes())))
-                    .collect();
-                pending
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .insert(number, Waiting { window: window.to_string(), responder });
-                emitter.emit(Event::SchemeRequest(SchemeRequest {
-                    request: number,
-                    window: window.to_string(),
-                    method: head.method.to_string(),
-                    uri: head.uri.to_string(),
-                    headers,
-                    body,
-                }));
-            });
+            builder = builder.with_asynchronous_custom_protocol(
+                scheme.clone(),
+                move |window, request, responder| {
+                    // The request is parked here under a number of ours and told to
+                    // the parent, so the page waits and the helper does not.
+                    let number = requests.fetch_add(1, Ordering::Relaxed) + 1;
+                    let (head, body) = request.into_parts();
+                    let headers = head
+                        .headers
+                        .iter()
+                        .map(|(name, value)| {
+                            Header::new(name.as_str(), String::from_utf8_lossy(value.as_bytes()))
+                        })
+                        .collect();
+                    pending
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(
+                            number,
+                            Waiting {
+                                window: window.to_string(),
+                                responder,
+                            },
+                        );
+                    emitter.emit(Event::SchemeRequest(SchemeRequest {
+                        request: number,
+                        window: window.to_string(),
+                        method: head.method.to_string(),
+                        uri: head.uri.to_string(),
+                        headers,
+                        body,
+                    }));
+                },
+            );
         }
 
         if open.kit_bridge {
@@ -367,9 +437,15 @@ impl Engine {
     fn close(&mut self, id: &str, reason: CloseReason) {
         if let Some(open) = self.windows.remove(id) {
             self.by_loop_id.remove(&open.window.id());
-            self.pending.lock().unwrap_or_else(PoisonError::into_inner).retain(|_, waiting| waiting.window != id);
+            self.pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|_, waiting| waiting.window != id);
             drop(open);
-            self.emitter.emit(Event::WindowClosed { window: id.to_string(), reason });
+            self.emitter.emit(Event::WindowClosed {
+                window: id.to_string(),
+                reason,
+            });
         }
     }
 
@@ -385,11 +461,19 @@ impl Engine {
     /// for a request that is gone (its window closed, or the page went
     /// elsewhere) is dropped without a word: it is a race, not a mistake.
     fn respond(&self, response: SchemeResponse) {
-        let waiting = self.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&response.request);
+        let waiting = self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&response.request);
         let Some(waiting) = waiting else { return };
         let (built, problems) = http_response(response);
         if !problems.is_empty() {
-            self.emitter.error(Some(&waiting.window), ErrorCode::BadResponse, problems.join("; "));
+            self.emitter.error(
+                Some(&waiting.window),
+                ErrorCode::BadResponse,
+                problems.join("; "),
+            );
         }
         waiting.responder.respond(built);
     }
@@ -417,7 +501,10 @@ fn http_response(response: SchemeResponse) -> (Response<Vec<u8>>, Vec<String>) {
     let mut built = Response::new(response.body);
     *built.status_mut() = status;
     for header in response.headers {
-        match (HeaderName::from_bytes(header.name.as_bytes()), HeaderValue::from_str(&header.value)) {
+        match (
+            HeaderName::from_bytes(header.name.as_bytes()),
+            HeaderValue::from_str(&header.value),
+        ) {
             (Ok(name), Ok(value)) => {
                 built.headers_mut().append(name, value);
             }
@@ -435,7 +522,9 @@ fn attach(builder: WebViewBuilder, window: &Window) -> Result<WebView, String> {
     use tao::platform::unix::WindowExtUnix;
     use wry::WebViewBuilderExtUnix;
 
-    let vbox = window.default_vbox().ok_or("the window has no box to draw the page in")?;
+    let vbox = window
+        .default_vbox()
+        .ok_or("the window has no box to draw the page in")?;
     builder.build_gtk(vbox).map_err(|error| error.to_string())
 }
 

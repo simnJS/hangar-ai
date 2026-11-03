@@ -162,7 +162,10 @@ impl OpenWindow {
         self
     }
 
-    pub fn allow_navigation(mut self, prefixes: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn allow_navigation(
+        mut self,
+        prefixes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         self.allow_navigation = Some(prefixes.into_iter().map(Into::into).collect());
         self
     }
@@ -183,7 +186,10 @@ pub struct Header {
 
 impl Header {
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { name: name.into(), value: value.into() }
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
     }
 }
 
@@ -196,13 +202,22 @@ pub struct SchemeResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<Header>,
     /// The body, base64 in JSON.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "base64::serde_bytes")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "base64::serde_bytes"
+    )]
     pub body: Vec<u8>,
 }
 
 impl SchemeResponse {
     pub fn new(request: u64, status: u16) -> Self {
-        Self { request, status, headers: Vec::new(), body: Vec::new() }
+        Self {
+            request,
+            status,
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
     }
 
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -217,7 +232,9 @@ impl SchemeResponse {
 
     /// A `200` with `body` and a `Content-Type`.
     pub fn ok(request: u64, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
-        Self::new(request, 200).header("Content-Type", content_type).body(body)
+        Self::new(request, 200)
+            .header("Content-Type", content_type)
+            .body(body)
     }
 }
 
@@ -289,7 +306,11 @@ pub struct SchemeRequest {
     #[serde(default)]
     pub headers: Vec<Header>,
     /// The request's body, base64 in JSON, empty for a `GET`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "base64::serde_bytes")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "base64::serde_bytes"
+    )]
     pub body: Vec<u8>,
 }
 
@@ -349,32 +370,56 @@ pub enum ErrorCode {
 pub enum Event {
     /// The first line a helper writes, once its window system is up: the
     /// protocol it speaks, the version of the helper and the engine it drives.
-    Ready { protocol: u32, version: String, engine: String },
+    Ready {
+        protocol: u32,
+        version: String,
+        engine: String,
+    },
     /// A window is open.
     Opened { window: String },
     /// The page called `window.ipc.postMessage(body)`. The body is the page's
     /// string and nothing more: the page wrote it, so it is untrusted input to
     /// check, as is `uri`, which says which document sent it as far as the
     /// engine knows (some engines say the main frame's current URL).
-    Ipc { window: String, uri: String, body: String },
+    Ipc {
+        window: String,
+        uri: String,
+        body: String,
+    },
     /// A page asked for something at one of the window's schemes.
     SchemeRequest(SchemeRequest),
     /// A document started or finished loading, its URL as the engine has it.
-    PageLoad { window: String, state: PageLoadState, url: String },
+    PageLoad {
+        window: String,
+        state: PageLoadState,
+        url: String,
+    },
     /// The document's `<title>` changed. The window's title is not touched; see
     /// [`Command::SetTitle`].
     TitleChanged { window: String, title: String },
     /// What a script run with a `token` evaluated to, as JSON. A script with
     /// no value gives `null`.
-    EvalResult { window: String, token: String, result: Value },
+    EvalResult {
+        window: String,
+        token: String,
+        result: Value,
+    },
     /// A navigation that `allow_navigation` stopped, or a page asking for a
     /// window of its own (`window.open`, `target=_blank`), which the helper
     /// never grants: the parent decides what to do with the URL.
-    NavigationBlocked { window: String, url: String, new_window: bool },
+    NavigationBlocked {
+        window: String,
+        url: String,
+        new_window: bool,
+    },
     /// The window is gone.
     WindowClosed { window: String, reason: CloseReason },
     /// Something failed. `window` says which window it concerns, if one.
-    Error { window: Option<String>, code: ErrorCode, message: String },
+    Error {
+        window: Option<String>,
+        code: ErrorCode,
+        message: String,
+    },
     /// An event this client does not know: a newer helper's. Ignore it.
     #[serde(other)]
     Unknown,
@@ -392,7 +437,11 @@ impl Event {
 
     /// An [`Event::Error`] with no window.
     pub fn error(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self::Error { window: None, code, message: message.into() }
+        Self::Error {
+            window: None,
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -428,48 +477,114 @@ mod tests {
             .allow_navigation(["hangar-kit://localhost/k/"])
             .background(18, 18, 18);
         round_trip_command(Command::Open(open));
-        round_trip_command(Command::Open(OpenWindow::new("w2", Content::html("<p>a\nb</p>"))));
-        round_trip_command(Command::Navigate { window: "w1".into(), url: "https://example.com".into() });
-        round_trip_command(Command::Eval { window: "w1".into(), script: "1 + 1".into(), token: None });
-        round_trip_command(Command::Eval { window: "w1".into(), script: "1 + 1".into(), token: Some("t".into()) });
-        round_trip_command(Command::PostMessage { window: "w1".into(), message: json!({ "hangar": 1, "event": "theme", "data": {} }) });
-        round_trip_command(Command::SetTitle { window: "w1".into(), title: "Run #4".into() });
-        round_trip_command(Command::Focus { window: "w1".into() });
-        round_trip_command(Command::Close { window: "w1".into() });
+        round_trip_command(Command::Open(OpenWindow::new(
+            "w2",
+            Content::html("<p>a\nb</p>"),
+        )));
+        round_trip_command(Command::Navigate {
+            window: "w1".into(),
+            url: "https://example.com".into(),
+        });
+        round_trip_command(Command::Eval {
+            window: "w1".into(),
+            script: "1 + 1".into(),
+            token: None,
+        });
+        round_trip_command(Command::Eval {
+            window: "w1".into(),
+            script: "1 + 1".into(),
+            token: Some("t".into()),
+        });
+        round_trip_command(Command::PostMessage {
+            window: "w1".into(),
+            message: json!({ "hangar": 1, "event": "theme", "data": {} }),
+        });
+        round_trip_command(Command::SetTitle {
+            window: "w1".into(),
+            title: "Run #4".into(),
+        });
+        round_trip_command(Command::Focus {
+            window: "w1".into(),
+        });
+        round_trip_command(Command::Close {
+            window: "w1".into(),
+        });
         round_trip_command(Command::SchemeResponse(
-            SchemeResponse::ok(7, "text/html", b"<p>hi</p>".to_vec()).header("X-A", "1").header("X-A", "2"),
+            SchemeResponse::ok(7, "text/html", b"<p>hi</p>".to_vec())
+                .header("X-A", "1")
+                .header("X-A", "2"),
         ));
         round_trip_command(Command::Quit);
     }
 
     #[test]
     fn every_event_survives_a_round_trip() {
-        round_trip_event(Event::Ready { protocol: PROTOCOL_VERSION, version: "1.12.1".into(), engine: "wry".into() });
-        round_trip_event(Event::Opened { window: "w1".into() });
-        round_trip_event(Event::Ipc { window: "w1".into(), uri: "hangar-kit://localhost/k/a.html".into(), body: "{\"a\":1}\n".into() });
+        round_trip_event(Event::Ready {
+            protocol: PROTOCOL_VERSION,
+            version: "1.12.1".into(),
+            engine: "wry".into(),
+        });
+        round_trip_event(Event::Opened {
+            window: "w1".into(),
+        });
+        round_trip_event(Event::Ipc {
+            window: "w1".into(),
+            uri: "hangar-kit://localhost/k/a.html".into(),
+            body: "{\"a\":1}\n".into(),
+        });
         round_trip_event(Event::SchemeRequest(SchemeRequest {
             request: 3,
             window: "w1".into(),
             method: "POST".into(),
             uri: "hangar-kit://localhost/k/a".into(),
-            headers: vec![Header::new("accept", "*/*"), Header::new("accept", "text/html")],
+            headers: vec![
+                Header::new("accept", "*/*"),
+                Header::new("accept", "text/html"),
+            ],
             body: vec![0, 1, 2, 254, 255],
         }));
-        round_trip_event(Event::PageLoad { window: "w1".into(), state: PageLoadState::Started, url: "about:blank".into() });
-        round_trip_event(Event::PageLoad { window: "w1".into(), state: PageLoadState::Finished, url: "about:blank".into() });
-        round_trip_event(Event::TitleChanged { window: "w1".into(), title: "é \u{2028} 😀".into() });
-        round_trip_event(Event::EvalResult { window: "w1".into(), token: "t".into(), result: json!([1, "a", null]) });
-        round_trip_event(Event::NavigationBlocked { window: "w1".into(), url: "https://x.test".into(), new_window: true });
+        round_trip_event(Event::PageLoad {
+            window: "w1".into(),
+            state: PageLoadState::Started,
+            url: "about:blank".into(),
+        });
+        round_trip_event(Event::PageLoad {
+            window: "w1".into(),
+            state: PageLoadState::Finished,
+            url: "about:blank".into(),
+        });
+        round_trip_event(Event::TitleChanged {
+            window: "w1".into(),
+            title: "é \u{2028} 😀".into(),
+        });
+        round_trip_event(Event::EvalResult {
+            window: "w1".into(),
+            token: "t".into(),
+            result: json!([1, "a", null]),
+        });
+        round_trip_event(Event::NavigationBlocked {
+            window: "w1".into(),
+            url: "https://x.test".into(),
+            new_window: true,
+        });
         for reason in [CloseReason::User, CloseReason::Command, CloseReason::Quit] {
-            round_trip_event(Event::WindowClosed { window: "w1".into(), reason });
+            round_trip_event(Event::WindowClosed {
+                window: "w1".into(),
+                reason,
+            });
         }
-        round_trip_event(Event::Error { window: Some("w1".into()), code: ErrorCode::OpenFailed, message: "no display".into() });
+        round_trip_event(Event::Error {
+            window: Some("w1".into()),
+            code: ErrorCode::OpenFailed,
+            message: "no display".into(),
+        });
         round_trip_event(Event::error(ErrorCode::BadCommand, "nope"));
     }
 
     #[test]
     fn the_wire_format_is_the_documented_one() {
-        let open = Command::Open(OpenWindow::new("w1", Content::url("https://example.com")).title("Docs"));
+        let open =
+            Command::Open(OpenWindow::new("w1", Content::url("https://example.com")).title("Docs"));
         assert_eq!(
             serde_json::from_str::<Value>(&open.to_line()).unwrap(),
             json!({
@@ -519,7 +634,9 @@ mod tests {
         .to_line();
         let value: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(value["body"].as_str().unwrap(), base64::encode(&bytes));
-        let Event::SchemeRequest(back) = Event::from_line(&line).unwrap() else { panic!("not a request") };
+        let Event::SchemeRequest(back) = Event::from_line(&line).unwrap() else {
+            panic!("not a request")
+        };
         assert_eq!(back.body, bytes);
 
         let bad = r#"{"type":"scheme_response","request":1,"status":200,"body":"not base64!"}"#;
@@ -545,19 +662,28 @@ mod tests {
     #[test]
     fn versions_unknown_fields_and_unknown_types_are_handled() {
         // A newer helper's `ready` reads, and says it is not ours.
-        let Event::Ready { protocol, .. } =
-            Event::from_line(r#"{"type":"ready","protocol":2,"version":"9","engine":"x","extra":true}"#).unwrap()
-        else {
+        let Event::Ready { protocol, .. } = Event::from_line(
+            r#"{"type":"ready","protocol":2,"version":"9","engine":"x","extra":true}"#,
+        )
+        .unwrap() else {
             panic!("not a ready")
         };
         assert_ne!(protocol, PROTOCOL_VERSION);
 
         // An event it has and we do not is skipped, not a failure.
-        assert_eq!(Event::from_line(r#"{"type":"zoom_changed","window":"w","level":2}"#).unwrap(), Event::Unknown);
+        assert_eq!(
+            Event::from_line(r#"{"type":"zoom_changed","window":"w","level":2}"#).unwrap(),
+            Event::Unknown
+        );
         // An error code it has and we do not folds into `other`.
         assert_eq!(
-            Event::from_line(r#"{"type":"error","window":null,"code":"disk_full","message":"m"}"#).unwrap(),
-            Event::Error { window: None, code: ErrorCode::Other, message: "m".into() }
+            Event::from_line(r#"{"type":"error","window":null,"code":"disk_full","message":"m"}"#)
+                .unwrap(),
+            Event::Error {
+                window: None,
+                code: ErrorCode::Other,
+                message: "m".into()
+            }
         );
 
         // A command the helper does not know, or half of one, is an error for it to report.

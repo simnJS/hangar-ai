@@ -11,10 +11,12 @@ mod engine;
 mod output;
 
 fn main() {
-    // WebKitGTK's DMA-BUF renderer cannot make a GBM EGL display on a Wayland
-    // session with an NVIDIA GPU ("Could not create GBM EGL display"), and the
-    // window stays blank. Turning it off costs a little speed and is what Tauri's
-    // window needed there; the person can still override it from the outside.
+    // On a Wayland session with an NVIDIA GPU, WebKitGTK's DMA-BUF renderer has
+    // failed to make a GBM EGL display ("Could not create GBM EGL display"),
+    // which leaves the window blank; Hangar's Tauri window needed this setting
+    // there. Turning it off costs a little speed everywhere else, and a value
+    // already in the environment (a person's own, or `0` to turn the renderer
+    // back on) is left alone.
     #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         // SAFETY: nothing else runs yet. Changing the environment is only

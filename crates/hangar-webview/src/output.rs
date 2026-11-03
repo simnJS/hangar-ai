@@ -35,7 +35,11 @@ impl Emitter {
                         Out::Event(event) => {
                             let mut line = event.to_line();
                             line.push('\n');
-                            if stdout.write_all(line.as_bytes()).and_then(|()| stdout.flush()).is_err() {
+                            if stdout
+                                .write_all(line.as_bytes())
+                                .and_then(|()| stdout.flush())
+                                .is_err()
+                            {
                                 // The parent closed its end: there is nobody to
                                 // run for, and its closing our input would have
                                 // ended us as well.
@@ -58,7 +62,11 @@ impl Emitter {
     }
 
     pub fn error(&self, window: Option<&str>, code: ErrorCode, message: impl Into<String>) {
-        self.emit(Event::Error { window: window.map(str::to_string), code, message: message.into() });
+        self.emit(Event::Error {
+            window: window.map(str::to_string),
+            code,
+            message: message.into(),
+        });
     }
 
     /// Wait until what was emitted has been written, for the last moments of the
