@@ -5,6 +5,7 @@ use super::*;
 use crate::state::types::{AppState, Workspace};
 
 mod drawn;
+mod guarded;
 
 fn device(id: &str, name: &str, created: u64) -> RemoteDevice {
     RemoteDevice {

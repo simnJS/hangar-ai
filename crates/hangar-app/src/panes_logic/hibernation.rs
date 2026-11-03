@@ -67,7 +67,7 @@ pub struct Hibernation {
 }
 
 /// Working or waiting for an answer: what keeps a workspace awake.
-fn is_busy(activity: AgentActivity) -> bool {
+pub(super) fn is_busy(activity: AgentActivity) -> bool {
     matches!(activity, AgentActivity::Working | AgentActivity::Waiting)
 }
 
@@ -193,9 +193,10 @@ impl Hibernation {
     }
 }
 
-/// What a workspace is put to sleep from: the app as it stands, read when
-/// asked, and the few things a sleep does to it.
-pub trait SleepEnv {
+/// What a decision reads of the app, as it stands. Apart from `SleepEnv` so
+/// that something which only wants the verdict (the navigator's menu, drawn
+/// from a shared model) needs nothing it could change.
+pub trait SleepRead {
     fn state(&self) -> &AppState;
     /// The workspace the main window shows.
     fn active(&self) -> Option<&str>;
@@ -204,12 +205,17 @@ pub trait SleepEnv {
     /// The workspaces the main window showed, the latest first.
     fn recent(&self) -> &[WsId];
     fn store(&self) -> &Hibernation;
-    fn store_mut(&mut self) -> &mut Hibernation;
     /// Prompts held for a pane (`getPaneInsight(id).queue.length`).
     fn queued(&self, pane_id: &str) -> usize;
     /// One of its deliveries is being checked, reviewed or landed:
     /// `isDelivering(id) || deliveringIn(id)`.
     fn delivering(&self, workspace_id: &str) -> bool;
+}
+
+/// What a workspace is put to sleep from: the app as it stands, read when
+/// asked, and the few things a sleep does to it.
+pub trait SleepEnv: SleepRead {
+    fn store_mut(&mut self) -> &mut Hibernation;
     /// Unmounts a workspace's terminals, which ends their PTYs.
     fn unmount(&mut self, workspace_id: &str);
     /// Shows another workspace in the main window.
@@ -264,7 +270,7 @@ fn navigator_order(state: &AppState) -> Vec<Candidate> {
 }
 
 /// Where the main window would go if `workspace_id` left it.
-fn step_aside_from(env: &dyn SleepEnv, workspace_id: &str) -> Option<WsId> {
+fn step_aside_from<E: SleepRead + ?Sized>(env: &E, workspace_id: &str) -> Option<WsId> {
     let workspaces = navigator_order(env.state());
     let mounted: Vec<WsId> = env
         .opened_ids()
@@ -280,8 +286,8 @@ fn step_aside_from(env: &dyn SleepEnv, workspace_id: &str) -> Option<WsId> {
     })
 }
 
-fn rest_of(
-    env: &dyn SleepEnv,
+fn rest_of<E: SleepRead + ?Sized>(
+    env: &E,
     pane_id: &str,
     probed: Option<&HashMap<PaneId, bool>>,
 ) -> Option<PaneRest> {
@@ -296,15 +302,24 @@ fn rest_of(
     })
 }
 
-/// One workspace as it stands, put to the rules of `mode`; `probed` is what
-/// the system said its shells run, once asked. `None` when it is gone.
-pub fn read_workspace(
-    env: &mut dyn SleepEnv,
+/// A workspace as the rules are fed it, read once.
+struct Seen {
+    workspace: Workspace,
+    asleep: bool,
+    mounted: bool,
+    on_screen: bool,
+    detached: bool,
+    delivering: bool,
+    rest: HashMap<PaneId, PaneRest>,
+}
+
+/// Everything both modes of the rules read of a workspace. `None` when it is
+/// gone.
+fn see<E: SleepRead + ?Sized>(
+    env: &E,
     workspace_id: &str,
-    mode: SleepMode,
     probed: Option<&HashMap<PaneId, bool>>,
-    now: EpochMs,
-) -> Option<Reading> {
+) -> Option<Seen> {
     let workspace = env
         .state()
         .workspaces
@@ -325,43 +340,80 @@ pub fn read_workspace(
         .iter()
         .filter_map(|pane| Some((pane.id.clone(), rest_of(env, &pane.id, probed)?)))
         .collect();
+    Some(Seen {
+        workspace,
+        asleep,
+        mounted,
+        on_screen,
+        detached,
+        delivering,
+        rest,
+    })
+}
 
-    let verdict = match mode {
-        SleepMode::Forced => {
-            let can_step_aside = !on_screen || step_aside_from(env, workspace_id).is_some();
-            forced_sleep_verdict(&ForcedSleepInput {
-                panes: &workspace.panes,
-                asleep,
-                mounted,
-                on_screen,
-                can_step_aside,
-                detached,
-                delivering,
-                rest: &rest,
-            })
-        }
-        SleepMode::Idle { delay_ms } => {
-            // Never seen before (mounted by an agent, say): its delay starts
-            // now. Not before it is mounted, or it would start the delay
-            // already spent.
-            if mounted && (on_screen || env.store().last_touch(workspace_id).is_none()) {
-                env.store_mut().touch_workspace(workspace_id, now);
-            }
-            let last_interaction = env.store().last_touch(workspace_id).unwrap_or(now);
-            hibernation_verdict(&HibernateInput {
-                now,
-                delay_ms,
-                panes: &workspace.panes,
-                mounted,
-                on_screen,
-                detached,
-                delivering,
-                last_interaction,
-                rest: &rest,
-            })
-        }
+/// The rules of a sleep asked for by hand. They need no clock, so reading
+/// them changes nothing: this is what the navigator's menu shows as it opens
+/// (`sleep.verdict` of `useHibernation`) and what `read_workspace` decides on
+/// in `Forced` mode. `probed` is what the system said the shells run, once
+/// asked. `None` when the workspace is gone.
+pub fn read_forced<E: SleepRead + ?Sized>(
+    env: &E,
+    workspace_id: &str,
+    probed: Option<&HashMap<PaneId, bool>>,
+) -> Option<Reading> {
+    let seen = see(env, workspace_id, probed)?;
+    let can_step_aside = !seen.on_screen || step_aside_from(env, workspace_id).is_some();
+    let verdict = forced_sleep_verdict(&ForcedSleepInput {
+        panes: &seen.workspace.panes,
+        asleep: seen.asleep,
+        mounted: seen.mounted,
+        on_screen: seen.on_screen,
+        can_step_aside,
+        detached: seen.detached,
+        delivering: seen.delivering,
+        rest: &seen.rest,
+    });
+    Some(Reading {
+        workspace: seen.workspace,
+        verdict,
+    })
+}
+
+/// One workspace as it stands, put to the rules of `mode`; `probed` is what
+/// the system said its shells run, once asked. `None` when it is gone.
+pub fn read_workspace(
+    env: &mut dyn SleepEnv,
+    workspace_id: &str,
+    mode: SleepMode,
+    probed: Option<&HashMap<PaneId, bool>>,
+    now: EpochMs,
+) -> Option<Reading> {
+    let delay_ms = match mode {
+        SleepMode::Forced => return read_forced(&*env, workspace_id, probed),
+        SleepMode::Idle { delay_ms } => delay_ms,
     };
-    Some(Reading { workspace, verdict })
+    let seen = see(&*env, workspace_id, probed)?;
+    // Never seen before (mounted by an agent, say): its delay starts now. Not
+    // before it is mounted, or it would start the delay already spent.
+    if seen.mounted && (seen.on_screen || env.store().last_touch(workspace_id).is_none()) {
+        env.store_mut().touch_workspace(workspace_id, now);
+    }
+    let last_interaction = env.store().last_touch(workspace_id).unwrap_or(now);
+    let verdict = hibernation_verdict(&HibernateInput {
+        now,
+        delay_ms,
+        panes: &seen.workspace.panes,
+        mounted: seen.mounted,
+        on_screen: seen.on_screen,
+        detached: seen.detached,
+        delivering: seen.delivering,
+        last_interaction,
+        rest: &seen.rest,
+    });
+    Some(Reading {
+        workspace: seen.workspace,
+        verdict,
+    })
 }
 
 /// Where a decision stands after its first reading.
@@ -671,7 +723,7 @@ mod tests {
         }
     }
 
-    impl SleepEnv for Window {
+    impl SleepRead for Window {
         fn state(&self) -> &AppState {
             &self.state
         }
@@ -687,14 +739,17 @@ mod tests {
         fn store(&self) -> &Hibernation {
             &self.store
         }
-        fn store_mut(&mut self) -> &mut Hibernation {
-            &mut self.store
-        }
         fn queued(&self, pane_id: &str) -> usize {
             self.queued.get(pane_id).copied().unwrap_or(0)
         }
         fn delivering(&self, workspace_id: &str) -> bool {
             self.delivering.contains(workspace_id)
+        }
+    }
+
+    impl SleepEnv for Window {
+        fn store_mut(&mut self) -> &mut Hibernation {
+            &mut self.store
         }
         fn unmount(&mut self, workspace_id: &str) {
             self.calls.push(format!("unmount {workspace_id}"));

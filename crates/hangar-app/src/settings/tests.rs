@@ -5,6 +5,7 @@ use crate::state::types::AppState;
 
 mod drawn;
 mod driven;
+mod guarded;
 
 fn model_with(overlays: Vec<Overlay>) -> Model {
     let mut model = Model::default();

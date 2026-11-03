@@ -69,10 +69,13 @@ impl HooksDraft {
 
 /// The section: what runs where, then the two fields with their hints.
 /// `message` makes the message that edits a field (the creation dialog's or
-/// the kits dialog's).
+/// the kits dialog's). `submit` is what Return in a field says: the creation
+/// dialog is a form that Return sends, the kits dialog saves as it goes and
+/// has nothing to send.
 pub fn view<'a>(
     ctx: Ctx<'a>,
     draft: &'a HooksDraft,
+    submit: Option<Message>,
     message: impl Fn(HookField, String) -> Message + Copy + 'a,
 ) -> Element<'a, Message> {
     let t = ctx.theme;
@@ -80,12 +83,16 @@ pub fn view<'a>(
     let field = |field: HookField, label: Key, hint: Key| -> Element<'a, Message> {
         column![
             typography::hint(t, ctx.t(label)),
-            text_input(placeholder, draft.get(field))
-                .size(tokens::font_size::UI)
-                .padding(Padding::from([5.0, tokens::space::MD]))
-                .font(hangar_theme::fonts::mono())
-                .on_input(move |text| message(field, text))
-                .style(hangar_theme::style::text_input::field(t)),
+            crate::keymap::guard(
+                ctx,
+                text_input(placeholder, draft.get(field))
+                    .size(tokens::font_size::UI)
+                    .padding(Padding::from([5.0, tokens::space::MD]))
+                    .font(hangar_theme::fonts::mono())
+                    .on_input(move |text| message(field, text))
+                    .on_submit_maybe(submit.clone())
+                    .style(hangar_theme::style::text_input::field(t)),
+            ),
             typography::hint(t, ctx.t(hint)),
         ]
         .spacing(tokens::space::XS)

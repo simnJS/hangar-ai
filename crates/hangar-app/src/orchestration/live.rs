@@ -11,6 +11,7 @@ use hangar_core::git::{
     Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree,
 };
 use hangar_core::memory::MemoryEntry;
+use hangar_core::pty::PtyManager;
 
 use super::brief::BriefingPort;
 use super::events::{EngineIo, JournalEntry, OrchestratorEvent};
@@ -20,7 +21,9 @@ use super::projects::{ProjectSummary, ProjectsPort};
 use super::runtime::OrchestrationHandle;
 use super::text::now_ms;
 use super::worker::{Starting, WorkerPort};
+
 use crate::control::ModelCmd;
+use crate::control::port::{is_open, workspace_in};
 use crate::message::Message;
 use crate::services::inbox::Answer;
 use crate::state::types::{AppState, Pane, PaneId};
@@ -109,9 +112,9 @@ impl WorkerPort for LivePort {
     }
 
     /// The model's opened set, not a guess from the activity (inventory A6,
-    /// problem 4).
+    /// problem 4), or a window of its own.
     fn is_open(&self, workspace_id: &str) -> bool {
-        self.snapshot().opened.contains(workspace_id)
+        open_in(&self.snapshot(), workspace_id)
     }
 
     fn activity(&self, pane: &str) -> Option<PaneActivity> {
@@ -180,12 +183,28 @@ impl WorkerPort for LivePort {
         self.tell(ModelCmd::OpenWorkspace(workspace_id.into()));
     }
 
+    /// On the blocking pool: the kill takes the PTY manager's lock, which
+    /// the panes' readers hold, and an async thread waiting on it stalls
+    /// every task scheduled behind it.
     async fn kill_pane(&self, pane: &str) -> Result<(), String> {
-        hangar_core::pty::pty_kill(self.handle.services().core().pty(), pane.into(), Some(true))
+        let (pty, pane) = (
+            self.handle.services().core().pty().clone(),
+            pane.to_string(),
+        );
+        on_pty(pty, move |pty| {
+            hangar_core::pty::pty_kill(pty, pane, Some(true))
+        })
+        .await?
     }
 
     async fn alive(&self, pane: &str) -> bool {
-        hangar_core::pty::pty_alive(self.handle.services().core().pty(), pane.into())
+        let (pty, pane) = (
+            self.handle.services().core().pty().clone(),
+            pane.to_string(),
+        );
+        on_pty(pty, move |pty| hangar_core::pty::pty_alive(pty, pane))
+            .await
+            .unwrap_or(false)
     }
 
     async fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
@@ -401,10 +420,75 @@ impl ProjectsPort for LivePort {
     }
 
     fn is_open(&self, workspace_id: &str) -> bool {
-        self.snapshot().opened.contains(workspace_id)
+        open_in(&self.snapshot(), workspace_id)
     }
 
     fn journal(&self, workspace_id: &str) -> Vec<JournalEntry> {
         self.handle.journal(workspace_id)
+    }
+}
+
+/// Whether a workspace's panes are up: opened in the main window during this
+/// run, or shown in a window of its own (P18's `is_open`, App.tsx's
+/// `isOpen`). A workspace detached when Hangar last quit draws its panes
+/// without ever being opened in the main window; read off the opened set
+/// alone, its workers would be listed as stopped while they run.
+pub fn open_in(snapshot: &Snapshot, workspace_id: &str) -> bool {
+    workspace_in(snapshot, workspace_id).is_some_and(|ws| is_open(snapshot, ws))
+}
+
+/// `f` on the blocking pool for the panes' shells: the PTY manager's lock is
+/// the one every pane's reader and writer takes, and a kill reaps the shell.
+async fn on_pty<T: Send + 'static>(
+    pty: Arc<PtyManager>,
+    f: impl FnOnce(&Arc<PtyManager>) -> T + Send + 'static,
+) -> Result<T, String> {
+    blocking(move || f(&pty)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::types::Workspace;
+
+    #[test]
+    fn a_workspace_in_a_window_of_its_own_is_open_without_being_opened() {
+        let workspace = |id: &str, detached| Workspace {
+            id: id.into(),
+            detached,
+            ..Workspace::default()
+        };
+        let snapshot = Snapshot {
+            state: Arc::new(AppState {
+                workspaces: vec![
+                    workspace("main", None),
+                    workspace("site", Some(true)),
+                    workspace("shut", Some(false)),
+                ],
+                ..AppState::default()
+            }),
+            opened: ["main".to_string()].into(),
+            ..Snapshot::default()
+        };
+        assert!(open_in(&snapshot, "main"));
+        assert!(open_in(&snapshot, "site"));
+        assert!(!open_in(&snapshot, "shut"));
+        assert!(!open_in(&snapshot, "gone"));
+    }
+
+    #[tokio::test]
+    async fn answers_the_pty_questions_through_the_blocking_pool() {
+        let pty = Arc::new(PtyManager::default());
+        let alive = on_pty(pty.clone(), |pty| {
+            hangar_core::pty::pty_alive(pty, "nobody".into())
+        })
+        .await;
+        assert_eq!(alive, Ok(false));
+        // A pane with no shell: nothing to kill, and no error.
+        let killed = on_pty(pty, |pty| {
+            hangar_core::pty::pty_kill(pty, "nobody".into(), Some(true))
+        })
+        .await;
+        assert_eq!(killed, Ok(Ok(())));
     }
 }

@@ -6,6 +6,7 @@ use super::super::fake::{Fake, lock};
 use super::super::run::{DISABLED, caller_workspace};
 use super::super::types::Caller;
 use super::{contains, control, from_ava, from_shop, matches, refusal, with};
+use crate::state::layout::preset_tree;
 
 fn caller(pane: Option<&str>, cwd: Option<&str>) -> Caller {
     Caller {
@@ -67,6 +68,32 @@ async fn lists_the_callers_panes_marking_the_caller_and_its_activity() {
             json!(["Max", false, null, true])
         ]
     );
+}
+
+#[tokio::test]
+async fn lists_the_panes_in_the_order_they_are_read_on_screen() {
+    let fake = Fake::setup();
+    let names = |result: &serde_json::Value| -> Vec<serde_json::Value> {
+        result["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pane| pane["name"].clone())
+            .collect()
+    };
+    // Max first on screen.
+    fake.patch("w1", |ws| {
+        ws.tree = Some(preset_tree(&["p2".into(), "p1".into()]))
+    });
+    let result = control("pane_list", from_ava(), &fake).await.unwrap();
+    assert_eq!(names(&result), vec![json!("Max"), json!("Ava")]);
+    // A stored tree that no longer matches the panes, with a leaf left over
+    // from a pane gone: what it still holds first, then the others.
+    fake.patch("w1", |ws| {
+        ws.tree = Some(preset_tree(&["gone".into(), "p2".into()]))
+    });
+    let result = control("pane_list", from_ava(), &fake).await.unwrap();
+    assert_eq!(names(&result), vec![json!("Max"), json!("Ava")]);
 }
 
 #[tokio::test]

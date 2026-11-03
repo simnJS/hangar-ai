@@ -60,6 +60,13 @@ unicode-normalization = "0.1"
 # Dates in the local time zone (hangar-core and hangar-update already use it).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 usvg = { version = "0.45", default-features = false }
+# The clipboard with pictures in it: iced's own is text only, and the 3D
+# view copies its capture as an image. The Wayland feature lets it use a
+# compositor's data-control protocol; X11 (XWayland) is what it falls back on.
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
+# The version hangar-core and hangar-model3d already build: hangar-core's
+# `model_save_png` takes a capture as base64.
+base64 = "0.22"
 iced_test = "0.14"
 # The version hangar-core already builds: hangar-app's orchestration engine
 # reads plans with it.

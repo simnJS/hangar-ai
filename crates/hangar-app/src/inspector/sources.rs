@@ -12,56 +12,22 @@
 //! package that owns each: `panes_logic` for the pane's, `board::format` for
 //! the task's.
 
-use std::collections::HashSet;
-
 use hangar_core::board::Task;
-use iced::window;
 
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
-use crate::shell::WindowKind;
+use crate::state::layout;
 use crate::state::live::{EpochMs, PaneActivity, PaneInsight, PlanLimits};
 use crate::state::{Model, Pane, PaneId, Workspace};
 
-// ---- The workspace and the pane -----------------------------------------------------------
-
-/// The workspace a window shows: its own when it is a workspace window, the
-/// active one in the main window.
-pub fn window_workspace(m: &Model, window: window::Id) -> Option<&Workspace> {
-    match m.live.windows.get(&window) {
-        Some(WindowKind::Workspace(id)) => m.workspace(id),
-        _ => m.active_workspace(),
-    }
-}
-
-/// The panes of a workspace in the order they are read on screen (`readingOrder`
-/// of `lib/layout.ts`): the tree's leaves that name a pane, once each, then
-/// the panes the tree does not mention, in their own order.
-///
-/// TODO(P0b): `state::layout::normalize_tree` is not ported yet; this is the
-/// part of it a reading order needs, and it gives the same order.
-pub fn reading_order(ws: &Workspace) -> Vec<&Pane> {
-    let mut seen = HashSet::new();
-    let mut order: Vec<&Pane> = Vec::with_capacity(ws.panes.len());
-    if let Some(tree) = &ws.tree {
-        for id in crate::state::layout::leaf_ids(tree) {
-            if let Some(pane) = ws.panes.iter().find(|pane| pane.id == id)
-                && seen.insert(&pane.id)
-            {
-                order.push(pane);
-            }
-        }
-    }
-    order.extend(ws.panes.iter().filter(|pane| !seen.contains(&pane.id)));
-    order
-}
+// ---- The pane ---------------------------------------------------------------------------------
 
 /// The pane the inspector speaks about and its 1-based place in reading
 /// order. The pane in focus when the workspace has one; otherwise the first,
 /// which is where App's effect puts the focus ("keep focus on a pane that
 /// still exists") before the inspector could be asked.
 pub fn focused_pane<'a>(m: &Model, ws: &'a Workspace) -> Option<(&'a Pane, usize)> {
-    let order = reading_order(ws);
+    let order = layout::reading_order(&ws.panes, ws.tree.as_ref());
     let wanted = m.ui.focus_by_workspace.get(&ws.id);
     let found = wanted.and_then(|id| order.iter().position(|pane| &pane.id == id));
     let at = found.unwrap_or(0);
@@ -133,16 +99,14 @@ impl TaskCard {
 /// The task an agent in this pane is on, as far as the board can tell
 /// (`taskForPane` over `useBoardTasks(workspace.cwd)`): an open task whose
 /// assignee resolves to this pane.
+///
+/// An assignee's name is looked for in the pane's own workspace first, which
+/// is what the TS passed as the active one: each window's App had its own,
+/// and the inspector is about the workspace its window draws.
 pub fn task_for_pane(m: &Model, ws: &Workspace, pane: &PaneId) -> Option<TaskCard> {
-    let state = m.state();
     m.live
         .board
-        .task_for_pane(
-            ws,
-            pane,
-            &state.workspaces,
-            state.active_workspace_id.as_deref(),
-        )
+        .task_for_pane(ws, pane, &m.state().workspaces, Some(&ws.id))
         .map(TaskCard::of)
 }
 
@@ -191,8 +155,10 @@ mod tests {
         }
     }
 
+    /// The order the column reads panes in: `state::layout`'s, which the
+    /// inspector no longer has a copy of.
     fn names(ws: &Workspace) -> Vec<&str> {
-        reading_order(ws)
+        layout::reading_order(&ws.panes, ws.tree.as_ref())
             .into_iter()
             .map(|pane| pane.id.as_str())
             .collect()

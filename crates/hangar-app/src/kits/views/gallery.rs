@@ -378,10 +378,13 @@ pub fn view<'a>(
     rows.push(
         container(
             row![
-                input::search_field(ctx.theme, &page.gallery_query, model.filter_placeholder)
-                    .on_input(|query| msg(Msg::GalleryQuery(query)))
-                    .on_clear(msg(Msg::GalleryQuery(String::new())))
-                    .clear_tip(ctx.t(Key::KitsManageGalleryFilter)),
+                crate::keymap::guard(
+                    ctx,
+                    input::search_field(ctx.theme, &page.gallery_query, model.filter_placeholder)
+                        .on_input(|query| msg(Msg::GalleryQuery(query)))
+                        .on_clear(msg(Msg::GalleryQuery(String::new())))
+                        .clear_tip(ctx.t(Key::KitsManageGalleryFilter)),
+                ),
                 button::secondary(ctx.theme, model.refresh.clone())
                     .on_press_maybe(model.refresh_enabled.then(|| msg(Msg::GalleryRefresh))),
             ]

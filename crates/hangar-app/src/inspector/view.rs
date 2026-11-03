@@ -18,7 +18,6 @@ use super::widgets::{GripEvents, grip};
 use super::{Msg, State, files, format, sources};
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::side_panels::{INSPECTOR_MAX, INSPECTOR_MIN};
 use crate::state::live::{PaneInsight, RateLimit};
 use crate::state::types::{AgentId, Pane, Workspace};
 
@@ -26,7 +25,9 @@ use crate::state::types::{AgentId, Pane, Workspace};
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let m = ctx.model;
     let t = ctx.theme;
-    let content: Element<'a, Message> = match sources::window_workspace(m, ctx.window) {
+    // The workspace this window draws: a window of its own shows its own, not
+    // whichever the main window has active.
+    let content: Element<'a, Message> = match ctx.workspace() {
         Some(ws) => match sources::focused_pane(m, ws) {
             Some((pane, index)) => pane_panel(st, ctx, ws, pane, index),
             None => no_pane(ctx, ws.id.clone()),
@@ -34,10 +35,13 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         None => no_pane(ctx, String::new()),
     };
 
+    // The widest a drag may make the column in this window now, as the frame
+    // placed it: read when the grip is pressed, as the TS did.
+    let max = ctx.panels().inspector.max;
     let edge = grip(
         t,
         GripEvents {
-            pressed: Box::new(|x| Message::Inspector(Msg::GripPressed(x))),
+            pressed: Box::new(move |x| Message::Inspector(Msg::GripPressed { x, max })),
             moved: Box::new(|x| Message::Inspector(Msg::GripMoved(x))),
             released: Message::Inspector(Msg::GripReleased),
             reset: Message::Inspector(Msg::ResetWidth),
@@ -100,11 +104,7 @@ fn pane_panel<'a>(
             ],
         )
         .map(|found| found.label.clone()),
-        changes: st
-            .changes
-            .as_ref()
-            .filter(|(of, _)| of == folder)
-            .map(|(_, changes)| changes.as_ref()),
+        changes: st.changes.get(folder).map(|changes| changes.as_ref()),
         index,
     };
     column_of(&scene, data)
@@ -119,9 +119,9 @@ pub(super) fn scene<'a>(ctx: Ctx<'a>, ws: &'a Workspace, pane: &'a Pane) -> Scen
         pane,
         now: sources::now_ms(),
         folded: &settings.inspector_collapsed,
-        width: settings
-            .inspector_width
-            .clamp(f64::from(INSPECTOR_MIN), f64::from(INSPECTOR_MAX)) as f32,
+        // What the frame drew the column at: the saved width, cut to the room
+        // this window has.
+        width: ctx.panels().inspector.width,
     }
 }
 

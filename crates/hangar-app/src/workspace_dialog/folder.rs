@@ -3,7 +3,7 @@
 //! (`WorkspaceDialog.tsx`).
 
 use crate::state::WorkspaceDraft;
-use crate::state::types::{AGENTS, AgentId, Workspace};
+use crate::state::types::{AGENTS, AgentId};
 
 use super::hooks::HooksDraft;
 
@@ -104,55 +104,6 @@ pub fn count_of(assignments: &[AgentId], agent: AgentId) -> usize {
         .iter()
         .filter(|assigned| **assigned == agent)
         .count()
-}
-
-// ── pane names ────────────────────────────────────────────────────────
-
-/// Short, unambiguous, easy to say out loud (`PANE_NAMES` of
-/// `lib/paneNames.ts`). The first sixteen are the ones panes were named with
-/// before names became unique across workspaces.
-///
-/// TODO(P0b): `state::pane_names` is to hold this list with `pickPaneNames`;
-/// until it does the preview keeps a copy so it can name the cells as the
-/// store will. Replace `pick_pane_names` below by that module's.
-const PANE_NAMES: [&str; 48] = [
-    "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna", "Jude",
-    "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris", "Jack",
-    "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will", "Yara", "Zack",
-    "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby", "Tess", "Vic",
-];
-
-/// First free name; falls back to « Ava 2 » once the list runs out.
-fn pick_pane_name(taken: &std::collections::HashSet<String>) -> String {
-    if let Some(free) = PANE_NAMES.iter().find(|name| !taken.contains(**name)) {
-        return (*free).to_string();
-    }
-    (2_u32..)
-        .flat_map(|round| PANE_NAMES.iter().map(move |name| format!("{name} {round}")))
-        .find(|candidate| !taken.contains(candidate))
-        .unwrap_or_default()
-}
-
-/// The next `count` free names, in the order panes would be given them.
-pub fn pick_pane_names(count: usize, taken: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut used: std::collections::HashSet<String> = taken.into_iter().collect();
-    (0..count)
-        .map(|_| {
-            let name = pick_pane_name(&used);
-            used.insert(name.clone());
-            name
-        })
-        .collect()
-}
-
-/// Every name in use, in every workspace.
-pub fn all_pane_names(workspaces: &[Workspace]) -> Vec<String> {
-    workspaces
-        .iter()
-        .flat_map(|ws| ws.panes.iter())
-        .map(|pane| pane.name.clone())
-        .filter(|name| !name.is_empty())
-        .collect()
 }
 
 // ── the draft ─────────────────────────────────────────────────────────
@@ -334,33 +285,6 @@ mod tests {
         );
         assert_eq!(assignments[1], AgentId::Shell);
         cycle_cell(&mut assignments, 9);
-    }
-
-    #[test]
-    fn pane_names_are_the_next_free_ones_in_order() {
-        assert_eq!(pick_pane_names(3, []), ["Ava", "Max", "Leo"]);
-        assert_eq!(
-            pick_pane_names(2, ["Ava".to_string(), "Leo".to_string()]),
-            ["Max", "Mia"]
-        );
-        let all: Vec<String> = PANE_NAMES.iter().map(|name| name.to_string()).collect();
-        assert_eq!(pick_pane_names(2, all), ["Ava 2", "Max 2"]);
-    }
-
-    #[test]
-    fn every_name_of_every_workspace_is_taken() {
-        let workspace = |names: &[&str]| Workspace {
-            panes: names
-                .iter()
-                .map(|name| crate::state::Pane {
-                    name: (*name).into(),
-                    ..crate::state::Pane::default()
-                })
-                .collect(),
-            ..Workspace::default()
-        };
-        let all = [workspace(&["Ava", "", "Max"]), workspace(&["Leo"])];
-        assert_eq!(all_pane_names(&all), ["Ava", "Max", "Leo"]);
     }
 
     fn form<'a>(name: &'a str, cwd: &'a str, roots: &'a [Root]) -> FolderForm<'a> {

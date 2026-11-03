@@ -885,12 +885,15 @@ fn project_view<'a>(
     }
     let draft: &'a str = st.port_drafts.get(&project.id).map_or("", String::as_str);
     let typing = id.clone();
-    let typed = input::text_field(t, draft)
-        .placeholder("5173")
-        .mono()
-        .width(110)
-        .on_input(move |text| wrap(Msg::PortDraft(typing.clone(), text)))
-        .on_submit(wrap(Msg::PortAdd(id.clone())));
+    let typed = crate::keymap::guard(
+        ctx,
+        input::text_field(t, draft)
+            .placeholder("5173")
+            .mono()
+            .width(110)
+            .on_input(move |text| wrap(Msg::PortDraft(typing.clone(), text)))
+            .on_submit(wrap(Msg::PortAdd(id.clone()))),
+    );
     let add = button::secondary(t, project.add_label)
         .on_press_maybe(project.add_enabled.then(|| wrap(Msg::PortAdd(id.clone()))));
     let mut stack = column![

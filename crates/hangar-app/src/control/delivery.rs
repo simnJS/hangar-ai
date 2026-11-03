@@ -25,7 +25,8 @@ use hangar_core::board::{Task, TaskPatch};
 use hangar_core::delivery::{Cleanup, Delivery, Kind, Outcome, Plan, TaskBrief, Tested};
 use hangar_core::shells::ShellInfo;
 
-use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL};
+use crate::accounts::{MAIN_ACCOUNT, launch_account_with};
+use crate::state::roles::{NEEDS_YOU_LABEL, READY_TO_LAND_LABEL, orchestration_of, workers_of};
 use crate::state::types::PaneRole;
 use crate::state::{Pane, Settings, Workspace, WsId};
 
@@ -35,7 +36,7 @@ use super::delivery_text::{
 };
 use super::paths::resolve_path;
 use super::port::{DeliveryDeps, ModelCmd, Port, workspace_in};
-use super::run::{orchestration_of, unknown};
+use super::run::unknown;
 use super::types::{
     Caller, DeliveryOutcomeKind, DeliveryState, OrchestratorEvent, outcome_name, outcome_of, text,
 };
@@ -45,8 +46,6 @@ pub const MAX_FAILED_DELIVERIES: usize = 3;
 /// A worker done without git keeps its pane this long: its answer has to
 /// reach it first.
 const CLOSE_AFTER_MS: u64 = 5_000;
-/// The Claude account a pane runs on when nothing names another.
-const MAIN_ACCOUNT: &str = "main";
 
 /* ── State ─────────────────────────────────────────────────────── */
 
@@ -377,12 +376,6 @@ fn is_worker_on_task(pane: &Pane) -> bool {
     pane.role == Some(PaneRole::Worker) && pane.task_id.as_deref().is_some_and(|id| !id.is_empty())
 }
 
-fn workers_of(ws: &Workspace) -> impl Iterator<Item = &Pane> {
-    ws.panes
-        .iter()
-        .filter(|pane| pane.role == Some(PaneRole::Worker))
-}
-
 fn require(port: &Port) -> Result<std::sync::Arc<dyn DeliveryDeps>, String> {
     port.delivery()
         .ok_or_else(|| "Deliveries are not available in this Hangar window.".into())
@@ -398,46 +391,40 @@ fn worktree_of(ws: &Workspace, pane: &Pane) -> String {
     resolve_path(&ws.cwd, folder)
 }
 
-/// A non-empty account id, or no choice at all (`readAccountChoice`).
-fn account_choice(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|id| !id.is_empty())
-}
-
 /// The Claude account the review spends: the one a pane of this workspace
-/// would start on (`launchAccount`). Pane over workspace over settings over
-/// main; an account that no longer exists is skipped. The accounts are asked
-/// for only when a level names one other than main.
+/// would start on (`launchAccount`), by P8's rule
+/// (`accounts::launch_account_with`): pane over workspace over
+/// settings over main, an account that no longer exists skipped.
 ///
-/// TODO(P8): the accounts module's own `launch_account` once it lands; this
-/// is the same rule.
+/// P8's rule asks for the list synchronously, and only when a level names an
+/// account other than main; the deliveries' list is async. So the rule is
+/// asked once without the list, and again with it only if it wanted it.
 async fn launch_account(
     settings: &Settings,
     ws: &Workspace,
     pane: Option<&Pane>,
     delivery: &dyn DeliveryDeps,
 ) -> String {
-    let levels = [
-        pane.and_then(|pane| pane.claude_account.as_deref()),
-        ws.claude_account.as_deref(),
+    let (default, workspace, pane) = (
         settings.claude_account.as_deref(),
-    ];
-    let named = levels
-        .iter()
-        .any(|level| account_choice(*level).is_some_and(|id| id != MAIN_ACCOUNT));
-    let accounts = if named {
-        delivery.accounts().await.unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    for level in levels {
-        let Some(id) = account_choice(level) else {
-            continue;
-        };
-        if id == MAIN_ACCOUNT || accounts.iter().any(|account| account.id == id) {
-            return id.to_string();
-        }
+        ws.claude_account.as_deref(),
+        pane.and_then(|pane| pane.claude_account.as_deref()),
+    );
+    let mut wanted = false;
+    let without = launch_account_with(
+        || {
+            wanted = true;
+            Ok(Vec::new())
+        },
+        default,
+        workspace,
+        pane,
+    );
+    if !wanted {
+        return without.id;
     }
-    MAIN_ACCOUNT.to_string()
+    let accounts = delivery.accounts().await;
+    launch_account_with(move || accounts, default, workspace, pane).id
 }
 
 /// The first of `preferred` that is detected, else the first shell detected
@@ -779,6 +766,7 @@ async fn status(
     let panes: Vec<&Pane> = match caller_pane(ws, caller).filter(|pane| is_worker_on_task(pane)) {
         Some(mine) => vec![mine],
         None => workers_of(ws)
+            .into_iter()
             .filter(|pane| pane.task_id.as_deref().is_some_and(|id| !id.is_empty()))
             .collect(),
     };
@@ -1170,6 +1158,7 @@ async fn settle(
 pub async fn land_delivery(ws: &Workspace, task_id: &str, port: &Port) -> Result<(), String> {
     let delivery = require(port)?;
     let pane = workers_of(ws)
+        .into_iter()
         .find(|pane| pane.task_id.as_deref() == Some(task_id))
         .cloned();
     // Taken before anything is awaited, like a submission.

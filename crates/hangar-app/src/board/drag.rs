@@ -54,6 +54,10 @@ pub fn starts_drag(button: Button, inside_control: bool) -> bool {
 /// is over when it is let go.
 #[derive(Debug, Clone)]
 pub struct Press {
+    /// The folder of the board the card is on. Every window draws a board of
+    /// its own, and the pointer is followed from the window's events, which do
+    /// not say which board they are about: the press remembers it.
+    pub cwd: String,
     pub task: String,
     pub from: Column,
     start: Point,
@@ -77,12 +81,19 @@ pub enum Ended {
 impl Press {
     pub fn new(task: String, from: Column, at: Point) -> Press {
         Press {
+            cwd: String::new(),
             task,
             from,
             start: at,
             moved: false,
             over: Some(from),
         }
+    }
+
+    /// The press happened on the board of `cwd`.
+    pub fn on(mut self, cwd: &str) -> Press {
+        self.cwd = cwd.to_owned();
+        self
     }
 
     /// The pointer moved. Returns true the moment the press becomes a drag.

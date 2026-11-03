@@ -23,7 +23,7 @@ use crate::message::Message;
 use crate::pane_menu::Folded;
 use crate::panes::controller::{PaneRt, folder_of};
 use crate::panes::gauge;
-use crate::panes::status::{pane_glyph_state, shell_short_name, state_key, ui_glyph};
+use crate::panes::status::{shell_short_name, state_key, ui_glyph};
 use crate::panes::{Msg, Picker};
 use crate::panes_logic::{PaneBranch, short_session_id};
 use crate::state::live::PaneStatus;
@@ -153,7 +153,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
     let bridged = published.is_some_and(|p| p.bridged);
     let activity = published.map(|p| p.activity);
     let reports = activity.is_some();
-    let glyph_state = pane_glyph_state(status, activity);
+    let glyph_state = crate::panes_logic::state_glyph_state(ctx.model, &pane.id);
     let state_label = ctx.t(state_key(status, activity)).into_owned();
     let source = (status == PaneStatus::Running && reports).then(|| {
         ctx.t(if bridged {
