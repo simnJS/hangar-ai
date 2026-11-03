@@ -28,16 +28,18 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The snapshot of `model` now. `asleep` and `activity` are what P4
-    /// writes in `live.signals`, `delivering` what P18 writes there.
+    /// The snapshot of `model` now: `activity` and `asleep` as P4 holds them
+    /// (`panes_logic::Live`, which bumps `live.version` when they change, so
+    /// the shell republishes), `delivering` as P18 writes it in
+    /// `live.signals`.
     pub fn of(model: &Model) -> Snapshot {
-        let signals = &model.live.signals;
+        let panes = &model.live.panes_logic;
         Snapshot {
             state: model.state_arc(),
             opened: model.ui.opened_ids.iter().cloned().collect(),
-            asleep: signals.asleep.clone(),
-            activity: signals.activity.clone(),
-            delivering: signals.delivering.clone(),
+            asleep: panes.asleep_ids(),
+            activity: panes.activity_map().clone(),
+            delivering: model.live.signals.delivering.clone(),
             hydrated: model.live.hydrated,
         }
     }

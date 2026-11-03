@@ -97,10 +97,6 @@ pub struct Signals {
     /// P6: how many items Needs-you lists; `view.needsYou` is live while
     /// there are some.
     pub needs_you: usize,
-    /// P4: every pane's activity, for the snapshot (`Snapshot::activity`).
-    pub activity: HashMap<PaneId, PaneActivity>,
-    /// P4: the workspaces put to sleep, for the snapshot.
-    pub asleep: HashSet<WsId>,
     /// P18: the deliveries running, for the snapshot.
     pub delivering: Delivering,
 }
