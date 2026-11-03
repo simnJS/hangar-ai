@@ -25,10 +25,22 @@ use hangar_kit_host::{
 };
 
 fn workspace() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
-        .expect("the workspace")
+        .expect("the workspace");
+    // Windows' `canonicalize` answers `\\?\C:\…`, a form that cargo and the
+    // compilers and linkers it starts are not all at home with, and that
+    // neither the folder cargo runs in nor `--target-dir` needs: the plain
+    // path names the same folder. (A share, `\\?\UNC\…`, is left as it is.)
+    match root
+        .to_str()
+        .and_then(|path| path.strip_prefix(r"\\?\"))
+        .filter(|plain| !plain.starts_with(r"UNC\"))
+    {
+        Some(plain) => PathBuf::from(plain),
+        None => root,
+    }
 }
 
 /// The two test modules, built once.
