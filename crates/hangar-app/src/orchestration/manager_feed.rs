@@ -74,6 +74,8 @@ pub enum ManagerEvent {
 /// (`BlockEvent`). Told to the manager like the rest, but kept apart from
 /// `ManagerEvent`: the phone push knows only those four, and a block is not a
 /// notification it was asked to make.
+// The names are the kinds the TS wrote, which the JSON carries.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BlockEvent {

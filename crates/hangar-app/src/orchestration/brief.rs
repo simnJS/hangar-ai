@@ -77,7 +77,7 @@ pub fn find_plan<'a>(memory: &'a [MemoryEntry], title: &str, ws: &Workspace) -> 
                 && same_path(&entry.workspace, &ws.cwd)
         })
         .collect();
-    mine.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    mine.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at));
     mine.first().copied()
 }
 
@@ -88,7 +88,7 @@ pub fn find_tracker(memory: &[MemoryEntry]) -> Option<&MemoryEntry> {
         .iter()
         .filter(|entry| entry.title == TRACKER_TITLE && entry.tags.iter().any(|tag| tag == TRACKER_TAG))
         .collect();
-    mine.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    mine.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at));
     mine.first().copied()
 }
 
@@ -224,7 +224,7 @@ fn board_section(tasks: &[Task], max_attempts: u32) -> Vec<String> {
         lines.push(format!("…and {} more open tasks: board_list_tasks.", open - listed));
     }
     let mut done = ordered("done");
-    done.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    done.sort_by_key(|task| std::cmp::Reverse(task.updated_at));
     if !done.is_empty() {
         let titles: Vec<String> = done
             .iter()
