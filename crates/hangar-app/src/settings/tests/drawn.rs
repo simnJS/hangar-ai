@@ -63,7 +63,21 @@ fn sheet(
         default_font: hangar_theme::fonts::ui(),
         ..WindowSettings::default()
     };
-    let _ui = Simulator::with_size(window, size, view(&st, ctx, category));
+    let mut ui = Simulator::with_size(window, size, view(&st, ctx, category));
+    // Drawn to `<folder>/sheet-<category>-<locale>-<theme>` when
+    // `HANGAR_SETTINGS_SNAPSHOTS` names a folder, to look at:
+    //   HANGAR_SETTINGS_SNAPSHOTS=/tmp/settings cargo test -p hangar-app settings::tests::drawn
+    if let Some(folder) = std::env::var_os("HANGAR_SETTINGS_SNAPSHOTS") {
+        let folder = std::path::PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).expect("the folder");
+        let picture = ui
+            .snapshot(&hangar_theme::to_iced(ctx.theme))
+            .expect("the sheet can be drawn");
+        let stem = format!("sheet-{}-{}-{theme}", category.id(), locale.id());
+        picture
+            .matches_image(folder.join(stem))
+            .expect("the picture can be written");
+    }
 }
 
 /// The window the shell opens.

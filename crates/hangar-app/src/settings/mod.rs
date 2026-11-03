@@ -635,7 +635,15 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
     ])
     .width(200)
     .height(Length::Fill)
-    .style(style::container::sidebar(t));
+    .style(move |theme: &iced::Theme| container::Style {
+        // Its own corners round with the sheet's: the sheet clips to its
+        // bounds, not to its radius, so a square fill would cover them.
+        border: iced::Border {
+            radius: iced::border::left(INNER_RADIUS),
+            ..iced::Border::default()
+        },
+        ..style::container::sidebar(t)(theme)
+    });
 
     let title = active.as_ref().map_or_else(
         || ctx.t(Key::SettingsTitle).into_owned(),
@@ -697,12 +705,18 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
         .height(Length::Fill)
         .style(move |_: &iced::Theme| container::Style {
             background: Some(iced::Background::Color(page_color)),
+            border: iced::Border {
+                radius: iced::border::right(INNER_RADIUS),
+                ..iced::Border::default()
+            },
             ..container::Style::default()
         });
 
+    // One pixel in from the sheet's edge, so its hairline shows all round.
     let sheet = container(row![side, main])
         .width(980)
         .height(700)
+        .padding(1)
         .clip(true)
         .style(style::container::modal(t));
 
@@ -725,6 +739,10 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
     .escape(false)
     .into()
 }
+
+/// The corners of what fills the sheet: the sheet's own radius, less the one
+/// pixel of its hairline they sit inside.
+const INNER_RADIUS: f32 = hangar_theme::tokens::radius::XL - 1.0;
 
 fn hairline<'a>(color: iced::Color) -> Element<'a, Message> {
     container(widget::Space::new())
