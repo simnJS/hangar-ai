@@ -95,6 +95,17 @@ struct Raised {
     reply: Reply,
 }
 
+/// What a tab asked of the window and waits for: its toasts at the foot of
+/// the tab, and a question in place of its page.
+#[derive(Default)]
+pub struct Asked {
+    pub toasts: Toasts<Message>,
+    raised: HashMap<u64, Raised>,
+    next_toast: u64,
+    /// The question, and who waits for the answer.
+    pub confirm: Option<(kit_api::Confirm, Reply)>,
+}
+
 /// One open native tab.
 pub struct NativeTab {
     pub tab: KitTab,
@@ -106,11 +117,7 @@ pub struct NativeTab {
     pub modified: Option<SystemTime>,
     /// The store's watch of its params, to stop when it goes.
     pub watch: Option<WatchId>,
-    pub toasts: Toasts<Message>,
-    raised: HashMap<u64, Raised>,
-    next_toast: u64,
-    /// The question in place of its page, and who waits for the answer.
-    pub confirm: Option<(kit_api::Confirm, Reply)>,
+    pub asked: Asked,
 }
 
 impl std::fmt::Debug for NativeTab {
@@ -171,15 +178,14 @@ impl NativeTab {
                 module: path,
                 modified,
                 watch: None,
-                toasts: Toasts::new(),
-                raised: HashMap::new(),
-                next_toast: 0,
-                confirm: None,
+                asked: Asked::default(),
             },
             effects,
         )
     }
+}
 
+impl Asked {
     /// The tab asks the window for a toast or a question; the clipboard is
     /// the caller's to write.
     pub fn ask(&mut self, entry: &str, ask: UiAsk, now: Instant) {
@@ -276,6 +282,13 @@ impl NativeTab {
     }
 }
 
+impl NativeTab {
+    /// The tab goes: whoever waits for the window is told no.
+    pub fn close(&mut self) {
+        self.asked.close();
+    }
+}
+
 /// The scheme and language a tab is drawn in.
 pub fn theme_of(theme: &hangar_theme::Theme, locale: hangar_i18n::Locale) -> kit_api::Theme {
     kit_api::Theme {
@@ -285,5 +298,81 @@ pub fn theme_of(theme: &hangar_theme::Theme, locale: hangar_i18n::Locale) -> kit
             Scheme::Light
         },
         locale: locale.id().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kit_tabs::api::UiCall;
+
+    fn ask(
+        asked: &mut Asked,
+        call: UiCall,
+        now: Instant,
+    ) -> tokio::sync::oneshot::Receiver<Result<Value, KitError>> {
+        let (answer, waiting) = Answer::channel();
+        asked.ask("e1", UiAsk { call, answer }, now);
+        waiting
+    }
+
+    fn toast(kind: Notice, action: Option<&str>) -> UiCall {
+        UiCall::Toast(kit_api::Toast {
+            message: "Hello".into(),
+            kind,
+            action: action.map(str::to_owned),
+        })
+    }
+
+    #[test]
+    fn a_toast_says_when_it_goes_whether_its_action_was_pressed() {
+        let mut asked = Asked::default();
+        let now = Instant::now();
+        let mut gone = ask(&mut asked, toast(Notice::Info, None), now);
+        let mut undone = ask(&mut asked, toast(Notice::Success, Some("Undo")), now);
+        assert_eq!(asked.toasts.len(), 2);
+        assert!(gone.try_recv().is_err(), "it waits while on screen");
+
+        asked.toast_action(2);
+        assert_eq!(undone.try_recv().unwrap(), Ok(json!({ "action": true })));
+        asked.tick(now + TOAST_LIFETIME + Duration::from_millis(1));
+        assert_eq!(gone.try_recv().unwrap(), Ok(json!({ "action": false })));
+        assert!(asked.toasts.is_empty());
+    }
+
+    #[test]
+    fn an_error_stays_until_it_is_closed() {
+        let mut asked = Asked::default();
+        let now = Instant::now();
+        let mut error = ask(&mut asked, toast(Notice::Error, None), now);
+        asked.tick(now + Duration::from_secs(60));
+        assert_eq!(asked.toasts.len(), 1);
+        let shown = asked.toasts.iter().next().unwrap().id;
+        asked.dismiss_toast(shown);
+        assert_eq!(error.try_recv().unwrap(), Ok(json!({ "action": false })));
+    }
+
+    #[test]
+    fn a_question_is_answered_once_and_a_tab_that_goes_answers_no() {
+        let question = || {
+            UiCall::Confirm(kit_api::Confirm {
+                message: "Delete it?".into(),
+                confirm: None,
+                cancel: None,
+                danger: true,
+            })
+        };
+        let mut asked = Asked::default();
+        let now = Instant::now();
+        let mut first = ask(&mut asked, question(), now);
+        asked.confirmed(true);
+        assert_eq!(first.try_recv().unwrap(), Ok(json!(true)));
+        assert!(asked.confirm.is_none());
+
+        let mut second = ask(&mut asked, question(), now);
+        let mut toasted = ask(&mut asked, toast(Notice::Info, None), now);
+        asked.close();
+        assert_eq!(second.try_recv().unwrap(), Ok(json!(false)));
+        assert_eq!(toasted.try_recv().unwrap(), Ok(json!({ "action": false })));
     }
 }

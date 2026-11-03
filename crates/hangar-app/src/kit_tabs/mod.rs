@@ -49,6 +49,8 @@ pub mod tabs;
 mod view;
 
 #[cfg(test)]
+mod listed;
+#[cfg(test)]
 mod testing;
 
 use std::collections::{HashMap, HashSet};
@@ -302,7 +304,7 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
                 return iced::clipboard::write(text.clone());
             }
             match st.natives.get_mut(&id) {
-                Some(native) => native.ask(&id, ask, Instant::now()),
+                Some(native) => native.asked.ask(&id, ask, Instant::now()),
                 None => {
                     ask.answer.send(Err(KitError::new(
                         KitError::UNAVAILABLE,
@@ -314,26 +316,26 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         }
         Msg::ToastAction(id, seq) => {
             if let Some(native) = st.natives.get_mut(&id) {
-                native.toast_action(seq);
+                native.asked.toast_action(seq);
             }
             Task::none()
         }
         Msg::ToastDismiss(id, shown) => {
             if let Some(native) = st.natives.get_mut(&id) {
-                native.dismiss_toast(shown);
+                native.asked.dismiss_toast(shown);
             }
             Task::none()
         }
         Msg::ToastTick => {
             let now = Instant::now();
             for native in st.natives.values_mut() {
-                native.tick(now);
+                native.asked.tick(now);
             }
             Task::none()
         }
         Msg::Confirmed(id, yes) => {
             if let Some(native) = st.natives.get_mut(&id) {
-                native.confirmed(yes);
+                native.asked.confirmed(yes);
             }
             let _ = sv;
             Task::none()
@@ -843,7 +845,7 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     if st
         .natives
         .values()
-        .any(|native| native.toasts.next_deadline().is_some())
+        .any(|native| native.asked.toasts.next_deadline().is_some())
     {
         subscriptions.push(iced::time::every(TOAST_TICK).map(|_| send(Msg::ToastTick)));
     }

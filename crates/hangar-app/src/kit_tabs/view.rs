@@ -219,10 +219,10 @@ fn ready<'a>(st: &'a State, ctx: Ctx<'a>, entry: &'a Entry) -> Element<'a, Messa
             .draw(style)
             .map(move |message| send(Msg::Native(owner.clone(), message)));
         let owner = id.to_owned();
-        let page = hangar_ui::toast::over(t, page, &native.toasts, move |shown| {
+        let page = hangar_ui::toast::over(t, page, &native.asked.toasts, move |shown| {
             send(Msg::ToastDismiss(owner.clone(), shown))
         });
-        let question = native.confirm.as_ref().map(|(asked, _)| {
+        let question = native.asked.confirm.as_ref().map(|(asked, _)| {
             let cancel = asked
                 .cancel
                 .clone()
