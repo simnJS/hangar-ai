@@ -208,7 +208,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Term(pane, action) => term_action(st, m, sv, pane, action),
-        Msg::Hub(events) => hub_events(st, sv, events),
+        Msg::Hub(events) => hub_events(st, m, sv, events),
         Msg::Sync => sync(st, m, sv),
         Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
             Some(rt) => controller::start(rt, sv, &st.channel),
@@ -496,7 +496,12 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
 
 /// What the reader threads said: output (one wake-up per pane per batch),
 /// an exit, a bell, a notification, a copy.
-fn hub_events(st: &mut State, sv: &Services, events: Vec<HubEvent>) -> Task<Message> {
+fn hub_events(
+    st: &mut State,
+    m: &mut Model,
+    sv: &Services,
+    events: Vec<HubEvent>,
+) -> Task<Message> {
     let mut tasks = Vec::new();
     for event in events {
         let Some(rt) = st.panes.get_mut(&event.pane) else {
@@ -508,7 +513,7 @@ fn hub_events(st: &mut State, sv: &Services, events: Vec<HubEvent>) -> Task<Mess
                 rt.link.take_wake();
                 tasks.push(logic(Logic::Output { pane }));
             }
-            HubKind::Exit => controller::exited(rt, sv),
+            HubKind::Exit => controller::exited(rt, m, sv),
             HubKind::Bell => tasks.push(logic(Logic::Bell { pane })),
             // OSC 9 and OSC 777, already read by hangar-term (ConEmu's
             // numeric sub-commands left out): the message, or the title when
@@ -921,7 +926,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         if st.picker.as_ref().is_some_and(|(open, _)| *open == id) {
             st.picker = None;
         }
-        tasks.push(controller::unmount(&st.hub, sv, rt));
+        tasks.push(controller::unmount(&st.hub, sv, m, rt));
     }
 
     for (ws_id, pane_id) in &wanted {

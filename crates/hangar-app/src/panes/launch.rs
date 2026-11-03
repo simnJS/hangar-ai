@@ -1,13 +1,9 @@
-//! What a launch needs that no merged package provides yet: the name a
-//! Claude Code session runs under (`sessionName` of `src/lib/paneNames.ts`,
-//! which the shell ports with the rest of that module in `state::pane_names`,
-//! P0b) and the login of a pane opened to log an account in
-//! (`LOGIN_COMMAND` of `lib/accounts.ts`). The command itself is P4's
-//! (`panes_logic::agents::launch_command`). When `state::pane_names` has
+//! The name a Claude Code session runs under (`sessionName` of
+//! `src/lib/paneNames.ts`), which no merged package provides yet: the shell
+//! ports that module in `state::pane_names` (P0b). The command itself is
+//! P4's (`panes_logic::agents::launch_command`), the login one P8's
+//! (`accounts::LOGIN_COMMAND`). When `state::pane_names` has
 //! `session_name`, the launch should call it and this file go.
-
-/// What a pane opened to log a Claude account in types (`LOGIN_COMMAND`).
-pub const LOGIN_COMMAND: &str = "claude auth login";
 
 /// The name a Claude Code session runs under, what other sessions list and
 /// message it by: the pane's name, then its workspace's, with what a shell

@@ -111,6 +111,11 @@ impl std::fmt::Debug for PaneRt {
 #[derive(Debug, Clone)]
 pub struct SpawnReport {
     pub kit_issues: Vec<(String, IssueReason, Option<String>)>,
+    /// The account the pane was launched on, as P8's choice resolved it.
+    pub resolved: Option<String>,
+    /// The account that was asked for and is gone: the fallback applies.
+    pub missing: Option<String>,
+    /// The account core started its Claude Code on (main when it fell back).
     pub account: Option<String>,
     pub mcp: Option<PaneMcp>,
     pub mcp_arg: Option<(String, bool)>,
@@ -154,21 +159,14 @@ fn kits_of(settings: &Settings, ws: &Workspace) -> Vec<String> {
     ids
 }
 
-/// The Claude account a pane is launched on: its own, its workspace's, the
-/// settings', then main. Core falls back to main for one that is gone and
-/// says which it used.
-fn account_of(settings: &Settings, ws: &Workspace, pane: &Pane) -> String {
-    [
-        pane.claude_account.as_deref(),
-        ws.claude_account.as_deref(),
-        settings.claude_account.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(str::trim)
-    .find(|id| !id.is_empty())
-    .unwrap_or("main")
-    .to_owned()
+/// The Claude account choices of a launch, the settings', the workspace's
+/// and the pane's, which P8's `launch_account` resolves (pane, workspace,
+/// default, then main) off the UI thread: it reads the accounts' files.
+#[derive(Debug, Clone, Default)]
+struct AccountChoice {
+    default: Option<String>,
+    workspace: Option<String>,
+    pane: Option<String>,
 }
 
 /// What `pty_spawn` is called with, gathered on the UI thread.
@@ -183,7 +181,8 @@ struct Spawn {
     port_base: Option<u16>,
     kits: Vec<String>,
     agent: AgentId,
-    account: Option<String>,
+    /// A Claude Code pane's: the account it is launched on.
+    account: Option<AccountChoice>,
     /// The workspace's MCP choice applies (a Claude Code that is not a login
     /// pane).
     mcp: Option<McpLaunch>,
@@ -219,7 +218,11 @@ pub fn mount(
     hub.insert(link.clone());
 
     let login = pane.agent == AgentId::Claude && pane.login == Some(true);
-    let account = (pane.agent == AgentId::Claude).then(|| account_of(settings, ws, pane));
+    let account = (pane.agent == AgentId::Claude).then(|| AccountChoice {
+        default: settings.claude_account.clone(),
+        workspace: ws.claude_account.clone(),
+        pane: pane.claude_account.clone(),
+    });
     let shell = shell_of(m, ws, pane).cloned();
     let scope = workspace_mcp(Some(ws));
     let spawn = Spawn {
@@ -239,7 +242,7 @@ pub fn mount(
             kits_of(settings, ws)
         },
         agent: pane.agent,
-        account: account.clone(),
+        account,
         mcp: (pane.agent == AgentId::Claude && !login).then(|| McpLaunch {
             mode: scope.mode,
             enabled: scope.enabled,
@@ -267,7 +270,7 @@ pub fn mount(
         dismissed: HashSet::new(),
         search: None,
         last_query: String::new(),
-        account,
+        account: None,
         mcp: None,
         launched_role: pane.role,
         role_handled: false,
@@ -315,8 +318,17 @@ impl Spawn {
         rows: u16,
     ) -> Result<SpawnReport, String> {
         let mut notes = Vec::new();
+        let resolved = self.account.as_ref().map(|choice| {
+            crate::accounts::launch_account(
+                choice.default.as_deref(),
+                choice.workspace.as_deref(),
+                choice.pane.as_deref(),
+            )
+        });
+        let account = resolved.as_ref().map(|resolved| resolved.id.clone());
+        let missing = resolved.and_then(|resolved| resolved.missing);
         let (mcp, scope) = match &self.mcp {
-            Some(launch) => self.mcp_scope(host, launch, &mut notes),
+            Some(launch) => self.mcp_scope(host, launch, account.as_deref(), &mut notes),
             None => (None, None),
         };
         let spawned = hangar_core::pty::pty_spawn(
@@ -336,7 +348,7 @@ impl Spawn {
             scope.as_ref().map(|(path, _, _)| path.clone()),
             Some(self.kits),
             Some(self.agent.as_str().to_owned()),
-            self.account,
+            account.clone(),
         )?;
         Ok(SpawnReport {
             kit_issues: spawned
@@ -344,6 +356,8 @@ impl Spawn {
                 .into_iter()
                 .map(|issue| (issue.id, issue.reason, issue.detail))
                 .collect(),
+            resolved: account,
+            missing,
             account: spawned.account,
             mcp,
             mcp_arg: scope.map(|(_, arg, strict)| (arg, strict)),
@@ -361,6 +375,7 @@ impl Spawn {
         &self,
         host: &hangar_core::Host,
         launch: &McpLaunch,
+        account: Option<&str>,
         notes: &mut Vec<String>,
     ) -> (Option<PaneMcp>, Option<(String, String, bool)>) {
         let tr = launch.tr;
@@ -383,7 +398,7 @@ impl Spawn {
                 self.cwd.clone(),
                 enabled,
                 kits,
-                self.account.clone(),
+                account.map(str::to_owned),
             )
         };
         if launch.mode == McpMode::Inherit {
@@ -513,22 +528,31 @@ pub fn spawned(
     // In the pane's bar, not its terminal: Claude Code clears the screen as
     // it starts and the notes would go with it. A restart that gave the
     // pane Hangar's tools says so on the way in.
-    let requested = rt.account.clone();
     let mut notes: Vec<String> = take_restart_note(pane.session_id.as_deref())
         .into_iter()
         .collect();
+    // The account a pane fell back to: the one asked for is gone, or core
+    // could not start Claude Code on it.
+    let fell_back =
+        report.missing.is_some() || (report.account.is_some() && report.account != report.resolved);
     if rt.agent == AgentId::Claude {
-        if let (Some(asked), Some(used)) = (requested.as_deref(), report.account.as_deref())
-            && asked != used
-        {
+        if let Some(missing) = &report.missing {
             notes.push(
-                tr.t_with(Key::AccountsPickerMissing, &args!("id" => asked))
+                tr.t_with(Key::AccountsPickerMissing, &args!("id" => missing.as_str()))
                     .into_owned(),
             );
         }
         notes.extend(report.notes.iter().cloned());
         notes.extend(kit_notes(tr, &report.kit_issues));
-        rt.account = report.account.clone().or(requested.clone());
+        // What the pane's usage counts against until it restarts, whatever
+        // is chosen meanwhile (P8's `Launched`).
+        let account = report
+            .account
+            .clone()
+            .or(report.resolved.clone())
+            .unwrap_or_else(|| crate::accounts::MAIN_ACCOUNT.to_owned());
+        m.live.accounts.launched.note(&id, Some(&account));
+        rt.account = Some(account);
     }
     rt.notes = notes;
     let running = status(&id, PaneStatus::Running);
@@ -543,7 +567,7 @@ pub fn spawned(
     // on an account the pane fell back to: logging in to an account that is
     // gone would log main in again in its place.
     if pane.login == Some(true) && rt.agent == AgentId::Claude {
-        if report.account.is_some() && report.account != requested {
+        if fell_back {
             return running;
         }
         let (task, handle) = Task::perform(tokio::time::sleep(delay), move |()| {
@@ -677,7 +701,7 @@ pub fn launch_ready(
 pub fn login_ready(rt: &mut PaneRt) {
     rt.launch = None;
     rt.link
-        .write(format!("{}\r", launch::LOGIN_COMMAND).into_bytes());
+        .write(format!("{}\r", crate::accounts::LOGIN_COMMAND).into_bytes());
 }
 
 /// The workspace and the pane of `pane`, if both still exist.
@@ -690,11 +714,14 @@ pub fn find<'a>(m: &'a Model, ws: &str, pane: &str) -> Option<(&'a Workspace, &'
 /// Unmounts a pane: its shell killed (off the UI thread: the kill takes
 /// core's registry lock, which a blocked write may hold), its launch
 /// aborted with it, P4 told.
-pub fn unmount(hub: &Hub, sv: &Services, rt: PaneRt) -> Task<Message> {
+pub fn unmount(hub: &Hub, sv: &Services, m: &mut Model, rt: PaneRt) -> Task<Message> {
     hub.remove(&rt.link.id);
     let pty = sv.core().pty().clone();
     let id = rt.link.id.clone();
     drop(rt);
+    // Closed, restarted under a new id, or put to sleep: not counted against
+    // its account any more.
+    m.live.accounts.launched.note(&id, None);
     let unmounted = Task::done(Message::PanesLogic(Logic::Unmounted {
         pane: id.clone(),
         handing_over: false,
@@ -708,9 +735,10 @@ pub fn unmount(hub: &Hub, sv: &Services, rt: PaneRt) -> Task<Message> {
 
 /// The shell ended by itself: P4 and the orchestration engine hear of it
 /// as core's `pty:exit` (inventory §1.9).
-pub fn exited(rt: &mut PaneRt, sv: &Services) {
+pub fn exited(rt: &mut PaneRt, m: &mut Model, sv: &Services) {
     rt.status = PaneStatus::Exited;
     rt.launch = None;
+    m.live.accounts.launched.note(&rt.link.id, None);
     sv.send(Message::Core(CoreEvent::PtyExit {
         pane: rt.link.id.clone(),
     }));
@@ -821,27 +849,6 @@ mod tests {
             ..Workspace::default()
         };
         assert_eq!(kits_of(&settings, &ws), ["a", "b", "c"]);
-    }
-
-    #[test]
-    fn the_account_is_the_panes_then_the_workspaces_then_the_settings() {
-        let settings = Settings::default();
-        let ws = Workspace {
-            claude_account: Some("work".into()),
-            ..Workspace::default()
-        };
-        let pane = Pane::default();
-        assert_eq!(account_of(&settings, &ws, &pane), "work");
-        let own = Pane {
-            claude_account: Some("perso".into()),
-            ..Pane::default()
-        };
-        assert_eq!(account_of(&settings, &ws, &own), "perso");
-        let none = Settings {
-            claude_account: None,
-            ..settings
-        };
-        assert_eq!(account_of(&none, &Workspace::default(), &pane), "main");
     }
 
     #[test]
