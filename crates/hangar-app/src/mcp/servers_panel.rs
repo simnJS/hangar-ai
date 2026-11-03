@@ -22,7 +22,7 @@ use super::{Msg, State};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::Services;
-use crate::state::types::{AgentId, McpMode, Pane, WorkspaceMcp, WsId};
+use crate::state::types::{AgentId, McpMode, Pane, PaneId, WorkspaceMcp, WsId};
 use crate::state::{Model, Patch, StoreAction, Workspace};
 
 /// What the panel knows of the servers.
@@ -79,21 +79,70 @@ pub fn open(st: &mut State, m: &Model, ws_id: &str) -> Task<Message> {
     )
 }
 
-/// What a pane's Claude Code was started with, if this window saw it launch.
-///
-/// TODO(P4): `PaneInsight.mcp` is raw JSON in `state::live` until P4 types it
-/// and keeps a map of insights in `panes_logic::Live`; read it from there.
-/// Until then no launch is known, so every Claude Code pane counts as out of
-/// date, which is the TS's rule for a launch this window never saw.
-fn running_mcp(_m: &Model, _pane: &Pane) -> Option<PaneMcp> {
-    None
+/// What a pane's Claude Code was started with, if the launch said
+/// (`getPaneInsight(pane.id).mcp`): P4 keeps it with the rest of what the pane
+/// reported. A pane whose launch was never recorded (it has not started, or a
+/// launch that could not say) counts as out of date, which is the TS's rule.
+fn running_mcp(m: &Model, pane: &Pane) -> Option<PaneMcp> {
+    m.live
+        .panes_logic
+        .insight(&pane.id)
+        .mcp
+        .as_ref()
+        .map(PaneMcp::from)
 }
 
-/// Whether a pane is in the middle of a turn.
+/// The Claude Code panes of a workspace that run with something else than
+/// the choice, split by whether the restart may take them now.
 ///
-/// TODO(P4): `panes_logic::Live` holds each pane's activity once P4 fills it.
-fn is_working(_m: &Model, _pane: &Pane) -> bool {
-    false
+/// A restart interrupts the turn a pane is in. The TS listed such panes with
+/// a warning and restarted them with the rest; here the button leaves them
+/// out, because the person who clicks it is looking at servers, not at the
+/// turn an agent is halfway through, and a conversation resumes but the turn
+/// does not. They stay in the count that decides « every agent already runs
+/// with this choice », and join the button as soon as their turn ends: the
+/// panel is drawn from the live model, so it shows when they do.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RestartPlan {
+    /// Out of date and between turns: what the button restarts.
+    now: Vec<PaneId>,
+    /// Out of date and inside a turn (working, or waiting for an answer):
+    /// left alone.
+    held: Vec<PaneId>,
+    /// How many Claude Code panes the workspace has.
+    claude: usize,
+}
+
+impl RestartPlan {
+    /// Whether nothing is out of date at all: a workspace with no Claude Code
+    /// pane has nothing to be up to date.
+    fn up_to_date(&self) -> bool {
+        self.claude > 0 && self.now.is_empty() && self.held.is_empty()
+    }
+}
+
+fn restart_plan(
+    m: &Model,
+    ws: &Workspace,
+    mcp: &WorkspaceMcp,
+    servers: &[ServerInfo],
+) -> RestartPlan {
+    let mut plan = RestartPlan {
+        claude: ws
+            .panes
+            .iter()
+            .filter(|pane| pane.agent == AgentId::Claude)
+            .count(),
+        ..RestartPlan::default()
+    };
+    for pane in stale_panes(m, ws, mcp, servers) {
+        if m.live.panes_logic.is_mid_turn(&pane.id) {
+            plan.held.push(pane.id.clone());
+        } else {
+            plan.now.push(pane.id.clone());
+        }
+    }
+    plan
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: ServersMsg) -> Task<Message> {
@@ -148,22 +197,28 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: ServersMsg) -> 
             let Found::Ready(discovery) = &panel.found else {
                 return Task::none();
             };
-            let Some(ws) = m.workspace(&panel.ws) else {
-                return Task::none();
-            };
-            let mcp = workspace_mcp(Some(ws));
-            let stale: Vec<String> = stale_panes(m, ws, &mcp, &discovery.servers)
-                .map(|pane| pane.id.clone())
-                .collect();
-            Task::batch([
-                Task::done(Message::Intent(Intent::RestartPanes {
-                    ws: panel.ws.clone(),
-                    panes: stale,
-                })),
-                Task::done(Message::Intent(Intent::CloseOverlay)),
-            ])
+            match restart_request(m, &panel.ws, &discovery.servers) {
+                Some(restart) => Task::batch([
+                    Task::done(Message::Intent(restart)),
+                    Task::done(Message::Intent(Intent::CloseOverlay)),
+                ]),
+                None => Task::none(),
+            }
         }
     }
+}
+
+/// What « Restart N agents » asks the shell for: the panes that run with
+/// something else and are between turns. Read when the button is pressed, not
+/// when it was drawn, since a turn may have begun meanwhile. `None` when there
+/// is nothing to restart.
+fn restart_request(m: &Model, ws_id: &WsId, servers: &[ServerInfo]) -> Option<Intent> {
+    let ws = m.workspace(ws_id)?;
+    let plan = restart_plan(m, ws, &workspace_mcp(Some(ws)), servers);
+    (!plan.now.is_empty()).then(|| Intent::RestartPanes {
+        ws: ws_id.clone(),
+        panes: plan.now,
+    })
 }
 
 /// Saves the choice, on every toggle. Back to Claude Code's own configuration,
@@ -269,40 +324,31 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
     }
 
     // The footer: what the choice reaches, and the restart that makes it so.
-    let stale: Vec<&Pane> = if discovery.is_some() {
-        stale_panes(ctx.model, ws, &mcp, servers).collect()
+    let plan = if discovery.is_some() {
+        restart_plan(ctx.model, ws, &mcp, servers)
     } else {
-        Vec::new()
+        RestartPlan::default()
     };
-    let claude_panes = ws
-        .panes
-        .iter()
-        .filter(|pane| pane.agent == AgentId::Claude)
-        .count();
-    let working = stale
-        .iter()
-        .filter(|pane| is_working(ctx.model, pane))
-        .count();
-    let mut note = if discovery.is_some() && claude_panes > 0 && stale.is_empty() {
+    let mut note = if plan.up_to_date() {
         ctx.t(Key::McpScopeUpToDate).into_owned()
     } else {
         ctx.t(Key::McpScopeApplies).into_owned()
     };
-    if working > 0 {
+    if !plan.held.is_empty() {
         note.push(' ');
-        note.push_str(&ctx.i18n.tn(Key::McpScopeBusy, working, &[]));
+        note.push_str(&ctx.i18n.tn(Key::McpScopeHeld, plan.held.len(), &[]));
     }
     let restart = button::primary(
         t,
-        if stale.is_empty() {
+        if plan.now.is_empty() {
             ctx.t(Key::McpScopeRestartNone)
         } else {
-            ctx.i18n.tn(Key::McpScopeRestart, stale.len(), &[])
+            ctx.i18n.tn(Key::McpScopeRestart, plan.now.len(), &[])
         },
     )
     .icon(Icon::Restart)
     .tip(ctx.t(Key::McpScopeRestartHint))
-    .on_press_maybe((!stale.is_empty()).then(|| msg(ServersMsg::Restart)));
+    .on_press_maybe((!plan.now.is_empty()).then(|| msg(ServersMsg::Restart)));
     let close =
         button::ghost(t, ctx.t(Key::McpScopeClose)).on_press(Message::Intent(Intent::CloseOverlay));
 
@@ -642,3 +688,6 @@ fn stats<'a>(
     .style(style::container::well(t))
     .into()
 }
+
+#[cfg(test)]
+mod tests;
