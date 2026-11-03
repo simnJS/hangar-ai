@@ -1848,8 +1848,6 @@ pub enum Key {
     ModalClose,
     /// `model.animation`
     ModelAnimation,
-    /// `model.animationsLater`
-    ModelAnimationsLater,
     /// `model.axes`
     ModelAxes,
     /// `model.cancel`
@@ -3559,7 +3557,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1771;
+pub const KEY_COUNT: usize = 1770;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4481,7 +4479,6 @@ impl Key {
         Key::MobileUnavailable,
         Key::ModalClose,
         Key::ModelAnimation,
-        Key::ModelAnimationsLater,
         Key::ModelAxes,
         Key::ModelCancel,
         Key::ModelCapture,
@@ -6257,7 +6254,6 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "mobile.unavailable", en: Text::plain("its data folder could not be opened"), fr: Text::plain("son dossier de données n'a pas pu être ouvert") },
     Message { id: "modal.close", en: Text::plain("Close"), fr: Text::plain("Fermer") },
     Message { id: "model.animation", en: Text::plain("Animation"), fr: Text::plain("Animation") },
-    Message { id: "model.animationsLater", en: Text::plain("Animations are listed here, but this version cannot play them yet."), fr: Text::plain("Les animations sont listées ici, mais cette version ne sait pas encore les lire.") },
     Message { id: "model.axes", en: Text::plain("Axes and origin"), fr: Text::plain("Axes et origine") },
     Message { id: "model.cancel", en: Text::plain("Cancel"), fr: Text::plain("Annuler") },
     Message { id: "model.capture", en: Text::plain("Capture the view"), fr: Text::plain("Capturer la vue") },

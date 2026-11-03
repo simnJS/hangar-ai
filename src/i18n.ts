@@ -863,7 +863,6 @@ const en = {
   "model.megabytes": "{size} MB",
   "model.read": "Loading the file",
   "model.cancel": "Cancel",
-  "model.animationsLater": "Animations are listed here, but this version cannot play them yet.",
 
   "preview.kind.model": "3D model",
   "preview.kind.image": "Image",
@@ -2470,7 +2469,6 @@ const fr: Record<Key, string> = {
   "model.megabytes": "{size} Mo",
   "model.read": "Chargement du fichier",
   "model.cancel": "Annuler",
-  "model.animationsLater": "Les animations sont listées ici, mais cette version ne sait pas encore les lire.",
 
   "preview.kind.model": "Modèle 3D",
   "preview.kind.image": "Image",
