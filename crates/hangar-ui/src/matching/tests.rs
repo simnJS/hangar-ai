@@ -184,20 +184,23 @@ mod match_entry {
 
     #[test]
     fn falls_back_to_the_keywords_below_any_label_match() {
-        let keywords = vec!["Codex".to_string(), "attend ta réponse".to_string()];
+        let keywords = vec!["Claude Code".to_string(), "attend ta réponse".to_string()];
         assert_eq!(
-            super::super::match_entry("Aller à Ben", &keywords, "codex"),
+            super::super::match_entry("Aller à Ben", &keywords, "claude"),
             Some(Match {
                 score: SCORE_KEYWORD,
                 ranges: Vec::new()
             })
         );
         assert_eq!(
-            super::super::match_entry("Aller à Ben", &["Codex".to_string()], "ben")
+            super::super::match_entry("Aller à Ben", &["Claude Code".to_string()], "ben")
                 .map(|found| found.score),
             Some(SCORE_WORD)
         );
-        assert_eq!(super::super::match_entry("Aller à Ben", &[], "codex"), None);
+        assert_eq!(
+            super::super::match_entry("Aller à Ben", &[], "claude"),
+            None
+        );
     }
 }
 

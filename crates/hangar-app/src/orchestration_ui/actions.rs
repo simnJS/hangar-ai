@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn pins_a_claude_code_pane_in_a_workspace_that_has_no_orchestrator() {
-        let ws = ws_of(vec![claude("a"), pane("b", AgentId::Codex, None)]);
+        let ws = ws_of(vec![claude("a"), pane("b", AgentId::Shell, None)]);
         assert_eq!(pin_refusal(&ws, "a"), None);
     }
 
@@ -514,19 +514,8 @@ mod tests {
 
     #[test]
     fn pins_claude_code_only_the_role_reaches_the_agent_through_its_mod() {
-        for agent in [
-            AgentId::Shell,
-            AgentId::Codex,
-            AgentId::Gemini,
-            AgentId::Opencode,
-        ] {
-            let ws = ws_of(vec![pane("x", agent, None)]);
-            assert_eq!(
-                pin_refusal(&ws, "x"),
-                Some(PinRefusal::NotClaude),
-                "{agent:?}"
-            );
-        }
+        let ws = ws_of(vec![pane("x", AgentId::Shell, None)]);
+        assert_eq!(pin_refusal(&ws, "x"), Some(PinRefusal::NotClaude));
     }
 
     #[test]
@@ -865,17 +854,16 @@ mod tests {
     }
 
     #[test]
-    fn does_nothing_for_other_agents_or_without_a_role() {
-        for agent in [AgentId::Codex, AgentId::Shell] {
-            let input = RoleRestartInput { agent, ..base() };
-            assert_eq!(role_restart(&input), RoleRestart::Skip);
-            let mid = RoleRestartInput {
-                agent,
-                mid_turn: true,
-                ..base()
-            };
-            assert_eq!(role_restart(&mid), RoleRestart::Skip);
-        }
+    fn does_nothing_for_a_shell_or_without_a_role() {
+        let agent = AgentId::Shell;
+        let input = RoleRestartInput { agent, ..base() };
+        assert_eq!(role_restart(&input), RoleRestart::Skip);
+        let mid = RoleRestartInput {
+            agent,
+            mid_turn: true,
+            ..base()
+        };
+        assert_eq!(role_restart(&mid), RoleRestart::Skip);
         let input = RoleRestartInput {
             role: None,
             ..base()

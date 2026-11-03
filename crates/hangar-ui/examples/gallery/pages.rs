@@ -438,7 +438,7 @@ fn layout(g: &Gallery) -> Element<'_, Message> {
 
     let header = panel::header(t, "Ben")
         .leading(glyph::state(t, GlyphState::Waiting, 8.0))
-        .subtitle("Codex")
+        .subtitle("Claude Code")
         .action(glyph::gauge(t, 72).tip("72 % of 200k tokens"))
         .action(
             button::icon_button(t, Icon::More)

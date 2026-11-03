@@ -98,7 +98,7 @@ impl Harness {
                 args: vec![],
             },
         ];
-        model.ui.available_agents = vec!["claude".into(), "codex".into()];
+        model.ui.claude_installed = true;
         model.live.accounts.accounts = Some(vec![
             account("main", "Principal", true),
             account("perso", "Perso", true),

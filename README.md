@@ -5,7 +5,7 @@
 <h1 align="center">Hangar.AI</h1>
 
 <p align="center">
-  Run Claude Code, Codex, Gemini CLI and OpenCode side by side in one window,<br>
+  Run many Claude Code sessions side by side in one window,<br>
   sharing a task board and a memory over MCP, and follow and steer them from your phone.
 </p>
 
@@ -29,8 +29,8 @@
 <p align="center"><sub>Screenshots of a real session: Claude Code agents at work on checkout-v2, a sample repository.</sub></p>
 
 Hangar.AI is an open-source desktop app for Windows, macOS and Linux, built with Tauri 2
-and React. It runs the coding agents you already use, each in a real terminal, and gives
-them a shared place to coordinate.
+and React. It runs Claude Code, as many sessions as you need, each in a real terminal
+next to plain shells, and gives them a shared place to coordinate.
 
 With **Hangar Mobile**, you follow and steer them from your phone while Hangar keeps running
 on your PC: see what waits for you in every project, answer an agent, allow or deny a
@@ -65,7 +65,7 @@ Hangar keeps them in one window, and on your phone:
   worktrees, and each delivery is reviewed, and run through your check command if you set
   one, before it is merged locally.
 
-Hangar launches the agent CLIs installed on your machine, with your accounts and your
+Hangar launches the Claude Code installed on your machine, with your accounts and your
 settings. It is not a model provider, and it has no online service of its own.
 
 ## Contents
@@ -92,7 +92,7 @@ in 1.1, with a real chat since 1.2):
   a question from an orchestrator, a delivery ready to land.
 - **A real chat.** A Claude Code pane, and the project manager, open as a conversation:
   your messages, Claude's answers with their formatting, and one line per action that opens
-  its detail. Codex, Gemini CLI and shells keep the terminal view.
+  its detail. Shells keep the terminal view.
 - **Claude's questions as buttons**, several choices when it allows them, and "Other" with a
   text field. Your answer reaches the session on the PC as if you had typed it there.
 - **Permissions** show the tool and what it will do (the command, the file), with Allow and
@@ -188,9 +188,9 @@ chat.
 
 ### Agents and terminals
 
-- **Agents and shells.** Each pane runs Claude Code, Codex, Gemini CLI, OpenCode or a
-  plain shell: PowerShell, cmd, Git Bash, WSL, zsh, bash, fish, Nushell…
-- **Session resume.** Claude Code and Codex panes reopen on the conversation they were in.
+- **Claude Code and shells.** Each pane runs Claude Code or a plain shell: PowerShell,
+  cmd, Git Bash, WSL, zsh, bash, fish, Nushell…
+- **Session resume.** Claude Code panes reopen on the conversation they were in.
 - **Claude Code bridge.** A small mod reports turns, permission prompts, context fill and
   plan usage, so pane states are exact rather than guessed. When an agent edits a file
   another pane just changed, it is told who changed it and asked to re-read it.
@@ -225,8 +225,8 @@ chat.
 - **Global memory.** Agents search, write and update facts across projects. You can browse
   and edit them in the Memory view.
 - **Usage statistics.** Tokens, active time and the equivalent cost at API prices, per
-  project, agent and model. They are read from the transcripts Claude Code and Codex keep on
-  disk. On a Claude or ChatGPT subscription, the cost figure is an equivalent, not a bill.
+  project and model. They are read from the transcripts Claude Code keeps on disk. On a
+  Claude subscription, the cost figure is an equivalent, not a bill.
 
 ![The board of a workspace: one task to do, waiting for a decision and depending on two other tasks; two in review, each labelled ready-to-land, with the worker that did it; and four done](.github/assets/board.webp)
 
@@ -264,21 +264,19 @@ installs it in one click.
 > and choose **Open**. On macOS 15 and later, go to **System Settings → Privacy &
 > Security** and click **Open Anyway**.
 
-You also need at least one agent CLI installed and signed in: [Claude Code](https://code.claude.com/docs/en/overview),
-[Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-or [OpenCode](https://opencode.ai). Hangar launches them; it does not install
-them.
+You also need [Claude Code](https://code.claude.com/docs/en/overview) installed and
+signed in. Hangar launches it; it does not install it.
 
 ## Getting started
 
 1. **Create a workspace** with `Ctrl`/`Cmd`+`Shift`+`N`. Pick a project folder and a
-   layout, then click a cell to choose its agent. Agents that are not installed are
-   marked as such.
-2. **Connect the agents to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`; `Alt` is
+   layout, then click a cell to choose Claude Code or a shell. If Claude Code is not
+   installed, the dialog says so.
+2. **Connect Claude Code to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`; `Alt` is
    `Option` on a Mac) and click
-   **Configure**. The panel can also write a short playbook into the project's `AGENTS.md`
-   and `CLAUDE.md`, telling agents to claim tasks before they start. Restart the agents so
-   they load the server.
+   **Configure**. The panel can also write a short playbook into the project's `CLAUDE.md`,
+   telling agents to claim tasks before they start. Restart the agents so they load the
+   server.
 3. **Give them work.** Add tasks on the board (`Ctrl`/`Cmd`+`Alt`+`B`), or ask an agent to
    split a goal into tasks. Other agents pick tasks up with `board_next_task`.
 4. **Try orchestration.** In a git repository, run **New orchestrator** from the command
@@ -304,7 +302,7 @@ on the PC.
 A Claude Code pane, and the project manager, open as a conversation rather than a copy of
 the terminal: your messages, Claude's answers, one line per action. When Claude asks you
 something, each question shows with its options as large buttons, and a **Terminal** button
-still shows any pane's raw screen. Codex, Gemini CLI and shells keep the terminal view.
+still shows any pane's raw screen. Shells keep the terminal view.
 
 It is a web app that Hangar itself serves, and that you add to the phone's Home Screen.
 There is no app store, no account and no server of ours in between.
@@ -350,26 +348,18 @@ goes to the running app through a local HTTP API on `127.0.0.1`. The port and th
 change at each launch and are never written into agent configs. Every board change goes
 through a single lock, so claims stay atomic across panes.
 
-The MCP panel registers the server in each tool's own format:
-
-| Tool | Config file |
-|---|---|
-| Claude Code | `.mcp.json` (project) |
-| Codex | `~/.codex/config.toml` |
-| Gemini CLI | `~/.gemini/settings.json` |
-| Cursor | `.cursor/mcp.json` (project) |
-| VS Code | `.vscode/mcp.json` (project) |
-
-Hangar merges its entry into the existing configuration rather than overwriting it, and
-keeps a backup the first time it writes a file. OpenCode is not in the panel yet: add
-`hangar-ai --mcp` to its MCP servers by hand.
+The MCP panel registers the server in the project's `.mcp.json`, which Claude Code reads,
+and approves it once in `~/.claude/settings.json` so it is not asked for again in every
+session. Hangar merges its entry into the existing configuration rather than overwriting
+it, and keeps a backup the first time it writes a file. To do it by hand instead, run
+`claude mcp add hangar --scope project -- "<path to hangar-ai>" --mcp` in the project.
 
 | Tools | What agents do with them |
 |---|---|
 | `board_list_tasks`, `board_next_task`, `board_claim_task`, `board_create_task`, `board_update_task`, `board_comment_task`, `board_delete_task` | Read the board, take the highest-priority free task whose dependencies are done, claim it (this fails if another agent holds it), split work into new tasks, move tasks between columns, and leave notes for each other. |
 | `board_block_task`, `board_unblock_task` | Put a task on hold for something outside the board (a release, a decision, a date) with a reason and an optional `recheck` day, instead of a comment: it returns to todo with nobody on it, `board_next_task` and `worker_spawn` skip it, and its dependents keep waiting. The recheck day passed, it unblocks itself; `human_only` blocks are lifted by a person from the board, never by an agent. |
 | `memory_search`, `memory_read`, `memory_write`, `memory_update`, `memory_list`, `memory_delete` | Look up what earlier sessions learned before starting, and record decisions, pitfalls and conventions. Writing an existing title replaces that entry. |
-| `workspace_list`, `workspace_window`, `pane_list`, `pane_create`, `pane_send`, `pane_read`, `pane_restart`, `pane_close`, `pane_focus` | See the other panes and their state, open a pane with another agent (in a worktree, for instance), type into a pane or queue a prompt until it is idle, read its output, and show a pane to you. |
+| `workspace_list`, `workspace_window`, `pane_list`, `pane_create`, `pane_send`, `pane_read`, `pane_restart`, `pane_close`, `pane_focus` | See the other panes and their state, open another Claude Code or shell pane (in a worktree, for instance), type into a pane or queue a prompt until it is idle, read its output, and show a pane to you. |
 | `workspace_create`, `workspace_set_check` | Any agent can ask for a workspace for a repository the person named (`workspace_create {repo, name?, parent?}`): Hangar clones it, into `parent` when you say where (any absolute folder, on any drive: « put it on my second SSD » gives `E:/AnyPS5`; missing folders are created, and an existing empty folder is used; your Projects folder setting is not changed), creates the workspace and starts an orchestrator that reads the repository, installs its dependencies, sets the check command, runs the tests once and reports. A repository that is not yours is cloned only after you click Clone in Hangar, on a card that shows the destination; for your own, the agent just tells you the folder. The orchestrator sets its own workspace's check command with `workspace_set_check {command}`, and you see it in the orchestration panel. |
 | `worker_spawn`, `worker_list`, `worker_stop`, `delivery_submit`, `delivery_status` | Orchestration. The orchestrator starts, lists and stops workers. A worker hands in its branch for check, review and merge. |
 | `model_show`, `model_snapshot`, `model_close` | Open a 3D model in the preview panel, render it to an image to check it, and close it. |

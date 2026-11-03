@@ -753,9 +753,9 @@ never the message's.
   than none.
 - Each may be called **120 times a minute**, enough to count seconds; each change redraws the strip.
 
-A pane in `panes.list`: `name` (what `panes.send` takes), `agent` (`claude`,
-`codex`, `gemini`, `opencode` or `shell`), `role` (`orchestrator`, `worker`,
-`manager` or `null`), `state` (`working`, `waiting` for an answer, `yours` —
+A pane in `panes.list`: `name` (what `panes.send` takes), `agent` (`claude`
+for Claude Code, or `shell` for a plain shell; Hangar runs no other agent),
+`role` (`orchestrator`, `worker`, `manager` or `null`), `state` (`working`, `waiting` for an answer, `yours` —
 done, not looked at yet — `idle`, or `null` when Hangar cannot tell), and
 `canSend`, whether `panes.send` reaches it now.
 

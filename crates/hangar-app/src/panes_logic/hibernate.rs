@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use hangar_i18n::{Key, Translator, args};
 
-use super::agents::is_resumable;
 use crate::state::live::EpochMs;
 use crate::state::types::{AgentId, Pane, PaneId, PaneRole, WsId};
 
@@ -95,7 +94,6 @@ pub enum Blocker {
     RecentInteraction,
     NoAgents,
     UnknownPane,
-    NotResumable,
     NoSession,
     Busy,
     RecentlyBusy,
@@ -166,9 +164,9 @@ fn waited(since: EpochMs, now: EpochMs, delay_ms: u64) -> bool {
 /// 2. Nobody has touched it for the delay.
 /// 3. At least one pane runs an agent: freeing agents is the point, and a
 ///    workspace of shells holds little memory and all its value on screen.
-/// 4. Every agent pane can come back as it was: Claude Code or Codex, with a
-///    session id captured. Gemini and OpenCode cannot resume, and a pane
-///    without an id would come back on a blank conversation.
+/// 4. Every agent pane can come back as it was: its Claude Code has a
+///    session id captured. A pane without an id would come back on a blank
+///    conversation.
 /// 5. Every agent has been idle or handed back for the delay (not working,
 ///    not waiting for an answer) with nothing queued for it.
 /// 6. Every shell has printed nothing for the delay and runs no process of
@@ -269,9 +267,6 @@ fn panes_at_rest(
 
         let mut shell = pane.agent == AgentId::Shell;
         if !shell {
-            if !is_resumable(pane.agent) {
-                return awake(Blocker::NotResumable);
-            }
             if pane.session_id.as_deref().is_none_or(str::is_empty) {
                 return awake(Blocker::NoSession);
             }
@@ -397,14 +392,6 @@ pub fn sleep_refusal(
         Blocker::Delivering => t.t(Key::SleepDelivering).into_owned(),
         Blocker::NoAgents => t.t(Key::SleepNoAgents).into_owned(),
         Blocker::UnknownPane => named(Key::SleepStarting),
-        Blocker::NotResumable => {
-            let agent = pane.map_or("", |pane| pane.agent.info().label);
-            t.t_with(
-                Key::SleepNotResumable,
-                &args!("name" => name, "agent" => agent),
-            )
-            .into_owned()
-        }
         Blocker::NoSession => named(Key::SleepNoSession),
         Blocker::Busy | Blocker::RecentlyBusy => {
             if pane.is_some_and(|pane| waiting(&pane.id)) {
@@ -489,11 +476,11 @@ mod tests {
         vec![
             pane("a", AgentId::Claude),
             pane("b", AgentId::Claude),
-            pane("c", AgentId::Codex),
+            pane("c", AgentId::Claude),
         ]
     }
 
-    /// Two Claude Code panes and a Codex, all resting: a workspace ready to sleep.
+    /// Three Claude Code panes, all resting: a workspace ready to sleep.
     fn verdict_of(
         panes: &[Pane],
         rest: &HashMap<PaneId, PaneRest>,
@@ -600,22 +587,10 @@ mod tests {
     }
 
     #[test]
-    fn keeps_awake_an_agent_that_could_not_resume_its_session() {
-        for agent in [AgentId::Gemini, AgentId::Opencode] {
-            let panes = [pane("a", AgentId::Claude), pane("g", agent)];
-            let rest = all_resting(&panes);
-            assert_eq!(
-                verdict_of(&panes, &rest, |_| {}),
-                awake(Blocker::NotResumable, "g")
-            );
-        }
-    }
-
-    #[test]
-    fn keeps_awake_a_resumable_agent_whose_session_was_never_captured() {
+    fn keeps_awake_an_agent_whose_session_was_never_captured() {
         let panes = [
             pane("a", AgentId::Claude),
-            with_session("b", AgentId::Codex, None),
+            with_session("b", AgentId::Claude, None),
         ];
         let rest = all_resting(&panes);
         assert_eq!(
@@ -695,7 +670,7 @@ mod tests {
 
         #[test]
         fn never_puts_a_workspace_to_sleep_while_one_of_its_workers_is_there() {
-            let panes = [orchestrator(), worker(), pane("c", AgentId::Codex)];
+            let panes = [orchestrator(), worker(), pane("c", AgentId::Claude)];
             let rest = all_resting(&panes);
             assert_eq!(
                 verdict_of(&panes, &rest, |_| {}),
@@ -708,7 +683,7 @@ mod tests {
             // Busy, never seen, without a session: the worker still answers first.
             let mut stuck = worker();
             stuck.session_id = None;
-            let panes = [stuck, pane("c", AgentId::Codex)];
+            let panes = [stuck, pane("c", AgentId::Claude)];
             let rest = HashMap::new();
             assert_eq!(reason(&verdict_of(&panes, &rest, |_| {})), "Worker");
         }
@@ -716,7 +691,7 @@ mod tests {
         #[test]
         fn never_puts_a_workspace_to_sleep_while_one_of_its_deliveries_runs() {
             assert_eq!(reason(&input(|i| i.delivering = true)), "Delivering");
-            let panes = [orchestrator(), pane("c", AgentId::Codex)];
+            let panes = [orchestrator(), pane("c", AgentId::Claude)];
             let rest = all_resting(&panes);
             assert_eq!(
                 reason(&verdict_of(&panes, &rest, |i| i.delivering = true)),
@@ -726,7 +701,7 @@ mod tests {
 
         #[test]
         fn lets_an_orchestrator_with_no_worker_and_nothing_landing_sleep_like_any_agent() {
-            let panes = [orchestrator(), pane("c", AgentId::Codex)];
+            let panes = [orchestrator(), pane("c", AgentId::Claude)];
             let rest = all_resting(&panes);
             assert_eq!(
                 verdict_of(&panes, &rest, |_| {}),
@@ -754,7 +729,7 @@ mod tests {
 
         #[test]
         fn never_sleeps_left_alone_however_long_whatever_its_manager_is_doing() {
-            let panes = [manager(), pane("c", AgentId::Codex)];
+            let panes = [manager(), pane("c", AgentId::Claude)];
             let rest = all_resting(&panes);
             assert_eq!(
                 verdict_of(&panes, &rest, |_| {}),
@@ -898,7 +873,7 @@ mod tests {
 
         #[test]
         fn never_asks_the_shell_of_a_running_agent_the_agent_is_its_child() {
-            let panes = [pane("a", AgentId::Claude), pane("b", AgentId::Codex)];
+            let panes = [pane("a", AgentId::Claude), pane("b", AgentId::Claude)];
             let rest = all_resting(&panes);
             assert_eq!(kind(&verdict_of(&panes, &rest, |_| {})), "sleep");
         }
@@ -1030,17 +1005,9 @@ mod tests {
 
         #[test]
         fn keeps_awake_an_agent_that_could_not_come_back_as_it_was() {
-            for agent in [AgentId::Gemini, AgentId::Opencode] {
-                let panes = [pane("a", AgentId::Claude), pane("g", agent)];
-                let rest = just_now_all(&panes);
-                assert_eq!(
-                    forced_of(&panes, &rest, |_| {}),
-                    awake(Blocker::NotResumable, "g")
-                );
-            }
             let fresh = [
                 pane("a", AgentId::Claude),
-                with_session("b", AgentId::Codex, None),
+                with_session("b", AgentId::Claude, None),
             ];
             let rest = just_now_all(&fresh);
             assert_eq!(
@@ -1269,7 +1236,7 @@ mod tests {
             ava.name = "Ava".into();
             let mut leo = shell("p2");
             leo.name = "Leo".into();
-            let mut gus = with_session("p3", AgentId::Gemini, None);
+            let mut gus = with_session("p3", AgentId::Claude, None);
             gus.name = "Gus".into();
             vec![ava, leo, gus]
         }
@@ -1306,16 +1273,16 @@ mod tests {
                 "Un processus tourne dans le shell de Leo"
             );
             assert_eq!(
-                calm(Locale::Fr, Blocker::NotResumable, Some("p3")),
-                "Gemini ne reprend pas sa session (Gus)"
+                calm(Locale::Fr, Blocker::NoSession, Some("p3")),
+                "Gus n'a pas encore de session à reprendre"
             );
             assert_eq!(
                 calm(Locale::En, Blocker::ShellChildren, Some("p2")),
                 "A process is running in Leo's shell"
             );
             assert_eq!(
-                calm(Locale::En, Blocker::NotResumable, Some("p3")),
-                "Gemini cannot resume its session (Gus)"
+                calm(Locale::En, Blocker::NoSession, Some("p3")),
+                "Gus has no session to resume yet"
             );
         }
 
@@ -1333,7 +1300,6 @@ mod tests {
                 Blocker::RecentInteraction,
                 Blocker::NoAgents,
                 Blocker::UnknownPane,
-                Blocker::NotResumable,
                 Blocker::NoSession,
                 Blocker::Busy,
                 Blocker::RecentlyBusy,

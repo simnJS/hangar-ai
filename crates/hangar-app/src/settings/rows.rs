@@ -50,11 +50,7 @@ pub fn snap(raw: f32, step: f64) -> f64 {
 /// anew for every frame.
 pub fn text_of<'a>(settings: &'a Settings, target: &Target) -> &'a str {
     match target {
-        Target::AgentCommand(agent) => settings
-            .agent_commands
-            .get(agent.as_str())
-            .and_then(|command| command.as_str())
-            .unwrap_or(""),
+        Target::ClaudeCommand => settings.agent_commands.claude.as_deref().unwrap_or(""),
         Target::VoiceCleanupModel => &settings.voice_cleanup_model,
         Target::VoiceCleanupHint => &settings.voice_cleanup_hint,
         Target::DiscordAppId => &settings.discord_app_id,

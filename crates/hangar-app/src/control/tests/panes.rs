@@ -141,7 +141,7 @@ async fn refuses_a_prompt_for_an_agent_the_queue_cannot_reach_a_taken_name_and_a
     contains(
         &refusal(
             "pane_create",
-            with(from_ava(), json!({"agent": "codex", "prompt": "hi"})),
+            with(from_ava(), json!({"agent": "shell", "prompt": "hi"})),
             &fake,
         )
         .await,

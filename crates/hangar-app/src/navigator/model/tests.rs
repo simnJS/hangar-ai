@@ -54,15 +54,15 @@ fn world() -> World {
                 "hangar",
                 vec![
                     claude("p1", "Ava"),
-                    pane("p2", "Ben", AgentId::Codex),
-                    pane("p3", "Cléo", AgentId::Gemini),
+                    pane("p2", "Ben", AgentId::Shell),
+                    claude("p3", "Cléo"),
                     pane("p4", "Dan", AgentId::Shell),
                 ],
                 None,
             ),
             ws(
                 "storefront",
-                vec![claude("p5", "Eve"), pane("p6", "Finn", AgentId::Shell)],
+                vec![claude("p5", "Eve"), claude("p6", "Finn")],
                 Some("clients"),
             ),
             ws("docs", vec![claude("p7", "Gus")], None),
@@ -328,7 +328,8 @@ fn finds_a_workspace_through_one_of_its_agents_by_name_or_kind() {
         strs(&["folder:clients", "ws:storefront"])
     );
     assert_eq!(keys(&world(), "cleo"), strs(&["ws:hangar"]));
-    assert_eq!(keys(&world(), "CODEX"), strs(&["ws:hangar"]));
+    // The shells of Hangar are the only ones.
+    assert_eq!(keys(&world(), "SHELL"), strs(&["ws:hangar"]));
 }
 
 #[test]

@@ -307,13 +307,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         ));
     }
 
-    let missing = pane.agent != AgentId::Shell
-        && !ctx
-            .model
-            .ui
-            .available_agents
-            .iter()
-            .any(|agent| agent == pane.agent.as_str());
+    let missing = pane.agent == AgentId::Claude && !ctx.model.ui.claude_installed;
     if missing {
         let words = ctx
             .i18n
@@ -566,13 +560,7 @@ fn agent_picker<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Mess
         AGENTS
             .iter()
             .map(|agent| {
-                let missing = agent.id != AgentId::Shell
-                    && !ctx
-                        .model
-                        .ui
-                        .available_agents
-                        .iter()
-                        .any(|id| id == agent.id.as_str());
+                let missing = agent.id == AgentId::Claude && !ctx.model.ui.claude_installed;
                 let mut label = agent.label.to_owned();
                 if missing {
                     label.push_str(&ctx.t(Key::PaneMissing));

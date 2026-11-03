@@ -648,12 +648,7 @@ fn counter<'a>(
     free: usize,
 ) -> Element<'a, Message> {
     let t = ctx.theme;
-    let missing = !ctx
-        .model
-        .ui
-        .available_agents
-        .iter()
-        .any(|available| available == agent.as_str());
+    let missing = agent == AgentId::Claude && !ctx.model.ui.claude_installed;
     let count = folder::count_of(&st.folder.assignments, agent);
     let mut name = column![text(label).size(tokens::font_size::BODY)];
     if missing {

@@ -424,7 +424,10 @@ mod tests {
 
     #[test]
     fn any_other_model_is_left_as_it_came() {
-        assert_eq!(pretty_model(Some("gpt-5-codex")).unwrap(), "gpt-5-codex");
+        assert_eq!(
+            pretty_model(Some("mystery-model-2")).unwrap(),
+            "mystery-model-2"
+        );
         assert_eq!(pretty_model(None), None);
         assert_eq!(pretty_model(Some("")), None);
     }

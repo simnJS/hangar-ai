@@ -1446,11 +1446,11 @@ mod tests {
         assert_eq!(live.insights.get("p1").queue.len(), 1);
     }
 
-    // ----- the guesses
+    // ----- the guesses, for a Claude Code whose mod has not spoken (or is off)
 
     #[test]
     fn a_long_burst_then_silence_is_work_then_a_hand_back() {
-        let (mut live, info) = mounted(AgentId::Codex);
+        let (mut live, info) = mounted(AgentId::Claude);
         let mut now = NOW;
         for _ in 0..40 {
             live.note_output("p1", now);
@@ -1467,7 +1467,7 @@ mod tests {
         assert_eq!(
             effects,
             [Effect::Notify {
-                title: "Ava · Codex".into(),
+                title: "Ava · Claude Code".into(),
                 body: said(Key::NotifySettled)
             }]
         );
@@ -1498,7 +1498,7 @@ mod tests {
 
     #[test]
     fn a_bell_hands_back_at_once() {
-        let (mut live, info) = mounted(AgentId::Gemini);
+        let (mut live, info) = mounted(AgentId::Claude);
         let effects = live.bell(&info, &amb(NOW));
         assert_eq!(activity(&live, &info), Some(AgentActivity::Yours));
         assert_eq!(effects.len(), 1);
@@ -1519,16 +1519,16 @@ mod tests {
 
     #[test]
     fn a_terminal_notification_hands_back_with_the_agents_own_words() {
-        let (mut live, info) = mounted(AgentId::Opencode);
+        let (mut live, info) = mounted(AgentId::Claude);
         let effects = live.terminal_notification(&info, "Build finished", &amb(NOW));
         assert_eq!(
             effects,
             [Effect::Notify {
-                title: "Ava · OpenCode".into(),
+                title: "Ava · Claude Code".into(),
                 body: "Build finished".into()
             }]
         );
-        let (mut live, info) = mounted(AgentId::Opencode);
+        let (mut live, info) = mounted(AgentId::Claude);
         let effects = live.terminal_notification(&info, "", &amb(NOW));
         assert!(
             matches!(&effects[0], Effect::Notify { body, .. } if *body == said(Key::NotifySettled))

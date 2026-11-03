@@ -1,12 +1,10 @@
 //! Usage statistics: tokens, active time and their API-equivalent cost, read
-//! from the transcripts the agents already keep on disk.
+//! from the transcripts Claude Code already keeps on disk.
 //!
 //! Claude Code writes every exchange to `~/.claude/projects/<project>/` —
 //! its subagents to a `subagents` folder under the session — and stamps each
-//! answer with its token usage. Codex keeps rollouts under
-//! `~/.codex/sessions/` and `archived_sessions/`, plain or compressed, with
-//! running token totals. Gemini CLI and OpenCode keep nothing readable of the
-//! kind, so they do not appear.
+//! answer with its token usage. It is the only agent Hangar runs (owner's
+//! decision, 2026-11-03), so it is the only one read.
 //!
 //! That is gigabytes for a busy machine, so nothing is read twice: every file
 //! leaves a digest (parse.rs) in a cache keyed by its path, size and
@@ -20,7 +18,7 @@ mod parse;
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -32,12 +30,12 @@ use serde::{Deserialize, Serialize};
 use crate::host::Host;
 
 pub use aggregate::{Bucket, ModelInfo, SessionInfo, Window, ACTIVE_GAP_CAP_MS};
-pub use parse::Agent;
 use parse::Digest;
 
 /// Bumped whenever a digest would come out differently for the same file —
 /// a parser fix — so the caches written before it are dropped, not trusted.
-const CACHE_VERSION: u32 = 2;
+/// 3: digests no longer name an agent, and Codex's are gone with it.
+const CACHE_VERSION: u32 = 3;
 const CACHE_FILE: &str = "usage-stats-cache.json";
 /// Bytes hashed at the head of a file to tell an appended one from a
 /// rewritten one.
@@ -47,46 +45,35 @@ const HEAD_BYTES: usize = 4096;
 // Finding the transcripts
 // ---------------------------------------------------------------------------
 
-/// Where each agent keeps its transcripts.
+/// Where Claude Code keeps its transcripts.
 #[derive(Debug, Clone)]
 pub struct Roots {
     pub claude: Vec<PathBuf>,
-    pub codex: Vec<PathBuf>,
 }
 
 impl Roots {
-    /// The agents' own defaults, and the variables each one reads to move
-    /// them. Claude Code's are the main account's `projects/`, which every
-    /// Claude account's profile shares, so a turn made on any account is
-    /// counted once — plus the folder of a profile that could not share it
-    /// (accounts.rs).
+    /// Claude Code's default, and the variable it reads to move it: the main
+    /// account's `projects/`, which every Claude account's profile shares, so
+    /// a turn made on any account is counted once — plus the folder of a
+    /// profile that could not share it (accounts.rs).
     pub fn from_env() -> Self {
-        let home = dirs::home_dir().unwrap_or_default();
-        let under = |var: &str, fallback: &str| {
-            std::env::var_os(var)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(fallback))
-        };
         let mut claude = crate::accounts::projects_dirs();
         if claude.is_empty() {
-            claude.push(under("CLAUDE_CONFIG_DIR", ".claude").join("projects"));
+            let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"));
+            claude.push(config.join("projects"));
         }
-        let codex = under("CODEX_HOME", ".codex");
-        Self {
-            claude,
-            codex: vec![codex.join("sessions"), codex.join("archived_sessions")],
-        }
+        Self { claude }
     }
 }
 
 #[derive(Debug, Clone)]
 struct Found {
     path: PathBuf,
-    agent: Agent,
     /// A Claude subagent's transcript.
     sub: bool,
-    compressed: bool,
     modified: u64,
     size: u64,
 }
@@ -108,18 +95,17 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
         } else {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.ends_with(".jsonl") || name.ends_with(".jsonl.zst") {
+            if name.ends_with(".jsonl") {
                 out.push(path);
             }
         }
     }
 }
 
-/// What each root holds, for the page to say which agents it could read.
+/// What each root holds, for the page to say what it could read.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    pub agent: Agent,
     pub root: String,
     pub found: bool,
     pub files: usize,
@@ -128,16 +114,10 @@ pub struct Source {
 fn discover(roots: &Roots) -> (Vec<Found>, Vec<Source>) {
     let mut found = Vec::new();
     let mut sources = Vec::new();
-    let all = roots
-        .claude
-        .iter()
-        .map(|root| (Agent::Claude, root))
-        .chain(roots.codex.iter().map(|root| (Agent::Codex, root)));
-    for (agent, root) in all {
+    for root in &roots.claude {
         let mut files = Vec::new();
         walk(root, 0, &mut files);
         sources.push(Source {
-            agent,
             root: root.to_string_lossy().into_owned(),
             found: root.is_dir(),
             files: files.len(),
@@ -155,8 +135,6 @@ fn discover(roots: &Roots) -> (Vec<Found>, Vec<Source>) {
                 sub: path
                     .components()
                     .any(|part| part.as_os_str() == "subagents"),
-                compressed: path.extension().is_some_and(|ext| ext == "zst"),
-                agent,
                 path,
                 modified,
                 size: meta.len(),
@@ -169,63 +147,6 @@ fn discover(roots: &Roots) -> (Vec<Found>, Vec<Source>) {
 // ---------------------------------------------------------------------------
 // Reading one file
 // ---------------------------------------------------------------------------
-
-/// A zstd stream of one or more frames, decoded as one: a rollout appended
-/// to after compression is a second frame after the first.
-struct Frames<R: BufRead> {
-    decoder: Option<ruzstd::decoding::StreamingDecoder<R, ruzstd::decoding::FrameDecoder>>,
-}
-
-impl<R: BufRead> Frames<R> {
-    fn new(source: R) -> std::io::Result<Self> {
-        let decoder =
-            ruzstd::decoding::StreamingDecoder::new(source).map_err(std::io::Error::other)?;
-        Ok(Self {
-            decoder: Some(decoder),
-        })
-    }
-}
-
-impl<R: BufRead> Read for Frames<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        loop {
-            let Some(decoder) = self.decoder.as_mut() else {
-                return Ok(0);
-            };
-            let read = decoder.read(buf)?;
-            if read > 0 || buf.is_empty() {
-                return Ok(read);
-            }
-            // This frame is done; another may follow.
-            let mut source = self.decoder.take().map(|done| done.into_inner()).unwrap();
-            if source.fill_buf()?.is_empty() {
-                return Ok(0);
-            }
-            // Whatever follows and is not a frame (padding, a skippable
-            // frame) ends the stream rather than the read.
-            self.decoder = ruzstd::decoding::StreamingDecoder::new(source).ok();
-        }
-    }
-}
-
-/// Whether a path is a compressed (`.jsonl.zst`) rollout.
-pub(crate) fn is_compressed(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == "zst")
-}
-
-/// Opens a rollout for reading, `.jsonl` or `.jsonl.zst`, and yields its
-/// decoded bytes. Read-only: nothing is written or copied.
-pub(crate) fn open_rollout(path: &Path) -> std::io::Result<Box<dyn Read>> {
-    let file = fs::File::open(path)?;
-    if is_compressed(path) {
-        Ok(Box::new(Frames::new(BufReader::with_capacity(
-            256 * 1024,
-            file,
-        ))?))
-    } else {
-        Ok(Box::new(file))
-    }
-}
 
 /// What the cache keeps per file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -251,13 +172,13 @@ fn head_hash(path: &Path) -> std::io::Result<u64> {
 }
 
 /// The session a file belongs to when none of its lines said: its own name,
-/// which for both agents carries the session id.
+/// which is the session id.
 fn session_from_name(path: &Path) -> String {
     let stem = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let stem = stem.trim_end_matches(".zst").trim_end_matches(".jsonl");
+    let stem = stem.trim_end_matches(".jsonl");
     stem.to_string()
 }
 
@@ -266,10 +187,7 @@ fn session_from_name(path: &Path) -> String {
 fn read_file(found: &Found, previous: Option<&Entry>) -> std::io::Result<Entry> {
     let head = head_hash(&found.path)?;
     let resumable = previous.filter(|entry| {
-        !found.compressed
-            && entry.head == head
-            && found.size >= entry.size
-            && entry.digest.offset <= found.size
+        entry.head == head && found.size >= entry.size && entry.digest.offset <= found.size
     });
     let mut file = fs::File::open(&found.path)?;
     let mut digest = match resumable {
@@ -277,16 +195,9 @@ fn read_file(found: &Found, previous: Option<&Entry>) -> std::io::Result<Entry> 
             file.seek(SeekFrom::Start(entry.digest.offset))?;
             entry.digest.clone()
         }
-        None => Digest::new(found.agent, found.sub),
+        None => Digest::new(found.sub),
     };
-    let consumed = if found.compressed {
-        let frames = Frames::new(BufReader::with_capacity(256 * 1024, file))?;
-        // A compressed rollout is finished: its last line counts even
-        // without a newline.
-        parse::read_into(&mut digest, frames, true)?
-    } else {
-        parse::read_into(&mut digest, file, false)?
-    };
+    let consumed = parse::read_into(&mut digest, file, false)?;
     digest.offset += consumed;
     if digest.session.is_empty() {
         digest.session = session_from_name(&found.path);
@@ -434,7 +345,7 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
     let bytes: u64 = todo
         .iter()
         .map(|(file, previous)| match previous {
-            Some(entry) if !file.compressed && file.size >= entry.size => {
+            Some(entry) if file.size >= entry.size => {
                 file.size - entry.digest.offset.min(file.size)
             }
             _ => file.size,
@@ -669,7 +580,6 @@ mod tests {
         Fixture {
             roots: Roots {
                 claude: vec![root.join("claude")],
-                codex: vec![root.join("codex")],
             },
             disk: root.join("cache.json"),
             transcript,
@@ -686,10 +596,7 @@ mod tests {
         assert_eq!((first.scan.parsed, first.scan.reused), (1, 0));
         assert_eq!(total_output(&first), 100);
         assert!(f.disk.is_file());
-        assert!(first
-            .sources
-            .iter()
-            .any(|s| s.agent == Agent::Codex && !s.found));
+        assert!(first.sources.iter().all(|s| s.found));
 
         let second = usage_stats_at(&f.roots, Some(&f.disk), Window::default(), false);
         assert_eq!((second.scan.parsed, second.scan.reused), (0, 1));
@@ -772,10 +679,10 @@ mod tests {
     }
 
     #[test]
-    fn compressed_codex_rollouts_and_claude_subagents_are_read() {
+    fn claude_subagents_are_read_as_part_of_their_session() {
         let _turn = serial();
         reset_cache();
-        let f = fixture("zst");
+        let f = fixture("subagents");
         let subagents = f.transcript.with_extension("").join("subagents");
         fs::create_dir_all(&subagents).unwrap();
         fs::write(
@@ -790,38 +697,14 @@ mod tests {
         )
         .unwrap();
 
-        let day = f.root.join("codex").join("2026").join("10").join("02");
-        fs::create_dir_all(&day).unwrap();
-        let rollout = [
-            r#"{"timestamp":"2026-10-02T09:00:00Z","type":"session_meta","payload":{"id":"thread-1","cwd":"/home/me/app","source":"cli"}}"#,
-            r#"{"timestamp":"2026-10-02T09:00:01Z","type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
-            r#"{"timestamp":"2026-10-02T09:00:10Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":800,"output_tokens":60,"total_tokens":1060}}}}"#,
-        ]
-        .join("\n");
-        let compressed = ruzstd::encoding::compress_to_vec(
-            rollout.as_bytes(),
-            ruzstd::encoding::CompressionLevel::Fastest,
-        );
-        fs::write(
-            day.join("rollout-2026-10-02T09-00-00-thread-1.jsonl.zst"),
-            compressed,
-        )
-        .unwrap();
-
         let stats = usage_stats_at(&f.roots, Some(&f.disk), Window::default(), false);
-        assert_eq!(stats.scan.files, 3);
+        assert_eq!(stats.scan.files, 2);
         assert_eq!(stats.scan.failed, 0);
-        // 100 from the session, 5 from its subagent, 60 from Codex.
-        assert_eq!(total_output(&stats), 165);
+        // 100 from the session, 5 from its subagent.
+        assert_eq!(total_output(&stats), 105);
         // The subagent is part of its session, not one of its own.
-        assert_eq!(stats.sessions.len(), 2);
-        let codex = stats
-            .sessions
-            .iter()
-            .find(|s| s.agent == Agent::Codex)
-            .unwrap();
-        assert_eq!(codex.cwd, "/home/me/app");
-        assert!(stats.models.iter().any(|m| m.id == "gpt-5.5" && m.priced));
+        assert_eq!(stats.sessions.len(), 1);
+        assert_eq!(stats.sessions[0].cwd, "C:\\dev\\app");
         fs::remove_dir_all(&f.root).ok();
     }
 
@@ -879,8 +762,8 @@ mod tests {
         );
         for source in &cold.sources {
             println!(
-                "source {:?} found={} files={}",
-                source.agent, source.found, source.files
+                "source {} found={} files={}",
+                source.root, source.found, source.files
             );
         }
         assert_eq!(from_disk.buckets.len(), cold.buckets.len());

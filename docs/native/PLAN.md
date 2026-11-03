@@ -39,9 +39,15 @@ House rules that apply to every commit on this branch:
 
 ## 2. What Hangar is (for someone who has never seen it)
 
-Hangar.AI is a desktop app (Windows, macOS, Linux) that runs CLI coding agents
-(Claude Code, Codex, Gemini CLI, OpenCode) and shells side by side, each in a
-real terminal pane, up to 16 per workspace. Around the terminals:
+Hangar.AI is a desktop app (Windows, macOS, Linux) that runs Claude Code
+sessions and plain shells side by side, each in a real terminal pane, up to 16
+per workspace. Claude Code is the only agent: the owner decided on 2026-11-03
+that "Hangar va devenir exclusivement Claude Code", so the native app drops
+Codex, Gemini CLI and OpenCode (their launch, resume, transcripts, stats, MCP
+install targets and settings). Shell panes stay, since kit setup commands and
+worktree hooks run in visible shell panes. A `state.json` pane that ran one of
+the dropped agents opens as a shell pane in the same folder, with a one-time
+note in its bar, and is saved back as a shell. Around the terminals:
 
 - a **task board** per workspace that agents read and write over Hangar's **MCP server** (atomic claims), and a shared **memory**;
 - **orchestration**: one agent plans, workers run in git worktrees, deliveries are checked, reviewed by a separate agent and merged locally (`delivery.rs`, `orchestrator.rs`);
@@ -237,7 +243,7 @@ Windows and macOS. The item-by-item state of each (816 rows, with evidence) is i
 and the app has been used for real beside the old one:
 
 - [ ] Opens on the same data: workspaces, panes, boards, memory, settings, theme, language, shortcuts.
-- [ ] Panes run Claude Code, Codex, Gemini CLI, OpenCode and every detected shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume.
+- [ ] Panes run Claude Code (the only agent since the owner's decision of 2026-11-03) and every detected shell; a pane saved with Codex, Gemini CLI or OpenCode opens as a shell with a note; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume.
 - [ ] Typing has no perceptible latency; US-International dead keys compose (`'` + `e` → `é`) and nothing sticks.
 - [ ] Pane states from the bridge are exact (working, waiting, done, permission); context and plan gauges.
 - [ ] Navigator, inspector (all panels), status bar, command palette, menus, F6 regions, every shortcut rebindable.

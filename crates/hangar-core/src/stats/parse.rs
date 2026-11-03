@@ -1,5 +1,5 @@
-//! One transcript in, one digest out: the calls the agent was billed for,
-//! the times it was active, and what the session was about.
+//! One Claude Code transcript in, one digest out: the calls the agent was
+//! billed for, the times it was active, and what the session was about.
 //!
 //! The digest keeps facts, not totals. Totals depend on the period asked for,
 //! on the time zone and on the price table, and the digest is what goes in
@@ -17,14 +17,6 @@ use std::io::{BufRead, Read};
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Agent {
-    #[default]
-    Claude,
-    Codex,
-}
 
 /// One API call, at the moment its answer started. Field names are one
 /// letter because the cache holds tens of thousands of these.
@@ -57,21 +49,6 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// Cumulative token counters, as Codex reports them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct CodexTotals {
-    #[serde(default)]
-    pub input_tokens: u64,
-    #[serde(default)]
-    pub cached_input_tokens: u64,
-    #[serde(default)]
-    pub cache_write_input_tokens: u64,
-    #[serde(default)]
-    pub output_tokens: u64,
-    #[serde(default)]
-    pub total_tokens: u64,
-}
-
 /// How sure a title is: a name the user gave beats Claude Code's own, which
 /// beats the first prompt.
 pub const TITLE_PROMPT: u8 = 1;
@@ -81,7 +58,6 @@ pub const TITLE_CUSTOM: u8 = 3;
 /// What one transcript file contributes.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Digest {
-    pub agent: Agent,
     /// The conversation it belongs to. A subagent's file names its parent's,
     /// so a session's subagents count as part of it.
     pub session: String,
@@ -102,18 +78,11 @@ pub struct Digest {
     /// Bytes parsed so far, always on a line boundary: where an appended
     /// transcript picks up.
     pub offset: u64,
-    /// Codex reports running totals; the last one seen, to take differences.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex_totals: Option<CodexTotals>,
-    /// The model Codex named last, which every following count is billed to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex_model: Option<u16>,
 }
 
 impl Digest {
-    pub fn new(agent: Agent, sub: bool) -> Self {
+    pub fn new(sub: bool) -> Self {
         Self {
-            agent,
             sub,
             ..Self::default()
         }
@@ -471,218 +440,6 @@ pub fn claude_line(line: &str, digest: &mut Digest, seen: &mut HashMap<u64, usiz
 }
 
 // ---------------------------------------------------------------------------
-// Codex
-// ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-struct CodexLine<'a> {
-    #[serde(borrow)]
-    timestamp: Option<Cow<'a, str>>,
-    #[serde(rename = "type", borrow)]
-    kind: Option<Cow<'a, str>>,
-    #[serde(borrow)]
-    payload: Option<&'a RawValue>,
-}
-
-#[derive(Deserialize)]
-struct SessionMeta<'a> {
-    #[serde(borrow)]
-    id: Option<Cow<'a, str>>,
-    #[serde(borrow)]
-    cwd: Option<Cow<'a, str>>,
-    source: Option<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct TurnContext<'a> {
-    #[serde(borrow)]
-    model: Option<Cow<'a, str>>,
-}
-
-#[derive(Deserialize)]
-struct EventMsg<'a> {
-    #[serde(rename = "type", borrow)]
-    kind: Option<Cow<'a, str>>,
-    info: Option<TokenInfo>,
-}
-
-#[derive(Deserialize)]
-struct TokenInfo {
-    total_token_usage: Option<CodexTotals>,
-    last_token_usage: Option<CodexTotals>,
-}
-
-#[derive(Deserialize)]
-struct ResponseItem<'a> {
-    #[serde(rename = "type", borrow)]
-    kind: Option<Cow<'a, str>>,
-    #[serde(borrow)]
-    role: Option<Cow<'a, str>>,
-    content: Option<Vec<CodexText<'a>>>,
-}
-
-#[derive(Deserialize)]
-struct CodexText<'a> {
-    #[serde(borrow)]
-    text: Option<Cow<'a, str>>,
-}
-
-/// The thread that spawned a subagent's rollout, when it is one.
-fn codex_parent(source: &serde_json::Value) -> Option<String> {
-    source
-        .get("subagent")?
-        .get("thread_spawn")?
-        .get("parent_thread_id")?
-        .as_str()
-        .map(str::to_string)
-}
-
-/// Folds one Codex rollout line into the digest. Codex reports cumulative
-/// totals, sometimes the same one twice in a row; a call is the difference
-/// between two of them.
-pub fn codex_line(line: &str, digest: &mut Digest) {
-    let Ok(parsed) = serde_json::from_str::<CodexLine>(line) else {
-        digest.bad_lines += 1;
-        return;
-    };
-    let at = parsed.timestamp.as_deref().and_then(parse_time);
-    if let Some(at) = at {
-        digest.stamps.push(at);
-    }
-    let (Some(kind), Some(payload)) = (parsed.kind.as_deref(), parsed.payload) else {
-        return;
-    };
-    match kind {
-        "session_meta" => {
-            let Ok(meta) = serde_json::from_str::<SessionMeta>(payload.get()) else {
-                return;
-            };
-            let parent = meta.source.as_ref().and_then(codex_parent);
-            digest.sub = parent.is_some();
-            if digest.session.is_empty() {
-                if let Some(id) = parent.or_else(|| meta.id.as_deref().map(str::to_string)) {
-                    digest.session = id;
-                }
-            }
-            if digest.cwd.is_empty() {
-                if let Some(cwd) = meta.cwd.as_deref() {
-                    digest.cwd = cwd.to_string();
-                }
-            }
-        }
-        "turn_context" => {
-            let Ok(context) = serde_json::from_str::<TurnContext>(payload.get()) else {
-                return;
-            };
-            if let Some(model) = context.model.as_deref() {
-                digest.codex_model = Some(digest.model_index(model));
-            }
-            // One turn_context opens every turn, in every version of the
-            // rollout format.
-            if let (Some(at), false) = (at, digest.sub) {
-                digest.prompts.push(at);
-            }
-        }
-        "event_msg" => {
-            // Most events are not token counts; a substring is cheaper than
-            // a parse to tell.
-            if !payload.get().contains("token_count") {
-                return;
-            }
-            let Ok(event) = serde_json::from_str::<EventMsg>(payload.get()) else {
-                return;
-            };
-            if event.kind.as_deref() != Some("token_count") {
-                return;
-            }
-            // Rate-limit heartbeats reuse the event with `info: null`.
-            let (Some(info), Some(at)) = (event.info, at) else {
-                return;
-            };
-            let Some(total) = info.total_token_usage else {
-                return;
-            };
-            codex_count(digest, at, total, info.last_token_usage);
-        }
-        "response_item" if digest.title_rank == 0 => {
-            let Ok(item) = serde_json::from_str::<ResponseItem>(payload.get()) else {
-                return;
-            };
-            if item.kind.as_deref() != Some("message") || item.role.as_deref() != Some("user") {
-                return;
-            }
-            // The environment and instructions Codex sends first are wrapped
-            // in tags; the person's own words are not.
-            let text = item
-                .content
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|part| part.text)
-                .find(|text| !text.trim_start().starts_with('<'));
-            if let Some(text) = text {
-                digest.offer_title(&text, TITLE_PROMPT);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn codex_count(digest: &mut Digest, at: i64, total: CodexTotals, last: Option<CodexTotals>) {
-    let previous = digest.codex_totals.unwrap_or_default();
-    digest.codex_totals = Some(total);
-    let delta = if total.total_tokens < previous.total_tokens {
-        // The running total went back: a new thread in the same file. What
-        // this event adds is its own last call.
-        match last {
-            Some(last) => last,
-            None => total,
-        }
-    } else {
-        CodexTotals {
-            input_tokens: total.input_tokens.saturating_sub(previous.input_tokens),
-            cached_input_tokens: total
-                .cached_input_tokens
-                .saturating_sub(previous.cached_input_tokens),
-            cache_write_input_tokens: total
-                .cache_write_input_tokens
-                .saturating_sub(previous.cache_write_input_tokens),
-            output_tokens: total.output_tokens.saturating_sub(previous.output_tokens),
-            total_tokens: total.total_tokens - previous.total_tokens,
-        }
-    };
-    // The same total reported again.
-    if delta.total_tokens == 0 && delta.input_tokens == 0 && delta.output_tokens == 0 {
-        return;
-    }
-    let model = match digest.codex_model {
-        Some(model) => model,
-        None => digest.model_index("unknown"),
-    };
-    // OpenAI counts cached input inside input; here they are kept apart, as
-    // they are billed.
-    let fresh = delta
-        .input_tokens
-        .saturating_sub(delta.cached_input_tokens + delta.cache_write_input_tokens);
-    digest.calls.push(Call {
-        // A forked rollout replays its parent's events verbatim: same time,
-        // same running total, so the copy is recognised.
-        key: fnv1a(&[
-            b"codex",
-            &at.to_le_bytes(),
-            &total.total_tokens.to_le_bytes(),
-        ]),
-        at,
-        model,
-        input: fresh,
-        output: delta.output_tokens,
-        cache_write_5m: delta.cache_write_input_tokens,
-        cache_write_1h: 0,
-        cache_read: delta.cached_input_tokens,
-        fast: false,
-    });
-}
-
-// ---------------------------------------------------------------------------
 // Whole files
 // ---------------------------------------------------------------------------
 
@@ -690,49 +447,24 @@ fn codex_count(digest: &mut Digest, at: i64, total: CodexTotals, last: Option<Co
 /// of the same file found: an appended transcript resumes where it stopped.
 /// Returns the bytes consumed, to add to `digest.offset`.
 pub fn read_into(digest: &mut Digest, reader: impl Read, finished: bool) -> std::io::Result<u64> {
-    match digest.agent {
-        Agent::Claude => {
-            let mut seen: HashMap<u64, usize> = digest
-                .calls
-                .iter()
-                .enumerate()
-                .filter(|(_, call)| call.key != 0)
-                .map(|(index, call)| (call.key, index))
-                .collect();
-            for_each_line(reader, finished, |line| {
-                claude_line(line, digest, &mut seen)
-            })
-        }
-        Agent::Codex => {
-            let consumed = for_each_line(reader, finished, |line| codex_line(line, digest))?;
-            name_early_calls(digest);
-            Ok(consumed)
-        }
-    }
-}
-
-/// Codex can report a count before the turn that names its model: those
-/// calls go to the first model the rollout names, once it has named one.
-fn name_early_calls(digest: &mut Digest) {
-    let Some(unknown) = digest.models.iter().position(|model| model == "unknown") else {
-        return;
-    };
-    let Some(named) = digest.models.iter().position(|model| model != "unknown") else {
-        return;
-    };
-    for call in &mut digest.calls {
-        if call.model as usize == unknown {
-            call.model = named as u16;
-        }
-    }
+    let mut seen: HashMap<u64, usize> = digest
+        .calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| call.key != 0)
+        .map(|(index, call)| (call.key, index))
+        .collect();
+    for_each_line(reader, finished, |line| {
+        claude_line(line, digest, &mut seen)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Synthetic lines in the shapes Claude Code and Codex write, trimmed to
-    // the fields that matter plus a few neighbours they sit among.
+    // Synthetic lines in the shapes Claude Code writes, trimmed to the
+    // fields that matter plus a few neighbours they sit among.
     fn assistant(id: &str, at: &str, output: u64) -> String {
         format!(
             r#"{{"parentUuid":"p","isSidechain":false,"type":"assistant","timestamp":"{at}","sessionId":"s-1","cwd":"C:\\dev\\app","requestId":"req-{id}","message":{{"id":"{id}","model":"claude-opus-5-5","role":"assistant","content":[{{"type":"text","text":"done"}}],"usage":{{"input_tokens":3,"output_tokens":{output},"cache_creation_input_tokens":100,"cache_read_input_tokens":2000,"cache_creation":{{"ephemeral_5m_input_tokens":40,"ephemeral_1h_input_tokens":60}},"service_tier":"standard","speed":"standard"}}}}}}"#
@@ -745,8 +477,8 @@ mod tests {
         )
     }
 
-    fn read(agent: Agent, text: &str) -> Digest {
-        let mut digest = Digest::new(agent, false);
+    fn read(text: &str) -> Digest {
+        let mut digest = Digest::new(false);
         let consumed = read_into(&mut digest, text.as_bytes(), true).unwrap();
         digest.offset += consumed;
         digest
@@ -765,7 +497,7 @@ mod tests {
             assistant("m2", "2026-10-01T10:00:30Z", 40),
         ]
         .join("\n");
-        let digest = read(Agent::Claude, &text);
+        let digest = read(&text);
         assert_eq!(digest.session, "s-1");
         assert_eq!(digest.cwd, "C:\\dev\\app");
         assert_eq!(digest.calls.len(), 2);
@@ -793,7 +525,7 @@ mod tests {
             r#"{"type":"ai-title","aiTitle":"Later guess","sessionId":"s-1"}"#.to_string(),
         ]
         .join("\n");
-        assert_eq!(read(Agent::Claude, &text).title, "Auth rework");
+        assert_eq!(read(&text).title, "Auth rework");
     }
 
     #[test]
@@ -804,7 +536,7 @@ mod tests {
             user("2026-10-01T10:00:02Z", r#""<command-name>/clear</command-name>""#),
         ]
         .join("\n");
-        let digest = read(Agent::Claude, &text);
+        let digest = read(&text);
         // The slash command was typed; the command's output and the meta line were not.
         assert_eq!(digest.prompts.len(), 1);
         // A tag is no title.
@@ -820,7 +552,7 @@ mod tests {
             assistant("m2", "2026-10-01T10:01:05Z", 10),
         ]
         .join("\n");
-        let digest = read(Agent::Claude, &text);
+        let digest = read(&text);
         assert_eq!(digest.calls.len(), 2);
         assert_eq!(digest.bad_lines, 2);
     }
@@ -830,7 +562,7 @@ mod tests {
         let synthetic =
             assistant("m1", "2026-10-01T10:00:05Z", 10).replace("claude-opus-5-5", "<synthetic>");
         let empty = r#"{"type":"assistant","timestamp":"2026-10-01T10:00:06Z","message":{"id":"m2","model":"claude-opus-5-5","usage":{"input_tokens":0,"output_tokens":0}}}"#;
-        let digest = read(Agent::Claude, &format!("{synthetic}\n{empty}\n"));
+        let digest = read(&format!("{synthetic}\n{empty}\n"));
         assert!(digest.calls.is_empty());
         assert_eq!(digest.stamps.len(), 2);
     }
@@ -840,111 +572,9 @@ mod tests {
         let whole = assistant("m1", "2026-10-01T10:00:05Z", 10);
         let partial = assistant("m2", "2026-10-01T10:00:06Z", 10);
         let text = format!("{whole}\n{}", &partial[..50]);
-        let mut digest = Digest::new(Agent::Claude, false);
+        let mut digest = Digest::new(false);
         let consumed = read_into(&mut digest, text.as_bytes(), false).unwrap();
         assert_eq!(consumed, whole.len() as u64 + 1);
         assert_eq!(digest.calls.len(), 1);
-    }
-
-    const META: &str = r#"{"timestamp":"2026-10-02T09:00:00.000Z","type":"session_meta","payload":{"id":"thread-1","timestamp":"2026-10-02T09:00:00Z","cwd":"/home/me/app","originator":"codex-tui","cli_version":"1.0","source":"cli"}}"#;
-
-    fn count(at: &str, input: u64, cached: u64, output: u64) -> String {
-        format!(
-            r#"{{"timestamp":"{at}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{input},"cached_input_tokens":{cached},"cache_write_input_tokens":0,"output_tokens":{output},"reasoning_output_tokens":0,"total_tokens":{}}},"last_token_usage":{{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"total_tokens":2}},"model_context_window":272000}},"rate_limits":{{}}}}}}"#,
-            input + output
-        )
-    }
-
-    fn turn(at: &str, model: &str) -> String {
-        format!(
-            r#"{{"timestamp":"{at}","type":"turn_context","payload":{{"cwd":"/home/me/app","model":"{model}","effort":"high"}}}}"#
-        )
-    }
-
-    #[test]
-    fn codex_calls_are_the_differences_between_running_totals() {
-        let text = [
-            META.to_string(),
-            turn("2026-10-02T09:00:01Z", "gpt-5.5"),
-            r#"{"timestamp":"2026-10-02T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>x</environment_context>"},{"type":"input_text","text":"Add a cache"}]}}"#.to_string(),
-            count("2026-10-02T09:00:10Z", 1000, 800, 50),
-            // The same total again: nothing new.
-            count("2026-10-02T09:00:11Z", 1000, 800, 50),
-            r#"{"timestamp":"2026-10-02T09:00:12Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{}}}"#.to_string(),
-            turn("2026-10-02T09:05:00Z", "gpt-6-astra"),
-            count("2026-10-02T09:05:10Z", 3000, 2500, 80),
-        ]
-        .join("\n");
-        let digest = read(Agent::Codex, &text);
-        assert_eq!(digest.session, "thread-1");
-        assert_eq!(digest.cwd, "/home/me/app");
-        assert_eq!(digest.title, "Add a cache");
-        assert_eq!(digest.prompts.len(), 2);
-        assert_eq!(digest.calls.len(), 2);
-        let first = digest.calls[0];
-        assert_eq!(
-            (first.input, first.cache_read, first.output),
-            (200, 800, 50)
-        );
-        assert_eq!(digest.models[first.model as usize], "gpt-5.5");
-        let second = digest.calls[1];
-        assert_eq!(
-            (second.input, second.cache_read, second.output),
-            (300, 1700, 30)
-        );
-        assert_eq!(digest.models[second.model as usize], "gpt-6-astra");
-    }
-
-    #[test]
-    fn a_count_before_the_first_turn_goes_to_the_model_named_next() {
-        let text = [
-            META.to_string(),
-            count("2026-10-02T09:00:01Z", 500, 0, 20),
-            turn("2026-10-02T09:00:02Z", "gpt-5.5"),
-            count("2026-10-02T09:00:10Z", 1000, 0, 50),
-        ]
-        .join(
-            "
-",
-        );
-        let digest = read(Agent::Codex, &text);
-        assert_eq!(digest.calls.len(), 2);
-        assert!(digest
-            .calls
-            .iter()
-            .all(|call| digest.models[call.model as usize] == "gpt-5.5"));
-    }
-
-    #[test]
-    fn a_codex_subagent_belongs_to_its_parent_and_has_no_turns() {
-        let meta = r#"{"timestamp":"2026-10-02T09:00:00Z","type":"session_meta","payload":{"id":"child","cwd":"/home/me/app","source":{"subagent":{"thread_spawn":{"parent_thread_id":"thread-1","depth":1}}}}}"#;
-        let text = [
-            meta.to_string(),
-            turn("2026-10-02T09:00:01Z", "gpt-5.5"),
-            count("2026-10-02T09:00:10Z", 100, 0, 10),
-        ]
-        .join("\n");
-        let digest = read(Agent::Codex, &text);
-        assert!(digest.sub);
-        assert_eq!(digest.session, "thread-1");
-        assert!(digest.prompts.is_empty());
-        assert_eq!(digest.calls.len(), 1);
-    }
-
-    #[test]
-    fn a_running_total_that_goes_back_counts_its_last_call() {
-        let reset = count("2026-10-02T09:10:00Z", 10, 0, 5).replace(
-            r#""last_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"total_tokens":2}"#,
-            r#""last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"total_tokens":15}"#,
-        );
-        let text = [
-            META.to_string(),
-            count("2026-10-02T09:00:10Z", 1000, 0, 50),
-            reset,
-        ]
-        .join("\n");
-        let digest = read(Agent::Codex, &text);
-        assert_eq!(digest.calls.len(), 2);
-        assert_eq!((digest.calls[1].input, digest.calls[1].output), (10, 5));
     }
 }

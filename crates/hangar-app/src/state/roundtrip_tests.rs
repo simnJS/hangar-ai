@@ -9,6 +9,9 @@ use super::{Model, Patch, Settings, StoreAction, Workspace, layout, read_state_k
 
 const TYPICAL: &str = include_str!("fixtures/typical.json");
 const HAND_EDITED: &str = include_str!("fixtures/hand_edited.json");
+/// A file of the old app with a Codex, a Gemini CLI and an OpenCode pane,
+/// and a launch command for each agent.
+const RETIRED_AGENTS: &str = include_str!("fixtures/retired_agents.json");
 
 fn load(file: &str) -> (Model, Value) {
     let raw: Value = serde_json::from_str(file).unwrap();
@@ -77,6 +80,92 @@ fn a_file_the_app_wrote_comes_back_as_it_was() {
     assert_eq!(state.workspaces[2].tree, None);
     assert_eq!(state.settings.locale, Some(hangar_i18n::Locale::Fr));
     assert_eq!(state.settings.keybindings["view.stats"], json!([]));
+}
+
+/// Hangar runs Claude Code only (owner's decision, 2026-11-03): the panes of
+/// the agents it dropped open as shells where they were, and the first save
+/// writes them so, with Claude Code's launch command and no other.
+#[test]
+fn the_panes_of_the_retired_agents_open_as_shells_and_are_saved_as_shells() {
+    let (model, raw) = load(RETIRED_AGENTS);
+    let ws = &model.state().workspaces[0];
+    let panes: Vec<(&str, AgentId, Option<&str>, Option<&str>)> = ws
+        .panes
+        .iter()
+        .map(|pane| {
+            (
+                pane.name.as_str(),
+                pane.agent,
+                pane.cwd.as_deref(),
+                pane.retired_agent,
+            )
+        })
+        .collect();
+    assert_eq!(
+        panes,
+        [
+            ("Ava", AgentId::Claude, None, None),
+            (
+                "Bob",
+                AgentId::Shell,
+                Some("/home/dev/code/shop/api"),
+                Some("Codex")
+            ),
+            ("Cleo", AgentId::Shell, None, Some("Gemini CLI")),
+            (
+                "Dan",
+                AgentId::Shell,
+                Some("/home/dev/code/shop/web"),
+                Some("OpenCode")
+            ),
+        ]
+    );
+    // Each keeps its place in the layout, and what was not its agent's.
+    let ids: Vec<String> = ws.panes.iter().map(|pane| pane.id.clone()).collect();
+    assert_eq!(layout::leaf_ids(ws.tree.as_ref().unwrap()), ids);
+    assert_eq!(ws.panes[1].shell_id.as_deref(), Some("zsh"));
+    assert_eq!(ws.panes[1].title.as_deref(), Some("api"));
+    assert_eq!(
+        (
+            ws.panes[1].session_id.as_deref(),
+            ws.panes[1].model.as_deref()
+        ),
+        (None, None)
+    );
+    assert_eq!(
+        model.settings().agent_commands.claude.as_deref(),
+        Some("claude --verbose")
+    );
+
+    let written = model.to_json();
+    let agents: Vec<&str> = written["workspaces"][0]["panes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pane| pane["agent"].as_str().unwrap())
+        .collect();
+    assert_eq!(agents, ["claude", "shell", "shell", "shell"]);
+    assert_eq!(
+        written["settings"]["agentCommands"],
+        json!({"claude": "claude --verbose"})
+    );
+    // Nothing else moved.
+    assert_eq!(
+        written["workspaces"][0]["tree"],
+        raw["workspaces"][0]["tree"]
+    );
+    assert_eq!(
+        written["workspaces"][0]["panes"][3]["cwd"],
+        raw["workspaces"][0]["panes"][3]["cwd"]
+    );
+    // And read back, a shell is a shell, with nothing left to say about it.
+    let (again, _) = read_state_keeping(written);
+    assert!(
+        again.workspaces[0]
+            .panes
+            .iter()
+            .all(|pane| pane.retired_agent.is_none())
+    );
 }
 
 #[test]

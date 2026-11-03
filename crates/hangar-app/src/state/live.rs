@@ -36,8 +36,8 @@ pub struct Ui {
     /// The chords of a shortcut sequence typed so far, as P7 formats them for
     /// the chord hint (`keymap::chord_hint`).
     pub pending_chords: Vec<String>,
-    /// From `detect_agents`, once at start.
-    pub available_agents: Vec<String>,
+    /// Whether Claude Code is on PATH (`claude_installed`), once at start.
+    pub claude_installed: bool,
     /// From `detect_shells`, once at start.
     pub shells: Vec<ShellInfo>,
     /// The measured width of each window's main body, for `side_panels`.

@@ -12,7 +12,7 @@ use hangar_core::chat::{
     Sender,
 };
 use hangar_core::remote::ActivityEntry;
-use hangar_core::stats::{Agent, Bucket, ModelInfo, ScanInfo, SessionInfo, UsageStats};
+use hangar_core::stats::{Bucket, ModelInfo, ScanInfo, SessionInfo, UsageStats};
 use hangar_i18n::Locale;
 
 use crate::control::port::{MobileHooks, Port};
@@ -1375,11 +1375,6 @@ fn usage(buckets: Vec<Bucket>, cwds: &[&str]) -> UsageStats {
             .iter()
             .enumerate()
             .map(|(index, cwd)| SessionInfo {
-                agent: if index == 2 {
-                    Agent::Codex
-                } else {
-                    Agent::Claude
-                },
                 id: format!("s{index}"),
                 cwd: (*cwd).into(),
                 title: format!("Session {index}"),
@@ -1393,7 +1388,7 @@ fn usage(buckets: Vec<Bucket>, cwds: &[&str]) -> UsageStats {
                 priced: true,
             },
             ModelInfo {
-                id: "gpt-5.6-sol".into(),
+                id: "claude-sonnet-5".into(),
                 priced: true,
             },
             ModelInfo {
@@ -1405,8 +1400,8 @@ fn usage(buckets: Vec<Bucket>, cwds: &[&str]) -> UsageStats {
     }
 }
 
-/// Shop's own session today, one in a worktree of it three days ago, Codex
-/// in a folder of no workspace ten days ago, and a model without a price
+/// Shop's own session today, one in a worktree of it three days ago, one in
+/// a folder of no workspace ten days ago, and a model without a price
 /// forty days ago.
 fn rows_of_usage() -> Vec<Bucket> {
     vec![
@@ -1576,7 +1571,9 @@ async fn stats_ranks_and_draws_by_the_measure_asked_for() {
     assert!((cost[0].1 - 0.9).abs() < 1e-9);
     assert_eq!(cost[1].0, "scratch");
     assert!((cost[1].1 - 0.1).abs() < 1e-9);
-    assert_eq!(labels(&by_cost["agents"]), ["Claude Code", "Codex"]);
+    // Claude Code is the only agent: the phone's ranking of them has one row.
+    assert_eq!(labels(&by_cost["agents"]), ["Claude Code"]);
+    assert_eq!(by_cost["agents"]["rows"][0]["share"].as_f64(), Some(1.0));
     assert_eq!(by_cost["series"].as_array().unwrap().len(), 30);
     assert_eq!(by_cost["series"][29]["value"].as_f64(), Some(1.5));
     assert_eq!(by_tokens["series"][29]["value"].as_f64(), Some(4_500.0));

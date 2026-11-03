@@ -1054,13 +1054,13 @@ async fn remote_answer_refuses_when_the_transcript_still_waits_but_the_pc_s_scre
 async fn remote_answer_refuses_a_pane_without_a_claude_question_and_a_second_answer_while_one_is_typed()
  {
     let page = page_with(Some(pending("q1", vec![color()])), vec![]);
-    let codex = answer_rig(
+    let shell = answer_rig(
         &Dialog::new(vec![color()], &[]),
         page.clone(),
-        AgentId::Codex,
+        AgentId::Shell,
     );
     assert_eq!(
-        codex.run(json!({"toolUseId": "q1", "answers": []})).await,
+        shell.run(json!({"toolUseId": "q1", "answers": []})).await,
         Err("\"Ava\" has no Claude Code question to answer.".into())
     );
 

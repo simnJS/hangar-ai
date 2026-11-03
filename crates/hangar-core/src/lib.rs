@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn every_async_command_is_a_future_the_app_can_spawn() {
         sendable(|| crate::chat::chat_page(todo!(), todo!(), todo!(), todo!()));
-        sendable(|| crate::context::context_usage(todo!(), todo!(), todo!()));
+        sendable(|| crate::context::context_usage(todo!(), todo!()));
         sendable(|| crate::delivery::delivery_cleanup(todo!(), todo!(), todo!(), todo!()));
         sendable(|| {
             crate::delivery::delivery_preflight(todo!(), todo!(), todo!(), todo!(), todo!())

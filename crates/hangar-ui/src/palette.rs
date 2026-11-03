@@ -18,7 +18,7 @@
 //!         .keywords(["preferences", "options"]),
 //!     Item::new(Target::Pane(id), "Panes", "Go to Ben")
 //!         .state(GlyphState::Waiting)
-//!         .detail(Detail::new().plain("Codex · ").state(AgentState::Waiting, "waiting")),
+//!         .detail(Detail::new().plain("Claude Code · ").state(AgentState::Waiting, "waiting")),
 //! ]));
 //!
 //! // In `update`:

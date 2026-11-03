@@ -254,7 +254,7 @@ impl Gallery {
             );
         }
         let states = [
-            ("Ben", "Codex", AgentState::Waiting, "waiting"),
+            ("Ben", "Claude Code", AgentState::Waiting, "waiting"),
             ("Ava", "Claude Code", AgentState::Working, "working"),
             ("Zoe", "Shell", AgentState::Idle, "idle"),
         ];

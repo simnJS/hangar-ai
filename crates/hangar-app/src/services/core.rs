@@ -121,11 +121,11 @@ pub async fn save_state(
     .await
 }
 
-/// `detect_agents` and `detect_shells`, once at start (inventory §1.6).
-pub async fn detect() -> (Vec<String>, Vec<ShellInfo>) {
+/// `claude_installed` and `detect_shells`, once at start (inventory §1.6).
+pub async fn detect() -> (bool, Vec<ShellInfo>) {
     blocking(|| {
         Ok((
-            hangar_core::sessions::detect_agents(),
+            hangar_core::sessions::claude_installed(),
             hangar_core::shells::detect_shells(),
         ))
     })

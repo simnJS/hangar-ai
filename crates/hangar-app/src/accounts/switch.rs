@@ -259,7 +259,7 @@ mod tests {
                 id: "w3".into(),
                 claude_account: Some("  ".into()),
                 panes: vec![
-                    pane("f", "codex", None, false),
+                    pane("f", "shell", None, false),
                     pane("g", "claude", None, false),
                 ],
             },

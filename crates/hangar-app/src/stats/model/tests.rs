@@ -2,7 +2,7 @@
 //! the page relies on added. Local times throughout, so the tests hold in any
 //! time zone.
 
-use hangar_core::stats::{Agent, Bucket, ModelInfo, ScanInfo, SessionInfo, UsageStats};
+use hangar_core::stats::{Bucket, ModelInfo, ScanInfo, SessionInfo, UsageStats};
 
 use super::super::time::testing::{at, on};
 use super::*;
@@ -72,7 +72,6 @@ fn stats(buckets: Vec<Bucket>) -> UsageStats {
         active_gap_cap_ms: 300_000,
         sessions: vec![
             SessionInfo {
-                agent: Agent::Claude,
                 id: "a".into(),
                 cwd: "C:\\dev\\app".into(),
                 title: "Auth".into(),
@@ -80,7 +79,6 @@ fn stats(buckets: Vec<Bucket>) -> UsageStats {
                 last_at: at(25, 10),
             },
             SessionInfo {
-                agent: Agent::Codex,
                 id: "b".into(),
                 cwd: "C:\\dev\\shop".into(),
                 title: String::new(),
@@ -119,14 +117,6 @@ fn projects() -> Vec<Project> {
     ]
 }
 
-fn agent_label(agent: Agent) -> String {
-    match agent {
-        Agent::Claude => "Claude Code",
-        Agent::Codex => "Codex",
-    }
-    .to_owned()
-}
-
 fn summary_of(
     data: &UsageStats,
     period: Period,
@@ -142,7 +132,6 @@ fn summary_of(
             measure,
             now: now(),
             projects: &projects,
-            agent_label: &agent_label,
             top_sessions: TOP_SESSIONS,
         },
     )
@@ -301,6 +290,8 @@ fn ranks_by_the_measure_and_keeps_every_project_pickable_under_a_filter() {
         .map(|row| row.label.as_str())
         .collect();
     assert_eq!(agents, ["Claude Code"]);
+    assert_eq!(filtered.agents[0].key, "claude");
+    assert_eq!(filtered.agents[0].totals.sessions, 1);
     assert_eq!(filtered.sessions[0].model.as_deref(), Some("Opus 5.5"));
 }
 
@@ -359,7 +350,6 @@ fn a_session_without_a_project_row_keeps_its_own_folder() {
             measure: Measure::Tokens,
             now: now(),
             projects: &none,
-            agent_label: &agent_label,
             top_sessions: TOP_SESSIONS,
         },
     );

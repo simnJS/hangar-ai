@@ -396,14 +396,14 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "pane_create",
-            "description": "Open a new pane in a workspace and start an agent in it, or a plain shell. Use it to hand work to another agent: with a prompt, a Claude Code pane starts on it as soon as it is ready; for other agents, send the prompt with pane_send once pane_read shows them started. Give a cwd (a worktree, for instance) to keep two agents out of each other's files. A workspace holds at most 16 panes.",
+            "description": "Open a new pane in a workspace and start Claude Code in it, or a plain shell. Use it to hand work to another agent: with a prompt, the new Claude Code starts on it as soon as it is ready. Give a cwd (a worktree, for instance) to keep two agents out of each other's files. A workspace holds at most 16 panes.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "agent": {
                         "type": "string",
-                        "enum": ["claude", "codex", "gemini", "opencode", "shell"],
-                        "description": "What to run. Defaults to the agent of the pane it is split from."
+                        "enum": ["claude", "shell"],
+                        "description": "What to run: Claude Code or a plain shell. Defaults to what the pane it is split from runs."
                     },
                     "name": { "type": "string", "description": "Name for the pane, unique across every workspace. Defaults to the next free first name." },
                     "cwd": { "type": "string", "description": "Folder to start in, absolute or relative to the workspace root. Defaults to the workspace root." },
@@ -417,7 +417,7 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "pane_close",
-            "description": "Close a pane: its terminal and whatever runs in it are killed. A Claude Code or Codex conversation stays on disk and can be resumed from the session picker. The last pane of a workspace cannot be closed. Closing your own pane ends your session.",
+            "description": "Close a pane: its terminal and whatever runs in it are killed. A Claude Code conversation stays on disk and can be resumed from the session picker. The last pane of a workspace cannot be closed. Closing your own pane ends your session.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "pane": pane_arg, "workspace": workspace_arg },
@@ -426,13 +426,13 @@ fn base_tool_definitions() -> Value {
         },
         {
             "name": "pane_restart",
-            "description": "Restart a pane's terminal. By default its agent resumes the conversation it had; fresh=true starts a new conversation instead (a reset); agent switches the pane to another agent, also fresh. The pane keeps its name.",
+            "description": "Restart a pane's terminal. By default its agent resumes the conversation it had; fresh=true starts a new conversation instead (a reset); agent switches the pane between Claude Code and a plain shell, also fresh. The pane keeps its name.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "pane": pane_arg,
                     "fresh": { "type": "boolean", "description": "Start a new conversation rather than resuming. Default false." },
-                    "agent": { "type": "string", "enum": ["claude", "codex", "gemini", "opencode", "shell"] },
+                    "agent": { "type": "string", "enum": ["claude", "shell"] },
                     "workspace": workspace_arg
                 },
                 "required": ["pane"]

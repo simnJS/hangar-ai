@@ -253,8 +253,8 @@ impl App {
         app.cache_themes();
         let host = core.host().clone();
         let load = Task::perform(services::core::load_state(host), Message::Booted);
-        let detect = Task::perform(services::core::detect(), |(agents, shells)| {
-            Message::Detected(agents, shells)
+        let detect = Task::perform(services::core::detect(), |(claude, shells)| {
+            Message::Detected(claude, shells)
         });
         let screenshot = match crate::shell::dev_screenshot::requested() {
             Some(_) => crate::shell::dev_screenshot::capture(main_window),
@@ -285,8 +285,8 @@ impl App {
         }
         match message {
             Message::Booted(loaded) => self.booted(loaded),
-            Message::Detected(agents, shells) => {
-                self.model.ui.available_agents = agents;
+            Message::Detected(claude, shells) => {
+                self.model.ui.claude_installed = claude;
                 self.model.ui.shells = shells;
                 Task::none()
             }

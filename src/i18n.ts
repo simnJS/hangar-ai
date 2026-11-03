@@ -165,7 +165,7 @@ const en = {
 
   "placeholder.title": "No workspace open",
   "placeholder.body":
-    "Create a workspace from the navigator: pick a project folder, then spread your agents ({agents}) across as many panes as you need — split, close and drag them around at any time.",
+    "Create a workspace from the navigator: pick a project folder, then run Claude Code and shells in as many panes as you need — split, close and drag them around at any time.",
 
   "broadcast.placeholder": "Send the same instruction to all {n} panes…",
   "broadcast.send": "Broadcast",
@@ -220,6 +220,8 @@ const en = {
   "pane.menuDiff": "Show changes",
   "pane.restartNow": "Restart",
   "pane.noteDismiss": "Dismiss the note",
+  "pane.agentRetired":
+    "{agent} is no longer supported: Hangar now runs Claude Code only, so this pane is a plain shell in the same folder.",
   "pane.event.resumed": "Session {id} resumed",
   "pane.event.newSession": "New session",
   "pane.event.turnStart": "Prompt received",
@@ -567,12 +569,12 @@ const en = {
   "settings.memory": "Memory",
   "settings.hibernate": "Put idle workspaces to sleep",
   "settings.hibernateHint":
-    "Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume (Gemini, OpenCode), nor while a shell runs a command. Right-click a workspace in the navigator to put it to sleep now.",
+    "Stops the agents of a workspace left alone, to free memory; they resume their sessions when it opens again. Never the workspace on screen, nor while an agent works, waits for your answer or could not resume its session, nor while a shell runs a command. Right-click a workspace in the navigator to put it to sleep now.",
   "settings.hibernateDelay": "Put to sleep after",
   "settings.hibernateDelayHint": "Without a keystroke, a click or an agent sending it anything",
-  "settings.agentCommands": "Launch commands",
+  "settings.agentCommands": "Launch command",
   "settings.agentCommandsHint":
-    "What a pane types to start each agent. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default.",
+    "What a pane types to start Claude Code. It goes into an interactive shell, so an alias or a script of your own works too, and resume arguments are added after it. Leave empty for the default.",
 
   "settings.shortcutsAll": "All commands",
   "settings.shortcutsHint":
@@ -1168,7 +1170,7 @@ const en = {
   "stats.sessionActive": "{value} active",
   "stats.emptyTitle": "No usage to show yet",
   "stats.emptyBody":
-    "The statistics come from the transcripts Claude Code and Codex keep on this machine. Run one of them in a pane, then come back here.",
+    "The statistics come from the transcripts Claude Code keeps on this machine. Run it in a pane, then come back here.",
   "stats.sourcesLabel": "Folders read",
   "stats.sourceFiles_one": "{n} transcript",
   "stats.sourceFiles_other": "{n} transcripts",
@@ -1180,11 +1182,11 @@ const en = {
   "stats.retry": "Try again",
   "stats.methodTitle": "How these numbers are made",
   "stats.methodSources":
-    "Read from the transcripts Claude Code and Codex keep on this machine, and nothing leaves it. Gemini CLI and OpenCode keep no usage that can be read.",
+    "Read from the transcripts Claude Code keeps on this machine, and nothing leaves it.",
   "stats.methodActive":
     "Active time adds up the gaps between the messages of a session, each capped at {cap}: a longer silence counts as {cap}. Agents working side by side each count.",
   "stats.methodCost":
-    "The API-equivalent cost prices every token at the providers' public API rates, cache and long context included. It is a measure of the work done, not what a Pro or Max subscription costs.",
+    "The API-equivalent cost prices every token at Anthropic's public API rates, cache and long context included. It is a measure of the work done, not what a Pro or Max subscription costs.",
   "stats.methodScan": "{files} transcripts · {read} read this time in {ms} ms",
   "stats.durationMinutes": "{m} min",
   "stats.durationHours": "{h} h {m}",
@@ -1272,18 +1274,18 @@ const en = {
   "inspector.activityOther":
     "{agent} does not report what it does. Only Claude Code does, through the hangar-bridge mod.",
 
-  "mcp.title": "Connect agents to the board",
+  "mcp.title": "Connect Claude Code to the board",
   "mcp.intro":
-    "Hangar.AI registers itself as an MCP server in each tool's configuration. The port and token are never written to those files: they are resolved at launch, so the configuration stays valid across restarts.",
+    "Hangar.AI registers itself as an MCP server in this project's Claude Code configuration (.mcp.json). The port and token are never written to that file: they are resolved at launch, so the configuration stays valid across restarts.",
   "mcp.playbook": "Write the agent playbook",
-  "mcp.playbookHint": "AGENTS.md + CLAUDE.md · adds .hangar/ to .gitignore",
+  "mcp.playbookHint": "CLAUDE.md · adds .hangar/ to .gitignore",
   "mcp.alreadyThere": "already present",
   "mcp.configured": "already configured",
   "mcp.stale": "broken — repair",
   "mcp.staleHint": "registered, but this executable is gone: {command}",
   "mcp.staleHintNoCommand": "registered, but names no executable",
   "mcp.notDetected": "not detected",
-  "mcp.restartHint": "Restart the affected agents so they load the server.",
+  "mcp.restartHint": "Restart the Claude Code panes so they load the server.",
   "mcp.manual": "Or do it manually",
   "mcp.manualHint": "if you prefer the CLI",
   "mcp.close": "Close",
@@ -1766,7 +1768,7 @@ const fr: Record<Key, string> = {
 
   "placeholder.title": "Aucun workspace ouvert",
   "placeholder.body":
-    "Crée un workspace depuis le navigateur : choisis un dossier de projet, puis répartis tes agents ({agents}) sur autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
+    "Crée un workspace depuis le navigateur : choisis un dossier de projet, puis lance Claude Code et des shells dans autant de panneaux que nécessaire — divise, ferme et déplace-les à tout moment.",
 
   "broadcast.placeholder": "Envoyer la même instruction aux {n} panneaux…",
   "broadcast.send": "Diffuser",
@@ -1821,6 +1823,8 @@ const fr: Record<Key, string> = {
   "pane.menuDiff": "Voir les modifications",
   "pane.restartNow": "Relancer",
   "pane.noteDismiss": "Masquer la note",
+  "pane.agentRetired":
+    "{agent} n'est plus pris en charge : Hangar ne lance plus que Claude Code, ce panneau est donc un simple shell dans le même dossier.",
   "pane.event.resumed": "Session {id} reprise",
   "pane.event.newSession": "Nouvelle session",
   "pane.event.turnStart": "Prompt reçu",
@@ -2172,12 +2176,12 @@ const fr: Record<Key, string> = {
   "settings.memory": "Mémoire",
   "settings.hibernate": "Mettre en veille les workspaces inactifs",
   "settings.hibernateHint":
-    "Arrête les agents d'un workspace laissé de côté pour libérer la mémoire ; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session (Gemini, OpenCode), ni tant qu'un shell exécute une commande. Fais un clic droit sur un workspace du navigateur pour le mettre en veille tout de suite.",
+    "Arrête les agents d'un workspace laissé de côté pour libérer la mémoire ; ils reprennent leur session à son ouverture. Jamais le workspace à l'écran, ni tant qu'un agent travaille, attend ta réponse ou ne pourrait pas reprendre sa session, ni tant qu'un shell exécute une commande. Fais un clic droit sur un workspace du navigateur pour le mettre en veille tout de suite.",
   "settings.hibernateDelay": "Mettre en veille après",
   "settings.hibernateDelayHint": "Sans frappe, clic ni envoi d'un agent",
-  "settings.agentCommands": "Commandes de lancement",
+  "settings.agentCommands": "Commande de lancement",
   "settings.agentCommandsHint":
-    "Ce qu'un panneau tape pour démarrer chaque agent. C'est envoyé à un shell interactif : un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.",
+    "Ce qu'un panneau tape pour démarrer Claude Code. C'est envoyé à un shell interactif : un alias ou un script à toi fonctionne aussi, et les arguments de reprise sont ajoutés à la suite. Laisse vide pour la valeur par défaut.",
 
   "settings.shortcutsAll": "Toutes les commandes",
   "settings.shortcutsHint":
@@ -2775,7 +2779,7 @@ const fr: Record<Key, string> = {
   "stats.sessionActive": "{value} d'activité",
   "stats.emptyTitle": "Aucun usage à montrer pour l'instant",
   "stats.emptyBody":
-    "Les statistiques viennent des transcripts que Claude Code et Codex gardent sur cette machine. Lance l'un d'eux dans un panneau, puis reviens ici.",
+    "Les statistiques viennent des transcripts que Claude Code garde sur cette machine. Lance-le dans un panneau, puis reviens ici.",
   "stats.sourcesLabel": "Dossiers lus",
   "stats.sourceFiles_one": "{n} transcript",
   "stats.sourceFiles_other": "{n} transcripts",
@@ -2787,11 +2791,11 @@ const fr: Record<Key, string> = {
   "stats.retry": "Réessayer",
   "stats.methodTitle": "D'où viennent ces chiffres",
   "stats.methodSources":
-    "Lus dans les transcripts que Claude Code et Codex gardent sur cette machine, et rien n'en sort. Gemini CLI et OpenCode ne gardent aucun usage lisible.",
+    "Lus dans les transcripts que Claude Code garde sur cette machine, et rien n'en sort.",
   "stats.methodActive":
     "Le temps actif additionne les écarts entre les messages d'une session, chacun plafonné à {cap} : un silence plus long compte pour {cap}. Des agents qui travaillent en parallèle comptent chacun.",
   "stats.methodCost":
-    "Le coût équivalent API compte chaque token aux tarifs publics de l'API des fournisseurs, cache et long contexte compris. C'est une mesure du travail fait, pas ce que coûte un abonnement Pro ou Max.",
+    "Le coût équivalent API compte chaque token aux tarifs publics de l'API d'Anthropic, cache et long contexte compris. C'est une mesure du travail fait, pas ce que coûte un abonnement Pro ou Max.",
   "stats.methodScan": "{files} transcripts · {read} lus cette fois en {ms} ms",
   "stats.durationMinutes": "{m} min",
   "stats.durationHours": "{h} h {m}",
@@ -2880,18 +2884,18 @@ const fr: Record<Key, string> = {
   "inspector.activityOther":
     "{agent} ne raconte pas ce qu'il fait. Seul Claude Code le fait, via le mod hangar-bridge.",
 
-  "mcp.title": "Connecter les agents au tableau",
+  "mcp.title": "Connecter Claude Code au tableau",
   "mcp.intro":
-    "Hangar.AI s'enregistre comme serveur MCP dans la configuration de chaque outil. Le port et le jeton ne sont jamais écrits dans ces fichiers : ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.",
+    "Hangar.AI s'enregistre comme serveur MCP dans la configuration Claude Code de ce projet (.mcp.json). Le port et le jeton ne sont jamais écrits dans ce fichier : ils sont résolus au lancement, donc la configuration reste valable après un redémarrage.",
   "mcp.playbook": "Écrire le mode d'emploi pour les agents",
-  "mcp.playbookHint": "AGENTS.md + CLAUDE.md · ajoute .hangar/ au .gitignore",
+  "mcp.playbookHint": "CLAUDE.md · ajoute .hangar/ au .gitignore",
   "mcp.alreadyThere": "déjà présent",
   "mcp.configured": "déjà configuré",
   "mcp.stale": "cassé — à réparer",
   "mcp.staleHint": "configuré, mais cet exécutable n'existe plus : {command}",
   "mcp.staleHintNoCommand": "configuré, mais ne désigne aucun exécutable",
   "mcp.notDetected": "non détecté",
-  "mcp.restartHint": "Redémarre les agents concernés pour qu'ils chargent le serveur.",
+  "mcp.restartHint": "Redémarre les panneaux Claude Code pour qu'ils chargent le serveur.",
   "mcp.manual": "Ou à la main",
   "mcp.manualHint": "si tu préfères passer par la CLI",
   "mcp.close": "Fermer",

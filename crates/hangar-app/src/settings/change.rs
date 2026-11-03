@@ -12,10 +12,9 @@
 //! the store merges it as `updateSettings({[key]: value})` did.
 
 use hangar_i18n::Locale;
-use serde_json::Value as Json;
 
 use super::experiments::with_experiment;
-use crate::state::types::{AgentId, CursorStyle, Settings, VoiceEngine, Workspace};
+use crate::state::types::{CursorStyle, Settings, VoiceEngine, Workspace};
 use crate::state::{Patch, StoreAction};
 
 /// The value a control reports.
@@ -38,7 +37,8 @@ pub enum Target {
     HibernateIdle,
     HibernateAfterMin,
     AgentPaneControl,
-    AgentCommand(AgentId),
+    /// Claude Code's launch command (`agentCommands.claude`).
+    ClaudeCommand,
     // Appearance
     UiScale,
     NavigatorOpen,
@@ -213,17 +213,11 @@ pub fn apply(settings: &mut Settings, target: &Target, value: &Value) -> bool {
             None => return false,
         },
         (T::AgentPaneControl, Bool(on)) => settings.agent_pane_control = *on,
-        (T::AgentCommand(agent), Text(command)) => {
-            // Cleared means back to the default, and storing "" would pin this
-            // agent to a command it no longer follows. What is stored is not
-            // trimmed: it is what the person typed.
-            if command.trim().is_empty() {
-                settings.agent_commands.remove(agent.as_str());
-            } else {
-                settings
-                    .agent_commands
-                    .insert(agent.as_str().to_string(), Json::String(command.clone()));
-            }
+        (T::ClaudeCommand, Text(command)) => {
+            // Cleared means back to the default, and storing "" would pin
+            // Claude Code to a command it no longer follows. What is stored is
+            // not trimmed: it is what the person typed.
+            settings.agent_commands.claude = (!command.trim().is_empty()).then(|| command.clone());
         }
         (T::UiScale, Number(percent)) => settings.ui_scale = *percent,
         (T::NavigatorOpen, Bool(on)) => settings.navigator_open = *on,
@@ -454,29 +448,20 @@ mod tests {
     #[test]
     fn a_launch_command_is_kept_as_typed_and_dropped_when_blank() {
         let typed = set(
-            Target::AgentCommand(AgentId::Claude),
+            Target::ClaudeCommand,
             Value::Text(" claude --verbose".into()),
         );
         assert_eq!(
-            typed.agent_commands["claude"],
-            Json::String(" claude --verbose".into())
+            typed.agent_commands.claude.as_deref(),
+            Some(" claude --verbose")
         );
-        let cleared = applied(
-            typed,
-            Change::text(Target::AgentCommand(AgentId::Claude), "   "),
+        let cleared = applied(typed, Change::text(Target::ClaudeCommand, "   "));
+        assert_eq!(cleared.agent_commands.claude, None);
+        let none = applied(
+            applied(cleared, Change::text(Target::ClaudeCommand, "c")),
+            Change::text(Target::ClaudeCommand, ""),
         );
-        assert!(cleared.agent_commands.is_empty());
-        // The other agents' commands stay.
-        let two = applied(
-            set(
-                Target::AgentCommand(AgentId::Codex),
-                Value::Text("codex".into()),
-            ),
-            Change::text(Target::AgentCommand(AgentId::Claude), "c"),
-        );
-        let none = applied(two, Change::text(Target::AgentCommand(AgentId::Claude), ""));
-        assert_eq!(none.agent_commands.len(), 1);
-        assert!(none.agent_commands.contains_key("codex"));
+        assert_eq!(none.agent_commands, Default::default());
     }
 
     #[test]

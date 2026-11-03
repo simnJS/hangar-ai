@@ -85,7 +85,7 @@ Most of the 6 missing and about half of the 18 partial rows among the first 690 
 1. **Windows and macOS have never run the app, and CI is red on all three platforms.**
    - The first complete CI run had 3 failures on macOS (keymap guard tests assume Ctrl; Mod is Cmd there), 3 on Windows (Unix paths in preview-root tests, a webview serving test) and 1 on Ubuntu (a `hangar-model3d` capture compared with a render the runner's software GPU draws differently). A fix package is running in another worktree.
    - Packaging is verified on Linux only. Installing a package, an update from a real old install and the real signing key were not tried (PACKAGING.md).
-2. **Nothing has been compared with the old app on real data, and only two kinds of agent have run.** The parity pass of the inventory (§8.1) is not done. Codex, Gemini CLI and OpenCode panes never ran in the real app. Dictation was never driven by its key and a microphone. Mobile was tried with a fake phone, never with a push to a real one or a real landing. The key dispatcher is checked by unit tests only (AltGr is a guess, `keymap/chord.rs:366-373`).
+2. **Nothing has been compared with the old app on real data.** The parity pass of the inventory (§8.1) is not done. Codex, Gemini CLI and OpenCode panes: dropped (owner's decision, 2026-11-03); Claude Code is the only agent, and a saved pane that ran one of them opens as a shell with a note. Dictation was never driven by its key and a microphone. Mobile was tried with a fake phone, never with a push to a real one or a real landing. The key dispatcher is checked by unit tests only (AltGr is a guess, `keymap/chord.rs:366-373`).
 3. **The 3D viewer shows still models only.** No clip plays (`model3d_view/animation_bar.rs` is drawn disabled). Draco, meshopt, KTX2, USDZ and `KHR_mesh_quantization` are refused where three.js read them. Skinned meshes stay in rest pose. A GPU failure, a lost device or iced's software renderer leaves a blank viewport with no message and no Restart.
 4. **PDF, HTML pages, video, audio and HTML kit tabs live in their own OS window.** That window opens by itself when an agent shows one, is never opened unfocused (so it may take the keyboard from a terminal), is not tied to the panel, the tab or the workspace being on screen, and media keeps playing when hidden.
 5. **The 2D viewers lose features.** AVIF does not open; animated GIF and WebP show their first frame; code, Markdown and the diff cannot be selected (Copy takes everything); web images in Markdown are links; a Markdown file can show any local image path.
@@ -100,7 +100,7 @@ Most of the 6 missing and about half of the 18 partial rows among the first 690 
 | Checklist item | Status | What holds it back |
 |---|---|---|
 | Opens on the same data: workspaces, panes, boards, memory, settings, theme, language, shortcuts | done | Round trip checked by tests and by a real run (the file stayed byte for byte). Detached workspaces mount at boot, and every load error moves the file aside. The localStorage usage cache is not migrated (accepted, inventory §9.1). Not yet compared with the old app on a real file (§7 WP-A) |
-| Panes run every agent and shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume | partial | Only Claude Code and shells have run in the real app. Links need Ctrl/Cmd+click. File-drop highlight untested |
+| Panes run Claude Code and every shell; resize, zoom, search, copy/paste, links, file drop, scrollback, broadcast, queued prompts, hibernation, session resume | partial | Codex, Gemini CLI and OpenCode: dropped (owner's decision, 2026-11-03). Links need Ctrl/Cmd+click. File-drop highlight untested |
 | Typing without latency; US-International dead keys | done | Release build, 16 panes looping coloured `ls`: a typed byte reaches the terminal in about 3 ms with 15 busy panes, UI thread 26% of a core, 60 fps (STATUS, integration pass). Dead keys pass widget tests, not tried on a real layout |
 | Exact pane states from the bridge; context and plan gauges | done | 217 tests in `panes_logic` |
 | Navigator, inspector (all panels), status bar, palette, menus, F6, every shortcut rebindable | partial | All wired and per window. No keyboard focus on iced buttons: F6 stops at regions, the toolbar's views group has no arrow walk |
@@ -108,8 +108,8 @@ Most of the 6 missing and about half of the 18 partial rows among the first 690 
 | Orchestrator mode end to end | partial | Engines, ops and UI done and each checked in a dev app; a real landing (it launches a Claude review) and a real orchestrator with workers have not run together |
 | Project manager (HQ) | done | |
 | Settings: every row of the old schema, Experimental included | partial | All 53 rows work except `letterSpacing` (no effect) |
-| Accounts, MCP servers panel and installs, agent instructions | done | |
-| Stats with charts; diff view; worktree panel; git clone with consent | done | Small partials: no text selection in the diff, no keyboard walk of the stats segments, no sticky table header; two copies of worktree naming |
+| Accounts, MCP servers panel and installs, agent instructions | done | The install panel writes Claude Code's `.mcp.json` only and the playbook goes to `CLAUDE.md` only; the Codex, Gemini CLI, Cursor and VS Code targets and `AGENTS.md`: dropped (owner's decision, 2026-11-03) |
+| Stats with charts; diff view; worktree panel; git clone with consent | done | Codex rollouts, the by-agent card and non-Anthropic prices: dropped (owner's decision, 2026-11-03). Small partials: no text selection in the diff, no keyboard walk of the stats segments, no sticky table header; two copies of worktree naming |
 | Kits: list, add, update, setup, activation; HTML tabs; native tabs | partial | Management and the launch consent are done. Tabs: §2.8 |
 | Previews: images, text and code, video, PDF, 3D | partial | §2.7, §2.8: AVIF, animated images, no inline video/PDF/HTML, 3D animation and compressed formats |
 | Voice dictation (local and Groq) and its HUD | done | Not driven by its key and a microphone |
@@ -136,7 +136,7 @@ All 24 rows. Rows that were `done` in the first audit are unchanged.
 | Save: 400 ms debounce, never before hydration, an older write never lands after a newer one, flush on quit | done | `app.rs:378-421`, `:447 quit`, `state/persist.rs` | – |
 | Unknown fields, explicit nulls, malformed values written back | done | `state/lenient.rs`, `state/unread.rs`, `state/roundtrip_tests.rs`; real run | – |
 | Load failure of any kind | **done** (was partial) | `hangar-core/src/store.rs` (`Rescue`, `LoadError`, `HELD`, `set_aside`); tests `store.rs:309` (not UTF-8), `:329` (not an object), `:340` (a BOM is no error), `:362` (cannot be moved: never written over), `:392`; `state/lenient.rs:57 read_checked`, test `:352`; `app.rs:196` | The TS started empty and overwrote the file |
-| Agents and shells detected once | done | `app.rs:256` | – |
+| Agents and shells detected once | done | `app.rs:256`; only Claude Code is looked for now, the other agents dropped (owner's decision, 2026-11-03) | – |
 | A notification's click raises the window and lands on the pane | done | `app.rs:422 core_event` | – |
 | Detached windows reopened at boot | **done** (was regressed) | `app/shell.rs:964 open_workspace_window`, `state/mod.rs:226-239` (a window opened mounts its workspace); test `app/shell/tests.rs:54`; real run: `site` open, its pane running | – |
 | Detach: flag set, main window moves to the next workspace, window opened | done | `app/shell.rs:884 detach` | – |
@@ -469,7 +469,7 @@ The packages own disjoint files and are listed most valuable first. Where two ne
 ### WP-A — Run it for real (owns no source files; findings become rows here)
 
 1. Copy a real `state.json` into a dev home and run the native app beside the old one: navigator, toolbar, panes, boards, memory, settings, themes, shortcuts, detached windows. Compare what each shows.
-2. Open Codex, Gemini CLI and OpenCode panes: launch, resume, state glyph, trust prompt, Shift+Enter.
+2. ~~Open Codex, Gemini CLI and OpenCode panes: launch, resume, state glyph, trust prompt, Shift+Enter.~~ Dropped (owner's decision, 2026-11-03): instead, open a `state.json` holding a Codex pane and check it comes up as a shell in its folder, with the note in its bar.
 3. Real keys: Mod+Alt+V with voice on (and a microphone), AltGr and AZERTY digits, US-International dead keys, Mod+, then a category click, F6 and Shift+F6.
 4. An orchestrator with two workers in a scratch repo, to a real landing (it launches a Claude review).
 5. The 3D capture's clipboard copy and save dialog; a Markdown file with a relative `.svg`; a file dropped on a pane.
@@ -535,7 +535,7 @@ Verify: `iced_test` walks of each control.
 
 1. `letterSpacing` in hangar-term and in the settings preview (`settings/previews.rs`).
 2. The unfocused pane at 0.94 opacity (pane opacity in hangar-term).
-3. Decide, with a real agent, plain click versus Ctrl/Cmd+click for links, and the kitty keyboard default (`hangar-term/src/config.rs:81`): compare the bytes Claude Code and Codex receive with xterm.js's.
+3. Decide, with a real agent, plain click versus Ctrl/Cmd+click for links, and the kitty keyboard default (`hangar-term/src/config.rs:81`): compare the bytes Claude Code receives with xterm.js's (Codex: dropped (owner's decision, 2026-11-03)).
 4. Keyboard resize of dividers (a key handler under F6 on the grid).
 5. The trust prompt looked for in the viewport only: `TerminalAccess::screen_text` and `panes_logic/mod.rs:1284`.
 6. Check the file-drop highlight with a real drag; selection foreground colour; fractional scaling.

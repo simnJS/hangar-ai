@@ -560,6 +560,21 @@ pub fn spawned(
     let mut notes: Vec<String> = take_restart_note(pane.session_id.as_deref())
         .into_iter()
         .collect();
+    // A pane of the old app whose agent this version no longer runs opens as
+    // a shell (lenient.rs): said once, as it first starts, and the mark
+    // taken off so that a restart or a sleep does not say it again. Taking it
+    // off is a change, so the pane is saved as the shell it now is.
+    if let Some(agent) = pane.retired_agent {
+        notes.push(
+            tr.t_with(Key::PaneAgentRetired, &args!("agent" => agent))
+                .into_owned(),
+        );
+        m.apply(StoreAction::UpdatePane {
+            ws: ws.id.clone(),
+            pane: id.clone(),
+            patch: Patch::new(|pane: &mut Pane| pane.retired_agent = None),
+        });
+    }
     // The account a pane fell back to: the one asked for is gone, or core
     // could not start Claude Code on it.
     let fell_back =
@@ -631,7 +646,7 @@ pub fn spawned(
             let exists = async {
                 match saved {
                     Some(id) => tokio::task::spawn_blocking(move || {
-                        hangar_core::sessions::session_exists(agent.as_str().to_owned(), id)
+                        hangar_core::sessions::session_exists(id)
                     })
                     .await
                     .ok()
@@ -680,7 +695,7 @@ pub fn launch_ready(
     let name = crate::state::pane_names::session_name(&pane.name, &ws.name);
     let options = LaunchOptions {
         extra_roots: &ws.extra_roots,
-        commands: Some(&settings.agent_commands),
+        command: settings.agent_commands.claude.as_deref(),
         name: Some(&name),
         mcp_config: rt.mcp_arg.as_ref().map(|(arg, _)| arg.as_str()),
         mcp_strict: rt.mcp_arg.as_ref().map(|(_, strict)| *strict),
@@ -817,13 +832,9 @@ pub fn role_check(rt: &mut PaneRt, m: &Model, locale: Locale) -> Task<Message> {
             // terminal.
             queue_restart_note(&session, restart_text(locale, RestartText::Restarting));
             let ws = ws.id.clone();
-            let agent = pane.agent;
             Task::perform(
                 tokio::task::spawn_blocking(move || {
-                    let found = hangar_core::sessions::session_exists(
-                        agent.as_str().to_owned(),
-                        session.clone(),
-                    );
+                    let found = hangar_core::sessions::session_exists(session.clone());
                     (found == Some(true), session)
                 }),
                 move |answer| {
@@ -1029,6 +1040,51 @@ mod tests {
         assert_eq!(rt.notes, [warning]);
     }
 
+    /// A Codex pane of the old app's file: a shell now, which says so in its
+    /// bar the first time it starts, in English or French, and never again.
+    /// Saying it saves the pane as the shell it is.
+    #[test]
+    fn a_pane_of_a_retired_agent_says_once_that_it_is_a_shell_now() {
+        let raw = serde_json::from_str(include_str!("../state/fixtures/retired_agents.json"))
+            .expect("the fixture is JSON");
+        let (state, kept) = crate::state::read_checked(raw).expect("the fixture reads");
+        let mut m = Model::default();
+        m.hydrate_read(state, kept);
+        let ws = m.state().workspaces[0].clone();
+        let bob = ws.panes[1].clone();
+        assert_eq!(
+            (bob.agent, bob.retired_agent),
+            (AgentId::Shell, Some("Codex"))
+        );
+
+        let revision = m.revision();
+        let mut rt = mounted(&ws, &bob);
+        let _ = spawned(&mut rt, &mut m, Ok(report(Vec::new())));
+        let note = Translator::new(Locale::En)
+            .t_with(Key::PaneAgentRetired, &args!("agent" => "Codex"))
+            .into_owned();
+        assert!(note.contains("Codex") && note.contains("shell"), "{note}");
+        assert_eq!(rt.notes, [note]);
+        let saved = &m.state().workspaces[0].panes[1];
+        assert_eq!(saved.retired_agent, None);
+        assert!(m.revision() > revision, "the shell is saved");
+        assert_eq!(m.to_json()["workspaces"][0]["panes"][1]["agent"], "shell");
+
+        // Restarted or woken up: nothing more to say.
+        let mut again = mounted(&ws, saved);
+        let _ = spawned(&mut again, &mut m, Ok(report(Vec::new())));
+        assert!(again.notes.is_empty());
+
+        // The French says the same, in French.
+        let fr = Translator::new(Locale::Fr)
+            .t_with(Key::PaneAgentRetired, &args!("agent" => "Gemini CLI"))
+            .into_owned();
+        assert!(
+            fr.contains("Gemini CLI") && fr.contains("plus pris en charge"),
+            "{fr}"
+        );
+    }
+
     #[test]
     fn the_kits_on_everywhere_are_held_the_same_way() {
         let kits = block_on(launch_kits(
@@ -1160,9 +1216,8 @@ mod tests {
     #[test]
     fn a_server_choice_keeps_a_custom_launcher_in_front() {
         let file = ps_file();
-        let commands = serde_json::json!({"claude": "claude --model haiku"});
         let options = LaunchOptions {
-            commands: commands.as_object(),
+            command: Some("claude --model haiku"),
             mcp_config: Some(&file),
             ..LaunchOptions::default()
         };
@@ -1175,20 +1230,13 @@ mod tests {
     }
 
     #[test]
-    fn a_server_choice_leaves_the_other_agents_alone() {
+    fn a_server_choice_leaves_a_shell_alone() {
         let file = ps_file();
         let options = LaunchOptions {
             mcp_config: Some(&file),
             ..LaunchOptions::default()
         };
-        assert_eq!(
-            launch_command(AgentId::Codex, Some("s1"), &options).as_deref(),
-            Some("codex resume s1")
-        );
-        assert_eq!(
-            launch_command(AgentId::Gemini, None, &options).as_deref(),
-            Some("gemini")
-        );
+        assert_eq!(launch_command(AgentId::Shell, Some("s1"), &options), None);
     }
 
     /// Sixteen panes printing cost one wake-up, then one look a frame: the

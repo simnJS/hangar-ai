@@ -64,16 +64,14 @@ pub fn build_presence(input: &PresenceInput) -> Option<Presence> {
     let panes: &[Pane] = workspace.map_or(&[], |ws| &ws.panes);
     // A shell is a terminal, not an agent: counting it would claim five
     // agents are running on a workspace where nothing was launched.
-    let working: Vec<&Pane> = panes
+    // Claude Code is the only agent (owner's decision, 2026-11-03): named, it
+    // is named once; counted, each of its panes counts, where the old app
+    // counted the kinds of agent running.
+    let agents = panes
         .iter()
         .filter(|pane| pane.agent != AgentId::Shell)
-        .collect();
-    let mut kinds: Vec<AgentId> = Vec::new();
-    for pane in &working {
-        if !kinds.contains(&pane.agent) {
-            kinds.push(pane.agent);
-        }
-    }
+        .count();
+    let claude = AgentId::Claude;
 
     let details = match workspace {
         Some(ws) if settings.discord_show_workspace => ws.name.clone(),
@@ -84,16 +82,12 @@ pub fn build_presence(input: &PresenceInput) -> Option<Presence> {
     let state = if workspace.is_none() {
         t.t(Key::DiscordIdle).into_owned()
     } else {
-        let agents = if kinds.is_empty() {
+        let agents = if agents == 0 {
             t.t(Key::DiscordShellOnly).into_owned()
         } else if settings.discord_show_agents {
-            kinds
-                .iter()
-                .map(|agent| agent.info().label)
-                .collect::<Vec<_>>()
-                .join(", ")
+            claude.info().label.to_owned()
         } else {
-            t.t_with(Key::DiscordAgents, &args!("n" => kinds.len()))
+            t.t_with(Key::DiscordAgents, &args!("n" => agents))
                 .into_owned()
         };
         format!(
@@ -102,16 +96,16 @@ pub fn build_presence(input: &PresenceInput) -> Option<Presence> {
         )
     };
 
-    // The badge follows the pane you are looking at, falling back to
-    // whichever agent is running: a shell-only workspace gets no badge
-    // rather than a meaningless one.
+    // The badge follows the pane you are looking at, falling back to the
+    // agent that is running: a shell-only workspace gets no badge rather than
+    // a meaningless one.
     let focused = panes
         .iter()
         .find(|pane| Some(pane.id.as_str()) == *focused_pane);
-    let badge = if settings.discord_show_agents && !kinds.is_empty() {
+    let badge = if settings.discord_show_agents && agents > 0 {
         Some(match focused {
             Some(pane) if pane.agent != AgentId::Shell => pane.agent,
-            _ => kinds[0],
+            _ => claude,
         })
     } else {
         None
@@ -274,18 +268,18 @@ mod tests {
                 AgentId::Claude,
                 AgentId::Shell,
                 AgentId::Claude,
-                AgentId::Codex,
+                AgentId::Claude,
             ],
         );
         assert_eq!(
             build(&on(), Some(&ws), None).unwrap().state,
-            "4 panes · Claude Code, Codex"
+            "4 panes · Claude Code"
         );
     }
 
     #[test]
     fn the_agents_can_be_counted_instead_of_named() {
-        let ws = workspace("Shop", &[AgentId::Claude, AgentId::Codex]);
+        let ws = workspace("Shop", &[AgentId::Claude, AgentId::Claude]);
         let hidden = Settings {
             discord_show_agents: false,
             ..on()
@@ -303,12 +297,12 @@ mod tests {
 
     #[test]
     fn the_badge_follows_the_focused_pane_else_the_first_agent() {
-        let ws = workspace("Shop", &[AgentId::Claude, AgentId::Codex, AgentId::Shell]);
+        let ws = workspace("Shop", &[AgentId::Claude, AgentId::Claude, AgentId::Shell]);
         let first = build(&on(), Some(&ws), None).unwrap();
         assert_eq!(first.small_image.as_deref(), Some("agent-claude"));
         assert_eq!(first.small_text.as_deref(), Some("Claude Code"));
-        let on_codex = build(&on(), Some(&ws), Some("p1")).unwrap();
-        assert_eq!(on_codex.small_image.as_deref(), Some("agent-codex"));
+        let on_second = build(&on(), Some(&ws), Some("p1")).unwrap();
+        assert_eq!(on_second.small_image.as_deref(), Some("agent-claude"));
         // Focus on a shell falls back to the running agent.
         let on_shell = build(&on(), Some(&ws), Some("p2")).unwrap();
         assert_eq!(on_shell.small_image.as_deref(), Some("agent-claude"));

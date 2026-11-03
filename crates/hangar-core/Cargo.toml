@@ -28,7 +28,6 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "json
 # limit (remote/tailscale.rs).
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
-toml_edit = "0.25.13"
 # Hangar at login, an option of the Mobile settings (remote/mod.rs, autostart.rs):
 # the window never asks for it, the settings' own commands do. The crate
 # tauri-plugin-autostart 2.5.1 wrapped, at the version it locked, so the login
@@ -95,11 +94,6 @@ percent-encoding = "2.3"
 dunce = "1.0"
 base64 = "0.22"
 
-# The usage statistics — see stats.rs. Codex compresses the rollouts it keeps
-# (`rollout-….jsonl.zst`), so reading its token counts means decoding zstd.
-# ruzstd is a decoder in pure Rust: no C library to build for the universal
-# macOS bundle or the AppImage, and decoding is all the stats ever do.
-ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 # Days and hours of the week are the user's own, not UTC's: a turn at 1 a.m.
 # in Paris belongs to that night, not to the evening before. Already compiled
 # for tauri with its clock, so naming it adds no crate.

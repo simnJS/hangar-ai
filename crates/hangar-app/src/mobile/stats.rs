@@ -10,10 +10,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
-use hangar_core::stats::Agent;
-
 use crate::control::port::Port;
-use crate::state::types::{AGENTS, AgentId};
 use crate::stats::model::{
     Granularity, Measure, PERIODS, Period, Ranked, Summary, SummaryOptions, Totals, project_for,
     summarize, workspace_roots,
@@ -180,17 +177,6 @@ fn choice<T: Copy>(
         })
 }
 
-fn agent_label(agent: Agent) -> String {
-    let id = match agent {
-        Agent::Claude => AgentId::Claude,
-        Agent::Codex => AgentId::Codex,
-    };
-    AGENTS
-        .iter()
-        .find(|entry| entry.id == id)
-        .map_or_else(|| id.as_str().to_string(), |entry| entry.label.to_string())
-}
-
 /// `remote_stats {period?, measure?}`.
 pub async fn remote_stats(
     port: &Port,
@@ -228,7 +214,6 @@ pub async fn remote_stats(
             measure,
             now: sources.stats_now(),
             projects: &projects,
-            agent_label: &agent_label,
             top_sessions: 0,
         },
     );
