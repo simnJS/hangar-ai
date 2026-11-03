@@ -17,7 +17,6 @@ use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Element, Event, Length, Padding, Rectangle, Size, mouse};
 
-use crate::keymap::KeymapIndex;
 use crate::message::Message;
 use crate::panes::Msg;
 use crate::panes::pty_link::PaneLink;
@@ -25,32 +24,31 @@ use crate::state::PaneId;
 
 type Inner<'b> = TerminalView<'b, Message, iced::Theme, iced::Renderer>;
 
-/// Whether the app's keymap takes a key before the terminal sees it.
-pub type KeyFilter = fn(&KeymapIndex, &KeyPress) -> bool;
+/// Whether the app's keymap takes a key before the terminal sees it
+/// (`keymap::terminal_filter`).
+pub type KeyFilter<'a> = Box<dyn Fn(&KeyPress) -> bool + 'a>;
 
 /// A pane's terminal, drawn.
 pub struct PaneTerminal<'a> {
     link: &'a PaneLink,
     pane: &'a PaneId,
     padding: Padding,
-    keymap: &'a KeymapIndex,
-    filter: KeyFilter,
+    filter: KeyFilter<'a>,
 }
 
 /// The terminal of `link`. `filter` says which keys the app's keymap takes
-/// before the terminal sees them (hangar-term's `key_filter`).
+/// before the terminal sees them (hangar-term's `key_filter`): those are
+/// neither typed nor captured, and reach the dispatcher.
 pub fn pane_terminal<'a>(
     link: &'a PaneLink,
     pane: &'a PaneId,
     padding: f32,
-    keymap: &'a KeymapIndex,
-    filter: KeyFilter,
+    filter: KeyFilter<'a>,
 ) -> PaneTerminal<'a> {
     PaneTerminal {
         link,
         pane,
         padding: Padding::new(padding),
-        keymap,
         filter,
     }
 }
@@ -60,12 +58,12 @@ impl PaneTerminal<'_> {
     fn with<R>(&self, f: impl FnOnce(&mut Inner<'_>) -> R) -> R {
         let guard = self.link.lock();
         let pane = self.pane;
-        let (keymap, filter) = (self.keymap, self.filter);
+        let filter = &self.filter;
         let mut view: Inner<'_> = terminal_view(&guard, move |action| {
             Message::Panes(Msg::Term(pane.clone(), action))
         })
         .padding(self.padding)
-        .key_filter(move |press| filter(keymap, press));
+        .key_filter(move |press| filter(press));
         f(&mut view)
     }
 }
@@ -121,6 +119,14 @@ impl Widget<Message, iced::Theme, iced::Renderer> for PaneTerminal<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        // A key a widget before the terminal already used (a text field with
+        // the keyboard, the search bar over it) is not the program's too:
+        // iced hands every key to every widget, and the terminal's own
+        // handling does not ask whether one was spent.
+        if matches!(event, Event::Keyboard(_) | Event::InputMethod(_)) && shell.is_event_captured()
+        {
+            return;
+        }
         self.with(|view| {
             view.update(
                 tree, event, layout, cursor, renderer, clipboard, shell, viewport,

@@ -1,6 +1,11 @@
 //! A pane's header (`.pane__bar` of TerminalPane.tsx): one line of status,
 //! and the drag handle for the whole pane.
 //!
+//! What it says about the agent (its activity, whether the mod reports it,
+//! the queue, the context gauge, the attention badge, an overlap, the git
+//! branch) is read from P4's `panes_logic::Live`; what it says about the
+//! shell and the launch is this package's.
+//!
 //! A narrowing pane drops its details in a fixed order, so nothing ever wraps
 //! or overlaps, down to eight panes beside both side panels in the smallest
 //! window. The web app did it with container queries in `em` of the header's
@@ -15,19 +20,23 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::panes::controller::PaneRt;
+use crate::pane_menu::Folded;
+use crate::panes::controller::{PaneRt, folder_of};
 use crate::panes::gauge;
-use crate::panes::status::{
-    PaneStatus, pane_glyph_state, shell_short_name, short_session_id, state_key, ui_glyph,
-};
+use crate::panes::status::{pane_glyph_state, shell_short_name, state_key, ui_glyph};
 use crate::panes::{Msg, Picker};
-use crate::state::types::{AGENTS, AgentId, Pane, ShellInfo};
-use crate::state::{AgentActivity, GlyphState, WsId};
+use crate::panes_logic::{PaneBranch, short_session_id};
+use crate::state::live::PaneStatus;
+use crate::state::types::{AGENTS, AgentId, Pane, ShellInfo, Workspace};
+use crate::state::{AgentActivity, GlyphState};
 
 /// The header's font size, which its breakpoints are counted in.
 const EM: f32 = 12.0;
 /// The header's padding, left and right: what its content box loses.
 pub const PADDING_X: f32 = 16.0;
+/// The branch label's widest (`max-width: 18ch` at the header's 10.8 px
+/// mono).
+const BRANCH_MAX: f32 = 18.0 * 6.5;
 
 /// What a header of a given width shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,34 +94,23 @@ impl Fit {
             state: !below(12.0),
         }
     }
-}
 
-/// The header buttons a narrow pane folded away, which its "…" menu takes
-/// in (`toggleMore`'s `folded`). Read by the pane menu (P7).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Folds {
-    pub commands: bool,
-    pub diff: bool,
-    pub zoom: bool,
-}
-
-impl From<Fit> for Folds {
-    fn from(fit: Fit) -> Self {
-        Folds {
-            commands: !fit.commands,
-            diff: !fit.diff,
-            zoom: !fit.zoom,
+    /// The header buttons this width folded away, which the "…" menu takes
+    /// in (`toggleMore`'s `folded`).
+    pub fn folded(self) -> Folded {
+        Folded {
+            commands: !self.commands,
+            diff: !self.diff,
+            zoom: !self.zoom,
         }
     }
 }
 
 /// What the header is drawn with.
 pub struct Head<'a> {
-    pub ws: &'a WsId,
+    pub ws: &'a Workspace,
     pub pane: &'a Pane,
     pub rt: &'a PaneRt,
-    /// Its place in reading order, for the jump shortcut's hint.
-    pub index: usize,
     pub focused: bool,
     pub hovered: bool,
     pub zoomed: bool,
@@ -143,17 +141,22 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
     let c = &t.colors;
     let rt = head.rt;
     let pane = head.pane;
-    let fit = Fit::of(head.width - PADDING_X);
+    let logic = &ctx.model.live.panes_logic;
+    let content_width = head.width - PADDING_X;
+    let fit = Fit::of(content_width);
 
     // The shell's life until it runs, then the agent's state, or nothing
     // more than a resting ring for a plain shell, whose builds and tests are
     // not an agent at work.
-    let reports = pane.agent != AgentId::Shell || rt.watch.bridged;
-    let activity = reports.then_some(rt.watch.activity);
-    let glyph_state = pane_glyph_state(rt.status, activity);
-    let state_label = ctx.t(state_key(rt.status, activity)).into_owned();
-    let source = (rt.status == PaneStatus::Running && reports).then(|| {
-        ctx.t(if rt.watch.bridged {
+    let status = logic.pane_status(&pane.id).unwrap_or(rt.status);
+    let published = logic.pane_activity(&pane.id);
+    let bridged = published.is_some_and(|p| p.bridged);
+    let activity = published.map(|p| p.activity);
+    let reports = activity.is_some();
+    let glyph_state = pane_glyph_state(status, activity);
+    let state_label = ctx.t(state_key(status, activity)).into_owned();
+    let source = (status == PaneStatus::Running && reports).then(|| {
+        ctx.t(if bridged {
             Key::PaneStateReported
         } else {
             Key::PaneStateGuessed
@@ -168,6 +171,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         GlyphState::Yours => ctx.t(Key::PaneStateYoursShort).into_owned(),
         _ => state_label.clone(),
     };
+    let insight = logic.insight(&pane.id);
 
     let mut bar = row![].spacing(tokens::space::SM).align_y(Alignment::Center);
 
@@ -177,9 +181,12 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         state_title.clone(),
     ));
 
+    // The jump shortcut's hint is the keymap's (`pane.jump {keys}` for the
+    // first nine panes); the name alone until P7 exposes the keys.
     let name_tip = ctx
         .i18n
         .t_with(Key::PaneLabel, &args!("name" => pane.name.as_str()));
+    let focused = head.focused;
     bar = bar.push(tip::bottom(
         t,
         text(pane.name.as_str())
@@ -187,7 +194,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
             .font(hangar_theme::fonts::ui_semibold())
             .wrapping(text::Wrapping::None)
             .style(move |theme| {
-                if head.focused {
+                if focused {
                     style::text::primary(t)(theme)
                 } else {
                     style::text::muted(t)(theme)
@@ -196,8 +203,17 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         name_tip.into_owned(),
     ));
 
-    bar = bar.push(crate::orchestration_ui::pane_badge(ctx, head.ws, &pane.id));
-    bar = bar.push(crate::accounts::pane_badge(ctx, head.ws, &pane.id));
+    if let Some(branch) = logic.pane_branch(&folder_of(head.ws, pane)) {
+        bar = bar.push(branch_label(ctx, branch));
+    }
+
+    bar = bar.push(crate::orchestration_ui::pane_badge_in(
+        ctx,
+        &head.ws.id,
+        &pane.id,
+        content_width,
+    ));
+    bar = bar.push(crate::accounts::pane_badge(ctx, &head.ws.id, &pane.id));
 
     if fit.agent {
         bar = bar.push(agent_picker(ctx, &head, fit));
@@ -211,7 +227,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         if fit.session && pane.agent.info().resumable {
             meta = meta.push(session_button(ctx, &head, fit));
         }
-        if let Some(reading) = &rt.watch.gauge {
+        if let Some(reading) = &insight.context {
             meta = meta.push(gauge::view(ctx, reading, pane.agent, fit.gauge_pct));
         }
         bar = bar.push(meta);
@@ -220,7 +236,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
     bar = bar.push(Space::new().width(Length::Fill));
 
     let actions_shown = head.focused || head.hovered;
-    let show_state = (rt.status != PaneStatus::Running || reports)
+    let show_state = (status != PaneStatus::Running || reports)
         && fit.state
         && !(head.focused && !fit.state_focused)
         && !(head.hovered && !head.focused && !fit.state_hovered);
@@ -238,8 +254,9 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         ));
     }
 
-    if fit.queue && !rt.queue.is_empty() {
-        let n = rt.queue.len();
+    // Prompts held for the agent; a click drops them.
+    if fit.queue && !insight.queue.is_empty() {
+        let n = insight.queue.len();
         let words = ctx.i18n.tn(Key::PaneQueue, n, &[]).into_owned();
         let mut content = row![].spacing(3).align_y(Alignment::Center);
         if fit.icons {
@@ -257,6 +274,19 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
                 .height(18)
                 .style(style::button::toggle(t, true))
                 .on_press(wrap(Msg::CancelQueue(pane.id.clone()))),
+            words,
+        ));
+    }
+
+    // Another pane just edited a file this one had edited.
+    if let Some(other) = logic.conflict(&pane.id) {
+        let words = ctx
+            .i18n
+            .t_with(Key::PaneConflict, &args!("name" => other))
+            .into_owned();
+        bar = bar.push(tip::bottom(
+            t,
+            icon(Icon::Alert, 13.0).color(c.warning),
             words,
         ));
     }
@@ -281,7 +311,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
     }
     // An agent pane says the same through its state; a shell keeps the bell
     // for the build that finished while the person was away.
-    if rt.attention && !reports {
+    if logic.needs_attention(&pane.id) && !reports {
         bar = bar.push(tip::bottom(
             t,
             icon(Icon::Bell, 13.0).color(c.state_yours_fill),
@@ -289,7 +319,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         ));
     }
     // A shell that died says how to bring it back, in so many words.
-    if rt.status == PaneStatus::Exited {
+    if status == PaneStatus::Exited {
         bar = bar.push(tip::bottom(
             t,
             iced::widget::button(
@@ -305,7 +335,7 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
             .padding(Padding::from([0.0, 8.0]))
             .height(20)
             .style(style::button::secondary(t))
-            .on_press(wrap(Msg::Restart(head.ws.clone(), pane.id.clone()))),
+            .on_press(wrap(Msg::Restart(head.ws.id.clone(), pane.id.clone()))),
             ctx.t(Key::PaneRestart).into_owned(),
         ));
     }
@@ -334,11 +364,65 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         .into()
 }
 
+/// The git branch of the pane's folder, beside its name; a detached head
+/// shows its short sha, marked (`PaneBranchLabel`).
+fn branch_label<'a>(ctx: Ctx<'a>, branch: &'a PaneBranch) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let (label, words, detached) = match branch {
+        PaneBranch::Branch {
+            name,
+            linked_worktree,
+        } => (
+            name.clone(),
+            ctx.i18n.t_with(
+                if *linked_worktree {
+                    Key::PaneBranchBranchWorktree
+                } else {
+                    Key::PaneBranchBranch
+                },
+                &args!("branch" => name.as_str()),
+            ),
+            false,
+        ),
+        PaneBranch::Detached { head } => (
+            head.clone(),
+            ctx.i18n
+                .t_with(Key::PaneBranchDetached, &args!("head" => head.as_str())),
+            true,
+        ),
+    };
+    let mut content = row![
+        text(label)
+            .size(tokens::font_size::LABEL)
+            .font(hangar_theme::fonts::mono())
+            .wrapping(text::Wrapping::None)
+            .style(style::text::muted(t)),
+    ]
+    .spacing(3);
+    if detached {
+        content = content.push(
+            text(ctx.t(Key::PaneBranchDetachedMark))
+                .size(tokens::font_size::LABEL)
+                .font(iced::Font {
+                    style: iced::font::Style::Italic,
+                    ..hangar_theme::fonts::ui()
+                })
+                .style(style::text::muted(t)),
+        );
+    }
+    tip::bottom(
+        t,
+        container(content).max_width(BRANCH_MAX).clip(true),
+        words.into_owned(),
+    )
+}
+
 /// The ⚡, diff, zoom, "…" and close buttons: always on the focused pane, on
 /// the others while the header is hovered.
 fn actions<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Message> {
     let t = ctx.theme;
     let pane = head.pane;
+    let ws = &head.ws.id;
     let side = if fit.narrow_actions { 20.0 } else { 22.0 };
     let mut group = row![].spacing(1).align_y(Alignment::Center);
     if fit.commands {
@@ -353,7 +437,7 @@ fn actions<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Message> 
             button::icon_button(t, Icon::Diff)
                 .side(side)
                 .tip(ctx.t(Key::DiffOpen).into_owned())
-                .on_press(wrap(Msg::Diff(head.ws.clone(), pane.id.clone()))),
+                .on_press(wrap(Msg::Diff(ws.clone(), pane.id.clone()))),
         );
     }
     if fit.zoom && head.can_zoom {
@@ -376,10 +460,15 @@ fn actions<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Message> 
             )
             .side(side)
             .tip(words)
-            .on_press(wrap(Msg::ToggleZoom(head.ws.clone(), pane.id.clone()))),
+            .on_press(wrap(Msg::ToggleZoom(ws.clone(), pane.id.clone()))),
         );
     }
-    group = group.push(crate::pane_menu::view(&ctx.pkg.pane_menu, ctx, &pane.id));
+    group = group.push(crate::pane_menu::view_folded(
+        &ctx.pkg.pane_menu,
+        ctx,
+        &pane.id,
+        fit.folded(),
+    ));
     let close_words = ctx
         .t(if head.can_close {
             Key::PaneClose
@@ -394,7 +483,7 @@ fn actions<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Message> 
             .tip(close_words)
             .on_press_maybe(
                 head.can_close
-                    .then(|| wrap(Msg::Close(head.ws.clone(), pane.id.clone()))),
+                    .then(|| wrap(Msg::Close(ws.clone(), pane.id.clone()))),
             ),
     );
     container(group)
@@ -475,7 +564,7 @@ fn agent_picker<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Mess
                 menu::item(label)
                     .checked(agent.id == pane.agent)
                     .on_select(wrap(Msg::SetAgent(
-                        head.ws.clone(),
+                        head.ws.id.clone(),
                         pane.id.clone(),
                         agent.id,
                     )))
@@ -516,14 +605,18 @@ fn shell_picker<'a>(ctx: Ctx<'a>, head: &Head<'a>) -> Element<'a, Message> {
                     .into_owned(),
             )
             .checked(pane.shell_id.is_none())
-            .on_select(wrap(Msg::SetShell(head.ws.clone(), pane.id.clone(), None)))
+            .on_select(wrap(Msg::SetShell(
+                head.ws.id.clone(),
+                pane.id.clone(),
+                None,
+            )))
             .into(),
         ];
         entries.extend(ctx.model.ui.shells.iter().map(|shell| {
             menu::item(shell.label.clone())
                 .checked(pane.shell_id.as_deref() == Some(shell.id.as_str()))
                 .on_select(wrap(Msg::SetShell(
-                    head.ws.clone(),
+                    head.ws.id.clone(),
                     pane.id.clone(),
                     Some(shell.id.clone()),
                 )))
@@ -586,7 +679,7 @@ fn session_button<'a>(ctx: Ctx<'a>, head: &Head<'a>, fit: Fit) -> Element<'a, Me
             })
             .height(18)
             .style(style::button::toggle(t, pane.session_id.is_some()))
-            .on_press(wrap(Msg::Sessions(head.ws.clone(), pane.id.clone()))),
+            .on_press(wrap(Msg::Sessions(head.ws.id.clone(), pane.id.clone()))),
         words,
     )
 }
@@ -636,18 +729,18 @@ mod tests {
 
     #[test]
     fn what_the_header_folds_the_menu_takes() {
-        assert_eq!(Folds::from(Fit::of(800.0)), Folds::default());
+        assert_eq!(Fit::of(800.0).folded(), Folded::default());
         assert_eq!(
-            Folds::from(Fit::of(30.0 * EM)),
-            Folds {
+            Fit::of(30.0 * EM).folded(),
+            Folded {
                 commands: false,
                 diff: true,
                 zoom: false
             }
         );
         assert_eq!(
-            Folds::from(Fit::of(20.0 * EM)),
-            Folds {
+            Fit::of(20.0 * EM).folded(),
+            Folded {
                 commands: true,
                 diff: true,
                 zoom: true

@@ -9,21 +9,23 @@
 //! | --- | --- |
 //! | `pty_link` | A pane's terminal, its writer thread, and the sink core feeds it through |
 //! | `hub` | Every terminal by pane id, for the engines (`TerminalAccess`), and the channel the reader threads wake the window on |
-//! | `controller` | A pane's life: mount, spawn, launch of its agent, exit, unmount |
-//! | `agent_watch` | Where its agent stands: the mod's reports, the output watcher, the trust question, hand-backs |
+//! | `controller` | A pane's life: mount, spawn (with the MCP scope), launch of its agent, exit, unmount, the restart a role asks for |
 //! | `term_widget` | hangar-term's widget over the locked terminal |
 //! | `grid` | The split grid: slots, boundaries, moves, zoom, file drops |
 //! | `workspace_terminals`, `terminal_pane`, `header`, `search`, `zoom_bar`, `gauge` | The views |
-//! | `status`, `geometry`, `look`, `launch`, `drop` | Pure logic, with the TS tests |
+//! | `status`, `geometry`, `look`, `launch` | Pure logic, with the TS tests |
 //!
 //! Terminals live in this package's state, never in a window: a hidden
 //! workspace draws nothing, and its panes keep consuming their output, on
 //! their own reader threads, all the same. A detached workspace is only
 //! drawn by another window.
+//!
+//! Where each agent stands is P4's (`panes_logic`): this package tells it
+//! what happens to a pane (`panes_logic::Msg::{Mounted, Unmounted, Status,
+//! Output, Bell, Notification, Key, Typed, WatchSession}`) and draws what it
+//! publishes.
 
-mod agent_watch;
 mod controller;
-mod drop;
 mod gauge;
 mod geometry;
 mod grid;
@@ -44,33 +46,29 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use hangar_term::{Action, ClipboardTarget, Event as TermEvent, KeyPress, ScrollTo};
+use hangar_term::{Action, ClipboardTarget, Event as TermEvent, ScrollTo};
 use iced::futures::stream;
 use iced::widget::Space;
-use iced::{Element, Size, Subscription, Task, window};
+use iced::{Element, Size, Subscription, Task};
 
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
-use crate::keymap::KeymapIndex;
 use crate::message::{Intent, Message};
+use crate::pane_menu::Folded;
+use crate::panes_logic::Msg as Logic;
 use crate::services::{CoreEvent, Services, TerminalAccess};
 use crate::shell::{Focus, Region, View, WindowKind};
-use crate::state::live::{ContextGauge, QueuedPrompt};
-use crate::state::types::{AgentId, DropZone, Pane, SplitDir};
-use crate::state::{
-    AgentActivity, BridgeEvent, GlyphState, Model, PaneId, Patch, StoreAction, Workspace, WsId,
-};
+use crate::state::live::{PaneMcp, PaneStatus};
+use crate::state::types::{DropZone, Pane, SplitDir};
+use crate::state::{Model, PaneId, Patch, StoreAction, Workspace, WsId};
 
-use controller::{Context, PaneRt, SpawnReport};
+use controller::{PaneRt, SpawnReport};
 use hub::{Hub, HubChannel};
 use pty_link::{HubEvent, HubKind};
 
 pub use geometry::Turn;
-pub use header::Folds;
 pub use search::SearchMsg;
-pub use status::PaneStatus;
 
 /// The package's UI state; lives in `App.pkg.panes`. The terminals and their
 /// PTY links live here, not in a window.
@@ -85,14 +83,9 @@ pub struct State {
     /// The panes each opened workspace had at the last sync: a change in the
     /// count ends the zoom.
     pane_counts: HashMap<WsId, usize>,
-    /// The windows known not to have the system's focus.
-    unfocused: HashSet<window::Id>,
     /// Files dropped in the batch of events being handled, joined into one
     /// paste per pane.
     drops: Vec<(PaneId, PathBuf)>,
-    /// Prompts still queued for a pane that restarted, for its successor
-    /// (`stashQueue`, `CARRY_MS`).
-    carried: HashMap<(WsId, String), (Instant, Vec<QueuedPrompt>)>,
     /// The header under the pointer, which shows its actions.
     hovered: Option<PaneId>,
     /// An agent or shell picker open in a header.
@@ -102,9 +95,6 @@ pub struct State {
     synced: u64,
 }
 
-/// How long the prompts of a restarted pane wait for its successor.
-const CARRY: Duration = Duration::from_secs(10);
-
 /// The pickers of a header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Picker {
@@ -112,7 +102,9 @@ pub enum Picker {
     Shell,
 }
 
-/// What other packages read of the panes; lives in `Model.live.panes`.
+/// What other packages read of the panes; lives in `Model.live.panes`. The
+/// agent's side of a pane (activity, insight, attention, status) is P4's
+/// `panes_logic::Live`.
 #[derive(Debug, Default)]
 pub struct Live {
     reports: HashMap<PaneId, PaneReport>,
@@ -122,32 +114,18 @@ pub struct Live {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneReport {
     pub workspace: WsId,
-    /// The shell's own life (starting, running, exited).
-    pub status: PaneStatus,
-    /// Where its agent stands. A plain shell reports nothing (`None`) unless
-    /// a Claude Code in it reports through the mod.
-    pub activity: Option<AgentActivity>,
-    pub bridged: bool,
-    /// It handed back while the person was looking elsewhere.
-    pub attention: bool,
-    pub gauge: Option<ContextGauge>,
-    pub queued: usize,
+    /// The header buttons its width folded into the "…" menu.
+    pub folds: Folded,
     /// The Claude account its Claude Code was started on.
     pub account: Option<String>,
-    /// The header buttons its width folded into the "…" menu.
-    pub folds: Folds,
+    /// The MCP servers its Claude Code was started with (`PaneInsight.mcp`
+    /// of the TS, written by the launch).
+    pub mcp: Option<PaneMcp>,
 }
 
 impl Live {
     pub fn report(&self, pane: &str) -> Option<&PaneReport> {
         self.reports.get(pane)
-    }
-
-    /// The glyph a pane shows (`paneGlyphState`), for whatever draws one.
-    pub fn glyph(&self, pane: &str) -> GlyphState {
-        self.report(pane).map_or(GlyphState::Starting, |report| {
-            status::pane_glyph_state(report.status, report.activity)
-        })
     }
 
     pub fn reports(&self) -> impl Iterator<Item = (&PaneId, &PaneReport)> {
@@ -164,13 +142,15 @@ pub enum Msg {
     Hub(Vec<HubEvent>),
     /// The model changed under the panes: bring them in line.
     Sync,
-    /// The output watchers' and the trust looks' clock.
-    Tick(Instant),
+    /// The terminal had its time to measure itself: start the shell.
+    SpawnDue(PaneId),
     Spawned(PaneId, Result<SpawnReport, String>),
-    /// The launch delay is over, and whether the session to resume exists.
-    LaunchReady(PaneId, Option<bool>),
+    /// The launch delay is over: whether the session to resume exists, and
+    /// the transcripts known before the launch.
+    LaunchReady(PaneId, Option<bool>, HashSet<String>),
     LoginReady(PaneId),
-    WindowFocus(window::Id, bool),
+    /// Whether the session a role's restart resumes exists.
+    RoleRestart(WsId, PaneId, String, bool),
     FlushDrops,
     Paste(PaneId, Option<String>),
     /// A press in a pane.
@@ -178,7 +158,7 @@ pub enum Msg {
     Hover(Option<PaneId>),
     OpenPicker(PaneId, Picker),
     ClosePicker,
-    SetAgent(WsId, PaneId, AgentId),
+    SetAgent(WsId, PaneId, crate::state::AgentId),
     SetShell(WsId, PaneId, Option<String>),
     Restart(WsId, PaneId),
     Close(WsId, PaneId),
@@ -201,9 +181,8 @@ pub enum Msg {
     },
     Search(PaneId, SearchMsg),
     /// A `terminal.*` command for the focused pane of the focused window:
-    /// what the shell's command table (`commands::run`) and the keymap send
-    /// for clear, copy, paste, select all, scroll to the top or the bottom,
-    /// and find.
+    /// what the shell's command table (`commands::run`) sends for clear,
+    /// copy, paste, select all, scroll to the top or the bottom, and find.
     Command(CommandId),
 }
 
@@ -215,6 +194,10 @@ fn intent(intent: Intent) -> Task<Message> {
     done(Message::Intent(intent))
 }
 
+fn logic(msg: Logic) -> Task<Message> {
+    done(Message::PanesLogic(msg))
+}
+
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     let task = handle(st, m, sv, msg);
     let synced = sync_if_needed(st, m, sv);
@@ -224,30 +207,30 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 
 fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
-        Msg::Term(pane, action) => term_action(st, pane, action),
-        Msg::Hub(events) => hub_events(st, m, sv, events),
+        Msg::Term(pane, action) => term_action(st, m, sv, pane, action),
+        Msg::Hub(events) => hub_events(st, sv, events),
         Msg::Sync => sync(st, m, sv),
-        Msg::Tick(now) => tick(st, m, now),
-        Msg::Spawned(pane, result) => {
-            let tr = hangar_i18n::Translator::new(m.locale());
-            match st.panes.get_mut(&pane) {
-                Some(rt) => controller::spawned(rt, m, tr, result),
-                // The pane went while its shell was starting: the shell
-                // would outlive it.
-                None if result.is_ok() => {
-                    let pty = sv.core().pty().clone();
-                    Task::perform(
-                        tokio::task::spawn_blocking(move || {
-                            hangar_core::pty::pty_kill(&pty, pane, None)
-                        }),
-                        |_| Message::Noop,
-                    )
-                }
-                None => Task::none(),
+        Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
+            Some(rt) => controller::start(rt, sv, &st.channel),
+            None => Task::none(),
+        },
+        Msg::Spawned(pane, result) => match st.panes.get_mut(&pane) {
+            Some(rt) => controller::spawned(rt, m, result),
+            // The pane went while its shell was starting: the shell would
+            // outlive it.
+            None if result.is_ok() => {
+                let pty = sv.core().pty().clone();
+                Task::perform(
+                    tokio::task::spawn_blocking(move || {
+                        hangar_core::pty::pty_kill(&pty, pane, None)
+                    }),
+                    |_| Message::Noop,
+                )
             }
-        }
-        Msg::LaunchReady(pane, exists) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::launch_ready(rt, m, exists),
+            None => Task::none(),
+        },
+        Msg::LaunchReady(pane, exists, known) => match st.panes.get_mut(&pane) {
+            Some(rt) => controller::launch_ready(rt, m, exists, known),
             None => Task::none(),
         },
         Msg::LoginReady(pane) => {
@@ -256,14 +239,10 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             }
             Task::none()
         }
-        Msg::WindowFocus(window, focused) => {
-            if focused {
-                st.unfocused.remove(&window);
-            } else {
-                st.unfocused.insert(window);
-            }
-            Task::none()
-        }
+        Msg::RoleRestart(ws, pane, session, found) => match st.panes.get(&pane) {
+            Some(rt) => controller::role_restart_answered(rt, ws, session, found, m.locale()),
+            None => Task::none(),
+        },
         Msg::FlushDrops => flush_drops(st, m),
         Msg::Paste(pane, text) => {
             if let (Some(rt), Some(text)) = (st.panes.get(&pane), text) {
@@ -272,11 +251,17 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             }
             Task::none()
         }
-        Msg::Focus(ws, pane) => intent(Intent::FocusPane {
-            ws,
-            pane,
-            terminal: true,
-        }),
+        // Clicking in a pane is using its workspace.
+        Msg::Focus(ws, pane) => Task::batch([
+            logic(Logic::Typed {
+                workspace: ws.clone(),
+            }),
+            intent(Intent::FocusPane {
+                ws,
+                pane,
+                terminal: true,
+            }),
+        ]),
         Msg::Hover(pane) => {
             st.hovered = pane;
             Task::none()
@@ -329,7 +314,8 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             })
         }
         Msg::ToggleZoom(ws, pane) => {
-            let target = (zoomed_pane(m, m.workspace(&ws)) != Some(pane.clone())).then_some(pane);
+            let zoomed = m.workspace(&ws).and_then(|w| zoomed_pane(m, w));
+            let target = (zoomed.as_deref() != Some(pane.as_str())).then_some(pane);
             zoom_to(ws, target)
         }
         Msg::Zoom(ws, target) => zoom_to(ws, target),
@@ -411,12 +397,23 @@ fn zoom_to(ws: WsId, target: Option<PaneId>) -> Task<Message> {
 }
 
 /// What a terminal widget did, applied, and what the terminal said back.
-fn term_action(st: &mut State, pane: PaneId, action: Action) -> Task<Message> {
+fn term_action(
+    st: &mut State,
+    m: &Model,
+    sv: &Services,
+    pane: PaneId,
+    action: Action,
+) -> Task<Message> {
     let Some(rt) = st.panes.get_mut(&pane) else {
         return Task::none();
     };
+    // The first measure of the terminal is the size its shell starts at.
+    let measured = matches!(action, Action::Resize(_));
     let events = rt.link.lock().perform(action);
     let mut tasks = Vec::new();
+    if measured {
+        tasks.push(controller::start(rt, sv, &st.channel));
+    }
     for event in events {
         match event {
             TermEvent::Write(bytes) => rt.link.write(bytes),
@@ -439,9 +436,16 @@ fn term_action(st: &mut State, pane: PaneId, action: Action) -> Task<Message> {
                     terminal: true,
                 }));
             }
+            // A key pressed in the pane, not the terminal answering its
+            // program: you taking it back, or answering what it waited on.
+            // On screen, it is using the workspace too.
             TermEvent::UserInput => {
-                rt.watch.key();
-                rt.attention = false;
+                tasks.push(logic(Logic::Key { pane: pane.clone() }));
+                if m.workspace(&rt.ws).is_some_and(|ws| visible(m, ws, &pane)) {
+                    tasks.push(logic(Logic::Typed {
+                        workspace: rt.ws.clone(),
+                    }));
+                }
             }
             TermEvent::FileDropped(path) => {
                 if st.drops.is_empty() {
@@ -478,7 +482,7 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
             continue;
         };
         let shell = controller::shell_of(m, ws, model_pane);
-        let text = drop::drop_text(&paths, model_pane.agent, shell);
+        let text = crate::panes_logic::file_drop::drop_text(&paths, model_pane.agent, shell);
         let bytes = rt.link.lock().paste_bytes(&text);
         rt.link.write(bytes);
         tasks.push(intent(Intent::FocusPane {
@@ -490,88 +494,34 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
     Task::batch(tasks)
 }
 
-fn hub_events(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
-    events: Vec<HubEvent>,
-) -> Task<Message> {
-    let now = Instant::now();
+/// What the reader threads said: output (one wake-up per pane per batch),
+/// an exit, a bell, a notification, a copy.
+fn hub_events(st: &mut State, sv: &Services, events: Vec<HubEvent>) -> Task<Message> {
     let mut tasks = Vec::new();
     for event in events {
-        let looking = looking(st, m, &event.pane);
-        let window_focused = window_focused(st, m, &event.pane);
         let Some(rt) = st.panes.get_mut(&event.pane) else {
             continue;
         };
-        let said = match event.kind {
+        let pane = event.pane;
+        match event.kind {
             HubKind::Output => {
-                controller::output(rt, now);
-                continue;
+                rt.link.take_wake();
+                tasks.push(logic(Logic::Output { pane }));
             }
-            HubKind::Exit => {
-                controller::exited(rt, sv);
-                continue;
+            HubKind::Exit => controller::exited(rt, sv),
+            HubKind::Bell => tasks.push(logic(Logic::Bell { pane })),
+            // OSC 9 and OSC 777, already read by hangar-term (ConEmu's
+            // numeric sub-commands left out): the message, or the title when
+            // there is no body (`osc777_notification`).
+            HubKind::Notification { title, body } => {
+                let message = [body.trim(), title.as_deref().unwrap_or_default().trim()]
+                    .into_iter()
+                    .find(|text| !text.is_empty())
+                    .unwrap_or_default()
+                    .to_owned();
+                tasks.push(logic(Logic::Notification { pane, message }));
             }
-            HubKind::Copy(text) => {
-                tasks.push(iced::clipboard::write(text));
-                continue;
-            }
-            // A bell is the agent asking for you outright.
-            HubKind::Bell => rt
-                .watcher
-                .ring(now)
-                .and_then(|verdict| rt.watch.watched(verdict)),
-            HubKind::Notification { title, body } => rt.watch.notification(title.as_deref(), &body),
-        };
-        if let Some(said) = said {
-            let tr = hangar_i18n::Translator::new(m.locale());
-            let settings = m.settings().clone();
-            let cx = Context {
-                tr,
-                settings: &settings,
-                window_focused,
-                looking,
-            };
-            tasks.push(controller::said(rt, m, &cx, vec![said]));
-        }
-    }
-    Task::batch(tasks)
-}
-
-/// The output watchers' silence checks, and the trust looks that are due.
-fn tick(st: &mut State, m: &mut Model, now: Instant) -> Task<Message> {
-    let idle = Duration::from_millis(m.settings().notify_idle_ms);
-    let ids: Vec<PaneId> = st
-        .panes
-        .iter()
-        .filter(|(_, rt)| rt.watcher.ticking() || rt.trust_due.is_some())
-        .map(|(id, _)| id.clone())
-        .collect();
-    let mut tasks = Vec::new();
-    for id in ids {
-        let looking = looking(st, m, &id);
-        let window_focused = window_focused(st, m, &id);
-        let Some(rt) = st.panes.get_mut(&id) else {
-            continue;
-        };
-        let mut said = Vec::new();
-        for verdict in rt.watcher.tick(now, idle) {
-            said.extend(rt.watch.watched(verdict));
-        }
-        if rt.trust_due.is_some_and(|due| due <= now) {
-            said.extend(controller::trust_look(rt));
-        }
-        if !said.is_empty() {
-            let tr = hangar_i18n::Translator::new(m.locale());
-            let settings = m.settings().clone();
-            let cx = Context {
-                tr,
-                settings: &settings,
-                window_focused,
-                looking,
-            };
-            tasks.push(controller::said(rt, m, &cx, said));
+            HubKind::Copy(text) => tasks.push(iced::clipboard::write(text)),
         }
     }
     Task::batch(tasks)
@@ -620,30 +570,11 @@ fn open_finder(st: &mut State, pane: &PaneId) -> Task<Message> {
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    let mut subscriptions = vec![
-        st.channel.subscription(),
-        iced::event::listen_with(|event, _status, window| match event {
-            iced::Event::Window(window::Event::Focused) => {
-                Some(Message::Panes(Msg::WindowFocus(window, true)))
-            }
-            iced::Event::Window(window::Event::Unfocused) => {
-                Some(Message::Panes(Msg::WindowFocus(window, false)))
-            }
-            _ => None,
-        }),
-    ];
-    if st
-        .panes
-        .values()
-        .any(|rt| rt.watcher.ticking() || rt.trust_due.is_some())
-    {
-        subscriptions
-            .push(iced::time::every(agent_watch::TICK).map(|at| Message::Panes(Msg::Tick(at))));
-    }
+    let mut subscriptions = vec![st.channel.subscription()];
     // Whatever changed the model outside this package's own messages (a store
-    // action of the shell, an engine's command, a hydration) is caught here:
-    // the subscription is rebuilt after every update, and a signature that
-    // differs from the last sync's fires one `Sync`.
+    // action of the shell, an engine's command, a hydration, a sleep) is
+    // caught here: the subscription is rebuilt after every update, and a
+    // signature that differs from the last sync's fires one `Sync`.
     let signature = signature(st, m);
     if signature != st.synced {
         subscriptions.push(Subscription::run_with(signature, |_| {
@@ -669,7 +600,8 @@ pub fn on_intent(
     let task = match intent {
         // The focus and the zoom are the shell's transient state; written
         // here too, idempotently, so the panes work before the shell's own
-        // handling of these intents lands (P0b, `activateRef`).
+        // handling of these intents lands (P0b, `activateRef`). P4 reads the
+        // same fields to know who is watching which pane.
         Intent::FocusPane { ws, pane, terminal } => {
             m.ui.focus_by_workspace.insert(ws.clone(), pane.clone());
             if *terminal {
@@ -686,16 +618,12 @@ pub fn on_intent(
             ws,
             text,
             when_free,
-        } => Some(broadcast(st, sv, ws, text, *when_free)),
+        } => Some(broadcast(st, m, sv, ws, text, *when_free)),
         Intent::InsertTranscript(text) => {
             // For the terminal that has the keyboard; a text field with the
             // focus is its own package's to fill.
-            let focus_is_terminal = matches!(
-                m.ui.focus,
-                None | Some(Focus::Terminal(_)) | Some(Focus::Region(Region::Main))
-            );
             match keyboard_pane(m)
-                .filter(|_| focus_is_terminal)
+                .filter(|_| keyboard_free(m))
                 .and_then(|pane| st.panes.get(&pane))
             {
                 Some(rt) => {
@@ -710,18 +638,31 @@ pub fn on_intent(
     };
     let synced = sync_if_needed(st, m, sv);
     publish(st, m);
-    match task {
-        Some(task) => Some(Task::batch([task, synced])),
-        None => Some(synced),
-    }
+    Some(match task {
+        Some(task) => Task::batch([task, synced]),
+        None => synced,
+    })
 }
 
 /// Types `text` into every pane of the workspace; with `when_free`, an agent
-/// whose mod reports gets it queued for when it is free (App.tsx's broadcast).
-fn broadcast(st: &State, sv: &Services, ws: &str, text: &str, when_free: bool) -> Task<Message> {
+/// whose mod reports gets it queued for when it is free (App.tsx's
+/// broadcast).
+fn broadcast(
+    st: &State,
+    m: &Model,
+    sv: &Services,
+    ws: &str,
+    text: &str,
+    when_free: bool,
+) -> Task<Message> {
     let mut queued = Vec::new();
     for (id, rt) in st.panes.iter().filter(|(_, rt)| rt.ws == ws) {
-        if when_free && rt.watch.bridged {
+        let bridged = m
+            .live
+            .panes_logic
+            .pane_activity(id)
+            .is_some_and(|activity| activity.bridged);
+        if when_free && bridged {
             queued.push(id.clone());
         } else {
             rt.link.write(format!("{text}\r").into_bytes());
@@ -742,43 +683,20 @@ fn broadcast(st: &State, sv: &Services, ws: &str, text: &str, when_free: bool) -
     )
 }
 
+/// The mod's reports and the queue are P4's; a report may end a turn, which
+/// a restart waiting for its role then takes (the next sync).
 pub fn on_event(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    let task = match event {
-        CoreEvent::Bridge { pane, event } => {
-            let parsed = BridgeEvent::parse(event)?;
-            let looking = looking(st, m, pane);
-            let window_focused = window_focused(st, m, pane);
-            let rt = st.panes.get_mut(pane)?;
-            let stored = controller::find(m, &rt.ws, pane).and_then(|(_, p)| p.session_id.clone());
-            let said = rt.watch.bridge(&parsed, stored.as_deref());
-            if !rt.watch.bridged {
-                rt.trust_due = None;
-            }
-            let tr = hangar_i18n::Translator::new(m.locale());
-            let settings = m.settings().clone();
-            let cx = Context {
-                tr,
-                settings: &settings,
-                window_focused,
-                looking,
-            };
-            controller::said(rt, m, &cx, said)
+    match event {
+        CoreEvent::Bridge { .. } | CoreEvent::BridgeQueue { .. } | CoreEvent::PtyExit { .. } => {
+            Some(sync_if_needed(st, m, sv))
         }
-        CoreEvent::BridgeQueue { pane, pending } => {
-            let rt = st.panes.get_mut(pane)?;
-            rt.queue.clone_from(pending);
-            Task::none()
-        }
-        _ => return None,
-    };
-    let synced = sync_if_needed(st, m, sv);
-    publish(st, m);
-    Some(Task::batch([task, synced]))
+        _ => None,
+    }
 }
 
 /// Region `main` in the terminals view: the grid of workspace `ws`. A hidden
@@ -803,28 +721,13 @@ pub fn terminal_access(st: &State) -> Arc<dyn TerminalAccess> {
     st.hub.clone()
 }
 
-/// The header buttons the pane's width folded into its "…" menu, for the
-/// pane menu (P7).
-pub fn folds(st: &State, m: &Model, pane: &str) -> Folds {
-    let _ = st;
-    m.live
-        .panes
-        .report(pane)
-        .map(|r| r.folds)
-        .unwrap_or_default()
-}
-
 /// The direction a split without one takes: along the pane's longer side
 /// (`preferredDir`), for the shell's `SplitPane` handling (P0b).
 pub fn preferred_dir(st: &State, m: &Model, ws: &str, pane: &str) -> SplitDir {
     let Some(workspace) = m.workspace(ws) else {
         return SplitDir::Row;
     };
-    let size = st
-        .grid_sizes
-        .get(ws)
-        .copied()
-        .unwrap_or(Size::new(1000.0, 700.0));
+    let size = st.grid_sizes.get(ws).copied().unwrap_or(UNMEASURED);
     let tree = geometry::normalize_tree(&workspace.panes, workspace.tree.as_ref());
     match geometry::compute_layout(&tree).rect(pane) {
         Some(rect) => geometry::preferred_dir(rect.width * size.width, rect.height * size.height),
@@ -832,16 +735,8 @@ pub fn preferred_dir(st: &State, m: &Model, ws: &str, pane: &str) -> SplitDir {
     }
 }
 
-/// Whether the app's keymap takes a key before the terminal sees it
-/// (hangar-term's `key_filter`, inventory §1.10).
-///
-/// `KeymapIndex` is P7's to define, with the lookup this needs; until it
-/// lands there is no dispatcher a key could go to, so every key stays the
-/// terminal's, as it would in a terminal without Hangar around it.
-pub(crate) fn keymap_takes(index: &KeymapIndex, press: &KeyPress) -> bool {
-    let _ = (index, press);
-    false
-}
+/// A grid's size before it has measured itself.
+const UNMEASURED: Size = Size::new(1000.0, 700.0);
 
 // ---- Where the panes stand --------------------------------------------------
 
@@ -862,66 +757,32 @@ pub(crate) fn focused_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
 /// The pane drawn over the whole grid: the focused one, while the
 /// workspace's zoom is on and it has more than one pane. The zoom follows
 /// the focus around.
-pub(crate) fn zoomed_pane<'w>(m: &Model, ws: impl Into<Option<&'w Workspace>>) -> Option<PaneId> {
-    let ws = ws.into()?;
+pub(crate) fn zoomed_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
     let on = m.ui.zoom_by_workspace.get(&ws.id).copied().unwrap_or(false);
     (on && ws.panes.len() > 1)
         .then(|| focused_pane(m, ws))
         .flatten()
 }
 
-/// The window that draws workspace `ws`: its own, or the main window while
-/// it is the active one there.
-fn window_of(m: &Model, ws: &str) -> Option<window::Id> {
-    let own = m
-        .live
-        .windows
-        .iter()
-        .find(|(_, kind)| matches!(kind, WindowKind::Workspace(id) if id == ws))
-        .map(|(id, _)| *id);
-    own.or_else(|| {
-        let active = m
-            .active_workspace()
-            .filter(|active| active.id == ws && active.detached != Some(true))?;
-        let _ = active;
-        m.live
-            .windows
-            .iter()
-            .find(|(_, kind)| matches!(kind, WindowKind::Main))
-            .map(|(id, _)| *id)
+/// Workspace `ws` is on screen, its grid shown: in its own window, or the
+/// active one of the main window.
+fn on_screen(m: &Model, ws: &Workspace) -> bool {
+    if !m.live.hydrated || m.ui.view != View::Terminals {
+        return false;
+    }
+    m.live.windows.values().any(|kind| match kind {
+        WindowKind::Workspace(id) => *id == ws.id,
+        WindowKind::Main => {
+            ws.detached != Some(true)
+                && m.state().active_workspace_id.as_deref() == Some(ws.id.as_str())
+        }
     })
-}
-
-/// Workspace `ws` is on screen, its grid shown.
-fn on_screen(m: &Model, ws: &str) -> bool {
-    m.live.hydrated && m.ui.view == View::Terminals && window_of(m, ws).is_some()
 }
 
 /// The pane is on screen: its workspace is, and no other pane is zoomed over
 /// it.
 fn visible(m: &Model, ws: &Workspace, pane: &str) -> bool {
-    on_screen(m, &ws.id) && zoomed_pane(m, ws).is_none_or(|zoomed| zoomed == pane)
-}
-
-fn window_focused(st: &State, m: &Model, pane: &str) -> bool {
-    let Some(rt) = st.panes.get(pane) else {
-        return false;
-    };
-    window_of(m, &rt.ws).is_some_and(|window| !st.unfocused.contains(&window))
-}
-
-/// The person is on the pane: its window in front, the pane focused and on
-/// screen. A hand-back then is not news.
-fn looking(st: &State, m: &Model, pane: &str) -> bool {
-    let Some(rt) = st.panes.get(pane) else {
-        return false;
-    };
-    let Some(ws) = m.workspace(&rt.ws) else {
-        return false;
-    };
-    window_focused(st, m, pane)
-        && focused_pane(m, ws).as_deref() == Some(pane)
-        && visible(m, ws, pane)
+    on_screen(m, ws) && zoomed_pane(m, ws).is_none_or(|zoomed| zoomed == pane)
 }
 
 /// The pane whose terminal has the keyboard in the focused window.
@@ -945,9 +806,10 @@ fn keyboard_free(m: &Model) -> bool {
 
 // ---- Keeping the panes in line with the model -------------------------------
 
-/// What the panes depend on in the model, hashed: which panes exist, which
-/// has the focus and which is zoomed, the theme and the look, what is on
-/// screen.
+/// What the panes depend on in the model, hashed: which panes exist and with
+/// what role, which has the focus and which is zoomed, the theme and the
+/// look, what is on screen, and whether a pane waiting to restart for its
+/// role is still in a turn.
 fn signature(st: &State, m: &Model) -> u64 {
     let mut hash = std::hash::DefaultHasher::new();
     m.live.hydrated.hash(&mut hash);
@@ -985,6 +847,12 @@ fn signature(st: &State, m: &Model) -> u64 {
         (&ws.id, &ws.theme_id, ws.detached).hash(&mut hash);
         for pane in &ws.panes {
             pane.id.hash(&mut hash);
+            if pane.role.is_some() {
+                format!("{:?}", pane.role).hash(&mut hash);
+                pane.session_id.hash(&mut hash);
+                let activity = m.live.panes_logic.activity_or_idle(&pane.id);
+                crate::orchestration_ui::actions::is_mid_turn(activity).hash(&mut hash);
+            }
         }
         focused_pane(m, ws).hash(&mut hash);
         m.ui.zoom_by_workspace.get(&ws.id).hash(&mut hash);
@@ -997,9 +865,14 @@ fn signature(st: &State, m: &Model) -> u64 {
         .collect();
     typing.sort();
     typing.hash(&mut hash);
-    let mut unfocused: Vec<String> = st.unfocused.iter().map(|id| format!("{id:?}")).collect();
-    unfocused.sort();
-    unfocused.hash(&mut hash);
+    let mut running: Vec<&PaneId> = st
+        .panes
+        .iter()
+        .filter(|(_, rt)| rt.status == PaneStatus::Running)
+        .map(|(id, _)| id)
+        .collect();
+    running.sort();
+    running.hash(&mut hash);
     hash.finish()
 }
 
@@ -1011,10 +884,12 @@ fn sync_if_needed(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message>
     }
 }
 
-/// Brings the panes in line with the model: starts the panes that appeared in
-/// an opened workspace and stops those that went, ends a zoom whose pane
-/// count changed, restyles, and gives the keyboard to the one terminal that
-/// should have it.
+/// Brings the panes in line with the model: starts the panes that appeared
+/// in an opened workspace and stops those that went (a workspace that leaves
+/// `opened_ids`, which is how a sleep unmounts it, takes its terminals with
+/// it), ends a zoom whose pane count changed, restyles, gives the keyboard
+/// to the one terminal that should have it, and restarts a pane a role
+/// asks it to.
 fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     let mut tasks = Vec::new();
     let wanted: Vec<(WsId, PaneId)> = if m.live.hydrated {
@@ -1029,30 +904,22 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     let wanted_ids: HashSet<&PaneId> = wanted.iter().map(|(_, pane)| pane).collect();
 
     // Gone: closed, restarted under a new id, its workspace closed or put to
-    // sleep. Its prompts still queued go to its successor, if the restart
-    // made one; closed for real, they go with it.
+    // sleep.
     let gone: Vec<PaneId> = st
         .panes
         .keys()
         .filter(|id| !wanted_ids.contains(id))
         .cloned()
         .collect();
-    let now = Instant::now();
-    st.carried
-        .retain(|_, (at, _)| now.duration_since(*at) < CARRY);
     for id in gone {
         let Some(rt) = st.panes.remove(&id) else {
             continue;
         };
-        let successor = m
-            .workspace(&rt.ws)
-            .is_some_and(|ws| ws.panes.iter().any(|p| p.name == rt.name && p.id != id));
-        if successor && !rt.queue.is_empty() {
-            st.carried
-                .insert((rt.ws.clone(), rt.name.clone()), (now, rt.queue.clone()));
-        }
         if st.hovered.as_ref() == Some(&id) {
             st.hovered = None;
+        }
+        if st.picker.as_ref().is_some_and(|(open, _)| *open == id) {
+            st.picker = None;
         }
         tasks.push(controller::unmount(&st.hub, sv, rt));
     }
@@ -1064,12 +931,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         let Some((ws, pane)) = controller::find(m, ws_id, pane_id) else {
             continue;
         };
-        let carried = st
-            .carried
-            .remove(&(ws_id.clone(), pane.name.clone()))
-            .map(|(_, queue)| queue)
-            .unwrap_or_default();
-        let (rt, task) = controller::mount(&st.hub, &st.channel, sv, m, ws, pane, carried);
+        let (rt, task) = controller::mount(&st.hub, sv, m, ws, pane);
         st.panes.insert(pane_id.clone(), rt);
         tasks.push(task);
     }
@@ -1089,12 +951,8 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     }
 
     let free = keyboard_free(m);
-    let ids: Vec<PaneId> = st.panes.keys().cloned().collect();
-    for id in ids {
-        let is_looking = looking(st, m, &id);
-        let Some(rt) = st.panes.get_mut(&id) else {
-            continue;
-        };
+    let locale = m.locale();
+    for (id, rt) in st.panes.iter_mut() {
         let Some(ws) = m.workspace(&rt.ws) else {
             continue;
         };
@@ -1111,7 +969,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         let typing = rt.search.as_ref().is_some_and(|search| search.typing);
         let wants = free
             && !typing
-            && visible(m, ws, &id)
+            && visible(m, ws, id)
             && focused_pane(m, ws).as_deref() == Some(id.as_str());
         if wants != rt.focused {
             rt.focused = wants;
@@ -1122,17 +980,17 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
                 }
             }
         }
-        // Looking at the pane clears its badge, and a turn seen counts as
-        // taken back; a dialog still waiting is still waiting.
-        if is_looking {
-            rt.attention = false;
-            if rt.watch.activity == AgentActivity::Yours {
-                rt.watch.activity = AgentActivity::Idle;
-            }
-        }
-        // The menus are placed from their button on screen, and a hidden
-        // workspace has none.
-        if !visible(m, ws, &id) && st.picker.as_ref().is_some_and(|(open, _)| *open == id) {
+        tasks.push(controller::role_check(rt, m, locale));
+    }
+    // The menus are placed from their button on screen, and a hidden
+    // workspace has none.
+    if let Some((open, _)) = &st.picker {
+        let shown = st
+            .panes
+            .get(open)
+            .and_then(|rt| m.workspace(&rt.ws))
+            .is_some_and(|ws| visible(m, ws, open));
+        if !shown {
             st.picker = None;
         }
     }
@@ -1148,25 +1006,14 @@ fn publish(st: &State, m: &mut Model) {
         let Some(ws) = m.workspace(&rt.ws) else {
             continue;
         };
-        let agent = ws
-            .panes
-            .iter()
-            .find(|p| &p.id == id)
-            .map_or(rt.agent, |p| p.agent);
-        let reports_activity = agent != AgentId::Shell || rt.watch.bridged;
         let width = pane_width(st, m, ws, id);
         reports.insert(
             id.clone(),
             PaneReport {
                 workspace: rt.ws.clone(),
-                status: rt.status,
-                activity: reports_activity.then_some(rt.watch.activity),
-                bridged: rt.watch.bridged,
-                attention: rt.attention,
-                gauge: rt.watch.gauge.clone(),
-                queued: rt.queue.len(),
+                folds: header::Fit::of(width - header::PADDING_X).folded(),
                 account: rt.account.clone(),
-                folds: header::Fit::of(width - header::PADDING_X).into(),
+                mcp: rt.mcp.clone(),
             },
         );
     }
@@ -1178,11 +1025,7 @@ fn publish(st: &State, m: &mut Model) {
 
 /// A pane's width on screen, from its grid's last measured size.
 fn pane_width(st: &State, m: &Model, ws: &Workspace, pane: &str) -> f32 {
-    let size = st
-        .grid_sizes
-        .get(&ws.id)
-        .copied()
-        .unwrap_or(Size::new(1000.0, 700.0));
+    let size = st.grid_sizes.get(&ws.id).copied().unwrap_or(UNMEASURED);
     if zoomed_pane(m, ws).as_deref() == Some(pane) {
         return size.width;
     }

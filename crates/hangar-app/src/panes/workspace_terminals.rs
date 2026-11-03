@@ -16,7 +16,6 @@ use crate::panes::header::PADDING_X;
 use crate::panes::zoom_bar::{self, Other};
 use crate::panes::{State, focused_pane, geometry, terminal_pane, zoomed_pane};
 use crate::state::Workspace;
-use crate::state::types::AgentId;
 
 /// A grid width to fold headers by before the grid has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
@@ -51,7 +50,6 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
             pane,
             rt,
             terminal_pane::Placing {
-                index: order.iter().position(|id| *id == pane.id).unwrap_or(0),
                 focused: is_focused,
                 zoomed: is_zoomed,
                 can_close: ws.panes.len() > 1,
@@ -62,15 +60,13 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
         // The outline says what the pane wants, an answer or (finished, or a
         // shell whose command is done) your turn; else the focus ring. Never
         // the accent for the first two: it would pass for the focused pane.
-        let reports = pane.agent != AgentId::Shell || rt.watch.bridged;
-        let ring = if rt.attention {
-            Some(
-                if reports && rt.watch.activity == crate::state::AgentActivity::Waiting {
-                    c.state_waiting_fill
-                } else {
-                    c.state_yours_fill
-                },
-            )
+        let logic = &ctx.model.live.panes_logic;
+        let ring = if logic.needs_attention(&pane.id) {
+            Some(if logic.is_waiting(&pane.id) {
+                c.state_waiting_fill
+            } else {
+                c.state_yours_fill
+            })
         } else if is_focused {
             Some(c.accent.scale_alpha(0.66))
         } else {
@@ -98,11 +94,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
                 Some(Other {
                     id: &pane.id,
                     name: &pane.name,
-                    activity: st
-                        .panes
-                        .get(&pane.id)
-                        .map(|rt| rt.watch.activity)
-                        .unwrap_or_default(),
+                    activity: ctx.model.live.panes_logic.activity_or_idle(&pane.id),
                 })
             })
             .collect();

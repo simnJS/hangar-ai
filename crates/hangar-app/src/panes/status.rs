@@ -1,23 +1,16 @@
 //! The pure half of a pane header (`components/PaneStatus.ts`, tests in
-//! PaneStatus.test.ts): what its glyph, its state word and its gauge say, and
-//! how the pane words what it reports. Kept apart from the views so it can be
-//! tested without a terminal.
+//! PaneStatus.test.ts): what its glyph, its state word and its gauge say.
+//!
+//! The module's text helpers (`firstLine`, `fileBaseName`, `shortSessionId`,
+//! `sessionIdLabel`, `newlyQueued`) word what a pane reports to its
+//! insight, which is P4's: they are in `panes_logic::bridge_events`, with
+//! their cases. What the header itself draws with is here.
 
 use hangar_i18n::Key;
 
-use crate::state::live::QueuedPrompt;
+use crate::state::live::PaneStatus;
 use crate::state::types::ShellInfo;
 use crate::state::{AgentActivity, GlyphState};
-
-/// The shell's own life: what a pane is before an agent has anything to say
-/// (`PaneStatus`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum PaneStatus {
-    #[default]
-    Starting,
-    Running,
-    Exited,
-}
 
 /// The shell's own life until it runs; then, for a pane that reports one, the
 /// agent's state. A plain shell has nothing to report and rests as idle
@@ -39,7 +32,8 @@ pub fn pane_glyph_state(status: PaneStatus, activity: Option<AgentActivity>) -> 
 pub const GAUGE_WARN: f64 = 70.0;
 pub const GAUGE_HOT: f64 = 90.0;
 
-/// How worrying a gauge's reading is (`gaugeLevel`).
+/// How worrying a gauge's reading is (`gaugeLevel`). The ring draws its
+/// colour from hangar-ui's own copy of the same thresholds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GaugeLevel {
     Ok,
@@ -74,60 +68,6 @@ pub fn shell_short_name(shell: Option<&ShellInfo>) -> Option<String> {
     } else {
         name
     })
-}
-
-/// Session ids are long; six characters tell two apart on screen.
-pub fn short_session_id(id: &str) -> &str {
-    match id.char_indices().nth(6) {
-        Some((end, _)) => &id[..end],
-        None => id,
-    }
-}
-
-/// The short id, with an ellipsis saying there is more of it.
-pub fn session_id_label(id: &str) -> String {
-    let short = short_session_id(id);
-    if short.len() < id.len() {
-        format!("{short}…")
-    } else {
-        id.to_owned()
-    }
-}
-
-/// The first line with something on it, trimmed: an event is one line.
-pub fn first_line(text: &str, max: usize) -> String {
-    let line = text
-        .split('\n')
-        .map(|line| line.strip_suffix('\r').unwrap_or(line))
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or_default();
-    if line.chars().count() > max {
-        let kept: String = line.chars().take(max.saturating_sub(1)).collect();
-        format!("{kept}…")
-    } else {
-        line.to_owned()
-    }
-}
-
-/// `src/lib/layout.ts` → `layout.ts`, whichever separator the agent used.
-pub fn file_base_name(path: &str) -> &str {
-    let trimmed = path.trim_end_matches(['\\', '/']);
-    match trimmed.rsplit(['\\', '/']).next() {
-        Some(name) if !name.is_empty() => name,
-        _ => trimmed,
-    }
-}
-
-/// The prompts that joined the queue since it last changed, oldest first.
-pub fn newly_queued<'a>(
-    before: &[QueuedPrompt],
-    after: &'a [QueuedPrompt],
-) -> Vec<&'a QueuedPrompt> {
-    after
-        .iter()
-        .filter(|entry| !before.iter().any(|known| known.id == entry.id))
-        .collect()
 }
 
 /// The key of the state word: `pane.state.<status>` until the shell runs,
@@ -165,14 +105,6 @@ pub fn ui_glyph(state: GlyphState) -> hangar_ui::glyph::GlyphState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn queued(id: &str, text: &str) -> QueuedPrompt {
-        QueuedPrompt {
-            id: id.into(),
-            text: text.into(),
-            from: None,
-        }
-    }
 
     #[test]
     fn shows_the_shells_life_before_the_agents_state() {
@@ -231,50 +163,6 @@ mod tests {
         );
         assert_eq!(shell_short_name(Some(&shell(""))).as_deref(), Some("Label"));
         assert_eq!(shell_short_name(None), None);
-    }
-
-    #[test]
-    fn shortens_session_ids() {
-        assert_eq!(short_session_id("01J8Z4-pty-bridge"), "01J8Z4");
-        assert_eq!(short_session_id("abc"), "abc");
-        assert_eq!(session_id_label("01J8Z4-pty-bridge"), "01J8Z4…");
-        assert_eq!(session_id_label("abc"), "abc");
-    }
-
-    #[test]
-    fn keeps_the_first_line_that_says_something() {
-        assert_eq!(
-            first_line("\n  \n  Done: tests pass\nmore", 120),
-            "Done: tests pass"
-        );
-        assert_eq!(first_line("", 120), "");
-        assert_eq!(first_line(&"x".repeat(10), 5), "xxxx…");
-    }
-
-    #[test]
-    fn takes_a_files_name_off_either_kind_of_path() {
-        assert_eq!(file_base_name("src/lib/layout.ts"), "layout.ts");
-        assert_eq!(file_base_name("C:\\dev\\app\\main.rs"), "main.rs");
-        assert_eq!(file_base_name("README.md"), "README.md");
-        assert_eq!(file_base_name("src/board/"), "board");
-    }
-
-    #[test]
-    fn finds_the_prompts_that_joined_the_queue() {
-        let a = queued("1", "a");
-        let b = queued("2", "b");
-        let c = queued("3", "c");
-        let ids =
-            |list: Vec<&QueuedPrompt>| list.into_iter().map(|q| q.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(newly_queued(&[], &[a.clone(), b.clone()])), ["1", "2"]);
-        assert_eq!(
-            ids(newly_queued(
-                &[a.clone(), b.clone()],
-                &[b.clone(), c.clone()]
-            )),
-            ["3"]
-        );
-        assert!(newly_queued(&[a, b.clone()], &[b]).is_empty());
     }
 
     #[test]
