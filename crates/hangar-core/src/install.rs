@@ -599,8 +599,14 @@ mod tests {
         );
 
         assert_eq!(reports.len(), 2);
-        assert!(reports.iter().all(|r| !r.ok && Some(&r.message) == refusal.as_ref()));
-        assert!(reports[0].path.ends_with(".mcp.json"), "{}", reports[0].path);
+        assert!(reports
+            .iter()
+            .all(|r| !r.ok && Some(&r.message) == refusal.as_ref()));
+        assert!(
+            reports[0].path.ends_with(".mcp.json"),
+            "{}",
+            reports[0].path
+        );
         assert!(!Path::new(&cwd).join(".mcp.json").exists());
         assert!(!Path::new(&cwd).join(".cursor").exists());
         fs::remove_dir_all(&cwd).ok();

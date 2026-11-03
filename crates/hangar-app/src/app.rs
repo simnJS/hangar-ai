@@ -300,11 +300,8 @@ impl App {
                     Task::none()
                 }
                 Err(error) => {
-                    let notice = save_notice(
-                        Translator::new(self.model.locale()),
-                        self.save_held,
-                        error,
-                    );
+                    let notice =
+                        save_notice(Translator::new(self.model.locale()), self.save_held, error);
                     crate::shell::notice::show(&mut self.model, notice)
                 }
             },
@@ -739,7 +736,9 @@ mod tests {
         assert!(
             load_notice(Translator::new(Locale::Fr), &held)
                 .text()
-                .starts_with("Impossible de lire state.json (permission denied). Il reste tel quel")
+                .starts_with(
+                    "Impossible de lire state.json (permission denied). Il reste tel quel"
+                )
         );
         assert_eq!(
             save_notice(Translator::new(Locale::En), true, "still there".into()).text(),

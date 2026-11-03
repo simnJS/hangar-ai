@@ -61,10 +61,7 @@ pub fn is_enabled() -> Result<bool, String> {
 /// `isolation_refusal`): the item would start this build at login instead of
 /// the installed app, and taking it out would take the installed app's out.
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
-    set_enabled_unless(
-        crate::install::isolation_refusal("the login item"),
-        enabled,
-    )
+    set_enabled_unless(crate::install::isolation_refusal("the login item"), enabled)
 }
 
 fn set_enabled_unless(refusal: Option<String>, enabled: bool) -> Result<(), String> {

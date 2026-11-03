@@ -257,7 +257,10 @@ pub enum Intent {
     /// Needs-you) it leaves the overlays, the view and the active workspace
     /// as they are, so a dialog open over the panes keeps what was typed in
     /// it. Sent by the command table; handled by the shell.
-    SelectPane { ws: WsId, pane: PaneId },
+    SelectPane {
+        ws: WsId,
+        pane: PaneId,
+    },
 }
 
 /// What `Intent::TerminalAction` asks of a pane's terminal.
