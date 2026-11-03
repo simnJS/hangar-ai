@@ -256,6 +256,16 @@ fn a_turn_ends_idle_when_the_window_is_in_front_on_the_focused_pane() {
 }
 
 #[test]
+fn the_pane_that_has_the_keyboard_counts_as_the_focused_one() {
+    let (mut m, main) = one_claude();
+    m.live.panes_logic.focused_window = Some(main);
+    // The workspace remembers no focused pane, but the terminal has the keys.
+    m.ui.focus = Some(Focus::Terminal("p1".into()));
+    end_turn(&mut m, NOW);
+    assert_eq!(activity_of(&m), AgentActivity::Idle);
+}
+
+#[test]
 fn a_turn_ends_yours_when_the_window_is_behind() {
     let (mut m, _) = one_claude();
     m.ui.focus_by_workspace.insert("w1".into(), "p1".into());

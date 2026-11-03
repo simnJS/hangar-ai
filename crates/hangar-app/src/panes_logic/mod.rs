@@ -44,13 +44,20 @@
 //!
 //! Through `Message::PanesLogic(Msg::…)`: `Mounted` when a pane's terminal
 //! exists (before the PTY spawns, so no report of the mod goes unheard),
-//! `Status` as the shell starts, runs and ends, `Output` for each chunk
-//! written to the terminal, `Bell`, `Notification` (OSC 9 and 777, read with
-//! `osc9_notification` and `osc777_notification`), `Key`, `Typed` (the person
-//! used the workspace), `WatchSession` once the agent is launched,
-//! `Unmounted` when the terminal goes. Everything that comes from core
-//! (`bridge:event`, `bridge:queue`, the shell's end) arrives through
-//! `on_event` and needs nothing from the terminal's package.
+//! `Status` once the shell runs (or when it could not start), `Output` for
+//! each chunk written to the terminal and not for a replayed history,
+//! `Bell`, `Notification` (OSC 9 and 777, read with `osc9_notification` and
+//! `osc777_notification`, which also tell the parser whether to handle the
+//! code), `Key` (a key pressed, not the terminal answering its program),
+//! `Typed` (the person used a workspace on screen), `WatchSession` once the
+//! agent is launched, `Unmounted` when the terminal goes. Everything that
+//! comes from core (`bridge:event`, `bridge:queue`) and the shell's end
+//! (`CoreEvent::PtyExit`, which P5 sends when a pane's shell ends by itself)
+//! arrives through `on_event` and needs nothing more from the terminal's
+//! package.
+//!
+//! A launch reads and takes from `Live` (`claim_session`, `must_resume`,
+//! `carry_resume`), through the few methods documented there.
 //!
 //! What a pane reports is worded and decided here: the activity, the badge,
 //! the notification (an `Intent::Notify`), the history, the context gauge
@@ -128,7 +135,7 @@ use self::pane_insight::Insights;
 use self::session_watch::SessionWatch;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Notification, Region, View, WindowKind};
+use crate::shell::{Focus, Notice, Notification, Region, View, WindowKind};
 use crate::state::live::{
     AgentActivity, AgentRoster, BridgeEvent, GlyphState, PaneActivity, PaneInsight, PaneStatus,
     PlanLimits, WorkspaceActivity,
@@ -475,17 +482,14 @@ fn host_window(m: &Model, ws: &Workspace) -> Option<window::Id> {
 /// (`focused && visible` of TerminalPane): in the main window the active
 /// workspace of the terminals view, or a workspace window's own.
 fn attended(m: &Model, ws: &Workspace, pane: &str) -> bool {
+    // The pane the workspace remembers as its own, or the one that has the
+    // keyboard right now.
     let focused =
         m.ui.focus_by_workspace
             .get(&ws.id)
-            .is_some_and(|id| id == pane);
-    let shown = if ws.detached == Some(true) {
-        host_window(m, ws).is_some()
-    } else {
-        m.state().active_workspace_id.as_deref() == Some(ws.id.as_str())
-            && m.ui.view == View::Terminals
-    };
-    focused && shown
+            .is_some_and(|id| id == pane)
+            || matches!(&m.ui.focus, Some(Focus::Terminal(focus)) if focus == pane);
+    focused && attended_workspace(m, ws)
 }
 
 /// What a decision about a pane depends on, read from the window.
