@@ -866,7 +866,7 @@ mod tests {
         let sender = grant(&["panes.send"]);
         let not_claude = |call: &HostCall| match call {
             HostCall::PanesSend { pane, .. } if pane == "Ben" => {
-                Err(KitError::new("denied", "Ben runs codex"))
+                Err(KitError::new("denied", "Ben runs a shell"))
             }
             _ => Ok(()),
         };

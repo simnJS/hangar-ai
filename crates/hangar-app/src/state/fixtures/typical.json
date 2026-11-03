@@ -85,8 +85,8 @@
         {
           "id": "3e6a4b54-3021-4eb2-9f71-5d4c9b6a2e43",
           "name": "Mia",
-          "agent": "codex",
-          "sessionId": "rollout-2026-10-30",
+          "agent": "claude",
+          "sessionId": "9c4e2a17-6b3d-4f58-a0e1-7d2b5c8f3a61",
           "cwd": null,
           "shellId": null,
           "title": null

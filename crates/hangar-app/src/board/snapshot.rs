@@ -120,7 +120,7 @@ pub(super) fn model(locale: Locale, theme: &str, loaded: Option<Vec<Task>>) -> M
         cwd: CWD.into(),
         panes: vec![
             pane("p1", "Ava", AgentId::Claude),
-            pane("p2", "Ben", AgentId::Codex),
+            pane("p2", "Ben", AgentId::Shell),
         ],
         ..Workspace::default()
     }];

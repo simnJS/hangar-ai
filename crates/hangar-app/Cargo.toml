@@ -1,6 +1,6 @@
 [package]
 name = "hangar-app"
-description = "Terminal multiplexer for CLI coding agents, with a shared task board"
+description = "Terminal multiplexer for Claude Code, with a shared task board"
 version.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -98,7 +98,7 @@ publisher = "simnjs"
 homepage = "https://github.com/hangar-ai/hangar"
 category = "DeveloperTool"
 longDescription = """
-Hangar runs CLI coding agents (Claude Code, Codex, Gemini CLI, OpenCode) and shells side by side, each in a real terminal pane, around a shared task board and memory that the agents read and write over Hangar's MCP server."""
+Hangar runs Claude Code and shells side by side, each in a real terminal pane, around a shared task board and memory that every Claude Code reads and writes over Hangar's MCP server."""
 icons = [
   "packaging/icons/32x32.png",
   "packaging/icons/128x128.png",

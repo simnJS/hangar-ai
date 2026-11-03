@@ -6,5 +6,5 @@ Exec=hangar-ai
 Icon=hangar-ai
 Terminal=false
 Categories=Development;
-Keywords=terminal;agent;AI;Claude;Codex;Gemini;
+Keywords=terminal;agent;AI;Claude;Claude Code;
 StartupWMClass=hangar-ai

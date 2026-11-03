@@ -22,7 +22,7 @@ fn items() -> Vec<Item<Target>> {
             .state(GlyphState::Waiting)
             .detail(
                 Detail::new()
-                    .plain("Codex · ")
+                    .plain("Claude Code · ")
                     .state(AgentState::Waiting, "waiting"),
             ),
         Item::new(Target::Settings, "View", "Open the settings")

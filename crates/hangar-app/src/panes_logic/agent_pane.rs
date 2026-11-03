@@ -14,7 +14,7 @@
 //!    active workspace first, then in any other, since pane names are unique
 //!    across workspaces; the longest name wins, so "Ava 2" beats "Ava".
 //! 3. The only pane of the active workspace running the agent the assignee
-//!    names ("claude", "codex-1").
+//!    names ("claude", "claude-1"); a shell runs none.
 
 use crate::state::types::{AgentId, PaneId, Workspace, WsId};
 
@@ -161,7 +161,7 @@ mod tests {
                 &[
                     ("Ava", AgentId::Claude),
                     ("Ava 2", AgentId::Claude),
-                    ("Max", AgentId::Codex),
+                    ("Max", AgentId::Shell),
                 ],
             ),
             workspace(
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn finds_a_pane_of_the_active_workspace_by_its_name_inside_the_assignee() {
         assert_eq!(pane_of("Max", "front").as_deref(), Some("front:Max"));
-        assert_eq!(pane_of("codex:max", "front").as_deref(), Some("front:Max"));
+        assert_eq!(pane_of("shell:max", "front").as_deref(), Some("front:Max"));
     }
 
     #[test]
@@ -227,9 +227,10 @@ mod tests {
 
     #[test]
     fn falls_back_on_the_agent_kind_only_when_one_pane_runs_it() {
-        assert_eq!(pane_of("codex-1", "front").as_deref(), Some("front:Max"));
         assert_eq!(pane_of("claude", "front"), None);
-        assert_eq!(pane_of("claude", "back").as_deref(), Some("back:Ava"));
+        assert_eq!(pane_of("claude-1", "back").as_deref(), Some("back:Ava"));
+        // A shell is not an agent anyone signs as.
+        assert_eq!(pane_of("shell", "back"), None);
     }
 
     #[test]

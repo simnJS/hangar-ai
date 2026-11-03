@@ -909,10 +909,9 @@ mod tests {
         );
         assert_eq!(claude.get_env("CLAUDE_SECURESTORAGE_CONFIG_DIR"), None);
 
-        // The main account, and every other agent, keep what Hangar has.
+        // The main account, and a shell, keep what Hangar has.
         for (agent, dir) in [
             (Some("claude"), None),
-            (Some("codex"), Some(profile)),
             (Some("shell"), Some(profile)),
             (None, Some(profile)),
         ] {

@@ -133,13 +133,7 @@ fn setup() -> World {
     let blog = workspace(
         "blog",
         "Blog",
-        vec![
-            pane("b1", "writer", None),
-            Pane {
-                agent: AgentId::Codex,
-                ..pane("b2", "cx", None)
-            },
-        ],
+        vec![pane("b1", "writer", None), pane("b2", "cx", None)],
     );
     let wiki = workspace("wiki", "Wiki", vec![pane("k", "wiki-agent", None)]);
     let boards = HashMap::from([
@@ -350,7 +344,7 @@ async fn summarizes_a_workspace_without_an_orchestrator_from_its_panes_and_board
         blog.waiting,
         [WaitingPane {
             name: "cx".into(),
-            agent: AgentId::Codex
+            agent: AgentId::Claude
         }]
     );
     assert_eq!(
@@ -529,7 +523,7 @@ async fn gives_an_unreadable_board_an_empty_part_and_still_summarizes_everything
         blog.waiting,
         [WaitingPane {
             name: "cx".into(),
-            agent: AgentId::Codex
+            agent: AgentId::Claude
         }]
     );
     assert_eq!(

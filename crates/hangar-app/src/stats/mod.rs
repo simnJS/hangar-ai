@@ -133,7 +133,6 @@ impl State {
                 measure: self.measure,
                 now,
                 projects: &projects,
-                agent_label: &view::agent_name,
                 top_sessions: TOP_SESSIONS,
             },
         );

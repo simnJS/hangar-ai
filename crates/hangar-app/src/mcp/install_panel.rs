@@ -1,12 +1,13 @@
-//! « Connecter les agents au tableau »: registers Hangar's MCP server in the
-//! agents' own configuration, and writes the playbook that tells them how to
-//! use the board (`McpPanel.tsx`; `install.rs` and `instructions.rs` of
+//! « Connecter Claude Code au tableau »: registers Hangar's MCP server in the
+//! project's Claude Code configuration, and writes the playbook that tells it
+//! how to use the board (`McpPanel.tsx`; `install.rs` and `instructions.rs` of
 //! hangar-core do the writing).
 //!
-//! The panel opens on the active workspace's folder. It lists the tools it
-//! knows how to configure, ticks the ones that are installed and not wired up
-//! yet (or whose entry is broken, since reinstalling is the repair), and
-//! reports what each write did.
+//! The panel opens on the active workspace's folder. It lists what it knows
+//! how to configure (Claude Code's `.mcp.json`, the only target since Claude
+//! Code became the only agent, owner's decision of 2026-11-03), ticks it when
+//! Claude Code is installed and not wired up yet (or its entry is broken,
+//! since reinstalling is the repair), and reports what each write did.
 
 use std::collections::HashSet;
 
@@ -71,11 +72,10 @@ pub struct Report {
     pub message: String,
 }
 
-/// The two lines that register the server by hand.
+/// The line that registers the server by hand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manual {
     pub claude: String,
-    pub codex: String,
 }
 
 #[derive(Debug, Clone)]
@@ -154,7 +154,6 @@ pub fn open(st: &mut State, m: &Model) -> Task<Message> {
                 InstallMsg::Manual(install::mcp_manual_commands(cwd).ok().and_then(|commands| {
                     Some(Manual {
                         claude: commands.get("claude")?.as_str()?.to_owned(),
-                        codex: commands.get("codex")?.as_str()?.to_owned(),
                     })
                 }))
             },
@@ -469,8 +468,8 @@ fn reports_view<'a>(ctx: Ctx<'a>, reports: &'a [Report]) -> Element<'a, Message>
         .into()
 }
 
-/// The two commands that do by hand what the button does, each to copy: iced
-/// cannot select text, so a button puts the line on the clipboard.
+/// The command that does by hand what the button does, to copy: iced cannot
+/// select text, so a button puts the line on the clipboard.
 fn manual_view<'a>(ctx: Ctx<'a>, manual: &'a Manual) -> Element<'a, Message> {
     let t = ctx.theme;
     let snippet = |line: &'a str| -> Element<'a, Message> {
@@ -501,7 +500,6 @@ fn manual_view<'a>(ctx: Ctx<'a>, manual: &'a Manual) -> Element<'a, Message> {
         .spacing(tokens::space::MD)
         .align_y(Alignment::Center),
         snippet(&manual.claude),
-        snippet(&manual.codex),
     ]
     .spacing(tokens::space::MD)
     .into()

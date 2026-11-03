@@ -71,9 +71,6 @@ fn the_folder_form_has_every_field_of_the_web_dialog() {
         "Number of panes",
         "Agent split",
         "Claude Code",
-        "Codex",
-        "Gemini",
-        "OpenCode",
         "Arrangement",
         "Claude account",
         "Worktree commands",
@@ -87,10 +84,15 @@ fn the_folder_form_has_every_field_of_the_web_dialog() {
 
 #[test]
 fn an_agent_that_is_not_installed_says_so() {
-    let h = Harness::new(Locale::En, "graphite");
+    let mut h = Harness::new(Locale::En, "graphite");
     let st = State::default();
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find("not installed").is_err());
+    }
+    // Claude Code missing from this machine's PATH.
+    h.model.ui.claude_installed = false;
     let mut ui = h.show(view(&st, h.ctx()));
-    // Gemini and OpenCode are missing on the harness' machine.
     assert!(ui.find("not installed").is_ok());
 }
 

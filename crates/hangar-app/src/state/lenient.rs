@@ -19,18 +19,22 @@
 //! holds (`unread.rs`) and writes back into the file on every save until the
 //! app writes that field itself, as the TS kept it by spreading.
 //!
-//! One shape is translated rather than set aside: a legacy `tree` whose
+//! Two shapes are translated rather than set aside. A legacy `tree` whose
 //! leaves stored a pane's index (`{type: "pane", index: 1}`), which the TS
-//! mapped onto pane ids each time it read the tree (`migrate`, layout.ts).
-//! It is mapped once here, so the typed tree holds ids.
+//! mapped onto pane ids each time it read the tree (`migrate`, layout.ts):
+//! it is mapped once here, so the typed tree holds ids. And a pane whose
+//! agent is one this version no longer runs (`RETIRED_AGENTS`: Codex, Gemini
+//! CLI, OpenCode): it becomes a plain shell in the same folder, rather than
+//! a shell whose old agent the next save would write back, and it is marked
+//! so that its bar can say why (`retired_agent`).
 
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use super::layout;
 use super::types::{
-    AppState, OrchestrationSettings, Pane, SavedCommand, Settings, SplitNode, Workspace,
-    WorkspaceFolder, WorkspaceMcp,
+    AppState, OrchestrationSettings, Pane, RETIRED_AGENTS, SavedCommand, Settings, SplitNode,
+    Workspace, WorkspaceFolder, WorkspaceMcp,
 };
 use super::unread::{self, Kept, Owner};
 
@@ -59,16 +63,69 @@ pub fn read_checked(mut value: Value) -> Result<(AppState, Vec<Kept>), String> {
         return Err("its content is not an object".into());
     }
     let mut kept = Vec::new();
+    let retired = retire_agents(&mut value);
     clean_app_state(&mut value, &mut kept);
     // Cleaning leaves only keys that parsed one by one, so a failure here
     // means a combination of them failed, which the derives here cannot
     // produce; it is still answered rather than taken for an empty state.
-    let state: AppState = serde_json::from_value(value.clone())
+    let mut state: AppState = serde_json::from_value(value.clone())
         .map_err(|err| format!("it could not be read even leniently: {err}"))?;
     if let Ok(written) = serde_json::to_value(&state) {
         explicit_nulls(&value, &written, &mut kept);
     }
+    for ws in &mut state.workspaces {
+        for pane in &mut ws.panes {
+            pane.retired_agent = retired
+                .iter()
+                .find(|(w, p, _)| *w == ws.id && *p == pane.id)
+                .map(|(_, _, agent)| *agent);
+        }
+    }
     Ok((state, kept))
+}
+
+/// Turns every pane whose agent this version no longer runs into a plain
+/// shell, in the JSON before it is read: by workspace and pane id, the panes
+/// it turned and the name of the agent each ran.
+///
+/// The pane keeps its folder, name and place in the layout. What belonged to
+/// the old agent goes with it: the session id (a conversation Claude Code
+/// cannot resume) and the model (one Claude Code would not start with), so
+/// that switching the pane to Claude Code later starts it clean.
+fn retire_agents(value: &mut Value) -> Vec<(String, String, &'static str)> {
+    let mut retired = Vec::new();
+    let workspaces = value
+        .get_mut("workspaces")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten();
+    for ws in workspaces {
+        let ws_id = id_of(ws);
+        let panes = ws
+            .get_mut("panes")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten();
+        for pane in panes {
+            let pane_id = id_of(pane);
+            let Some(map) = pane.as_object_mut() else {
+                continue;
+            };
+            let Some(agent) = map
+                .get("agent")
+                .and_then(Value::as_str)
+                .and_then(|agent| RETIRED_AGENTS.iter().find(|(id, _)| *id == agent))
+                .map(|(_, name)| *name)
+            else {
+                continue;
+            };
+            map.insert("agent".into(), Value::String("shell".into()));
+            map.insert("sessionId".into(), Value::Null);
+            map.remove("model");
+            retired.push((ws_id.clone(), pane_id, agent));
+        }
+    }
+    retired
 }
 
 /// The `null`s of `?: T | null` fields (`taskId`, `model`, `portBase`,
@@ -527,6 +584,108 @@ mod tests {
             key: "experiments".into(),
             raw: json!([7])
         }));
+    }
+
+    /// A file of the old app with a Codex, a Gemini CLI and an OpenCode pane:
+    /// each opens as a shell in its own folder, marked for its note, and is
+    /// written back as a shell. Nothing of it is set aside to come back.
+    #[test]
+    fn a_pane_of_a_retired_agent_reads_as_a_shell_in_the_same_folder() {
+        let (state, kept) = read(json!({
+            "workspaces": [{
+                "id": "w1", "name": "Shop", "cwd": "/code/shop",
+                "panes": [
+                    {"id": "p1", "name": "Ada", "agent": "claude", "sessionId": "s1"},
+                    {"id": "p2", "name": "Bob", "agent": "codex",
+                     "sessionId": "rollout-1", "model": "gpt-5.5", "cwd": "/code/shop/api"},
+                    {"id": "p3", "name": "Cy", "agent": "gemini", "sessionId": null},
+                    {"id": "p4", "name": "Di", "agent": "opencode", "title": "tests"}
+                ],
+                "tree": {"type": "split", "dir": "row", "ratio": 0.5,
+                         "a": {"type": "pane", "id": "p1"}, "b": {"type": "pane", "id": "p2"}}
+            }]
+        }));
+        assert!(kept.is_empty(), "{kept:?}");
+        let panes = &state.workspaces[0].panes;
+        assert_eq!(panes.len(), 4, "no pane is dropped");
+        assert_eq!(panes[0].agent, AgentId::Claude);
+        assert_eq!(panes[0].retired_agent, None);
+        assert_eq!(panes[0].session_id.as_deref(), Some("s1"));
+        let shells: Vec<_> = panes[1..]
+            .iter()
+            .map(|pane| (pane.name.as_str(), pane.agent, pane.retired_agent))
+            .collect();
+        assert_eq!(
+            shells,
+            [
+                ("Bob", AgentId::Shell, Some("Codex")),
+                ("Cy", AgentId::Shell, Some("Gemini CLI")),
+                ("Di", AgentId::Shell, Some("OpenCode")),
+            ]
+        );
+        let bob = &panes[1];
+        assert_eq!(bob.cwd.as_deref(), Some("/code/shop/api"), "its own folder");
+        assert_eq!(
+            (bob.session_id.as_deref(), bob.model.as_deref()),
+            (None, None)
+        );
+        assert_eq!(panes[3].title.as_deref(), Some("tests"));
+        assert!(matches!(
+            state.workspaces[0].tree,
+            Some(SplitNode::Split { .. })
+        ));
+
+        let written = serde_json::to_value(&state).unwrap();
+        for (at, pane) in written["workspaces"][0]["panes"].as_array().unwrap()[1..]
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(pane["agent"], json!("shell"), "pane {at}");
+            assert!(pane.get("model").is_none());
+            assert!(
+                pane.get("retiredAgent").is_none(),
+                "the mark is not written"
+            );
+        }
+        // Read again, a shell is a shell: no mark, no note a second time.
+        let (again, _) = read(written);
+        assert!(
+            again.workspaces[0]
+                .panes
+                .iter()
+                .all(|p| p.retired_agent.is_none())
+        );
+    }
+
+    /// `agentCommands` of the old app held a command per agent: Claude Code's
+    /// is read, the others' are not, and the next save leaves them out.
+    #[test]
+    fn only_claude_codes_launch_command_is_read_and_written() {
+        let (state, kept) = read(json!({
+            "settings": {"agentCommands": {
+                "claude": "ccr code", "codex": "codex --yolo", "gemini": "gemini -y"
+            }}
+        }));
+        assert!(kept.is_empty());
+        assert_eq!(
+            state.settings.agent_commands.claude.as_deref(),
+            Some("ccr code")
+        );
+        let written = serde_json::to_value(&state).unwrap();
+        assert_eq!(
+            written["settings"]["agentCommands"],
+            json!({"claude": "ccr code"})
+        );
+
+        // None for Claude Code, or one that is not text: not customised, and
+        // nothing is set aside to come back.
+        for commands in [json!({"opencode": "oc"}), json!({"claude": 5})] {
+            let (state, kept) = read(json!({"settings": {"agentCommands": commands}}));
+            assert!(kept.is_empty());
+            assert_eq!(state.settings.agent_commands.claude, None);
+            let written = serde_json::to_value(&state).unwrap();
+            assert_eq!(written["settings"]["agentCommands"], json!({}));
+        }
     }
 
     #[test]

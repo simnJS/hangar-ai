@@ -47,7 +47,7 @@ fn workspace() -> Workspace {
                 AgentId::Claude,
                 Some(PaneRole::Orchestrator),
             ),
-            pane("p-ben", "Ben", AgentId::Codex, None),
+            pane("p-ben", "Ben", AgentId::Shell, None),
             pane("p-cleo", "Cleo", AgentId::Claude, None),
             pane("p-sh", "Shell", AgentId::Shell, None),
         ],
@@ -1937,7 +1937,7 @@ mod panes_send_reaches_the_workspaces_claude_code_agents_only {
     }
 
     #[test]
-    fn refuses_another_agent_a_shell_a_pane_of_another_workspace_and_an_agent_without_the_bridge() {
+    fn refuses_a_shell_a_pane_of_another_workspace_and_an_agent_without_the_bridge() {
         let mut s = setup();
         let code = |s: &mut Setup, pane: &str| {
             s.error_of("panes.send", json!({ "pane": pane, "text": "hi" }))
@@ -2029,7 +2029,7 @@ mod what_a_tab_sees {
             serde_json::to_value(kit_panes(&workspace(), activity)).unwrap(),
             json!([
                 { "name": "Ava", "agent": "claude", "role": "orchestrator", "state": "working", "canSend": true },
-                { "name": "Ben", "agent": "codex", "role": null, "state": "idle", "canSend": false },
+                { "name": "Ben", "agent": "shell", "role": null, "state": "idle", "canSend": false },
                 { "name": "Cleo", "agent": "claude", "role": null, "state": "idle", "canSend": false },
                 { "name": "Shell", "agent": "shell", "role": null, "state": null, "canSend": false },
             ])

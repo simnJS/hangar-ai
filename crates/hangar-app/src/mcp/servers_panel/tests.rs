@@ -27,7 +27,7 @@ fn servers() -> Vec<ServerInfo> {
 }
 
 /// Workspace `w` has chosen only `robloxstudio`; it holds the Claude Code
-/// panes `a`, `b` and `c`, a shell and a Codex.
+/// panes `a`, `b` and `c`, and two shells.
 fn model() -> Model {
     let mut ws = workspace(
         "w",
@@ -38,7 +38,7 @@ fn model() -> Model {
             pane("b", "Bo", AgentId::Claude),
             pane("c", "Cy", AgentId::Claude),
             pane("s", "Sam", AgentId::Shell),
-            pane("x", "Xi", AgentId::Codex),
+            pane("x", "Xi", AgentId::Shell),
         ],
     );
     ws.mcp = Some(WorkspaceMcp {
@@ -130,7 +130,7 @@ fn only_the_panes_running_something_else_are_in_the_restart() {
     let mut m = model();
     launch(&mut m, "a", matching());
     launch(&mut m, "b", inherited());
-    // `c` never said what it launched with, and a shell and a Codex have no
+    // `c` never said what it launched with, and the two shells have no
     // Claude Code servers to be out of date.
     let plan = plan(&m);
     assert_eq!(plan.now, ids(&["b", "c"]));

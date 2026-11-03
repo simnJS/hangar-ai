@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn names_a_bare_agent_id_after_the_agent() {
         assert_eq!(signer_name("claude").as_deref(), Some("Claude Code"));
-        assert_eq!(signer_name("codex").as_deref(), Some("Codex"));
+        assert_eq!(signer_name("shell").as_deref(), Some("Shell"));
     }
 
     #[test]

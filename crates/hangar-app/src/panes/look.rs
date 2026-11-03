@@ -182,7 +182,7 @@ mod tests {
             text: None,
             kind: KeyEventKind::Press,
         };
-        for agent in [AgentId::Shell, AgentId::Claude, AgentId::Codex] {
+        for agent in [AgentId::Shell, AgentId::Claude] {
             let config = config(&Settings::default(), agent);
             let options = KeyOptions {
                 alt_sends_escape: config.alt_sends_escape,

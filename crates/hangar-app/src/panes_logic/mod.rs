@@ -1196,10 +1196,11 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
         }
         Msg::Context { pane, usage } => {
-            let agent = locate(m, &pane).map(|(info, _)| info.agent);
-            let gauge = agent
-                .zip(usage)
-                .and_then(|(agent, usage)| compute_context_gauge(agent, &usage));
+            // A pane switched to a shell since the read has no gauge.
+            let claude = locate(m, &pane).is_some_and(|(info, _)| info.agent == AgentId::Claude);
+            let gauge = usage
+                .filter(|_| claude)
+                .and_then(|usage| compute_context_gauge(&usage));
             m.live.panes_logic.set_transcript_context(&pane, gauge);
             bump(m);
             Task::none()
@@ -1318,14 +1319,12 @@ fn slow(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) -> Task<Mess
         if !watch.begin_round(now) {
             continue;
         }
-        let (agent, cwd) = (watch.agent.as_str().to_string(), watch.cwd.clone());
+        let cwd = watch.cwd.clone();
         tasks.push(Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || {
-                    hangar_core::sessions::list_sessions(agent, cwd)
-                })
-                .await
-                .ok()
+                tokio::task::spawn_blocking(move || hangar_core::sessions::list_sessions(cwd))
+                    .await
+                    .ok()
             },
             move |sessions| {
                 Message::PanesLogic(Msg::Sessions {
@@ -1357,12 +1356,12 @@ fn slow(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) -> Task<Mess
                         if attended_workspace(m, ws)
                             && live.pane_status(&pane.id) == Some(PaneStatus::Running)
                         {
-                            reads.push((pane.id.clone(), pane.agent, session, folder_of(ws, pane)));
+                            reads.push((pane.id.clone(), session, folder_of(ws, pane)));
                         }
                     }
-                    // Gemini and opencode keep no readable transcript, and
-                    // before a session is captured there is nothing to read:
-                    // no gauge beats a made-up zero.
+                    // A shell keeps no transcript, and before a session is
+                    // captured there is nothing to read: no gauge beats a
+                    // made-up zero.
                     _ => clears.push(pane.id.clone()),
                 }
             }
@@ -1370,9 +1369,9 @@ fn slow(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) -> Task<Mess
         for pane in clears {
             m.live.panes_logic.set_transcript_context(&pane, None);
         }
-        for (pane, agent, session, cwd) in reads {
+        for (pane, session, cwd) in reads {
             tasks.push(Task::perform(
-                hangar_core::context::context_usage(agent.as_str().to_string(), session, cwd),
+                hangar_core::context::context_usage(session, cwd),
                 move |usage| {
                     Message::PanesLogic(Msg::Context {
                         pane: pane.clone(),

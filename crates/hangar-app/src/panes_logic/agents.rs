@@ -1,44 +1,32 @@
-//! The agents a pane can run, and the command typed to start one
-//! (`lib/agents.ts`). The transcript hunt that follows a pane's session is
-//! in `session_watch`.
+//! What a pane runs, and the command typed to start Claude Code
+//! (`lib/agents.ts`). Claude Code is the only agent Hangar runs (owner's
+//! decision, 2026-11-03); a plain shell types nothing. The transcript hunt
+//! that follows a pane's session is in `session_watch`.
 
 use std::collections::HashSet;
 
-use serde_json::{Map, Value};
-
 use crate::state::types::AgentId;
 
-/// What each agent is started with when nothing was customised. `None` for
-/// the plain shell, which types nothing.
-pub fn default_agent_command(agent: AgentId) -> Option<&'static str> {
-    match agent {
-        AgentId::Shell => None,
-        AgentId::Claude => Some("claude"),
-        AgentId::Codex => Some("codex"),
-        AgentId::Gemini => Some("gemini"),
-        AgentId::Opencode => Some("opencode"),
-    }
-}
+/// What Claude Code is started with when nothing was customised.
+pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 
 /// JavaScript's `String.prototype.trim`: it also strips the byte order mark.
 fn js_trim(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
 
-/// The command a pane starts an agent with: whatever the settings hold for
-/// it, or the plain binary name.
+/// The command a pane starts its agent with: for Claude Code, the one the
+/// settings hold, or the plain binary name; `None` for a shell.
 ///
 /// Trimmed, and an empty override reads as "not customised" rather than as a
 /// pane that types nothing: clearing the field in the settings is how you go
 /// back to the default.
-pub fn agent_command(agent: AgentId, commands: Option<&Map<String, Value>>) -> Option<String> {
-    let default = default_agent_command(agent)?;
-    let custom = commands
-        .and_then(|commands| commands.get(agent.as_str()))
-        .and_then(Value::as_str)
-        .map(js_trim)
-        .filter(|command| !command.is_empty());
-    Some(custom.unwrap_or(default).to_string())
+pub fn agent_command(agent: AgentId, custom: Option<&str>) -> Option<String> {
+    if agent != AgentId::Claude {
+        return None;
+    }
+    let custom = custom.map(js_trim).filter(|command| !command.is_empty());
+    Some(custom.unwrap_or(DEFAULT_CLAUDE_COMMAND).to_string())
 }
 
 /// A path safe to put between double quotes in a command line.
@@ -69,11 +57,10 @@ fn all_of(text: &str, allowed: impl Fn(char) -> bool) -> bool {
 #[derive(Debug, Default, Clone)]
 pub struct LaunchOptions<'a> {
     /// The folders a multi-root workspace has beyond the one the terminal
-    /// opened in. Only Claude Code takes them on the command line; the others
-    /// are left with their working directory rather than handed a flag they
-    /// would refuse to start with.
+    /// opened in, handed to Claude Code with `--add-dir`.
     pub extra_roots: &'a [String],
-    pub commands: Option<&'a Map<String, Value>>,
+    /// Claude Code's launch command from the settings, when customised.
+    pub command: Option<&'a str>,
     /// The session's name (`session_name` of the pane names). Claude Code
     /// sessions on one machine can message each other by name, and naming
     /// each after its pane is what lets an agent reach another one.
@@ -108,90 +95,82 @@ pub fn launch_command(
     session_id: Option<&str>,
     options: &LaunchOptions,
 ) -> Option<String> {
-    let command = agent_command(agent, options.commands)?;
+    let command = agent_command(agent, options.command)?;
     let session_id = session_id.filter(|id| !id.is_empty());
 
-    match agent {
-        AgentId::Claude => {
-            let resume = session_id.map_or_else(String::new, |id| format!(" --resume {id}"));
-            let name = options
-                .name
-                .filter(|name| !name.is_empty() && is_quotable(name))
-                .map_or_else(String::new, |name| {
-                    if all_of(name, |c| is_word(c) || c == '-') {
-                        format!(" --name {name}")
-                    } else {
-                        format!(" --name \"{name}\"")
-                    }
-                });
-            // An alias or an id: `sonnet`, `claude-sonnet-4-5`, `opus[1m]`;
-            // the last quoted, since brackets are a glob to bash and zsh.
-            let chosen = options
-                .model
-                .map(js_trim)
-                .filter(|model| !model.is_empty() && is_quotable(model))
-                .map_or_else(String::new, |model| {
-                    if all_of(model, |c| is_word(c) || c == '.' || c == '-') {
-                        format!(" --model {model}")
-                    } else {
-                        format!(" --model \"{model}\"")
-                    }
-                });
-            let permission = options
-                .permission_mode
-                .map(js_trim)
-                .filter(|mode| all_of(mode, |c| c.is_ascii_alphabetic()))
-                .map_or_else(String::new, |mode| format!(" --permission-mode {mode}"));
-            // Variadic, like the two below: the flag after it closes its list.
-            let rules: Vec<&str> = options
-                .allowed_tools
-                .iter()
-                .map(String::as_str)
-                .filter(|rule| all_of(rule, |c| is_word(c) || c == '*' || c == '.' || c == '-'))
-                .collect();
-            let allowed = if rules.is_empty() {
-                String::new()
+    let resume = session_id.map_or_else(String::new, |id| format!(" --resume {id}"));
+    let name = options
+        .name
+        .filter(|name| !name.is_empty() && is_quotable(name))
+        .map_or_else(String::new, |name| {
+            if all_of(name, |c| is_word(c) || c == '-') {
+                format!(" --name {name}")
             } else {
-                format!(" --allowedTools {}", rules.join(" "))
-            };
-            // `--mcp-config` is variadic as well; the flag right behind it
-            // closes its list, and `--strict-mcp-config` is what makes it the
-            // only source. Not strict, it may be the last flag, or be closed
-            // by `--add-dir`.
-            let mcp = match options.mcp_config.filter(|arg| !arg.is_empty()) {
-                Some(arg) if options.mcp_strict == Some(false) => format!(" --mcp-config {arg}"),
-                Some(arg) => format!(" --mcp-config {arg} --strict-mcp-config"),
-                None => String::new(),
-            };
-            let roots: Vec<String> = options
-                .extra_roots
-                .iter()
-                .filter(|root| is_quotable(root))
-                .map(|root| format!("\"{root}\""))
-                .collect();
-            // `--add-dir` is variadic, so it comes last: a following flag (one
-            // the custom command carries, or the resume above) would be
-            // swallowed as one more directory.
-            let added = if roots.is_empty() {
-                String::new()
+                format!(" --name \"{name}\"")
+            }
+        });
+    // An alias or an id: `sonnet`, `claude-sonnet-4-5`, `opus[1m]`;
+    // the last quoted, since brackets are a glob to bash and zsh.
+    let chosen = options
+        .model
+        .map(js_trim)
+        .filter(|model| !model.is_empty() && is_quotable(model))
+        .map_or_else(String::new, |model| {
+            if all_of(model, |c| is_word(c) || c == '.' || c == '-') {
+                format!(" --model {model}")
             } else {
-                format!(" --add-dir {}", roots.join(" "))
-            };
-            Some(format!(
-                "{command}{resume}{name}{chosen}{permission}{allowed}{mcp}{added}"
-            ))
-        }
-        AgentId::Codex => Some(match session_id {
-            Some(id) => format!("{command} resume {id}"),
-            None => command,
-        }),
-        _ => Some(command),
-    }
+                format!(" --model \"{model}\"")
+            }
+        });
+    let permission = options
+        .permission_mode
+        .map(js_trim)
+        .filter(|mode| all_of(mode, |c| c.is_ascii_alphabetic()))
+        .map_or_else(String::new, |mode| format!(" --permission-mode {mode}"));
+    // Variadic, like the two below: the flag after it closes its list.
+    let rules: Vec<&str> = options
+        .allowed_tools
+        .iter()
+        .map(String::as_str)
+        .filter(|rule| all_of(rule, |c| is_word(c) || c == '*' || c == '.' || c == '-'))
+        .collect();
+    let allowed = if rules.is_empty() {
+        String::new()
+    } else {
+        format!(" --allowedTools {}", rules.join(" "))
+    };
+    // `--mcp-config` is variadic as well; the flag right behind it
+    // closes its list, and `--strict-mcp-config` is what makes it the
+    // only source. Not strict, it may be the last flag, or be closed
+    // by `--add-dir`.
+    let mcp = match options.mcp_config.filter(|arg| !arg.is_empty()) {
+        Some(arg) if options.mcp_strict == Some(false) => format!(" --mcp-config {arg}"),
+        Some(arg) => format!(" --mcp-config {arg} --strict-mcp-config"),
+        None => String::new(),
+    };
+    let roots: Vec<String> = options
+        .extra_roots
+        .iter()
+        .filter(|root| is_quotable(root))
+        .map(|root| format!("\"{root}\""))
+        .collect();
+    // `--add-dir` is variadic, so it comes last: a following flag (one
+    // the custom command carries, or the resume above) would be
+    // swallowed as one more directory.
+    let added = if roots.is_empty() {
+        String::new()
+    } else {
+        format!(" --add-dir {}", roots.join(" "))
+    };
+    Some(format!(
+        "{command}{resume}{name}{chosen}{permission}{allowed}{mcp}{added}"
+    ))
 }
 
-/// Whether a pane's agent can be started again on the session it was in.
+/// Whether a pane's agent can be started again on the session it was in:
+/// Claude Code can, a shell has no session.
 pub fn is_resumable(agent: AgentId) -> bool {
-    matches!(agent, AgentId::Claude | AgentId::Codex)
+    agent == AgentId::Claude
 }
 
 /// Session ids already handed to a pane during this app run. Without this,
@@ -223,9 +202,8 @@ pub async fn known_session_ids(agent: AgentId, cwd: String) -> HashSet<String> {
     if !is_resumable(agent) {
         return HashSet::new();
     }
-    let agent = agent.as_str().to_string();
     tokio::task::spawn_blocking(move || {
-        hangar_core::sessions::list_sessions(agent, cwd)
+        hangar_core::sessions::list_sessions(cwd)
             .into_iter()
             .map(|session| session.id)
             .collect()
@@ -325,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn changes_nothing_without_a_model_nor_for_the_other_agents() {
+    fn changes_nothing_without_a_model_nor_for_a_shell() {
         assert_eq!(claude(LaunchOptions::default()), "claude");
         assert_eq!(
             claude(LaunchOptions {
@@ -338,10 +316,6 @@ mod tests {
             model: Some("sonnet"),
             ..Default::default()
         };
-        assert_eq!(
-            launch(AgentId::Codex, None, sonnet.clone()).as_deref(),
-            Some("codex")
-        );
         assert_eq!(launch(AgentId::Shell, None, sonnet), None);
     }
 
@@ -470,25 +444,22 @@ mod tests {
 
     #[test]
     fn a_custom_command_is_trimmed_and_an_empty_one_is_the_default() {
-        let mut commands = Map::new();
-        commands.insert("claude".into(), Value::String("  ccr code  ".into()));
-        commands.insert("codex".into(), Value::String("   ".into()));
         assert_eq!(
-            agent_command(AgentId::Claude, Some(&commands)).as_deref(),
+            agent_command(AgentId::Claude, Some("  ccr code  ")).as_deref(),
             Some("ccr code")
         );
         assert_eq!(
-            agent_command(AgentId::Codex, Some(&commands)).as_deref(),
-            Some("codex")
+            agent_command(AgentId::Claude, Some("   ")).as_deref(),
+            Some("claude")
         );
-        assert_eq!(agent_command(AgentId::Shell, Some(&commands)), None);
+        assert_eq!(agent_command(AgentId::Shell, Some("ccr code")), None);
         // The resume arguments go after a custom launcher.
         assert_eq!(
             launch(
                 AgentId::Claude,
                 Some("abc"),
                 LaunchOptions {
-                    commands: Some(&commands),
+                    command: Some("  ccr code  "),
                     ..Default::default()
                 }
             )
@@ -498,11 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn resumes_codex_by_a_subcommand_and_names_a_session_with_a_space_in_quotes() {
-        assert_eq!(
-            launch(AgentId::Codex, Some("s1"), LaunchOptions::default()).as_deref(),
-            Some("codex resume s1")
-        );
+    fn names_a_session_with_a_space_in_quotes() {
         assert_eq!(
             claude(LaunchOptions {
                 name: Some("Ava (My Work)"),
@@ -518,10 +485,10 @@ mod tests {
             }),
             "claude"
         );
-        // Gemini and OpenCode have no resume.
+        // A shell has nothing to resume.
         assert_eq!(
-            launch(AgentId::Gemini, Some("s1"), LaunchOptions::default()).as_deref(),
-            Some("gemini")
+            launch(AgentId::Shell, Some("s1"), LaunchOptions::default()),
+            None
         );
     }
 
@@ -538,11 +505,8 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_code_and_codex_resume() {
+    fn only_claude_code_resumes() {
         assert!(is_resumable(AgentId::Claude));
-        assert!(is_resumable(AgentId::Codex));
-        assert!(!is_resumable(AgentId::Gemini));
-        assert!(!is_resumable(AgentId::Opencode));
         assert!(!is_resumable(AgentId::Shell));
     }
 

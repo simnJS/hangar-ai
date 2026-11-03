@@ -824,7 +824,7 @@ fn restarts_the_claude_code_panes_only() {
         panes: vec![
             pane("a", AgentId::Claude),
             pane("b", AgentId::Shell),
-            pane("c", AgentId::Codex),
+            pane("c", AgentId::Shell),
             pane("d", AgentId::Claude),
         ],
         ..Workspace::default()

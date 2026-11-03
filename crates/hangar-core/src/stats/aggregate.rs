@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use super::parse::{Agent, Digest};
+use super::parse::Digest;
 use crate::pricing::{self, CallTokens};
 
 /// The longest a silence inside a session counts for, in active time.
@@ -24,7 +24,6 @@ pub const ACTIVE_GAP_CAP_MS: i64 = 5 * 60_000;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
-    pub agent: Agent,
     pub id: String,
     pub cwd: String,
     pub title: String,
@@ -128,7 +127,7 @@ pub fn aggregate<'a>(
         )
     });
 
-    let mut index: HashMap<(Agent, &str), usize> = HashMap::new();
+    let mut index: HashMap<&str, usize> = HashMap::new();
     let mut gathered: Vec<Gathering> = Vec::new();
     let mut models: Vec<String> = Vec::new();
     let mut model_index: HashMap<&str, i32> = HashMap::new();
@@ -136,24 +135,21 @@ pub fn aggregate<'a>(
     let mut seen: HashSet<u64> = HashSet::new();
 
     for digest in &digests {
-        let at = *index
-            .entry((digest.agent, digest.session.as_str()))
-            .or_insert_with(|| {
-                gathered.push(Gathering {
-                    info: SessionInfo {
-                        agent: digest.agent,
-                        id: digest.session.clone(),
-                        cwd: String::new(),
-                        title: String::new(),
-                        first_at: 0,
-                        last_at: 0,
-                    },
-                    main_cwd: false,
-                    title_rank: 0,
-                    stamps: Vec::new(),
-                });
-                gathered.len() - 1
+        let at = *index.entry(digest.session.as_str()).or_insert_with(|| {
+            gathered.push(Gathering {
+                info: SessionInfo {
+                    id: digest.session.clone(),
+                    cwd: String::new(),
+                    title: String::new(),
+                    first_at: 0,
+                    last_at: 0,
+                },
+                main_cwd: false,
+                title_rank: 0,
+                stamps: Vec::new(),
             });
+            gathered.len() - 1
+        });
         let session = &mut gathered[at];
         if !digest.cwd.is_empty()
             && (session.info.cwd.is_empty() || (!digest.sub && !session.main_cwd))

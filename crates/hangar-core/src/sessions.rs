@@ -1,3 +1,7 @@
+//! The Claude Code conversations a pane can resume. Claude Code is the only
+//! agent Hangar runs (owner's decision, 2026-11-03): a plain shell pane keeps
+//! no session, so nothing here takes an agent.
+
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -31,14 +35,10 @@ fn modified_ms(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn home() -> Option<PathBuf> {
-    dirs::home_dir()
-}
-
 /// Extracts a display label from a `.jsonl` transcript by finding the first
 /// real user message. Reads only the head of the file.
-fn label_from_jsonl(path: &Path, user_field: &str) -> String {
-    let Ok(file) = crate::stats::open_rollout(path) else {
+fn label_from_jsonl(path: &Path) -> String {
+    let Ok(file) = fs::File::open(path) else {
         return String::new();
     };
     let reader = BufReader::new(file);
@@ -46,23 +46,11 @@ fn label_from_jsonl(path: &Path, user_field: &str) -> String {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
-        let is_user = value.get("type").and_then(|t| t.as_str()) == Some(user_field)
-            || value
-                .get("payload")
-                .and_then(|p| p.get("role"))
-                .and_then(|r| r.as_str())
-                == Some("user");
-
-        if !is_user {
+        if value.get("type").and_then(|t| t.as_str()) != Some("user") {
             continue;
         }
 
-        let content = value
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .or_else(|| value.get("payload").and_then(|p| p.get("content")));
-
-        let text = match content {
+        let text = match value.get("message").and_then(|m| m.get("content")) {
             Some(serde_json::Value::String(s)) => s.clone(),
             Some(serde_json::Value::Array(items)) => items
                 .iter()
@@ -109,7 +97,7 @@ fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
             }
             sessions.push(AgentSession {
                 id,
-                label: label_from_jsonl(&path, "user"),
+                label: label_from_jsonl(&path),
                 modified_ms: modified_ms(&path),
             });
         }
@@ -119,94 +107,9 @@ fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
     sessions
 }
 
-/// Walks `~/.codex/sessions/YYYY/MM/DD/` and keeps rollouts whose recorded
-/// working directory matches the pane's.
-fn codex_sessions(cwd: &str) -> Vec<AgentSession> {
-    let Some(home) = home() else {
-        return vec![];
-    };
-    codex_sessions_in(&home.join(".codex").join("sessions"), cwd)
-}
-
-fn codex_sessions_in(root: &Path, cwd: &str) -> Vec<AgentSession> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_jsonl(root, &mut files, 0);
-    files.sort_by_key(|p| std::cmp::Reverse(modified_ms(p)));
-    files.truncate(80);
-
-    let target = cwd.replace('\\', "/").to_lowercase();
-
-    files
-        .into_iter()
-        .filter_map(|path| {
-            let file = crate::stats::open_rollout(&path).ok()?;
-            let mut first = String::new();
-            BufReader::new(file).read_line(&mut first).ok()?;
-            let meta: serde_json::Value = serde_json::from_str(&first).ok()?;
-
-            let session_cwd = meta
-                .get("payload")
-                .and_then(|p| p.get("cwd"))
-                .or_else(|| meta.get("cwd"))
-                .and_then(|c| c.as_str())?;
-
-            if session_cwd.replace('\\', "/").to_lowercase() != target {
-                return None;
-            }
-
-            let id = meta
-                .get("payload")
-                .and_then(|p| p.get("id"))
-                .or_else(|| meta.get("id"))
-                .and_then(|i| i.as_str())
-                .map(str::to_string)
-                .or_else(|| uuid_from_filename(&path))?;
-
-            Some(AgentSession {
-                id,
-                label: label_from_jsonl(&path, "user"),
-                modified_ms: modified_ms(&path),
-            })
-        })
-        .collect()
-}
-
-/// `rollout-2025-01-01T10-00-00-<uuid>.jsonl[.zst]` -> `<uuid>`
-fn uuid_from_filename(path: &Path) -> Option<String> {
-    let name = path.file_name()?.to_string_lossy();
-    let stem = name.trim_end_matches(".zst").trim_end_matches(".jsonl");
-    let parts: Vec<&str> = stem.split('-').collect();
-    if parts.len() < 5 {
-        return None;
-    }
-    Some(parts[parts.len() - 5..].join("-"))
-}
-
-pub(crate) fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 4 {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jsonl(&path, out, depth + 1);
-        } else if path.extension().is_some_and(|e| e == "jsonl")
-            || path.to_string_lossy().ends_with(".jsonl.zst")
-        {
-            out.push(path);
-        }
-    }
-}
-
-pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
-    match agent.as_str() {
-        "claude" => claude_sessions(&cwd),
-        "codex" => codex_sessions(&cwd),
-        _ => vec![],
-    }
+/// The Claude Code conversations kept for `cwd`, newest first.
+pub fn list_sessions(cwd: String) -> Vec<AgentSession> {
+    claude_sessions(&cwd)
 }
 
 /// Whether the conversation a pane is about to resume has a transcript left:
@@ -219,7 +122,7 @@ pub fn list_sessions(agent: String, cwd: String) -> Vec<AgentSession> {
 /// conversation found". Every project directory is searched, not just the
 /// pane's: a transcript filed under another spelling of the path is still
 /// worth handing to the agent.
-pub fn session_exists(agent: String, id: String) -> Option<bool> {
+pub fn session_exists(id: String) -> Option<bool> {
     // Joined into a path below: anything but a plain id is not ours to judge.
     if id.is_empty()
         || !id
@@ -228,11 +131,7 @@ pub fn session_exists(agent: String, id: String) -> Option<bool> {
     {
         return None;
     }
-    match agent.as_str() {
-        "claude" => claude_transcript_exists_in(&crate::accounts::projects_dirs(), &id),
-        "codex" => codex_transcript_exists(&home()?.join(".codex").join("sessions"), &id),
-        _ => None,
-    }
+    claude_transcript_exists_in(&crate::accounts::projects_dirs(), &id)
 }
 
 /// Found under any of `roots` — the folders every Claude account files its
@@ -259,46 +158,19 @@ fn claude_transcript_exists(projects: &Path, id: &str) -> Option<bool> {
     )
 }
 
-fn codex_transcript_exists(root: &Path, id: &str) -> Option<bool> {
-    // An unreadable root says nothing about the session; an empty walk would.
-    fs::read_dir(root).ok()?;
-    let mut files = Vec::new();
-    collect_jsonl(root, &mut files, 0);
-    Some(files.iter().any(|path| {
-        path.file_name().is_some_and(|name| {
-            let name = name.to_string_lossy();
-            name.trim_end_matches(".zst")
-                .trim_end_matches(".jsonl")
-                .ends_with(id)
-        })
-    }))
-}
-
-/// Reports which agent CLIs are actually on PATH, so the UI can grey out the rest.
-pub fn detect_agents() -> Vec<String> {
-    // Without this the answer on macOS is "none of them": a bundled app is
-    // handed the bare system PATH, and no agent CLI installs into it.
+/// Whether Claude Code is on PATH, so the UI can say when a pane will not
+/// find it.
+pub fn claude_installed() -> bool {
+    // Without this the answer on macOS is "no": a bundled app is handed the
+    // bare system PATH, and Claude Code does not install into it.
     crate::path_env::ensure();
-
-    let candidates: [(&str, &[&str]); 4] = [
-        ("claude", &["claude.exe", "claude.cmd", "claude"]),
-        ("codex", &["codex.exe", "codex.cmd", "codex"]),
-        ("gemini", &["gemini.exe", "gemini.cmd", "gemini"]),
-        ("opencode", &["opencode.exe", "opencode.cmd", "opencode"]),
-    ];
 
     let paths: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
-
-    candidates
+    ["claude.exe", "claude.cmd", "claude"]
         .iter()
-        .filter(|(_, bins)| {
-            bins.iter()
-                .any(|bin| paths.iter().any(|dir| dir.join(bin).is_file()))
-        })
-        .map(|(name, _)| name.to_string())
-        .collect()
+        .any(|bin| paths.iter().any(|dir| dir.join(bin).is_file()))
 }
 
 #[cfg(test)]
@@ -372,65 +244,31 @@ mod tests {
         fs::remove_dir_all(&own).ok();
     }
 
+    /// The label is the first prompt the person typed, not a slash command
+    /// or the preamble Claude Code injects before it.
     #[test]
-    fn a_codex_session_is_found_by_the_id_ending_its_rollout_name() {
-        let root = temp_dir("codex");
-        let day = root.join("2026").join("10").join("07");
-        fs::create_dir_all(&day).expect("day dir");
-        fs::write(
-            day.join("rollout-2026-10-07T10-00-00-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl"),
-            "{}\n",
-        )
-        .expect("rollout");
+    fn a_session_is_labelled_by_its_first_real_prompt() {
+        let root = temp_dir("label");
+        let dir = root.join(encode_project_dir("/work/app"));
+        fs::create_dir_all(&dir).expect("project dir");
+        let transcript = [
+            r#"{"type":"user","message":{"content":"<command-name>/clear</command-name>"}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"fix   the bug"}]}}"#,
+        ]
+        .join("\n");
+        fs::write(dir.join("s-1.jsonl"), transcript).expect("transcript");
 
-        assert_eq!(
-            codex_transcript_exists(&root, "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"),
-            Some(true)
-        );
-        assert_eq!(
-            codex_transcript_exists(&root, "0199a1b2-0000-7e5f-8a9b-0c1d2e3f4a5b"),
-            Some(false)
-        );
-        assert_eq!(codex_transcript_exists(&root.join("missing"), "x"), None);
-
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn a_compressed_codex_rollout_is_listed_and_found() {
-        let id = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
-        let root = temp_dir("codex-zst");
-        let day = root.join("2026").join("10").join("07");
-        fs::create_dir_all(&day).expect("day dir");
-        let rollout = format!(
-            "{}\n{}\n",
-            r#"{"type":"session_meta","payload":{"id":"0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b","cwd":"/work/app"}}"#,
-            r#"{"type":"response_item","payload":{"role":"user","content":[{"text":"fix the bug"}]}}"#
-        );
-        let path = day.join(format!("rollout-2026-10-07T10-00-00-{id}.jsonl.zst"));
-        fs::write(
-            &path,
-            ruzstd::encoding::compress_to_vec(
-                rollout.as_bytes(),
-                ruzstd::encoding::CompressionLevel::Fastest,
-            ),
-        )
-        .expect("rollout");
-
-        assert_eq!(codex_transcript_exists(&root, id), Some(true));
-        let listed = codex_sessions_in(&root, "/work/app");
+        let listed = claude_sessions_in(std::slice::from_ref(&root), "/work/app");
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].id, "s-1");
         assert_eq!(listed[0].label, "fix the bug");
-        assert_eq!(uuid_from_filename(&path).as_deref(), Some(id));
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn an_id_that_is_not_plain_is_left_to_the_agent() {
-        assert_eq!(session_exists("claude".into(), "../escape".into()), None);
-        assert_eq!(session_exists("claude".into(), String::new()), None);
-        assert_eq!(session_exists("gemini".into(), "abc".into()), None);
+        assert_eq!(session_exists("../escape".into()), None);
+        assert_eq!(session_exists(String::new()), None);
     }
 }

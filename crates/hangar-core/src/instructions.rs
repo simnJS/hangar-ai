@@ -1,8 +1,9 @@
-//! Writes the agent playbook into the files agents actually read on startup.
+//! Writes the agent playbook into the file Claude Code reads on startup.
 //!
-//! A doc parked in `.hangar/` would be loaded by nobody. `AGENTS.md` is the
-//! cross-tool convention (Codex, Cursor, recent Claude Code) and `CLAUDE.md`
-//! is always read by Claude Code, so the block goes in both.
+//! A doc parked in `.hangar/` would be loaded by nobody. `CLAUDE.md` is always
+//! read by Claude Code, the only agent Hangar runs (owner's decision,
+//! 2026-11-03). Earlier versions also wrote `AGENTS.md`, for the other agents;
+//! a block left there is not touched, and no longer counts as installed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ const END: &str = "<!-- HANGAR:END -->";
 
 /// Marker pairs written by earlier versions, newest first.
 ///
-/// These are already sitting in users' `AGENTS.md` and `CLAUDE.md`. A rename
+/// These are already sitting in users' `CLAUDE.md`. A rename
 /// that only knew the new markers would not match the old block, so instead of
 /// replacing the playbook it would append a second copy on every run.
 const LEGACY_MARKERS: &[(&str, &str)] = &[(
@@ -22,7 +23,7 @@ const LEGACY_MARKERS: &[(&str, &str)] = &[(
     "<!-- IABENCH:END -->",
 )];
 
-const TARGET_FILES: [&str; 2] = ["AGENTS.md", "CLAUDE.md"];
+const TARGET_FILES: [&str; 1] = ["CLAUDE.md"];
 
 #[derive(Debug, Serialize)]
 pub struct InstructionReport {
@@ -398,5 +399,37 @@ mod tests {
 
         assert!(updated.contains("# Mon projet"));
         assert_eq!(updated.matches(START).count(), 1);
+    }
+
+    /// Claude Code reads `CLAUDE.md`: the playbook goes there only, and one an
+    /// earlier version left in `AGENTS.md` is neither touched nor counted.
+    #[test]
+    fn the_playbook_goes_to_claude_md_only() {
+        let root = std::env::temp_dir().join(format!(
+            "hangar-instructions-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let old = format!("# Notes\n\n{}\n", playbook());
+        fs::write(root.join("AGENTS.md"), &old).unwrap();
+        let cwd = root.to_string_lossy().into_owned();
+        assert!(!agent_instructions_status(cwd.clone()));
+
+        let reports = write_agent_instructions(cwd.clone());
+        let written: Vec<String> = reports
+            .iter()
+            .map(|report| {
+                Path::new(&report.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(written, ["CLAUDE.md", ".gitignore"]);
+        assert!(reports.iter().all(|report| report.ok));
+        assert!(agent_instructions_status(cwd));
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), old);
+        fs::remove_dir_all(&root).ok();
     }
 }

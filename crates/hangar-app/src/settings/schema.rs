@@ -25,10 +25,10 @@ use super::experiments::{Experiment, Platform, available_experiments};
 use super::format::{num, plain};
 use crate::commands::CommandId;
 use crate::keymap::KeymapIndex;
+use crate::panes_logic::agents::DEFAULT_CLAUDE_COMMAND;
 use crate::shell::SettingsCategory;
 use crate::state::types::{
-    AGENTS, AgentId, CursorStyle, Settings, ShellInfo, UI_SCALE_MAX, UI_SCALE_MIN, VoiceEngine,
-    Workspace,
+    AgentId, CursorStyle, Settings, ShellInfo, UI_SCALE_MAX, UI_SCALE_MIN, VoiceEngine, Workspace,
 };
 
 /// A choice of a select or a segmented control.
@@ -763,43 +763,25 @@ fn general(ctx: &Context, locale: Locale) -> Category {
             section(
                 "agentCommands",
                 tx(Key::SettingsAgentCommands),
-                AGENTS
-                    .iter()
-                    .filter(|agent| agent.id != AgentId::Shell)
-                    .map(|agent| {
-                        item(
-                            &format!("agentCommand.{}", agent.id.as_str()),
-                            Some(agent.label.to_string()),
-                            Kind::Input {
-                                value: settings
-                                    .agent_commands
-                                    .get(agent.id.as_str())
-                                    .and_then(|command| command.as_str())
-                                    .unwrap_or_default()
-                                    .to_string(),
-                                // The default as the placeholder, so an empty
-                                // field reads as "starts with this" rather
-                                // than as nothing at all.
-                                placeholder: default_agent_command(agent.id).into(),
-                                target: Target::AgentCommand(agent.id),
-                            },
-                        )
-                        .keywords(format!(
-                            "{} command commande launch lancement alias",
-                            agent.id.as_str()
-                        ))
-                    })
-                    .collect(),
+                vec![
+                    item(
+                        "agentCommand.claude",
+                        Some(AgentId::Claude.info().label.to_string()),
+                        Kind::Input {
+                            value: settings.agent_commands.claude.clone().unwrap_or_default(),
+                            // The default as the placeholder, so an empty
+                            // field reads as "starts with this" rather than
+                            // as nothing at all.
+                            placeholder: DEFAULT_CLAUDE_COMMAND.into(),
+                            target: Target::ClaudeCommand,
+                        },
+                    )
+                    .keywords("claude command commande launch lancement alias"),
+                ],
             )
             .hint(tx(Key::SettingsAgentCommandsHint)),
         ],
     }
-}
-
-/// What each agent is started with when nothing was customised
-/// (`DEFAULT_AGENT_COMMANDS`): the plain binary name, which is the agent's id.
-fn default_agent_command(agent: AgentId) -> &'static str {
-    agent.as_str()
 }
 
 fn terminal(ctx: &Context, locale: Locale) -> Category {

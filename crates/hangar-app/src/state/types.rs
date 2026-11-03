@@ -49,17 +49,26 @@ pub struct AppState {
     pub extra: Extra,
 }
 
-/// The CLI a pane runs (`AgentId`).
+/// What a pane runs (`AgentId`): Claude Code, or a plain shell.
+///
+/// Claude Code is the only agent Hangar runs (owner's decision, 2026-11-03).
+/// The old app also offered `codex`, `gemini` and `opencode`; a pane saved
+/// with one of them opens as a shell (`RETIRED_AGENTS`, lenient.rs).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentId {
     #[default]
     Shell,
     Claude,
-    Codex,
-    Gemini,
-    Opencode,
 }
+
+/// The agents the old app could run and this one no longer does, by the id
+/// `state.json` holds, with the name a pane's note gives them.
+pub const RETIRED_AGENTS: [(&str, &str); 3] = [
+    ("codex", "Codex"),
+    ("gemini", "Gemini CLI"),
+    ("opencode", "OpenCode"),
+];
 
 /// One row of `AGENTS`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +80,7 @@ pub struct AgentInfo {
 }
 
 /// `AGENTS`, in the order the pickers list them.
-pub const AGENTS: [AgentInfo; 5] = [
+pub const AGENTS: [AgentInfo; 2] = [
     AgentInfo {
         id: AgentId::Shell,
         label: "Shell",
@@ -81,21 +90,6 @@ pub const AGENTS: [AgentInfo; 5] = [
         id: AgentId::Claude,
         label: "Claude Code",
         resumable: true,
-    },
-    AgentInfo {
-        id: AgentId::Codex,
-        label: "Codex",
-        resumable: true,
-    },
-    AgentInfo {
-        id: AgentId::Gemini,
-        label: "Gemini",
-        resumable: false,
-    },
-    AgentInfo {
-        id: AgentId::Opencode,
-        label: "OpenCode",
-        resumable: false,
     },
 ];
 
@@ -112,9 +106,6 @@ impl AgentId {
         match self {
             AgentId::Shell => "shell",
             AgentId::Claude => "claude",
-            AgentId::Codex => "codex",
-            AgentId::Gemini => "gemini",
-            AgentId::Opencode => "opencode",
         }
     }
 }
@@ -162,6 +153,12 @@ pub struct Pane {
     /// A Claude Code pane opened to log an account in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login: Option<bool>,
+    /// The agent the file said this pane ran, when it is one this version
+    /// no longer runs (`RETIRED_AGENTS`): the reader made the pane a shell
+    /// and set this, so its bar says why once, as it first starts
+    /// (panes/controller.rs). Never written.
+    #[serde(skip)]
+    pub retired_agent: Option<&'static str>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -358,6 +355,29 @@ pub enum VoiceEngine {
     Groq,
 }
 
+/// What a pane types to start Claude Code where it differs from the plain
+/// `claude` (`agentCommands`, by agent id). The old app kept one for each of
+/// its agents; this version runs Claude Code only, so it reads Claude Code's
+/// and the others' are left out of the file at the next save. A value that is
+/// not text reads as not customised.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentCommands {
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "text_or_none"
+    )]
+    pub claude: Option<String>,
+}
+
+fn text_or_none<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Ok(Value::deserialize(deserializer)?
+        .as_str()
+        .map(str::to_owned))
+}
+
 /// The settings. `Default` is `DEFAULT_SETTINGS`, and the file's settings
 /// are read over it (`{...DEFAULT_SETTINGS, ...loaded.settings}`). The UI
 /// controls of each are in inventory §2.3/2.
@@ -377,8 +397,8 @@ pub struct Settings {
     pub cursor_blink: bool,
     pub scrollback: u64,
     pub padding: f64,
-    /// What a pane types to start each agent, by agent id, where it differs.
-    pub agent_commands: Map<String, Value>,
+    /// What a pane types to start Claude Code, where it differs.
+    pub agent_commands: AgentCommands,
     pub auto_resume: bool,
     pub hibernate_idle: bool,
     /// Read as `max(1, value)` minutes.
@@ -444,7 +464,7 @@ impl Default for Settings {
             cursor_blink: true,
             scrollback: 10_000,
             padding: 10.0,
-            agent_commands: Map::new(),
+            agent_commands: AgentCommands::default(),
             auto_resume: true,
             hibernate_idle: true,
             hibernate_after_min: 10.0,

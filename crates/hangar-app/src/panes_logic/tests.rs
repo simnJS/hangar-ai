@@ -696,7 +696,7 @@ fn without_the_mod() -> Model {
     let (m, _) = model(vec![workspace(
         "w1",
         vec![
-            pane("cx", "Cy", AgentId::Codex),
+            pane("cx", "Cy", AgentId::Claude),
             pane("cl", "Ava", AgentId::Claude),
             pane("sh", "Leo", AgentId::Shell),
         ],
@@ -704,9 +704,18 @@ fn without_the_mod() -> Model {
     m
 }
 
+/// The hangar-bridge mod switched off: nothing but the launch says when a
+/// Claude Code session began.
+fn bridge_off(m: &mut Model) {
+    let mut state = m.state().clone();
+    state.settings.claude_bridge = false;
+    m.hydrate(state);
+}
+
 #[test]
 fn an_agent_without_the_mod_dates_its_session_and_words_it_when_launched() {
     let mut m = without_the_mod();
+    bridge_off(&mut m);
     let version = m.live.version;
     launched(&mut m, "cx", None, NOW + 7);
     let insight = m.live.panes_logic.insight("cx");
@@ -745,9 +754,7 @@ fn a_claude_code_with_the_mod_leaves_it_to_its_hello() {
     assert_eq!((insight.session_since, insight.events.len()), (None, 0));
 
     // With the mod switched off nothing will say it: the launch does.
-    let mut state = m.state().clone();
-    state.settings.claude_bridge = false;
-    m.hydrate(state);
+    bridge_off(&mut m);
     launched(&mut m, "cl", Some("abc"), NOW + 2);
     assert_eq!(
         m.live.panes_logic.insight("cl").session_since,
@@ -762,6 +769,7 @@ fn a_claude_code_with_the_mod_leaves_it_to_its_hello() {
 #[test]
 fn a_shell_and_a_pane_nobody_mounted_launch_nothing() {
     let mut m = without_the_mod();
+    bridge_off(&mut m);
     let version = m.live.version;
     launched(&mut m, "sh", None, NOW + 1);
     launched(&mut m, "never", None, NOW + 1);

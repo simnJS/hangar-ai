@@ -1,6 +1,5 @@
 //! The heaviest sessions of the period, in order (`SessionList`).
 
-use hangar_core::stats::Agent;
 use hangar_i18n::{Key, args};
 use hangar_theme::tokens::{font_size, radius, space};
 use hangar_theme::{Theme, fonts, style};
@@ -38,13 +37,7 @@ fn chip(t: &Theme) -> impl Fn(&iced::Theme, Status) -> Style + '_ {
 /// What a session's project chip does: filter the page on it.
 pub type Pick = fn(String) -> Message;
 
-pub fn list<'a>(
-    ui: Ui,
-    rows: &[SessionRow],
-    measure: Measure,
-    agent_label: &dyn Fn(Agent) -> String,
-    pick: Pick,
-) -> Element<'a, Message> {
+pub fn list<'a>(ui: Ui, rows: &[SessionRow], measure: Measure, pick: Pick) -> Element<'a, Message> {
     let t = ui.t;
     let locale = ui.locale();
     if rows.is_empty() {
@@ -60,42 +53,40 @@ pub fn list<'a>(
         } else {
             session.title.clone()
         };
-        let who = [Some(agent_label(session.agent)), session.model.clone()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
         let separator = || {
             text("·")
                 .size(font_size::CAPTION)
                 .style(style::text::subtle(t))
         };
-        let meta = row![
-            hangar_ui::tip::bottom(
-                t,
-                button(one_line(session.project.name.clone()).size(font_size::CAPTION))
-                    .padding(Padding::from([0.0, space::SM]))
-                    .height(17)
-                    .style(chip(t))
-                    .on_press(pick(session.project.key.clone())),
-                ui.tr
-                    .t_with(
-                        Key::StatsShowOnly,
-                        &args!("name" => session.project.name.as_str())
-                    )
-                    .into_owned(),
-            ),
-            separator(),
-            one_line(who)
-                .size(font_size::CAPTION)
-                .style(style::text::muted(t)),
-            separator(),
+        let mut meta = row![hangar_ui::tip::bottom(
+            t,
+            button(one_line(session.project.name.clone()).size(font_size::CAPTION))
+                .padding(Padding::from([0.0, space::SM]))
+                .height(17)
+                .style(chip(t))
+                .on_press(pick(session.project.key.clone())),
+            ui.tr
+                .t_with(
+                    Key::StatsShowOnly,
+                    &args!("name" => session.project.name.as_str())
+                )
+                .into_owned(),
+        ),]
+        .spacing(space::SM)
+        .align_y(alignment::Vertical::Center);
+        // Claude Code is the only agent, so the model says who worked.
+        if let Some(model) = session.model.clone() {
+            meta = meta.push(separator()).push(
+                one_line(model)
+                    .size(font_size::CAPTION)
+                    .style(style::text::muted(t)),
+            );
+        }
+        let meta = meta.push(separator()).push(
             one_line(format::day_month(session.last_at, locale))
                 .size(font_size::CAPTION)
                 .style(style::text::muted(t)),
-        ]
-        .spacing(space::SM)
-        .align_y(alignment::Vertical::Center);
+        );
 
         let main = column![
             one_line(title)

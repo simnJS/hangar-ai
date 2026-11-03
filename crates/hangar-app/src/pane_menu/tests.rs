@@ -33,13 +33,12 @@ fn part(ws: &Workspace, id: &str) -> Option<Part> {
 fn only_a_free_claude_code_pane_can_become_the_orchestrator() {
     let ws = workspace(vec![
         pane("claude", "Claude", AgentId::Claude),
-        pane("codex", "Codex", AgentId::Codex),
         pane("shell", "Shell", AgentId::Shell),
         with_role("worker", AgentId::Claude, PaneRole::Worker),
         with_role("manager", AgentId::Claude, PaneRole::Manager),
     ]);
     assert_eq!(part(&ws, "claude"), Some(Part::Free));
-    for other in ["codex", "shell", "worker", "manager"] {
+    for other in ["shell", "worker", "manager"] {
         assert_eq!(part(&ws, other), None, "{other}");
     }
 }

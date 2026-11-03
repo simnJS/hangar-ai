@@ -8,7 +8,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hangar_core::stats::Agent;
 use hangar_i18n::{Key, args};
 use hangar_theme::tokens::{font_size, radius, size, space};
 use hangar_theme::{Theme, fonts, style};
@@ -26,13 +25,12 @@ use super::charts::{ChartId, KINDS};
 use super::format::{
     self, format_change, format_compact, format_duration, format_integer, format_share, format_usd,
 };
-use super::model::{Granularity, Measure, PERIODS, Period, Summary, agent_key, change};
+use super::model::{Granularity, Measure, PERIODS, Period, Summary, change};
 use super::ranked::{self, List};
 use super::ui::{self, Ui, measure_key, one_line};
 use super::{Computed, Msg, State, sessions, tables};
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::state::types::AGENTS;
 
 /// How many projects show before the rest fold under "N more".
 const PROJECTS_SHOWN: usize = 7;
@@ -713,21 +711,6 @@ fn kpi<'a>(ui: Ui, kpi: Kpi, days: i64, since: Option<String>) -> Element<'a, Me
 // The page
 // ---------------------------------------------------------------------------
 
-fn agent_label(agent: Agent) -> String {
-    let id = match agent {
-        Agent::Claude => crate::state::types::AgentId::Claude,
-        Agent::Codex => crate::state::types::AgentId::Codex,
-    };
-    AGENTS.iter().find(|entry| entry.id == id).map_or_else(
-        || agent_key(agent).to_owned(),
-        |entry| entry.label.to_owned(),
-    )
-}
-
-pub(super) fn agent_name(agent: Agent) -> String {
-    agent_label(agent)
-}
-
 fn content<'a>(
     st: &'a State,
     ctx: Ctx<'a>,
@@ -904,7 +887,7 @@ fn content<'a>(
 
     // Two columns that stack on their own, so a long ranking never leaves a
     // hole beside a short card.
-    let first = column![projects_card(st, ui, summary), agents_card(st, ui, summary)]
+    let first = column![projects_card(st, ui, summary), models_card(st, ui, summary)]
         .spacing(14)
         .width(Length::Fill);
     let second = column![
@@ -1020,36 +1003,12 @@ fn projects_card<'a>(st: &State, ui: Ui, summary: &Summary) -> Element<'a, Messa
     )
 }
 
-fn agents_card<'a>(st: &State, ui: Ui, summary: &Summary) -> Element<'a, Message> {
+/// The models the period's tokens went to. It shared a card with the agents
+/// until Claude Code became the only one (owner's decision, 2026-11-03): a
+/// ranking of one says nothing.
+fn models_card<'a>(st: &State, ui: Ui, summary: &Summary) -> Element<'a, Message> {
     let t = ui.t;
-    let sub = sessions_and_time(ui);
     let mut body = column![].spacing(space::XL);
-    if summary.agents.is_empty() {
-        body = body.push(muted_line(ui, ui.s(Key::StatsNoData)));
-    } else {
-        body = body.push(ranked::list(
-            ui,
-            List {
-                rows: &summary.agents,
-                measure: st.measure,
-                selected: None,
-                pick: None,
-                pick_tip: None,
-                sub: Some(&sub),
-            },
-        ));
-    }
-    body = body.push(
-        column![
-            rule::horizontal(1).style(style::rule::hairline(t)),
-            Space::new().height(space::MD),
-            text(ui.s(Key::StatsModelsTitle))
-                .size(font_size::BODY)
-                .font(fonts::ui_semibold())
-                .style(style::text::primary(t)),
-        ]
-        .spacing(space::XS),
-    );
     if summary.models.is_empty() {
         body = body.push(muted_line(ui, ui.s(Key::StatsNoData)));
     } else {
@@ -1079,7 +1038,7 @@ fn agents_card<'a>(st: &State, ui: Ui, summary: &Summary) -> Element<'a, Message
             .style(style::text::subtle(t)),
         );
     }
-    card(ui, ui.s(Key::StatsAgentsTitle), None, None, body.into())
+    card(ui, ui.s(Key::StatsModelsTitle), None, None, body.into())
 }
 
 fn heat_card<'a>(st: &State, ui: Ui, summary: &Arc<Summary>) -> Element<'a, Message> {
@@ -1130,7 +1089,7 @@ fn sessions_card<'a>(
         ui.s(Key::StatsSessionsTitle),
         Some(hint),
         None,
-        sessions::list(ui, &summary.sessions, measure, &agent_label, |key| {
+        sessions::list(ui, &summary.sessions, measure, |key| {
             msg(Msg::SetProject(Some(key)))
         }),
     )

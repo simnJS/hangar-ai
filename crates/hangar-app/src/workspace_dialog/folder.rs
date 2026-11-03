@@ -87,7 +87,8 @@ pub fn remove_agent(assignments: &mut [AgentId], agent: AgentId) {
     }
 }
 
-/// Clicking a preview cell cycles that single pane through the agents.
+/// Clicking a preview cell cycles that single pane through the choices:
+/// Claude Code, then back to a shell.
 pub fn cycle_cell(assignments: &mut [AgentId], index: usize) {
     let Some(slot) = assignments.get_mut(index) else {
         return;
@@ -214,12 +215,13 @@ mod tests {
         let mut assignments = initial_assignments(4);
         assert_eq!(assignments, [AgentId::Shell; 4]);
         add_agent(&mut assignments, AgentId::Claude);
-        add_agent(&mut assignments, AgentId::Codex);
+        add_agent(&mut assignments, AgentId::Claude);
         resize(&mut assignments, 2);
-        assert_eq!(assignments, [AgentId::Claude, AgentId::Codex]);
+        assert_eq!(assignments, [AgentId::Claude, AgentId::Claude]);
         resize(&mut assignments, 8);
         assert_eq!(assignments.len(), 8);
         assert_eq!(count_of(&assignments, AgentId::Shell), 6);
+        assert_eq!(count_of(&assignments, AgentId::Claude), 2);
         resize(&mut assignments, 1);
         assert_eq!(assignments, [AgentId::Claude]);
     }
@@ -229,13 +231,13 @@ mod tests {
         let mut assignments = initial_assignments(4);
         add_agent(&mut assignments, AgentId::Claude);
         add_agent(&mut assignments, AgentId::Claude);
-        add_agent(&mut assignments, AgentId::Codex);
+        add_agent(&mut assignments, AgentId::Claude);
         assert_eq!(
             assignments,
             [
                 AgentId::Claude,
                 AgentId::Claude,
-                AgentId::Codex,
+                AgentId::Claude,
                 AgentId::Shell
             ]
         );
@@ -244,25 +246,30 @@ mod tests {
             assignments,
             [
                 AgentId::Claude,
+                AgentId::Claude,
                 AgentId::Shell,
-                AgentId::Codex,
                 AgentId::Shell
             ]
         );
-        // Nothing to take back, nothing to take it: no change.
-        remove_agent(&mut assignments, AgentId::Gemini);
-        add_agent(&mut assignments, AgentId::Gemini);
-        add_agent(&mut assignments, AgentId::Gemini);
-        add_agent(&mut assignments, AgentId::Opencode);
+        cycle_cell(&mut assignments, 3);
+        remove_agent(&mut assignments, AgentId::Claude);
         assert_eq!(
             assignments,
             [
                 AgentId::Claude,
-                AgentId::Gemini,
-                AgentId::Codex,
-                AgentId::Gemini
+                AgentId::Claude,
+                AgentId::Shell,
+                AgentId::Shell
             ]
         );
+        // Every pane taken: nothing to take it, no change.
+        let mut full = vec![AgentId::Claude; 2];
+        add_agent(&mut full, AgentId::Claude);
+        assert_eq!(full, [AgentId::Claude; 2]);
+        // Nothing to take back: no change either.
+        let mut empty = initial_assignments(2);
+        remove_agent(&mut empty, AgentId::Claude);
+        assert_eq!(empty, [AgentId::Shell; 2]);
     }
 
     #[test]
@@ -273,16 +280,7 @@ mod tests {
             cycle_cell(&mut assignments, 0);
             seen.push(assignments[0]);
         }
-        assert_eq!(
-            seen,
-            [
-                AgentId::Claude,
-                AgentId::Codex,
-                AgentId::Gemini,
-                AgentId::Opencode,
-                AgentId::Shell
-            ]
-        );
+        assert_eq!(seen, [AgentId::Claude, AgentId::Shell]);
         assert_eq!(assignments[1], AgentId::Shell);
         cycle_cell(&mut assignments, 9);
     }

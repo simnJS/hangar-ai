@@ -255,10 +255,17 @@ pub fn on_intent(
         sessions: None,
         cursor: 0,
     };
-    let agent = picker.agent.as_str().to_string();
+    // Only Claude Code keeps conversations; a shell has none to list.
+    let claude = picker.agent == AgentId::Claude;
     st.picker = Some(picker);
     Some(Task::perform(
-        tokio::task::spawn_blocking(move || list_sessions(agent, cwd)),
+        tokio::task::spawn_blocking(move || {
+            if claude {
+                list_sessions(cwd)
+            } else {
+                Vec::new()
+            }
+        }),
         move |found| {
             send(Msg::Loaded {
                 ws,

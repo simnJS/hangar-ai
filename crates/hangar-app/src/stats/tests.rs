@@ -31,7 +31,6 @@ fn week() -> State {
             measure: Measure::Tokens,
             now: time::now_ms(),
             projects: &projects,
-            agent_label: &|_| String::new(),
             top_sessions: TOP_SESSIONS,
         },
     );

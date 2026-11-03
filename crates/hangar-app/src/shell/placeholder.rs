@@ -12,7 +12,7 @@ use hangar_theme::{style, tokens};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::shell::Overlay;
-use crate::state::types::{AGENTS, AgentId, Workspace};
+use crate::state::types::Workspace;
 
 /// `app.loading`, until `load_state` answers.
 pub fn boot<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
@@ -26,15 +26,7 @@ pub fn boot<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
 
 /// No workspace yet: what Hangar runs, and the button that makes one.
 pub fn no_workspace<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
-    let agents = AGENTS
-        .iter()
-        .filter(|agent| agent.id != AgentId::Shell)
-        .map(|agent| agent.label)
-        .collect::<Vec<_>>()
-        .join(", ");
-    let body = ctx
-        .i18n
-        .t_with(Key::PlaceholderBody, &args!("agents" => agents.as_str()));
+    let body = ctx.t(Key::PlaceholderBody);
     let content = column![
         text(ctx.t(Key::PlaceholderTitle))
             .size(tokens::font_size::TITLE)

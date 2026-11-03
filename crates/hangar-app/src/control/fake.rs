@@ -484,7 +484,7 @@ pub struct Fake {
 
 impl Fake {
     /// Two workspaces: "Hangar" with Ava (Claude Code) and Max (a shell),
-    /// open and on screen; "Shop" with another Ava (Codex), not open.
+    /// open and on screen; "Shop" with another Ava (a shell), not open.
     pub fn setup() -> Arc<Fake> {
         Fake::with_state(AppState {
             workspaces: vec![
@@ -501,7 +501,7 @@ impl Fake {
                     "w2",
                     "Shop",
                     "C:\\dev\\shop",
-                    vec![pane("p3", "Ava", AgentId::Codex, None)],
+                    vec![pane("p3", "Ava", AgentId::Shell, None)],
                 ),
             ],
             active_workspace_id: Some("w1".into()),

@@ -85,7 +85,7 @@ fn a_reset_counts_the_agents_not_the_shells() {
         panes: vec![
             pane("a", AgentId::Claude, None),
             pane("b", AgentId::Shell, None),
-            pane("c", AgentId::Codex, None),
+            pane("c", AgentId::Claude, None),
         ],
         ..Workspace::default()
     };

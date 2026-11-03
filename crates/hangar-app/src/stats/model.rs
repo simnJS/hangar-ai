@@ -7,10 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use hangar_core::stats::{Agent, UsageStats};
+use hangar_core::stats::UsageStats;
 
 use super::time::{add_days, hour_of, start_of_day, start_of_week, weekday_of};
-use crate::state::types::Workspace;
+use crate::state::types::{AgentId, Workspace};
 
 /// The periods the page offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -311,7 +311,6 @@ pub struct Ranked {
 pub struct SessionRow {
     pub index: usize,
     pub id: String,
-    pub agent: Agent,
     pub title: String,
     pub project: Project,
     /// The model that did most of its work in the period.
@@ -336,6 +335,9 @@ pub struct Summary {
     pub series: Vec<Point>,
     /// Every project of the period, whatever the filter, so any can be picked.
     pub projects: Vec<Ranked>,
+    /// One row, Claude Code's, the only agent Hangar runs (owner's decision,
+    /// 2026-11-03): the desktop page has no card for it any more, but Hangar
+    /// Mobile's statistics screen still ranks agents.
     pub agents: Vec<Ranked>,
     pub models: Vec<Ranked>,
     /// Active time by weekday (Monday first) and hour.
@@ -359,21 +361,11 @@ pub struct SummaryOptions<'a> {
     pub now: i64,
     /// The project of each session, by index (see [`project_for`]).
     pub projects: &'a [Project],
-    /// Display names of the agents.
-    pub agent_label: &'a dyn Fn(Agent) -> String,
     /// How many of the heaviest sessions to keep; the page shows eight.
     pub top_sessions: usize,
 }
 
 pub const TOP_SESSIONS: usize = 8;
-
-/// An agent's id as the transcripts name it.
-pub fn agent_key(agent: Agent) -> &'static str {
-    match agent {
-        Agent::Claude => "claude",
-        Agent::Codex => "codex",
-    }
-}
 
 const FAMILIES: [&str; 4] = ["opus", "sonnet", "haiku", "fable"];
 
@@ -696,12 +688,11 @@ pub fn summarize(stats: &UsageStats, options: &SummaryOptions<'_>) -> Summary {
             active_days.insert(start_of_day(row.at));
         }
 
-        let agent_id = agent_key(session.agent);
-        let label = (options.agent_label)(session.agent);
-        ranked_entry(&mut agents, agent_id, &label, "")
+        let claude = AgentId::Claude;
+        ranked_entry(&mut agents, claude.as_str(), claude.info().label, "")
             .totals
             .add(row);
-        count_session(&mut agent_sessions, &agent_id.to_owned(), index);
+        count_session(&mut agent_sessions, &claude.as_str().to_owned(), index);
 
         let tokens = row.input + row.output + row.cache_write + row.cache_read;
         if row.model >= 0 {
@@ -729,7 +720,6 @@ pub fn summarize(stats: &UsageStats, options: &SummaryOptions<'_>) -> Summary {
             .entry(&index, || SessionRow {
                 index,
                 id: session.id.clone(),
-                agent: session.agent,
                 title: session.title.clone(),
                 project: project.cloned().unwrap_or_else(|| Project {
                     path: session.cwd.clone(),

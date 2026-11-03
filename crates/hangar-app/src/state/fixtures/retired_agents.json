@@ -1,0 +1,85 @@
+{
+  "workspaces": [
+    {
+      "id": "4a7e1c90-5d2b-4f36-8e1a-6c0b9d2f7e11",
+      "name": "shop",
+      "cwd": "/home/dev/code/shop",
+      "extraRoots": [],
+      "panes": [
+        {
+          "id": "a1f0c3d2-7e6b-4a59-9c18-2b4d6e8f0a12",
+          "name": "Ava",
+          "agent": "claude",
+          "sessionId": "5e3d2c1b-0a9f-4e8d-b7c6-1a2b3c4d5e6f",
+          "cwd": null,
+          "shellId": null,
+          "title": null
+        },
+        {
+          "id": "b2e1d4c3-8f7a-4b60-8d29-3c5e7f9a1b23",
+          "name": "Bob",
+          "agent": "codex",
+          "sessionId": "rollout-2026-10-30T09-12-44-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+          "cwd": "/home/dev/code/shop/api",
+          "shellId": "zsh",
+          "title": "api",
+          "model": "gpt-5.5"
+        },
+        {
+          "id": "c3d2e5f4-9a8b-4c71-9e3a-4d6f8a0b2c34",
+          "name": "Cleo",
+          "agent": "gemini",
+          "sessionId": null,
+          "cwd": null,
+          "shellId": null,
+          "title": null
+        },
+        {
+          "id": "d4c3f6a5-0b9c-4d82-af4b-5e7a9b1c3d45",
+          "name": "Dan",
+          "agent": "opencode",
+          "sessionId": null,
+          "cwd": "/home/dev/code/shop/web",
+          "shellId": null,
+          "title": null
+        }
+      ],
+      "themeId": null,
+      "shellId": null,
+      "tree": {
+        "type": "split",
+        "dir": "row",
+        "ratio": 0.5,
+        "a": {
+          "type": "split",
+          "dir": "col",
+          "ratio": 0.5,
+          "a": { "type": "pane", "id": "a1f0c3d2-7e6b-4a59-9c18-2b4d6e8f0a12" },
+          "b": { "type": "pane", "id": "b2e1d4c3-8f7a-4b60-8d29-3c5e7f9a1b23" }
+        },
+        "b": {
+          "type": "split",
+          "dir": "col",
+          "ratio": 0.5,
+          "a": { "type": "pane", "id": "c3d2e5f4-9a8b-4c71-9e3a-4d6f8a0b2c34" },
+          "b": { "type": "pane", "id": "d4c3f6a5-0b9c-4d82-af4b-5e7a9b1c3d45" }
+        }
+      },
+      "savedCommands": [],
+      "folderId": null
+    }
+  ],
+  "folders": [],
+  "activeWorkspaceId": "4a7e1c90-5d2b-4f36-8e1a-6c0b9d2f7e11",
+  "settings": {
+    "themeId": "graphite",
+    "locale": "en",
+    "agentCommands": {
+      "claude": "claude --verbose",
+      "codex": "codex --full-auto",
+      "gemini": "gemini --yolo",
+      "opencode": "opencode run"
+    },
+    "autoResume": true
+  }
+}

@@ -550,7 +550,7 @@ pub struct Workspace {
 pub struct Pane {
     /// What `panes.send` takes.
     pub name: String,
-    /// `claude`, `codex`, `gemini`, `opencode` or `shell`.
+    /// `claude` (Claude Code) or `shell`.
     pub agent: String,
     /// `orchestrator`, `worker` or `manager`.
     #[serde(default)]

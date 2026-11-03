@@ -19,7 +19,7 @@ fn model() -> Model {
                 "b",
                 "beta",
                 Some("work"),
-                vec![pane("b1", "Ben", AgentId::Codex)],
+                vec![pane("b1", "Ben", AgentId::Shell)],
             ),
             workspace("c", "gamma", None, vec![]),
         ],

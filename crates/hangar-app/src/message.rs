@@ -31,8 +31,8 @@ pub enum Message {
     SaveDue(u64),
     /// A save finished.
     Saved(u64, Result<(), String>),
-    /// `detect_agents` and `detect_shells` answered.
-    Detected(Vec<String>, Vec<crate::state::types::ShellInfo>),
+    /// `claude_installed` and `detect_shells` answered.
+    Detected(bool, Vec<crate::state::types::ShellInfo>),
     Core(CoreEvent),
     Window(window::Id, window::Event),
     Key(window::Id, keyboard::Event),

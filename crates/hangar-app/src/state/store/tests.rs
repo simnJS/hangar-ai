@@ -78,13 +78,13 @@ fn leaves_the_field_out_when_the_workspace_follows_the_default() {
 #[test]
 fn makes_the_layout_s_panes_with_their_agents_named_against_every_workspace() {
     let ws = make_workspace(
-        &draft(3, &[AgentId::Claude, AgentId::Codex]),
+        &draft(3, &[AgentId::Claude, AgentId::Claude]),
         ["Ava", "Leo"],
     );
     let names: Vec<&str> = ws.panes.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["Max", "Mia", "Sam"]);
     let agents: Vec<AgentId> = ws.panes.iter().map(|p| p.agent).collect();
-    assert_eq!(agents, [AgentId::Claude, AgentId::Codex, AgentId::Shell]);
+    assert_eq!(agents, [AgentId::Claude, AgentId::Claude, AgentId::Shell]);
     assert_eq!(
         ws.tree,
         Some(preset_tree(
@@ -265,13 +265,13 @@ fn a_growing_preset_copies_the_agent_of_the_pane_the_person_is_in() {
 #[test]
 fn without_a_focused_pane_a_preset_copies_the_last_pane_kept() {
     let mut m = model();
-    let w = with_workspace(&mut m, 1, &[AgentId::Codex]);
+    let w = with_workspace(&mut m, 1, &[AgentId::Claude]);
     m.apply(StoreAction::ApplyPreset {
         ws: w.clone(),
         count: 2,
         model_pane: None,
     });
-    assert_eq!(ws(&m, &w).panes[1].agent, AgentId::Codex);
+    assert_eq!(ws(&m, &w).panes[1].agent, AgentId::Claude);
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn an_explicit_agent_wins_and_a_free_name_is_used() {
     let new = m
         .apply(StoreAction::AddPane {
             ws: w.clone(),
-            agent: Some(AgentId::Codex),
+            agent: Some(AgentId::Shell),
             near: None,
             dir: None,
             cwd: None,
@@ -364,7 +364,7 @@ fn an_explicit_agent_wins_and_a_free_name_is_used() {
         .unwrap();
     let pane = ws(&m, &w).panes.last().unwrap().clone();
     assert_eq!(pane.id, new, "init never changes the id");
-    assert_eq!(pane.agent, AgentId::Codex);
+    assert_eq!(pane.agent, AgentId::Shell);
     assert_eq!(pane.name, "Zed");
     assert_eq!(pane.role, Some(PaneRole::Worker));
     // A name already taken is not.

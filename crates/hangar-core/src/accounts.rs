@@ -776,13 +776,11 @@ mod tests {
         );
         // Main keeps Hangar's environment.
         assert!(env_for(Some("claude"), None).is_empty());
-        // No account applies to the other agents, nor to a shell.
-        for agent in ["codex", "gemini", "opencode", "shell"] {
-            assert!(env_for(Some(agent), Some(&dir)).is_empty(), "{agent}");
-        }
+        // No account applies to a shell.
+        assert!(env_for(Some("shell"), Some(&dir)).is_empty());
         assert!(env_for(None, Some(&dir)).is_empty());
         // And no launch is ever made for them.
-        assert_eq!(for_launch(Some("codex"), Some("work")), None);
+        assert_eq!(for_launch(Some("shell"), Some("work")), None);
         assert_eq!(for_launch(Some("claude"), None), Some(Launch::main()));
         assert_eq!(
             for_launch(Some("claude"), Some(" main ")),

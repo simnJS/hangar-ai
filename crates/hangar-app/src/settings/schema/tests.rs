@@ -178,10 +178,7 @@ fn general_has_every_row_of_the_old_schema_with_its_default() {
             "hibernateIdle: toggle HibernateIdle = true",
             r#"hibernateAfter: select HibernateAfterMin = "10""#,
             "agentPaneControl: toggle AgentPaneControl = true",
-            r#"agentCommand.claude: input AgentCommand(Claude) = "" ("claude")"#,
-            r#"agentCommand.codex: input AgentCommand(Codex) = "" ("codex")"#,
-            r#"agentCommand.gemini: input AgentCommand(Gemini) = "" ("gemini")"#,
-            r#"agentCommand.opencode: input AgentCommand(Opencode) = "" ("opencode")"#,
+            r#"agentCommand.claude: input ClaudeCommand = "" ("claude")"#,
         ]
     );
 }
@@ -524,14 +521,11 @@ fn the_hibernate_delay_stays_available_when_hibernation_is_off() {
 #[test]
 fn a_launch_command_row_shows_what_the_person_typed() {
     let mut world = World::new();
-    world.settings.agent_commands.insert(
-        "claude".into(),
-        serde_json::Value::String("claude --verbose".into()),
-    );
+    world.settings.agent_commands.claude = Some("claude --verbose".into());
     let built = world.build();
     assert_eq!(
         describe(find(&built, "agentCommand.claude")),
-        r#"input AgentCommand(Claude) = "claude --verbose" ("claude")"#
+        r#"input ClaudeCommand = "claude --verbose" ("claude")"#
     );
 }
 

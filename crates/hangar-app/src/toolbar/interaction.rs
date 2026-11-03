@@ -17,7 +17,7 @@ fn model() -> Model {
         None,
         vec![
             pane("p1", "Ava", AgentId::Claude),
-            pane("p2", "Ben", AgentId::Codex),
+            pane("p2", "Ben", AgentId::Claude),
             pane("p3", "Dan", AgentId::Shell),
         ],
     );

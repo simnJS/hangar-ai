@@ -3,7 +3,7 @@
 //! a quiet note.
 
 use hangar_core::git::Changes;
-use hangar_i18n::{Key, args};
+use hangar_i18n::Key;
 use hangar_theme::tokens::{BORDER_WIDTH, font_size};
 use hangar_theme::{AgentState, fonts, style};
 use hangar_ui::Icon;
@@ -136,17 +136,15 @@ pub(super) fn column_of<'a>(scene: &Scene<'a>, data: Data<'a>) -> Element<'a, Me
     let claude = pane.agent == AgentId::Claude;
     let folder: &str = pane.cwd.as_deref().unwrap_or(&ws.cwd);
 
-    let nothing_yet = if claude {
-        tr.t(if data.bridged {
+    // Read for Claude Code only: a shell gets the activity section once
+    // something happened in it, so never empty.
+    let nothing_yet = tr
+        .t(if data.bridged {
             Key::InspectorActivityQuiet
         } else {
             Key::InspectorActivityEmpty
         })
-        .into_owned()
-    } else {
-        tr.t_with(Key::InspectorActivityOther, &args!("agent" => agent.label))
-            .into_owned()
-    };
+        .into_owned();
 
     let mut sections = Vec::new();
     sections.push(if is_shell {
@@ -158,8 +156,8 @@ pub(super) fn column_of<'a>(scene: &Scene<'a>, data: Data<'a>) -> Element<'a, Me
         sections.push(sections::context(scene, insight, agent.label, data.limits));
     }
     sections.push(sections::task(scene, data.task.as_ref()));
-    // Prompts are queued through the hangar-bridge mod, which only Claude Code
-    // loads; another agent only shows a queue it has.
+    // Prompts are queued through the hangar-bridge mod, which Claude Code
+    // loads; a shell only shows a queue it has.
     if claude || !insight.queue.is_empty() {
         sections.push(sections::queue(scene, &insight.queue));
     }

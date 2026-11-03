@@ -1,9 +1,10 @@
-//! One-click MCP registration across agent CLIs.
+//! One-click MCP registration for Claude Code.
 //!
-//! There is no single standard. Most tools read a JSON file keyed by
-//! `mcpServers`, VS Code uses `servers`, and Codex uses TOML. Rather than
-//! pretending one format fits all, each target declares its own shape and we
-//! patch its file in place, preserving whatever the user already had.
+//! Claude Code reads a project's servers from `.mcp.json`, keyed by
+//! `mcpServers`; the file is patched in place, preserving whatever the user
+//! already had. Claude Code is the only agent Hangar runs (owner's decision,
+//! 2026-11-03), so it is the only target: the Codex, Gemini CLI, Cursor and
+//! VS Code configurations earlier versions also wrote are left as they are.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,71 +22,24 @@ pub(crate) const SERVER_KEY: &str = "hangar";
 /// install removes them rather than adding beside them.
 pub(crate) const LEGACY_SERVER_KEYS: &[&str] = &["iabench"];
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Format {
-    /// `{ "mcpServers": { ... } }` — Claude Code, Cursor, Gemini, Windsurf.
-    JsonMcpServers,
-    /// `{ "servers": { ... } }` — VS Code.
-    JsonServers,
-    /// `[mcp_servers.name]` — Codex.
-    TomlCodex,
-}
-
-/// Top-level key holding the servers, for the two JSON shapes.
-fn json_section(format: Format) -> &'static str {
-    match format {
-        Format::JsonServers => "servers",
-        _ => "mcpServers",
-    }
-}
-
 #[derive(Debug, Clone)]
 struct Target {
     id: &'static str,
     label: &'static str,
-    format: Format,
     /// Config lives in the project rather than the home directory.
     project_scoped: bool,
     relative_path: &'static str,
 }
 
-const TARGETS: &[Target] = &[
-    Target {
-        id: "claude-code",
-        label: "Claude Code (projet)",
-        format: Format::JsonMcpServers,
-        project_scoped: true,
-        relative_path: ".mcp.json",
-    },
-    Target {
-        id: "codex",
-        label: "Codex",
-        format: Format::TomlCodex,
-        project_scoped: false,
-        relative_path: ".codex/config.toml",
-    },
-    Target {
-        id: "gemini",
-        label: "Gemini CLI",
-        format: Format::JsonMcpServers,
-        project_scoped: false,
-        relative_path: ".gemini/settings.json",
-    },
-    Target {
-        id: "cursor",
-        label: "Cursor (projet)",
-        format: Format::JsonMcpServers,
-        project_scoped: true,
-        relative_path: ".cursor/mcp.json",
-    },
-    Target {
-        id: "vscode",
-        label: "VS Code (projet)",
-        format: Format::JsonServers,
-        project_scoped: true,
-        relative_path: ".vscode/mcp.json",
-    },
-];
+/// The key of `mcpServers`-shaped files, which hold the servers by name.
+const SERVERS: &str = "mcpServers";
+
+const TARGETS: &[Target] = &[Target {
+    id: "claude-code",
+    label: "Claude Code (projet)",
+    project_scoped: true,
+    relative_path: ".mcp.json",
+}];
 
 #[derive(Debug, Serialize)]
 pub struct TargetStatus {
@@ -125,26 +79,14 @@ fn config_path(target: &Target, workspace_cwd: &str) -> Option<PathBuf> {
     Some(root.join(target.relative_path))
 }
 
-/// Presence of the tool's own config directory is a good enough signal, and
-/// avoids shelling out to probe every CLI.
+/// Presence of Claude Code's own config directory is a good enough signal,
+/// and avoids shelling out to probe the CLI.
 fn detected(target: &Target) -> bool {
     let Some(home) = dirs::home_dir() else {
         return false;
     };
     match target.id {
         "claude-code" => home.join(".claude").exists(),
-        "codex" => home.join(".codex").exists(),
-        "gemini" => home.join(".gemini").exists(),
-        "cursor" => home.join(".cursor").exists(),
-        // VS Code keeps its user data per platform: %APPDATA% on Windows,
-        // ~/Library/Application Support on macOS, ~/.config on Linux. The
-        // ~/.vscode directory holding extensions is common to all three.
-        "vscode" => {
-            home.join(".vscode").exists()
-                || home.join("AppData/Roaming/Code").exists()
-                || home.join("Library/Application Support/Code").exists()
-                || home.join(".config/Code").exists()
-        }
         _ => false,
     }
 }
@@ -183,7 +125,7 @@ fn executable() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The entry every JSON-shaped target gets. Note it carries no port or token:
+/// The entry `.mcp.json` gets. Note it carries no port or token:
 /// those are resolved at runtime from the endpoint file, so this stays valid
 /// across app restarts.
 pub(crate) fn server_entry(workspace_cwd: &str) -> Result<Value, String> {
@@ -275,47 +217,6 @@ fn allow_project_server_globally() -> Result<(), String> {
     fs::write(&path, body).map_err(|e| e.to_string())
 }
 
-fn install_toml(path: &PathBuf, workspace_cwd: &str) -> Result<(), String> {
-    use toml_edit::{value, Array, DocumentMut, Item, Table};
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    backup(path);
-
-    let existing = fs::read_to_string(path).unwrap_or_default();
-    let mut doc: DocumentMut = existing
-        .parse()
-        .map_err(|e| format!("config.toml is not valid TOML: {e}"))?;
-
-    let mut args = Array::new();
-    args.push("--mcp");
-
-    let mut env = Table::new();
-    env.insert("HANGAR_WORKSPACE", value(workspace_cwd));
-
-    let mut server = Table::new();
-    server.insert("command", value(executable()?));
-    server.insert("args", value(args));
-    server.insert("env", Item::Table(env));
-
-    // Ensure [mcp_servers] exists as a real table before adding our subtable.
-    if !doc.contains_key("mcp_servers") {
-        let mut parent = Table::new();
-        parent.set_implicit(true);
-        doc.insert("mcp_servers", Item::Table(parent));
-    }
-    let servers = doc["mcp_servers"]
-        .as_table_mut()
-        .ok_or("'mcp_servers' exists but is not a table")?;
-    for legacy in LEGACY_SERVER_KEYS {
-        servers.remove(legacy);
-    }
-    servers.insert(SERVER_KEY, Item::Table(server));
-
-    fs::write(path, doc.to_string()).map_err(|e| e.to_string())
-}
-
 /// The entry we own in a target's config.
 struct Registration {
     /// Sits under an old server key, so it predates the rename.
@@ -337,56 +238,27 @@ impl Registration {
     }
 }
 
-fn registration(target: &Target, path: &PathBuf) -> Option<Registration> {
-    match target.format {
-        Format::JsonMcpServers | Format::JsonServers => {
-            let command_of = |entry: &Value| {
-                entry
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            };
-            let root = read_json(path);
-            let servers = root.get(json_section(target.format))?;
-            if let Some(entry) = servers.get(SERVER_KEY) {
-                return Some(Registration {
-                    legacy: false,
-                    command: command_of(entry),
-                });
-            }
-            LEGACY_SERVER_KEYS.iter().find_map(|key| {
-                servers.get(*key).map(|entry| Registration {
-                    legacy: true,
-                    command: command_of(entry),
-                })
-            })
-        }
-        Format::TomlCodex => {
-            let command_of = |entry: &toml_edit::Item| {
-                entry
-                    .get("command")
-                    .and_then(|c| c.as_str())
-                    .map(str::to_string)
-            };
-            let doc = fs::read_to_string(path)
-                .ok()?
-                .parse::<toml_edit::DocumentMut>()
-                .ok()?;
-            let servers = doc.get("mcp_servers")?;
-            if let Some(entry) = servers.get(SERVER_KEY) {
-                return Some(Registration {
-                    legacy: false,
-                    command: command_of(entry),
-                });
-            }
-            LEGACY_SERVER_KEYS.iter().find_map(|key| {
-                servers.get(*key).map(|entry| Registration {
-                    legacy: true,
-                    command: command_of(entry),
-                })
-            })
-        }
+fn registration(path: &PathBuf) -> Option<Registration> {
+    let command_of = |entry: &Value| {
+        entry
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let root = read_json(path);
+    let servers = root.get(SERVERS)?;
+    if let Some(entry) = servers.get(SERVER_KEY) {
+        return Some(Registration {
+            legacy: false,
+            command: command_of(entry),
+        });
     }
+    LEGACY_SERVER_KEYS.iter().find_map(|key| {
+        servers.get(*key).map(|entry| Registration {
+            legacy: true,
+            command: command_of(entry),
+        })
+    })
 }
 
 pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
@@ -394,7 +266,7 @@ pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
         .iter()
         .filter_map(|target| {
             let path = config_path(target, &workspace_cwd)?;
-            let found = registration(target, &path);
+            let found = registration(&path);
             Some(TargetStatus {
                 id: target.id.to_string(),
                 label: target.label.to_string(),
@@ -450,10 +322,7 @@ fn install_unless(
                 }
             };
 
-            let mut outcome = match target.format {
-                Format::TomlCodex => install_toml(&path, &workspace_cwd),
-                format => install_json(&path, json_section(format), &workspace_cwd),
-            };
+            let mut outcome = install_json(&path, SERVERS, &workspace_cwd);
 
             // Writing .mcp.json alone leaves the user re-approving every session.
             let mut note = "configuré".to_string();
@@ -484,7 +353,6 @@ pub fn mcp_manual_commands(workspace_cwd: String) -> Result<serde_json::Value, S
     Ok(json!({
         "executable": exe,
         "claude": format!("claude mcp add {SERVER_KEY} --scope project -- \"{exe}\" --mcp"),
-        "codex": format!("codex mcp add {SERVER_KEY} -- \"{exe}\" --mcp"),
         "workspace": workspace_cwd,
     }))
 }
@@ -492,14 +360,6 @@ pub fn mcp_manual_commands(workspace_cwd: String) -> Result<serde_json::Value, S
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const JSON_TARGET: Target = Target {
-        id: "test",
-        label: "test",
-        format: Format::JsonMcpServers,
-        project_scoped: true,
-        relative_path: "mcp.json",
-    };
 
     fn temp_config(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -547,7 +407,7 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         write_server(&path, "iabench", &exe.to_string_lossy());
 
-        let found = registration(&JSON_TARGET, &path).expect("registration");
+        let found = registration(&path).expect("registration");
 
         assert!(found.legacy);
         assert!(found.stale(), "the old key needs reinstalling either way");
@@ -561,7 +421,7 @@ mod tests {
         let path = temp_config("dead-path");
         write_server(&path, SERVER_KEY, "C:/nowhere/hangar-ia.exe");
 
-        let found = registration(&JSON_TARGET, &path).expect("registration");
+        let found = registration(&path).expect("registration");
 
         assert!(!found.legacy);
         assert!(found.stale());
@@ -574,7 +434,7 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         write_server(&path, SERVER_KEY, &exe.to_string_lossy());
 
-        let found = registration(&JSON_TARGET, &path).expect("registration");
+        let found = registration(&path).expect("registration");
 
         assert!(!found.stale());
         assert_eq!(found.command.as_deref(), Some(&*exe.to_string_lossy()));
@@ -598,7 +458,8 @@ mod tests {
             cwd.clone(),
         );
 
-        assert_eq!(reports.len(), 2);
+        // A target this version no longer has is not answered at all.
+        assert_eq!(reports.len(), 1);
         assert!(reports
             .iter()
             .all(|r| !r.ok && Some(&r.message) == refusal.as_ref()));
@@ -625,7 +486,7 @@ mod tests {
         let path = temp_config("absent");
         fs::write(&path, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
 
-        assert!(registration(&JSON_TARGET, &path).is_none());
+        assert!(registration(&path).is_none());
         fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }
