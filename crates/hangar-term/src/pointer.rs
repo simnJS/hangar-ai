@@ -879,6 +879,7 @@ mod tests {
         }));
         assert_eq!(writes(&events), b"\x1bOB\x1bOB\x1bOB");
     }
+
     /// The URLs the events open.
     fn opened(events: &[Event]) -> Vec<String> {
         events
