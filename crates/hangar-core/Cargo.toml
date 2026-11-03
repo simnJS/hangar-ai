@@ -50,9 +50,11 @@ open = { workspace = true, features = ["shellexecute-on-windows"] }
 # Cargo satisfies them independently — `windows` 0.61 carrying its own core,
 # next to a bare `windows-core` 0.62 — and cpal then fails to build, with the
 # COM types coming from one crate and the traits implementing them from the
-# other. Cargo.lock pins both halves to 0.61; if a `cargo update` ever pulls
-# them apart again, `cargo update -p windows-core --precise 0.61.2` puts them
-# back.
+# other. What matters is that both halves are the same version. The native
+# workspace has them both at 0.62, the version wry's webview2-com needs too
+# (checked with `cargo check -p cpal --target x86_64-pc-windows-gnu`); if a
+# `cargo update` ever pulls them apart again, `cargo update -p windows-core`
+# with `--precise` set to the version of `windows` puts them back together.
 cpal = "0.18"
 # Local transcription, through whisper.cpp rather than the ONNX runtime.
 #
