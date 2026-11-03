@@ -23,6 +23,7 @@ pub fn carry_out(
     answer: Answer<Result<StoreOutcome, String>>,
 ) -> iced::Task<Message> {
     let mut then = None;
+    let mut touched = None;
     let outcome = match cmd {
         ModelCmd::AddPane {
             ws,
@@ -60,10 +61,13 @@ pub fn carry_out(
             {
                 m.ui.focus_by_workspace.insert(ws, next.clone());
             }
-            // TODO(P4): `carryResume(pane, next)` unless `fresh`: a pane
-            // restarted while its workspace slept is still owed its session.
-            // Hibernation is P4's, which has no entry for it yet.
-            let _ = fresh;
+            // Restarted while its workspace slept: still owed its session,
+            // unless the restart asked for a fresh one (`carryResume`).
+            if let Some(next) = &outcome.pane
+                && !fresh
+            {
+                m.live.panes_logic.carry_resume(&pane, next);
+            }
             outcome
         }
         ModelCmd::UpdatePane { ws, pane, patch } => {
@@ -71,17 +75,19 @@ pub fn carry_out(
         }
         ModelCmd::UpdateWorkspace { ws, patch } => m.apply(StoreAction::UpdateWorkspace(ws, patch)),
         ModelCmd::OpenWorkspace(ws) => {
-            // As the shell's ActivateWorkspace mounts one, without switching to it.
+            // Opened by an agent, an asleep workspace is awake again (P4's
+            // hibernation), and mounted as the shell's ActivateWorkspace
+            // mounts one, without switching to it.
+            m.live.panes_logic.mark_awake(&ws);
             if !m.ui.opened_ids.contains(&ws) {
                 m.ui.opened_ids.push(ws);
             }
+            m.live.version += 1;
             StoreOutcome::default()
         }
         ModelCmd::Touch(ws) => {
-            // TODO(P4): `touchWorkspace(ws)`, which puts off the workspace's
-            // sleep. Hibernation is P4's, which has no entry for it yet; until
-            // it does, no workspace sleeps either.
-            let _ = ws;
+            // Sending it something is using it, as typing is: its sleep waits.
+            touched = Some(ws);
             StoreOutcome::default()
         }
         ModelCmd::Activate { ws, pane } => {
@@ -128,10 +134,16 @@ pub fn carry_out(
         answer.send(Ok(outcome));
         Message::Noop
     });
-    match then {
-        Some(intent) => iced::Task::batch([reply, iced::Task::done(Message::Intent(intent))]),
-        None => reply,
+    let mut tasks = vec![reply];
+    if let Some(intent) = then {
+        tasks.push(iced::Task::done(Message::Intent(intent)));
     }
+    if let Some(workspace) = touched {
+        tasks.push(iced::Task::done(Message::PanesLogic(
+            crate::panes_logic::Msg::Typed { workspace },
+        )));
+    }
+    iced::Task::batch(tasks)
 }
 
 /// The line the window shows for what an agent did (App.tsx's `announce`):
