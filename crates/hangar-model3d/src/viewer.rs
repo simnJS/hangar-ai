@@ -271,6 +271,14 @@ impl ModelViewer {
         self.health.rendering()
     }
 
+    /// Sets how the viewport is drawing, as if the window's renderer had
+    /// found it so. A seam for an app's tests of what it shows for each state,
+    /// since a test cannot make a GPU fail on demand; nothing else calls it.
+    #[doc(hidden)]
+    pub fn pretend_rendering(&self, rendering: Rendering) {
+        self.health.force(rendering);
+    }
+
     /// Starts the 3D drawing over after it stopped (the device was lost, or
     /// refused the model): the GPU's copy of everything is made again, and the
     /// verdict forgotten. Another viewer of the same window starts over too,
@@ -363,7 +371,7 @@ impl ModelViewer {
 
     /// Whether motion is to be avoided: the camera jumps back instead of
     /// gliding.
-    pub fn set_reduced_motion(&mut self, reduced: bool) {
+    pub fn set_reduced_motion(&self, reduced: bool) {
         lock(&self.view).reduced_motion = reduced;
     }
 
@@ -1949,6 +1957,34 @@ mod tests {
             .capture(1.0, ViewerTheme::dark())
             .expect("a capture");
         assert_eq!(job.playhead, Some(Playhead { clip: 0, time: 1.0 }));
+    }
+
+    #[test]
+    fn recentring_glides_back_unless_motion_is_reduced_and_then_jumps() {
+        let mut rig = Rig::new();
+        let framed = rig.distance();
+        rig.viewer.zoom(5);
+        rig.settle();
+        assert!(rig.distance() < framed);
+
+        rig.viewer.recenter();
+        assert!(rig.camera(Camera::is_moving), "a glide is under way");
+        assert!(rig.distance() < framed, "and has not arrived");
+        rig.settle();
+        assert!((rig.distance() - framed).abs() < 1e-6);
+
+        rig.viewer.zoom(5);
+        rig.settle();
+        rig.viewer.set_reduced_motion(true);
+        rig.viewer.recenter();
+        assert!(!rig.camera(Camera::is_moving), "it jumped");
+        assert!((rig.distance() - framed).abs() < 1e-6, "and has arrived");
+        // Back to gliding when the setting is turned off again.
+        rig.viewer.set_reduced_motion(false);
+        rig.viewer.zoom(5);
+        rig.settle();
+        rig.viewer.recenter();
+        assert!(rig.camera(Camera::is_moving));
     }
 
     #[test]

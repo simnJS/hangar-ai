@@ -21,6 +21,19 @@
 //!   axes, normals, capture), the viewport with the state of the load over it,
 //!   the animation bar and the numbers. The viewport takes the mouse and the
 //!   keys itself (hangar-model3d's widget).
+//! - **Animation** (`animation_bar.rs`): a model with clips starts playing the
+//!   first one, as the web viewer did. hangar-model3d keeps the clock (the
+//!   widget moves it on with each frame it draws); the bar plays and pauses,
+//!   picks the clip and scrubs the time through the viewer, and the view is
+//!   built again a few times a second while a clip plays in front
+//!   (`Msg::Tick`) so that the slider and the time follow.
+//! - **When the viewport cannot draw** (`stage.rs`): hangar-model3d reports
+//!   how its drawing is going (`ModelViewer::rendering`). A window drawn by
+//!   iced's software renderer, a GPU that could not be set up, a model it
+//!   refuses and a lost device each put a sentence over the blank viewport,
+//!   with Restart where trying again can help.
+//! - **Reduced motion** (`motion.rs`): the system's setting is read once and
+//!   makes Recenter jump instead of glide.
 //! - **The capture button** (`capture.rs`): twice the panel's size, the
 //!   person's own framing, to the clipboard as a picture or to a PNG file
 //!   through the system's save dialog and hangar-core's `model_save_png`.
@@ -31,14 +44,15 @@
 //!
 //! # Gaps
 //!
-//! - Animations are listed, not played: hangar-model3d does not play them
-//!   yet, so the bar is drawn disabled with the reason.
-//! - On iced's software renderer (tiny-skia) the viewport stays empty;
-//!   captures and snapshots still work, they bring their own device.
+//! - On iced's software renderer (tiny-skia) the viewport stays empty, and
+//!   says so; captures and snapshots still work, they bring their own device.
 //! - F6 does not put the keyboard in the viewport: the widget takes it when it
 //!   is clicked (the preview's `focus_entry` owns region `model`).
-//! - The old viewer's `prefers-reduced-motion` has no source in the settings
-//!   yet, so the camera always glides back on Recenter.
+//! - The system's reduced-motion setting is read on Linux (GNOME's) and macOS;
+//!   on Windows it is not, and the camera glides (`motion.rs`).
+//! - A snapshot for an agent is of the first frame of the first clip, not of
+//!   the moment on screen: the registry it reads holds models, not playheads.
+//!   The capture button is of the moment on screen.
 
 mod animation_bar;
 mod capture;
@@ -46,6 +60,7 @@ mod dev;
 mod format;
 mod info_strip;
 mod loads;
+mod motion;
 mod slot;
 mod snapshots;
 mod stage;
@@ -68,7 +83,7 @@ use iced::{Element, Length, Subscription, Task};
 use hangar_i18n::{Key, args};
 use hangar_model3d::{DisplayOptions, LoadEvent};
 
-use self::animation_bar::{ClipLine, Clips};
+use self::animation_bar::Clips;
 use self::capture::{Destination, Done};
 use self::slot::Slot;
 use self::snapshots::{Registry, Snapshots};
@@ -86,6 +101,12 @@ use crate::state::{Model, WsId};
 /// models open: a workspace put to sleep lets its models go, a theme change
 /// reaches the snapshots.
 const REVIEW: Duration = Duration::from_secs(2);
+
+/// How often the view is built again while a clip plays in front, for the
+/// slider and the time: ten times a second moves them smoothly enough, and
+/// building the whole window's view at the pace of the frames would cost far
+/// more than it shows. The model itself moves at the frames' pace on its own.
+const ANIMATION_TICK: Duration = Duration::from_millis(100);
 
 /// A display toggle of the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +137,10 @@ pub struct State {
     notice_seq: u64,
     /// `HANGAR_DEV_MODEL3D_CAPTURE` has been served.
     dev_captured: bool,
+    /// The system asks for less motion (`motion.rs`); Recenter then jumps.
+    reduced_motion: bool,
+    /// The system's setting has been asked for.
+    motion_asked: bool,
 }
 
 impl Default for State {
@@ -136,6 +161,8 @@ impl State {
             clock: 0,
             notice_seq: 0,
             dev_captured: false,
+            reduced_motion: false,
+            motion_asked: false,
         }
     }
 }
@@ -160,8 +187,21 @@ pub enum Msg {
     CancelLoad(String),
     /// Load a model that could not be, or no longer can be, again.
     Retry(String),
-    /// The viewport's widget: the person took hold of the camera.
+    /// The viewport's widget: the person took hold of the camera, or how it
+    /// draws changed (the view is built again and reads it).
     Viewer(String, hangar_model3d::Event),
+    /// Play or pause the model's animation.
+    PlayPause(String),
+    /// Play the clip at this index of the file's, from its start.
+    Clip(String, usize),
+    /// Move the animation to this many seconds into its clip.
+    Seek(String, f32),
+    /// Start the viewport's drawing over (the GPU was lost or refused).
+    Restart(String),
+    /// A clip is playing in front: build the view again for the slider.
+    Tick,
+    /// The system's reduced-motion setting has been read.
+    ReducedMotion(bool),
     Toggle(Toggle),
     Recenter(String),
     /// A step closer (positive) or further (negative) with the bar's buttons.
@@ -183,10 +223,32 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 
 /// `update`, for whoever has an inbox but not the services.
 fn step(st: &mut State, m: &mut Model, inbox: &Inbox, msg: Msg) -> Task<Message> {
+    // Only there to make the shell build the view again: nothing in the
+    // store has changed, so the look at it is left for the slower tick.
+    if matches!(msg, Msg::Tick) {
+        return Task::none();
+    }
     register(st, inbox);
+    let asked = ask_motion(st);
     let first = handle(st, m, msg);
     let then = loads::reconcile(st, m);
-    Task::batch([first, then])
+    Task::batch([asked, first, then])
+}
+
+/// Asks the system, once, whether the person wants less motion. The answer
+/// comes back as `Msg::ReducedMotion`.
+fn ask_motion(st: &mut State) -> Task<Message> {
+    if std::mem::replace(&mut st.motion_asked, true) {
+        return Task::none();
+    }
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(motion::reduced_motion)
+                .await
+                .unwrap_or(false)
+        },
+        |reduced| Message::Model3d(Msg::ReducedMotion(reduced)),
+    )
 }
 
 /// Gives the preview store the way to render a snapshot, once. It needs the
@@ -215,7 +277,45 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             retry(st, &id);
             Task::none()
         }
-        Msg::Viewer(_, hangar_model3d::Event::Interacted) => Task::none(),
+        // Nothing to do for either: the first changes nothing the app holds,
+        // and the second is only the news that the view reads the viewer's
+        // `rendering()` again, which building it does.
+        Msg::Viewer(..) => Task::none(),
+        Msg::PlayPause(id) => {
+            if let Some(slot) = st.slots.get(&id)
+                && let Some(playback) = slot.viewer.playback()
+            {
+                slot.viewer.set_playing(!playback.playing);
+            }
+            Task::none()
+        }
+        Msg::Clip(id, clip) => {
+            if let Some(slot) = st.slots.get_mut(&id) {
+                slot.viewer.set_clip(clip);
+                slot.clips_menu = false;
+            }
+            Task::none()
+        }
+        Msg::Seek(id, time) => {
+            if let Some(slot) = st.slots.get(&id) {
+                slot.viewer.seek(time);
+            }
+            Task::none()
+        }
+        Msg::Restart(id) => {
+            if let Some(slot) = st.slots.get(&id) {
+                slot.viewer.restart();
+            }
+            Task::none()
+        }
+        Msg::Tick => Task::none(),
+        Msg::ReducedMotion(reduced) => {
+            st.reduced_motion = reduced;
+            for slot in st.slots.values() {
+                slot.viewer.set_reduced_motion(reduced);
+            }
+            Task::none()
+        }
         Msg::Toggle(which) => {
             toggle(st, which);
             Task::none()
@@ -300,7 +400,7 @@ fn ensure(st: &mut State, id: &str) -> Task<Message> {
     let slot = st
         .slots
         .entry(want.id.clone())
-        .or_insert_with(|| Slot::new(want.ws.clone(), st.display));
+        .or_insert_with(|| Slot::new(want.ws.clone(), st.display, st.reduced_motion));
     if slot.loading(want.revision) || slot.failed == Some(want.revision) {
         return Task::none();
     }
@@ -433,7 +533,30 @@ pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
     if dev::capture_folder().is_some() && !st.dev_captured {
         subscriptions.push(iced::time::every(dev::POLL).map(|_| Message::Model3d(Msg::DevCapture)));
     }
+    if animating_in_front(st) {
+        subscriptions.push(iced::time::every(ANIMATION_TICK).map(|_| Message::Model3d(Msg::Tick)));
+    }
     Subscription::batch(subscriptions)
+}
+
+/// A clip is playing in a model that is in front in a workspace whose preview
+/// panel is drawn: the slider of its bar has to move. A model nobody can see
+/// does not move (its widget is not drawn), so it asks for nothing.
+fn animating_in_front(st: &State) -> bool {
+    if st.slots.is_empty() {
+        return false;
+    }
+    st.shared.read(|store| {
+        st.slots.iter().any(|(id, slot)| {
+            slot.viewer
+                .playback()
+                .is_some_and(|playback| playback.playing)
+                && store.entry(id).is_some_and(|entry| {
+                    store.scope(&entry.workspace_id).active_id.as_deref() == Some(id.as_str())
+                        && store.view().panel_shown(&entry.workspace_id)
+                })
+        })
+    })
 }
 
 /// What takes the focus when F6 reaches a region this package owns. It owns
@@ -500,21 +623,14 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a WsId, entry: &'a str) -> El
         bar,
         container(stage).width(Length::Fill).height(Length::Fill)
     ];
-    if let Some(model) = model.filter(|model| !model.clips.is_empty()) {
-        let names = hangar_model3d::stats::clip_names(&model.clips);
-        let lines = names
-            .into_iter()
-            .zip(&model.clips)
-            .map(|(name, clip)| ClipLine {
-                name,
-                duration: clip.duration,
-            })
-            .collect();
+    // A model with clips gets the bar (`animation && hasContent`).
+    if let (Some(model), Some(playback)) = (model, slot.and_then(|slot| slot.viewer.playback())) {
         page = page.push(animation_bar::view(
             ctx,
             Clips {
                 id: entry,
-                lines,
+                names: hangar_model3d::stats::clip_names(&model.clips),
+                playback,
                 menu: slot.is_some_and(|slot| slot.clips_menu),
             },
         ));

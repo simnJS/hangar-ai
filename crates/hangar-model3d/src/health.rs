@@ -150,6 +150,14 @@ impl Health {
         }
     }
 
+    /// Sets the verdict as if the renderer had reached it (the app's tests
+    /// cannot make a GPU fail on demand). Not told to the app as news.
+    pub fn force(&self, rendering: Rendering) {
+        let mut state = self.lock();
+        state.told = rendering.clone();
+        state.rendering = rendering;
+    }
+
     /// A new model is on show: a failure to draw the last one is not its.
     pub fn new_model(&self) {
         let mut state = self.lock();

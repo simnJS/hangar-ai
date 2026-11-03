@@ -66,9 +66,10 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(ws: WsId, display: hangar_model3d::DisplayOptions) -> Slot {
+    pub fn new(ws: WsId, display: hangar_model3d::DisplayOptions, reduced_motion: bool) -> Slot {
         let mut viewer = ModelViewer::new();
         viewer.set_display(display);
+        viewer.set_reduced_motion(reduced_motion);
         Slot {
             ws,
             viewer,

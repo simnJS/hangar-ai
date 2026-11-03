@@ -1,116 +1,136 @@
-//! The bar under the viewport that lists a model's animation clips
-//! (`AnimationBar`).
+//! The bar under the viewport that plays a model's animation clips
+//! (`AnimationBar`): a play and pause button, the clip (a menu when the file
+//! has several), a slider over the clip's time, and the time.
 //!
-//! hangar-model3d reads the clips of a glTF (their names and lengths) but does
-//! not play them yet, so the bar lists them and says so: the play button, the
-//! clip menu's lines and the track are drawn disabled, each with the reason,
-//! rather than left out. When the crate gains playback, the controls get their
-//! messages here and nowhere else.
+//! hangar-model3d keeps the clock (it moves the clip on with every frame it
+//! draws); the bar only shows where the viewer is and sends what the person
+//! does. The viewer's position is read when the view is built, and the view is
+//! built again a few times a second while a clip plays (`Msg::Tick`), which is
+//! all the slider and the time need.
 
-use iced::widget::{Space, container, progress_bar, row, text};
+use iced::widget::{container, row, text};
 use iced::{Alignment, Element, Length, Padding};
 
 use hangar_i18n::{Key, args};
+use hangar_model3d::Playback;
 use hangar_theme::{fonts, style, tokens};
-use hangar_ui::{Icon, menu, tip};
+use hangar_ui::{Icon, input, menu, tip};
 
 use super::{Msg, format, info_strip};
 use crate::ctx::Ctx;
 use crate::message::Message;
 use crate::preview::parts;
 
-/// A clip as the bar lists it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClipLine {
-    pub name: String,
-    /// In seconds.
-    pub duration: f32,
-}
-
-/// What the bar shows: the clips, and whether the clip menu is open.
+/// What the bar shows: where the clip is, what the file's clips are called,
+/// and whether the clip menu is open.
 pub struct Clips<'a> {
     pub id: &'a str,
-    pub lines: Vec<ClipLine>,
+    /// Every clip's name, in the file's order (unnamed ones numbered).
+    pub names: Vec<String>,
+    pub playback: Playback,
     pub menu: bool,
+}
+
+fn to(msg: Msg) -> Message {
+    Message::Model3d(msg)
+}
+
+/// The length the slider runs over: the clip's, or one second for a clip with
+/// no length, as the web bar's `max={state.duration || 1}`.
+pub fn track_length(duration: f32) -> f32 {
+    if duration > 0.0 { duration } else { 1.0 }
 }
 
 pub fn view<'a>(ctx: Ctx<'a>, clips: Clips<'a>) -> Element<'a, Message> {
     let t = ctx.theme;
     let locale = ctx.i18n.locale();
-    let reason = ctx.t(Key::ModelAnimationsLater).into_owned();
-    let first = clips.lines.first();
+    let Clips {
+        id,
+        names,
+        playback,
+        menu: menu_open,
+    } = clips;
 
-    // The play button, drawn as the old bar had it and unable to be pressed.
-    let play = parts::icon_tool(t, Icon::Play, reason.clone(), None, None::<Message>);
+    let (icon, label) = if playback.playing {
+        (Icon::Pause, ctx.t(Key::ModelPause))
+    } else {
+        (Icon::Play, ctx.t(Key::ModelPlay))
+    };
+    let play = parts::icon_tool(
+        t,
+        icon,
+        label.into_owned(),
+        None,
+        Some(to(Msg::PlayPause(id.to_string()))),
+    );
 
-    // One clip is a name; several are a menu of names, so the person can see
-    // what the file holds even though none can be chosen yet.
     let name = |label: &str| {
         text(label.to_string())
             .size(tokens::font_size::CAPTION_LG)
             .style(style::text::muted(t))
             .wrapping(text::Wrapping::None)
     };
-    let clip: Element<'a, Message> = match (first, clips.lines.len()) {
-        (None, _) => Space::new().into(),
-        (Some(only), 1) => tip::bottom(
+    // One clip is a name; several are a menu of names, the playing one checked.
+    let current = names.get(playback.clip).cloned().unwrap_or_default();
+    let clip: Element<'a, Message> = if names.len() > 1 {
+        let opener = parts::clickable(
+            row![
+                name(&current),
+                hangar_ui::icon(Icon::ChevronDown, 11.0).color(t.colors.fg_muted)
+            ]
+            .spacing(tokens::space::XS)
+            .align_y(Alignment::Center),
+            to(Msg::ClipsMenu(id.to_string(), !menu_open)),
+        );
+        let entries = menu_open.then(|| {
+            names
+                .iter()
+                .enumerate()
+                .map(|(at, line)| -> menu::Entry<Message> {
+                    menu::item(line.clone())
+                        .checked(at == playback.clip)
+                        .on_select(to(Msg::Clip(id.to_string(), at)))
+                        .into()
+                })
+                .collect::<Vec<_>>()
+        });
+        tip::bottom(
             t,
-            container(name(&only.name)).max_width(200.0),
+            menu::dropdown(t, opener, entries)
+                .on_dismiss(to(Msg::ClipsMenu(id.to_string(), false))),
             ctx.t(Key::ModelClip),
-        ),
-        (Some(first), _) => {
-            let id = clips.id;
-            let opener = parts::clickable(
-                row![
-                    name(&first.name),
-                    hangar_ui::icon(Icon::ChevronDown, 11.0).color(t.colors.fg_muted)
-                ]
-                .spacing(tokens::space::XS)
-                .align_y(Alignment::Center),
-                Message::Model3d(Msg::ClipsMenu(id.to_string(), !clips.menu)),
-            );
-            let entries = clips.menu.then(|| {
-                clips
-                    .lines
-                    .iter()
-                    .enumerate()
-                    .map(|(at, line)| -> menu::Entry<Message> {
-                        menu::item(line.name.clone())
-                            .checked(at == 0)
-                            .disabled_because(reason.clone())
-                            .into()
-                    })
-                    .collect::<Vec<_>>()
-            });
-            tip::bottom(
-                t,
-                menu::dropdown(t, opener, entries)
-                    .on_dismiss(Message::Model3d(Msg::ClipsMenu(id.to_string(), false))),
-                ctx.t(Key::ModelClip),
-            )
-        }
+        )
+    } else {
+        tip::bottom(
+            t,
+            container(name(&current)).max_width(200.0),
+            ctx.t(Key::ModelClip),
+        )
     };
 
-    // The track, empty: nothing plays, so there is nothing to scrub.
+    // The track, to the clip's length. A drag sends the time for every step it
+    // takes; the viewer holds it to the clip.
+    let owner = id.to_string();
+    let scrub = input::slider(
+        t,
+        0.0..=track_length(playback.duration),
+        playback.time.min(track_length(playback.duration)),
+        move |time| to(Msg::Seek(owner.clone(), time)),
+    )
+    .step(0.01);
     let track = tip::bottom(
         t,
-        container(
-            progress_bar(0.0..=1.0, 0.0)
-                .girth(3.0)
-                .style(style::progress_bar::accent(t)),
-        )
-        .width(Length::Fill),
-        reason,
+        container(scrub).width(Length::Fill),
+        ctx.t(Key::ModelTime),
     );
 
-    let duration = first.map_or(0.0, |line| line.duration);
     let time = ctx
         .i18n
         .t_with(
             Key::ModelTimeOf,
             &args!(
-                "time" => format::seconds(0.0, locale),
-                "total" => format::seconds(duration, locale)
+                "time" => format::seconds(playback.time, locale),
+                "total" => format::seconds(playback.duration, locale)
             ),
         )
         .into_owned();
@@ -134,4 +154,16 @@ pub fn view<'a>(ctx: Ctx<'a>, clips: Clips<'a>) -> Element<'a, Message> {
             left: 6.0,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clip_with_no_length_still_has_a_track_to_stand_on() {
+        assert_eq!(track_length(0.0), 1.0);
+        assert_eq!(track_length(-2.0), 1.0);
+        assert_eq!(track_length(8.0), 8.0);
+    }
 }
