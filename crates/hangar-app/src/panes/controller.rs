@@ -351,7 +351,7 @@ pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Messa
         return Task::none();
     };
     let (columns, rows) = rt.link.lock().size();
-    let sink = rt.link.sink(channel.sender());
+    let sink = rt.link.sink(channel.waker());
     let pty = sv.core().pty().clone();
     let host = sv.core().host().clone();
     let id = spawn.id.clone();
@@ -1189,5 +1189,68 @@ mod tests {
             launch_command(AgentId::Gemini, None, &options).as_deref(),
             Some("gemini")
         );
+    }
+
+    /// Sixteen panes printing cost one wake-up, then one look a frame: the
+    /// window is not built again for every chunk between two frames.
+    #[test]
+    fn output_wakes_the_window_once_then_is_looked_at_each_frame_until_quiet() {
+        use crate::panes::pty_link::HubKind;
+        use hangar_core::pty::{PtyEvent, PtyOutput, PtySink};
+        let ws = Workspace {
+            id: "w".into(),
+            ..Workspace::default()
+        };
+        let pane = |id: &str| Pane {
+            id: id.into(),
+            ..Pane::default()
+        };
+        let mut st = crate::panes::State::default();
+        let mut wakes = st.channel.take_receiver().expect("the receiver");
+        for id in ["a", "b"] {
+            st.panes.insert(id.into(), mounted(&ws, &pane(id)));
+        }
+        let mut sink_a = st.panes["a"].link.sink(st.channel.waker());
+        let mut sink_b = st.panes["b"].link.sink(st.channel.waker());
+        let print = |sink: &mut PtySink| {
+            sink(PtyEvent::Output(PtyOutput {
+                id: String::new(),
+                data: "x".into(),
+                seq: 0,
+            }))
+        };
+        let mut wakes_sent = || {
+            let mut outputs = 0;
+            while let Ok(event) = wakes.try_recv() {
+                if event.kind == HubKind::Output {
+                    outputs += 1;
+                }
+            }
+            outputs
+        };
+        let sorted = |mut panes: Vec<PaneId>| {
+            panes.sort();
+            panes
+        };
+
+        print(&mut sink_a);
+        print(&mut sink_a);
+        print(&mut sink_b);
+        assert_eq!(wakes_sent(), 1, "one wake-up for both panes, three chunks");
+        // The wake-up starts the ticking; the panes are looked at.
+        st.ticking = true;
+        assert_eq!(sorted(crate::panes::take_outputs(&st)), ["a", "b"]);
+
+        // While it ticks, output sends nothing: each frame looks.
+        print(&mut sink_b);
+        assert_eq!(wakes_sent(), 0);
+        assert_eq!(crate::panes::frame(&mut st), ["b"]);
+        assert!(st.ticking);
+        // A frame that finds every pane quiet ends it.
+        assert!(crate::panes::frame(&mut st).is_empty());
+        assert!(!st.ticking);
+        // And the next chunk wakes the window again.
+        print(&mut sink_a);
+        assert_eq!(wakes_sent(), 1);
     }
 }

@@ -9,6 +9,7 @@
 //! [`PaneLink`] with the panes' state.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use iced::Subscription;
@@ -17,7 +18,7 @@ use tokio::sync::mpsc;
 
 use crate::message::Message;
 use crate::panes::Msg;
-use crate::panes::pty_link::{HubEvent, HubSender, PaneLink};
+use crate::panes::pty_link::{HubEvent, HubSender, PaneLink, Waker};
 use crate::services::TerminalAccess;
 use crate::state::PaneId;
 
@@ -81,12 +82,14 @@ impl TerminalAccess for Hub {
     }
 }
 
-/// The channel every pane's sink sends on, and its receiving half, which the
-/// subscription takes once.
+/// The channel every pane's sink sends on, its receiving half, which the
+/// subscription takes once, and the flag that keeps the panes' wake-ups for
+/// output to one at a time ([`Waker`]).
 #[derive(Debug, Clone)]
 pub struct HubChannel {
     sender: HubSender,
     receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<HubEvent>>>>,
+    awake: Arc<AtomicBool>,
 }
 
 impl Default for HubChannel {
@@ -95,6 +98,7 @@ impl Default for HubChannel {
         HubChannel {
             sender,
             receiver: Arc::new(Mutex::new(Some(receiver))),
+            awake: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -107,8 +111,29 @@ impl std::hash::Hash for HubChannel {
 }
 
 impl HubChannel {
-    pub fn sender(&self) -> HubSender {
-        self.sender.clone()
+    /// What a pane's sink is given.
+    pub fn waker(&self) -> Waker {
+        Waker {
+            sender: self.sender.clone(),
+            awake: self.awake.clone(),
+        }
+    }
+
+    /// The receiving half, for a test to read what the sinks sent.
+    #[cfg(test)]
+    pub fn take_receiver(&self) -> Option<mpsc::UnboundedReceiver<HubEvent>> {
+        self.receiver.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Every pane was quiet for a frame: the next chunk sends a wake-up.
+    pub fn rest(&self) {
+        self.awake.store(false, Ordering::Release);
+    }
+
+    /// Output came in between the window's last look and its rest: it goes
+    /// on looking every frame, and no wake-up is needed.
+    pub fn stay_awake(&self) {
+        self.awake.store(true, Ordering::Release);
     }
 
     /// Every event the panes' reader threads send, in batches: whatever has
