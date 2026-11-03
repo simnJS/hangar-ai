@@ -418,12 +418,16 @@ fn changed(host: &Host, cwd: String) {
     let _ = host.emit(Event::BoardChanged { cwd });
 }
 
-/// A workspace's preview through the shell's `PreviewAccess`, until P15
-/// installs its own hosts (`Hook::Preview`).
+/// A workspace's preview through the shell's `PreviewAccess`, used only
+/// before P15's hosts are on the bus (`Hook::Preview`).
 ///
-/// TODO(P15): `PreviewAccess` lists entries without the active one, the
-/// panel's visibility, a model's format and findings or a kit tab's params;
-/// they read as absent here. P15 installs `PreviewHosts` with all of it.
+/// P15 installs them on the first update after hydration, and requests reach
+/// the bus only after hydration, so this covers the few messages in between.
+/// It is kept rather than refusing them: without a host, `preview_of` would
+/// tell the agent that a window of its own is not answering, which is not
+/// what happened. `PreviewAccess` lists entries without the active one, the
+/// panel's visibility, a model's format and findings or a kit tab's params,
+/// so they read as absent here; the hosts have all of it.
 struct AccessHost {
     services: Services,
     ws: WsId,
