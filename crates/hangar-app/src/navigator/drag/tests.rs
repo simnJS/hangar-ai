@@ -374,3 +374,18 @@ fn a_folder_cannot_go_into_a_folder() {
         .is_none()
     );
 }
+
+#[test]
+fn a_press_the_buttons_release_has_ended_does_not_become_a_drag() {
+    let mut drag = Drag::pressed(item(DragKind::Workspace, "a"));
+    drag.ended = true;
+    drag.moved("ws:a", Point::new(0.0, 0.0), H, None);
+    drag.moved(
+        "ws:b",
+        Point::new(10.0, 3.0),
+        H,
+        Some(Hit::Workspace("b".into())),
+    );
+    assert!(!drag.active);
+    assert_eq!(drag.target, None);
+}

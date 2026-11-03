@@ -66,6 +66,9 @@ pub struct Drag {
     /// the row it was over: the threshold is measured from here.
     anchor: Option<(String, Point)>,
     pub target: Option<DropTarget>,
+    /// The button came up somewhere nothing took the release: a press that
+    /// never became a drag stays inert until the next press replaces it.
+    pub ended: bool,
 }
 
 impl Drag {
@@ -76,6 +79,7 @@ impl Drag {
             active: false,
             anchor: None,
             target: None,
+            ended: false,
         }
     }
 
@@ -86,6 +90,9 @@ impl Drag {
     /// was on is travel enough, since rows are 28 px tall and a click does not
     /// leave one.
     pub fn moved(&mut self, row: &str, point: Point, row_height: f32, hit: Option<Hit>) -> bool {
+        if self.ended {
+            return false;
+        }
         if !self.active {
             match &self.anchor {
                 None => {

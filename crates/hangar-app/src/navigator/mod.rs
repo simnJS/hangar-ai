@@ -521,11 +521,18 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             }
             Task::none()
         }
+        // The global release, which comes whether or not a row took it. A drag
+        // drops where the pointer last was in the list; a press that never
+        // became one is left for its row's release, which may come before or
+        // after this, and is inert meanwhile.
         Msg::DragEnd => match st.drag.take() {
-            // A release outside every row: it still drops where the pointer
-            // last was inside the list, if it is still there.
             Some(drag) if drag.active => drop_drag(&drag, m),
-            _ => Task::none(),
+            Some(mut drag) => {
+                drag.ended = true;
+                st.drag = Some(drag);
+                Task::none()
+            }
+            None => Task::none(),
         },
         Msg::DragCancel => {
             st.drag = None;

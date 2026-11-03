@@ -465,3 +465,37 @@ fn an_editor_that_opened_leaves_no_note() {
     let _ = step(&mut st, &mut m, Msg::EditorDone(None));
     assert!(st.note.is_none());
 }
+
+#[test]
+fn a_global_release_before_the_rows_own_still_lets_the_click_through() {
+    // The subscription's release and the row's can arrive in either order.
+    let mut m = model();
+    let mut st = State::default();
+    press(&mut st, &mut m, "a");
+    let _ = step(&mut st, &mut m, Msg::DragEnd);
+    assert!(st.drag.as_ref().is_some_and(|drag| drag.ended));
+    let _ = step(&mut st, &mut m, Msg::Release("ws:a".into()));
+    assert!(st.drag.is_none());
+    assert_eq!(at(&st), "ws:a");
+}
+
+#[test]
+fn a_global_release_that_no_row_followed_leaves_nothing_to_drag_with() {
+    let mut m = model();
+    let mut st = State::default();
+    press(&mut st, &mut m, "a");
+    let _ = step(&mut st, &mut m, Msg::DragEnd);
+    // The pointer then wanders over rows without the button.
+    for (row, y) in [("ws:a", 0.0), ("ws:b", 3.0)] {
+        let _ = step(
+            &mut st,
+            &mut m,
+            Msg::RowMove {
+                row: row.into(),
+                point: Point::new(5.0, y),
+                hit: Hit::Workspace(row.trim_start_matches("ws:").into()),
+            },
+        );
+    }
+    assert!(!st.drag.as_ref().unwrap().active);
+}
