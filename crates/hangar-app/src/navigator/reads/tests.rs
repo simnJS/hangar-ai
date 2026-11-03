@@ -166,7 +166,11 @@ fn while_the_installed_kits_are_being_read_the_menu_says_so() {
 fn the_menu_lists_the_tabs_of_the_enabled_kits_in_the_order_they_were_enabled() {
     let mut m = model();
     m.live.kits.installed = Some(vec![
-        kit("deploy", "Deploy", vec![tab("runs", "Runs"), tab("logs", "Logs")]),
+        kit(
+            "deploy",
+            "Deploy",
+            vec![tab("runs", "Runs"), tab("logs", "Logs")],
+        ),
         kit("notes", "Notes", vec![tab("all", "All notes")]),
         kit("unused", "Unused", vec![tab("x", "X")]),
     ]);
@@ -233,7 +237,10 @@ fn the_button_is_there_once_something_is_open_and_lit_while_it_waits_unseen() {
 
     assert_eq!(models(&ctx(&m, &pkg), ws), Models::default());
 
-    m.live.signals.preview.insert("a".into(), preview(2, false, true));
+    m.live
+        .signals
+        .preview
+        .insert("a".into(), preview(2, false, true));
     let waiting = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
     assert_eq!(
         waiting,
@@ -245,7 +252,10 @@ fn the_button_is_there_once_something_is_open_and_lit_while_it_waits_unseen() {
     );
 
     // The panel on screen has been seen.
-    m.live.signals.preview.insert("a".into(), preview(2, true, true));
+    m.live
+        .signals
+        .preview
+        .insert("a".into(), preview(2, true, true));
     let shown = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
     assert_eq!(
         shown,
@@ -261,7 +271,10 @@ fn the_button_is_there_once_something_is_open_and_lit_while_it_waits_unseen() {
 fn the_preview_is_shown_over_the_terminals_only() {
     let mut m = model();
     m.ui.view = View::Board;
-    m.live.signals.preview.insert("a".into(), preview(1, true, false));
+    m.live
+        .signals
+        .preview
+        .insert("a".into(), preview(1, true, false));
     let pkg = Packages::default();
     let on_the_board = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
     assert!(on_the_board.open);
@@ -273,7 +286,10 @@ fn a_workspace_window_reads_its_own_workspaces_preview() {
     let mut m = model();
     m.ui.view = View::Terminals;
     let own = detach(&mut m, "b");
-    m.live.signals.preview.insert("a".into(), preview(3, true, false));
+    m.live
+        .signals
+        .preview
+        .insert("a".into(), preview(3, true, false));
     let pkg = Packages::default();
 
     // Workspace `a` has a preview open, in the main window; `b` has none.

@@ -144,7 +144,13 @@ pub enum Msg {
 /// window drew when the button was pressed, which must still exist. The field
 /// empties; a line with nothing in it, or for a workspace that is gone, sends
 /// nothing and leaves the field as it is.
-fn send(st: &mut State, m: &Model, window: window::Id, ws: WsId, when_free: bool) -> Option<Intent> {
+fn send(
+    st: &mut State,
+    m: &Model,
+    window: window::Id,
+    ws: WsId,
+    when_free: bool,
+) -> Option<Intent> {
     let text = st.broadcast_text(window).trim().to_string();
     if text.is_empty() || m.workspace(&ws).is_none() {
         return None;
@@ -198,9 +204,7 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
 /// on one folder share a beat.
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let focus = iced::event::listen_with(|event, _status, window| match event {
-        Event::Window(window::Event::Focused) => {
-            Some(Message::StatusBar(Msg::Focus(window, true)))
-        }
+        Event::Window(window::Event::Focused) => Some(Message::StatusBar(Msg::Focus(window, true))),
         Event::Window(window::Event::Unfocused) => {
             Some(Message::StatusBar(Msg::Focus(window, false)))
         }
@@ -247,8 +251,7 @@ fn beat(cwd: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
 /// only there over the terminals.
 pub fn focus_entry(_st: &State, m: &Model, _region: Region) -> Option<Task<Message>> {
     let window = m.focused_window()?;
-    (m.view_in(window) == View::Terminals)
-        .then(|| iced::widget::operation::focus(input_id(window)))
+    (m.view_in(window) == View::Terminals).then(|| iced::widget::operation::focus(input_id(window)))
 }
 
 /// A dictation lands in the broadcast field when that is where the keyboard

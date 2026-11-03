@@ -26,9 +26,9 @@ use super::{
 };
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
+use crate::inspector::format::prose_time;
 use crate::message::{Intent, Message};
 use crate::shell::{Focus, Region};
-use crate::inspector::format::prose_time;
 use crate::state::roles::{orchestrator_of, workers_of};
 use crate::state::types::Workspace;
 use crate::state::{AgentActivity, WsId};

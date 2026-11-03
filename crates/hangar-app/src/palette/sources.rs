@@ -18,8 +18,8 @@ use hangar_ui::palette::{Detail, Item};
 
 use crate::commands::{self, CommandId, Section};
 use crate::keymap::KeymapIndex;
-use crate::shell::WindowKind;
 use crate::navigator::reads;
+use crate::shell::WindowKind;
 use crate::state::types::{AgentId, Pane, Workspace};
 use crate::state::{AgentActivity, Model, PaneId, WsId, folders, layout};
 

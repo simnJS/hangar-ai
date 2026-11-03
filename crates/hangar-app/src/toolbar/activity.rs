@@ -98,12 +98,7 @@ pub fn next_in<'a>(
 /// the state word.
 pub const EXTRAS_FROM_EM: f32 = 71.0;
 
-pub fn view<'a>(
-    ctx: Ctx<'a>,
-    ws: &'a Workspace,
-    extras: bool,
-    room: f32,
-) -> Element<'a, Message> {
+pub fn view<'a>(ctx: Ctx<'a>, ws: &'a Workspace, extras: bool, room: f32) -> Element<'a, Message> {
     let t = ctx.theme;
     let tr = ctx.i18n;
     let focused = ctx
@@ -174,35 +169,35 @@ pub fn view<'a>(
             // With no room for a few words the state word stands alone, rather
             // than trailing off as "Travaille su…".
             if room >= 30.0 * font_size::UI {
-                let (words, strong) = match detail(
-                    activity,
-                    insight,
-                    task.map(|task| task.title.as_str()),
-                ) {
-                    Detail::None => (None, false),
-                    Detail::Tool(tool) => (Some(format!("· {tool}")), false),
-                    Detail::Working(title) => (
-                        Some(
-                            tr.t_with(Key::ToolbarActivityOn, &args!("title" => title))
-                                .into_owned(),
+                let (words, strong) =
+                    match detail(activity, insight, task.map(|task| task.title.as_str())) {
+                        Detail::None => (None, false),
+                        Detail::Tool(tool) => (Some(format!("· {tool}")), false),
+                        Detail::Working(title) => (
+                            Some(
+                                tr.t_with(Key::ToolbarActivityOn, &args!("title" => title))
+                                    .into_owned(),
+                            ),
+                            true,
                         ),
-                        true,
-                    ),
-                    Detail::Done(title) => (
-                        Some(format!(
-                            "· {}",
-                            tr.t_with(Key::ToolbarActivityTask, &args!("title" => title))
-                        )),
-                        true,
-                    ),
-                    Detail::LastAnswer(answer) => (
-                        Some(format!(
-                            "· {}",
-                            tr.t_with(Key::ToolbarActivityLastAnswer, &args!("answer" => answer))
-                        )),
-                        false,
-                    ),
-                };
+                        Detail::Done(title) => (
+                            Some(format!(
+                                "· {}",
+                                tr.t_with(Key::ToolbarActivityTask, &args!("title" => title))
+                            )),
+                            true,
+                        ),
+                        Detail::LastAnswer(answer) => (
+                            Some(format!(
+                                "· {}",
+                                tr.t_with(
+                                    Key::ToolbarActivityLastAnswer,
+                                    &args!("answer" => answer)
+                                )
+                            )),
+                            false,
+                        ),
+                    };
                 if let Some(words) = words {
                     line = line.push(
                         text(words)
@@ -293,7 +288,10 @@ pub fn view<'a>(
                 .padding([0.0, space::SM])
                 .height(22)
                 .style(style::button::icon(t))
-                .on_press(Message::Toolbar(Msg::GoTo(ws.id.clone(), target.id.clone())));
+                .on_press(Message::Toolbar(Msg::GoTo(
+                    ws.id.clone(),
+                    target.id.clone(),
+                )));
             Some(Element::from(tooltip(
                 pressed,
                 tip_text(t, label.into_owned()),

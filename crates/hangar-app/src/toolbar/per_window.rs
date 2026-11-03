@@ -10,9 +10,7 @@ use hangar_i18n::{Key, Locale, Translator};
 
 use super::*;
 use crate::app::Packages;
-use crate::navigator::testing::{
-    Drive, ctx, ctx_in, detach, model_of, pane, simulate, workspace,
-};
+use crate::navigator::testing::{Drive, ctx, ctx_in, detach, model_of, pane, simulate, workspace};
 use crate::state::live::WindowUi;
 use crate::state::types::{AgentId, AppState};
 

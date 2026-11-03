@@ -101,6 +101,7 @@ fn a_block_that_comes_without_a_separator_gets_one_and_an_empty_block_none() {
 fn a_pane_that_does_not_run_claude_code_has_no_account_block() {
     let harness = Harness::new(Locale::En, "graphite");
     // `p2` is a shell.
-    let block = crate::accounts::menu_items(harness.ctx(), &"w1".to_string(), Some(&"p2".to_string()));
+    let block =
+        crate::accounts::menu_items(harness.ctx(), &"w1".to_string(), Some(&"p2".to_string()));
     assert!(block.is_empty());
 }

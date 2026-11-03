@@ -126,10 +126,10 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
     match msg {
         Msg::ToggleMore(_) | Msg::CloseMenus => {
             let opening = match msg {
-                Msg::ToggleMore(window) => {
-                    (st.more_open != Some(window) && !m.ui.confirm_reset && !m.ui.confirm_stop_workers)
-                        .then_some(window)
-                }
+                Msg::ToggleMore(window) => (st.more_open != Some(window)
+                    && !m.ui.confirm_reset
+                    && !m.ui.confirm_stop_workers)
+                    .then_some(window),
                 _ => None,
             };
             // A question the menu was showing is called off with it.
@@ -235,7 +235,8 @@ pub fn go_to(m: &Model, ws: WsId, pane: PaneId) -> Vec<Intent> {
 
 /// What the window that draws workspace `ws` shows in its main area.
 fn view_of(m: &Model, ws: &str) -> View {
-    m.window_of(ws).map_or(m.ui.view, |window| m.view_in(window))
+    m.window_of(ws)
+        .map_or(m.ui.view, |window| m.view_in(window))
 }
 
 /// The panes among `closing` with something going on, and what: the ones a
@@ -557,9 +558,10 @@ fn views<'a>(ctx: Ctx<'a>, current: View, icons_only: bool) -> Element<'a, Messa
 fn presets<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let t = ctx.theme;
     let tr = ctx.i18n;
-    let asking = st.preset.as_ref().filter(|ask| {
-        ask.ws == ws.id && ask.view == ctx.view() && !ctx.model.ui.confirm_reset
-    });
+    let asking = st
+        .preset
+        .as_ref()
+        .filter(|ask| ask.ws == ws.id && ask.view == ctx.view() && !ctx.model.ui.confirm_reset);
     let buttons = LAYOUTS.map(|size| {
         let words = tr
             .t_with(Key::TopbarPresetHint, &args!("n" => size))

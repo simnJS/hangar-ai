@@ -5,9 +5,7 @@ use iced::keyboard::{Modifiers, key::Named};
 
 use super::*;
 use crate::app::Packages;
-use crate::navigator::testing::{
-    Drive, ctx, ctx_in, detach, model_of, pane, simulate, workspace,
-};
+use crate::navigator::testing::{Drive, ctx, ctx_in, detach, model_of, pane, simulate, workspace};
 use crate::state::types::{AgentId, AppState};
 
 fn model(view: View) -> Model {
@@ -252,7 +250,10 @@ fn a_workspace_windows_bar_is_about_its_own_workspace() {
     let st = State::default();
 
     let mut mine = simulate(view(&st, ctx_in(&model, &pkg, own)));
-    assert!(mine.find("Send the same instruction to all 3 panes…").is_ok());
+    assert!(
+        mine.find("Send the same instruction to all 3 panes…")
+            .is_ok()
+    );
     assert!(mine.find("3 panes").is_ok());
     drop(mine);
 

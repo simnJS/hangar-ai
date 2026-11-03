@@ -67,10 +67,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             let Some(open) = st.open.take() else {
                 return task;
             };
-            Task::batch([
-                task,
-                close(m).chain(give_back(m, open.window, open.opener)),
-            ])
+            Task::batch([task, close(m).chain(give_back(m, open.window, open.opener))])
         }
         Event::Run(target) => {
             let window = open.window;
