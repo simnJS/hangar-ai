@@ -402,6 +402,9 @@ pub struct Gauge<'a> {
     theme: &'a Theme,
     pct: u8,
     tip: Option<String>,
+    /// The words beside the ring: the percentage by default, the caller's
+    /// own (a translated `{pct} %`), or nothing in a narrow header.
+    label: Option<Option<String>>,
 }
 
 /// How full the agent's context window is: a ring and a percentage, sized to
@@ -411,6 +414,7 @@ pub fn gauge(t: &Theme, pct: u8) -> Gauge<'_> {
         theme: t,
         pct,
         tip: None,
+        label: None,
     }
 }
 
@@ -418,6 +422,14 @@ impl Gauge<'_> {
     /// The numbers behind the ring, in a tooltip.
     pub fn tip(mut self, words: impl Into<String>) -> Self {
         self.tip = Some(words.into());
+        self
+    }
+
+    /// What the ring is labelled with instead of the bare percentage: the
+    /// app's translated figure, or `None` for the ring alone, which a narrow
+    /// pane header keeps once the figure no longer fits.
+    pub fn label(mut self, words: Option<String>) -> Self {
+        self.label = Some(words);
         self
     }
 }
@@ -437,12 +449,18 @@ impl<'a, M: 'a> From<Gauge<'a>> for Element<'a, M> {
         })
         .width(12.0)
         .height(12.0);
-        let words = text(format!("{} %", g.pct))
-            .size(font_size::CAPTION_LG)
-            .style(move |_: &iced::Theme| text::Style { color: Some(ink) });
-        let content = row![ring, words]
-            .spacing(space::XS)
-            .align_y(Alignment::Center);
+        let words = match g.label {
+            None => Some(format!("{} %", g.pct)),
+            Some(label) => label,
+        };
+        let mut content = row![ring].spacing(space::XS).align_y(Alignment::Center);
+        if let Some(words) = words {
+            content = content.push(
+                text(words)
+                    .size(font_size::CAPTION_LG)
+                    .style(move |_: &iced::Theme| text::Style { color: Some(ink) }),
+            );
+        }
         match g.tip {
             Some(words) => tip::bottom(g.theme, content, words),
             None => content.into(),
