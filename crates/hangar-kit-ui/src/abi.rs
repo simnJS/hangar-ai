@@ -111,6 +111,11 @@ pub struct Start {
     /// Whether the tab is in front.
     #[serde(default = "visible_by_default")]
     pub visible: bool,
+    /// The person's time zone when the tab started, as minutes east of UTC
+    /// (`120` in Paris in summer): what `format::since`, `clock` and `date`
+    /// write local times with, wasm32 having no time zone of its own.
+    #[serde(default)]
+    pub utc_offset: i32,
 }
 
 fn visible_by_default() -> bool {
@@ -159,6 +164,17 @@ pub enum Input {
     Timer(TimerFired),
     /// Something happened in Hangar that the tab subscribed to.
     Event(HangarEvent),
+    /// A keyboard shortcut of the tab's subscriptions was pressed: a
+    /// person's keystroke, as a click is.
+    Shortcut(ShortcutPressed),
+}
+
+/// A shortcut pressed, by the spec the tab subscribed with
+/// ([`crate::keys`]): `{ "type": "shortcut", "keys": "mod+s" }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutPressed {
+    pub keys: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -223,6 +239,46 @@ pub struct Output {
     /// stops. Absent, they stay as they were.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscriptions: Option<Subscriptions>,
+    /// What to do to the page once it is drawn: a field focused, a part
+    /// scrolled. Done after the view that follows this output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<Operation>,
+}
+
+/// Something done to the page, naming a widget by its `id`; an id the view
+/// does not have does nothing. In JSON, an object whose `type` says which.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Operation {
+    /// The keyboard goes to this text input, search or text area.
+    Focus { id: String },
+    /// A `scroll` or a log with an id shows this: a line of a log, from 0,
+    /// with a few lines above it; a point `y` from the top of a scroll; or
+    /// its end.
+    ScrollTo {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<f32>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        end: bool,
+    },
+    /// A text area's cursor goes to the start of a line, from 1, at a
+    /// column, from 1, and a text area with `lineNumbers` scrolls to it.
+    CursorTo {
+        id: String,
+        line: u32,
+        #[serde(default = "first_column")]
+        column: u32,
+    },
+    /// What a newer SDK asks and this Hangar does not do.
+    #[serde(other)]
+    Unsupported,
+}
+
+fn first_column() -> u32 {
+    1
 }
 
 /// A call to Hangar: a method of the host API, and its params, as an HTML
@@ -245,6 +301,11 @@ pub struct Subscriptions {
     pub events: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub timers: Vec<Timer>,
+    /// Keyboard shortcuts, as [`crate::keys`] writes them: pressed while the
+    /// person is in the tab, each comes as an [`Input::Shortcut`]. A key a
+    /// focused control uses itself (Ctrl+C in a field) is the control's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shortcuts: Vec<String>,
 }
 
 /// A timer: a [`TimerFired`] with this `id` every `everyMs`. One that keeps

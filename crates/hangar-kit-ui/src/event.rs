@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::draw::{Mark, Point};
 use crate::element::HandlerId;
 
 /// A widget was used: the handler it named, in the view it was drawn from,
@@ -22,8 +23,10 @@ pub struct UiEvent {
 
 /// What an event carries, by widget: see each handler's documentation.
 ///
-/// In JSON, `{ "text": "abc" }`, `{ "bool": true }`, `{ "index": 3 }` or
-/// `{ "sort": { "column": 1, "descending": false } }`; absent for a press.
+/// In JSON, `{ "text": "abc" }`, `{ "bool": true }`, `{ "index": 3 }`,
+/// `{ "sort": { "column": 1, "descending": false } }`, `{ "mark": … }`,
+/// `{ "point": { "x": 4, "y": 9 } }`, `{ "number": 0.5 }` or
+/// `{ "range": { "start": 200, "end": 600 } }`; absent for a press.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EventValue {
@@ -36,6 +39,23 @@ pub enum EventValue {
     Index(u32),
     /// A table's header pressed.
     Sort(Sort),
+    /// A drag on a canvas finished: what it drew.
+    Mark(Mark),
+    /// A press on a canvas, in its units.
+    Point(Point),
+    /// A number: a canvas's scale.
+    Number(f64),
+    /// The lines of a long log to give next.
+    Range(Range),
+}
+
+/// Lines of a long log, from `start` to before `end`, as indices in the
+/// whole log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Range {
+    pub start: u32,
+    pub end: u32,
 }
 
 /// The order of a table's rows: by a column, one way or the other.

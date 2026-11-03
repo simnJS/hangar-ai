@@ -10,12 +10,15 @@ use serde_json::Value;
 
 use hangar_kit_ui::abi::{self, MIN_TIMER_MS};
 use hangar_kit_ui::api::{self, TabParamsAnswer, Theme, Visibility};
+use hangar_kit_ui::keys::Shortcut;
 
 type EventHandler<M> = Rc<dyn Fn(Value) -> Option<M>>;
 
 pub struct Subscriptions<M> {
     pub(crate) timers: Vec<(String, u32, M)>,
     pub(crate) events: Vec<(String, EventHandler<M>)>,
+    /// By the spec as [`Shortcut`]'s `Display` writes it.
+    pub(crate) shortcuts: Vec<(String, M)>,
 }
 
 impl<M> Default for Subscriptions<M> {
@@ -23,6 +26,7 @@ impl<M> Default for Subscriptions<M> {
         Subscriptions {
             timers: Vec::new(),
             events: Vec::new(),
+            shortcuts: Vec::new(),
         }
     }
 }
@@ -70,6 +74,23 @@ impl<M: 'static> Subscriptions<M> {
         })
     }
 
+    /// `message` when the person presses `keys` in the tab: `"mod+s"` (Ctrl+S,
+    /// Cmd+S on macOS), `"mod+shift+z"`, `"escape"` ([`hangar_kit_ui::keys`]
+    /// says what is written how). A key a focused control uses itself is the
+    /// control's: Ctrl+C in a field copies. A keystroke is a gesture, so the
+    /// update may call `ui.copy` or `files.pick`. A spec that does not read is
+    /// logged and left out.
+    pub fn shortcut(mut self, keys: &str, message: M) -> Self {
+        match Shortcut::parse(keys) {
+            Some(shortcut) => self.shortcuts.push((shortcut.to_string(), message)),
+            None => crate::sys::log(
+                hangar_kit_ui::abi::LogLevel::Warn,
+                &format!("{keys:?} is not a shortcut; it is left out"),
+            ),
+        }
+        self
+    }
+
     /// Any event by its name, its data as JSON: one a newer Hangar sends and
     /// this SDK does not type yet.
     pub fn event(
@@ -95,6 +116,11 @@ impl<M: 'static> Subscriptions<M> {
                     id: id.clone(),
                     every_ms: *every_ms,
                 })
+                .collect(),
+            shortcuts: self
+                .shortcuts
+                .iter()
+                .map(|(keys, _)| keys.clone())
                 .collect(),
         }
     }

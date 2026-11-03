@@ -418,6 +418,29 @@ impl Deps for LiveDeps {
         })
     }
 
+    fn workspace_image(
+        &self,
+        root: String,
+        path: String,
+        hidden: bool,
+    ) -> Result<Vec<u8>, KitError> {
+        read_image(Path::new(&root), &path, hidden)
+    }
+
+    fn pick_file(
+        &self,
+        root: String,
+        request: hangar_kit_ui::api::FilesPick,
+    ) -> BoxFuture<Result<Option<hangar_kit_host::PickedFile>, KitError>> {
+        Box::pin(super::media::pick_file(root, request))
+    }
+
+    fn clipboard_image(
+        &self,
+    ) -> BoxFuture<Result<Option<hangar_kit_host::ClipboardImage>, KitError>> {
+        Box::pin(super::media::clipboard_image())
+    }
+
     fn image(&self, kit: &str, source: &ImageSource) -> Result<Vec<u8>, KitError> {
         let (root, raw, hidden) = match source {
             ImageSource::Kit(path) => {
@@ -434,6 +457,14 @@ impl Deps for LiveDeps {
                 let root = hangar_core::kits::data::root()
                     .ok_or_else(|| KitError::new(KitError::FAILED, "no home directory"))?;
                 (root.join(kit), path, true)
+            }
+            // The workspace's are `workspace_image`'s, which `TabApi` asks
+            // with the workspace's folder; the held ones are the tab's own.
+            ImageSource::File(_) | ImageSource::Held(_) => {
+                return Err(KitError::new(
+                    KitError::UNSUPPORTED,
+                    "not an image of the kit or of its data",
+                ));
             }
         };
         read_image(&root, raw, hidden)

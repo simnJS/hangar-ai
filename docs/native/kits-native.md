@@ -108,6 +108,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]   # the module, and the library its tests use
 
 [dependencies]
+# Until a release tag holds the SDK, its branch: { …, branch = "feat/native-rust" }.
 hangar-kit-sdk = { git = "https://github.com/hangar-ai/hangar", tag = "v2.0.0" }
 
 [profile.release]
@@ -145,6 +146,14 @@ assert!(tab.shows("1 pane"));
 tab.press("Refresh");
 assert_eq!(tab.methods(), vec!["panes.list"]);
 ```
+
+What else a harness does, as a person or as Hangar would: `type_into(name, text)`,
+`choose(name, value)` (a select, radio buttons, tabs, a menu's line), `toggle(label, on)`,
+`open_menu(label)`, `shortcut("mod+s")`, `draw(canvas, mark)`, `point(canvas, point)`,
+`range(log, start, end)`, `timer(id)`, `elapse(key)` and `waits(key)` for `cx.after`, `event(name,
+data)`; and what it saw: `shows(text)`, `texts()`, `calls()`, `methods()`, `take_operations()`,
+`subscriptions()`. `testing::start()` takes `.grant([…])`, `.param(…)`, `.locale("fr")`,
+`.utc_offset(60)` and `.caller("Ava")`; `testing::set_now(Some(ms))` sets the clock.
 
 `cargo test` runs these, since the crate is also an `rlib` and `export_kit!` writes nothing off
 wasm32. **In a window**, `cargo run -p hangar-kit-host --example preview -- tabs/my.wasm` opens the
@@ -214,9 +223,10 @@ export_kit!(Panes);
    it returns, and its answer comes back later as an update of its own, the message `on_reply` made
    of it. A module never waits on Hangar, so a call that takes two minutes (`command.run`) holds
    nothing.
-4. **Subscriptions are declared, all of them, after every update**: timers by id and period, and
-   Hangar's events by name. What the kit leaves out stops; a timer that keeps its id and period keeps
-   running. A timer runs at 100 ms at the shortest, 16 per tab at most.
+4. **Subscriptions are declared, all of them, after every update**: timers by id and period,
+   Hangar's events by name, and keyboard shortcuts by their keys. What the kit leaves out stops; a
+   timer that keeps its id and period keeps running. A timer runs at 100 ms at the shortest, 16 per
+   tab at most.
 5. **It ends** when the tab is closed, or its workspace is put to sleep: the instance is dropped,
    with its memory. A kit keeps what must outlive it in its data folder (`data.write`). Restarting
    Hangar brings the tab back with its params, and it starts from `init` again.
@@ -225,6 +235,43 @@ export_kit!(Panes);
 the handlers of each view, and the event that comes back names the number and the view (`seq`) it
 was drawn from. Hangar may draw a new view between a click and its delivery: the SDK keeps the last
 eight views' handlers, so the click lands on the handler it was drawn with, as an iced message would.
+
+**Shortcuts.** `Subscriptions::shortcut("mod+s", Message::Save)`: the message when the person presses
+the keys in the tab, a keystroke as a click is (the update may call `ui.copy` or `files.pick`).
+`mod` is Ctrl, Cmd on macOS; `ctrl`, `alt`, `shift` are those keys; the key is one character, case
+not counting, or `enter`, `escape`, `tab`, `space`, `backspace`, `delete`, `up`, `down`, `left`,
+`right`, `pageup`, `pagedown`, `home`, `end`, `f1`…`f12` (`hangar_kit_ui::keys`). "In the tab" is
+where the person last pressed the pointer, and a tab starts as in. A key a focused control uses
+itself is the control's: Ctrl+C in a field copies, Enter in a menu chooses. iced's fields have no
+undo, so `mod+z` reaches the kit while a field has the focus: a kit undoing marks checks that
+itself.
+
+**Operations.** What a kit asks done to its page once drawn, naming a widget by its `id`; an id the
+page does not have does nothing:
+
+| SDK                               | Does                                                                |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `cx.focus("note-3")`              | The keyboard goes to that text input, search or text area.          |
+| `cx.scroll_to_line("job", 340)`   | The long log shows that line, from 0, three lines under its top.    |
+| `cx.scroll_to("page", 120.0)`, `cx.scroll_to_end("page")` | A `scroll` with that id shows that point, or its end. |
+| `cx.cursor_to("editor", 12, 1)`   | A text area's cursor goes to that line and column, from 1, and one with line numbers scrolls to it. |
+
+Hangar keeps each tab's widget ids apart (`KitTab::widget_id`), so two tabs never share a field.
+Without an operation, what iced keeps of a widget stays as long as the page keeps its shape: the
+focus and caret of a field, a scroll's position, are not lost because the view was sent again.
+
+**One-shot timers.** `cx.after("save", Duration::from_millis(1500), Message::Save)`: the message
+once, later; asking again under the same key starts the wait again, which is a debounce, and
+`cx.cancel("save")` drops it. Built on the subscription timers (each takes one of the 16 while it
+waits), so a kit needs no flag of its own.
+
+**Time.** `start.utc_offset` (and `cx.utc_offset()`) is the person's time zone when the tab started,
+in minutes east of UTC; `format::since(at, now, offset, locale)`, `format::clock(at, offset,
+seconds)` and `format::date(at, now, offset, locale)` write what kit-ui.js's `format.since`, `clock`
+and `date` write, `format::local_time(at, offset)` is the calendar's day and the clock's time,
+and `format::parse_iso("2024-10-31T21:14:56Z")` reads what tools write
+(`Date.parse`'s ISO 8601). A tab open across a change of summer time keeps the offset it started
+with until it starts again.
 
 **Events** a tab can subscribe to:
 
@@ -282,7 +329,7 @@ these exports and speaks this JSON can write a tab; the SDK is the Rust way to.
   "kit": { "id": "hello-native", "name": "Hello native", "version": "0.1.0" },
   "tab": { "id": "hello", "params": { "run": "4567" }, "caller": { "pane": "Ava" } },
   "theme": { "scheme": "dark", "locale": "fr" },
-  "permissions": ["panes.read", "data.read"], "visible": true }
+  "permissions": ["panes.read", "data.read"], "visible": true, "utcOffset": 60 }
 
 // Input, to hangar_update: one of
 { "type": "ui", "view": 7, "handler": 3, "value": { "text": "owner/name" } }
@@ -290,10 +337,13 @@ these exports and speaks this JSON can write a tab; the SDK is the Rust way to.
 { "type": "reply", "id": 13, "error": { "code": "denied", "message": "this tab was not granted panes.send" } }
 { "type": "timer", "id": "poll" }
 { "type": "event", "name": "panes.changed", "data": {} }
+{ "type": "shortcut", "keys": "mod+s" }
 
 // Output, from hangar_init and hangar_update
 { "calls": [ { "id": 12, "method": "panes.list", "params": null } ],
-  "subscriptions": { "events": ["panes.changed"], "timers": [ { "id": "poll", "everyMs": 1000 } ] } }
+  "subscriptions": { "events": ["panes.changed"], "timers": [ { "id": "poll", "everyMs": 1000 } ],
+                     "shortcuts": ["mod+s"] },
+  "operations": [ { "type": "focus", "id": "note-3" }, { "type": "scrollTo", "id": "job", "line": 340 } ] }
 
 // View, from hangar_view
 { "seq": 7, "root": { "type": "page", "children": [ { "type": "header", "title": "Hello" }, … ] } }
@@ -336,35 +386,41 @@ page: one primary action, designed empty, loading, failed and denied states, num
 | `.kit-stack`, `.kit-actions`, `.kit-bar`     | `column`, `row` (`wrap`), `bar` (`foot`)       | `col![…]`, `row![…].wrap()`, `bar(…)` |
 | Text classes: `.kit-dim` … `.kit-code`       | `text` with `size`, `tone`, `weight`, `mono`, `numeric`, `code`, `wrap: truncate` | `text("…").dim().mono()` |
 | `.kit-sr`                                    | — (iced has no accessibility tree yet: see Later) |                                   |
-| `.kit-header`                                | `header` (`title`, `state`, `actions`)         | `header("…").state(…).action(…)`     |
+| `.kit-header`                                | `header` (`lead`, `title`, `state`, `actions`) | `header("…").lead(icon_button(Icon::ArrowLeft, "Back")).state(…).action(…)` |
 | `.kit-section`                               | `section` (`title`, `count`, `actions`)        | `section("…", […])`                  |
-| `.kit-rows`, `.kit-row`, `--group`           | `list` of `ListItem` (`lead`, `title`, `sub`, `end`, `selected`, `wrap`), `group` | `list(…)`, `item("…")` |
+| `.kit-rows`, `.kit-row`, `--group`           | `list` of `ListItem` (`lead`, `title`, `sub`, `end`, `actions`, `body`, `selected`, `wrap`, `mono`), `group` | `list(…)`, `item("…").body(…)` |
 | `.kit-btn` and its kinds, `--small`, `--icon`, `disabled` | `button` (`kind`, `small`, `icon`, no handler = disabled) | `button("…").primary()`, `icon_button(…)` |
-| `.kit-icon`                                  | `icon` (12 icons, a `tone`, a `size`)          | `icon(Icon::Alert)`                  |
-| `.kit-field`, `.kit-input`                   | `textInput` (`label`, `hint`, `error`, `secure`, `mono`) | `text_input("…", &value)`  |
-| `textarea.kit-input`                         | `textArea` (`id`, `height`)                    | `text_area("id", &value)`            |
-| `.kit-select`                                | `select` (`options`, `selected`)               | `select(…, Some(…))`                 |
-| `.kit-search`                                | `search` (and its clear button)                | `search("…", &value).on_clear(…)`    |
+| `.kit-icon`                                  | `icon` (33 icons, a `tone`, a `size`)          | `icon(Icon::Alert)`                  |
+| `.kit-field`, `.kit-input`                   | `textInput` (`id`, `label`, `hint`, `error`, `secure`, `mono`) | `text_input("…", &value).id("…")` |
+| `textarea.kit-input`                         | `textArea` (`id`, `height`, `fill`, `lineNumbers`, `marks`) | `text_area("id", &value).line_numbers().mark(line_mark(4, Notice::Error))` |
+| `.kit-select`                                | `select` (`options`, each `disabled`, `selected`) | `select(…, Some(…))`              |
+| `input type=radio`                           | `radio` (`options`, `selected`, `horizontal`)  | `radio(…, Some(…)).on_select(…)`     |
+| `.kit-search`                                | `search` (`id`, and its clear button)          | `search("…", &value).on_clear(…)`    |
 | `.kit-switch`                                | `switch`, and `checkbox`                       | `switch("…", on)`, `checkbox(…)`     |
 | `.kit-chips`, `.kit-chip`                    | a wrapping `row` of `chip`; with a `tone`, a badge | `chip("…").tone(Tone::Ok)`       |
 | `.kit-filter`                                | `filter` (`pressed`, `count`, `countTone`)     | `filter("…", pressed)`               |
 | `.kit-dot`, `.kit-glyph`, `.kit-state`       | `glyph` (`dot`), `state`                       | `glyph(…)`, `state_label(…)`         |
-| `.kit-progress` and its states               | `progress` (`value`, none to say indeterminate; `kind`) | `progress(Some(0.4))`        |
-| `.kit-banner`                                | `banner` (`kind`, `actions`)                   | `banner(Notice::Warning, "…")`       |
-| `.kit-empty` (empty, loading, error, denied) | `empty` (`kind`, `title`, `text`, `actions`)   | `empty`, `loading`, `failed`, `denied` |
+| `.kit-progress` and its states               | `progress` (`value`, none to say indeterminate, drawn running; `kind`) | `progress(Some(0.4))` |
+| `.kit-banner`                                | `banner` (`kind`, `title` in bold, `actions`: any widget, a switch too) | `banner(Notice::Warning, "…").title("…")` |
+| `.kit-empty` (empty, loading, error, denied) | `empty` (`kind`, `icon`, `title`, `text`, `children`, `actions`) | `empty`, `loading`, `failed`, `denied`, `.child(text("gh auth login").code())` |
 | `.kit-pre`                                   | `pre` (`height`)                               | `pre("…")`                           |
-| `.kit-log`, `hangar.ui.log`                  | `log` of `LogLine` (`kind`, `number`, `current`), `atEnd` | `log_lines(…)`, `log_line(…)` |
+| `.kit-log`, `hangar.ui.log`                  | `log` of `LogLine` (`kind`: also `added`, `removed`; `number`, `current`), `atEnd`; with an `id` a long log, with `total`, `first`, `onRange` one given in parts | `log_lines(…).id("job")`, `log_line(…)` |
 | `.kit-kv`                                    | `keyValue`                                     | `key_value([("Branch", "main")])`    |
 | `.kit-tabs`, `hangar.ui.tabs`                | `tabs` (the kit draws the chosen panel)        | `tabs(…, "jobs")`                    |
 | `title` (tooltip)                            | `tooltip`, and `tooltip` on buttons and rows   | `tooltip(child, "…")`                |
-| `.kit-menu`, `hangar.ui.menu`                | `menu` of `MenuItem` (`hint`, `danger`, `disabled`, `checked`) and separators | `menu([…])` |
+| `.kit-menu`, `hangar.ui.menu`                | `menu` of `MenuItem` (`hint`, `danger`, `disabled`, `checked`) and separators; `id` and `onOpen` for one filled once it opens | `menu([…]).id("hand").on_open(…)` |
 | `.kit-confirm`, `hangar.ui.confirm`          | the call `ui.confirm`                          | `cx.confirm(…)`                      |
 | `.kit-toast`, `hangar.ui.toast`              | the call `ui.toast`                            | `cx.toast(…)`, or `cx.call(api::Toast …)` |
 | `hangar.ui.copy`, `copyButton`               | the call `ui.copy`, from a click               | `cx.copy("…")`                       |
-| `hangar.ui.list` (a long list)               | `list`, `log` or `table` with `height`, given the lines in view: see Later | |
+| `hangar.ui.list` (a long list)               | a `log` with an `id` (lines of one height), a `table` with `height` for a few hundred rows, a page's "Show 100 more" beyond | |
 | `hangar.ui.i18n`, `locale`                   | `hangar_kit_sdk::i18n::Strings`, `start.theme.locale` and the `theme` event | `Strings::new(…).add("fr", …)` |
 | `hangar.ui.format` (duration, bytes, number) | `hangar_kit_sdk::format`                       | `format::duration(ms, locale)`       |
-| `format.clock`, `date`, `since`              | — (no time zone in wasm32: see Later)          |                                      |
+| `format.clock`, `date`, `since`              | `format::clock`, `date`, `since`, with `start.utc_offset`; `format::parse_iso` | `format::since(at, now, offset, locale)` |
+| A file input, a paste, a drop                | the calls `files.pick`, `ui.pasteImage` (no drop: see Later) | `cx.call(api::FilesPick { … }, …)` |
+| `<canvas>` drawn on, `toBlob`                | `canvas`, and the call `canvas.export`         | `canvas("shot", w, h).tool(…)`, `api::CanvasExport::of(&canvas, path)` |
+| `keydown` on the document                    | `Subscriptions::shortcut`                      | `.shortcut("mod+z", Message::Undo)`  |
+| `element.focus()`, `scrollIntoView`, `setSelectionRange` | operations                         | `cx.focus`, `cx.scroll_to_line`, `cx.cursor_to` |
+| `setTimeout`                                 | `cx.after(key, delay, message)`, `cx.cancel(key)` | `cx.after("save", ms(1500), Save)` |
 | Focus ring                                   | Hangar's own, on every control                 |                                      |
 
 **What a native tab adds:**
@@ -380,9 +436,23 @@ page: one primary action, designed empty, loading, failed and denied states, num
 | `link`        | Text in the accent's colour that acts like a button.                        |
 | `table`       | Columns (`align`, `width`, `sortable`), rows of cells (any widget, a sort `key`), `selected`, `height`. |
 | `tree`        | Nodes that open and close, with icons; a node chosen.                       |
-| `image`       | From the kit's folder (`{ "kit": "assets/x.png" }`, no permission) or its data folder (`{ "data": … }`, needs `data.read`); PNG, JPEG, GIF, WebP, SVG, 10 MB; `fit`, a `description`. |
+| `image`       | From the kit's folder (`{ "kit": "assets/x.png" }`, no permission), its data folder (`{ "data": … }`, needs `data.read`), the workspace (`{ "file": … }`, needs `files.read`, hidden files with `files.write` too), or a picture the tab holds (`{ "held": "held-1" }`); PNG, JPEG, GIF, WebP, SVG, 10 MB; `fit`, a `description`. |
 | `sparkline`   | A line of values, small, `fill` under it.                                   |
 | `bars`        | Labelled bars, across or standing.                                          |
+| `canvas`      | A picture (`background`, an image source) with `marks` on it, in its own units (`width`, `height`: the picture's pixels as a rule), at a `zoom` or fitted to its room (`fitHeight`, 480 by default, never larger than its size). A drag draws with the `tool` (`line`, `arrow`, `rect`, `ellipse`, `free`; `point` makes a press a point) in the `ink`, `stroke` units wide: Hangar draws it as the pointer moves and sends the finished mark (`onDraw`); a press that does not move is a point (`onPoint`); without a zoom, the scale drawn at (`onFit`). White where there is no picture. |
+| `swatch`      | A square of an `ink`, `selected` ringed, its `label` on hover: choosing an ink. |
+
+**Marks** (`Mark`, in JSON a shape's `type` and geometry beside `ink`, `width`, `fill`): `line`
+(`from`, `to`, `arrow` for a head at `to`, five lines long, 14 units at least), `rect` and `ellipse`
+(`x`, `y`, `w`, `h`), `path` (`points`: a freehand stroke), `circle` (`center`, `r`; filled, its
+edge half a line), `text` (`at`, its middle at `at.y`; `text`, `size` in units, `bold`, `align` of
+its end at `at.x`; `fill` draws it on a box padded by 35 % of its size; `fallback`, where it goes,
+aligned the other way, when its box would leave the canvas). A width left out is the canvas's
+`stroke`, a 250th of its longer side by default (2 to 12, `default_stroke`). **Inks** are the one
+colour a kit names, since they are part of the picture: `red`, `orange`, `yellow`, `green`, `teal`,
+`blue`, `purple`, `magenta`, `gray`, `black`, `white` (kit-annotate's palette among them), or
+`"#rrggbb"`; `Ink::contrast` is black or white, whichever reads on it. A mark Hangar does not know
+draws nothing; an ink it does not know is black.
 
 Sizes are logical pixels: `{ "px": 120 }`, `"fill"`, `{ "portion": 2 }`, `"shrink"`. Hangar's
 interface size scales the whole window, so a kit never multiplies by it. Spacing follows Hangar UI's
@@ -399,6 +469,12 @@ steps (2, 4, 6, 8, 10, 12, 16, 20, 24). A `row` and a `column` fill their width 
 | `onSelect` of a select (option's value), tabs, menu, tree (ids) | `{ "text": … }`                |
 | `onRow` of a table                                              | `{ "index": its index in the rows given }` |
 | `onSort` of a table                                             | `{ "sort": { "column", "descending" } }` |
+| `onSelect` of radio buttons                                     | `{ "text": the option's value }` |
+| `onPress` of a swatch, `onOpen` of a menu                       | none                           |
+| `onDraw` of a canvas                                            | `{ "mark": { "type": "rect", … } }`, inside the canvas |
+| `onPoint` of a canvas                                           | `{ "point": { "x", "y" } }`, in its units |
+| `onFit` of a canvas                                             | `{ "number": the scale }`      |
+| `onRange` of a log given in parts                               | `{ "range": { "start", "end" } }`: give `lines` from `start`, `first: start` |
 
 Inputs are **controlled**: a text input shows the `value` the kit gives, and the kit gives the new one
 back in its next view, as in iced.
@@ -407,7 +483,10 @@ back in its next view, as in iced.
 has no `onSort` (by the cells' keys, numbers before texts, texts without regard to case, what has no
 key last, kept under the table's `id`); which tree nodes are open (from each node's `open`, kept under
 the tree's `id`); a text area's cursor and selection (kept under its `id`, its text replaced when the
-kit gives another than the one typed). A text area without `onInput` is read-only.
+kit gives another than the one typed); where a long log is scrolled (under its `id`); a canvas's drag
+in progress; which menu is open (under its `id`, or what it lists). A text area without `onInput` is
+read-only. A table sorting with `onSort` turns a column round on each press; a kit that wants a third
+press to unsort reads a press on its current column while descending as that.
 
 ## The host API
 
@@ -437,6 +516,10 @@ typed (`api::PanesList`, `api::FilesWrite`…), each with its `METHOD` and the t
 | `ui.toast`          | `{ message, kind?, action? }`                | —                         | `{ action }` once it goes: whether its action was pressed |
 | `ui.confirm`        | `{ message, confirm?, cancel?, danger? }`    | —                         | `true` or `false` |
 | `ui.copy`           | `{ text }`                                   | —, from a click           | `{}` |
+| `files.pick`        | `{ title?, extensions? }`                    | `files.read`, from a click | `null` when cancelled, or `{ name, size, path }` inside the workspace, `{ name, size, held }` outside it |
+| `ui.pasteImage`     | —                                            | —, from a click           | `{ held, width, height }`, or `not_found` |
+| `canvas.export`     | `{ path, width, height, background?, marks, stroke? }` | `files.write` (and the background's own) | `{ path, width, height, bytes, scale }` |
+| `image.size`        | `{ source }`, an image source               | the source's own          | `{ width, height }` in pixels |
 
 The three `ui.*` methods are new, and stand for what an HTML page had in `hangar.ui` and its own
 document: a toast at the foot of the tab (`kind` among `info`, `success`, `warning`, `error`; it goes
@@ -444,6 +527,31 @@ after 4 seconds, an error stays until closed; 30 a minute), a question in place 
 first and holding the focus, Escape cancels; one at a time, a second answers `busy`), and the
 clipboard. **`ui.copy` is refused (`denied`) unless the update that made it answers a person's click
 or keystroke**: a tab may not fill the clipboard by itself, as a page may not.
+
+Four more stand for a page's file input, paste, canvas and `naturalWidth` (`api::NATIVE_ONLY`; a page
+is answered `unknown` for all seven):
+
+- **`files.pick`** opens the system's chooser in the workspace folder, from a click or a keystroke
+  only, one at a time (`busy`). A file of the workspace (none of its parts hidden) is answered by its
+  `path`, which `files.read` and `{ "file": … }` read. One outside it is read, 10 MB at most, and held
+  by the tab: `{ "held": "held-2" }` shows it and `canvas.export` draws on it; nothing is written.
+- **`ui.pasteImage`**, from a click or a keystroke only: the clipboard's picture, held as a PNG.
+- **`canvas.export`** draws a canvas (the same marks, its background read under its own permission)
+  as a PNG at its own size, smaller (¾, ½, 35 %, ¼) when that would pass 10 MB, and writes it as a
+  new file of the workspace through `files.writeBinary` (never over a file: `conflict`; counted as a
+  `files.write`). The path ends in `.png`; at most 8 192 units a side, 5 000 marks, 200 000 points.
+  `api::CanvasExport::of(&canvas, "path.png")` exports what a canvas shows.
+- **`image.size`** reads a picture's size from its first bytes (PNG, JPEG, GIF, WebP, BMP), under the
+  permission its source needs: what a canvas over a capture is as large as, without the capture
+  crossing into the module.
+
+**Held pictures** are the tab instance's: 8 at most, the oldest let go for a new one, all of them when
+the tab restarts. A kit that must keep one writes it out (`canvas.export`).
+
+**Secrets.** Hangar logs no view, no input and no call's params: a `secure` field's value is in no
+log, no toast, nothing an agent reads. The only text of a tab an agent gets is what the kit sends with
+`panes.send`, so a kit that edits secrets (kit-editor) builds that text from names and counts, never
+from a value, and logs none (`console::*` lines are kept beside a failure, which a person reads).
 
 How a call is held, in this order, by `hangar-kit-host` before the app sees it — the order of
 `src/lib/kitApi.ts`, with its words:
@@ -537,8 +645,11 @@ refused call, an unreachable server, a missing file are not failures: they are a
    `kits::data`, `kits::loopback`, `kits::commands` (with the commands' acceptance), the bridge's queue
    for `panes.send` (labelled `kit:<id>`, Claude Code panes with the bridge only, `not_found`,
    `unavailable`), the notifier (titled `<kit name> · <title>`), the tab strip for `tab.*`, and the
-   window for `ui.*`. `image(source)` reads from the kit's folder or its data folder, under the same
-   path rules.
+   window for `ui.*`. `image(source)` reads from the kit's folder, its data folder or the workspace
+   (`{ "file": … }`, which the gate let through under `files.read`), under the same path rules;
+   `pick_file` opens the system's chooser (rfd) and `clipboard_image` reads the clipboard's picture
+   (arboard), both off the window's thread (`kit_tabs/media.rs`). `files.pick`, `ui.pasteImage` and
+   `canvas.export` never reach `call`: the tab does them with these and `files.writeBinary`.
 3. **`KitTab::start`**, then: `draw(style)` in the view, mapped into the app's message with the tab's
    key; `update(message)` with what it sends; the `Effects` it answers run as tasks
    (`effects.task()`), each answering `KitMessage::Reply`; `subscription().with(key)` for its timers;
@@ -579,9 +690,30 @@ The person this was written for was not there to ask; these were decided, and ca
   is still the only authority.
 - **Hangar keeps a table's order, a tree's open nodes and a text area's cursor**; inputs are
   controlled otherwise.
-- **Images from the kit's folder need nothing; from its data folder, `data.read`.** Images from the
-  workspace are not a widget source: a tab reads them with `files.readBinary`, which its permissions
-  already cover. A source for bytes a kit holds is left for later.
+- **Images from the kit's folder need nothing; from its data folder, `data.read`; from the
+  workspace, `files.read`**, by the paths `files.read` reads. A capture is shown and drawn on where
+  it is, rather than read into the module, which a message of 4 MB and a deadline of 250 ms would not
+  hold for a large one.
+- **What the person hands a tab from outside the workspace is held by the tab, not written**:
+  `files.pick` of a file elsewhere and `ui.pasteImage` give a `held` id the tab's widgets and
+  `canvas.export` read, for as long as it runs. Writing them into the kit's data folder would be a
+  side effect the person did not ask for, and a binary write to it that kits do not have.
+- **A drag is Hangar's to draw**, and the kit hears its end: a line follows the pointer at the
+  window's rate, and a freehand stroke of a thousand points makes one update, not a thousand.
+- **`canvas.export` is drawn by Hangar** (tiny-skia, Inter through ab_glyph, the marks laid out once
+  for the screen and the file), on a thread of its own, then written as `files.writeBinary` writes:
+  decoding and encoding a 4K capture in the module would not fit its 250 ms, nor its message.
+- **Inks are named colours, or hex**: what is drawn on a picture is the picture's, the same in every
+  theme; everywhere else a kit still says what something is, not its colour.
+- **Shortcuts are subscriptions**, delivered when the person is in the tab and no focused control
+  used the key, as a keystroke; **focus and scroll are operations** of an update's output, done once
+  the next page is drawn, on ids Hangar keeps apart for each tab.
+- **A long log has lines of one height**, kept whole: where a line is follows from its index, so
+  Hangar draws the lines in view, scrolls to one, and asks the kit for others when it gives a part.
+  A list of rows of any height is not windowed: a page shows a hundred and a "Show more".
+- **One-shot timers are the SDK's**, on the subscription timers, each wait a timer of its own id.
+- **The time zone is the one at start**, in `Start`: a tab open across a change of summer time is an
+  hour off until it starts again, which a kit that writes "today at 21:14" can live with.
 - **`col!`, not `column!`**, for the SDK's macro: std has its own `column!()`, which a glob import of
   the prelude would make ambiguous.
 - **The example and the test kit are workspace members**, built for the host too, with the host's
@@ -596,13 +728,20 @@ The person this was written for was not there to ask; these were decided, and ca
   own, styled from `KitStyle`, not yet hangar-ui's `input::*`. The contract does not change.
 - **The failure reasons** (a module that does not load, a deadline passed) are the runtime's
   English: what a kit's author reads. The titles and the button around them are translated.
-- **A long list** (`hangar.ui.list`, a hundred thousand lines) is not virtualised: a kit sends the
-  lines in view of a `log` or `table` with a `height`. A windowed list widget, asking the kit for
-  ranges, is the next widget to add.
+- **A long list of rows of any height** (`hangar.ui.list` with rich rows): a `log` with an id is
+  windowed, a `table` and a `list` are not. A list asking for ranges of rows of a height it is told
+  is the next widget to add.
 - **Markdown**, through iced's `markdown`, a natural widget for kits that show agents' output.
-- **Clock, date, since** in the SDK's `format`, once `Start` carries the person's time zone offset.
 - **Accessibility**: iced has no accessibility tree yet; labels on icons and glyphs are tooltips until
   it does.
-- **The progress bar's indeterminate state** is drawn still, the **split** is not draggable, and a
-  tab cannot move the focus (which an HTML tab should not do by itself either).
+- **Selectable text**: iced's text cannot be selected; a kit gives a copy button (`cx.copy`) or a
+  read-only `textArea` for what a person copies from (hangar-ui's `selectable` could serve `pre`).
+- **A file dropped on a tab**: the window hears a drop, not where it lands; a kit offers `files.pick`.
+- **A secret over several lines**: a `textArea` has no `secure`; a kit shows a secure one-line field
+  until the value is revealed, as kit-editor's page does.
+- **Lines of a long log that wrap**, and a text area with line numbers that scrolls sideways: both
+  keep lines whole, the second cutting a long one at its edge.
+- **A closing tab's last write**: a tab is dropped at once, with no last update, as a page's
+  `pagehide` is not to be relied on either; a kit saves as it goes (`cx.after` debounced).
+- **The split** is not draggable.
 - **Compiled modules on disk**: wasmtime's cache, so a tab opens without compiling after a restart.

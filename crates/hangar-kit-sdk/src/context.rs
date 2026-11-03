@@ -1,10 +1,12 @@
 //! What a kit hands Hangar during `init` and `update`: calls, answered later
 //! by a message of its own, as an iced `Task` would be.
 
+use std::time::Duration;
+
 use serde_json::Value;
 
 use hangar_kit_ui::Notice;
-use hangar_kit_ui::abi::{Call, CallId, LogLevel};
+use hangar_kit_ui::abi::{Call, CallId, LogLevel, MIN_TIMER_MS, Operation};
 use hangar_kit_ui::api::{self, KitError, Request};
 
 /// A call's answer, turned into the kit's message; none drops it.
@@ -17,14 +19,23 @@ pub struct Context<M> {
     next_id: CallId,
     pub(crate) calls: Vec<(Call, Pending<M>)>,
     gesture: bool,
+    utc_offset: i32,
+    pub(crate) operations: Vec<Operation>,
+    /// One-shot timers asked for, by key: `(key, delay in ms, message)`.
+    pub(crate) after: Vec<(String, u32, M)>,
+    pub(crate) cancelled: Vec<String>,
 }
 
 impl<M: 'static> Context<M> {
-    pub(crate) fn new(next_id: CallId, gesture: bool) -> Self {
+    pub(crate) fn new(next_id: CallId, gesture: bool, utc_offset: i32) -> Self {
         Context {
             next_id,
             calls: Vec::new(),
             gesture,
+            utc_offset,
+            operations: Vec::new(),
+            after: Vec::new(),
+            cancelled: Vec::new(),
         }
     }
 
@@ -102,6 +113,80 @@ impl<M: 'static> Context<M> {
     /// Milliseconds since the Unix epoch, UTC, from Hangar's clock.
     pub fn now(&self) -> i64 {
         crate::sys::now_ms()
+    }
+
+    /// The person's time zone when the tab started, as minutes east of UTC:
+    /// what [`format::since`](crate::format::since) and the others take.
+    pub fn utc_offset(&self) -> i32 {
+        self.utc_offset
+    }
+
+    /// `message` once, `delay` from now (100 ms at the shortest), under
+    /// `key`: asking again under the same key starts the wait again, which
+    /// is a debounce (save 1.5 s after the last keystroke). Gone with the
+    /// tab, as a page's `setTimeout` is. It takes one of the tab's 16 timers
+    /// while it waits.
+    pub fn after(&mut self, key: impl Into<String>, delay: Duration, message: M) {
+        let ms = delay
+            .as_millis()
+            .clamp(MIN_TIMER_MS as u128, u32::MAX as u128) as u32;
+        let key = key.into();
+        self.after.retain(|(waiting, _, _)| *waiting != key);
+        self.after.push((key, ms, message));
+    }
+
+    /// The message [`Context::after`] waits to send under `key`, not sent.
+    pub fn cancel(&mut self, key: impl Into<String>) {
+        let key = key.into();
+        self.after.retain(|(waiting, _, _)| *waiting != key);
+        self.cancelled.push(key);
+    }
+
+    /// The keyboard goes to the text input, search or text area of this `id`
+    /// once the page is drawn: the note just added, the field that was wrong.
+    pub fn focus(&mut self, id: impl Into<String>) {
+        self.operations.push(Operation::Focus { id: id.into() });
+    }
+
+    /// The long log of this `id` shows its line `line`, from 0, with a few
+    /// lines above it: the first error, the next one.
+    pub fn scroll_to_line(&mut self, id: impl Into<String>, line: u32) {
+        self.operations.push(Operation::ScrollTo {
+            id: id.into(),
+            line: Some(line),
+            y: None,
+            end: false,
+        });
+    }
+
+    /// The `scroll` of this `id` shows what is `y` logical pixels from its top.
+    pub fn scroll_to(&mut self, id: impl Into<String>, y: f32) {
+        self.operations.push(Operation::ScrollTo {
+            id: id.into(),
+            line: None,
+            y: Some(y),
+            end: false,
+        });
+    }
+
+    /// The `scroll` or log of this `id` shows its end.
+    pub fn scroll_to_end(&mut self, id: impl Into<String>) {
+        self.operations.push(Operation::ScrollTo {
+            id: id.into(),
+            line: None,
+            y: None,
+            end: true,
+        });
+    }
+
+    /// The cursor of the text area of this `id` goes to `line` and `column`,
+    /// both from 1; one with line numbers scrolls to it.
+    pub fn cursor_to(&mut self, id: impl Into<String>, line: u32, column: u32) {
+        self.operations.push(Operation::CursorTo {
+            id: id.into(),
+            line: line.max(1),
+            column: column.max(1),
+        });
     }
 
     fn push(

@@ -21,6 +21,8 @@ pub enum KitMessage {
     Timer(String),
     /// The person asked for the tab again, after a failure or from its bar.
     Reload,
+    /// A shortcut the tab subscribed to was pressed in it, by its spec.
+    Shortcut(String),
 }
 
 #[derive(Debug, Clone)]
@@ -42,4 +44,13 @@ pub enum Local {
     },
     /// A menu opened, by what it holds, or the open one closed.
     Menu(Option<u64>),
+    /// A menu with an `onOpen` opened: Hangar keeps it open and tells the
+    /// kit, which may list other items.
+    MenuOpened {
+        key: u64,
+        view: u32,
+        handler: HandlerId,
+    },
+    /// A long log scrolled: where its view starts, and how tall it is.
+    Scrolled { log: String, top: f32, height: f32 },
 }

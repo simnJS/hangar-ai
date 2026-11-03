@@ -19,6 +19,7 @@ use serde_json::{Map, Value};
 
 use hangar_kit_ui::abi::{Call, CallId};
 use hangar_kit_ui::api::{self, BadgeState, KitError, Needs, limits};
+use hangar_kit_ui::{ImageSource, Shape};
 
 use crate::api::{HostCall, LoopbackCall};
 
@@ -159,6 +160,17 @@ impl Gate {
                 "a question is already asked; wait for its answer",
             ));
         }
+        if let HostCall::FilesPick(_) = host_call
+            && self
+                .waiting
+                .values()
+                .any(|method| *method == api::method::FILES_PICK)
+        {
+            return Err(error(
+                KitError::BUSY,
+                "a file chooser is already open; wait for its answer",
+            ));
+        }
         self.rate(&host_call, now)?;
         self.waiting.insert(call.id, host_call.method());
         Ok(host_call)
@@ -173,7 +185,9 @@ impl Gate {
                 limits::WRITES_PER_MINUTE,
                 "data.write",
             ),
-            HostCall::FilesWrite { .. } | HostCall::FilesWriteBinary { .. } => (
+            HostCall::FilesWrite { .. }
+            | HostCall::FilesWriteBinary { .. }
+            | HostCall::CanvasExport(_) => (
                 &mut self.files_write,
                 limits::WRITES_PER_MINUTE,
                 "files.write",
@@ -680,8 +694,173 @@ fn parse(
             }
             HostCall::Copy { text: copy.text }
         }
+        FILES_PICK => {
+            if !gesture {
+                return Err(error(
+                    KitError::DENIED,
+                    "files.pick answers a click or a keystroke only: a tab may not open a file chooser by itself",
+                ));
+            }
+            let empty = Value::Object(Map::new());
+            let pick: api::FilesPick = typed(if params.is_null() { &empty } else { params })?;
+            if let Some(title) = &pick.title
+                && (title.chars().count() > 120 || title.chars().any(hides_or_turns))
+            {
+                return Err(invalid(
+                    "title must be plain text on one line, 120 characters at most",
+                ));
+            }
+            if pick.extensions.len() > limits::PICK_MAX_EXTENSIONS
+                || pick.extensions.iter().any(|extension| {
+                    extension.is_empty()
+                        || extension.len() > 16
+                        || !extension.bytes().all(|b| b.is_ascii_alphanumeric())
+                })
+            {
+                return Err(invalid(format!(
+                    "extensions must be at most {} names of letters and digits, without their dot",
+                    limits::PICK_MAX_EXTENSIONS
+                )));
+            }
+            HostCall::FilesPick(pick)
+        }
+        UI_PASTE_IMAGE => {
+            if !gesture {
+                return Err(error(
+                    KitError::DENIED,
+                    "ui.pasteImage answers a click or a keystroke only: a tab may not read the clipboard by itself",
+                ));
+            }
+            HostCall::PasteImage
+        }
+        CANVAS_EXPORT => HostCall::CanvasExport(Box::new(canvas_export(params, granted)?)),
+        IMAGE_SIZE => {
+            let asked: api::ImageSize = typed(params)?;
+            HostCall::ImageSize(image_source(&asked.source, granted)?)
+        }
         other => return Err(error(KitError::UNKNOWN, format!("no method {other:?}"))),
     })
+}
+
+/// An image source a call names, held to the rules of the folder it reads
+/// and to the permission that folder needs: the kit's own needs nothing,
+/// its data folder `data.read`, the workspace `files.read` (hidden files
+/// with `files.write` too); a picture the tab holds, nothing.
+pub(crate) fn image_source(
+    source: &ImageSource,
+    granted: &[String],
+) -> Result<ImageSource, KitError> {
+    let holds = |permission: &str| granted.iter().any(|held| held == permission);
+    let denied = |permission: &str| {
+        error(
+            KitError::DENIED,
+            format!("this tab was not granted {permission}"),
+        )
+    };
+    Ok(match source {
+        ImageSource::Kit(path) => ImageSource::Kit(relative_path(
+            Some(&Value::String(path.clone())),
+            "the kit's folder",
+            false,
+        )?),
+        ImageSource::Data(path) => {
+            if !holds(api::permission::DATA_READ) {
+                return Err(denied(api::permission::DATA_READ));
+            }
+            ImageSource::Data(data_path(Some(&Value::String(path.clone())))?)
+        }
+        ImageSource::File(path) => {
+            if !holds(api::permission::FILES_READ) {
+                return Err(denied(api::permission::FILES_READ));
+            }
+            let raw = Value::String(path.clone());
+            ImageSource::File(if api::reads_hidden_files(granted) {
+                project_path(Some(&raw))?
+            } else {
+                workspace_path(Some(&raw))?
+            })
+        }
+        ImageSource::Held(id) => {
+            if id.is_empty() || id.len() > 64 {
+                return Err(invalid("held must name a picture the tab holds"));
+            }
+            ImageSource::Held(id.clone())
+        }
+    })
+}
+
+/// `canvas.export`'s params: a `.png` path `files.write` reaches, a size and
+/// marks within the limits, every number a number, the background readable.
+fn canvas_export(params: &Value, granted: &[String]) -> Result<api::CanvasExport, KitError> {
+    let mut export: api::CanvasExport = typed(params)?;
+    export.path = project_path(object(params)?.get("path"))?;
+    if !export.path.to_ascii_lowercase().ends_with(".png") {
+        return Err(invalid(
+            "path must end in .png: the picture is written as a PNG",
+        ));
+    }
+    let side = |value: f32| value.is_finite() && (1.0..=limits::CANVAS_MAX_SIDE).contains(&value);
+    if !side(export.width) || !side(export.height) {
+        return Err(invalid(format!(
+            "width and height must be from 1 to {}",
+            limits::CANVAS_MAX_SIDE
+        )));
+    }
+    if export
+        .stroke
+        .is_some_and(|stroke| !stroke.is_finite() || stroke <= 0.0)
+    {
+        return Err(invalid("stroke must be a positive number"));
+    }
+    if export.marks.len() > limits::CANVAS_MAX_MARKS {
+        return Err(invalid(format!(
+            "at most {} marks",
+            limits::CANVAS_MAX_MARKS
+        )));
+    }
+    let mut points = 0;
+    for mark in &export.marks {
+        let finite = |values: &[f32]| values.iter().all(|value| value.is_finite());
+        let fine = match &mark.shape {
+            Shape::Line { from, to, .. } => finite(&[from.x, from.y, to.x, to.y]),
+            Shape::Rect { x, y, w, h } | Shape::Ellipse { x, y, w, h } => finite(&[*x, *y, *w, *h]),
+            Shape::Path { points: line } => {
+                points += line.len();
+                line.iter().all(|point| finite(&[point.x, point.y]))
+            }
+            Shape::Circle { center, r } => finite(&[center.x, center.y, *r]),
+            Shape::Text {
+                at,
+                text,
+                size,
+                fallback,
+                ..
+            } => {
+                if text.chars().count() > limits::CANVAS_TEXT_MAX_CHARS {
+                    return Err(invalid(format!(
+                        "a text is at most {} characters",
+                        limits::CANVAS_TEXT_MAX_CHARS
+                    )));
+                }
+                finite(&[at.x, at.y, *size])
+                    && fallback.is_none_or(|point| finite(&[point.x, point.y]))
+            }
+            Shape::Unsupported => true,
+        } && mark.width.is_none_or(f32::is_finite);
+        if !fine {
+            return Err(invalid("every number of a mark must be a finite number"));
+        }
+    }
+    if points > limits::CANVAS_MAX_POINTS {
+        return Err(invalid(format!(
+            "at most {} points in all the paths",
+            limits::CANVAS_MAX_POINTS
+        )));
+    }
+    if let Some(background) = &export.background {
+        export.background = Some(image_source(background, granted)?);
+    }
+    Ok(export)
 }
 
 #[cfg(test)]
@@ -1030,5 +1209,154 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(bad.code, "invalid");
+    }
+
+    #[test]
+    fn a_file_chooser_needs_a_gesture_files_read_and_one_at_a_time() {
+        let mut gate = Gate::new();
+        let now = Instant::now();
+        let read = grant(&["files.read"]);
+        let pick = json!({ "title": "An image", "extensions": ["png", "jpg"] });
+        let not_clicked = gate
+            .admit(&call(1, "files.pick", pick.clone()), &read, false, now, ok)
+            .unwrap_err();
+        assert_eq!(not_clicked.code, "denied");
+        let no_grant = gate
+            .admit(&call(2, "files.pick", pick.clone()), &[], true, now, ok)
+            .unwrap_err();
+        assert_eq!(
+            no_grant,
+            KitError::new("denied", "this tab was not granted files.read")
+        );
+        assert!(matches!(
+            gate.admit(&call(3, "files.pick", pick.clone()), &read, true, now, ok),
+            Ok(HostCall::FilesPick(_))
+        ));
+        let busy = gate
+            .admit(&call(4, "files.pick", pick), &read, true, now, ok)
+            .unwrap_err();
+        assert_eq!(busy.code, "busy");
+        let bad = gate
+            .admit(
+                &call(5, "files.pick", json!({ "extensions": [".png"] })),
+                &read,
+                true,
+                now,
+                ok,
+            )
+            .unwrap_err();
+        assert_eq!(bad.code, "invalid");
+        assert_eq!(
+            gate.admit(&call(6, "ui.pasteImage", json!({})), &[], false, now, ok)
+                .unwrap_err()
+                .code,
+            "denied"
+        );
+        assert_eq!(
+            gate.admit(&call(7, "ui.pasteImage", Value::Null), &[], true, now, ok),
+            Ok(HostCall::PasteImage)
+        );
+    }
+
+    #[test]
+    fn a_canvas_export_is_a_png_files_write_reaches_with_a_background_it_may_read() {
+        let mut gate = Gate::new();
+        let now = Instant::now();
+        let write = grant(&["files.write"]);
+        let export = |path: &str, background: Value| {
+            json!({
+                "path": path, "width": 640, "height": 480, "background": background,
+                "marks": [{ "type": "arrow", "from": { "x": 1, "y": 2 }, "to": { "x": 3, "y": 4 } }]
+            })
+        };
+        let admitted = gate
+            .admit(
+                &call(1, "canvas.export", export("shots\\a.png", Value::Null)),
+                &write,
+                false,
+                now,
+                ok,
+            )
+            .unwrap();
+        let HostCall::CanvasExport(export_call) = admitted else {
+            panic!("{admitted:?}");
+        };
+        assert_eq!(export_call.path, "shots/a.png");
+        gate.settle(1);
+        for (id, path, background, code) in [
+            (2, "shots/a.jpg", Value::Null, "invalid"),
+            (3, "../a.png", Value::Null, "invalid"),
+            (4, "a.png", json!({ "data": "pasted/x.png" }), "denied"),
+            // The workspace is read under files.read, which it does not hold.
+            (5, "a.png", json!({ "file": "x.png" }), "denied"),
+        ] {
+            let refused = gate
+                .admit(
+                    &call(id, "canvas.export", export(path, background)),
+                    &write,
+                    false,
+                    now,
+                    ok,
+                )
+                .unwrap_err();
+            assert_eq!(refused.code, code, "{path}");
+        }
+        let huge = json!({ "path": "a.png", "width": 100000, "height": 10, "marks": [] });
+        assert_eq!(
+            gate.admit(&call(6, "canvas.export", huge), &write, false, now, ok)
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        // It counts as a files.write: ten a minute, with files.writeBinary.
+        let mut gate = Gate::new();
+        for id in 10..20 {
+            gate.admit(
+                &call(id, "canvas.export", export("a.png", Value::Null)),
+                &write,
+                false,
+                now,
+                ok,
+            )
+            .unwrap();
+            gate.settle(id);
+        }
+        assert_eq!(
+            gate.admit(
+                &call(
+                    20,
+                    "files.writeBinary",
+                    json!({ "path": "b.png", "base64": "" })
+                ),
+                &write,
+                false,
+                now,
+                ok
+            )
+            .unwrap_err()
+            .code,
+            "rate_limited"
+        );
+    }
+
+    #[test]
+    fn an_image_source_is_held_to_its_folders_rules_and_permission() {
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            image_source(&ImageSource::Kit("assets\\logo.png".into()), &none),
+            Ok(ImageSource::Kit("assets/logo.png".into()))
+        );
+        assert_eq!(
+            image_source(&ImageSource::File("shot.png".into()), &none)
+                .unwrap_err()
+                .code,
+            "denied"
+        );
+        let read = grant(&["files.read"]);
+        assert!(image_source(&ImageSource::File(".hidden/x.png".into()), &read).is_err());
+        let both = grant(&["files.read", "files.write"]);
+        assert!(image_source(&ImageSource::File(".hidden/x.png".into()), &both).is_ok());
+        assert!(image_source(&ImageSource::File(".git/x.png".into()), &both).is_err());
+        assert!(image_source(&ImageSource::Held("held-3".into()), &none).is_ok());
     }
 }

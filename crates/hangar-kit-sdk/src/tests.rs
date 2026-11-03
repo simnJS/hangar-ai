@@ -156,3 +156,156 @@ fn a_value_of_another_kind_is_dropped() {
     tab.ui(input.unwrap(), Some(EventValue::Bool(true)));
     assert_eq!(tab.kit().name, "");
 }
+
+/// A sketch of kit-annotate and kit-ci together: marks drawn on a canvas,
+/// undone with a shortcut, saved after a pause, a note focused, a long log
+/// given in parts.
+struct Sketch {
+    marks: Vec<Mark>,
+    saves: u32,
+    window: (u32, u32),
+    copied: bool,
+}
+
+#[derive(Clone, Debug)]
+enum Sketched {
+    Drew(Mark),
+    Note(Point),
+    Undo,
+    Save,
+    Saved,
+    Copy,
+    Range(Range),
+}
+
+impl Kit for Sketch {
+    type Message = Sketched;
+
+    fn init(_start: &Start, _cx: &mut Context<Sketched>) -> Self {
+        Sketch {
+            marks: Vec::new(),
+            saves: 0,
+            window: (0, 100),
+            copied: false,
+        }
+    }
+
+    fn update(&mut self, message: Sketched, cx: &mut Context<Sketched>) {
+        match message {
+            Sketched::Drew(mark) => {
+                self.marks.push(mark);
+                cx.after("save", Duration::from_millis(1500), Sketched::Save);
+            }
+            Sketched::Note(at) => {
+                self.marks.push(Mark::circle(at, 6.0).fill(Ink::Red));
+                cx.focus(format!("note-{}", self.marks.len()));
+            }
+            Sketched::Undo => {
+                self.marks.pop();
+                cx.after("save", Duration::from_millis(1500), Sketched::Save);
+            }
+            Sketched::Save => self.saves += 1,
+            Sketched::Saved => {}
+            Sketched::Copy => {
+                self.copied = cx.is_gesture();
+                cx.copy("marks");
+            }
+            Sketched::Range(range) => {
+                self.window = (range.start, range.end);
+                cx.scroll_to_line("job", range.start);
+            }
+        }
+    }
+
+    fn view(&self) -> Element<Sketched> {
+        let lines = (self.window.0..self.window.1).map(|n| log_line(format!("line {n}")));
+        col![
+            canvas("shot", 800.0, 600.0)
+                .tool(Some(Tool::Arrow))
+                .marks(self.marks.clone())
+                .on_draw(Sketched::Drew)
+                .on_point(Sketched::Note),
+            swatch(Ink::Blue, "Blue").on_press(Sketched::Saved),
+            log_lines(lines)
+                .id("job")
+                .window(self.window.0, 20_000)
+                .on_range(Sketched::Range),
+        ]
+        .into()
+    }
+
+    fn subscriptions(&self) -> Subscriptions<Sketched> {
+        Subscriptions::none()
+            .shortcut("Mod+Z", Sketched::Undo)
+            .shortcut("mod+shift+c", Sketched::Copy)
+            .shortcut("hyper+q", Sketched::Saved)
+    }
+}
+
+#[test]
+fn a_canvas_sends_what_was_drawn_and_where_it_was_pressed() {
+    let mut tab = Harness::<Sketch>::new(testing::start());
+    tab.draw("shot", Mark::arrow((10.0, 10.0), (200.0, 90.0)));
+    tab.point("shot", Point::new(40.0, 50.0));
+    assert_eq!(tab.kit().marks.len(), 2);
+    assert_eq!(
+        tab.take_operations(),
+        vec![crate::ui::abi::Operation::Focus {
+            id: "note-2".into()
+        }]
+    );
+    tab.press("Blue");
+}
+
+#[test]
+fn shortcuts_are_subscribed_by_one_spelling_and_are_gestures() {
+    let mut tab = Harness::<Sketch>::new(testing::start());
+    assert_eq!(
+        tab.subscriptions().shortcuts,
+        vec!["mod+z", "mod+shift+c"],
+        "the spec that does not read is left out"
+    );
+    tab.draw("shot", Mark::arrow((0.0, 0.0), (5.0, 5.0)));
+    tab.shortcut("mod+z");
+    assert!(tab.kit().marks.is_empty());
+    tab.shortcut("shift+mod+c");
+    assert!(tab.kit().copied);
+    assert_eq!(tab.methods(), vec!["ui.copy"]);
+}
+
+#[test]
+fn after_waits_once_and_asking_again_starts_the_wait_again() {
+    let mut tab = Harness::<Sketch>::new(testing::start());
+    tab.draw("shot", Mark::arrow((0.0, 0.0), (5.0, 5.0)));
+    let first = tab.subscriptions().timers.clone();
+    tab.draw("shot", Mark::arrow((1.0, 0.0), (5.0, 5.0)));
+    let second = tab.subscriptions().timers.clone();
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].id, second[0].id, "a new wait is a new timer");
+    assert_eq!(second[0].every_ms, 1500);
+    // The first wait's timer, had the host not stopped it yet, sends nothing.
+    tab.timer(&first[0].id);
+    assert_eq!(tab.kit().saves, 0);
+    tab.elapse("save");
+    assert_eq!(tab.kit().saves, 1);
+    assert!(!tab.waits("save"), "it is sent once");
+}
+
+#[test]
+fn a_long_log_is_given_the_lines_it_asks_for() {
+    let mut tab = Harness::<Sketch>::new(testing::start());
+    assert!(tab.shows("line 99"));
+    tab.range("job", 4000, 4200);
+    assert!(tab.shows("line 4100"));
+    assert!(!tab.shows("line 99"));
+    assert_eq!(
+        tab.take_operations(),
+        vec![crate::ui::abi::Operation::ScrollTo {
+            id: "job".into(),
+            line: Some(4000),
+            y: None,
+            end: false
+        }]
+    );
+}

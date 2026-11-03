@@ -200,6 +200,32 @@ pub enum Icon {
     Restart,
     Search,
     Updown,
+    // Added for the kits' native tabs; a Hangar that has not them draws
+    // nothing in their place.
+    /// Back: a page before this one.
+    ArrowLeft,
+    ArrowRight,
+    /// Out of Hangar: a page in the browser.
+    ArrowUpRight,
+    ChevronLeft,
+    ChevronRight,
+    ChevronUp,
+    Minus,
+    Pencil,
+    Trash,
+    Folder,
+    Link,
+    Send,
+    Download,
+    Play,
+    Pause,
+    Stop,
+    Clock,
+    Filter,
+    /// Undo: an arrow turning back.
+    Undo,
+    Expand,
+    Collapse,
     /// An icon a newer Hangar has: this one draws nothing in its place.
     #[serde(other)]
     Unknown,
@@ -289,6 +315,10 @@ pub enum LineKind {
     Warning,
     /// A heading inside the log: a job, a step.
     Head,
+    /// A line a diff adds, drawn on a green tint.
+    Added,
+    /// A line a diff takes away, drawn on a red tint.
+    Removed,
 }
 
 /// Which way a split or a scroll goes.

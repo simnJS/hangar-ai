@@ -6,9 +6,18 @@
 //! from; what Hangar keeps itself (a table's order, a tree's open nodes, a
 //! text area's cursor, which menu is open) becomes a [`KitMessage::Local`].
 
+mod board;
 mod chart;
 mod icons;
+mod keys;
+mod long;
+mod motion;
 mod style;
+
+pub(crate) use long::{
+    Scroller, area_scroller_id, editor_line_top, find_area, find_field, find_scroller,
+    log_line_top, range_wanted, widget_id,
+};
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -36,7 +45,7 @@ use hangar_kit_ui::{
 
 use crate::api::KitApi;
 use crate::message::{KitMessage, Local};
-use crate::tab::{Failure, FailureKind, KitTab, LogEntry};
+use crate::tab::{Failure, FailureKind, Held, KitTab, LogEntry};
 
 pub use style::{KitStyle, Palette};
 
@@ -85,6 +94,11 @@ pub(crate) struct WidgetState {
     /// The menu open, by what it holds ([`menu_key`]): a menu has no id, and
     /// what it lists is what tells one from another across views.
     pub menu: Option<u64>,
+    /// Where each long log's view starts, and how tall it is, by its id.
+    pub scrolls: HashMap<String, (f32, f32)>,
+    /// The lines last asked of a long log given in parts, so a scroll asks
+    /// for them once.
+    pub asked: HashMap<String, ui::Range>,
 }
 
 /// More images than this in a tab's cache, and it starts again.
@@ -93,8 +107,25 @@ const MAX_IMAGES: usize = 256;
 impl WidgetState {
     /// Brings what Hangar keeps in line with a new view: text areas made or
     /// given a new text, those gone dropped, images read once.
-    pub(crate) fn sync(&mut self, view: &ui::abi::View, kit: &dyn KitApi, granted: &[String]) {
+    pub(crate) fn sync(
+        &mut self,
+        view: &ui::abi::View,
+        kit: &dyn KitApi,
+        granted: &[String],
+        held: &Held,
+    ) {
         let mut areas = HashSet::new();
+        let mut logs = HashSet::new();
+        let load = |images: &mut HashMap<ImageSource, Picture>, source: &ImageSource| {
+            if images.contains_key(source) {
+                return;
+            }
+            if images.len() >= MAX_IMAGES {
+                images.clear();
+            }
+            let loaded = load_image(source, kit, granted, held);
+            images.insert(source.clone(), loaded);
+        };
         view.root.for_each(&mut |element| match element {
             ui::Element::TextArea(area) => {
                 areas.insert(area.id.clone());
@@ -118,39 +149,59 @@ impl WidgetState {
                     Some(_) => {}
                 }
             }
-            ui::Element::Image(picture) if !self.images.contains_key(&picture.source) => {
-                if self.images.len() >= MAX_IMAGES {
-                    self.images.clear();
+            ui::Element::Image(picture) => load(&mut self.images, &picture.source),
+            ui::Element::Canvas(canvas) => {
+                if let Some(source) = &canvas.background {
+                    load(&mut self.images, source);
                 }
-                let loaded = load_image(&picture.source, kit, granted);
-                self.images.insert(picture.source.clone(), loaded);
+            }
+            ui::Element::Log(log) if !log.id.is_empty() => {
+                logs.insert(log.id.clone());
             }
             _ => {}
         });
         self.editors.retain(|id, _| areas.contains(id));
+        self.scrolls.retain(|id, _| logs.contains(id));
+        self.asked.retain(|id, _| logs.contains(id));
     }
 }
 
-fn load_image(source: &ImageSource, kit: &dyn KitApi, granted: &[String]) -> Picture {
-    let path = match source {
-        ImageSource::Kit(path) => path,
-        ImageSource::Data(path) => {
-            if !granted
-                .iter()
-                .any(|held| held == api::permission::DATA_READ)
-            {
-                return Picture::Missing(Missing::NeedsData);
-            }
-            path
+/// Whether bytes are an SVG rather than a raster: by its name, or, for a
+/// picture the tab holds, by how it starts.
+fn is_svg(source: &ImageSource, bytes: &[u8]) -> bool {
+    match source {
+        ImageSource::Kit(path) | ImageSource::Data(path) | ImageSource::File(path) => {
+            path.to_ascii_lowercase().ends_with(".svg")
         }
+        ImageSource::Held(_) => {
+            let head = String::from_utf8_lossy(&bytes[..bytes.len().min(256)]).to_ascii_lowercase();
+            head.trim_start().starts_with("<svg") || head.contains("<svg")
+        }
+    }
+}
+
+fn load_image(source: &ImageSource, kit: &dyn KitApi, granted: &[String], held: &Held) -> Picture {
+    let checked = match crate::gate::image_source(source, granted) {
+        Ok(checked) => checked,
+        Err(_) if matches!(source, ImageSource::Data(_)) => {
+            return Picture::Missing(Missing::NeedsData);
+        }
+        Err(KitError { message, .. }) => return Picture::Missing(Missing::Refused(message)),
     };
-    match kit.image(source) {
+    let bytes = match &checked {
+        ImageSource::Held(id) => held.get(id).map(|bytes| (*bytes).clone()).ok_or_else(|| {
+            KitError::new(
+                KitError::NOT_FOUND,
+                format!("this tab holds no picture {id}"),
+            )
+        }),
+        _ => kit.image(&checked),
+    };
+    match bytes {
         Ok(bytes) if bytes.len() > api::limits::BINARY_MAX_BYTES => {
             Picture::Missing(Missing::TooLarge)
         }
-        Ok(bytes) if path.to_ascii_lowercase().ends_with(".svg") => {
-            Picture::Vector(svg::Handle::from_memory(bytes))
-        }
+        Ok(bytes) if is_svg(&checked, &bytes) => Picture::Vector(svg::Handle::from_memory(bytes)),
         Ok(bytes) => Picture::Raster(image::Handle::from_bytes(bytes)),
         Err(KitError { message, .. }) => Picture::Missing(Missing::Refused(message)),
     }
@@ -167,8 +218,9 @@ impl KitTab {
                     style,
                     seq: view.seq,
                     widgets: &self.widgets,
+                    ns: self.ns,
                 };
-                element(&cx, &view.root)
+                keys::shortcuts(element(&cx, &view.root), self.shortcuts())
             }
             (None, None) => center(state_label(
                 style,
@@ -193,6 +245,8 @@ struct Cx<'a> {
     style: KitStyle,
     seq: u32,
     widgets: &'a WidgetState,
+    /// The tab's namespace for its widgets' ids ([`widget_id`]).
+    ns: u64,
 }
 
 impl Cx<'_> {
@@ -333,23 +387,47 @@ fn vertical_line(style: KitStyle) -> El<'static> {
         .into()
 }
 
-/// A kit's icon as hangar-ui has it: the twelve of Hangar UI are among the
-/// window's own. One a newer Hangar has is none here.
-fn ui_icon(icon: ui::Icon) -> Option<hangar_ui::Icon> {
+/// A kit's icon as hangar-ui has it, turned by an angle: every icon of
+/// Hangar UI is among the window's own, and the ones pointing left are the
+/// window's pointing right, turned round. One a newer Hangar has is none
+/// here.
+fn ui_icon(icon: ui::Icon) -> Option<(hangar_ui::Icon, f32)> {
     use hangar_ui::Icon as Hangar;
+    let half_turn = std::f32::consts::PI;
     Some(match icon {
-        ui::Icon::Alert => Hangar::Alert,
-        ui::Icon::Check => Hangar::Check,
-        ui::Icon::ChevronDown => Hangar::ChevronDown,
-        ui::Icon::Close => Hangar::Close,
-        ui::Icon::Copy => Hangar::Copy,
-        ui::Icon::Info => Hangar::Info,
-        ui::Icon::Lock => Hangar::Lock,
-        ui::Icon::More => Hangar::More,
-        ui::Icon::Plus => Hangar::Plus,
-        ui::Icon::Restart => Hangar::Restart,
-        ui::Icon::Search => Hangar::Search,
-        ui::Icon::Updown => Hangar::Updown,
+        ui::Icon::Alert => (Hangar::Alert, 0.0),
+        ui::Icon::Check => (Hangar::Check, 0.0),
+        ui::Icon::ChevronDown => (Hangar::ChevronDown, 0.0),
+        ui::Icon::Close => (Hangar::Close, 0.0),
+        ui::Icon::Copy => (Hangar::Copy, 0.0),
+        ui::Icon::Info => (Hangar::Info, 0.0),
+        ui::Icon::Lock => (Hangar::Lock, 0.0),
+        ui::Icon::More => (Hangar::More, 0.0),
+        ui::Icon::Plus => (Hangar::Plus, 0.0),
+        ui::Icon::Restart => (Hangar::Restart, 0.0),
+        ui::Icon::Search => (Hangar::Search, 0.0),
+        ui::Icon::Updown => (Hangar::Updown, 0.0),
+        ui::Icon::ArrowLeft => (Hangar::ArrowRight, half_turn),
+        ui::Icon::ArrowRight => (Hangar::ArrowRight, 0.0),
+        ui::Icon::ArrowUpRight => (Hangar::ArrowUpRight, 0.0),
+        ui::Icon::ChevronLeft => (Hangar::ChevronRight, half_turn),
+        ui::Icon::ChevronRight => (Hangar::ChevronRight, 0.0),
+        ui::Icon::ChevronUp => (Hangar::ChevronUp, 0.0),
+        ui::Icon::Minus => (Hangar::Minus, 0.0),
+        ui::Icon::Pencil => (Hangar::Pencil, 0.0),
+        ui::Icon::Trash => (Hangar::Trash, 0.0),
+        ui::Icon::Folder => (Hangar::Folder, 0.0),
+        ui::Icon::Link => (Hangar::Link, 0.0),
+        ui::Icon::Send => (Hangar::Send, 0.0),
+        ui::Icon::Download => (Hangar::Download, 0.0),
+        ui::Icon::Play => (Hangar::Play, 0.0),
+        ui::Icon::Pause => (Hangar::Pause, 0.0),
+        ui::Icon::Stop => (Hangar::Stop, 0.0),
+        ui::Icon::Clock => (Hangar::Clock, 0.0),
+        ui::Icon::Filter => (Hangar::Filter, 0.0),
+        ui::Icon::Undo => (Hangar::Reset, 0.0),
+        ui::Icon::Expand => (Hangar::Expand, 0.0),
+        ui::Icon::Collapse => (Hangar::Collapse, 0.0),
         ui::Icon::Unknown => return None,
     })
 }
@@ -357,7 +435,10 @@ fn ui_icon(icon: ui::Icon) -> Option<hangar_ui::Icon> {
 fn icon_image(style: KitStyle, icon: ui::Icon, size: f32, color: Option<Color>) -> El<'static> {
     let color = color.unwrap_or(style.palette.text);
     match ui_icon(icon) {
-        Some(which) => hangar_ui::icon(which, size).color(color).into(),
+        Some((which, turn)) => hangar_ui::icon(which, size)
+            .color(color)
+            .rotate(turn)
+            .into(),
         None => space().width(size).height(size).into(),
     }
 }
@@ -492,7 +573,11 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                     horizontal: thin(),
                 },
             };
-            let scroll = scrollable(element(cx, &w.child))
+            let mut scroll = scrollable(element(cx, &w.child));
+            if !w.id.is_empty() {
+                scroll = scroll.id(widget_id(cx.ns, &w.id));
+            }
+            let scroll = scroll
                 .direction(direction)
                 .width(length(w.width, Length::Fill))
                 .height(length(w.height, Length::Fill))
@@ -643,6 +728,7 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
         .width(Length::Fill)
         .style(surface(style, Some(p.well), Some(p.line), 6.0))
         .into(),
+        ui::Element::Log(w) if !w.id.is_empty() => long::long_log(cx, w),
         ui::Element::Log(w) => log_widget(style, w),
         ui::Element::KeyValue(w) => Column::with_children(w.pairs.iter().map(|pair| {
             row![
@@ -668,16 +754,27 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                         .wrap(),
                 );
             }
+            let mut parts: Vec<El<'a>> = Vec::new();
+            if !w.lead.is_empty() {
+                parts.push(
+                    Row::with_children(all(&w.lead))
+                        .spacing(4)
+                        .align_y(Alignment::Center)
+                        .into(),
+                );
+            }
+            parts.push(main.into());
+            parts.push(
+                Row::with_children(all(&w.actions))
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .into(),
+            );
             column![
                 container(
-                    row![
-                        main,
-                        Row::with_children(all(&w.actions))
-                            .spacing(6)
-                            .align_y(Alignment::Center)
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center)
+                    Row::with_children(parts)
+                        .spacing(12)
+                        .align_y(Alignment::Center)
                 )
                 .padding([8, 0]),
                 line(style),
@@ -784,17 +881,25 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
         }
         ui::Element::Empty(w) => {
             let mut parts: Vec<El<'a>> = Vec::new();
+            let own = w
+                .icon
+                .map(|icon| icon_image(style, icon, 18.0, Some(p.text_dim)));
             match w.kind {
                 EmptyKind::Loading => parts.push(state_label(style, Status::Running, &w.title)),
                 EmptyKind::Error => {
-                    parts.push(icon_image(style, ui::Icon::Alert, 18.0, Some(p.text_dim)));
+                    parts.push(own.unwrap_or_else(|| {
+                        icon_image(style, ui::Icon::Alert, 18.0, Some(p.text_dim))
+                    }));
                     parts.push(strong(style, w.title.as_str(), TextSize::Body).into());
                 }
                 EmptyKind::Denied => {
-                    parts.push(icon_image(style, ui::Icon::Lock, 18.0, Some(p.text_dim)));
+                    parts.push(own.unwrap_or_else(|| {
+                        icon_image(style, ui::Icon::Lock, 18.0, Some(p.text_dim))
+                    }));
                     parts.push(strong(style, w.title.as_str(), TextSize::Body).into());
                 }
                 EmptyKind::Empty => {
+                    parts.extend(own);
                     parts.push(strong(style, w.title.as_str(), TextSize::Body).into())
                 }
             }
@@ -805,6 +910,7 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                         .into(),
                 );
             }
+            parts.extend(all(&w.children));
             if !w.actions.is_empty() {
                 parts.push(Row::with_children(all(&w.actions)).spacing(6).into());
             }
@@ -821,11 +927,21 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                 Notice::Warning => (p.surface, p.warn_fill),
                 Notice::Error => (p.danger_soft, p.danger),
             };
-            let mut parts = vec![
-                plain(style, w.text.as_str(), TextSize::Control, Tone::Default)
+            let words: El<'a> = match &w.title {
+                Some(title) => rich_text::<(), _, _, _>([
+                    span(title.as_str()).font(style.weighted(Weight::Semibold, false)),
+                    span(" "),
+                    span(w.text.as_str()).font(style.font),
+                ])
+                .size(TextSize::Control.px())
+                .color(p.text)
+                .width(Length::Fill)
+                .into(),
+                None => plain(style, w.text.as_str(), TextSize::Control, Tone::Default)
                     .width(Length::Fill)
                     .into(),
-            ];
+            };
+            let mut parts = vec![words];
             parts.extend(all(&w.actions));
             container(
                 Row::with_children(parts)
@@ -870,6 +986,9 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                 .placeholder(&w.placeholder)
                 .error(w.error.as_deref())
                 .width(length(w.width, Length::Fill));
+            if !w.id.is_empty() {
+                input = input.id(widget_id(cx.ns, &w.id));
+            }
             if let Some(label) = &w.label {
                 input = input.label(label);
             }
@@ -902,11 +1021,25 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             };
             let area = w.id.clone();
             let (seq, handler, invalid) = (cx.seq, w.on_input, w.error.is_some());
-            let input = text_editor(&editor.content)
+            let height = match (w.line_numbers, w.fill) {
+                // Inside the scroll it shares with its gutter, as tall as
+                // its lines.
+                (true, _) => Length::Shrink,
+                (false, true) => Length::Fill,
+                (false, false) => Length::Fixed(w.height.unwrap_or(120.0)),
+            };
+            let mut input = text_editor(&editor.content)
+                .id(widget_id(cx.ns, &w.id))
                 .placeholder(w.placeholder.as_str())
-                .height(w.height.unwrap_or(120.0))
+                .height(height)
                 .size(TextSize::Control.px())
-                .padding(8)
+                .padding(8);
+            if w.line_numbers {
+                input = input
+                    .wrapping(Wrapping::None)
+                    .line_height(text::LineHeight::Absolute(iced::Pixels(long::EDITOR_LINE)));
+            }
+            let input = input
                 .font(if w.mono { style.mono } else { style.font })
                 .on_action(move |action| {
                     KitMessage::Local(Local::Edit {
@@ -925,10 +1058,15 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                         hangar_theme::style::text_editor::field(t)(theme, status)
                     }
                 });
+            let input: El<'a> = if w.line_numbers {
+                long::numbered_area(cx, w, input.into(), editor.content.line_count())
+            } else {
+                input.into()
+            };
             field(
                 style,
                 w.label.as_deref(),
-                input.into(),
+                input,
                 w.hint.as_deref(),
                 w.error.as_deref(),
             )
@@ -937,6 +1075,9 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             let seq = cx.seq;
             let mut input = hangar_ui::input::search_field(style.theme, &w.value, &w.placeholder)
                 .clear_tip(style.t(Key::SettingsSearchClear));
+            if !w.id.is_empty() {
+                input = input.id(widget_id(cx.ns, &w.id));
+            }
             if let Some(handler) = w.on_input {
                 input = input.on_input(move |value| {
                     KitMessage::Ui(UiEvent {
@@ -973,11 +1114,25 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             let picker: El<'a> = match w.on_select {
                 Some(handler) => {
                     let seq = cx.seq;
+                    // A disabled option is listed, and choosing it is choosing
+                    // what was chosen: nothing changes.
+                    let disabled: HashSet<String> = w
+                        .options
+                        .iter()
+                        .filter(|option| option.disabled)
+                        .map(|option| option.value.clone())
+                        .collect();
+                    let current = w.selected.clone();
                     hangar_ui::input::select(style.theme, options, selected, move |choice| {
+                        let value = if disabled.contains(&choice.id) {
+                            current.clone().unwrap_or_default()
+                        } else {
+                            choice.id
+                        };
                         KitMessage::Ui(UiEvent {
                             view: seq,
                             handler,
-                            value: Some(EventValue::Text(choice.id)),
+                            value: Some(EventValue::Text(value)),
                         })
                     })
                 }
@@ -1093,6 +1248,16 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             };
             with_tooltip(style, mark, Some(&w.label))
         }
+        ui::Element::Progress(w) if w.value.is_none() => {
+            let drawn: El<'a> = canvas(motion::Running {
+                track: p.selected,
+                bar: p.accent,
+            })
+            .width(Length::Fill)
+            .height(3)
+            .into();
+            with_tooltip(style, drawn, w.label.as_deref())
+        }
         ui::Element::Progress(w) => {
             let (value, bar) = match (w.value, w.kind) {
                 (None, _) => (1.0, p.accent_soft),
@@ -1175,6 +1340,34 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             with_tooltip(style, drawn, w.label.as_deref())
         }
         ui::Element::Bars(w) => bars_widget(style, w),
+        ui::Element::Canvas(w) => board::canvas_widget(cx, w),
+        ui::Element::Radio(w) => radio_widget(cx, w),
+        ui::Element::Swatch(w) => {
+            let [r, g, b] = w.ink.rgb();
+            let ink = Color::from_rgb8(r, g, b);
+            let selected = w.selected;
+            let ring = if selected { p.accent } else { p.border };
+            let drawn: El<'a> = button(space().width(16).height(16))
+                .padding(0)
+                .on_press_maybe(w.on_press.map(|handler| cx.message(handler, None)))
+                .style(move |_, status| button::Style {
+                    background: Some(Background::Color(ink)),
+                    text_color: p.text,
+                    border: Border {
+                        color: if status == button::Status::Hovered {
+                            p.border_hover
+                        } else {
+                            ring
+                        },
+                        width: if selected { 2.0 } else { 1.0 },
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow::default(),
+                    snap: true,
+                })
+                .into();
+            with_tooltip(style, drawn, Some(&w.label))
+        }
         ui::Element::Unsupported => plain(
             style,
             style.t(Key::KitsTabNativeNewer),
@@ -1216,15 +1409,86 @@ fn text_widget<'a>(style: KitStyle, w: &'a ui::Text) -> El<'a> {
     drawn.into()
 }
 
+/// Round buttons, one chosen: iced's radio, in the field's colours.
+fn radio_widget<'a>(cx: &Cx<'a>, w: &'a ui::Radio) -> El<'a> {
+    let style = cx.style;
+    let p = style.palette;
+    let chosen = w
+        .selected
+        .as_ref()
+        .and_then(|value| w.options.iter().position(|option| option.value == *value));
+    let buttons = w.options.iter().enumerate().map(|(index, option)| {
+        let seq = cx.seq;
+        let handler = w.on_select.filter(|_| !option.disabled);
+        let value = option.value.clone();
+        let disabled = handler.is_none();
+        let menu = cx.widgets.menu;
+        iced::widget::radio(
+            option.label.as_str(),
+            index,
+            chosen,
+            move |_| match handler {
+                Some(handler) => KitMessage::Ui(UiEvent {
+                    view: seq,
+                    handler,
+                    value: Some(EventValue::Text(value.clone())),
+                }),
+                // iced's radio always sends: this one changes nothing.
+                None => KitMessage::Local(Local::Menu(menu)),
+            },
+        )
+        .size(14)
+        .spacing(6)
+        .text_size(TextSize::Control.px())
+        .font(style.font)
+        .style(move |_, status| {
+            let hovered = matches!(status, iced::widget::radio::Status::Hovered { .. });
+            iced::widget::radio::Style {
+                background: Background::Color(p.field),
+                dot_color: p.accent,
+                border_width: 1.0,
+                border_color: if hovered && !disabled {
+                    p.border_hover
+                } else {
+                    p.border
+                },
+                text_color: Some(if disabled { p.text_faint } else { p.text }),
+            }
+        })
+        .into()
+    });
+    let buttons: Vec<El<'a>> = buttons.collect();
+    // A radio without a handler, or a disabled option, is drawn but sends
+    // the kit nothing.
+    let group: El<'a> = if w.horizontal {
+        Row::with_children(buttons)
+            .spacing(14)
+            .align_y(Alignment::Center)
+            .wrap()
+            .into()
+    } else {
+        Column::with_children(buttons).spacing(6).into()
+    };
+    field(style, w.label.as_deref(), group, None, None)
+}
+
 fn log_widget<'a>(style: KitStyle, w: &'a ui::Log) -> El<'a> {
     let p = style.palette;
     let numbers = w.lines.iter().any(|line| line.number.is_some());
     let lines = w.lines.iter().map(|given| {
-        let color = match given.kind {
-            LineKind::Error => p.danger,
-            LineKind::Warning => p.warn,
-            LineKind::Head => p.text,
-            LineKind::Normal => p.text_dim,
+        let (color, tint) = match given.kind {
+            LineKind::Error => (p.danger, None),
+            LineKind::Warning => (p.warn, None),
+            LineKind::Head => (p.text, None),
+            LineKind::Normal => (p.text_dim, None),
+            LineKind::Added => (
+                p.text,
+                Some(Color {
+                    a: 0.16,
+                    ..p.ok_fill
+                }),
+            ),
+            LineKind::Removed => (p.text, Some(p.danger_soft)),
         };
         let weight = if given.kind == LineKind::Head {
             Weight::Semibold
@@ -1257,12 +1521,16 @@ fn log_widget<'a>(style: KitStyle, w: &'a ui::Log) -> El<'a> {
                 .width(Length::Fill)
                 .into(),
         );
-        let current = given.current;
+        let background = if given.current {
+            Some(p.selected)
+        } else {
+            tint
+        };
         container(Row::with_children(parts).spacing(10))
             .padding([1, 8])
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: current.then_some(Background::Color(p.selected)),
+                background: background.map(Background::Color),
                 ..Default::default()
             })
             .into()
@@ -1317,11 +1585,26 @@ fn list_item<'a>(cx: &Cx<'a>, item: &'a ui::ListItem) -> El<'a> {
     } else {
         Wrapping::None
     };
-    let mut main =
-        column![plain(style, item.title.as_str(), TextSize::Row, Tone::Default).wrapping(wrapping)]
-            .spacing(1);
+    let title = plain(style, item.title.as_str(), TextSize::Row, Tone::Default).wrapping(wrapping);
+    let title = if item.mono {
+        title.font(style.mono)
+    } else {
+        title
+    };
+    let mut main = column![title].spacing(1);
     if let Some(sub) = &item.sub {
         main = main.push(plain(style, sub.as_str(), TextSize::Small, Tone::Dim).wrapping(wrapping));
+    }
+    if !item.body.is_empty() {
+        main = main.push(
+            Column::with_children(item.body.iter().map(|part| element(cx, part)))
+                .spacing(6)
+                .padding(Padding {
+                    top: 4.0,
+                    ..Padding::ZERO
+                })
+                .width(Length::Fill),
+        );
     }
     let mut parts: Vec<El<'a>> = Vec::new();
     if let Some(lead) = &item.lead {
@@ -1332,9 +1615,15 @@ fn list_item<'a>(cx: &Cx<'a>, item: &'a ui::ListItem) -> El<'a> {
         parts.push(element(cx, end));
     }
     parts.extend(item.actions.iter().map(|action| element(cx, action)));
+    // A row with a body holds its lead and its end at the top, beside its
+    // title, as a page's rich row does.
     let line = Row::with_children(parts)
         .spacing(8)
-        .align_y(Alignment::Center)
+        .align_y(if item.body.is_empty() {
+            Alignment::Center
+        } else {
+            Alignment::Start
+        })
         .padding([5, 8]);
     let drawn: El<'a> = match item.on_press {
         Some(handler) => button(line)
@@ -1603,6 +1892,11 @@ impl fmt::Display for Choice {
 pub(crate) fn menu_key(w: &ui::Menu) -> u64 {
     use std::hash::{DefaultHasher, Hash, Hasher};
     let mut hasher = DefaultHasher::new();
+    // A menu with an id is that menu, whatever it lists now.
+    if !w.id.is_empty() {
+        ("id", &w.id).hash(&mut hasher);
+        return hasher.finish();
+    }
     w.label.hash(&mut hasher);
     format!("{:?}{:?}{}", w.icon, w.kind, w.small).hash(&mut hasher);
     for entry in &w.items {
@@ -1627,10 +1921,18 @@ fn menu_widget<'a>(cx: &Cx<'a>, w: &'a ui::Menu) -> El<'a> {
     let key = menu_key(w);
     let open = cx.widgets.menu == Some(key);
     let usable = w.on_select.is_some()
-        && w.items
-            .iter()
-            .any(|entry| matches!(entry, ui::MenuEntry::Item(item) if !item.disabled));
-    let toggle = usable.then(|| KitMessage::Local(Local::Menu((!open).then_some(key))));
+        && (w.on_open.is_some()
+            || w.items
+                .iter()
+                .any(|entry| matches!(entry, ui::MenuEntry::Item(item) if !item.disabled)));
+    let toggle = usable.then(|| match (open, w.on_open) {
+        (false, Some(handler)) => KitMessage::Local(Local::MenuOpened {
+            key,
+            view: cx.seq,
+            handler,
+        }),
+        _ => KitMessage::Local(Local::Menu((!open).then_some(key))),
+    });
     let anchor = match (&w.label, w.icon) {
         (None, icon) => kit_button(
             style,
@@ -1700,8 +2002,10 @@ fn kit_button<'a>(
     let t = style.theme;
     let icon = icon.and_then(ui_icon);
     match (label, icon) {
-        (None, Some(which)) => {
-            let mut square = hangar_ui::button::icon_button(t, which).on_press_maybe(on_press);
+        (None, Some((which, turn))) => {
+            let mut square = hangar_ui::button::icon_button(t, which)
+                .rotate(turn)
+                .on_press_maybe(on_press);
             if small {
                 square = square.small();
             }
@@ -1714,7 +2018,22 @@ fn kit_button<'a>(
             square.into()
         }
         (label, icon) => {
-            let label = label.unwrap_or_default().to_owned();
+            // hangar-ui turns no icon of a labelled button: one that points
+            // left is written before the label instead.
+            let (label, icon) = match icon {
+                Some((which, turn)) if turn != 0.0 => {
+                    let arrow = if which == hangar_ui::Icon::ArrowRight {
+                        "←"
+                    } else {
+                        "‹"
+                    };
+                    (format!("{arrow} {}", label.unwrap_or_default()), None)
+                }
+                other => (
+                    label.unwrap_or_default().to_owned(),
+                    other.map(|(which, _)| which),
+                ),
+            };
             let mut pressable = match kind {
                 ButtonKind::Primary => hangar_ui::button::primary(t, label),
                 ButtonKind::Danger => hangar_ui::button::danger(t, label),

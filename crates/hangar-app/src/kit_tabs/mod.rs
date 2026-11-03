@@ -44,6 +44,7 @@ mod bridge;
 pub mod catalog;
 pub mod deps;
 mod dev;
+mod media;
 mod native;
 pub mod tabs;
 mod view;

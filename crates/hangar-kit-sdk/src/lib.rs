@@ -100,8 +100,9 @@ pub mod prelude {
     pub use crate::format;
     pub use crate::i18n::Strings;
     pub use crate::ui::{
-        Align, Axis, ButtonKind, EmptyKind, Fit, Icon, Length, LineKind, Notice, Padding,
-        ProgressKind, Sort, SortKey, Status, Surface, TextSize, Tone, Weight, Wrap,
+        Align, Axis, ButtonKind, EmptyKind, Fit, Icon, ImageSource, Ink, Length, LineKind, Mark,
+        Notice, Padding, Point, ProgressKind, Range, Shape, Sort, SortKey, Status, Surface,
+        TextSize, Tone, Tool, Weight, Wrap,
     };
     pub use crate::widgets::*;
     pub use crate::{

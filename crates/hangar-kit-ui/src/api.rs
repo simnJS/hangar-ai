@@ -40,6 +40,12 @@ pub mod method {
     pub const UI_TOAST: &str = "ui.toast";
     pub const UI_CONFIRM: &str = "ui.confirm";
     pub const UI_COPY: &str = "ui.copy";
+    /// Native tabs only, as the three `ui.*` above: what a page has in its
+    /// own document (a file input, a paste, a canvas's `toBlob`).
+    pub const FILES_PICK: &str = "files.pick";
+    pub const UI_PASTE_IMAGE: &str = "ui.pasteImage";
+    pub const CANVAS_EXPORT: &str = "canvas.export";
+    pub const IMAGE_SIZE: &str = "image.size";
 }
 
 /// The permissions a manifest may ask for (docs/kits.md, "Tab permissions").
@@ -125,6 +131,29 @@ pub const METHODS: &[(&str, Needs)] = &[
     (method::UI_TOAST, Needs::Nothing),
     (method::UI_CONFIRM, Needs::Nothing),
     (method::UI_COPY, Needs::Nothing),
+    (
+        method::FILES_PICK,
+        Needs::Permission(permission::FILES_READ),
+    ),
+    (method::UI_PASTE_IMAGE, Needs::Nothing),
+    (
+        method::CANVAS_EXPORT,
+        Needs::Permission(permission::FILES_WRITE),
+    ),
+    // What it needs is its source's: held to it with its params.
+    (method::IMAGE_SIZE, Needs::Nothing),
+];
+
+/// The methods a native tab has and an HTML tab does not: a page has these
+/// in its own document, and is answered `unknown` for them.
+pub const NATIVE_ONLY: &[&str] = &[
+    method::UI_TOAST,
+    method::UI_CONFIRM,
+    method::UI_COPY,
+    method::FILES_PICK,
+    method::UI_PASTE_IMAGE,
+    method::CANVAS_EXPORT,
+    method::IMAGE_SIZE,
 ];
 
 /// What `method` needs; none for a method there is not.
@@ -261,6 +290,19 @@ pub mod limits {
     pub const UI_MESSAGE_MAX_CHARS: usize = 500;
     /// `ui.copy`'s longest text, in bytes.
     pub const COPY_MAX_BYTES: usize = 1024 * 1024;
+    /// The pictures a tab holds at once (`files.pick` outside the
+    /// workspace, `ui.pasteImage`); the oldest goes for a new one.
+    pub const HELD_IMAGES: usize = 8;
+    /// `canvas.export`: the longest side of a canvas, in its units, and so
+    /// of the picture written at its own size.
+    pub const CANVAS_MAX_SIDE: f32 = 8192.0;
+    /// `canvas.export`: the most marks, and points of all its paths.
+    pub const CANVAS_MAX_MARKS: usize = 5_000;
+    pub const CANVAS_MAX_POINTS: usize = 200_000;
+    /// `canvas.export`: the longest text of a mark, in characters.
+    pub const CANVAS_TEXT_MAX_CHARS: usize = 500;
+    /// `files.pick`: the most extensions a filter names.
+    pub const PICK_MAX_EXTENSIONS: usize = 20;
 }
 
 /// A call refused or failed: the protocol's `{ code, message }`. A `denied`
@@ -529,7 +571,124 @@ pub struct CopyText {
 }
 request!(CopyText => method::UI_COPY, Done);
 
+/// `files.pick`, needs `files.read`, from a click or a keystroke only: the
+/// system's file chooser, opened in the workspace folder. Answers `null`
+/// when the person cancels, else a [`Picked`]: a file of the workspace by its
+/// `path`, which `files.read` and `{ "file": … }` read; one outside it, held
+/// by the tab as a picture (`held`), which `{ "held": … }` shows and
+/// `canvas.export` draws on, up to 10 MB.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesPick {
+    /// The chooser's title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The extensions offered, without their dot: `["png", "jpg"]`. None,
+    /// every file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+}
+request!(FilesPick => method::FILES_PICK, Option<Picked>);
+
+/// `ui.pasteImage`, from a click or a keystroke only: the picture on the
+/// clipboard, held by the tab (`{ "held": … }`) as a PNG. `not_found` when
+/// the clipboard holds none.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PasteImage {}
+request!(PasteImage => method::UI_PASTE_IMAGE, HeldImage);
+
+/// `canvas.export`, needs `files.write`: a canvas drawn as a PNG, written as
+/// a new file of the workspace (never over one: `conflict`), counted as a
+/// `files.write`. Drawn at the canvas's own size; one whose PNG would be
+/// over 10 MB is drawn smaller, at three quarters, a half, 35 %, a quarter,
+/// and `scale` says which. The background is read under its own permission.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanvasExport {
+    /// Ends in `.png`.
+    pub path: String,
+    pub width: f32,
+    pub height: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<crate::ImageSource>,
+    #[serde(default)]
+    pub marks: Vec<crate::Mark>,
+    /// The width of a mark without its own, as on the canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<f32>,
+}
+request!(CanvasExport => method::CANVAS_EXPORT, Exported);
+
+impl CanvasExport {
+    /// The export of what `canvas` shows, to `path`.
+    pub fn of<H>(canvas: &crate::Canvas<H>, path: impl Into<String>) -> Self {
+        CanvasExport {
+            path: path.into(),
+            width: canvas.width,
+            height: canvas.height,
+            background: canvas.background.clone(),
+            marks: canvas.marks.clone(),
+            stroke: canvas.stroke,
+        }
+    }
+}
+
+/// `image.size`: the size in pixels of a picture a view may show, read from
+/// its first bytes, under its source's own permission (`data.read` for the
+/// data folder, `files.read` for the workspace): what a canvas over a
+/// capture is as large as, without reading the capture into the module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageSize {
+    pub source: crate::ImageSource,
+}
+request!(ImageSize => method::IMAGE_SIZE, ImageInfo);
+
 // ---------------------------------------------------------------- Results.
+
+/// A picture's size, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageInfo {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A file the person chose: inside the workspace, its `path`; outside it,
+/// the picture the tab now holds (`held`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Picked {
+    /// Its name, without its folder.
+    pub name: String,
+    /// In bytes.
+    pub size: u64,
+    /// Relative to the workspace folder, with `/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<String>,
+}
+
+/// A picture the tab holds, and its size in pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldImage {
+    pub held: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// What `canvas.export` wrote.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exported {
+    pub path: String,
+    /// In pixels.
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+    /// 1 at the canvas's own size.
+    pub scale: f32,
+}
 
 /// What a call that answers nothing answers: `{}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
