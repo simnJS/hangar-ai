@@ -273,4 +273,80 @@ mod context {
             [Msg::Dismiss, Msg::Open(Vector::new(10.0, 10.0))]
         );
     }
+
+    #[test]
+    fn opened_from_the_keyboard_the_first_line_has_the_highlight() {
+        let mut ui = simulate(
+            context_menu(
+                default_theme(),
+                row(),
+                Some(Vector::new(100.0, 10.0)),
+                entries,
+            )
+            .from_keyboard(true)
+            .on_open(Msg::Open)
+            .on_dismiss(Msg::Dismiss),
+        );
+        ui.key(Named::Enter);
+        assert_eq!(messages(ui), [Msg::First]);
+    }
+}
+
+mod panel {
+    use super::*;
+    use crate::button::secondary;
+    use crate::input::text_field;
+    use iced::widget::column;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Inner {
+        Typed(String),
+        Dismiss,
+    }
+
+    fn open<'a>() -> Element<'a, Inner> {
+        let t = default_theme();
+        let anchor: Element<'a, Inner> = container(space())
+            .width(Length::Fixed(80.0))
+            .height(Length::Fixed(26.0))
+            .into();
+        let content = super::super::panel(
+            t,
+            column![
+                text_field(t, "").on_input(Inner::Typed),
+                secondary(t, "Confirm").on_press(Inner::Dismiss),
+            ]
+            .spacing(8),
+        );
+        layer::dropdown(anchor, Some(content))
+            .tab_inside()
+            .autofocus()
+            .on_dismiss(Inner::Dismiss)
+            .into()
+    }
+
+    #[test]
+    fn a_panel_with_a_field_takes_the_keyboard_when_it_opens() {
+        let mut ui = simulate(open());
+        ui.typewrite("a");
+        let sent: Vec<Inner> = ui.into_messages().collect();
+        assert_eq!(sent, [Inner::Typed("a".into())]);
+    }
+
+    #[test]
+    fn tab_stays_inside_it_where_a_list_would_close() {
+        let mut ui = simulate(open());
+        ui.key(Named::Tab);
+        ui.typewrite("b");
+        let sent: Vec<Inner> = ui.into_messages().collect();
+        assert!(!sent.contains(&Inner::Dismiss), "{sent:?}");
+    }
+
+    #[test]
+    fn escape_closes_it() {
+        let mut ui = simulate(open());
+        ui.key(Named::Escape);
+        let sent: Vec<Inner> = ui.into_messages().collect();
+        assert_eq!(sent, [Inner::Dismiss]);
+    }
 }

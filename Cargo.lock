@@ -1156,8 +1156,8 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "web-sys",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -2740,7 +2740,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

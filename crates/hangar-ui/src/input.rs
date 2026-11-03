@@ -14,7 +14,7 @@
 //! input::switch(t, self.on).on_toggle(Msg::Toggled)
 //! input::slider(t, 90.0..=130.0, self.scale, Msg::Scale).step(5.0).display("100 %")
 //! input::segmented(t, &[("dark", "Dark"), ("light", "Light")], &self.mode, Msg::Mode)
-//! input::select(t, &self.shells, Some(self.shell.clone()), Msg::Shell)
+//! input::select(t, &self.shells[..], Some(self.shell.clone()), Msg::Shell)
 //! ```
 //!
 //! Every control is stateless, as iced's are: the value is the view's, and a

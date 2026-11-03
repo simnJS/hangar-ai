@@ -34,7 +34,12 @@
 //! }
 //!
 //! // In `view`, over the page:
-//! palette::over(t, page, self.palette.as_ref().map(|p| p.view(t, &labels)), Msg::Palette(palette::Msg::Dismiss))
+//! palette::over(
+//!     t,
+//!     page,
+//!     self.palette.as_ref().map(|p| p.view(t, &self.labels).map(Msg::Palette)),
+//!     Msg::Palette(palette::Msg::Dismiss),
+//! )
 //! ```
 //!
 //! What it does, as the web app's did:

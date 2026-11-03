@@ -165,6 +165,21 @@ impl<'a, M: Clone + 'a> Layer<'a, M> {
         self.outside = outside;
         self
     }
+
+    /// Keeps Tab inside the content, wrapping round its ends, instead of
+    /// dismissing on it: for a popover that holds a question with buttons or
+    /// a small form (the toolbar's reset confirmation) and not a list.
+    pub fn tab_inside(mut self) -> Self {
+        self.trap_tab = true;
+        self.tab_dismisses = false;
+        self
+    }
+
+    /// Gives the keyboard to the first field of the content when it opens.
+    pub fn autofocus(mut self) -> Self {
+        self.autofocus = true;
+        self
+    }
 }
 
 /// A dialog: centred over a veil that blocks the window, with the keyboard

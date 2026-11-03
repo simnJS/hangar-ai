@@ -18,6 +18,7 @@ enum Msg {
     Second(String),
     Close,
     Save,
+    Shell(&'static str),
 }
 
 fn page<'a>() -> Element<'a, Msg> {
@@ -105,6 +106,16 @@ mod keys {
     }
 
     #[test]
+    fn escape_can_be_left_to_what_is_inside() {
+        // The settings turn it off while a shortcut is being recorded, so
+        // that the key that cancels the recording does not close them.
+        let layer = over(default_theme(), page(), Some(the_dialog())).escape(false);
+        let mut ui = simulate(Element::from(layer));
+        ui.key(Named::Escape);
+        assert_eq!(messages(ui), []);
+    }
+
+    #[test]
     fn every_key_is_the_dialogs() {
         let mut ui = simulate(open());
         assert_eq!(ui.key(Named::F5), iced::event::Status::Captured);
@@ -185,4 +196,42 @@ fn a_dialog_without_a_close_message_cannot_be_dismissed_from_inside() {
     ui.key(Named::Escape);
     ui.click_at(5.0, 5.0);
     assert_eq!(messages(ui), []);
+}
+
+mod nested {
+    use super::*;
+    use crate::input::select;
+
+    /// A dialog with a drop-down in it: the list the drop-down opens is an
+    /// overlay of the dialog's content, which the dialog's layer must pass on.
+    fn with_a_select<'a>() -> Element<'a, Msg> {
+        let t = default_theme();
+        over(
+            t,
+            page(),
+            Some(
+                dialog(
+                    t,
+                    "Shell",
+                    select(t, ["bash", "zsh"], Some("bash"), Msg::Shell),
+                )
+                .on_close(Msg::Close),
+            ),
+        )
+        .into()
+    }
+
+    #[test]
+    fn the_list_of_a_drop_down_inside_a_dialog_opens_and_picks() {
+        let mut ui = simulate(with_a_select());
+        // The dialog is 152 high, centred in 600: its body starts 49 px
+        // down, with 12 px of padding, and the field is 26 high.
+        let field_y = (600.0 - 152.0) / 2.0 + 49.0 + 12.0 + 13.0;
+        ui.click_at(400.0, field_y);
+        // Its list opens under it: "bash", then "zsh".
+        ui.click_at(400.0, field_y + 13.0 + 13.0 + 26.0);
+        let sent = messages(ui);
+        assert!(sent.contains(&Msg::Shell("zsh")), "{sent:?}");
+        assert!(!sent.contains(&Msg::Close));
+    }
 }

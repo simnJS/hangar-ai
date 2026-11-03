@@ -967,6 +967,17 @@ pub fn dropdown<'a, M: Clone + 'a>(
     layer::dropdown(anchor, entries.map(|entries| menu(t, entries).into()))
 }
 
+/// What a popover holds when it is not a list of lines: a question with
+/// buttons, a small form. A card on the popover's surface, for
+/// [`layer::dropdown`] (with [`Layer::tab_inside`] and [`Layer::autofocus`]
+/// if it has fields).
+pub fn panel<'a, M: 'a>(t: &'a Theme, content: impl Into<Element<'a, M>>) -> Element<'a, M> {
+    container(content)
+        .padding(iced::Padding::new(10.0))
+        .style(style::container::popover(t))
+        .into()
+}
+
 /// A dropdown that opens with the first line highlighted, for a menu asked for
 /// with the keyboard.
 pub fn dropdown_from_keyboard<'a, M: Clone + 'a>(
@@ -985,7 +996,10 @@ pub fn dropdown_from_keyboard<'a, M: Clone + 'a>(
 /// `entries` builds its lines.
 #[must_use]
 pub struct ContextMenu<'a, M> {
-    layer: Layer<'a, M>,
+    row: Element<'a, M>,
+    /// Where it is open, and what is in it, or `None` while it is closed.
+    open: Option<(Vector, Menu<'a, M>)>,
+    on_dismiss: Option<M>,
     on_open: Option<Box<dyn Fn(Vector) -> M + 'a>>,
 }
 
@@ -995,18 +1009,24 @@ pub fn context_menu<'a, M: Clone + 'a>(
     at: Option<Vector>,
     entries: impl FnOnce() -> Vec<Entry<M>>,
 ) -> ContextMenu<'a, M> {
-    let row: Element<'a, M> = row.into();
-    let layer = match at {
-        Some(at) => layer::context(row, Some(menu(t, entries()).into()), at),
-        None => layer::context(row, None, Vector::ZERO),
-    };
     ContextMenu {
-        layer,
+        row: row.into(),
+        open: at.map(|at| (at, menu(t, entries()))),
+        on_dismiss: None,
         on_open: None,
     }
 }
 
 impl<'a, M: Clone + 'a> ContextMenu<'a, M> {
+    /// Opened from the keyboard (the menu key on a focused row): the first
+    /// line has the highlight at once, so that the arrows work straight away.
+    pub fn from_keyboard(mut self, from_keyboard: bool) -> Self {
+        self.open = self
+            .open
+            .map(|(at, menu)| (at, menu.from_keyboard(from_keyboard)));
+        self
+    }
+
     /// Sent when the menu is asked for: the right button pressed on the row.
     /// The offset is the pointer's from the row's corner; give it back as
     /// `at` to open the menu there.
@@ -1017,7 +1037,7 @@ impl<'a, M: Clone + 'a> ContextMenu<'a, M> {
 
     /// Sent when Escape, Tab or a press outside asks for the menu to close.
     pub fn on_dismiss(mut self, message: M) -> Self {
-        self.layer = self.layer.on_dismiss(message);
+        self.on_dismiss = Some(message);
         self
     }
 }
@@ -1155,7 +1175,14 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for OpenOnRightClick<'_, M
 
 impl<'a, M: Clone + 'a> From<ContextMenu<'a, M>> for Element<'a, M> {
     fn from(menu: ContextMenu<'a, M>) -> Self {
-        let layer: Element<'a, M> = menu.layer.into();
+        let mut layer = match menu.open {
+            Some((at, list)) => layer::context(menu.row, Some(list.into()), at),
+            None => layer::context(menu.row, None, Vector::ZERO),
+        };
+        if let Some(message) = menu.on_dismiss {
+            layer = layer.on_dismiss(message);
+        }
+        let layer: Element<'a, M> = layer.into();
         match menu.on_open {
             Some(on_open) => Element::new(OpenOnRightClick {
                 inner: layer,

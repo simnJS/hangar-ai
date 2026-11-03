@@ -15,7 +15,7 @@
 //!     .on_close(Msg::Cancel);
 //!
 //! // Over the page, while there is one to show:
-//! dialog::over(t, page, self.rename.as_ref().map(|d| d.view(t)))
+//! dialog::over(t, page, self.renaming.then(|| self.rename_dialog(t)))
 //! ```
 //!
 //! What the layer does, as the web app's backdrop did:
