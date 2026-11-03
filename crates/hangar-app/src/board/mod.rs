@@ -2,50 +2,712 @@
 //!
 //! Ports Board*.tsx, TaskDialog.tsx,
 //! lib/{board,boardDrag,boardFormat,paneTask}.ts. Read inventory-frontend.md
-//! §2.3/1 and crates/hangar-app/PACKAGES.md. Planned files of this directory
-//! (§8.1): mod, model, cache, view, card, filter, task_dialog, dock, format,
-//! drag.
+//! §2.3/1 and crates/hangar-app/PACKAGES.md.
 //!
-//! This is the stub P0 handed over: the surface the shell calls, with
-//! placeholder bodies. The directory is this package's own; replace the
-//! bodies, add files, keep the signatures the shell calls.
+//! What other packages read is [`Live`] (the boards cache, `cache.rs`) and the
+//! pure helpers of `model`, `format` and `pane_task`. What this package draws
+//! is the board of the active workspace, full (`view`) or in the dock beside
+//! the terminals, and the task dialog (`task_dialog`), an overlay.
+//!
+//! # How a frame comes about
+//!
+//! `update` is the only place that writes: a change to a task goes to
+//! hangar-core off the UI thread (`actions`), and the board is read again
+//! after it, so what is drawn is always what the file says. The cards and
+//! columns are drawn from `Live` by `view`, `card` and `filter`; `look` has
+//! the surfaces, `hit` the one custom widget (a surface pressed with its
+//! position, which the drag and the dock's grip need).
 
-use iced::{Element, Subscription, Task};
+pub mod actions;
+pub mod agent_pane;
+pub mod cache;
+mod card;
+mod dock;
+pub mod drag;
+mod filter;
+pub mod format;
+mod hit;
+#[cfg(test)]
+mod interaction;
+mod look;
+pub mod model;
+pub mod pane_task;
+mod select;
+#[cfg(test)]
+mod snapshot;
+pub mod task_dialog;
+mod view;
+
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::Arc;
+use std::time::Duration;
+
+use hangar_i18n::{Key, Translator, args};
+use iced::widget::{Id, Space};
+use iced::{Element, Point, Subscription, Task};
 
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{BoardVariant, Region, placeholder};
-use crate::state::Model;
+use crate::shell::{BoardVariant, Overlay, Region, View};
+use crate::state::{Model, Patch, Settings, StoreAction};
+
+use actions::{After, Draft, Edit, Errors, Mutation};
+pub use cache::Live;
+// `model::Task` is not re-exported here: this module already names iced's.
+#[allow(unused_imports)]
+pub use model::{Blocked, Column, TaskComment};
+use model::{Task as BoardTask, blocked_move_refusal};
+use select::Filters;
+
+/// Which filter of the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterKind {
+    Label,
+    Assignee,
+    State,
+}
+
+/// What the pointer does while a card or the dock's grip is held: the board
+/// follows it from the window's events, since it may leave the widget that
+/// took the press.
+#[derive(Debug, Clone, Copy)]
+pub enum Pointer {
+    Moved(Point),
+    Released,
+    /// Escape, or the window losing the focus.
+    Cancelled,
+}
 
 /// The package's UI state; lives in `App.pkg.board`.
 /// Owns region `main` in the board view and region `dock`.
-#[derive(Debug, Default)]
-pub struct State;
+#[derive(Debug)]
+pub struct State {
+    filters: Filters,
+    open_filter: Option<FilterKind>,
+    /// What is typed in the add field of each column, not made a card yet.
+    drafts: HashMap<Column, String>,
+    /// The column whose add field was asked for.
+    adding: Option<Column>,
+    /// The dock's folded sections. Finished work, and work nobody started,
+    /// are the least useful things to keep in view next to the agents.
+    folded: Vec<Column>,
+    /// Dock only: the filter row is one click away rather than always there.
+    filter_bar: bool,
+    /// Asked for a first task from the empty board: show the columns anyway.
+    composing: bool,
+    /// Why a move was refused, shown for a few seconds.
+    toast: Option<(u64, String)>,
+    toasts: u64,
+    press: Option<drag::Press>,
+    grip: Option<dock::Grip>,
+    dialog: Option<task_dialog::Dialog>,
+    /// What the add field had when "with details" was asked for.
+    seed: Option<(Column, String)>,
+}
 
-/// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.board`.
-/// The boards cache by folder (`board_load` + `CoreEvent::BoardChanged`), which
-/// P6, P9 and P19 read.
-#[derive(Debug, Default)]
-pub struct Live;
+impl Default for State {
+    fn default() -> Self {
+        State {
+            filters: Filters::default(),
+            open_filter: None,
+            drafts: HashMap::new(),
+            adding: None,
+            folded: vec![Column::Todo, Column::Done],
+            filter_bar: false,
+            composing: false,
+            toast: None,
+            toasts: 0,
+            press: None,
+            grip: None,
+            dialog: None,
+            seed: None,
+        }
+    }
+}
 
 /// The package's messages, routed by the shell as `Message::Board(Msg)`.
 #[derive(Debug, Clone)]
-pub enum Msg {}
+pub enum Msg {
+    // Reading
+    /// The folders of the workspaces, which the cache keeps the boards of.
+    Follow(Vec<String>),
+    Loaded(String, Option<Arc<Vec<BoardTask>>>),
+    /// A recheck day may have passed: read again.
+    Reload,
+    /// The clock of cards in progress ticked: nothing to do but draw.
+    Redraw,
+
+    // Writing
+    Mutated {
+        cwd: String,
+        errors: Errors,
+        after: After,
+        result: Result<(), String>,
+    },
+
+    // The bars
+    OpenFilter(Option<FilterKind>),
+    Filter(FilterKind, String),
+    ClearFilters,
+    ToggleFilterBar,
+    OpenMcp,
+    Expand,
+    HideDock,
+
+    // Columns
+    StartAdding(Column),
+    FocusAdd(Column),
+    FocusField(&'static str),
+    Draft(Column, String),
+    Submit(Column),
+    ClearDraft(Column),
+    AddDetails(Column),
+    Fold(Column),
+
+    // Cards
+    Press(String, Point),
+    Pointer(Pointer),
+    Enter(Column),
+    Leave(Column),
+    OpenTask(String),
+    FocusAgent {
+        ws: String,
+        pane: String,
+        from_dialog: bool,
+    },
+    ToastGone(u64),
+
+    // The dock's grip
+    GripPress {
+        at: Point,
+        width: f32,
+        max: f32,
+    },
+    GripReset,
+    GripKey {
+        widen: bool,
+    },
+
+    Dialog(task_dialog::Msg),
+}
+
+impl Msg {
+    /// Whether it is a press somewhere else than the add field a card is being
+    /// typed in. The web app made the card when the field lost the keyboard;
+    /// iced's fields have no such event, so this is when it is made.
+    fn leaves_the_add_field(&self) -> bool {
+        matches!(
+            self,
+            Msg::Press(..)
+                | Msg::OpenTask(_)
+                | Msg::Fold(_)
+                | Msg::OpenFilter(_)
+                | Msg::Filter(..)
+                | Msg::ClearFilters
+                | Msg::ToggleFilterBar
+                | Msg::OpenMcp
+                | Msg::Expand
+                | Msg::HideDock
+                | Msg::StartAdding(_)
+                | Msg::Draft(..)
+                | Msg::GripPress { .. }
+                | Msg::Dialog(_)
+        )
+    }
+
+    /// The column whose draft this message is about, which it leaves be.
+    fn keeps_draft_of(&self) -> Option<Column> {
+        match self {
+            Msg::StartAdding(column) | Msg::Draft(column, _) => Some(*column),
+            _ => None,
+        }
+    }
+}
+
+/// The identity of a column's add field, for the keyboard to go to.
+fn add_id(column: Column) -> Id {
+    Id::from(format!("board-add-{}", column.id()))
+}
+
+/// The identity of a task's card.
+fn card_id(task: &str) -> Id {
+    Id::from(format!("board-card-{task}"))
+}
+
+/// The folder of the board the window shows.
+fn active_cwd(m: &Model) -> Option<String> {
+    m.active_workspace().map(|ws| ws.cwd.clone())
+}
+
+/// Whether a board is on screen: the full view, or the dock beside the
+/// terminals.
+fn board_shown(m: &Model) -> bool {
+    match m.ui.view {
+        View::Board => true,
+        View::Terminals => m.settings().board_dock_open,
+        _ => false,
+    }
+}
+
+fn task_named<'a>(m: &'a Model, cwd: &str, id: &str) -> Option<&'a BoardTask> {
+    m.live
+        .board
+        .tasks(cwd)?
+        .iter()
+        .find(|candidate| candidate.id == id)
+}
+
+/// Reads every board that is not being read already.
+fn read_all(m: &mut Model) -> Task<Message> {
+    let folders = m.live.board.request_all();
+    Task::batch(folders.iter().map(|cwd| actions::read(cwd)))
+}
+
+/// Reads one board, unless a read of it is out (it will repeat).
+fn read_one(m: &mut Model, cwd: &str) -> Task<Message> {
+    if m.live.board.request(cwd) {
+        actions::read(cwd)
+    } else {
+        Task::none()
+    }
+}
+
+/// Makes a card of what was typed in the add fields, but the one about to be
+/// typed in.
+fn flush_drafts(st: &mut State, m: &Model, keep: Option<Column>) -> Task<Message> {
+    let Some(cwd) = active_cwd(m) else {
+        return Task::none();
+    };
+    let mut made = Vec::new();
+    for column in Column::ALL {
+        if Some(column) == keep {
+            continue;
+        }
+        if let Some(draft) = st.drafts.remove(&column) {
+            let title = draft.trim();
+            if !title.is_empty() {
+                made.push(actions::run(
+                    &cwd,
+                    Mutation::Create(Draft::titled(title, column)),
+                    Errors::Swallow,
+                    After::Nothing,
+                ));
+            }
+        }
+    }
+    Task::batch(made)
+}
+
+fn toast(st: &mut State, words: String) -> Task<Message> {
+    st.toasts += 1;
+    let seq = st.toasts;
+    st.toast = Some((seq, words));
+    Task::perform(
+        async { tokio::time::sleep(Duration::from_secs(6)).await },
+        move |()| Message::Board(Msg::ToastGone(seq)),
+    )
+}
+
+/// Moves a card to a column, unless it is blocked: the person has to lift the
+/// block first, and is told so.
+fn move_task(st: &mut State, m: &Model, id: &str, to: Column) -> Task<Message> {
+    let Some(cwd) = active_cwd(m) else {
+        return Task::none();
+    };
+    let Some(task) = task_named(m, &cwd, id) else {
+        return Task::none();
+    };
+    if Column::of(task) == Some(to) {
+        return Task::none();
+    }
+    if let Some(reason) = blocked_move_refusal(task, to) {
+        // Never clear the state silently: the task has to be unblocked first.
+        let words = Translator::new(m.locale())
+            .t_with(
+                Key::BoardBlockedStays,
+                &args!("title" => task.title.as_str(), "reason" => reason),
+            )
+            .into_owned();
+        return toast(st, words);
+    }
+    actions::run(
+        &cwd,
+        Mutation::Update {
+            id: id.to_owned(),
+            edit: Edit::Column(to),
+        },
+        Errors::Swallow,
+        After::Nothing,
+    )
+}
+
+fn set_dock_width(m: &mut Model, width: f32) {
+    m.apply(StoreAction::UpdateSettings(Patch::new(
+        move |settings: &mut Settings| settings.board_dock_width = f64::from(width),
+    )));
+}
+
+/// The widest the dock may be in the window that has the focus.
+fn dock_room(m: &Model) -> f32 {
+    let window =
+        m.ui.focused_window
+            .and_then(|window| m.ui.body_width.get(&window))
+            .copied()
+            .unwrap_or(crate::shell::windows::MAIN_SIZE.width);
+    dock::room(m, window)
+}
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
-    match msg {}
+    let abandoned = if msg.leaves_the_add_field() {
+        // The field that was asked for is left, unless it is the next one.
+        if !matches!(msg, Msg::StartAdding(_) | Msg::Draft(..)) {
+            st.adding = None;
+        }
+        flush_drafts(st, m, msg.keeps_draft_of())
+    } else {
+        Task::none()
+    };
+    Task::batch([abandoned, handle(st, m, msg)])
 }
+
+fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
+    match msg {
+        // ---- Reading ----------------------------------------------------
+        Msg::Follow(folders) => {
+            let fresh = m.live.board.follow(&folders);
+            m.live.version += 1;
+            Task::batch(fresh.iter().map(|cwd| read_one(m, cwd)))
+        }
+        Msg::Loaded(cwd, tasks) => {
+            let again = m.live.board.answer(&cwd, tasks);
+            m.live.version += 1;
+            let repeat = if again {
+                actions::read(&cwd)
+            } else {
+                Task::none()
+            };
+            Task::batch([repeat, follow_dialog(st, m, &cwd)])
+        }
+        Msg::Reload => read_all(m),
+        Msg::Redraw => Task::none(),
+
+        // ---- Writing ----------------------------------------------------
+        Msg::Mutated {
+            cwd,
+            errors,
+            after,
+            result,
+        } => {
+            let dialog = task_dialog::mutated(st, errors, after, &result);
+            Task::batch([dialog, read_one(m, &cwd)])
+        }
+
+        // ---- The bars ---------------------------------------------------
+        Msg::OpenFilter(kind) => {
+            st.open_filter = match kind {
+                Some(kind) if st.open_filter != Some(kind) => Some(kind),
+                _ => None,
+            };
+            Task::none()
+        }
+        Msg::Filter(kind, value) => {
+            match kind {
+                FilterKind::Label => st.filters.label = value,
+                FilterKind::Assignee => st.filters.assignee = value,
+                FilterKind::State => st.filters.state = value,
+            }
+            st.open_filter = None;
+            Task::none()
+        }
+        Msg::ClearFilters => {
+            st.filters.clear();
+            Task::none()
+        }
+        Msg::ToggleFilterBar => {
+            st.filter_bar = !st.filter_bar;
+            Task::none()
+        }
+        Msg::OpenMcp => Task::done(Message::Intent(Intent::OpenMcpInstall)),
+        Msg::Expand => Task::done(Message::Intent(Intent::SetView(View::Board))),
+        Msg::HideDock => Task::done(Message::Intent(Intent::CloseDock)),
+
+        // ---- Columns ----------------------------------------------------
+        Msg::StartAdding(column) => {
+            // Puts the cursor in a column's add field, unfolding it if need be.
+            st.composing = true;
+            st.adding = Some(column);
+            st.folded.retain(|folded| *folded != column);
+            // The field is on screen after this message's view.
+            Task::perform(
+                async { tokio::time::sleep(Duration::from_millis(30)).await },
+                move |()| Message::Board(Msg::FocusAdd(column)),
+            )
+        }
+        Msg::FocusAdd(column) => iced::widget::operation::focus(add_id(column)),
+        Msg::FocusField(id) => iced::widget::operation::focus(id),
+        Msg::Draft(column, text) => {
+            st.drafts.insert(column, text);
+            Task::none()
+        }
+        Msg::Submit(column) => {
+            let title = st.drafts.remove(&column).unwrap_or_default();
+            st.adding = None;
+            let (Some(cwd), false) = (active_cwd(m), title.trim().is_empty()) else {
+                return Task::none();
+            };
+            actions::run(
+                &cwd,
+                Mutation::Create(Draft::titled(&title, column)),
+                Errors::Swallow,
+                After::Nothing,
+            )
+        }
+        Msg::ClearDraft(column) => {
+            st.drafts.remove(&column);
+            Task::none()
+        }
+        Msg::AddDetails(column) => {
+            let title = st.drafts.remove(&column).unwrap_or_default();
+            st.adding = None;
+            let Some(cwd) = active_cwd(m) else {
+                return Task::none();
+            };
+            st.seed = Some((column, title));
+            Task::done(Message::Intent(Intent::OpenTask { cwd, task: None }))
+        }
+        Msg::Fold(column) => {
+            if st.folded.contains(&column) {
+                st.folded.retain(|folded| *folded != column);
+            } else {
+                st.folded.push(column);
+            }
+            Task::none()
+        }
+
+        // ---- Cards ------------------------------------------------------
+        Msg::Press(id, at) => {
+            let Some(cwd) = active_cwd(m) else {
+                return Task::none();
+            };
+            let Some(column) = task_named(m, &cwd, &id).and_then(Column::of) else {
+                return Task::none();
+            };
+            // A new press ends any drag in progress.
+            st.press = Some(drag::Press::new(id, column, at));
+            st.adding = None;
+            Task::none()
+        }
+        Msg::Pointer(pointer) => pointer_event(st, m, pointer),
+        Msg::Enter(column) => {
+            if let Some(press) = &mut st.press {
+                press.enter(column);
+            }
+            Task::none()
+        }
+        Msg::Leave(column) => {
+            if let Some(press) = &mut st.press {
+                press.leave(column);
+            }
+            Task::none()
+        }
+        Msg::OpenTask(id) => match active_cwd(m) {
+            Some(cwd) => Task::done(Message::Intent(Intent::OpenTask {
+                cwd,
+                task: Some(id),
+            })),
+            None => Task::none(),
+        },
+        Msg::FocusAgent {
+            ws,
+            pane,
+            from_dialog,
+        } => {
+            let go = Task::done(Message::Intent(Intent::FocusPane {
+                ws,
+                pane,
+                terminal: true,
+            }));
+            if from_dialog {
+                Task::batch([Task::done(Message::Intent(Intent::CloseOverlay)), go])
+            } else {
+                go
+            }
+        }
+        Msg::ToastGone(seq) => {
+            if st.toast.as_ref().is_some_and(|(shown, _)| *shown == seq) {
+                st.toast = None;
+            }
+            Task::none()
+        }
+
+        // ---- The dock's grip -------------------------------------------
+        Msg::GripPress { at, width, max } => {
+            st.grip = Some(dock::Grip::new(at, width, max));
+            Task::none()
+        }
+        Msg::GripReset => {
+            st.grip = None;
+            set_dock_width(m, dock::default_width());
+            Task::none()
+        }
+        Msg::GripKey { widen } => {
+            let width = m.settings().board_dock_width as f32;
+            set_dock_width(m, dock::key_width(width, dock_room(m), widen));
+            Task::none()
+        }
+
+        Msg::Dialog(inner) => task_dialog::update(st, m, inner),
+    }
+}
+
+/// The pointer, while a card or the grip is held.
+fn pointer_event(st: &mut State, m: &mut Model, pointer: Pointer) -> Task<Message> {
+    if let Some(grip) = &st.grip {
+        match pointer {
+            Pointer::Moved(at) => set_dock_width(m, grip.width_at(at.x)),
+            Pointer::Released | Pointer::Cancelled => st.grip = None,
+        }
+        return Task::none();
+    }
+    match pointer {
+        Pointer::Moved(at) => {
+            if let Some(press) = &mut st.press {
+                press.pointer_moved(at);
+            }
+            Task::none()
+        }
+        Pointer::Cancelled => {
+            st.press = None;
+            Task::none()
+        }
+        Pointer::Released => {
+            let Some(press) = st.press.take() else {
+                return Task::none();
+            };
+            match press.release() {
+                drag::Ended::Click(id) => handle(st, m, Msg::OpenTask(id)),
+                drag::Ended::Drop { task, to } => move_task(st, m, &task, to),
+                drag::Ended::Nothing => Task::none(),
+            }
+        }
+    }
+}
+
+/// A board was read: the dialog open on it follows what the board says now,
+/// or is done with if the task is gone.
+fn follow_dialog(st: &mut State, m: &Model, cwd: &str) -> Task<Message> {
+    let Some(dialog) = st.dialog.as_mut().filter(|dialog| dialog.cwd == cwd) else {
+        return Task::none();
+    };
+    let Some(id) = dialog.task.clone() else {
+        return Task::none();
+    };
+    match task_named(m, cwd, &id) {
+        Some(task) => {
+            if dialog.follow(task) {
+                iced::widget::operation::snap_to_end("board-task-thread")
+            } else {
+                Task::none()
+            }
+        }
+        // An agent deleted it: nothing is left to show.
+        None => {
+            st.dialog = None;
+            Task::done(Message::Intent(Intent::CloseOverlay))
+        }
+    }
+}
+
+/// The window's events while a card or the grip is held.
+fn pointer(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    use iced::keyboard::{self, Key, key::Named};
+    use iced::{Event, mouse, window};
+    let pointer = match event {
+        Event::Mouse(mouse::Event::CursorMoved { position }) => Pointer::Moved(position),
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Pointer::Released,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(Named::Escape),
+            ..
+        })
+        | Event::Window(window::Event::Unfocused) => Pointer::Cancelled,
+        _ => return None,
+    };
+    Some(Message::Board(Msg::Pointer(pointer)))
+}
+
+/// The folders to hold the boards of: a subscription of its own, restarted
+/// whenever a workspace comes or goes, which says so once.
+#[derive(Hash)]
+struct Folders(Vec<String>);
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    Subscription::none()
+    let mut all = vec![Subscription::run_with(
+        Folders(cache::folders_of(m.state())),
+        |folders| {
+            let folders = folders.0.clone();
+            iced::futures::stream::once(async move { Message::Board(Msg::Follow(folders)) })
+        },
+    )];
+    // A recheck day that passes unblocks its task when the board is next
+    // read (board.rs): reading again now and then is what shows that.
+    if m.live.board.has_rechecks() {
+        all.push(iced::time::every(Duration::from_secs(60)).map(|_| Message::Board(Msg::Reload)));
+    }
+    // Cards in progress carry a clock, drawn to the minute.
+    if board_shown(m) && clock_running(m) {
+        all.push(iced::time::every(Duration::from_secs(30)).map(|_| Message::Board(Msg::Redraw)));
+    }
+    if st.press.is_some() || st.grip.is_some() {
+        all.push(iced::event::listen_with(pointer));
+    }
+    Subscription::batch(all)
 }
 
-/// What takes the focus when F6 reaches region `Main`, which this package
-/// owns.
+/// Whether a task of the board on screen is in progress with a clock.
+fn clock_running(m: &Model) -> bool {
+    let Some(workspace) = m.active_workspace() else {
+        return false;
+    };
+    m.live.board.tasks(&workspace.cwd).is_some_and(|tasks| {
+        tasks
+            .iter()
+            .any(|task| task.column == "doing" && task.doing_since.is_some())
+    })
+}
+
+/// What takes the focus when F6 reaches region `Main` (the board view) or
+/// `Dock`: the first card, else the first column's add field.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    None
+    if !matches!(region, Region::Main | Region::Dock) {
+        return None;
+    }
+    let cwd = active_cwd(m)?;
+    let tasks = m.live.board.tasks(&cwd)?;
+    if tasks.is_empty() && !st.composing {
+        return None;
+    }
+    let dock = region == Region::Dock;
+    let order = if dock {
+        Column::DOCK_ORDER
+    } else {
+        Column::ALL
+    };
+    let shown = select::shown(tasks, &st.filters);
+    for column in order {
+        if dock && st.folded.contains(&column) {
+            continue;
+        }
+        if let Some(first) = select::column_items(&shown, column).first() {
+            return Some(iced::widget::operation::focus(card_id(&first.id)));
+        }
+    }
+    Some(iced::widget::operation::focus(add_id(order[0])))
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
@@ -56,7 +718,50 @@ pub fn on_intent(
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
-    None
+    react(st, m, intent)
+}
+
+fn react(st: &mut State, m: &mut Model, intent: &Intent) -> Option<Task<Message>> {
+    match intent {
+        Intent::OpenTask { cwd, task } | Intent::OpenOverlay(Overlay::Task { cwd, task }) => {
+            if task.is_none()
+                && let Some((column, title)) = st.seed.take()
+                && st.dialog.is_none()
+            {
+                // The add field's text and column go to the form.
+                let opened = task_dialog::opened(st, m, cwd, None);
+                if let Some(dialog) = &mut st.dialog {
+                    dialog.seed(column, title);
+                }
+                return Some(opened);
+            }
+            Some(task_dialog::opened(st, m, cwd, task.as_deref()))
+        }
+        // The dialog is closed by the shell (Escape, its scrim) or by itself;
+        // either way what was typed is saved, and the keyboard goes back.
+        Intent::CloseOverlay | Intent::ClosePopovers(_)
+            if st.dialog.is_some()
+                && !m
+                    .ui
+                    .overlays
+                    .iter()
+                    .any(|overlay| matches!(overlay, Overlay::Task { .. })) =>
+        {
+            Some(task_dialog::closed(st, m))
+        }
+        // The board leaves the screen: a press, a menu and a message about a
+        // move do not outlive it.
+        Intent::SetView(_) | Intent::OpenBoard(_) | Intent::ToggleDock | Intent::CloseDock => {
+            st.open_filter = None;
+            st.press = None;
+            st.grip = None;
+            st.adding = None;
+            st.composing = false;
+            st.toast = None;
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Every core event, after the shell's own handling of it.
@@ -66,13 +771,30 @@ pub fn on_event(
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    None
+    match event {
+        // Agents mutate the board through the HTTP API; core says so, and the
+        // boards are read again. The payload names the caller's folder, which
+        // is not compared against ours: worktree sharing makes several paths
+        // alias one board, so an agent writing from a linked worktree carries
+        // a path this window has never heard of.
+        CoreEvent::BoardChanged { .. } => Some(read_all(m)),
+        _ => None,
+    }
 }
 
 /// Region `main` in the board view (`BoardVariant::Full`), or region `dock`
 /// beside the terminals (`BoardVariant::Dock`).
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, variant: BoardVariant) -> Element<'a, Message> {
-    placeholder::stub(ctx, "board::view")
+    let Some(workspace) = ctx.model.active_workspace() else {
+        return Space::new().into();
+    };
+    match variant {
+        BoardVariant::Full => view::board(st, ctx, &workspace.cwd, None),
+        BoardVariant::Dock { width, .. } => {
+            let max = dock::room(ctx.model, ctx.metrics.body_width);
+            view::board(st, ctx, &workspace.cwd, Some((width, max)))
+        }
+    }
 }
 
 /// `Overlay::Task`: a board task, new (`task` is `None`) or opened.
@@ -82,5 +804,345 @@ pub fn task_view<'a>(
     cwd: &'a str,
     task: Option<&'a str>,
 ) -> Element<'a, Message> {
-    placeholder::stub_modal(ctx, "board::task_view")
+    task_dialog::view(st, ctx, cwd, task)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snapshot::{CWD, model, tasks};
+    use super::*;
+    use hangar_i18n::Locale;
+
+    const BLOCKED: &str = "5b3c0000-aaaa-bbbb-cccc-dddddddddddd";
+    const FREE: &str = "1a2b0000-aaaa-bbbb-cccc-dddddddddddd";
+    const DOING: &str = "3d4e0000-aaaa-bbbb-cccc-dddddddddddd";
+
+    fn setup() -> (State, Model) {
+        (
+            State::default(),
+            model(Locale::En, "graphite", Some(tasks())),
+        )
+    }
+
+    /// A message whose task nobody needs.
+    fn step(st: &mut State, m: &mut Model, msg: Msg) {
+        drop(handle(st, m, msg));
+    }
+
+    fn drag(st: &mut State, m: &mut Model, id: &str, to: Column) -> Task<Message> {
+        step(st, m, Msg::Press(id.into(), Point::new(10.0, 10.0)));
+        step(st, m, Msg::Pointer(Pointer::Moved(Point::new(80.0, 10.0))));
+        step(st, m, Msg::Enter(to));
+        handle(st, m, Msg::Pointer(Pointer::Released))
+    }
+
+    #[test]
+    fn what_was_typed_becomes_a_card_when_the_person_goes_elsewhere() {
+        let (mut st, m) = setup();
+        st.drafts.insert(Column::Todo, "  Fix the thing ".into());
+        st.drafts.insert(Column::Done, "   ".into());
+
+        // Typing in another column leaves the first one's field.
+        let typing = Msg::Draft(Column::Doing, "x".into());
+        assert!(typing.leaves_the_add_field());
+        assert_eq!(typing.keeps_draft_of(), Some(Column::Doing));
+        let made = flush_drafts(&mut st, &m, Some(Column::Doing));
+        // One card, from the one that had words; both drafts are gone.
+        assert_eq!(made.units(), 1);
+        assert!(st.drafts.is_empty());
+    }
+
+    #[test]
+    fn typing_in_a_field_does_not_make_a_card_of_it() {
+        let (mut st, m) = setup();
+        st.drafts.insert(Column::Todo, "Fix".into());
+        let made = flush_drafts(&mut st, &m, Some(Column::Todo));
+        assert_eq!(made.units(), 0);
+        assert_eq!(
+            st.drafts.get(&Column::Todo).map(String::as_str),
+            Some("Fix")
+        );
+        assert!(!Msg::Submit(Column::Todo).leaves_the_add_field());
+        assert!(!Msg::Pointer(Pointer::Released).leaves_the_add_field());
+    }
+
+    #[test]
+    fn submitting_makes_the_card_and_empties_the_field() {
+        let (mut st, mut m) = setup();
+        st.drafts.insert(Column::Todo, "Fix".into());
+        st.adding = Some(Column::Todo);
+        assert_eq!(
+            handle(&mut st, &mut m, Msg::Submit(Column::Todo)).units(),
+            1
+        );
+        assert!(st.drafts.is_empty() && st.adding.is_none());
+        // Nothing typed: nothing made.
+        assert_eq!(
+            handle(&mut st, &mut m, Msg::Submit(Column::Todo)).units(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_card_dropped_in_another_column_moves() {
+        let (mut st, mut m) = setup();
+        let after = drag(&mut st, &mut m, FREE, Column::Review);
+        assert_eq!(after.units(), 1);
+        assert!(st.toast.is_none() && st.press.is_none());
+    }
+
+    #[test]
+    fn a_blocked_card_dropped_out_of_todo_stays_and_says_why() {
+        let (mut st, mut m) = setup();
+        drop(drag(&mut st, &mut m, BLOCKED, Column::Doing));
+        let (_, words) = st.toast.as_ref().expect("a message");
+        assert!(words.contains("Release 1.13"));
+        assert!(words.contains("Waiting for the npm release"));
+    }
+
+    #[test]
+    fn a_blocked_card_dropped_in_todo_is_not_refused() {
+        let (mut st, mut m) = setup();
+        // Dropped where it already is: nothing to do, nothing to say.
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(BLOCKED.into(), Point::new(1.0, 1.0)),
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(90.0, 1.0))),
+        );
+        step(&mut st, &mut m, Msg::Enter(Column::Todo));
+        step(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        assert!(st.toast.is_none());
+    }
+
+    #[test]
+    fn a_press_that_barely_moves_is_a_click_that_opens_the_task() {
+        let (mut st, mut m) = setup();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(DOING.into(), Point::new(5.0, 5.0)),
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(7.0, 6.0))),
+        );
+        let opened = handle(&mut st, &mut m, Msg::Pointer(Pointer::Released));
+        assert_eq!(opened.units(), 1);
+        assert!(st.press.is_none());
+    }
+
+    #[test]
+    fn escape_ends_a_drag_without_moving_anything() {
+        let (mut st, mut m) = setup();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Press(FREE.into(), Point::new(5.0, 5.0)),
+        );
+        step(
+            &mut st,
+            &mut m,
+            Msg::Pointer(Pointer::Moved(Point::new(90.0, 5.0))),
+        );
+        step(&mut st, &mut m, Msg::Enter(Column::Done));
+        let cancelled = handle(&mut st, &mut m, Msg::Pointer(Pointer::Cancelled));
+        assert_eq!(cancelled.units(), 0);
+        assert!(st.press.is_none());
+    }
+
+    #[test]
+    fn a_press_on_a_task_that_is_gone_starts_nothing() {
+        let (mut st, mut m) = setup();
+        step(&mut st, &mut m, Msg::Press("gone".into(), Point::ORIGIN));
+        assert!(st.press.is_none());
+    }
+
+    #[test]
+    fn the_filters_pick_clear_and_toggle() {
+        let (mut st, mut m) = setup();
+        step(&mut st, &mut m, Msg::OpenFilter(Some(FilterKind::Label)));
+        assert_eq!(st.open_filter, Some(FilterKind::Label));
+        // The same button again closes its list.
+        step(&mut st, &mut m, Msg::OpenFilter(Some(FilterKind::Label)));
+        assert_eq!(st.open_filter, None);
+
+        step(&mut st, &mut m, Msg::OpenFilter(Some(FilterKind::Label)));
+        step(&mut st, &mut m, Msg::Filter(FilterKind::Label, "ui".into()));
+        assert_eq!(st.filters.label, "ui");
+        assert_eq!(st.open_filter, None);
+        assert!(st.filters.active());
+
+        step(&mut st, &mut m, Msg::ClearFilters);
+        assert!(!st.filters.active());
+    }
+
+    #[test]
+    fn a_section_of_the_dock_folds_and_unfolds() {
+        let (mut st, mut m) = setup();
+        assert!(st.folded.contains(&Column::Todo));
+        step(&mut st, &mut m, Msg::Fold(Column::Todo));
+        assert!(!st.folded.contains(&Column::Todo));
+        step(&mut st, &mut m, Msg::Fold(Column::Todo));
+        assert!(st.folded.contains(&Column::Todo));
+    }
+
+    #[test]
+    fn asking_to_add_unfolds_the_column_and_shows_the_columns() {
+        let (mut st, mut m) = setup();
+        let focus = handle(&mut st, &mut m, Msg::StartAdding(Column::Done));
+        assert!(st.composing && st.adding == Some(Column::Done));
+        assert!(!st.folded.contains(&Column::Done));
+        // The keyboard goes to the field once it is drawn.
+        assert_eq!(focus.units(), 1);
+    }
+
+    #[test]
+    fn the_cache_follows_the_workspaces_and_answers_reads() {
+        let mut st = State::default();
+        let mut m = model(Locale::En, "graphite", None);
+        // The model knows its folder but has not read it.
+        assert!(!m.live.board.is_loaded(CWD));
+        let read = handle(
+            &mut st,
+            &mut m,
+            Msg::Follow(vec![CWD.into(), "/other".into()]),
+        );
+        // Only the folder that was not held yet is read: `/other`.
+        assert_eq!(read.units(), 1);
+        assert_eq!(m.live.board.folders(), vec!["/other", CWD]);
+
+        let again = handle(
+            &mut st,
+            &mut m,
+            Msg::Loaded(CWD.into(), Some(Arc::new(tasks()))),
+        );
+        assert_eq!(again.units(), 0);
+        assert_eq!(m.live.board.tasks(CWD).map(<[BoardTask]>::len), Some(7));
+    }
+
+    #[test]
+    fn a_change_event_reads_every_board_once() {
+        let (mut st, mut m) = setup();
+        let event_reads = read_all(&mut m);
+        assert_eq!(event_reads.units(), 1);
+        // A read is out: a second event waits for it instead of piling on.
+        assert_eq!(read_all(&mut m).units(), 0);
+        let _ = &mut st;
+    }
+
+    #[test]
+    fn opening_a_task_and_closing_its_overlay() {
+        let (mut st, mut m) = setup();
+        let open = Intent::OpenTask {
+            cwd: CWD.into(),
+            task: Some(DOING.into()),
+        };
+        // The shell pushes the overlay first, then offers the intent.
+        m.ui.overlays.push(Overlay::Task {
+            cwd: CWD.into(),
+            task: Some(DOING.into()),
+        });
+        assert!(react(&mut st, &mut m, &open).is_some());
+        assert!(st.dialog.is_some());
+
+        // Still open while its overlay is on the stack.
+        react(&mut st, &mut m, &Intent::CloseOverlay);
+        assert!(st.dialog.is_some());
+
+        m.ui.overlays.pop();
+        assert!(react(&mut st, &mut m, &Intent::CloseOverlay).is_some());
+        assert!(st.dialog.is_none());
+    }
+
+    #[test]
+    fn closing_the_dialog_saves_what_was_typed() {
+        let (mut st, mut m) = setup();
+        let open = Intent::OpenTask {
+            cwd: CWD.into(),
+            task: Some(DOING.into()),
+        };
+        react(&mut st, &mut m, &open);
+        let dialog = st.dialog.as_mut().expect("open");
+        dialog.seed(Column::Todo, String::new());
+        step(
+            &mut st,
+            &mut m,
+            Msg::Dialog(task_dialog::Msg::Title("Renamed".into())),
+        );
+        // One save (the title), and the keyboard back to the card.
+        let closed = task_dialog::closed(&mut st, &m);
+        assert_eq!(closed.units(), 2);
+        assert!(st.dialog.is_none());
+    }
+
+    #[test]
+    fn a_new_task_takes_what_the_add_field_held() {
+        let (mut st, mut m) = setup();
+        st.drafts.insert(Column::Doing, "Typed in the board".into());
+        step(&mut st, &mut m, Msg::AddDetails(Column::Doing));
+        assert!(st.drafts.is_empty());
+        let new = Intent::OpenTask {
+            cwd: CWD.into(),
+            task: None,
+        };
+        react(&mut st, &mut m, &new);
+        let dialog = st.dialog.as_ref().expect("open");
+        assert!(dialog.is_new());
+    }
+
+    #[test]
+    fn an_open_dialog_closes_when_an_agent_deletes_the_task() {
+        let (mut st, mut m) = setup();
+        react(
+            &mut st,
+            &mut m,
+            &Intent::OpenTask {
+                cwd: CWD.into(),
+                task: Some(DOING.into()),
+            },
+        );
+        let without: Vec<BoardTask> = tasks().into_iter().filter(|t| t.id != DOING).collect();
+        step(
+            &mut st,
+            &mut m,
+            Msg::Loaded(CWD.into(), Some(Arc::new(without))),
+        );
+        assert!(st.dialog.is_none());
+    }
+
+    #[test]
+    fn leaving_the_board_ends_what_was_in_progress() {
+        let (mut st, mut m) = setup();
+        step(&mut st, &mut m, Msg::Press(FREE.into(), Point::ORIGIN));
+        st.open_filter = Some(FilterKind::State);
+        st.composing = true;
+        react(&mut st, &mut m, &Intent::SetView(View::Terminals));
+        assert!(st.press.is_none() && st.open_filter.is_none() && !st.composing);
+    }
+
+    #[test]
+    fn f6_lands_on_the_first_card_of_the_first_column_that_has_one() {
+        let (st, mut m) = setup();
+        assert!(focus_entry(&st, &m, Region::Main).is_some());
+        assert!(focus_entry(&st, &m, Region::Dock).is_some());
+        assert!(focus_entry(&st, &m, Region::Navigator).is_none());
+        // An empty board has nothing to land on.
+        let empty = model(Locale::En, "graphite", Some(Vec::new()));
+        assert!(focus_entry(&st, &empty, Region::Main).is_none());
+        m.live.version += 1;
+    }
+
+    #[test]
+    fn the_clock_runs_only_while_a_task_is_in_progress_with_one() {
+        let (_, m) = setup();
+        assert!(clock_running(&m));
+        let idle = model(Locale::En, "graphite", Some(vec![model::test_task("a")]));
+        assert!(!clock_running(&idle));
+    }
 }
