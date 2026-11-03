@@ -3,6 +3,9 @@
 use super::*;
 use crate::state::types::AppState;
 
+mod drawn;
+mod driven;
+
 fn model_with(overlays: Vec<Overlay>) -> Model {
     let mut model = Model::default();
     model.ui.overlays = overlays;

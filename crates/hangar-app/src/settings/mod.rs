@@ -603,7 +603,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, category: SettingsCategory) -> Elem
             );
         }
         nav = nav.push(
-            plain_button(line)
+            plain_button(container(line).center_y(Length::Fill))
                 .width(Length::Fill)
                 .height(28)
                 .padding(Padding::from([0.0, space::MD]))

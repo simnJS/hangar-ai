@@ -105,6 +105,9 @@ pub struct State {
     /// Who was there when the code was drawn: a refresh that finds anyone else
     /// found the phone that paired.
     known: HashSet<String>,
+    /// Core could not open Hangar Mobile's store, so there is nothing to ask:
+    /// the page says so (`core.remote()` is `None`).
+    unavailable: bool,
     /// Tailscale, the list and the slots have been asked for since Hangar
     /// Mobile was last turned on.
     loaded: bool,
@@ -114,8 +117,6 @@ pub struct State {
 fn remote(sv: &Services) -> Option<Arc<Remote>> {
     sv.core().core().remote().cloned()
 }
-
-const UNAVAILABLE: &str = "Hangar Mobile could not open its store.";
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -149,7 +150,7 @@ impl State {
         *self = State::default();
         self.now = now_ms();
         let Some(remote) = remote(sv) else {
-            self.error = Some(UNAVAILABLE.to_string());
+            self.unavailable = true;
             return Task::none();
         };
         let status = ask(
@@ -316,7 +317,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Toggle(on) => {
             begin(st);
             let Some(remote) = remote(sv) else {
-                st.error = Some(UNAVAILABLE.to_string());
+                st.unavailable = true;
                 return Task::none();
             };
             st.busy.toggle = true;
@@ -579,6 +580,11 @@ pub fn subscription(st: &State) -> Subscription<Message> {
 /// The page, drawn from its description.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let projects = projects(ctx.model);
+    let error = if st.unavailable {
+        Some(ctx.t(hangar_i18n::Key::MobileUnavailable).into_owned())
+    } else {
+        st.error.clone()
+    };
     let page = page(&Props {
         t: ctx.i18n,
         now: st.now,
@@ -589,7 +595,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         just_paired: st.just_paired.as_ref().map(|(name, _)| name.as_str()),
         revoking: st.revoking.as_deref(),
         busy: st.busy,
-        error: st.error.as_deref(),
+        error: error.as_deref(),
         options: st.options.as_ref(),
         projects: &projects,
         slots: st.slots.as_deref(),
