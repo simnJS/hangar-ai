@@ -70,6 +70,7 @@ pub mod markdown;
 pub mod model;
 pub mod panel;
 pub mod parts;
+pub mod powershell;
 pub mod roots;
 pub mod store;
 pub mod tabs;

@@ -449,11 +449,16 @@ fn info<'a>(ctx: Ctx<'a>, entry: &'a Entry, kind: FileKind) -> Element<'a, Messa
     .spacing(tokens::space::LG)
     .align_y(Alignment::Center);
     if !mime.is_empty() {
+        // The only item that gives way when the panel is narrow, ending in an
+        // ellipsis (`.model-info__item--size`: `flex: 0 1 auto`, `min-width:
+        // 0`); the others keep their room.
         line = line.push(
-            text(model::mime_type(mime).to_string())
+            hangar_ui::tail_text::tail_text(model::mime_type(mime).to_string())
+                .cut_end()
+                .width(Length::Shrink)
                 .size(tokens::font_size::LABEL)
                 .font(hangar_theme::fonts::mono())
-                .style(style::text::subtle(t)),
+                .color(t.colors.fg_subtle),
         );
     }
     column![
@@ -463,6 +468,7 @@ fn info<'a>(ctx: Ctx<'a>, entry: &'a Entry, kind: FileKind) -> Element<'a, Messa
             .height(26.0)
             .width(Length::Fill)
             .align_y(Alignment::Center)
+            .clip(true)
             .style(style::container::panel(t)),
     ]
     .into()
