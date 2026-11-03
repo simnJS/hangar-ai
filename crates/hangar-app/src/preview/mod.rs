@@ -11,6 +11,9 @@
 //! placeholder bodies. The directory is this package's own; replace the
 //! bodies, add files, keep the signatures the shell calls.
 
+pub mod model;
+pub mod store;
+
 use std::sync::Arc;
 
 use iced::{Element, Subscription, Task};
