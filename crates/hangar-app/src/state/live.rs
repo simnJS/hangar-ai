@@ -97,8 +97,6 @@ pub struct Signals {
     /// P6: how many items Needs-you lists; `view.needsYou` is live while
     /// there are some.
     pub needs_you: usize,
-    /// P18: the deliveries running, for the snapshot.
-    pub delivering: Delivering,
 }
 
 /// A workspace's preview panel (the panel part of `lib/modelStore.ts`).

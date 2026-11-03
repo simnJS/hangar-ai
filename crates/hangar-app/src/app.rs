@@ -12,6 +12,7 @@
 //! `shell.rs` next to this file: what each intent does to the frame, the
 //! windows, the drawers and the focus.
 
+mod hooks;
 mod shell;
 
 use std::collections::{HashMap, HashSet};
@@ -149,6 +150,10 @@ pub fn run() -> iced::Result {
         .run()
 }
 
+/// What an agent asking before the state is in is told, word for word as
+/// control.ts and remoteControl.ts said it.
+const STARTING: &str = "Hangar.AI is still starting. Try again in a moment.";
+
 /// What the snapshot was last published for: a change to any of these
 /// republishes it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -243,7 +248,8 @@ impl App {
             Some(_) => crate::shell::dev_screenshot::capture(main_window),
             None => Task::none(),
         };
-        (app, Task::batch([open, load, detect, screenshot]))
+        let hooks = hooks::install(&app.services);
+        (app, Task::batch([open, load, detect, screenshot, hooks]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -259,9 +265,7 @@ impl App {
         if let Message::Control(crate::control::Msg::Request(request)) = &message
             && !self.model.live.hydrated
         {
-            request
-                .reply
-                .send(Err("Hangar.AI is still starting…".into()));
+            request.reply.send(Err(STARTING.into()));
             return Task::none();
         }
         if Self::is_package_message(&message) {
@@ -372,6 +376,11 @@ impl App {
             if self.model.live.hydrated && self.model.revision() != saved_revision {
                 tasks.push(persist::schedule(self.model.revision()));
             }
+        }
+        // Nothing to save, but what the engines and hibernation read beside
+        // the state (deliveries, activity, sleep) may have moved (P18).
+        if self.model.live.hydrated && self.snapshot.borrow().is_stale(&self.model) {
+            self.publish_snapshot();
         }
         Task::batch(tasks)
     }

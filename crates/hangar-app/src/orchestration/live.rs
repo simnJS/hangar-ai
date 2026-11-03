@@ -1,36 +1,28 @@
 //! The ports over the running app: the snapshot for reads, hangar-core for
 //! boards, git, the panes' shells and the bridge queue, and the inbox for the
-//! model writes, which the package's `update` applies on the UI thread
-//! (PACKAGES.md, rule 6).
-//!
-//! The model writes ride in this package's own message,
-//! `Message::Orchestration(Msg::Model(write, answer))`, because P18's
-//! `ModelCmd` was still empty when this was written. Once P18 defines
-//! `ModelCmd::{AddPane, ClosePane, OpenWorkspace, Touch, Announce}`, these
-//! sends become `Message::Control(control::Msg::Model(cmd, answer))` and the
-//! package's `Msg::Model` goes away.
+//! model writes, which P18's `control::update` applies on the UI thread
+//! (`Message::Control(control::Msg::Model(cmd, answer))`, PACKAGES.md,
+//! rule 6).
 
 use std::sync::{Arc, Mutex};
 
 use hangar_core::board::Task;
 use hangar_core::git::{Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree};
 use hangar_core::memory::MemoryEntry;
-use hangar_i18n::{Key, Locale, args, t, t_with};
 
 use super::brief::BriefingPort;
 use super::events::{EngineIo, JournalEntry, OrchestratorEvent};
 use super::manager_feed::ManagerJournalEntry;
-use super::port::{AnnounceKind, Announcement, NewPane};
+use super::port::{Announcement, NewPane};
 use super::projects::{ProjectSummary, ProjectsPort};
 use super::runtime::OrchestrationHandle;
 use super::text::now_ms;
 use super::worker::{Starting, WorkerPort};
-use super::{ModelWrite, Msg};
-use crate::message::{Intent, Message};
+use crate::control::ModelCmd;
+use crate::message::Message;
 use crate::services::inbox::Answer;
-use crate::shell::Notice;
-use crate::state::types::{AppState, PaneId};
-use crate::state::{PaneActivity, Snapshot};
+use crate::state::types::{AppState, Pane, PaneId};
+use crate::state::{PaneActivity, PanePatch, Snapshot};
 
 /// The ports, over the running app.
 #[derive(Clone, Debug)]
@@ -58,18 +50,20 @@ impl LivePort {
         self.handle.services().core().host().clone()
     }
 
-    fn locale(&self) -> Locale {
-        self.snapshot().state.settings.locale.unwrap_or_else(Locale::system)
-    }
-
-    /// A model write, applied by the package's `update`; `None` when the app
-    /// went away before answering.
-    async fn write(&self, write: ModelWrite) -> Option<crate::state::StoreOutcome> {
+    /// A model write, applied on the UI thread by P18's `control::update`;
+    /// `None` when the app went away before answering.
+    async fn write(&self, cmd: ModelCmd) -> Option<crate::state::StoreOutcome> {
         let (answer, outcome) = Answer::channel();
-        if !self.handle.services().send(Message::Orchestration(Msg::Model(write, answer))) {
+        if !self.handle.services().send(Message::Control(crate::control::Msg::Model(cmd, answer))) {
             return None;
         }
-        outcome.await.ok()
+        outcome.await.ok()?.ok()
+    }
+
+    /// The same, for a write nothing waits on.
+    fn tell(&self, cmd: ModelCmd) {
+        let (answer, _) = Answer::channel();
+        self.handle.services().send(Message::Control(crate::control::Msg::Model(cmd, answer)));
     }
 
     fn enqueue_now(&self, pane: &str, text: &str, from: &str) {
@@ -124,47 +118,49 @@ impl WorkerPort for LivePort {
     }
 
     /// The notice `control.created` / `control.closed`, as App.tsx's
-    /// `announce` showed it, in the person's language.
+    /// `announce` showed it, in the person's language (P18 words it).
     fn announce(&self, announcement: Announcement) {
-        let locale = self.locale();
-        let by = match &announcement.by {
-            Some(by) => by.clone(),
-            None => t(locale, Key::ControlSomeone).into_owned(),
-        };
-        let key = match announcement.kind {
-            AnnounceKind::Created => Key::ControlCreated,
-            AnnounceKind::Closed => Key::ControlClosed,
-        };
-        let text = t_with(
-            locale,
-            key,
-            &args!("by" => by, "pane" => &announcement.pane, "workspace" => &announcement.workspace),
-        );
-        self.handle
-            .services()
-            .send(Message::Intent(Intent::Notice(Notice::Agent(text.into_owned()))));
+        self.tell(ModelCmd::Announce(announcement));
     }
 
     async fn add_pane(&self, workspace_id: &str, pane: NewPane) -> Option<PaneId> {
-        self.write(ModelWrite::AddPane { ws: workspace_id.into(), pane }).await?.pane
+        // In the add itself, so the worker's shell starts with all of it.
+        let init = pane.init.map(|init| {
+            PanePatch::new(move |target: &mut Pane| {
+                target.role = Some(init.role);
+                target.task_id = Some(init.task_id.clone());
+                target.model = Some(init.model.clone());
+                target.port_base = Some(init.port_base);
+                if init.shared_folder.is_some() {
+                    target.shared_folder = init.shared_folder;
+                }
+            })
+        });
+        let cmd = ModelCmd::AddPane {
+            ws: workspace_id.into(),
+            agent: Some(pane.agent),
+            near: pane.near,
+            dir: None,
+            cwd: Some(pane.cwd),
+            name: Some(pane.name),
+            init,
+        };
+        self.write(cmd).await?.pane
     }
 
     async fn close_pane(&self, workspace_id: &str, pane: &str) {
-        self.write(ModelWrite::ClosePane { ws: workspace_id.into(), pane: pane.into() }).await;
+        self.write(ModelCmd::ClosePane { ws: workspace_id.into(), pane: pane.into() }).await;
     }
 
-    /// Hibernation's `touchWorkspace` is P4's, which has no way in from an
-    /// engine yet: until it has (P18's planned `ModelCmd::Touch`), a
-    /// workspace a worker was just started or stopped in can still fall
-    /// asleep on the person's idle delay. Nothing else depends on it.
+    /// Hibernation's `touchWorkspace`, through P18 to P4: a workspace a
+    /// worker was just started or stopped in does not fall asleep on the
+    /// person's idle delay.
     fn touch(&self, workspace_id: &str) {
-        let _ = workspace_id;
+        self.tell(ModelCmd::Touch(workspace_id.into()));
     }
 
     fn open_workspace(&self, workspace_id: &str) {
-        let (answer, _) = Answer::channel();
-        let write = ModelWrite::OpenWorkspace(workspace_id.into());
-        self.handle.services().send(Message::Orchestration(Msg::Model(write, answer)));
+        self.tell(ModelCmd::OpenWorkspace(workspace_id.into()));
     }
 
     async fn kill_pane(&self, pane: &str) -> Result<(), String> {
