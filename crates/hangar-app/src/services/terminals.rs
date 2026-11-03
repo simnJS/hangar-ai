@@ -1,6 +1,8 @@
 //! What the engines may do with a pane's terminal, wherever it is drawn
-//! (inventory §8.2 and A6). P5 implements it over its `TerminalHub`; until it
-//! does, every pane reads as absent.
+//! (inventory §8.2 and A6). The panes implement it over their `TerminalHub`
+//! (`panes::terminal_access`, installed when the app boots); the trait's own
+//! answers (a pane absent, nothing taken) are only what an implementation
+//! leaves out.
 
 use crate::state::PaneId;
 
@@ -32,9 +34,3 @@ pub trait TerminalAccess: Send + Sync {
         false
     }
 }
-
-/// No terminals: the default until P5 installs its hub.
-#[derive(Debug, Default)]
-pub struct NoTerminals;
-
-impl TerminalAccess for NoTerminals {}

@@ -22,9 +22,9 @@
 //!
 //! The sheet steers its own Escape (first the search, then the sheet, and
 //! never while a shortcut is recording), so its layer does not close on
-//! Escape. The shell's own Escape rule (`App::key`, a TODO of P0b) must leave
-//! the top overlay alone when it is the settings and the key was spent, or the
-//! sheet closes with the search still full.
+//! Escape. The shell's own Escape rule (`App::key`) only hears a press nothing
+//! captured, and the sheet's `keys::on_key` captures the one it answers, so
+//! the shell never closes the sheet while the search is still full.
 
 pub mod discord;
 pub mod experiments;

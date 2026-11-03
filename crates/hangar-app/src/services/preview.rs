@@ -1,9 +1,10 @@
 //! What the engines may do with a workspace's preview panel (the
 //! `PreviewHost` of control.ts, inventory A6): list, show, reveal, reload,
 //! close, wait for an entry to settle, render a model off screen, list kit
-//! tabs. P15 implements it over its preview store (with P16's kit tabs and
-//! P17's snapshots); until it does, every workspace's preview is empty and
-//! showing anything fails.
+//! tabs. The preview implements it over its store (`preview/access.rs`, with
+//! the kit tabs and the 3D snapshots), installed when the app boots
+//! (`preview::preview_access`). The trait's own answers (empty, refused) are
+//! only what a partial implementation leaves out.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,8 +30,13 @@ pub struct PreviewRequest {
     pub reveal: bool,
 }
 
-/// One open entry, as an engine sees it.
-/// TODO(P15): the fields `model_list`/`preview_list` answer with.
+/// One open entry, in short. The agents' `model_list` and `preview_list`
+/// answer with more (the active entry, the panel's visibility, a model's
+/// format and findings, a kit tab's params): that comes from the preview's
+/// hosts on the control bus (`Hook::Preview`, `control::port::OpenEntry`).
+/// This summary is what `PreviewAccess` lists, which only the bus's fallback
+/// for the moments before those hosts are installed reads
+/// (`control/live.rs`, `AccessHost`), with the preview's own listings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewEntry {
     pub id: String,
@@ -117,9 +123,3 @@ pub trait PreviewAccess: Send + Sync {
         Vec::new()
     }
 }
-
-/// No preview: the default until P15 installs its store.
-#[derive(Debug, Default)]
-pub struct NoPreview;
-
-impl PreviewAccess for NoPreview {}
