@@ -10,7 +10,9 @@
 //!
 //! One helper serves the whole app. The kit tabs (P16) share it: windows named
 //! `preview-…` are this package's, and whoever registers a prefix with
-//! `Helper::route` gets the events of the windows that start with it.
+//! `Helper::route` gets the events of the windows that start with it, and with
+//! `Helper::serve` answers their pages' requests (a kit's page is served by
+//! `kit_scheme::serve`, not from the preview's folders).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -54,6 +56,7 @@ impl std::fmt::Display for StartError {
 }
 
 type Route = Box<dyn Fn(&Event) + Send + Sync>;
+type Serve = Arc<dyn Fn(&SchemeRequest) -> SchemeResponse + Send + Sync>;
 
 /// The helper process and the way to it, shared by everything that shows a
 /// page: started on the first window, and again after it was lost.
@@ -61,6 +64,7 @@ type Route = Box<dyn Fn(&Event) + Send + Sync>;
 pub struct Helper {
     client: Mutex<Option<Arc<Client>>>,
     routes: Mutex<Vec<(String, Route)>>,
+    serves: Mutex<Vec<(String, Serve)>>,
 }
 
 impl std::fmt::Debug for Helper {
@@ -128,6 +132,30 @@ impl Helper {
             .push((prefix.to_string(), Box::new(handler)));
     }
 
+    /// Answers the requests the pages of the windows whose name starts with
+    /// `prefix` make to their schemes, in place of the preview's files.
+    pub fn serve(
+        &self,
+        prefix: &str,
+        answer: impl Fn(&SchemeRequest) -> SchemeResponse + Send + Sync + 'static,
+    ) {
+        self.serves
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push((prefix.to_string(), Arc::new(answer)));
+    }
+
+    /// Who answers a window's requests: whoever serves its prefix, or the
+    /// preview's files.
+    fn server_of(&self, window: &str) -> Option<Serve> {
+        self.serves
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .iter()
+            .find(|(prefix, _)| window.starts_with(prefix.as_str()))
+            .map(|(_, serve)| serve.clone())
+    }
+
     /// Starts the helper if it is not running, and answers its client. It
     /// takes a moment: call it off the UI thread. `inbox` is where this
     /// package's events go.
@@ -157,9 +185,14 @@ impl Helper {
         while let Some(event) = events.recv() {
             if let Event::SchemeRequest(request) = event {
                 let client = client.clone();
+                let server = self.server_of(&request.window);
                 std::thread::spawn(move || {
+                    let response = match server {
+                        Some(serve) => serve(&request),
+                        None => answer(&request),
+                    };
                     // A helper that is gone has nobody to answer to.
-                    let _: Result<(), Closed> = client.respond(answer(&request));
+                    let _: Result<(), Closed> = client.respond(response);
                 });
                 continue;
             }
