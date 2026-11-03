@@ -560,6 +560,47 @@ fn a_panes_folder_is_its_own_or_its_workspaces() {
 }
 
 #[test]
+fn a_pane_selected_by_the_keyboard_asks_for_its_branch_as_a_landing_does() {
+    let (mut m, _) = model(vec![workspace(
+        "w1",
+        vec![
+            pane("p1", "Ava", AgentId::Claude),
+            Pane {
+                cwd: Some("/work/w1/site".into()),
+                ..pane("p2", "Ben", AgentId::Shell)
+            },
+        ],
+    )]);
+    let asked = |m: &mut Model, folder: &str| {
+        m.live
+            .panes_logic
+            .branches
+            .lookup(folder, NOW, PANE_BRANCH_FOCUS_MS)
+            == Lookup::InFlight
+    };
+    let select = Intent::SelectPane {
+        ws: "w1".into(),
+        pane: "p2".into(),
+    };
+    assert!(focused_branch(&mut m, &select, NOW).is_some());
+    assert!(asked(&mut m, "/work/w1/site"), "the pane's own folder");
+    let land = Intent::FocusPane {
+        ws: "w1".into(),
+        pane: "p1".into(),
+        terminal: true,
+    };
+    assert!(focused_branch(&mut m, &land, NOW).is_some());
+    assert!(asked(&mut m, "/work/w1"));
+    // A pane that is gone, and any other intent, ask nothing.
+    let gone = Intent::SelectPane {
+        ws: "w1".into(),
+        pane: "p9".into(),
+    };
+    assert!(focused_branch(&mut m, &gone, NOW).is_none());
+    assert!(focused_branch(&mut m, &Intent::CloseOverlay, NOW).is_none());
+}
+
+#[test]
 fn a_freshly_mounted_pane_has_done_nothing_yet() {
     let (m, _) = one_claude();
     let rest = m.live.panes_logic.hibernation.pane_rest("p1").unwrap();
