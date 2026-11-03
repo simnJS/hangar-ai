@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 fn theme() -> &'static Theme {
     hangar_theme::by_id_or_default("graphite")
@@ -110,10 +111,15 @@ fn resolves_images_numbers_headings_and_colours_fenced_code_as_it_renders() {
         heading_ids(&rendered.content, theme()),
         ["intro", "intro-1"]
     );
-    match rendered.images.get("shots/one.png") {
-        Some(Resolved::Handle(_)) => {}
-        other => panic!("the image should load from beside the file: {other:?}"),
-    }
+    // The image is a file to be read, beside the page, by its checks.
+    assert_eq!(
+        rendered.wanted(),
+        [(
+            "shots/one.png".to_string(),
+            PathBuf::from("/dev/docs/shots/one.png")
+        )]
+    );
+    assert!(rendered.images.is_empty());
     let Some(Item::CodeBlock { language, code, .. }) = rendered
         .content
         .items()
@@ -162,8 +168,9 @@ fn an_inline_image_is_read_from_its_bytes() {
     );
     assert!(matches!(
         rendered.images.values().next(),
-        Some(Resolved::Handle(_))
+        Some(Resolved::Raster(_))
     ));
+    assert!(rendered.wanted().is_empty());
 }
 
 #[test]
@@ -193,6 +200,253 @@ fn scrolls_to_a_heading_opens_the_web_outside_and_goes_nowhere_for_anything_else
 fn a_headings_widget_is_named_by_its_anchor() {
     assert_eq!(heading_widget("setting-up"), heading_widget("setting-up"));
     assert_ne!(heading_widget("setting-up"), heading_widget("other"));
+}
+
+/* ── the images of a page ──────────────────────────────────────── */
+
+/// A folder the preview may read from, for as long as the test lives. The
+/// list of folders is the process's, so the tests that set it take turns.
+struct Granted {
+    dir: PathBuf,
+    outside: PathBuf,
+    _turn: tokio::sync::MutexGuard<'static, ()>,
+}
+
+impl Granted {
+    async fn new(name: &str) -> Granted {
+        let turn = crate::preview::tests::ROOTS.lock().await;
+        let base = std::env::temp_dir().join(format!("hangar-md-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = base.join("docs");
+        let outside = base.join("elsewhere");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        hangar_core::model::model_allow_roots(vec![dir.to_string_lossy().into_owned()])
+            .await
+            .unwrap();
+        // The roots are canonical (`/tmp` may be a link), so the paths the
+        // tests write are too.
+        Granted {
+            dir: dir.canonicalize().unwrap(),
+            outside: outside.canonicalize().unwrap(),
+            _turn: turn,
+        }
+    }
+}
+
+impl Drop for Granted {
+    fn drop(&mut self) {
+        if let Some(base) = self.dir.parent() {
+            let _ = std::fs::remove_dir_all(base);
+        }
+    }
+}
+
+fn png_file(path: &Path) {
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = png::Encoder::new(file, 2, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[255u8; 16]).unwrap();
+}
+
+fn gif_file(path: &Path) {
+    use ::image::codecs::gif::GifEncoder;
+    use ::image::{Delay, Frame, Rgba, RgbaImage};
+    let mut out = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut out);
+        for colour in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+            let image = RgbaImage::from_pixel(4, 4, Rgba(colour));
+            let delay = Delay::from_numer_denom_ms(100, 1);
+            encoder
+                .encode_frame(Frame::from_parts(image, 0, 0, delay))
+                .unwrap();
+        }
+    }
+    std::fs::write(path, out).unwrap();
+}
+
+/// What a page ends up with for the images it names, by address.
+async fn loaded(text: &str, page: &Path) -> HashMap<Uri, Resolved> {
+    let rendered = Rendered::parse(text, &page.to_string_lossy());
+    load_images(rendered.wanted()).await.into_iter().collect()
+}
+
+#[tokio::test]
+async fn an_image_beside_the_page_loads_whatever_it_is_made_of() {
+    let grant = Granted::new("beside").await;
+    png_file(&grant.dir.join("one.png"));
+    gif_file(&grant.dir.join("move.gif"));
+    std::fs::write(
+        grant.dir.join("logo.svg"),
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'/>",
+    )
+    .unwrap();
+    std::fs::create_dir_all(grant.dir.join("shots")).unwrap();
+    png_file(&grant.dir.join("shots/two.png"));
+    let page = grant.dir.join("README.md");
+    let found = loaded(
+        "![a](one.png) ![b](shots/two.png) ![c](./shots/../one.png) ![d](move.gif) ![e](logo.svg)",
+        &page,
+    )
+    .await;
+    assert!(matches!(found.get("one.png"), Some(Resolved::Raster(_))));
+    assert!(matches!(
+        found.get("shots/two.png"),
+        Some(Resolved::Raster(_))
+    ));
+    assert!(matches!(
+        found.get("./shots/../one.png"),
+        Some(Resolved::Raster(_))
+    ));
+    assert!(
+        matches!(found.get("move.gif"), Some(Resolved::Animated(a)) if a.frames.len() == 2),
+        "a GIF of two frames plays"
+    );
+    assert!(
+        matches!(found.get("logo.svg"), Some(Resolved::Vector(_))),
+        "an SVG is drawn as a vector, not handed to the raster decoder"
+    );
+}
+
+#[tokio::test]
+async fn an_image_outside_the_allowed_folders_is_never_read() {
+    let grant = Granted::new("outside").await;
+    png_file(&grant.outside.join("secret.png"));
+    png_file(&grant.dir.join("fine.png"));
+    let page = grant.dir.join("README.md");
+    let text = format!(
+        "![up](../elsewhere/secret.png) ![abs]({}) ![fine](fine.png)",
+        grant.outside.join("secret.png").display()
+    );
+    let found = loaded(&text, &page).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found.contains_key("fine.png"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_inside_the_folder_to_a_file_outside_it_is_refused() {
+    let grant = Granted::new("link").await;
+    png_file(&grant.outside.join("secret.png"));
+    std::os::unix::fs::symlink(
+        grant.outside.join("secret.png"),
+        grant.dir.join("sneak.png"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&grant.outside, grant.dir.join("out")).unwrap();
+    let page = grant.dir.join("README.md");
+    let found = loaded("![a](sneak.png) ![b](out/secret.png)", &page).await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_device_is_not_an_image() {
+    let grant = Granted::new("device").await;
+    std::os::unix::fs::symlink("/dev/zero", grant.dir.join("zero.png")).unwrap();
+    let page = grant.dir.join("README.md");
+    let found = loaded("![z](zero.png) ![z2](/dev/zero)", &page).await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[tokio::test]
+async fn a_file_that_is_not_what_its_name_says_or_too_large_is_refused() {
+    let grant = Granted::new("kinds").await;
+    std::fs::write(grant.dir.join("page.png"), "<html>an error page</html>").unwrap();
+    std::fs::create_dir_all(grant.dir.join("folder.png")).unwrap();
+    // A PNG that is larger than the 64 MB the preview reads: only a sparse
+    // file, which costs no disk.
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(grant.dir.join("huge.png")).unwrap();
+        file.write_all(b"\x89PNG\r\n\x1a\n").unwrap();
+        file.set_len(64 * 1024 * 1024 + 1).unwrap();
+    }
+    png_file(&grant.dir.join("ok.png"));
+    let page = grant.dir.join("README.md");
+    let found = loaded(
+        "![a](page.png) ![b](folder.png) ![c](huge.png) ![d](ok.png) ![e](missing.png)",
+        &page,
+    )
+    .await;
+    assert_eq!(found.keys().collect::<Vec<_>>(), ["ok.png"], "{found:?}");
+}
+
+#[tokio::test]
+async fn a_picture_with_a_header_the_decoder_cannot_read_is_left_out() {
+    let grant = Granted::new("broken").await;
+    // The right first bytes, then nothing a PNG has.
+    std::fs::write(
+        grant.dir.join("broken.png"),
+        b"\x89PNG\r\n\x1a\nnot a header",
+    )
+    .unwrap();
+    let page = grant.dir.join("README.md");
+    let found = loaded("![b](broken.png)", &page).await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn the_page_resolves_what_was_found_and_keeps_the_rest_as_alt_text() {
+    let mut rendered = Rendered::parse("![a](one.png) ![b](two.png)", "/dev/docs/README.md");
+    assert_eq!(rendered.wanted().len(), 2);
+    rendered.resolve(vec![(
+        "one.png".to_string(),
+        Resolved::Raster(image::Handle::from_bytes(vec![1])),
+    )]);
+    assert!(matches!(
+        rendered.images.get("one.png"),
+        Some(Resolved::Raster(_))
+    ));
+    assert!(!rendered.images.contains_key("two.png"));
+}
+
+/* ── front matter ──────────────────────────────────────────────── */
+
+#[test]
+fn front_matter_is_shown_as_a_code_block_instead_of_dropped() {
+    let source = "---\ntitle: Notes\ntags: [a, b]\n---\n\n# Heading\n\ntext\n";
+    assert_eq!(
+        prepare(source),
+        "```yaml\ntitle: Notes\ntags: [a, b]\n```\n\n\n# Heading\n\ntext\n"
+    );
+    let rendered = Rendered::parse(source, "/d/README.md");
+    let items = rendered.content.items();
+    assert!(
+        matches!(&items[0], Item::CodeBlock { language: Some(l), code, .. }
+            if l == "yaml" && code.starts_with("title: Notes")),
+        "{:?}",
+        items.first()
+    );
+    assert!(matches!(&items[1], Item::Heading(..)));
+}
+
+#[test]
+fn a_toml_block_and_a_dotted_end_are_front_matter_too() {
+    assert_eq!(
+        prepare("+++\ntitle = \"x\"\n+++\ntext\n"),
+        "```toml\ntitle = \"x\"\n```\n\ntext\n"
+    );
+    assert_eq!(
+        prepare("---\na: 1\n...\ntext\n"),
+        "```yaml\na: 1\n```\n\ntext\n"
+    );
+}
+
+#[test]
+fn a_rule_at_the_top_that_is_never_closed_is_not_front_matter() {
+    assert_eq!(prepare("---\ntext\n"), "---\ntext\n");
+    // Nothing inside: dropped, as there is nothing to read.
+    assert_eq!(prepare("---\n---\ntext\n"), "text\n");
+}
+
+#[test]
+fn the_fence_of_front_matter_is_longer_than_any_backticks_inside_it() {
+    let out = prepare("---\nnote: ```code```\n---\n");
+    assert!(out.starts_with("````yaml\n"), "{out}");
+    assert!(out.contains("\n````\n"));
 }
 
 #[test]

@@ -5,8 +5,9 @@
 //! in, and the theme coloured the classes it produced (`.hljs-keyword` in the
 //! accent, `.hljs-string` in the success tone…). Here the grammars are bat's,
 //! through `two-face` (the set iced's own highlighter loads as well, which has
-//! the TypeScript, TOML, Dockerfile, PowerShell and Kotlin that syntect's
-//! default set lacks), run with `syntect`. iced's `Highlighter` hands over a
+//! the TypeScript, TOML, Dockerfile and Kotlin that syntect's default set
+//! lacks; it has no PowerShell, which `powershell.rs` colours), run with
+//! `syntect`. iced's `Highlighter` hands over a
 //! colour from one of five fixed syntect themes, which would not follow the
 //! app's 33 themes nor stay readable on a light one; so the scopes are kept
 //! and mapped to the same handful of classes the stylesheet coloured, and
@@ -226,6 +227,9 @@ pub fn syntax_of_language(language: &str) -> Option<&'static SyntaxReference> {
 /// names it) is written; `None` for plain text, or a language no grammar is
 /// known for, which the viewer draws as it is.
 pub fn highlight_file(text: &str, path: &str, language: Option<&str>) -> Option<Lines> {
+    if super::powershell::is_file(path, language) {
+        return Some(super::powershell::highlight(text));
+    }
     let syntax = syntax_for(path, language)?;
     Some(run(text, syntax))
 }
@@ -233,6 +237,9 @@ pub fn highlight_file(text: &str, path: &str, language: Option<&str>) -> Option<
 /// The same for a fenced block of Markdown, by its language word.
 pub fn highlight_block(text: &str, language: &str) -> Option<Lines> {
     let language = language.split([' ', ',', '{']).next().unwrap_or("");
+    if super::powershell::is_language(language) {
+        return Some(super::powershell::highlight(text));
+    }
     let syntax = syntax_of_language(language)?;
     Some(run(text, syntax))
 }
@@ -313,8 +320,8 @@ mod tests {
             .any(|run| run.text.contains(text) && run.class == class)
     }
 
-    /// bat's set has no PowerShell, which highlight.js had: a `.ps1` is drawn
-    /// plain, under its language chip.
+    /// bat's set has no PowerShell, which highlight.js had: `powershell.rs`
+    /// colours it instead.
     const WITHOUT_GRAMMAR: [&str; 1] = ["powershell"];
 
     #[test]
@@ -324,6 +331,21 @@ mod tests {
             .filter(|language| syntax_of_language(language).is_none())
             .collect();
         assert_eq!(missing, WITHOUT_GRAMMAR);
+        // And the one that has none of syntect's is coloured all the same,
+        // whether it is a file or a fenced block.
+        let file = highlight_file("Write-Host 'hi' # done", "run.ps1", Some("powershell"))
+            .expect("PowerShell is coloured");
+        assert!(
+            has(&file, 0, "Write-Host", Class::Title),
+            "{:?}",
+            classes(&file, 0)
+        );
+        assert!(has(&file, 0, "# done", Class::Comment));
+        let fence = highlight_block("$x = 1", "pwsh").expect("a fenced block");
+        assert!(has(&fence, 0, "$x", Class::Attr));
+        for name in ["psd1", "psm1"] {
+            assert!(highlight_file("$a", &format!("m.{name}"), Some("powershell")).is_some());
+        }
     }
 
     #[test]

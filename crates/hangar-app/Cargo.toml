@@ -55,14 +55,24 @@ unicode-normalization.workspace = true
 # through hangar-core's `model_save_png`, which takes it as base64.
 arboard.workspace = true
 base64.workspace = true
+# The 2D viewers (P15, package F): the frames of an animated GIF or WebP, and
+# the AVIF files iced's image feature cannot read.
+image.workspace = true
+avif-parse.workspace = true
+re_rav1d.workspace = true
+# The version iced's SVG renderer builds: it tells an SVG that cannot be read
+# from one that has no size, which the renderer reports the same way, and the
+# tests check that every glyph of the preview is an SVG a renderer can read.
+usvg.workspace = true
 
 [dev-dependencies]
 # Draws a package's views without a window, for the snapshot tests packages keep
 # to look at what they built (kits/views/snapshot.rs), and drives the preview's
 # views with real events.
 iced_test.workspace = true
-# Only to check that every glyph of the preview is an SVG a renderer can read.
-usvg.workspace = true
+# The AVIF encoder (iced's image feature builds it already), to make the files
+# the AVIF reader of the preview is tested on.
+image = { workspace = true, features = ["avif"] }
 
 # The Windows executable's icon and version information (build.rs). Only a
 # Windows host compiles the resource, so it is only a build dependency there.

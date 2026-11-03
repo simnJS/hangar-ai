@@ -56,6 +56,7 @@
 //! | [`panel`] | `header`, `panel`: a bar with a title and actions |
 //! | [`split`] | `split`: two regions with a draggable divider |
 //! | [`tabs`] | `strip`: document tabs with close crosses |
+//! | [`selectable`] | `Doc`, `selectable`: text a person can select with the pointer and copy, in code, Markdown and the like |
 //! | [`tail_text`](mod@tail_text) | `tail_text`: one line that loses its beginning, not its end (a path in a narrow cell) |
 //! | [`list`] | `row`: a list row with selection and hover |
 //! | [`badge`] | `badge`, `count`, `tag` |
@@ -102,6 +103,7 @@ pub mod menu_select;
 pub mod palette;
 pub mod panel;
 pub mod section;
+pub mod selectable;
 pub mod shortcut;
 pub mod shortcut_field;
 pub mod split;

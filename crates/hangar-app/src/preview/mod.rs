@@ -55,7 +55,10 @@
 //! `Helper::route`.
 
 pub mod access;
+pub mod animated;
+pub mod avif;
 pub mod code_lines;
+pub mod decode;
 pub mod dev;
 pub mod glyph;
 pub mod grip;
@@ -67,10 +70,12 @@ pub mod markdown;
 pub mod model;
 pub mod panel;
 pub mod parts;
+pub mod powershell;
 pub mod roots;
 pub mod store;
 pub mod tabs;
 pub mod text;
+pub mod travelling;
 pub mod viewer;
 pub mod webview;
 pub mod windowed;
@@ -160,6 +165,16 @@ pub struct State {
     agreed: HashMap<WsId, Agreed>,
     /// The hook for the control bus has been sent.
     hosted: bool,
+    /// The shell is about to give the panel the keyboard because of a press
+    /// in it (a tab, the text of a file, the expand button): `focus_entry` is
+    /// not to put it on the image in front. Read and cleared by `focus_entry`,
+    /// which only sees the state by reference.
+    skip_stage: std::cell::Cell<bool>,
+    /// The arrows, Home, End and Delete are the tab strip's while the panel
+    /// has the keyboard: they are after a tab was pressed or F6 came in, and
+    /// are not after a press in the text of a file, where Delete closing the
+    /// tab would be a trap.
+    strip_keys: std::cell::Cell<bool>,
 }
 
 /// A workspace's panel as the shell's signals and the store both held it at
@@ -203,6 +218,8 @@ impl Default for State {
             fronts: HashMap::new(),
             agreed: HashMap::new(),
             hosted: false,
+            skip_stage: std::cell::Cell::new(false),
+            strip_keys: std::cell::Cell::new(false),
         }
     }
 }
@@ -380,7 +397,15 @@ fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
         Msg::Tick => watch(st, m),
         Msg::Activate(ws, id) => {
             st.shared.edit(|store| store.activate_model(&id));
-            strip_to(st, &ws)
+            // A pressed tab has the keyboard, as it did in the TS: the arrows,
+            // Home, End and Delete are the strip's from then on (the panel is
+            // the focused region), until the keyboard goes elsewhere.
+            st.skip_stage.set(true);
+            st.strip_keys.set(true);
+            Task::batch([
+                strip_to(st, &ws),
+                Task::done(Message::Intent(Intent::FocusRegion(Region::Model))),
+            ])
         }
         Msg::Close(_, id) => {
             st.shared.edit(|store| store.close_model(&id));
@@ -502,20 +527,16 @@ fn sync_panels(st: &mut State, m: &mut Model) {
 }
 
 /// Brings the strip to the tab in front: an agent may bring forward one that
-/// sits past the panel's edge.
+/// sits past the panel's edge. The least that shows the whole of it, by where
+/// the tab is (`tabs::reveal_tab`).
 fn strip_to(st: &State, ws: &str) -> Task<Message> {
-    let Some(scope) = st.shared.read(|store| Some(store.scope(ws).clone())) else {
-        return Task::none();
-    };
-    let ids: Vec<String> = scope.entries.iter().map(|entry| entry.id.clone()).collect();
-    let share = tabs::scroll_share(&ids, scope.active_id.as_deref());
-    iced::widget::operation::snap_to(
-        tabs::strip_id(),
-        iced::widget::scrollable::RelativeOffset {
-            x: Some(share),
-            y: None,
-        },
-    )
+    let front = st
+        .shared
+        .read(|store| Some(store.scope(ws).active_id.clone()));
+    match front {
+        Some(Some(id)) => tabs::reveal_tab(&id),
+        _ => Task::none(),
+    }
 }
 
 fn tab_key(st: &mut State, m: &Model, key: TabKey) -> Task<Message> {
@@ -797,6 +818,22 @@ fn read_image(id: &str, revision: u64, path: &str) -> Task<Message> {
     )
 }
 
+/// Reads the pictures a Markdown page names from the disk, off the UI thread
+/// and through the checks of `markdown::load_images`.
+fn markdown_images(
+    id: &str,
+    revision: u64,
+    wanted: Vec<(String, std::path::PathBuf)>,
+) -> Task<Message> {
+    if wanted.is_empty() {
+        return Task::none();
+    }
+    let id = id.to_string();
+    Task::perform(markdown::load_images(wanted), move |found| {
+        viewer_message(&id, revision, ViewerMsg::MarkdownImages(found))
+    })
+}
+
 /// Colours a text off the UI thread: the grammars take a moment to load and
 /// a long file longer.
 fn colour(
@@ -872,14 +909,26 @@ fn viewer_update(
                 kind == FileKind::Text && language == Some("json"),
                 generation,
             );
+            let mut images = Task::none();
             if kind == FileKind::Markdown {
-                viewer.rendered = Some(markdown::Rendered::parse(&ready.text, &entry.path));
+                let rendered = markdown::Rendered::parse(&ready.text, &entry.path);
+                images = markdown_images(id, revision, rendered.wanted());
+                viewer.rendered = Some(rendered);
             }
             viewer.generation = generation;
             let (body, path) = (ready.text.clone(), entry.path.clone());
             viewer.load = Some(Load::Ready(Box::new(ready)));
             // A page's source is HTML to colour; its path says `.html`.
-            colour(id, revision, generation, body, path, language)
+            Task::batch([
+                colour(id, revision, generation, body, path, language),
+                images,
+            ])
+        }
+        ViewerMsg::MarkdownImages(found) => {
+            if let Some(rendered) = st.viewers.get_mut(id).and_then(|v| v.rendered.as_mut()) {
+                rendered.resolve(found);
+            }
+            Task::none()
         }
         ViewerMsg::Coloured(generation, lines) => {
             if let Some(viewer) = st.viewers.get_mut(id)
@@ -911,12 +960,13 @@ fn viewer_update(
             Task::none()
         }
         ViewerMsg::ToggleWrap => {
+            // The lines are laid out anew and the view stays where it was
+            // scrolled to, as a class toggled on the TS's `<pre>` kept its
+            // `scrollTop`: the scrollable is the same and keeps its offset
+            // (the window of built rows follows it), and shortens it itself
+            // when the text is now shorter than that.
             st.wrap = !st.wrap;
-            // The lines are laid out anew: from the top, as the TS's were.
-            if let Some(viewer) = st.viewers.get_mut(id) {
-                viewer.scroll = code_lines::Scroll::default();
-            }
-            to_top(id)
+            Task::none()
         }
         ViewerMsg::CodeScrolled(scroll) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
@@ -930,6 +980,12 @@ fn viewer_update(
             };
             viewer.source = !viewer.source;
             viewer.scroll = code_lines::Scroll::default();
+            // The lines and the rendered page are not the same text.
+            viewer.doc.clear();
+            viewer.selection.clear();
+            if let Some(rendered) = &viewer.rendered {
+                rendered.clear_selection();
+            }
             // A source is read the first time it is asked for.
             if viewer.source && viewer.load.is_none() {
                 viewer.load = Some(Load::Loading);
@@ -938,12 +994,8 @@ fn viewer_update(
             to_top(id)
         }
         ViewerMsg::Copy => {
-            let Some(text) = st
-                .viewers
-                .get(id)
-                .and_then(ViewerState::text)
-                .map(|ready| ready.text.clone())
-            else {
+            // What is selected, when something is; else the whole text.
+            let Some(text) = st.viewers.get(id).and_then(ViewerState::copy_text) else {
                 return Task::none();
             };
             let done = notify(
@@ -953,15 +1005,43 @@ fn viewer_update(
             );
             Task::batch([iced::clipboard::write(text), done])
         }
+        ViewerMsg::Pressed => content_pressed(st, m),
+        ViewerMsg::Selected(text) => {
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.selection = text;
+            }
+            Task::none()
+        }
+        ViewerMsg::Copied => notify(
+            st,
+            id,
+            Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
+        ),
+        ViewerMsg::Image(image::Msg::Gesture(image_stage::Gesture::Pressed)) => {
+            content_pressed(st, m)
+        }
         ViewerMsg::Image(msg) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.picture.update(msg);
             }
             Task::none()
         }
-        ViewerMsg::Markdown(msg) => markdown_update(st, id, revision, msg, locale),
+        ViewerMsg::Markdown(msg) => markdown_update(st, m, id, revision, msg, locale),
         ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
+}
+
+/// The pointer went down in the text of a file or a page: the keyboard is the
+/// panel's, which a terminal that had it has to be told (its Ctrl+C would
+/// interrupt what runs in it, where here it copies what is selected). The
+/// strip's keys are not: Delete would close the tab one is reading.
+fn content_pressed(st: &State, m: &Model) -> Task<Message> {
+    st.strip_keys.set(false);
+    if m.ui.focus == Some(Focus::Region(Region::Model)) {
+        return Task::none();
+    }
+    st.skip_stage.set(true);
+    Task::done(Message::Intent(Intent::FocusRegion(Region::Model)))
 }
 
 /// Brings the text of an entry back to its top: the lines and the rendered
@@ -980,6 +1060,7 @@ fn to_top(id: &str) -> Task<Message> {
 
 fn markdown_update(
     st: &mut State,
+    m: &Model,
     id: &str,
     revision: u64,
     msg: markdown::Msg,
@@ -990,6 +1071,23 @@ fn markdown_update(
         let id = id.to_string();
         move |msg: markdown::Msg| viewer_message(&id, revision, ViewerMsg::Markdown(msg))
     };
+    match msg {
+        markdown::Msg::Pressed => return content_pressed(st, m),
+        markdown::Msg::Selected(text) => {
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.selection = text;
+            }
+            return Task::none();
+        }
+        markdown::Msg::Copied => {
+            return notify(
+                st,
+                id,
+                Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
+            );
+        }
+        _ => {}
+    }
     let Some(rendered) = st.viewers.get_mut(id).and_then(|v| v.rendered.as_mut()) else {
         return Task::none();
     };
@@ -999,6 +1097,8 @@ fn markdown_update(
             Task::none()
         }
         markdown::Msg::Found(y) => markdown::scroll_by(scroll, y).map(to_message),
+        // Handled above, before the page is looked for.
+        markdown::Msg::Pressed | markdown::Msg::Selected(_) | markdown::Msg::Copied => Task::none(),
         markdown::Msg::Link(href) => {
             if let Some(anchor) = markdown::Rendered::anchor(&href) {
                 return markdown::scroll_to_heading(scroll, &anchor).map(to_message);
@@ -1316,6 +1416,12 @@ fn changes(shared: &Arc<Shared>) -> Subscription<Message> {
     })
 }
 
+/// Whether the strip's keys are being listened for: the panel has the keyboard
+/// and the keys are the strip's (see `State::strip_keys`).
+fn tab_keys_listen(st: &State, m: &Model) -> bool {
+    m.ui.focus == Some(Focus::Region(Region::Model)) && st.strip_keys.get()
+}
+
 /// The keys the tab strip answers while the panel has the keyboard.
 fn tab_keys(
     event: Event,
@@ -1340,6 +1446,19 @@ fn tab_keys(
         _ => return None,
     };
     Some(Message::Preview(Msg::Tab(key)))
+}
+
+/// Whether Escape is the panel's to answer: it is expanded and has the
+/// keyboard. In the TS the keydown was the panel's own, so a terminal or a
+/// field elsewhere kept its Escape.
+fn escape_collapses_here(m: &Model) -> bool {
+    m.ui.focus == Some(Focus::Region(Region::Model)) && escape_would_collapse(m)
+}
+
+/// Whether the focused window's panel is expanded.
+fn escape_would_collapse(m: &Model) -> bool {
+    m.focused_window()
+        .is_some_and(|window| Panels::of(m, window).model_expanded)
 }
 
 /// Expanded, Escape puts the panel back beside the terminals, like leaving a
@@ -1385,13 +1504,10 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     if loading {
         subscriptions.push(iced::time::every(SPIN).map(|_| Message::Preview(Msg::Spin)));
     }
-    if m.ui.focus == Some(Focus::Region(Region::Model)) {
+    if tab_keys_listen(st, m) {
         subscriptions.push(iced::event::listen_with(tab_keys));
     }
-    let expanded = m
-        .focused_window()
-        .is_some_and(|window| Panels::of(m, window).model_expanded);
-    if expanded {
+    if escape_collapses_here(m) {
         subscriptions.push(iced::event::listen_with(escape_collapses));
     }
     Subscription::batch(subscriptions)
@@ -1401,12 +1517,18 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
 /// owns: the image in front, or the panel as a whole. Nothing when no panel
 /// is shown.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+    let pressed = st.skip_stage.replace(false);
     let window = m.focused_window()?;
     if !Panels::of(m, window).model.shown {
         return None;
     }
     let ws = m.window_workspace(window)?;
     let front = m.live.preview.scope(&ws.id)?.active()?;
+    if pressed {
+        return Some(Task::none());
+    }
+    // F6: the keys of the strip, or the image's own.
+    st.strip_keys.set(true);
     if front.file_kind() == Some(FileKind::Image) {
         return Some(iced::widget::operation::focus(viewer::stage_id(&front.id)));
     }
@@ -1442,6 +1564,16 @@ fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Ta
                     Err(why) => Message::Intent(Intent::Notice(crate::shell::Notice::Problem(why))),
                 },
             ))
+        }
+        // Expanding takes the keyboard into the panel, as pressing its
+        // button did in the TS (the focus was on the button, inside it), so
+        // that Escape puts it back.
+        Intent::TogglePreviewExpand if escape_would_collapse(m) => {
+            st.skip_stage.set(true);
+            st.strip_keys.set(false);
+            Some(Task::done(Message::Intent(Intent::FocusRegion(
+                Region::Model,
+            ))))
         }
         Intent::ActivateWorkspace(ws) => {
             if m.live.hydrated {

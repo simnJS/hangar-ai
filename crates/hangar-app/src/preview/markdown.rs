@@ -10,9 +10,21 @@
 //!   and the tag is read as text. There is no HTML engine to run it either way.
 //! - **Linkify.** pulldown-cmark does not link a bare address; `prepare` wraps
 //!   `http://` and `https://` addresses in angle brackets, which it does.
-//! - **Images** load from beside the file, an absolute path as it is, an
-//!   inline `data:` one from its bytes (`markdownImageSrc`). A web image is
-//!   not fetched: the viewer draws a link in its place, with its alt text.
+//! - **Images** load from beside the file or by an absolute path, but only
+//!   through core's `preview_inspect`, which the scheme of the old app asked
+//!   as well: a file inside the folders agents may show from, of a kind the
+//!   preview draws, confirmed by its first bytes, under the 64 MB cap. A
+//!   README cannot make the page draw `/dev/zero`, a link to another folder
+//!   or a file elsewhere on the disk; what is refused is its alt text. An
+//!   inline `data:` image is read from its own bytes (`markdownImageSrc`). A
+//!   local SVG is drawn as a vector, a GIF or WebP of several frames plays. A
+//!   web image is not fetched: the viewer draws a link in its place, with its
+//!   alt text. Fetching on opening a file would be a request the person never
+//!   made, to an address the file chose; the old app made it only because its
+//!   browser engine did.
+//! - **Front matter** (`---` at the top, closed by `---`) is shown as a code
+//!   block. iced's parser drops it; markdown-it printed it as a rule and a
+//!   heading, which read worse.
 //! - **Heading ids** are GitHub's, so `[see](#setting-up)` finds its heading;
 //!   a link to one scrolls there.
 //! - **Links** never take the window anywhere: a web address or `mailto:`
@@ -23,6 +35,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use iced::advanced::widget::operation::{Operation, Outcome, Scrollable};
 use iced::widget::markdown::{self, HeadingLevel, Highlight, Item, Settings, Style, Uri};
@@ -31,7 +44,10 @@ use iced::widget::{column, container, image, rich_text, span, text};
 use iced::{Element, Font, Length, Padding, Rectangle, Task, border, padding};
 
 use hangar_theme::{Theme, fonts, style, tokens};
+use hangar_ui::selectable::{Doc, selectable};
 
+use super::animated;
+use super::decode::{self, Animation, Loaded};
 use super::highlight::{self, Lines};
 use super::model::{self, ImageSource, MarkdownLink};
 
@@ -44,6 +60,13 @@ pub enum Msg {
     Scrolled(f32),
     /// A heading was found, this far down the page.
     Found(f32),
+    /// What is selected on the page, said when the pointer is let go: empty
+    /// when nothing is.
+    Selected(String),
+    /// Ctrl+C copied the selection.
+    Copied,
+    /// The pointer went down in the page.
+    Pressed,
 }
 
 /// What a press on a link asks of the app.
@@ -56,10 +79,14 @@ pub enum Follow {
     Inert(String),
 }
 
-/// An image the page holds, resolved once.
+/// An image the page holds, once it is read.
 #[derive(Debug, Clone)]
 pub enum Resolved {
-    Handle(image::Handle),
+    Raster(image::Handle),
+    /// An SVG, drawn as a vector.
+    Vector(iced::widget::svg::Handle),
+    /// A GIF or WebP of several frames.
+    Animated(Arc<Animation>),
     /// Shown as a link with its alt text.
     Web(String),
 }
@@ -68,7 +95,12 @@ pub struct Rendered {
     pub content: markdown::Content,
     base: PathBuf,
     images: HashMap<Uri, Resolved>,
+    /// The images that are files on the disk, by the address the page names
+    /// them with: read by [`load_images`], never by the view.
+    wanted: Vec<(Uri, PathBuf)>,
     offset: f32,
+    /// What is selected on the page, kept across the views built of it.
+    doc: Doc,
 }
 
 impl std::fmt::Debug for Rendered {
@@ -92,28 +124,54 @@ impl Rendered {
     pub fn parse(text: &str, path: &str) -> Rendered {
         let content = markdown::Content::parse(&prepare(text));
         let base = folder_of(path);
-        let images = content
-            .images()
-            .iter()
-            .filter_map(|url| {
-                let resolved = match model::markdown_image_src(url, &base)? {
-                    ImageSource::Path(file) => Resolved::Handle(image::Handle::from_path(file)),
-                    ImageSource::Data(data) => {
-                        let payload = data.split_once(',').map(|(_, rest)| rest)?;
-                        let bytes = hangar_webview::body::decode(payload).ok()?;
-                        Resolved::Handle(image::Handle::from_bytes(bytes))
+        let mut images = HashMap::new();
+        let mut wanted = Vec::new();
+        for url in content.images() {
+            match model::markdown_image_src(url, &base) {
+                Some(ImageSource::Path(file)) => wanted.push((url.clone(), file)),
+                Some(ImageSource::Data(data)) => {
+                    let bytes = data
+                        .split_once(',')
+                        .and_then(|(_, rest)| hangar_webview::body::decode(rest).ok());
+                    if let Some(bytes) = bytes {
+                        images.insert(
+                            url.clone(),
+                            Resolved::Raster(image::Handle::from_bytes(bytes)),
+                        );
                     }
-                    ImageSource::Web(address) => Resolved::Web(address),
-                };
-                Some((url.clone(), resolved))
-            })
-            .collect();
+                }
+                Some(ImageSource::Web(address)) => {
+                    images.insert(url.clone(), Resolved::Web(address));
+                }
+                None => {}
+            }
+        }
+        // In the order of the addresses, so that the loading is the same each
+        // time.
+        wanted.sort_by(|a, b| a.0.cmp(&b.0));
         Rendered {
             content,
             base,
             images,
+            wanted,
             offset: 0.0,
+            doc: Doc::new(iced::Color::TRANSPARENT),
         }
+    }
+
+    /// Selects nothing.
+    pub fn clear_selection(&self) {
+        self.doc.clear();
+    }
+
+    /// The files the page asks for, to be read by [`load_images`].
+    pub fn wanted(&self) -> Vec<(Uri, PathBuf)> {
+        self.wanted.clone()
+    }
+
+    /// Puts the images [`load_images`] found in their places on the page.
+    pub fn resolve(&mut self, found: Vec<(Uri, Resolved)>) {
+        self.images.extend(found);
     }
 
     /// What a press on a link does.
@@ -210,6 +268,76 @@ pub fn scroll_by(scroll: iced::widget::Id, y: f32) -> Task<Msg> {
     )
 }
 
+/* ── the images of a page ──────────────────────────────────────── */
+
+/// How many pictures a page may ask the disk for, and how many bytes of file
+/// they may come to together: a README with a thousand screenshots shows the
+/// first of them, not all the memory there is.
+const MAX_IMAGES: usize = 200;
+const MAX_IMAGE_BYTES: u64 = 256 * 1024 * 1024;
+/// The most pixels one picture may have, as its header says.
+const MAX_PIXELS: u64 = 120_000_000;
+
+/// Reads the files a page asks for. Each goes through core's
+/// `preview_inspect`, as the scheme of the old app made every image request
+/// do: the file is under a folder agents may show from (symbolic links and
+/// `..` are resolved first), is a regular file, is an image of the kind its
+/// name says, and is no larger than the preview's cap. What passes is read
+/// and decoded here, off the UI thread; what does not is left out, and the
+/// page draws its alt text.
+pub async fn load_images(wanted: Vec<(Uri, PathBuf)>) -> Vec<(Uri, Resolved)> {
+    let mut left = MAX_IMAGE_BYTES;
+    let mut found = Vec::new();
+    for (url, path) in wanted.into_iter().take(MAX_IMAGES) {
+        let Ok(shown) =
+            hangar_core::preview::preview_inspect(path.to_string_lossy().into_owned()).await
+        else {
+            continue;
+        };
+        if shown.kind != hangar_core::preview::Kind::Image || shown.size > left {
+            continue;
+        }
+        left -= shown.size;
+        let file = PathBuf::from(shown.path);
+        let read = tokio::task::spawn_blocking(move || read_image(&file)).await;
+        if let Ok(Some(resolved)) = read {
+            found.push((url, resolved));
+        }
+    }
+    found
+}
+
+/// A checked file as a picture of the page, or `None` when it cannot be one.
+fn read_image(file: &Path) -> Option<Resolved> {
+    let bytes = decode::read_file(file).ok()?;
+    if model::has_source(&file.to_string_lossy()) {
+        // A source that cannot be read is its alt text, not an empty space.
+        super::image::check_svg(&bytes).ok()?;
+        return Some(Resolved::Vector(iced::widget::svg::Handle::from_memory(
+            bytes,
+        )));
+    }
+    // The header first: a file whose size is unreadable, or absurd, never
+    // reaches the renderer, which would decode it on the UI thread.
+    let (width, height) = ::image::ImageReader::new(std::io::Cursor::new(&bytes[..]))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+        .or_else(|| {
+            // AVIF is read by `decode`, which refuses what it cannot read.
+            super::avif::is_avif(&bytes[..bytes.len().min(512)]).then_some((1, 1))
+        })?;
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return None;
+    }
+    Some(match decode::load(bytes).ok()? {
+        Loaded::Encoded(bytes) => Resolved::Raster(image::Handle::from_bytes(bytes.0.to_vec())),
+        Loaded::Pixels(handle, ..) => Resolved::Raster(handle),
+        Loaded::Animated(animation) => Resolved::Animated(animation),
+    })
+}
+
 /* ── before the parser ─────────────────────────────────────────── */
 
 /// The source as the parser should see it: tags escaped so that they are text
@@ -217,6 +345,13 @@ pub fn scroll_by(scroll: iced::widget::Id, y: f32) -> Task<Msg> {
 /// (`linkify`). Fenced code, indented code and inline code are left alone.
 pub fn prepare(source: &str) -> String {
     let mut out = String::with_capacity(source.len() + source.len() / 16);
+    let source = match front_matter(source) {
+        Some((block, used)) => {
+            out.push_str(&block);
+            &source[used..]
+        }
+        None => source,
+    };
     let mut fence: Option<(char, usize)> = None;
     let mut blank_before = true;
     let mut in_indented = false;
@@ -271,6 +406,37 @@ pub fn prepare(source: &str) -> String {
         out.push_str(&line[body.len()..]);
     }
     out
+}
+
+/// The front matter at the top of a file as a fenced code block, and how much
+/// of the source it took: a first line of `---` (YAML) or `+++` (TOML), then
+/// the lines of the block, then the line that closes it (`---` or `...`, or
+/// `+++`). It is the parser's own rule for what it hides. A block with
+/// nothing in it is dropped.
+fn front_matter(source: &str) -> Option<(String, usize)> {
+    let mut lines = source.split_inclusive('\n');
+    let first = lines.next()?;
+    let (language, closers): (&str, &[&str]) = match first.trim_end() {
+        "---" => ("yaml", &["---", "..."]),
+        "+++" => ("toml", &["+++"]),
+        _ => return None,
+    };
+    let mut used = first.len();
+    let mut body = String::new();
+    for line in lines {
+        used += line.len();
+        if closers.contains(&line.trim_end()) {
+            if body.trim().is_empty() {
+                return Some((String::new(), used));
+            }
+            // A fence longer than any run of backticks inside the block.
+            let longest = body.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+            let fence = "`".repeat((longest + 1).max(3));
+            return Some((format!("{fence}{language}\n{body}{fence}\n\n"), used));
+        }
+        body.push_str(line);
+    }
+    None
 }
 
 fn is_reference(line: &str) -> bool {
@@ -498,6 +664,9 @@ fn settings(t: &Theme) -> Settings {
 struct Page<'a> {
     t: &'a Theme,
     images: &'a HashMap<Uri, Resolved>,
+    /// Where the page's text is selected: each paragraph, heading and line of
+    /// code is a block of it.
+    doc: &'a Doc,
     /// The ids given so far, for the -1, -2 of a repeated title.
     ids: RefCell<HashMap<String, usize>>,
 }
@@ -515,9 +684,15 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
         alt: &markdown::Text,
     ) -> Element<'a, Msg> {
         match self.images.get(url) {
-            Some(Resolved::Handle(handle)) => image(handle.clone())
+            Some(Resolved::Raster(handle)) => image(handle.clone())
                 .content_fit(iced::ContentFit::ScaleDown)
                 .into(),
+            Some(Resolved::Vector(handle)) => iced::widget::svg(handle.clone())
+                .width(Length::Shrink)
+                .height(Length::Shrink)
+                .content_fit(iced::ContentFit::ScaleDown)
+                .into(),
+            Some(Resolved::Animated(animation)) => animated::Inline::new(animation.clone()).into(),
             Some(Resolved::Web(address)) => {
                 // The window fetches nothing from the network: the picture is
                 // its alt text, and a link to where it lives.
@@ -548,6 +723,26 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
         }
     }
 
+    fn paragraph(&self, settings: Settings, text: &markdown::Text) -> Element<'a, Msg> {
+        let spans = text.spans(settings.style);
+        // A line break inside a paragraph (a hard break) cannot be told apart
+        // by line from a place in its text, so such a paragraph is iced's own
+        // and cannot be selected.
+        if spans.iter().any(|part| part.text.contains('\n')) {
+            return rich_text(spans)
+                .size(settings.text_size)
+                .on_link_click(Msg::Link)
+                .into();
+        }
+        let block: Element<'static, Msg> = self
+            .doc
+            .block::<Uri, Msg>(spans)
+            .size(settings.text_size)
+            .on_link_click(Msg::Link)
+            .into();
+        block
+    }
+
     fn heading(
         &self,
         settings: Settings,
@@ -576,12 +771,13 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
             HeadingLevel::H5 => settings.h5_size,
             HeadingLevel::H6 => settings.h6_size,
         };
-        let mut words = column![
-            rich_text(spans)
-                .size(size)
-                .on_link_click(Self::on_link_click)
-        ]
-        .spacing(4);
+        let words_block: Element<'static, Msg> = self
+            .doc
+            .block::<Uri, Msg>(spans)
+            .size(size)
+            .on_link_click(Msg::Link)
+            .into();
+        let mut words = column![words_block].spacing(4);
         match level {
             HeadingLevel::H1 => {
                 words = words
@@ -628,17 +824,24 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
                             }
                         })
                         .collect();
-                    rich_text(spans).size(settings.code_size).into()
+                    self.doc
+                        .block::<Uri, Msg>(spans)
+                        .size(settings.code_size)
+                        .into()
                 })
                 .collect(),
             None => lines
                 .iter()
                 .map(|line| {
-                    rich_text(line.spans(settings.style))
+                    let row: Element<'static, Msg> = self
+                        .doc
+                        .block::<Uri, Msg>(line.spans(settings.style))
                         .font(mono)
                         .size(settings.code_size)
                         .color(t.colors.fg)
-                        .into()
+                        .on_link_click(Msg::Link)
+                        .into();
+                    row
                 })
                 .collect(),
         };
@@ -677,26 +880,33 @@ pub fn view<'a>(
     rendered: &'a Rendered,
     scroll: iced::widget::Id,
 ) -> Element<'a, Msg> {
+    rendered.doc.begin();
+    rendered.doc.paint(t.terminal.selection);
     let page = Page {
         t,
         images: &rendered.images,
+        doc: &rendered.doc,
         ids: RefCell::new(HashMap::new()),
     };
     let body = markdown::view_with(rendered.content.items(), settings(t), &page);
+    let body = container(body)
+        .padding(Padding {
+            top: 20.0,
+            right: 32.0,
+            bottom: 44.0,
+            left: 32.0,
+        })
+        .width(Length::Fill)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(t.colors.bg)),
+            text_color: Some(t.colors.fg),
+            ..Default::default()
+        });
     iced::widget::scrollable(
-        container(body)
-            .padding(Padding {
-                top: 20.0,
-                right: 32.0,
-                bottom: 44.0,
-                left: 32.0,
-            })
-            .width(Length::Fill)
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(t.colors.bg)),
-                text_color: Some(t.colors.fg),
-                ..Default::default()
-            }),
+        selectable(&rendered.doc, body)
+            .on_select(Msg::Selected)
+            .on_copy(|| Msg::Copied)
+            .on_press(|| Msg::Pressed),
     )
     .id(scroll)
     .on_scroll(|viewport| Msg::Scrolled(viewport.absolute_offset().y))

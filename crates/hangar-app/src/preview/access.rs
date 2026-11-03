@@ -327,6 +327,12 @@ impl Shared {
     ) -> Result<String, String> {
         let what = match (file.kind, FileKind::of(file.kind)) {
             (Kind::Model, _) => {
+                // The cap a kit's `preview.show` had (`showFile`): core's
+                // inspection holds models to it already, and this is what is
+                // said when a file is handed here that it did not inspect.
+                if file.size > model::MAX_MODEL_BYTES {
+                    return Err(format!("{} is too large for the preview", file.name));
+                }
                 let format = model::model_format_of(&file.path).ok_or_else(|| {
                     format!(
                         "{} is not a 3D model the preview can open. Formats: {}.",
@@ -661,6 +667,41 @@ mod tests {
                 format: "glb".into(),
             },
         }
+    }
+
+    fn inspected(kind: Kind, name: &str, size: u64) -> PreviewFile {
+        PreviewFile {
+            path: format!("/w/{name}"),
+            kind,
+            mime: "application/octet-stream".into(),
+            size,
+            name: name.into(),
+            modified_ms: 1,
+        }
+    }
+
+    fn request() -> PreviewRequest {
+        PreviewRequest {
+            ws: "w1".into(),
+            path: "x".into(),
+            title: None,
+            opened_by: None,
+            reveal: true,
+        }
+    }
+
+    #[test]
+    fn a_model_over_the_cap_is_too_large_for_the_preview_and_one_at_it_opens() {
+        let shared = shared();
+        let big = inspected(Kind::Model, "city.glb", model::MAX_MODEL_BYTES + 1);
+        let why = shared.open_file(&request(), &big).unwrap_err();
+        assert_eq!(why, "city.glb is too large for the preview");
+        assert!(shared.read(|store| store.scope("w1").entries.is_empty()));
+        let fits = inspected(Kind::Model, "city.glb", model::MAX_MODEL_BYTES);
+        assert!(shared.open_file(&request(), &fits).is_ok());
+        // What is not a model has its own caps, which core checked.
+        let page = inspected(Kind::Text, "log.txt", model::MAX_MODEL_BYTES + 1);
+        assert!(shared.open_file(&request(), &page).is_ok());
     }
 
     #[test]

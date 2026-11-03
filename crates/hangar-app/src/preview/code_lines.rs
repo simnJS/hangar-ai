@@ -2,7 +2,11 @@
 //! then, never empty) (`components/preview/CodeLines.tsx`). Each line is a row
 //! beside its number, so a long line wraps under itself and the numbers stay
 //! with their lines. The numbers are not part of the text: what is copied is
-//! the text.
+//! the text, all of it with the bar's button, or what is selected: each line
+//! is a block of hangar-ui's selectable text, numbered by its line, and the
+//! text of the lines that are not built is given to the selection as a
+//! source, so a drag may run past the ones in sight and Select All takes the
+//! whole file.
 //!
 //! A page of the web app drew all of its 5,000 rows and let the engine decide
 //! which were seen. iced lays out every widget it is given, on every change
@@ -12,12 +16,15 @@
 //! possible. A wrapped line has a height of its own, which nothing knows
 //! before it is laid out, so the wrapped view builds them all.
 
+use std::sync::Arc;
+
 use iced::font::Style as FontStyle;
 use iced::widget::text::{self, LineHeight, Wrapping};
-use iced::widget::{Space, column, container, rich_text, row, scrollable, span};
+use iced::widget::{Space, column, container, row, scrollable, span};
 use iced::{Alignment, Element, Font, Length, Pixels};
 
 use hangar_theme::{Theme, fonts, style};
+use hangar_ui::selectable::{Doc, Source, selectable};
 
 use super::highlight::{self, Lines};
 
@@ -66,17 +73,52 @@ pub fn window(total: usize, scroll: Scroll) -> std::ops::Range<usize> {
     start..end.max(start)
 }
 
+/// What a selection says to the view that owns it.
+#[derive(Clone)]
+pub struct Select<M> {
+    /// Where the selection is, kept by the viewer across views.
+    pub doc: Doc,
+    /// What is selected, when the pointer is let go (empty: nothing).
+    pub on_select: fn(String) -> M,
+    /// Ctrl+C copied the selection.
+    pub on_copy: fn() -> M,
+    /// The pointer went down in the lines.
+    pub on_press: fn() -> M,
+}
+
+/// The lines of a text as the selection's source: a line is the text of its
+/// runs.
+struct Text(Arc<Lines>);
+
+impl Source for Text {
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn text(&self, block: usize) -> String {
+        self.0
+            .get(block)
+            .map(|runs| runs.iter().map(|run| run.text.as_str()).collect())
+            .unwrap_or_default()
+    }
+}
+
 /// The rows of `lines`, scrolling both ways, or only down when `wrap` is on.
 /// `on_scroll` hears how far down the view went and how tall it is, to say
 /// which rows to build next.
 pub fn view<'a, M: Clone + 'a>(
     t: &'a Theme,
-    lines: &'a Lines,
+    lines: &'a Arc<Lines>,
     wrap: bool,
     scroll: Scroll,
     on_scroll: fn(Scroll) -> M,
     id: iced::widget::Id,
+    select: Select<M>,
 ) -> Element<'a, M> {
+    let doc = select.doc.clone();
+    doc.begin();
+    doc.paint(t.terminal.selection);
+    doc.source(Some(Arc::new(Text(lines.clone()))));
     let gutter = gutter_width(lines.len());
     let mono = fonts::mono();
     let italic = Font {
@@ -108,7 +150,8 @@ pub fn view<'a, M: Clone + 'a>(
                 }
             })
             .collect();
-        let code = rich_text::<(), M, iced::Theme, iced::Renderer>(spans)
+        let code = doc
+            .block_at::<(), M>(at, spans)
             .size(SIZE)
             .line_height(line_height)
             .wrapping(if wrap {
@@ -149,14 +192,18 @@ pub fn view<'a, M: Clone + 'a>(
             .unwrap_or(0);
         stack = stack.push(Space::new().width(gutter + 16.0 + widest as f32 * DIGIT * SIZE));
     }
-    let body =
-        container(stack)
-            .padding([PAD, 0.0])
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(t.colors.bg)),
-                text_color: Some(t.colors.fg),
-                ..Default::default()
-            });
+    let body = container(stack)
+        .padding([PAD, 0.0])
+        .width(if wrap { Length::Fill } else { Length::Shrink })
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(t.colors.bg)),
+            text_color: Some(t.colors.fg),
+            ..Default::default()
+        });
+    let body = selectable(&doc, body)
+        .on_select(select.on_select)
+        .on_copy(select.on_copy)
+        .on_press(select.on_press);
     let direction = if wrap {
         scrollable::Direction::Vertical(scrollable::Scrollbar::default())
     } else {
@@ -167,7 +214,7 @@ pub fn view<'a, M: Clone + 'a>(
     };
     // The page's colour reaches the edges whatever the lines' width.
     container(
-        scrollable(body.width(if wrap { Length::Fill } else { Length::Shrink }))
+        scrollable(body)
             .id(id)
             .direction(direction)
             .on_scroll(move |viewport| {

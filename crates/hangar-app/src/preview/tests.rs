@@ -18,12 +18,11 @@ use hangar_theme::{fonts, to_iced};
 
 use super::access::Shared;
 use super::highlight;
-use super::image::Bytes;
 use super::image_stage::Measured;
 use super::model::{self, FileKind, Size as FrameSize};
 use super::store::Status;
 use super::text::Load;
-use super::viewer::{Coloured, Loaded, ViewerMsg};
+use super::viewer::{Coloured, Loaded, ViewerMsg, ViewerState};
 use super::webview::{StartError, WebMsg, WinState};
 use super::{Env, Live, Msg, State, link, reconcile, text, viewer_update};
 use crate::app::Packages;
@@ -31,7 +30,7 @@ use crate::ctx::{Ctx, Metrics};
 use crate::message::{Intent, Message};
 use crate::services::preview::PreviewRequest;
 use crate::services::{PreviewAccess, inbox};
-use crate::shell::{PanelMode, WindowKind};
+use crate::shell::{Focus, PanelMode, Region, WindowKind};
 use crate::state::{AppState, Model, Pane, PreviewPanel, Workspace};
 
 /// hangar-core keeps one list of the folders it serves for the whole process:
@@ -204,7 +203,7 @@ impl Harness {
             .expect("open")
             .path
             .clone();
-        let bytes: Bytes = super::image::read(Path::new(&path)).expect("readable");
+        let bytes = super::image::read(Path::new(&path)).expect("readable");
         self.viewer(id, ViewerMsg::Bytes(Ok(bytes)));
         // What the stage tells once the renderer has the picture.
         let natural = match image_size(&path) {
@@ -513,6 +512,104 @@ async fn what_the_shells_toggles_write_reaches_the_store() {
 }
 
 #[tokio::test]
+async fn a_pressed_tab_asks_for_the_keyboard_and_the_strip_gets_it_not_the_image() {
+    let mut h = Harness::new("tab-keys");
+    let shot = h.write("shot.png", b"\x89PNG\r\n\x1a\n");
+    let id = h.show(&shot).await;
+    h.shell_toggles(|panel| panel.open = true);
+    assert!(
+        super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
+        "F6 puts the keyboard on the image in front"
+    );
+    assert!(h.st.strip_keys.get(), "and the strip's keys are on");
+    h.st.strip_keys.set(false);
+    h.send(Msg::Activate(WORKSPACE.into(), id));
+    assert!(h.st.skip_stage.get(), "the shell is about to ask");
+    assert!(h.st.strip_keys.get(), "the pressed tab has the arrows");
+    let task = super::focus_entry(&h.st, &h.model, Region::Model).expect("a panel on screen");
+    assert_eq!(
+        task.units(),
+        0,
+        "nothing is focused: the tabs have the keys"
+    );
+    assert!(!h.st.skip_stage.get(), "once");
+    assert!(
+        super::focus_entry(&h.st, &h.model, Region::Model).is_some_and(|task| task.units() > 0),
+        "F6 afterwards is F6 again"
+    );
+}
+
+#[tokio::test]
+async fn a_press_in_the_text_takes_the_keyboard_from_a_terminal_but_not_the_tabs_keys() {
+    let mut h = Harness::new("text-press");
+    let id = h.show(&h.write("notes.txt", "one\ntwo\n")).await;
+    h.read_text(&id);
+    h.shell_toggles(|panel| panel.open = true);
+    h.st.strip_keys.set(true);
+    // The keyboard is a terminal's: the press asks for it.
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(!super::tab_keys_listen(&h.st, &h.model));
+    h.viewer(&id, ViewerMsg::Pressed);
+    assert!(
+        !h.st.strip_keys.get(),
+        "Delete is not to close the tab read"
+    );
+    assert!(h.st.skip_stage.get(), "the shell is asked for the panel");
+    // Once the panel has it, a press asks for nothing more, and the strip
+    // still has no keys.
+    h.st.skip_stage.set(false);
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    h.viewer(&id, ViewerMsg::Pressed);
+    assert!(!h.st.skip_stage.get());
+    assert!(!super::tab_keys_listen(&h.st, &h.model));
+    // A press on an image is the same: the stage has the keyboard.
+    let shot = h.write("shot.png", b"\x89PNG\r\n\x1a\n");
+    let image = h.show(&shot).await;
+    h.st.strip_keys.set(true);
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    h.viewer(
+        &image,
+        ViewerMsg::Image(super::image::Msg::Gesture(
+            super::image_stage::Gesture::Pressed,
+        )),
+    );
+    assert!(!h.st.strip_keys.get());
+    assert!(h.st.skip_stage.get());
+    h.st.skip_stage.set(false);
+    // A pressed tab gives them back.
+    h.st.strip_keys.set(true);
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    assert!(super::tab_keys_listen(&h.st, &h.model));
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(
+        !super::tab_keys_listen(&h.st, &h.model),
+        "not in a terminal"
+    );
+}
+
+#[tokio::test]
+async fn escape_is_the_panels_only_when_it_is_expanded_and_has_the_keyboard() {
+    let mut h = Harness::new("escape-focus");
+    h.show(&h.write("one.txt", "1")).await;
+    let window = h.model.focused_window().expect("a window");
+    h.shell_toggles(|panel| {
+        panel.open = true;
+        panel.expanded = true;
+    });
+    // Expanded, with the keyboard in a terminal: the terminal's Escape.
+    h.model.ui.focus = Some(Focus::Terminal("pane-1".into()));
+    assert!(super::escape_would_collapse(&h.model));
+    assert!(!super::escape_collapses_here(&h.model));
+    // With the keyboard in the panel: the panel's.
+    h.model.ui.focus = Some(Focus::Region(Region::Model));
+    assert!(super::escape_collapses_here(&h.model));
+    // Not expanded: nobody's.
+    h.shell_toggles(|panel| panel.expanded = false);
+    assert!(!super::escape_collapses_here(&h.model));
+    let _ = window;
+}
+
+#[tokio::test]
 async fn an_agent_revealing_a_tab_opens_the_panel_the_shell_draws() {
     let mut h = Harness::new("reveal");
     let one = h.show(&h.write("one.txt", "1")).await;
@@ -756,6 +853,26 @@ async fn copying_the_text_says_so_and_stops_saying_so() {
 }
 
 #[tokio::test]
+async fn wrapping_the_lines_keeps_the_place_the_view_was_scrolled_to() {
+    let mut h = Harness::new("wrap-keeps");
+    let long: String = (1..=300).map(|n| format!("line {n}\n")).collect();
+    let id = h.show(&h.write("long.txt", long)).await;
+    h.read_text(&id);
+    let place = super::code_lines::Scroll {
+        offset: 1234.0,
+        height: 500.0,
+    };
+    h.viewer(&id, ViewerMsg::CodeScrolled(place));
+    assert!(!h.st.wrap);
+    h.viewer(&id, ViewerMsg::ToggleWrap);
+    assert!(h.st.wrap);
+    assert_eq!(h.st.viewers.get(&id).map(|v| v.scroll), Some(place));
+    h.viewer(&id, ViewerMsg::ToggleWrap);
+    assert!(!h.st.wrap);
+    assert_eq!(h.st.viewers.get(&id).map(|v| v.scroll), Some(place));
+}
+
+#[tokio::test]
 async fn the_status_of_a_file_is_ready_at_once_and_a_model_waits_for_its_viewer() {
     let mut h = Harness::new("status");
     let path = h.write("notes.txt", "plain\n");
@@ -765,6 +882,132 @@ async fn the_status_of_a_file_is_ready_at_once_and_a_model_waits_for_its_viewer(
         Status::Ready
     );
     assert_eq!(h.st.viewers.get(&id).map(|v| v.kind), Some(FileKind::Text));
+}
+
+/* ── selecting text ────────────────────────────────────────────── */
+
+/// A triple click on the text `target` of the panel's view: the messages the
+/// viewer was told, in order.
+fn click_thrice(h: &Harness, target: &str, size: Size) -> Vec<ViewerMsg> {
+    let pkg = Packages::default();
+    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+    let mut ui = simulate(super::view_panel(&h.st, ctx, PanelMode::Expanded), size);
+    for _ in 0..3 {
+        ui.click(target).expect("the text is on screen");
+    }
+    ui.into_messages()
+        .filter_map(|message| match message {
+            Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_line_of_code_is_selected_with_the_pointer_and_copy_takes_only_that() {
+    let mut h = Harness::new("select-code");
+    let path = h.write("notes.txt", "first line\nsecond line\nthird line\n");
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let told = click_thrice(&h, "second line", Size::new(900.0, 600.0));
+    let selected = told
+        .iter()
+        .rev()
+        .find_map(|msg| match msg {
+            ViewerMsg::Selected(text) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the viewer is told what was selected");
+    assert_eq!(selected, "second line");
+    h.viewer(&id, ViewerMsg::Selected(selected));
+    assert_eq!(
+        h.st.viewers.get(&id).and_then(ViewerState::copy_text),
+        Some("second line".into())
+    );
+    // With nothing selected, Copy takes the whole file.
+    h.viewer(&id, ViewerMsg::Selected(String::new()));
+    assert_eq!(
+        h.st.viewers.get(&id).and_then(ViewerState::copy_text),
+        Some("first line\nsecond line\nthird line\n".into())
+    );
+}
+
+#[tokio::test]
+async fn a_link_on_a_page_is_still_followed_and_selects_nothing() {
+    let mut h = Harness::new("select-link");
+    let path = h.write(
+        "README.md",
+        "# Top\n\n[jump to the code](#code)\n\n## Code\n\ntext\n",
+    );
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let pkg = Packages::default();
+    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+    let mut ui = simulate(
+        super::view_panel(&h.st, ctx, PanelMode::Expanded),
+        Size::new(900.0, 600.0),
+    );
+    ui.click("jump to the code").expect("the link is on screen");
+    let told: Vec<ViewerMsg> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        told.iter().any(|msg| matches!(msg,
+            ViewerMsg::Markdown(super::markdown::Msg::Link(href)) if href == "#code")),
+        "{told:?}"
+    );
+    assert!(
+        !told
+            .iter()
+            .any(|msg| matches!(msg, ViewerMsg::Markdown(super::markdown::Msg::Selected(_)))),
+        "a click on a link is not the start of a selection: {told:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_selection_is_let_go_when_the_source_is_toggled() {
+    let mut h = Harness::new("select-toggle");
+    let path = h.write("NOTES.md", "# Title\n\ntext\n");
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    h.viewer(&id, ViewerMsg::Selected("text".into()));
+    h.viewer(&id, ViewerMsg::ToggleSource);
+    let viewer = h.st.viewers.get(&id).expect("mounted");
+    assert_eq!(viewer.selection, "", "the lines are not the page's text");
+}
+
+#[tokio::test]
+async fn a_paragraph_of_a_page_is_selected_with_the_pointer_and_link_text_is_text() {
+    let mut h = Harness::new("select-page");
+    let path = h.write(
+        "README.md",
+        "# Title\n\nSome *emphasised* words and [a link](https://example.com) here.\n\nSecond paragraph.\n",
+    );
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let told = click_thrice(&h, "Second paragraph.", Size::new(900.0, 600.0));
+    let selected = told.iter().rev().find_map(|msg| match msg {
+        ViewerMsg::Markdown(super::markdown::Msg::Selected(text)) => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(selected.as_deref(), Some("Second paragraph."), "{told:?}");
+    // The text of a paragraph is what its spans say, links and emphasis
+    // included, in one piece.
+    let told = click_thrice(
+        &h,
+        "Some emphasised words and a link here.",
+        Size::new(900.0, 600.0),
+    );
+    assert!(
+        told.iter().any(|msg| matches!(msg,
+            ViewerMsg::Markdown(super::markdown::Msg::Selected(text))
+                if text == "Some emphasised words and a link here.")),
+        "{told:?}"
+    );
 }
 
 /* ── the views ─────────────────────────────────────────────────── */

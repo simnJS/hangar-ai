@@ -2,14 +2,16 @@
 //! one in front joined to the panel under it (`PreviewTabs`, `KitBadgeGlyph`,
 //! `.model-tab*`).
 //!
-//! Keyboard: with the panel focused (F6), Left and Right cycle, Home and End
-//! jump, Delete closes the one in front (`TabKey`; the arrows of the roving
-//! tabindex of the TS).
+//! Keyboard: after a tab is pressed, or with the panel focused (F6), Left and
+//! Right cycle, Home and End jump, Delete closes the one in front (`TabKey`;
+//! the arrows of the roving tabindex of the TS).
 
 use std::f32::consts::TAU;
 
+use iced::advanced::widget::operation::{Operation, Outcome, Scrollable};
+use iced::widget::scrollable::AbsoluteOffset;
 use iced::widget::{Space, button, container, row, scrollable, text};
-use iced::{Alignment, Element, Length, Padding, Radians};
+use iced::{Alignment, Element, Length, Padding, Radians, Rectangle, Task, Vector};
 
 use hangar_i18n::{Key, args};
 use hangar_theme::{fonts, style, tokens};
@@ -50,18 +52,96 @@ pub fn target_of(key: TabKey, ids: &[String], active: Option<&str>) -> Option<us
     }
 }
 
-/// How far along the strip a tab is, as the share of the way to its end that
-/// brings it into view when the strip scrolls sideways.
-pub fn scroll_share(ids: &[String], active: Option<&str>) -> f32 {
-    let at = active.and_then(|active| ids.iter().position(|id| id == active));
-    match (at, ids.len()) {
-        (Some(at), len) if len > 1 => at as f32 / (len - 1) as f32,
-        _ => 0.0,
+pub fn strip_id() -> iced::widget::Id {
+    iced::widget::Id::new("preview-tabs")
+}
+
+/// The widget id of a tab, by the id of what it shows.
+pub fn tab_id(entry: &str) -> iced::widget::Id {
+    iced::widget::Id::from(format!("preview-tab:{entry}"))
+}
+
+/// Where the strip must be scrolled to for a tab to be in view: `None` when
+/// it already is. All in pixels along the strip: the tab's left edge and
+/// width from the start of the strip's content, the strip's own width and
+/// how far it is scrolled now. A tab wider than the strip is brought to its
+/// left edge. The least movement that shows the tab: tabs have widths of
+/// their own (a title may be long, a tab may say who opened it), so the
+/// place of the tab cannot be told from its number.
+pub fn reveal(tab_left: f32, tab_width: f32, view: f32, offset: f32) -> Option<f32> {
+    if tab_left < offset || tab_width > view {
+        Some(tab_left.max(0.0))
+    } else if tab_left + tab_width > offset + view {
+        Some(tab_left + tab_width - view)
+    } else {
+        None
     }
 }
 
-pub fn strip_id() -> iced::widget::Id {
-    iced::widget::Id::new("preview-tabs")
+/// Finds a tab and the strip it is in, and says how far the strip is to be
+/// scrolled for the tab to show (`reveal`).
+struct Reveal {
+    strip: iced::widget::Id,
+    tab: iced::widget::Id,
+    /// The strip's width, how far it is scrolled, and where its content starts.
+    strip_view: Option<(f32, f32, f32)>,
+    found: Option<Option<f32>>,
+}
+
+impl Operation<Option<f32>> for Reveal {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<f32>>)) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&iced::widget::Id>, bounds: Rectangle) {
+        if id != Some(&self.tab) {
+            return;
+        }
+        if let Some((view, offset, start)) = self.strip_view {
+            self.found = Some(reveal(bounds.x - start, bounds.width, view, offset));
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::widget::Id>,
+        bounds: Rectangle,
+        content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn Scrollable,
+    ) {
+        if id == Some(&self.strip) {
+            self.strip_view = Some((bounds.width, translation.x, content_bounds.x));
+        }
+    }
+
+    fn finish(&self) -> Outcome<Option<f32>> {
+        match self.found {
+            Some(found) => Outcome::Some(found),
+            None => Outcome::None,
+        }
+    }
+}
+
+/// Scrolls the strip, if it needs to be, so that the tab of `entry` is in
+/// view.
+pub fn reveal_tab<M: Send + 'static>(entry: &str) -> Task<M> {
+    let find = Reveal {
+        strip: strip_id(),
+        tab: tab_id(entry),
+        strip_view: None,
+        found: None,
+    };
+    iced::advanced::widget::operate(find).then(|found| match found {
+        Some(x) => iced::widget::operation::scroll_to(
+            strip_id(),
+            AbsoluteOffset {
+                x: Some(x),
+                y: None,
+            },
+        ),
+        None => Task::none(),
+    })
 }
 
 /// The name of the pane that opened a tab, as the tab says it: `opened_by` is
@@ -288,6 +368,7 @@ pub fn view<'a>(ctx: Ctx<'a>, ws: &'a WsId, scope: &'a Scope, spin: usize) -> El
             ]
             .align_y(Alignment::Center),
         )
+        .id(tab_id(&entry.id))
         .height(Length::Fill)
         .style(move |_| container::Style {
             background: active.then_some(iced::Background::Color(t.colors.chrome)),
@@ -340,12 +421,36 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_scrolls_to_the_tab_in_front() {
-        let tabs = ids(&["a", "b", "c", "d", "e"]);
-        assert_eq!(scroll_share(&tabs, Some("a")), 0.0);
-        assert_eq!(scroll_share(&tabs, Some("c")), 0.5);
-        assert_eq!(scroll_share(&tabs, Some("e")), 1.0);
-        assert_eq!(scroll_share(&ids(&["a"]), Some("a")), 0.0);
-        assert_eq!(scroll_share(&tabs, None), 0.0);
+    fn a_tab_in_view_does_not_move_the_strip() {
+        assert_eq!(reveal(100.0, 80.0, 400.0, 0.0), None);
+        assert_eq!(reveal(100.0, 80.0, 400.0, 100.0), None, "flush at the left");
+        assert_eq!(reveal(320.0, 80.0, 400.0, 0.0), None, "flush at the right");
+    }
+
+    #[test]
+    fn a_tab_past_the_right_edge_is_brought_to_it_whole_and_no_further() {
+        // Half of it showing: scroll just far enough to show all of it.
+        assert_eq!(reveal(350.0, 100.0, 400.0, 0.0), Some(50.0));
+        // Wholly out of sight.
+        assert_eq!(reveal(900.0, 120.0, 400.0, 100.0), Some(620.0));
+    }
+
+    #[test]
+    fn a_tab_before_the_left_edge_is_brought_to_it() {
+        assert_eq!(reveal(40.0, 100.0, 400.0, 300.0), Some(40.0));
+        assert_eq!(reveal(0.0, 100.0, 400.0, 300.0), Some(0.0));
+    }
+
+    #[test]
+    fn a_tab_wider_than_the_strip_shows_its_beginning() {
+        assert_eq!(reveal(500.0, 460.0, 400.0, 0.0), Some(500.0));
+        assert_eq!(reveal(500.0, 460.0, 400.0, 900.0), Some(500.0));
+    }
+
+    #[test]
+    fn tabs_have_ids_of_their_own() {
+        assert_eq!(tab_id("a"), tab_id("a"));
+        assert_ne!(tab_id("a"), tab_id("b"));
+        assert_ne!(tab_id("a"), strip_id());
     }
 }

@@ -17,3 +17,5 @@ unicode-normalization.workspace = true
 usvg.workspace = true
 # A headless window to drive the widgets with real events.
 iced_test.workspace = true
+# Reads back the pictures the simulator draws, to look at their pixels.
+png.workspace = true

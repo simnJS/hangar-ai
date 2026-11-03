@@ -8,6 +8,8 @@
 //! (the `ResizeObserver`), and says what the person did. What a gesture does
 //! to the frame is the view's, with `model::zoom_around`.
 
+use std::sync::Arc;
+
 use iced::advanced::image::Renderer as _;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse::{self, Click, click};
@@ -23,14 +25,17 @@ use iced::{
     window,
 };
 
+use super::decode::{Animation, Clock};
 use super::model::{ImageFrame, Size as FrameSize};
 
-/// A picture the stage can hold: a raster the renderer decodes, or a vector
-/// one it rasterises at the size asked.
+/// A picture the stage can hold: a raster the renderer decodes, a vector
+/// one it rasterises at the size asked, or a raster of several frames that
+/// the stage plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pic {
     Raster(image::Handle),
     Vector(svg_core::Handle),
+    Animated(Arc<Animation>),
 }
 
 /// What the person did on the stage.
@@ -59,6 +64,10 @@ pub enum Gesture {
         at: (f32, f32),
     },
     Key(StageKey),
+    /// The pointer went down on the stage, which has the keyboard from then
+    /// on: whatever else had it (a terminal) is to be told. Nothing to the
+    /// frame.
+    Pressed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +184,8 @@ struct State {
     measured: Option<(Pic, Measured)>,
     reported_measure: bool,
     reported_stage: Option<Size>,
+    /// Where an animation is; it begins again for another picture.
+    clock: Clock,
 }
 
 impl Focusable for State {
@@ -223,6 +234,11 @@ fn measure(renderer: &iced::Renderer, pic: &Pic) -> Measured {
             let side = |value: u32| if value == 0 { 512.0 } else { value as f32 };
             Measured::Size(FrameSize::new(side(size.width), side(size.height)))
         }
+        // Its frames were decoded to the canvas's size: nothing to ask.
+        Pic::Animated(animation) => Measured::Size(FrameSize::new(
+            animation.width as f32,
+            animation.height as f32,
+        )),
     }
 }
 
@@ -253,6 +269,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
         if !known {
             state.measured = Some((self.pic.clone(), measure(renderer, self.pic)));
             state.reported_measure = false;
+            state.clock.reset();
         }
         layout::Node::new(limits.max())
     }
@@ -289,7 +306,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
         };
 
         match event {
-            Event::Window(window::Event::RedrawRequested(_)) => {
+            Event::Window(window::Event::RedrawRequested(now)) => {
                 // Said once the renderer has the picture, and each time the
                 // stage changes size.
                 if !state.reported_measure
@@ -301,6 +318,13 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
                 if state.reported_stage != Some(bounds.size()) {
                     state.reported_stage = Some(bounds.size());
                     shell.publish((self.on_stage)(FrameSize::new(bounds.width, bounds.height)));
+                }
+                // An animation asks to be drawn again when its frame ends.
+                // Nothing asks while the stage is not drawn at all (another
+                // tab, a hidden panel, a minimised window), so an animation
+                // out of sight costs nothing.
+                if let Pic::Animated(animation) = self.pic {
+                    shell.request_redraw_at(state.clock.tick(*now, &animation.timeline));
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -327,6 +351,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if over && let Some(point) = cursor.position() {
                     state.focused = true;
+                    shell.publish((self.on_gesture)(Gesture::Pressed));
                     state.last = Some(point);
                     let click = Click::new(point, mouse::Button::Left, state.last_click);
                     state.last_click = Some(click);
@@ -537,6 +562,21 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
                 Pic::Vector(handle) => {
                     renderer.draw_svg(svg_core::Svg::new(handle.clone()), rect, bounds)
                 }
+                Pic::Animated(animation) => {
+                    let frame =
+                        &animation.frames[state.clock.frame.min(animation.frames.len() - 1)];
+                    renderer.draw_image(
+                        iced::advanced::image::Image::new(frame.handle.clone()).filter_method(
+                            if self.pixelated {
+                                image::FilterMethod::Nearest
+                            } else {
+                                image::FilterMethod::Linear
+                            },
+                        ),
+                        rect,
+                        bounds,
+                    );
+                }
             }
             renderer.fill_quad(
                 Quad {
@@ -621,6 +661,90 @@ mod tests {
             moved,
             Rectangle::new(Point::new(140.0, 60.0), Size::new(200.0, 100.0))
         );
+    }
+
+    /// A 2 by 2 picture of one colour.
+    fn solid(rgba: [u8; 4]) -> image::Handle {
+        image::Handle::from_rgba(2, 2, rgba.repeat(4))
+    }
+
+    /// The colour at the middle of a snapshot, read back from the PNG the
+    /// simulator writes.
+    fn middle(
+        snapshot: &iced_test::simulator::Snapshot,
+        dir: &std::path::Path,
+        name: &str,
+    ) -> [u8; 4] {
+        snapshot.matches_image(dir.join(name)).expect("written");
+        let file = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|file| file.to_string_lossy().starts_with(name))
+            })
+            .expect("the png");
+        let mut reader =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()))
+                .read_info()
+                .unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        let at = ((info.height / 2) * info.width + info.width / 2) as usize * 4;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    #[test]
+    fn an_animation_shows_the_frame_its_clock_has_reached() {
+        use std::time::Duration;
+        let frames = vec![
+            super::super::decode::Frame {
+                handle: solid([255, 0, 0, 255]),
+                delay: Duration::from_millis(500),
+            },
+            super::super::decode::Frame {
+                handle: solid([0, 0, 255, 255]),
+                delay: Duration::from_millis(500),
+            },
+        ];
+        let timeline = super::super::decode::Timeline::new(frames.iter().map(|f| f.delay));
+        let pic = Pic::Animated(Arc::new(Animation {
+            width: 2,
+            height: 2,
+            frames,
+            timeline,
+        }));
+        let theme = hangar_theme::by_id_or_default("graphite");
+        let stage = Stage::new(
+            &pic,
+            ImageFrame {
+                zoom: 40.0,
+                x: 0.0,
+                y: 0.0,
+            },
+            Some(FrameSize::new(2.0, 2.0)),
+            theme,
+            |_| (),
+            |_| (),
+            |_| (),
+        );
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            Size::new(200.0, 200.0),
+            iced::Element::from(stage),
+        );
+        let dir = std::env::temp_dir().join(format!("hangar-stage-anim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let iced_theme = iced::Theme::Dark;
+        // The clock starts at the first draw: the first frame.
+        let first = middle(&ui.snapshot(&iced_theme).unwrap(), &dir, "first");
+        assert!(first[0] > 200 && first[2] < 60, "{first:?}");
+        // Past the first frame's half second, and not yet past the second's.
+        std::thread::sleep(Duration::from_millis(700));
+        let second = middle(&ui.snapshot(&iced_theme).unwrap(), &dir, "second");
+        assert!(second[2] > 200 && second[0] < 60, "{second:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
