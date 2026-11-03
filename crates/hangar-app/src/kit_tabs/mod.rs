@@ -52,6 +52,8 @@ mod view;
 mod listed;
 #[cfg(test)]
 mod testing;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -61,6 +63,9 @@ use std::time::{Duration, Instant};
 use iced::futures::stream::{self, StreamExt};
 use iced::{Element, Subscription, Task};
 use serde_json::{Value, json};
+use tokio::sync::watch;
+
+use hangar_core::Host;
 
 use hangar_kit_host::KitMessage;
 use hangar_kit_ui::abi::CallId;
@@ -78,9 +83,9 @@ use crate::message::{Intent, Message};
 use crate::preview::access::Shared;
 use crate::preview::store::{Entry, KitTabToOpen};
 use crate::preview::webview::{StartError, WinState};
-use crate::services::{CoreEvent, Services};
+use crate::services::{CoreEvent, Inbox, Services};
 use crate::shell::Region;
-use crate::state::{Model, Workspace, WsId};
+use crate::state::{Model, Snapshot, Workspace, WsId};
 
 /// How often the running tabs are brought in line with what nothing tells
 /// this package of: an agent's state, the installed kits, the helper.
@@ -188,9 +193,33 @@ pub fn has_kits(m: &Model, ws: &Workspace) -> bool {
     !effective_kits(Some(ws), Some(m.settings())).is_empty()
 }
 
+/// What this package takes of the services: the core's host (its folders and
+/// events), the model's snapshots, which a tab's API reads off the window's
+/// thread, and the way back into `update`. Nothing else of them is needed,
+/// which is what lets the tests drive the package without a running core.
+pub(crate) struct Env {
+    host: Host,
+    snapshots: watch::Receiver<Arc<Snapshot>>,
+    inbox: Inbox,
+}
+
+impl Env {
+    fn of(sv: &Services) -> Env {
+        Env {
+            host: sv.core().host().clone(),
+            snapshots: sv.snapshots(),
+            inbox: sv.inbox().clone(),
+        }
+    }
+}
+
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
-    let first = handle(st, m, sv, msg);
-    let then = reconcile(st, m, sv);
+    step(st, m, &Env::of(sv), msg)
+}
+
+fn step(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
+    let first = handle(st, m, msg);
+    let then = reconcile(st, m, env);
     Task::batch([first, then])
 }
 
@@ -215,7 +244,7 @@ fn post(st: &State, window: &str, messages: impl IntoIterator<Item = Value>) {
     }
 }
 
-fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+fn handle(st: &mut State, m: &Model, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Changed | Msg::Tick => Task::none(),
         Msg::Native(id, message) => match st.natives.get_mut(&id) {
@@ -337,7 +366,6 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             if let Some(native) = st.natives.get_mut(&id) {
                 native.asked.confirmed(yes);
             }
-            let _ = sv;
             Task::none()
         }
     }
@@ -383,6 +411,28 @@ struct Seen {
     theme: &'static hangar_theme::Theme,
 }
 
+/// Every kit tab of every workspace as the preview last synced it, and
+/// whether it is in front of a panel on screen.
+fn seen_tabs(st: &State, m: &Model) -> Vec<Seen> {
+    let view = st.shared.read(|store| store.view().clone());
+    let mut seen = Vec::new();
+    for ws in &m.state().workspaces {
+        let Some(scope) = m.live.preview.scope(&ws.id) else {
+            continue;
+        };
+        for entry in scope.entries.iter().filter(|entry| entry.is_kit_tab()) {
+            let shown =
+                view.panel_shown(&ws.id) && scope.active_id.as_deref() == Some(entry.id.as_str());
+            seen.push(Seen {
+                entry: entry.clone(),
+                shown,
+                theme: theme_of(m, ws),
+            });
+        }
+    }
+    seen
+}
+
 fn theme_of(m: &Model, ws: &Workspace) -> &'static hangar_theme::Theme {
     hangar_theme::by_id_or_default(
         ws.theme_id
@@ -393,7 +443,7 @@ fn theme_of(m: &Model, ws: &Workspace) -> &'static hangar_theme::Theme {
 
 /// Brings the running tabs in line with the store and the model: starts what
 /// should run, stops what should not, and tells each what changed.
-fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
+fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     if !m.live.hydrated {
         return Task::none();
     }
@@ -423,25 +473,10 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     }
     m.live.preview.sync();
     let installed = st.installed.get();
-    let view = st.shared.read(|store| store.view().clone());
 
     // Every kit tab of every workspace, and whether it is in front of a
     // panel on screen; one shown is no longer waiting for its first look.
-    let mut seen: Vec<Seen> = Vec::new();
-    for ws in &m.state().workspaces {
-        let Some(scope) = m.live.preview.scope(&ws.id) else {
-            continue;
-        };
-        for entry in scope.entries.iter().filter(|entry| entry.is_kit_tab()) {
-            let shown =
-                view.panel_shown(&ws.id) && scope.active_id.as_deref() == Some(entry.id.as_str());
-            seen.push(Seen {
-                entry: entry.clone(),
-                shown,
-                theme: theme_of(m, ws),
-            });
-        }
-    }
+    let seen = seen_tabs(st, m);
     for tab in &seen {
         if tab.shown && tab.entry.kit().is_some_and(|kit| kit.restored) {
             st.shared
@@ -505,7 +540,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
                 continue;
             }
             st.runtime
-                .cache_in(native::cache_dir(sv.core().host().paths()));
+                .cache_in(native::cache_dir(env.host.paths()));
             match st.runtime.module(&path) {
                 Ok(module) => {
                     let runtime = match st.runtime.runtime() {
@@ -520,7 +555,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
                         old.close();
                         unwatch(st, &entry.id, old.watch);
                     }
-                    let api = tab_api(st, sv, entry, &kit.kit_id, &kit.tab_id);
+                    let api = tab_api(st, env, entry, &kit.kit_id, &kit.tab_id);
                     let version = installed
                         .as_deref()
                         .and_then(|kits| kits.iter().find(|candidate| candidate.id == kit.kit_id))
@@ -544,7 +579,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
                         entry.revision,
                         path,
                     );
-                    native.watch = Some(watch(st, sv, &entry.id));
+                    native.watch = Some(watch(st, env, &entry.id));
                     tasks.push(effects(&entry.id, first));
                     st.natives.insert(entry.id.clone(), native);
                     keep_native.insert(entry.id.clone());
@@ -573,7 +608,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         }
         st.windows += 1;
         let window = format!("{}{}-{}", bridge::PREFIX, entry.id, st.windows);
-        let api = tab_api(st, sv, entry, &kit.kit_id, &kit.tab_id);
+        let api = tab_api(st, env, entry, &kit.kit_id, &kit.tab_id);
         let mut page = PageTab::new(
             PageHost::new(window, api),
             &kit.kit_id,
@@ -581,11 +616,11 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             entry.revision,
             &entry.title,
         );
-        page.watch = Some(watch(st, sv, &entry.id));
-        route(st, sv);
+        page.watch = Some(watch(st, env, &entry.id));
+        route(st, env);
         match st.shared.helper().client() {
             Some(client) => page.open(&client, bridge::background_of(tab.theme)),
-            None => tasks.extend(start_helper(st, sv)),
+            None => tasks.extend(start_helper(st, env)),
         }
         st.pages.insert(entry.id.clone(), page);
         keep_page.insert(entry.id.clone());
@@ -622,6 +657,35 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     Task::batch(tasks)
 }
 
+/// The workspaces among `watched` whose panes (their names, roles, states or
+/// whether a send reaches them, `kitPanes`) differ from what `last` held
+/// for them, which is brought up to date. A workspace not seen before only
+/// takes its first reading: a tab has just been told the panes it starts
+/// with.
+fn panes_changed(
+    last: &mut HashMap<WsId, String>,
+    m: &Model,
+    watched: HashSet<&WsId>,
+) -> HashSet<WsId> {
+    let mut changed = HashSet::new();
+    for ws_id in watched {
+        let Some(ws) = m.workspace(ws_id) else {
+            continue;
+        };
+        let panes = serde_json::to_string(&kit_panes(ws, |pane| {
+            m.live.panes_logic.pane_activity(pane).cloned()
+        }))
+        .unwrap_or_default();
+        match last.insert(ws_id.clone(), panes.clone()) {
+            Some(before) if before != panes => {
+                changed.insert(ws_id.clone());
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
 /// Tells the running tabs what changed: the panes of their workspace, their
 /// theme, whether they are in front; a page's window takes its tab's name.
 fn tell(st: &mut State, m: &Model, seen: &[Seen]) -> Task<Message> {
@@ -642,33 +706,18 @@ fn tell(st: &mut State, m: &Model, seen: &[Seen]) -> Task<Message> {
     }
 
     // `panes.changed`: the panes, their names, roles or states, changed.
-    let mut changed: HashSet<WsId> = HashSet::new();
     let running: HashSet<&str> = st
         .natives
         .keys()
         .chain(st.pages.keys())
         .map(String::as_str)
         .collect();
-    let workspaces: HashSet<&WsId> = seen
+    let watched: HashSet<&WsId> = seen
         .iter()
         .filter(|tab| running.contains(tab.entry.id.as_str()))
         .map(|tab| &tab.entry.workspace_id)
         .collect();
-    for ws_id in workspaces {
-        let Some(ws) = m.workspace(ws_id) else {
-            continue;
-        };
-        let panes = serde_json::to_string(&kit_panes(ws, |pane| {
-            m.live.panes_logic.pane_activity(pane).cloned()
-        }))
-        .unwrap_or_default();
-        match st.panes.insert(ws_id.clone(), panes.clone()) {
-            Some(before) if before != panes => {
-                changed.insert(ws_id.clone());
-            }
-            _ => {}
-        }
-    }
+    let changed = panes_changed(&mut st.panes, m, watched);
 
     for tab in seen {
         let id = tab.entry.id.as_str();
@@ -705,7 +754,7 @@ fn tell(st: &mut State, m: &Model, seen: &[Seen]) -> Task<Message> {
 }
 
 /// The API of a tab, over the app, from the app's own record of it.
-fn tab_api(st: &State, sv: &Services, entry: &Entry, kit_id: &str, tab_id: &str) -> Arc<TabApi> {
+fn tab_api(st: &State, env: &Env, entry: &Entry, kit_id: &str, tab_id: &str) -> Arc<TabApi> {
     let record = TabRecord {
         entry: entry.id.clone(),
         kit_id: kit_id.to_owned(),
@@ -715,14 +764,14 @@ fn tab_api(st: &State, sv: &Services, entry: &Entry, kit_id: &str, tab_id: &str)
     let cx = LiveContext::new(
         record,
         st.shared.clone(),
-        sv.snapshots(),
+        env.snapshots.clone(),
         st.installed.clone(),
     );
     let deps = LiveDeps::new(
-        sv.core().host().clone(),
+        env.host.clone(),
         st.shared.clone(),
-        sv.snapshots(),
-        sv.inbox().clone(),
+        env.snapshots.clone(),
+        env.inbox.clone(),
         st.installed.clone(),
         entry.id.clone(),
     );
@@ -731,8 +780,8 @@ fn tab_api(st: &State, sv: &Services, entry: &Entry, kit_id: &str, tab_id: &str)
 
 /// Hears a tab's new params, and an agent or a hook asking for it again: the
 /// store tells it under its lock, so this only queues a message.
-fn watch(st: &State, sv: &Services, id: &str) -> crate::preview::store::WatchId {
-    let inbox = sv.inbox().clone();
+fn watch(st: &State, env: &Env, id: &str) -> crate::preview::store::WatchId {
+    let inbox = env.inbox.clone();
     let owner = id.to_owned();
     st.shared.edit(|store| {
         store.watch_kit_tab_params(
@@ -762,13 +811,13 @@ fn drop_page(st: &State, id: &str, mut page: PageTab) {
 
 /// The helper sends this package its windows' events and has it answer
 /// their pages' requests, once.
-fn route(st: &mut State, sv: &Services) {
+fn route(st: &mut State, env: &Env) {
     if st.routed {
         return;
     }
     st.routed = true;
     let helper = st.shared.helper();
-    let inbox = sv.inbox().clone();
+    let inbox = env.inbox.clone();
     helper.route(bridge::PREFIX, move |event| {
         inbox.send(send(Msg::Web(event.clone())));
     });
@@ -777,13 +826,13 @@ fn route(st: &mut State, sv: &Services) {
 
 /// Starts the helper, off the window's thread, unless it runs or is
 /// starting.
-fn start_helper(st: &mut State, sv: &Services) -> Option<Task<Message>> {
+fn start_helper(st: &mut State, env: &Env) -> Option<Task<Message>> {
     if st.helper_starting || st.shared.helper().client().is_some() {
         return None;
     }
     st.helper_starting = true;
     let helper = st.shared.helper().clone();
-    let inbox = sv.inbox().clone();
+    let inbox = env.inbox.clone();
     Some(Task::perform(
         async move {
             match tokio::task::spawn_blocking(move || helper.start(inbox).map(drop)).await {
@@ -882,19 +931,43 @@ pub fn on_intent(
         open = open.singleton();
     }
     st.shared.edit(|store| store.open_kit_tab(open));
-    Some(reconcile(st, m, sv))
+    Some(reconcile(st, m, &Env::of(sv)))
+}
+
+/// Whether a core event is one that changes what `panes.list` tells: a
+/// report of a pane's hangar-bridge mod (its agent started or finished a turn,
+/// asks for a permission), or its shell ending. The reducers of the panes
+/// package have applied it to the model by the time it is offered here: that
+/// package is offered every event first (`packages!` in `app.rs` lists
+/// `panes_logic` first).
+fn moves_panes(event: &CoreEvent) -> bool {
+    matches!(event, CoreEvent::Bridge { .. } | CoreEvent::PtyExit { .. })
 }
 
 /// Every core event, after the shell's own handling of it. The installed
 /// kits are P14's to read again; the next look here takes them.
+///
+/// A pane's state is the one thing a tab hears about that no store change and
+/// no message of this package announces, so the events that move it tell the
+/// running tabs at once (`panes.changed`), where the TypeScript followed the
+/// activity live. What no event announces, a state read from a terminal's
+/// output, still reaches them on the next tick, within a second.
 pub fn on_event(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    let _ = (st, m, sv, event);
-    None
+    let _ = sv;
+    tell_of_event(st, m, event)
+}
+
+fn tell_of_event(st: &mut State, m: &Model, event: &CoreEvent) -> Option<Task<Message>> {
+    if !moves_panes(event) || (st.natives.is_empty() && st.pages.is_empty()) {
+        return None;
+    }
+    let seen = seen_tabs(st, m);
+    Some(tell(st, m, &seen))
 }
 
 /// A kit tab in the preview panel's body (called by `preview::view_entry`):
