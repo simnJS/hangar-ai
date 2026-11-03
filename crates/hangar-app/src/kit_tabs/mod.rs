@@ -468,14 +468,15 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     if !st.dev_done && m.live.kits.installed.is_some() {
         st.dev_done = true;
         if let Some(ws) = m.active_workspace().cloned() {
-            for (kit, tab) in dev::requested() {
+            for dev::Asked { kit, tab, params } in dev::requested() {
                 let Some(choice) = choices(m, &ws)
                     .into_iter()
                     .find(|choice| choice.kit_id == kit && choice.tab.id == tab)
                 else {
                     continue;
                 };
-                let open = KitTabToOpen::new(ws.id.clone(), kit, tab, choice.tab.title);
+                let mut open = KitTabToOpen::new(ws.id.clone(), kit, tab, choice.tab.title);
+                open.params = params;
                 st.shared.edit(|store| store.open_kit_tab(open));
             }
         }
