@@ -344,12 +344,16 @@ pub enum BridgeEvent {
     #[serde(rename_all = "camelCase")]
     Hello {
         session_id: String,
+        /// Empty when the session names none (the mod sends `null`).
+        #[serde(default, deserialize_with = "text")]
         model: String,
+        #[serde(default, deserialize_with = "text")]
         version: String,
     },
     #[serde(rename_all = "camelCase")]
     Session {
         session_id: String,
+        #[serde(default, deserialize_with = "text")]
         source: String,
     },
     Turn(TurnPhase),
@@ -364,7 +368,9 @@ pub enum BridgeEvent {
     #[serde(rename_all = "camelCase")]
     Usage {
         context: UsageContext,
+        #[serde(default)]
         rate_limits: Vec<RateLimit>,
+        #[serde(default)]
         cost_usd: Option<f64>,
     },
     #[serde(rename_all = "camelCase")]
@@ -377,11 +383,19 @@ pub enum BridgeEvent {
     },
     Dropped {
         text: String,
+        #[serde(default, deserialize_with = "text")]
         reason: String,
     },
     End {
+        #[serde(default, deserialize_with = "text")]
         reason: String,
     },
+}
+
+/// A text the mod may send as `null` or leave out: empty then, as the TS
+/// read it with `||`.
+fn text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 impl BridgeEvent {
@@ -399,9 +413,12 @@ pub enum TurnPhase {
     #[serde(rename_all = "camelCase")]
     End {
         /// `answer`, `aborted`, `refusal` or `error`.
+        #[serde(default, deserialize_with = "text")]
         reason: String,
+        #[serde(default)]
         duration_ms: u64,
         /// First line of the final answer, possibly empty.
+        #[serde(default, deserialize_with = "text")]
         answer: String,
     },
 }
@@ -421,8 +438,12 @@ pub enum ToolPhase {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageContext {
+    #[serde(default)]
     pub tokens: Option<u64>,
+    /// 0 when the agent does not say.
+    #[serde(default)]
     pub window: u64,
+    #[serde(default)]
     pub percent: Option<f64>,
 }
 
@@ -453,5 +474,65 @@ mod tests {
             Some(BridgeEvent::Turn(TurnPhase::Start))
         );
         assert_eq!(BridgeEvent::parse(&json!({"kind": "future"})), None);
+    }
+
+    /// The shapes of crates/hangar-core/claude-mod/hangar-bridge/hooks/
+    /// register.js, nulls and extra keys included: a report that fails to
+    /// read is a report lost, a hello among them.
+    #[test]
+    fn bridge_reports_read_what_the_mod_really_sends() {
+        let hello = json!({"kind": "hello", "sessionId": "s1", "model": null, "version": "2.1"});
+        assert_eq!(
+            BridgeEvent::parse(&hello),
+            Some(BridgeEvent::Hello {
+                session_id: "s1".into(),
+                model: String::new(),
+                version: "2.1".into(),
+            })
+        );
+        let usage = json!({"kind": "usage",
+            "context": {"tokens": null, "window": 200000, "percent": 41.5},
+            "rateLimits": [{"kind": "five_hour", "percentUsed": 12, "resetsAt": null}],
+            "costUsd": null});
+        let Some(BridgeEvent::Usage {
+            context,
+            rate_limits,
+            cost_usd,
+        }) = BridgeEvent::parse(&usage)
+        else {
+            panic!("a usage report");
+        };
+        assert_eq!(
+            (context.tokens, context.window, context.percent),
+            (None, 200_000, Some(41.5))
+        );
+        assert_eq!((rate_limits[0].percent_used, cost_usd), (12.0, None));
+        // The mod names the pane that edited it, which the window does not use.
+        assert_eq!(
+            BridgeEvent::parse(
+                &json!({"kind": "edit", "file": "a.ts", "name": "Ava", "overlap": "Bob", "overlapPane": "p9"})
+            ),
+            Some(BridgeEvent::Edit {
+                file: "a.ts".into(),
+                overlap: Some("Bob".into()),
+                overlap_pane: Some("p9".into()),
+            })
+        );
+        let ended = json!({"kind": "turn", "phase": "end", "reason": "aborted", "durationMs": 0, "answer": null});
+        assert!(matches!(
+            BridgeEvent::parse(&ended),
+            Some(BridgeEvent::Turn(TurnPhase::End { ref answer, .. })) if answer.is_empty()
+        ));
+        assert_eq!(
+            BridgeEvent::parse(&json!({"kind": "end"})),
+            Some(BridgeEvent::End {
+                reason: String::new()
+            })
+        );
+        let tool = json!({"kind": "tool", "phase": "start", "toolUseId": "t1", "tool": "Bash", "input": {"command": "ls"}});
+        assert!(matches!(
+            BridgeEvent::parse(&tool),
+            Some(BridgeEvent::Tool(ToolPhase::Start { .. }))
+        ));
     }
 }

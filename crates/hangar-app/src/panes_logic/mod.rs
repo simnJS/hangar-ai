@@ -142,7 +142,7 @@ use crate::state::{Model, Patch, Snapshot, StoreAction};
 pub struct State {
     /// Workspaces whose shells are being asked about (a sweep or a sleep by
     /// hand): the system's answer is awaited, and nobody asks twice.
-    probing: HashSet<WsId>,
+    probing: HashSet<(WsId, bool)>,
     /// When the transcripts' context was last read, and the branches asked.
     last_context_poll: EpochMs,
     last_branch_poll: EpochMs,
@@ -600,6 +600,17 @@ impl Live {
             .get(pane)
             .map(|machine| (machine.activity, machine.attention))
     }
+
+    /// What a tick of the watchers can change in what is read, every pane's.
+    fn state_marks(&self) -> Vec<(PaneId, AgentActivity, bool)> {
+        let mut marks: Vec<_> = self
+            .machines
+            .iter()
+            .map(|(id, machine)| (id.clone(), machine.activity, machine.attention))
+            .collect();
+        marks.sort_by(|a, b| a.0.cmp(&b.0));
+        marks
+    }
 }
 
 // ----- hibernation, against the live model
@@ -772,7 +783,10 @@ fn decide_next(
     mode: SleepMode,
     now: EpochMs,
 ) -> Task<Message> {
-    if st.probing.contains(workspace_id) {
+    // The sweep and a sleep asked for by hand each ask once; the second of
+    // the same kind finds the first on its way.
+    let key = (workspace_id.to_string(), mode == SleepMode::Forced);
+    if st.probing.contains(&key) {
         return Task::none();
     }
     let (step, io) = with_env(m, sv, |env| begin(env, workspace_id, mode, now));
@@ -783,7 +797,7 @@ fn decide_next(
             workspace,
             pane_ids,
         } => {
-            st.probing.insert(workspace.id.clone());
+            st.probing.insert(key);
             let manager = sv.core().pty().clone();
             let asked = pane_ids.clone();
             Task::batch([
@@ -963,7 +977,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             asked,
             answer,
         } => {
-            st.probing.remove(&workspace.id);
+            st.probing
+                .remove(&(workspace.id.clone(), mode == SleepMode::Forced));
             let (reading, io) = with_env(m, sv, |env| {
                 finish(env, &workspace, mode, now, &asked, answer)
             });
@@ -1033,6 +1048,7 @@ fn with_pane(
 fn tick(m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
     let idle_ms = m.settings().notify_idle_ms;
     let panes: Vec<PaneId> = m.live.panes_logic.machines.keys().cloned().collect();
+    let before = m.live.panes_logic.state_marks();
     let mut tasks = Vec::new();
     for pane in panes {
         let Some((info, amb)) = inputs(m, &pane, now) else {
@@ -1056,7 +1072,11 @@ fn tick(m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
             tasks.push(run_effects(m, &info, effects));
         }
     }
-    bump(m);
+    // A burst of output ticks every quarter second; what the readers see
+    // changes only when a pane starts working or hands back.
+    if m.live.panes_logic.state_marks() != before {
+        bump(m);
+    }
     Task::batch(tasks)
 }
 
@@ -1315,6 +1335,12 @@ pub fn on_intent(
         // on screen, or one an agent writes to over MCP, which P18 counts.
         Intent::Broadcast { ws, .. } | Intent::RunSavedCommand { ws, .. } => {
             m.live.panes_logic.hibernation.touch_workspace(ws, now);
+        }
+        // Sent to a window of its own, a workspace asleep wakes there: the
+        // sessions its panes are owed stay owed, since the window that
+        // starts them is still this process.
+        Intent::Detach(ws) => {
+            m.live.panes_logic.hibernation.mark_awake(ws);
         }
         _ => {}
     }

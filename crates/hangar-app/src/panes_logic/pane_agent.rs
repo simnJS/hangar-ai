@@ -187,10 +187,6 @@ impl Live {
         }
     }
 
-    pub fn is_mounted(&self, pane: &str) -> bool {
-        self.machines.contains_key(pane)
-    }
-
     // ----- what is published
 
     /// Publishes the pane's activity: for the sidebar, which counts each
@@ -1698,7 +1694,7 @@ mod tests {
             &amb(NOW),
         );
         live.unmount_pane("p1", true);
-        assert!(!live.is_mounted("p1"));
+        assert!(!live.is_pane_mounted("p1"));
         assert!(live.agents.get("p1").is_some());
         assert!(live.insights.contains("p1"));
         assert!(live.hibernation.pane_rest("p1").is_none());
