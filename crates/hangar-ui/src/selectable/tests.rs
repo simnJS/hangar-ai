@@ -464,3 +464,35 @@ fn the_selected_part_is_drawn_in_the_selection_colour_and_only_that() {
     assert_eq!(reds_near(alpha), 0, "the block above is not painted");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_view_scrolled_down_selects_what_is_under_the_pointer_not_what_was_there() {
+    use iced::widget::scrollable;
+    let doc = Doc::new(PAINT);
+    doc.begin();
+    let lines: Vec<Element<'static, Msg>> = (0..60)
+        .map(|n| {
+            doc.block::<(), Msg>(plain(&format!("row {n}")))
+                .size(14)
+                .into()
+        })
+        .collect();
+    let page = selectable(&doc, iced::widget::column(lines))
+        .on_select(Msg::Selected)
+        .on_copy(|| Msg::Copied);
+    let mut ui = simulate(scrollable(page).height(200).width(iced::Length::Fill));
+    ui.move_to(20.0, 20.0);
+    // Scroll a good way: the rows in sight are not the first.
+    ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -400.0 },
+    })]);
+    ui.move_to(20.0, 21.0);
+    let seen = doc.lock().places.len();
+    assert!(seen > 20, "every block says where it is");
+    for _ in 0..3 {
+        ui.click("row 24").expect("that row is in sight");
+    }
+    assert_eq!(doc.selected_text(), "row 24");
+    let messages = said(ui);
+    assert_eq!(messages.last(), Some(&Msg::Selected("row 24".into())));
+}
