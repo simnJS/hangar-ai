@@ -10,7 +10,9 @@
 
 pub mod formats;
 pub mod framing;
+pub mod load;
 pub mod model;
+pub mod samples;
 pub mod stats;
 pub mod theme;
 
