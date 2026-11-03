@@ -37,3 +37,10 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+chrono.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+# Draws a view headless, to look at it (the inspector's and the diff view's
+# snapshot tests write PNGs when asked to).
+iced_test.workspace = true
