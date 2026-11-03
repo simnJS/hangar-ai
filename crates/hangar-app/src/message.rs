@@ -202,6 +202,12 @@ pub enum Intent {
     Notice(Notice),
     Notify(Notification),
     CreateWorkspaceFromGit(GitRequest),
+    /// The shortcut recorder of Settings › Shortcuts holds the keyboard
+    /// (`true`) or lets it go (`false`): while it does, the dispatcher must not
+    /// run a command, since every key pressed is the shortcut being recorded
+    /// (`suspendShortcuts()` of `useShortcuts.ts`). Handled by `keymap` (P7),
+    /// which counts the suspensions; sent by `settings`.
+    SuspendShortcuts(bool),
 }
 
 /// « From a Git repository » (`FromGitRequest` of lib/workspaceFromGit.ts).
