@@ -3038,6 +3038,7 @@ dependencies = [
  "hangar-ui",
  "hangar-update",
  "hangar-webview",
+ "http",
  "iced",
  "iced_test",
  "open",
@@ -3046,8 +3047,11 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "syntect",
  "tokio",
+ "two-face",
  "unicode-normalization",
+ "usvg",
  "uuid 1.24.0",
 ]
 

@@ -49,6 +49,11 @@ png = "0.18"
 # (WebKitGTK, WebView2, WKWebView) and tao gives it its windows.
 wry = "0.57"
 tao = "0.37"
+# Colours for the preview's source code: bat's syntaxes (what iced's own
+# highlighter loads), with the scopes kept so the theme picks the tones.
+two-face = { version = "0.4", default-features = false, features = ["syntect-default-fancy"] }
+syntect = { version = "5.3", default-features = false, features = ["parsing"] }
+http = "1"
 unicode-normalization = "0.1"
 # Dates in the local time zone (hangar-core and hangar-update already use it).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -37,6 +37,10 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+two-face.workspace = true
+syntect.workspace = true
+# The requests a page makes to the helper's scheme, served by hangar-core.
+http.workspace = true
 uuid.workspace = true
 # Wall-clock dates of the memory view, the local days, weeks and hours of the
 # statistics page (as `Intl.DateTimeFormat` wrote them), the dates of the
@@ -50,5 +54,8 @@ unicode-normalization.workspace = true
 
 [dev-dependencies]
 # Draws a package's views without a window, for the snapshot tests packages keep
-# to look at what they built (kits/views/snapshot.rs).
+# to look at what they built (kits/views/snapshot.rs), and drives the preview's
+# views with real events.
 iced_test.workspace = true
+# Only to check that every glyph of the preview is an SVG a renderer can read.
+usvg.workspace = true
