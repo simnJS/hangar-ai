@@ -7,10 +7,30 @@ license.workspace = true
 repository.workspace = true
 edition = "2024"
 
+# Two targets that share one protocol. The library is what the app depends on:
+# the messages, and a client that starts the helper and speaks to it. It needs
+# nothing but serde, so the app never compiles (or links) a browser engine.
+# The binary is the helper itself, and is only built with the `engine` feature.
+[lib]
+name = "hangar_webview"
+path = "src/lib.rs"
+
 [[bin]]
 name = "hangar-webview"
 path = "src/main.rs"
+required-features = ["engine"]
+
+[features]
+# wry, tao and, on Linux, GTK and WebKitGTK. `linux-body` is for the requests a
+# page makes to a scheme: without it WebKitGTK hands over their method and
+# headers but an empty body.
+engine = ["dep:wry", "dep:tao", "wry/linux-body"]
+# The inspector of a window opened with `devtools: true`, in a release build of
+# macOS too, where WKWebView only has it through a private API.
+devtools = ["engine", "wry/devtools"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+wry = { workspace = true, optional = true }
+tao = { workspace = true, optional = true }
