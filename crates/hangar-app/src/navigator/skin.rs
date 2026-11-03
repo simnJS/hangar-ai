@@ -51,12 +51,14 @@ pub fn well(t: &Theme) -> impl Fn(&iced::Theme) -> container::Style + '_ {
 
 /// What a row of the navigator is drawn on: the selected one on the
 /// selection's colour, the one under the pointer a step lighter, the others on
-/// the navigator's own surface. `drag` fades the row being dragged.
+/// the navigator's own surface. `dragged` fades the row being dragged, and
+/// `focused` rings the row the keyboard is on.
 pub fn nav_row(
     t: &Theme,
     active: bool,
     hovered: bool,
     dragged: bool,
+    focused: bool,
 ) -> impl Fn(&iced::Theme) -> container::Style + '_ {
     move |_| {
         let fill = if active {
@@ -77,9 +79,16 @@ pub fn nav_row(
                 }
                 .scale_alpha(fade),
             ),
-            border: Border {
-                radius: radius::MD.into(),
-                ..Border::default()
+            border: if focused {
+                Border {
+                    width: 2.0,
+                    ..border(t.colors.accent_ring, radius::MD)
+                }
+            } else {
+                Border {
+                    radius: radius::MD.into(),
+                    ..Border::default()
+                }
             },
             ..container::Style::default()
         }

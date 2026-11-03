@@ -20,6 +20,9 @@ use super::model::reading_order;
 
 /// A pane's activity: `working`, `waiting`, `yours` or `idle`.
 pub fn activity(m: &Model, pane: &PaneId) -> AgentActivity {
+    if let Some(forced) = dev_activity(pane) {
+        return forced;
+    }
     match panes_logic::state_glyph_state(m, pane) {
         GlyphState::Working => AgentActivity::Working,
         GlyphState::Waiting => AgentActivity::Waiting,
@@ -32,6 +35,9 @@ pub fn activity(m: &Model, pane: &PaneId) -> AgentActivity {
 /// activity (`paneGlyphState`).
 pub fn glyph(m: &Model, pane: &PaneId) -> hangar_ui::glyph::GlyphState {
     use hangar_ui::glyph::GlyphState as Ui;
+    if let Some(forced) = dev_activity(pane) {
+        return activity_glyph(forced);
+    }
     match panes_logic::state_glyph_state(m, pane) {
         GlyphState::Starting => Ui::Starting,
         GlyphState::Exited => Ui::Exited,
@@ -162,4 +168,61 @@ pub fn models(m: &Model, ws: &Workspace) -> Models {
 pub fn asleep_at(m: &Model, ws: &Workspace) -> Option<i64> {
     let _ = (m, ws);
     None
+}
+
+// ---- Development aids -----------------------------------------------------------------------------
+
+/// `HANGAR_DEV_ACTIVITY=pane-id:working,other-id:waiting` makes those panes
+/// look like that, to see the navigator, the toolbar and the status bar in
+/// every state before the panes' own logic (P4) can say it. Debug builds only:
+/// a release build never reads it.
+fn dev_activity(pane: &PaneId) -> Option<AgentActivity> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static FORCED: OnceLock<HashMap<String, AgentActivity>> = OnceLock::new();
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    FORCED
+        .get_or_init(|| {
+            let spec = std::env::var("HANGAR_DEV_ACTIVITY").unwrap_or_default();
+            spec.split(',')
+                .filter_map(|pair| {
+                    let (id, state) = pair.split_once(':')?;
+                    let state = match state.trim() {
+                        "working" => AgentActivity::Working,
+                        "waiting" => AgentActivity::Waiting,
+                        "yours" => AgentActivity::Yours,
+                        _ => return None,
+                    };
+                    Some((id.trim().to_string(), state))
+                })
+                .collect()
+        })
+        .get(pane)
+        .copied()
+}
+
+/// `HANGAR_DEV_PLAN=five_hour:72:2026-11-04T20:01:00Z,seven_day:35` shows the
+/// plan block without a pane to report it. Debug builds only.
+pub fn dev_plan() -> Option<crate::state::live::PlanLimits> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let spec = std::env::var("HANGAR_DEV_PLAN").ok()?;
+    let limits: Vec<crate::state::live::RateLimit> = spec
+        .split(',')
+        .filter_map(|window| {
+            let mut parts = window.splitn(3, ':');
+            let kind = parts.next()?.trim().to_string();
+            let percent_used = parts.next()?.trim().parse().ok()?;
+            let resets_at = parts.next().map(|at| at.trim().to_string());
+            Some(crate::state::live::RateLimit {
+                kind,
+                percent_used,
+                resets_at,
+            })
+        })
+        .collect();
+    super::plan::take(&limits)
 }

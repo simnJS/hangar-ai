@@ -2,6 +2,7 @@
 //! state: only the latest event can be the question, a state word alone says
 //! it all for a waiting pane, and the counters walk the panes in reading
 //! order, wrapping.
+#![allow(clippy::field_reassign_with_default)]
 
 use serde_json::json;
 

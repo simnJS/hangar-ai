@@ -201,6 +201,9 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     Subscription::batch([focus, Subscription::run_with(ws.cwd.clone(), beat)])
 }
 
+// `Subscription::run_with` hands the builder a reference to its data, which
+// is the `String` the subscription is identified by.
+#[allow(clippy::ptr_arg)]
 fn beat(cwd: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
     let cwd = cwd.clone();
     iced::futures::stream::unfold(true, move |first| {

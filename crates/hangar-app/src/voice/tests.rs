@@ -1,6 +1,7 @@
 //! `lib/voice.ts` had no tests; these hold the gesture it describes: only the
 //! press starts, any release ends, Escape cancels, nothing queues behind a
 //! transcription.
+#![allow(clippy::field_reassign_with_default)]
 
 use hangar_core::voice::EngineKind;
 

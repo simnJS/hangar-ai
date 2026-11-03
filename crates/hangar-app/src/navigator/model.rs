@@ -135,7 +135,7 @@ pub fn reading_order_ids(panes: &[Pane], tree: Option<&SplitNode>) -> Vec<PaneId
 }
 
 /// The panes a preset of `count` closes, in reading order (`closedByPreset`).
-pub fn closed_by_preset<'a>(ws: &'a Workspace, count: u8) -> Vec<&'a Pane> {
+pub fn closed_by_preset(ws: &Workspace, count: u8) -> Vec<&Pane> {
     let size = usize::from(count).clamp(1, crate::state::types::MAX_PANES);
     reading_order(ws).into_iter().skip(size).collect()
 }
