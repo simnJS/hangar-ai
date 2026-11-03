@@ -65,6 +65,13 @@ impl TerminalAccess for Hub {
         Some(lines)
     }
 
+    /// The rows of the screen, the history left out.
+    fn screen_text(&self, pane: &PaneId) -> Option<Vec<String>> {
+        let link = self.get(pane)?;
+        let rows = link.lock().screen_text();
+        Some(rows)
+    }
+
     /// As a paste: bracketed when the program asked for it, line breaks as
     /// Enter sends them.
     fn paste(&self, pane: &PaneId, text: &str) -> bool {
@@ -188,6 +195,38 @@ mod tests {
             Some(vec!["first".to_string(), "second".to_string()])
         );
         assert_eq!(hub.read_lines(&"b".to_string(), 2), None);
+    }
+
+    #[test]
+    fn the_screen_is_what_the_program_drew_and_not_what_scrolled_off_it() {
+        let (hub, link) = hub_with("a");
+        let question = "Quick safety check: trust this folder?";
+        link.lock().feed(format!("{question}\r\n").as_bytes());
+        let rows = hub.screen_text(&"a".to_string()).expect("a screen");
+        assert_eq!(rows.len(), 10, "one string per row of the grid");
+        assert_eq!(rows[0], question);
+        // Twenty lines later the question is history: read_lines still finds
+        // it, which is what made a long-gone question look asked again.
+        let mut output = String::new();
+        for line in 0..20 {
+            output.push_str(&format!("line {line}\r\n"));
+        }
+        link.lock().feed(output.as_bytes());
+        let rows = hub.screen_text(&"a".to_string()).expect("a screen");
+        assert!(
+            !rows.iter().any(|row| row.contains("safety check")),
+            "{rows:?}"
+        );
+        let lines = hub.read_lines(&"a".to_string(), 60).expect("lines");
+        assert!(lines.iter().any(|line| line.contains("safety check")));
+        // And a pane scrolled back is still read where the program draws.
+        link.lock()
+            .feed(b"Quick safety check: trust this folder?\r\n");
+        link.lock()
+            .perform(hangar_term::Action::Scroll(hangar_term::ScrollTo::Top));
+        let rows = hub.screen_text(&"a".to_string()).expect("a screen");
+        assert!(rows.iter().any(|row| row.contains("trust this folder")));
+        assert_eq!(hub.screen_text(&"b".to_string()), None);
     }
 
     #[test]

@@ -20,6 +20,18 @@ pub trait TerminalAccess: Send + Sync {
         None
     }
 
+    /// The rows of the pane's screen as the program drew them, without the
+    /// history above: what a person sees at the bottom of the pane, which is
+    /// where a program asking a question draws it. A pane scrolled back is
+    /// read all the same, since the question is not where the person is
+    /// looking. For the reads that must not find an answer, or a question,
+    /// printed before the screen was last cleared (`buffer.viewportY …
+    /// + rows` of the old terminal).
+    fn screen_text(&self, pane: &PaneId) -> Option<Vec<String>> {
+        let _ = pane;
+        None
+    }
+
     /// Pastes `text` as the person would, bracketed when the program asked
     /// for it (DECSET 2004). Whether the pane took it.
     fn paste(&self, pane: &PaneId, text: &str) -> bool {
