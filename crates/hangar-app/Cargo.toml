@@ -37,3 +37,8 @@ serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
 png.workspace = true
+
+[dev-dependencies]
+# Draws a package's views without a window, for the snapshot tests packages keep
+# to look at what they built (kits/views/snapshot.rs).
+iced_test.workspace = true
