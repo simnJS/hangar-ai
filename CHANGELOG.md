@@ -8,6 +8,70 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
+## [2.0.0] - Unreleased
+
+Hangar, rewritten as a native app. It keeps your data, your workspaces and the features
+around the terminals, and needs a fraction of the memory and processor it did.
+
+- **Native, in Rust.** The whole app is Rust now, drawn with iced, and runs no web view: 1.x
+  was a web page in a Tauri window. The terminals are Hangar's own, on alacritty_terminal.
+  - What only a browser engine can show, a kit's HTML tab, a PDF, a web page, a video,
+    opens in a separate helper program, `hangar-webview`, in a window of its own.
+  - Measured on the same Linux machine, 1.12.1 against 2.0.0:
+    - starting cold: 0.96 s, now 0.57 s;
+    - memory at rest: 238 MB, now 166 MB;
+    - 16 terminals printing non-stop for 30 s: 8.3 GB of memory, now 249 MB, and 4.4
+      processor cores, now 2.7;
+    - the echo of a key typed while 15 terminals print: none within 20 s, now 2.4 ms.
+- **Claude Code only.** Hangar runs Claude Code and plain shells. Codex, Gemini CLI and
+  OpenCode are gone, with their launch, session resume, statistics, prices and settings.
+  - A pane saved with one of them opens as a shell in the same folder, says so once in its
+    bar, and is saved as a shell.
+  - The MCP panel writes Claude Code's `.mcp.json` only, and the agents' playbook goes to
+    `CLAUDE.md` only. What earlier versions wrote for Codex, Gemini CLI, Cursor, VS Code or
+    in `AGENTS.md` is left as it is.
+  - The statistics read Claude Code's transcripts; the "By agent" card is gone.
+- **Native kit tabs.** A kit's tab can be Rust compiled to WebAssembly. It describes its
+  page as widgets that Hangar draws, in your theme and your language, with no browser
+  engine, and runs in a sandbox that reaches only what its manifest declares.
+  - The **kit SDK** (`hangar-kit-sdk`) has the `Kit` trait, view builders, the calls a tab
+    makes, and a harness that runs and tests a tab without Hangar. The contract is in
+    [docs/native/kits-native.md](docs/native/kits-native.md).
+  - A native tab needs `"schema": 2`. A kit that must still open on 1.x keeps its HTML page
+    and adds a `native` module beside it: 1.x opens the page, 2.0 the module.
+  - HTML tabs keep working, with the same `window.hangar` API and the same permissions.
+  - A compiled tab is kept on disk, so it opens at once after a restart.
+- **Same data, same updates.**
+  - 2.0 reads the same folders and the same `state.json` as 1.x: workspaces, panes, boards,
+    memory, settings, theme, language, shortcuts, kits and Claude accounts are all there. It
+    writes the file back in the shape 1.x reads, fields it does not know included.
+  - A 1.x install updates to 2.0 through the same update feed, signed with the same key. The
+    executable is still `hangar-ai`, so the MCP configurations agents already have keep
+    working.
+  - Two things 1.x kept in its web view's storage are not carried over: the kit tabs left
+    open, and each Claude account's cached usage. Open the tabs again once; the usage comes
+    back at its next refresh.
+  - A `state.json` that cannot be read is moved aside as it is, never replaced by an empty
+    one.
+- **Hangar Mobile is unchanged**: the same phone app, the same pairing, the same
+  notifications.
+- **Not there yet.**
+  - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux
+    is where it was used.
+  - No screen-reader support (iced has no accessibility tree yet), and buttons do not take
+    the keyboard focus: `F6` moves between regions, and the command palette reaches every
+    command.
+  - Text cannot be selected with the pointer in the diff, in native kit tabs and in most
+    panels; a Copy button stands in. Terminals, code and Markdown previews select as before.
+  - PDFs, web pages, video, audio and HTML kit tabs open in a window of their own rather
+    than in the panel. On GNOME under Wayland, one that an agent opens waits for your click
+    on **Open in a window**.
+  - On Linux, video and audio previews may not play.
+  - Dropping a file on a pane does not work under Wayland.
+  - The 3D preview does not read Draco, meshopt or KTX2 compressed glTF files, nor USDZ, and
+    plays no FBX animation.
+  - A window last left on a second screen reopens centred on the first.
+
 ## [1.12.1] - 2026-11-03
 
 - **Terminals no longer lag on Linux.** On Linux the webview is WebKitGTK, where drawing a

@@ -12,7 +12,18 @@ body:
     attributes:
       label: Hangar version
       description: Shown at the top of the navigator, and in Settings.
-      placeholder: "1.0.0"
+      placeholder: "2.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: generation
+    attributes:
+      label: Native app or 1.x
+      description: Hangar 2.0 and later are the native app, rewritten in Rust; 1.x is the web-view app it replaced.
+      options:
+        - Hangar 2.0 or later (native)
+        - Hangar 1.x
     validations:
       required: true
 
@@ -31,7 +42,7 @@ body:
     id: os-version
     attributes:
       label: OS version and install type
-      description: For example "Windows 11 24H2", "macOS 15.4 on Apple Silicon", "Ubuntu 24.04, AppImage".
+      description: For example "Windows 11 24H2", "macOS 15.4 on Apple Silicon", "Ubuntu 24.04, GNOME on Wayland, AppImage". On Linux, say whether the session is Wayland or X11.
     validations:
       required: true
 
@@ -67,9 +78,12 @@ body:
         - MCP server or agent configuration
         - Usage statistics
         - Workspaces, sleep or worktrees
+        - Kits and kit tabs (HTML or native)
+        - File previews, PDFs or web pages
         - 3D preview
         - Dictation
-        - Install or update
+        - Hangar Mobile
+        - Install or update, or data coming from 1.x
         - Something else
 
   - type: textarea

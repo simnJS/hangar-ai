@@ -66,10 +66,9 @@ nothing else: a Hangar that reads it reads schema 1 as it always did.
 **On an older Hangar.** One that reads schema 1 only says, as it always has for a higher number,
 `schema: 2 needs a newer Hangar`, and the kit is unusable there, plugin included: the person is told
 why, rather than opening a tab that cannot run. A kit says what it needs the usual way too,
-`"hangar": ">=2.0.0"`. The native Hangar is taken to ship as 2.0.0; if it ships under another
-number, only that number changes here. Until that release sets the version, the workspace is still
-1.12.1, so the example in this repository (`examples/kits/hello-native`) asks for `>=1.12.1` and
-runs in a build of this branch.
+`"hangar": ">=2.0.0"`: **Hangar 2.0.0 is the native Hangar**, the first release that reads schema 2
+and opens a native tab, and every 1.x is the web app, which reads schema 1 only. The example in this
+repository (`examples/kits/hello-native`) asks for `>=2.0.0`.
 
 **Both, for a kit that must still open on 1.x.** Stay at schema 1, keep an HTML `entry`, and add a
 `native` field to the tab:
@@ -108,7 +107,8 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]   # the module, and the library its tests use
 
 [dependencies]
-# Until a release tag holds the SDK, its branch: { …, branch = "feat/native-rust" }.
+# The SDK of the Hangar 2.0.0 release. Before that tag is out, its branch:
+# { …, branch = "feat/native-rust" }.
 hangar-kit-sdk = { git = "https://github.com/hangar-ai/hangar", tag = "v2.0.0" }
 
 [profile.release]
@@ -671,8 +671,7 @@ the tab and in place of its page.
 The person this was written for was not there to ask; these were decided, and can be revisited.
 
 - **A native tab is an `entry` ending in `.wasm`, under schema 2**; a kit that must open on 1.x keeps
-  an HTML `entry` and adds `native`, which an older Hangar ignores. The native Hangar is taken to be
-  2.0.0.
+  an HTML `entry` and adds `native`, which an older Hangar ignores. The native Hangar is 2.0.0.
 - **The ABI is pull and push of whole messages, Elm-shaped**: `init`, `update`, `view`, subscriptions
   declared after every update, calls as tasks answered by a later update. No call blocks the module,
   so no import but `log` and `now` is needed, and a module's time is compute only.
@@ -724,8 +723,6 @@ The person this was written for was not there to ask; these were decided, and ca
 
 ## Later
 
-- **The other controls**: text inputs, selects, checkboxes, switches, tables and trees are iced's
-  own, styled from `KitStyle`, not yet hangar-ui's `input::*`. The contract does not change.
 - **The failure reasons** (a module that does not load, a deadline passed) are the runtime's
   English: what a kit's author reads. The titles and the button around them are translated.
 - **A long list of rows of any height** (`hangar.ui.list` with rich rows): a `log` with an id is
@@ -744,4 +741,3 @@ The person this was written for was not there to ask; these were decided, and ca
 - **A closing tab's last write**: a tab is dropped at once, with no last update, as a page's
   `pagehide` is not to be relied on either; a kit saves as it goes (`cx.after` debounced).
 - **The split** is not draggable.
-- **Compiled modules on disk**: wasmtime's cache, so a tab opens without compiling after a restart.

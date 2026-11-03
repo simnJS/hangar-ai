@@ -9,7 +9,9 @@ about that domain. A kit can bring:
 - **tabs**: isolated pages of its own, talking to Hangar through a small,
   declared API, with a [data folder](#a-kits-data-folder) of the kit's and, when
   declared, a local server to talk to and
-  [commands to run](#declared-commands) on tools already on the machine;
+  [commands to run](#declared-commands) on tools already on the machine. A tab is
+  an HTML page or, since Hangar 2.0, a [native tab](#native-tabs): Rust compiled
+  to WebAssembly, drawn by Hangar itself;
 - **setup commands**: shown to the person verbatim, run in a visible pane once
   they approve, once per machine.
 
@@ -34,8 +36,11 @@ This page is the contract. The code lives in `crates/hangar-core/src/kits.rs` an
 `crates/hangar-app/src/kit_tabs/` (`api.rs`, `tabs.rs`). The web app these were
 ported from (`src/lib/kits.ts`, `src/lib/kitApi.ts`, `src/lib/kitTabs.ts`,
 `src/components/preview/KitTabView.tsx`) is at tag `v1.12.1`; the names below that
-come from it are kept for that reason. How a tab should look is in [Hangar UI](kit-ui.md), the
-interface library served to every tab.
+come from it are kept for that reason. How an HTML tab should look is in [Hangar UI](kit-ui.md),
+the interface library served to every HTML tab. A native tab's contract (its WebAssembly ABI,
+its widgets, the kit SDK) is in [native/kits-native.md](native/kits-native.md); it is run and
+drawn by `crates/hangar-kit-host`, and calls the same methods, under the same permissions, as
+an HTML tab.
 
 ## A minimal kit
 
@@ -132,11 +137,12 @@ manifest does not need a `plugin` field.
 
 ## The manifest: `hangar-kit.json`
 
-At the kit's root. Schema 1:
+At the kit's root. Schema 1, or schema 2 for a kit with a [native tab](#native-tabs) as its
+`entry` (Hangar 2.0 and later):
 
 | Field         | Type              | Required | Rules                                                                                     |
 | ------------- | ----------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `schema`      | number            | yes      | `1`. A higher number reads as "needs a newer Hangar".                                     |
+| `schema`      | number            | yes      | `1`, or `2` (Hangar 2.0): schema 2 only allows a `.wasm` `entry`. A higher number than a Hangar reads is "needs a newer Hangar". |
 | `id`          | string            | yes      | `[a-z0-9-]`, 2 to 40 characters. Unique on a machine: two kits cannot share it.           |
 | `name`        | string            | yes      | Not blank.                                                                                |
 | `version`     | string            | yes      | Semver: `1.2.0`, `0.3.0-beta.1`. What update checks compare.                              |
@@ -165,7 +171,8 @@ A **tab**:
 | ------------- | -------- | -------- | -------------------------------------------------------------------------- |
 | `id`          | string   | yes      | `[a-z0-9-]`, 1 to 40 characters.                                           |
 | `title`       | string   | yes      | Not blank.                                                                 |
-| `entry`       | string   | yes      | Relative path to an existing `.html` file.                                 |
+| `entry`       | string   | yes      | Relative path to an existing `.html` file, or, in schema 2, a `.wasm` module: a [native tab](#native-tabs). |
+| `native`      | string   | no       | Relative path to an existing `.wasm` module, beside an HTML `entry`: Hangar 2.0 opens the module, 1.x the page. |
 | `icon`        | string   | no       | Relative path to an existing `.svg` or `.png` file.                        |
 | `permissions` | string[] | yes      | Among the [permissions](#tab-permissions). `[]` asks for nothing.          |
 | `params`      | object   | no       | What callers may pass it, by name: [below](#a-tab-with-params).            |
@@ -442,7 +449,13 @@ saying they are there; the page loads, and sets its badge again. Files in the
 preview do not come back: only kits' tabs.
 
 **Small or large, a tab is the same thing**: it lives in the panel, at the panel's
-width. That is 320 interface points at least, so 320 CSS pixels at 100 % interface
+width.
+
+**Where an HTML page shows, since Hangar 2.0.** Hangar's window runs no browser engine, so
+the page of an HTML tab is shown by `hangar-webview`, a helper program beside Hangar, in a
+window of its own that follows its tab: hidden when the tab, its panel or its workspace
+leaves the screen, back when they return. The tab stays in the panel, with its bar. A
+native tab is drawn in the panel itself. That is 320 interface points at least, so 320 CSS pixels at 100 % interface
 size and 288 at the smallest, 90 %; a very narrow window can leave less, as a drawer.
 Nothing sets a minimum width for a page but the page.
 
@@ -459,6 +472,27 @@ designed states for what is empty, loading, failing or denied.
 Those addresses exist since Hangar 1.9.0, and an older one answers them with a 404, so a kit
 that uses them says `"hangar": ">=1.9.0"` in its manifest. A page that does without the
 library starts on a white frame, and has its width and all the themes to answer for itself.
+
+### Native tabs
+
+A native tab is a module of Rust compiled to `wasm32-unknown-unknown` with the kit SDK,
+`hangar-kit-sdk`. It describes its page as a tree of widgets — rows, text, buttons, fields,
+tables, trees, logs, a drawing canvas — and Hangar draws it with its own widgets, in the
+workspace's theme and the person's language, at any width of the panel. No browser engine
+runs for it, and its module reaches nothing but the calls below, answered under the same
+permissions and limits as an HTML tab's, plus time and memory limits of its own.
+
+```json
+{ "id": "hello", "title": "Hello", "entry": "tabs/hello.wasm", "permissions": ["panes.read"] }
+```
+
+Such an `entry` needs `"schema": 2`, which Hangar 1.x refuses as too new. A kit that must
+still open on 1.x stays at schema 1, keeps its HTML `entry`, and names the module in
+`native`: 1.x ignores the field and opens the page; 2.0 opens the module, and the page only
+if the module cannot be loaded. The SDK, the ABI, the widgets and a test harness that runs a
+tab without Hangar are in [native/kits-native.md](native/kits-native.md), with
+`examples/kits/hello-native` and [`kit-template`](https://github.com/hangar-ai/kit-template)
+to start from.
 
 ### A tab with params
 
@@ -675,9 +709,9 @@ It serves:
 
 The page runs isolated: this is code written by someone else.
 
-- It is framed with `sandbox="allow-scripts"`, and every answer of the scheme
-  carries a `sandbox allow-scripts` Content-Security-Policy as well: the page
-  has an **opaque origin**. It reaches neither Hangar's window nor its
+- Every answer of the scheme carries a `sandbox allow-scripts`
+  Content-Security-Policy (and Hangar 1.x also framed it with
+  `sandbox="allow-scripts"`): the page has an **opaque origin**. It reaches neither Hangar's window nor its
   commands, has **no storage** (`localStorage`, `sessionStorage`, IndexedDB
   and cookies throw or stay empty), opens no popup, submits no form, shows no
   `alert`/`confirm`/`prompt`, and cannot navigate Hangar.
@@ -685,7 +719,10 @@ The page runs isolated: this is code written by someone else.
   nothing else**: no network at all — no `fetch`, image, font, style or script
   from anywhere else, no frames, workers or plugins. Inline scripts and styles run, module scripts
   and WebAssembly too; `eval` does not.
-- It talks to Hangar by `postMessage` to its parent, and only that (below).
+- It talks to Hangar by `postMessage` to its parent, and only that (below). In
+  Hangar 2.0, where the page is a window of its own, the helper puts a stand-in at
+  `window.parent` that carries the same messages, so a page and `kit.js` written
+  for the frame run unchanged.
   **The frame still has no network of its own**: `data.read`, `data.write`,
   `loopback.fetch` and `command.run` are done by the Hangar host, and a page
   calling `fetch` on a local server is refused as ever.

@@ -6,7 +6,8 @@ interaction.
 
 - **Question, or want to talk it through first?** Join the [Hangar.AI Discord](https://discord.gg/hangarai).
 - **Security issue?** Do not open a public issue. See [SECURITY.md](SECURITY.md).
-- **Bug?** Open an issue with the bug template: OS, Hangar version, agent and steps.
+- **Bug?** Open an issue with the bug template: OS, Hangar version (2.0 and later are the
+  native app, 1.x the web-view one), what the pane ran, and steps.
 - **Idea?** Read [Proposing a feature](#proposing-a-feature) first.
 - **Small fix** (typo, obvious bug, missing translation)? Open a pull request directly.
 
@@ -23,8 +24,14 @@ scripts/native-dev.sh
 
 The app is the Cargo workspace under `crates/` (map and rules in
 [docs/native/PLAN.md](docs/native/PLAN.md)); `cargo run -p hangar-term --example shell`
-and the other crates' examples run a part on its own. The old Tauri and React app is no
-longer on this branch; read it at tag `v1.12.1` (`git show v1.12.1:src/lib/board.ts`).
+and the other crates' examples run a part on its own. HTML kit tabs, PDFs and web pages
+need the helper, built with its browser engine:
+`cargo build -p hangar-webview --features engine` (the app finds it next to its own
+executable). Native kit tabs are tried with
+`cargo run -p hangar-kit-host --example preview -- tab.wasm`.
+
+Hangar 2.0 is this native app. The Tauri and React app it replaced (1.x) is no longer in
+the repository; read it at tag `v1.12.1` (`git show v1.12.1:src/lib/board.ts`).
 
 For Hangar Mobile, the phone app under `mobile/`, the fastest loop needs no PC: it runs
 against a fake one.
@@ -151,8 +158,8 @@ Useful things to include:
 ## Agent instruction files
 
 `CLAUDE.md` and `AGENTS.md` are gitignored in this repository. Hangar's MCP panel writes a
-board playbook into those files for any workspace. If you drive agents on this repository
-with Hangar, generate your own; they stay on your machine.
+board playbook into `CLAUDE.md` for any workspace (1.x wrote `AGENTS.md` too). If you
+drive agents on this repository with Hangar, generate your own; they stay on your machine.
 
 ## License
 

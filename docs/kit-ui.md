@@ -1,8 +1,13 @@
 # Hangar UI
 
-The interface library of kits' tabs, so that a tab looks like a part of Hangar rather than a page
-framed inside it. A stylesheet of tokens and components, a script of behaviours, both served by
-Hangar to every tab, with no dependency and nothing to install.
+The interface library of kits' **HTML tabs**, so that a tab looks like a part of Hangar rather than
+a page framed inside it. A stylesheet of tokens and components, a script of behaviours, both served
+by Hangar to every HTML tab, with no dependency and nothing to install.
+
+A **native tab** (Hangar 2.0 and later, Rust compiled to WebAssembly) needs none of this: it
+describes its page as widgets of the kit SDK, and Hangar draws them with its own, in the person's
+theme. Its widgets and calls are in [native/kits-native.md](native/kits-native.md). The rules of
+[the rules a kit follows](#the-rules-a-kit-follows) hold for both kinds.
 
 It is **tied to Hangar, not copied from it**. Its colours, measures, icons and font are generated from
 Hangar's own sources, and a test fails when they no longer match: when Hangar changes a colour, a
