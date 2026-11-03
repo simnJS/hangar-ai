@@ -2,13 +2,6 @@
 node_modules/
 
 # Build output
-dist/
-dist-ssr/
-src-tauri/target/
-src-tauri/gen/schemas/
-# `pnpm demo:build` writes the demo into the site it is served from, so this one
-# generated file sits among sources. 770 kB of bundle, rebuilt every time.
-site/demo/
 # `pnpm mobile:build`: the phone app, which the desktop binary embeds.
 dist-mobile/
 

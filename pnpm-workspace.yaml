@@ -1,0 +1,7 @@
+# Hangar Mobile's one dependency with an install script: esbuild, under Vite.
+# pnpm 11 and later read allowBuilds and refuse to install without it; pnpm 10,
+# which CI runs, reads onlyBuiltDependencies.
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild
