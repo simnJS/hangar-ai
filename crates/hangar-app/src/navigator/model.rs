@@ -256,10 +256,5 @@ pub fn build_nav_tree<'a>(input: &NavInput<'a, '_>) -> NavTree<'a> {
     }
 }
 
-// The order the sidebar lists workspaces in is `state::folders::sidebar_order`
-// (`lib/folders.ts`). Needs-you still reaches it through here, so the name
-// stays until that package asks `state::folders` itself.
-pub use crate::state::folders::sidebar_order;
-
 #[cfg(test)]
 mod tests;

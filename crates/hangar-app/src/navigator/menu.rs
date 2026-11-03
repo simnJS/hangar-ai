@@ -11,9 +11,11 @@ use hangar_ui::{Icon, glyph::GlyphState};
 use super::Msg;
 use super::model::RowKind;
 use super::reads;
+use super::sleep;
 use super::status;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
+use crate::panes_logic::SleepLine;
 use crate::shell::MenuEntry;
 use crate::state::types::Workspace;
 use crate::state::{AgentActivity, PaneId, WsId};
@@ -259,21 +261,17 @@ pub fn workspace_entries(ctx: Ctx<'_>, id: &str) -> Vec<Entry<Message>> {
     entries.push(menu::separator());
 
     // Next to deleting it: the two ways to stop what it runs, for a while or
-    // for good.
-    //
-    // TODO(panes_logic): the line should be greyed with its reason
-    // (`sleep.verdict`, `sleepRefusal`, and the shells probed as the menu
-    // opens). `panes_logic::hibernate` has the rules (`forced_sleep_verdict`,
-    // `sleep_refusal`) but no synchronous reading of a workspace that builds
-    // their input from the model (the live environment is private to the
-    // package), so the line is always live and the intent's handler refuses
-    // with a notice. The package owes the accessor; this line then reads it.
-    entries.push(
-        menu::item(tr.t(Key::SleepAction).into_owned())
-            .icon(Icon::Moon)
-            .on_select(intent(Intent::Sleep(ws.id.clone())))
-            .into(),
-    );
+    // for good. The sleep line is greyed with its reason when a rule says no;
+    // the click asks everything again whatever it said.
+    let sleep = menu::item(tr.t(Key::SleepAction).into_owned()).icon(Icon::Moon);
+    match sleep::line(ctx.model, ctx.pkg.navigator.probe.as_ref(), id) {
+        // The workspace is gone: nothing to put to sleep.
+        None => {}
+        Some(SleepLine::Refused(reason)) => entries.push(sleep.disabled_because(reason).into()),
+        Some(SleepLine::Ready | SleepLine::Ask(_)) => {
+            entries.push(sleep.on_select(intent(Intent::Sleep(ws.id.clone()))).into());
+        }
+    }
     entries.push(
         menu::item(tr.t(Key::SidebarRemove).into_owned())
             .icon(Icon::Trash)

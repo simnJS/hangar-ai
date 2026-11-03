@@ -25,6 +25,7 @@ pub mod model;
 pub mod plan;
 pub mod reads;
 pub mod skin;
+pub mod sleep;
 pub mod status;
 mod view;
 
@@ -41,7 +42,7 @@ use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{Focus, Region};
 use crate::state::types::Workspace;
-use crate::state::{FolderPatch, Model, StoreAction, WorkspacePatch};
+use crate::state::{FolderPatch, Model, PaneId, StoreAction, WorkspacePatch, WsId};
 
 use drag::{Drag, DragItem, DragKind, Hit};
 use model::{NavInput, NavRow, RowKind, build_nav_tree, row_key};
@@ -100,6 +101,9 @@ pub struct State {
     /// expiry names.
     note: Option<(u64, String)>,
     note_serial: u64,
+    /// What the system said of the shells of the workspace whose menu is open,
+    /// for its « Put to sleep » line.
+    probe: Option<sleep::Probe>,
     /// Where the list is scrolled to and how tall it is.
     scroll: (f32, f32),
 }
@@ -116,6 +120,7 @@ impl Default for State {
             drag: None,
             note: None,
             note_serial: 0,
+            probe: None,
             scroll: (0.0, 0.0),
         }
         .with_dev_view()
@@ -255,6 +260,13 @@ pub enum Msg {
     ClearMcpScope(String),
     EditorDone(Option<String>),
     NoteExpired(u64),
+    /// The system said which of `asked` shells, in the workspace whose menu is
+    /// open, run something.
+    SleepProbed {
+        ws: WsId,
+        asked: Vec<PaneId>,
+        answer: Result<Vec<PaneId>, String>,
+    },
 }
 
 // ---- What the list is -------------------------------------------------------------------------
@@ -421,8 +433,45 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 |()| Message::Noop,
             )
         }
-        msg => step(st, m, msg),
+        msg => {
+            let before = st.menu.clone();
+            let task = step(st, m, msg);
+            if st.menu == before {
+                return task;
+            }
+            // A menu opened, moved or closed: what was asked of the system for
+            // the last one is of no use to this one.
+            st.probe = None;
+            match &st.menu {
+                Some(MenuState {
+                    kind: RowKind::Ws,
+                    id,
+                    ..
+                }) => match sleep::request(m, id) {
+                    Some(shells) => Task::batch([task, ask_shells(sv, id.clone(), shells)]),
+                    None => task,
+                },
+                _ => task,
+            }
+        }
     }
+}
+
+/// Asks the system which of a workspace's shells run something, as its menu
+/// opens (`sleep.check`); the answer comes back as `Msg::SleepProbed`.
+fn ask_shells(sv: &Services, ws: WsId, shells: Vec<PaneId>) -> Task<Message> {
+    let manager = sv.core().pty().clone();
+    let asked = shells.clone();
+    Task::perform(
+        hangar_core::pty::pty_has_children(manager, shells),
+        move |answer| {
+            Message::Navigator(Msg::SleepProbed {
+                ws: ws.clone(),
+                asked: asked.clone(),
+                answer,
+            })
+        },
+    )
 }
 
 /// Everything else a message does, which touches only the model and the
@@ -613,6 +662,17 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::NoteExpired(id) => {
             if st.note.as_ref().is_some_and(|(shown, _)| *shown == id) {
                 st.note = None;
+            }
+            Task::none()
+        }
+        Msg::SleepProbed { ws, asked, answer } => {
+            // An answer for a menu that has closed, or moved on, is old.
+            let open = matches!(
+                &st.menu,
+                Some(MenuState { kind: RowKind::Ws, id, .. }) if *id == ws
+            );
+            if open {
+                st.probe = Some(sleep::Probe::answered(ws, &asked, answer));
             }
             Task::none()
         }
