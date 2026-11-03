@@ -6,9 +6,9 @@
 use hangar_i18n::{Key, args};
 use hangar_theme::{style, tokens};
 use hangar_ui::tip;
-use iced::widget::{Space, container, text};
-use iced::widget::text::Wrapping;
 use iced::Element;
+use iced::widget::text::Wrapping;
+use iced::widget::{Space, container, text};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
@@ -76,7 +76,11 @@ pub fn pane<'a>(ctx: Ctx<'a>, ws: &'a WsId, pane: &'a PaneId) -> Element<'a, Mes
     let Some(workspace) = ctx.model.workspace(ws) else {
         return nothing();
     };
-    let Some(pane) = workspace.panes.iter().find(|candidate| candidate.id == *pane) else {
+    let Some(pane) = workspace
+        .panes
+        .iter()
+        .find(|candidate| candidate.id == *pane)
+    else {
         return nothing();
     };
     if pane.agent != AgentId::Claude {

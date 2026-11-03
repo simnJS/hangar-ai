@@ -28,7 +28,9 @@ use tokio::sync::watch;
 
 use crate::message::{GitOrigin, GitRequest};
 
-use super::clone::{CloneOutcome, Ownership, ParseResult, RepoRef, clean_repo_input, default_clone_folder};
+use super::clone::{
+    CloneOutcome, Ownership, ParseResult, RepoRef, clean_repo_input, default_clone_folder,
+};
 use super::consent::{ConsentAnswer, ConsentRequest};
 use super::paths::{join_folder, parent_problem, resolve_parent, same_repo_url};
 
@@ -506,7 +508,10 @@ async fn proceed<D: FromGitDeps>(
     }
 
     let job_id = deps.new_job_id();
-    let cloned = match deps.clone_repo(&repo.url, parent, &repo.name, &job_id).await {
+    let cloned = match deps
+        .clone_repo(&repo.url, parent, &repo.name, &job_id)
+        .await
+    {
         Ok(cloned) => cloned,
         Err(err) => {
             return refuse(

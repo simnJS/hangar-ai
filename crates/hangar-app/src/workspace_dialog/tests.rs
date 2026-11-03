@@ -72,7 +72,7 @@ fn the_folder_form_has_every_field_of_the_web_dialog() {
         "OpenCode",
         "Arrangement",
         "Claude account",
-        "Worktree hooks",
+        "Worktree commands",
         "Cancel",
         "Create workspace",
     ] {
@@ -92,7 +92,7 @@ fn an_agent_that_is_not_installed_says_so() {
 
 #[test]
 fn the_form_speaks_french_in_a_light_theme() {
-    let h = Harness::new(Locale::Fr, "paper");
+    let h = Harness::new(Locale::Fr, "github-light");
     let st = State::default();
     let mut ui = h.show(view(&st, h.ctx()));
     for text in [
@@ -103,7 +103,7 @@ fn the_form_speaks_french_in_a_light_theme() {
     ] {
         assert!(ui.find(text).is_ok(), "{text} is on the form");
     }
-    h.shot(&mut ui, "dialog-folder-fr-paper");
+    h.shot(&mut ui, "dialog-folder-fr-github-light");
 }
 
 #[test]
@@ -112,13 +112,13 @@ fn the_create_button_waits_for_a_folder() {
     let st = State::default();
     let mut ui = h.show(view(&st, h.ctx()));
     ui.click("Create workspace").expect("the button is drawn");
-    assert!(!sent(&messages(ui), |msg| matches!(msg, Msg::Submit)));
+    assert!(!sent(&messages(ui), |msg| matches!(msg, Msg::Submit(_))));
 
     let mut st = State::default();
     st.folder.cwd = "/home/me/dev/shop".into();
     let mut ui = h.show(view(&st, h.ctx()));
     ui.click("Create workspace").expect("the button is drawn");
-    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Submit)));
+    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Submit(_))));
 }
 
 #[test]
@@ -126,8 +126,12 @@ fn the_source_control_switches_to_the_git_form() {
     let h = Harness::new(Locale::En, "graphite");
     let st = State::default();
     let mut ui = h.show(view(&st, h.ctx()));
-    ui.click("From a Git repository").expect("the segment is drawn");
-    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Source(Source::Git))));
+    ui.click("From a Git repository")
+        .expect("the segment is drawn");
+    assert!(sent(&messages(ui), |msg| matches!(
+        msg,
+        Msg::Source(Source::Git)
+    )));
 }
 
 #[test]
@@ -228,7 +232,7 @@ fn the_git_form_shows_where_the_clone_will_land_and_starts_when_ready() {
     h.shot(&mut ui, "dialog-git-ready-en-graphite");
     ui.click("Clone and create workspace")
         .expect("the button is drawn");
-    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Submit)));
+    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Submit(_))));
 }
 
 #[test]
@@ -243,7 +247,10 @@ fn the_git_form_is_not_startable_until_the_address_is_read_and_good() {
         let mut ui = h.show(view(&st, h.ctx()));
         ui.click("Clone and create workspace")
             .expect("the button is drawn");
-        assert!(!sent(&messages(ui), |msg| matches!(msg, Msg::Submit)), "{repo:?}");
+        assert!(
+            !sent(&messages(ui), |msg| matches!(msg, Msg::Submit(_))),
+            "{repo:?}"
+        );
     }
 }
 
@@ -280,7 +287,8 @@ fn a_running_clone_shows_its_progress_and_offers_to_stop_it() {
     assert!(ui.find("Receiving objects 45 %").is_ok());
     assert!(ui.find("Cloning…").is_ok());
     h.shot(&mut ui, "dialog-git-running-en-graphite");
-    ui.click("Cancel the clone").expect("the stop button is drawn");
+    ui.click("Cancel the clone")
+        .expect("the stop button is drawn");
     assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Stop)));
 }
 
@@ -392,14 +400,14 @@ fn a_reading_that_arrives_late_is_ignored() {
         input: "acme/sho".into(),
         result: ParseResult::Refused { reason: "x".into() },
     };
-    form(&mut st, &mut m, late);
+    let _ = form(&mut st, &mut m, late);
     assert!(st.git.parsed.is_none());
     let on_time = Msg::Parsed {
         generation: 4,
         input: "acme/shop".into(),
         result: parsed_ok("acme/shop", "shop").result,
     };
-    form(&mut st, &mut m, on_time);
+    let _ = form(&mut st, &mut m, on_time);
     assert!(matches!(st.git.parse(), Some(ParseResult::Ok { .. })));
 }
 
@@ -407,17 +415,17 @@ fn a_reading_that_arrives_late_is_ignored() {
 fn a_new_layout_cuts_or_pads_the_agents() {
     let mut m = on_top();
     let mut st = State::default();
-    form(&mut st, &mut m, Msg::More(AgentId::Claude));
-    form(&mut st, &mut m, Msg::Layout(2));
+    let _ = form(&mut st, &mut m, Msg::More(AgentId::Claude));
+    let _ = form(&mut st, &mut m, Msg::Layout(2));
     assert_eq!(st.folder.assignments, [AgentId::Claude, AgentId::Shell]);
-    form(&mut st, &mut m, Msg::Layout(8));
+    let _ = form(&mut st, &mut m, Msg::Layout(8));
     assert_eq!(st.folder.assignments.len(), 8);
     // Not one of the sizes offered: refused.
-    form(&mut st, &mut m, Msg::Layout(3));
+    let _ = form(&mut st, &mut m, Msg::Layout(3));
     assert_eq!(st.folder.layout, 8);
-    form(&mut st, &mut m, Msg::Cycle(1));
+    let _ = form(&mut st, &mut m, Msg::Cycle(1));
     assert_eq!(st.folder.assignments[1], AgentId::Claude);
-    form(&mut st, &mut m, Msg::Less(AgentId::Claude));
+    let _ = form(&mut st, &mut m, Msg::Less(AgentId::Claude));
     assert_eq!(st.folder.assignments[0], AgentId::Claude);
     assert_eq!(st.folder.assignments[1], AgentId::Shell);
 }
@@ -426,14 +434,22 @@ fn a_new_layout_cuts_or_pads_the_agents() {
 fn picking_a_folder_fills_the_name_only_while_it_is_empty() {
     let mut m = on_top();
     let mut st = State::default();
-    form(&mut st, &mut m, Msg::Picked(Some("/home/me/dev/shop".into())));
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::Picked(Some("/home/me/dev/shop".into())),
+    );
     assert_eq!(st.folder.cwd, "/home/me/dev/shop");
     assert_eq!(st.name, "shop");
-    form(&mut st, &mut m, Msg::Name("My shop".into()));
-    form(&mut st, &mut m, Msg::Picked(Some("/home/me/dev/other".into())));
+    let _ = form(&mut st, &mut m, Msg::Name("My shop".into()));
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::Picked(Some("/home/me/dev/other".into())),
+    );
     assert_eq!(st.name, "My shop");
     // A cancelled dialog changes nothing.
-    form(&mut st, &mut m, Msg::Picked(None));
+    let _ = form(&mut st, &mut m, Msg::Picked(None));
     assert_eq!(st.folder.cwd, "/home/me/dev/other");
 }
 
@@ -447,7 +463,7 @@ fn a_workspace_file_makes_its_first_existing_folder_the_main_one() {
         path: path.into(),
         exists,
     };
-    form(
+    let _ = form(
         &mut st,
         &mut m,
         Msg::FileRead {
@@ -464,9 +480,9 @@ fn a_workspace_file_makes_its_first_existing_folder_the_main_one() {
     assert_eq!(st.folder.roots.len(), 3);
     assert!(st.folder.suggestion.is_none());
     // Another root is picked by a click; a missing one is not.
-    form(&mut st, &mut m, Msg::PickRoot("/work/web".into()));
+    let _ = form(&mut st, &mut m, Msg::PickRoot("/work/web".into()));
     assert_eq!(st.folder.cwd, "/work/web");
-    form(&mut st, &mut m, Msg::PickRoot("/work/gone".into()));
+    let _ = form(&mut st, &mut m, Msg::PickRoot("/work/gone".into()));
     assert_eq!(st.folder.cwd, "/work/web");
 }
 
@@ -475,7 +491,7 @@ fn a_workspace_file_that_cannot_be_read_says_so_and_keeps_the_folder() {
     let mut m = on_top();
     let mut st = State::default();
     st.folder.cwd = "/work".into();
-    form(
+    let _ = form(
         &mut st,
         &mut m,
         Msg::FileRead {
@@ -483,7 +499,10 @@ fn a_workspace_file_that_cannot_be_read_says_so_and_keeps_the_folder() {
             result: Err("no \"folders\" list".into()),
         },
     );
-    assert_eq!(st.folder.file_error.as_deref(), Some("/work/broken.code-workspace"));
+    assert_eq!(
+        st.folder.file_error.as_deref(),
+        Some("/work/broken.code-workspace")
+    );
     assert_eq!(st.folder.cwd, "/work");
     assert!(st.folder.roots.is_empty());
 }
@@ -569,7 +588,7 @@ fn a_created_workspace_closes_the_dialog_and_a_reused_folder_is_told() {
 fn a_refused_flow_stays_in_the_form_with_its_failure_on_one_line() {
     let mut m = on_top();
     let mut st = running("job-1");
-    form(
+    let _ = form(
         &mut st,
         &mut m,
         Msg::GitDone {
@@ -592,7 +611,7 @@ fn a_cancelled_clone_says_cancelled_rather_than_failed() {
     let mut m = on_top();
     let mut st = running("job-1");
     st.git.cancelled = true;
-    form(
+    let _ = form(
         &mut st,
         &mut m,
         Msg::GitDone {
@@ -648,22 +667,16 @@ fn the_progress_of_the_clone_followed_is_kept_and_another_clones_is_not() {
 
 #[test]
 fn opening_the_dialog_starts_a_clean_form_unless_a_clone_is_still_running() {
-    let mut m = on_top();
-    m.live.workspace_dialog.draft_kits = vec![WorkspaceKit {
-        id: "kit".into(),
-        granted: vec![],
-    }];
     let mut st = git_state("acme/shop", None);
     st.name = "left over".into();
-    opened(&mut st, &mut m);
+    opened(&mut st);
     assert!(st.name.is_empty() && st.git.repo.is_empty());
     assert_eq!(st.source, Source::Folder);
-    assert!(m.live.workspace_dialog.draft_kits.is_empty());
 
     // The dialog was closed with a clone running: it comes back as it was.
     let mut st = running("job-1");
     st.name = "shop".into();
-    opened(&mut st, &mut m);
+    opened(&mut st);
     assert!(st.git.running);
     assert_eq!(st.name, "shop");
     assert_eq!(st.git.repo, "acme/shop");

@@ -111,6 +111,15 @@ impl Harness {
         }
     }
 
+    /// The persisted state changed by `edit` (the store's own actions are
+    /// P0b's, so a test that needs a different state hydrates it).
+    pub fn edit(mut self, edit: impl FnOnce(&mut AppState)) -> Harness {
+        let mut state = self.model.state().clone();
+        edit(&mut state);
+        self.model.hydrate(state);
+        self
+    }
+
     pub fn ctx(&self) -> Ctx<'_> {
         Ctx {
             model: &self.model,
@@ -154,7 +163,9 @@ impl Harness {
         }
         let theme = to_iced(self.model.theme());
         let snapshot = ui.snapshot(&theme).expect("the interface can be drawn");
-        snapshot.matches_image(path).expect("the picture can be written");
+        snapshot
+            .matches_image(path)
+            .expect("the picture can be written");
     }
 }
 

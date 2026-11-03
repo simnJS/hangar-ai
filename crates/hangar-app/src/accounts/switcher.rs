@@ -16,8 +16,8 @@ use hangar_i18n::{Key, Translator, args};
 use hangar_theme::{style, tokens};
 use hangar_ui::menu;
 use hangar_ui::{Icon, button as ui_button, icon, layer, text as typography, tip};
-use iced::widget::{Space, button, column, container, row, text};
 use iced::widget::text::Wrapping;
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::ctx::Ctx;
@@ -85,7 +85,10 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let current_name = account_name(accounts, Some(&current), &unknown);
     let title = ctx
         .i18n
-        .t_with(Key::AccountsSwitcherButton, &args!("name" => current_name.as_str()))
+        .t_with(
+            Key::AccountsSwitcherButton,
+            &args!("name" => current_name.as_str()),
+        )
         .into_owned();
 
     let label = container(
@@ -230,7 +233,8 @@ fn account_row<'a>(
             &args!("name" => account.label.as_str()),
         )
         .into_owned();
-    let every_text = text(ctx.t(Key::AccountsSwitcherUseEverywhere)).size(tokens::font_size::CAPTION);
+    let every_text =
+        text(ctx.t(Key::AccountsSwitcherUseEverywhere)).size(tokens::font_size::CAPTION);
     let every_text = if is_default {
         every_text.style(style::text::accent(t))
     } else {
@@ -265,7 +269,10 @@ fn ask<'a>(
     let unknown = ctx.t(Key::AccountsPickerUnknown);
     let name = account_name(accounts, Some(id), &unknown);
     let (title_key, restart_key) = match scope {
-        SwitchScope::Workspace => (Key::AccountsSwitcherAskHere, Key::AccountsSwitcherRestartHere),
+        SwitchScope::Workspace => (
+            Key::AccountsSwitcherAskHere,
+            Key::AccountsSwitcherRestartHere,
+        ),
         SwitchScope::Default => (
             Key::AccountsSwitcherAskEverywhere,
             Key::AccountsSwitcherRestartEverywhere,
@@ -276,7 +283,10 @@ fn ask<'a>(
         .i18n
         .t_with(title_key, &args!("name" => name.as_str()))
         .into_owned();
-    let body = ctx.i18n.tn(Key::AccountsSwitcherRunning, running, &[]).into_owned();
+    let body = ctx
+        .i18n
+        .tn(Key::AccountsSwitcherRunning, running, &[])
+        .into_owned();
     column![
         typography::body(t, title).font(hangar_theme::fonts::ui_semibold()),
         typography::muted(t, body),

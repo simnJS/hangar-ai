@@ -17,9 +17,7 @@ use crate::services::Services;
 use crate::state::types::AgentId;
 use crate::state::{Model, Pane, Patch, Settings, StoreAction, Workspace};
 
-use super::model::{
-    AccountId, ClaudeAccount, MAIN_ACCOUNT, names_account, resolve_account,
-};
+use super::model::{AccountId, ClaudeAccount, MAIN_ACCOUNT, names_account, resolve_account};
 use super::{Msg, live};
 
 /// What the page itself remembers: the form it has open, the command it
@@ -27,16 +25,16 @@ use super::{Msg, live};
 #[derive(Debug, Default)]
 pub struct Page {
     /// The account being renamed, and the name as typed so far.
-    renaming: Option<(AccountId, String)>,
+    pub(super) renaming: Option<(AccountId, String)>,
     /// The account whose removal is being asked.
-    removing: Option<AccountId>,
+    pub(super) removing: Option<AccountId>,
     /// The name of the account to add.
-    name: String,
+    pub(super) name: String,
     /// The add form was sent once: its problem shows from then on.
-    touched: bool,
+    pub(super) touched: bool,
     /// A command runs: everything is disabled until it ends.
-    busy: bool,
-    error: Option<String>,
+    pub(super) busy: bool,
+    pub(super) error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +133,11 @@ fn who_names(workspaces: &[Workspace], default: Option<&str>, id: &str) -> Forgo
 /// Whatever named a removed account falls back to the level above; say so in
 /// the file too. A default that named it goes back to main.
 fn forget_account(m: &mut Model, id: &str) {
-    let forgotten = who_names(&m.state().workspaces, m.settings().claude_account.as_deref(), id);
+    let forgotten = who_names(
+        &m.state().workspaces,
+        m.settings().claude_account.as_deref(),
+        id,
+    );
     for ws in forgotten.workspaces {
         m.apply(StoreAction::UpdateWorkspace(
             ws,
@@ -156,7 +158,89 @@ fn forget_account(m: &mut Model, id: &str) {
     }
 }
 
+/// The three messages that start a command of the backend are the only ones
+/// that reach the services; the rest of the page is `step`.
 pub fn update(page: &mut Page, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    match msg {
+        Msg::RenameSubmit => match begin_rename(page, m) {
+            Some((id, label)) => {
+                let host = sv.core().host().clone();
+                Task::perform(
+                    run_blocking(move || {
+                        hangar_core::accounts::account_rename(&host, id, label).map(|_| ())
+                    }),
+                    |result| Message::Accounts(Msg::Renamed(result)),
+                )
+            }
+            None => Task::none(),
+        },
+        Msg::RemoveConfirm(id) => match begin_remove(page, &id) {
+            true => {
+                let host = sv.core().host().clone();
+                let pty = sv.core().pty().clone();
+                let removed = id.clone();
+                Task::perform(
+                    run_blocking(move || hangar_core::accounts::account_remove(&host, &pty, id)),
+                    move |result| Message::Accounts(Msg::Removed(removed.clone(), result)),
+                )
+            }
+            false => Task::none(),
+        },
+        Msg::AddSubmit => match begin_add(page, m) {
+            Some(label) => {
+                let host = sv.core().host().clone();
+                Task::perform(
+                    run_blocking(move || {
+                        hangar_core::accounts::account_add(&host, label)
+                            .map(|added| added.account.id)
+                    }),
+                    |result| Message::Accounts(Msg::Added(result)),
+                )
+            }
+            None => Task::none(),
+        },
+        msg => step(page, m, msg),
+    }
+}
+
+/// The rename form was sent: the account and its new name, unless the name
+/// is refused. The page then waits for the command.
+pub(super) fn begin_rename(page: &mut Page, m: &Model) -> Option<(AccountId, String)> {
+    let (id, label) = page.renaming.clone()?;
+    let accounts = m.live.accounts.accounts.as_deref().unwrap_or_default();
+    if label_problem(accounts, &label, Some(&id)).is_some() {
+        return None;
+    }
+    page.busy = true;
+    page.error = None;
+    Some((id, label.trim().to_string()))
+}
+
+/// The removal was confirmed. Never for main.
+pub(super) fn begin_remove(page: &mut Page, id: &str) -> bool {
+    if id == MAIN_ACCOUNT {
+        return false;
+    }
+    page.busy = true;
+    page.error = None;
+    true
+}
+
+/// The add form was sent: the name, unless it is refused (its problem shows
+/// from now on).
+pub(super) fn begin_add(page: &mut Page, m: &Model) -> Option<String> {
+    page.touched = true;
+    let accounts = m.live.accounts.accounts.as_deref().unwrap_or_default();
+    if label_problem(accounts, &page.name, None).is_some() {
+        return None;
+    }
+    page.busy = true;
+    page.error = None;
+    Some(page.name.trim().to_string())
+}
+
+/// Everything the page does that needs no service.
+pub(super) fn step(page: &mut Page, m: &mut Model, msg: Msg) -> Task<Message> {
     let t = Translator::new(m.locale());
     let accounts: Vec<ClaudeAccount> = m.live.accounts.accounts.clone().unwrap_or_default();
     match msg {
@@ -178,24 +262,6 @@ pub fn update(page: &mut Page, m: &mut Model, sv: &Services, msg: Msg) -> Task<M
         Msg::RenameCancel => {
             page.renaming = None;
             Task::none()
-        }
-        Msg::RenameSubmit => {
-            let Some((id, label)) = page.renaming.clone() else {
-                return Task::none();
-            };
-            if label_problem(&accounts, &label, Some(&id)).is_some() {
-                return Task::none();
-            }
-            page.busy = true;
-            page.error = None;
-            let host = sv.core().host().clone();
-            let label = label.trim().to_string();
-            Task::perform(
-                run_blocking(move || {
-                    hangar_core::accounts::account_rename(&host, id, label).map(|_| ())
-                }),
-                |result| Message::Accounts(Msg::Renamed(result)),
-            )
         }
         Msg::Renamed(result) => {
             page.busy = false;
@@ -219,20 +285,6 @@ pub fn update(page: &mut Page, m: &mut Model, sv: &Services, msg: Msg) -> Task<M
         Msg::RemoveCancel => {
             page.removing = None;
             Task::none()
-        }
-        Msg::RemoveConfirm(id) => {
-            if id == MAIN_ACCOUNT {
-                return Task::none();
-            }
-            page.busy = true;
-            page.error = None;
-            let host = sv.core().host().clone();
-            let pty = sv.core().pty().clone();
-            let removed = id.clone();
-            Task::perform(
-                run_blocking(move || hangar_core::accounts::account_remove(&host, &pty, id)),
-                move |result| Message::Accounts(Msg::Removed(removed.clone(), result)),
-            )
         }
         Msg::Removed(id, result) => {
             page.busy = false;
@@ -264,22 +316,6 @@ pub fn update(page: &mut Page, m: &mut Model, sv: &Services, msg: Msg) -> Task<M
         Msg::AddInput(value) => {
             page.name = value;
             Task::none()
-        }
-        Msg::AddSubmit => {
-            page.touched = true;
-            if label_problem(&accounts, &page.name, None).is_some() {
-                return Task::none();
-            }
-            page.busy = true;
-            page.error = None;
-            let host = sv.core().host().clone();
-            let label = page.name.trim().to_string();
-            Task::perform(
-                run_blocking(move || {
-                    hangar_core::accounts::account_add(&host, label).map(|added| added.account.id)
-                }),
-                |result| Message::Accounts(Msg::Added(result)),
-            )
         }
         Msg::Added(result) => {
             page.busy = false;
@@ -340,8 +376,11 @@ pub fn view<'a>(page: &'a Page, ctx: Ctx<'a>) -> Element<'a, Message> {
         }
         body = body.push(
             container(
-                row![icon(Icon::Alert, tokens::size::ICON).color(t.colors.danger), note]
-                    .spacing(tokens::space::LG),
+                row![
+                    icon(Icon::Alert, tokens::size::ICON).color(t.colors.danger),
+                    note
+                ]
+                .spacing(tokens::space::LG),
             )
             .padding(tokens::space::XL)
             .width(Length::Fill)
@@ -399,17 +438,25 @@ fn account_row<'a>(
         .map(|ws| ws.name.as_str())
         .collect();
 
-    let mut head = row![typography::body(t, account.label.as_str())
-        .font(hangar_theme::fonts::ui_semibold())]
-    .spacing(tokens::space::MD)
-    .align_y(Alignment::Center);
+    let mut head =
+        row![typography::body(t, account.label.as_str()).font(hangar_theme::fonts::ui_semibold())]
+            .spacing(tokens::space::MD)
+            .align_y(Alignment::Center);
     if is_default {
         head = head.push(badge::tag(t, ctx.t(Key::AccountsSettingsDefault)));
     }
     head = head.push(if account.logged_in {
-        badge::badge(t, ctx.t(Key::AccountsSettingsLoggedIn), badge::Tone::Success)
+        badge::badge(
+            t,
+            ctx.t(Key::AccountsSettingsLoggedIn),
+            badge::Tone::Success,
+        )
     } else {
-        badge::badge(t, ctx.t(Key::AccountsSettingsLoggedOut), badge::Tone::Neutral)
+        badge::badge(
+            t,
+            ctx.t(Key::AccountsSettingsLoggedOut),
+            badge::Tone::Neutral,
+        )
     });
 
     let mut lines = column![head].spacing(tokens::space::SM);
@@ -512,12 +559,9 @@ fn rename_form<'a>(
     let cancel = ui_button::ghost(t, ctx.t(Key::AccountsSettingsCancel))
         .small()
         .on_press(press(Msg::RenameCancel));
-    column![
-        field,
-        row![save, cancel].spacing(tokens::space::MD),
-    ]
-    .spacing(tokens::space::MD)
-    .into()
+    column![field, row![save, cancel].spacing(tokens::space::MD),]
+        .spacing(tokens::space::MD)
+        .into()
 }
 
 fn remove_confirm<'a>(
@@ -630,7 +674,10 @@ mod tests {
     fn a_name_is_refused_when_empty_or_when_another_account_has_it() {
         let all = accounts();
         assert_eq!(label_problem(&all, "", None), Some(LabelProblem::NameEmpty));
-        assert_eq!(label_problem(&all, "  ", None), Some(LabelProblem::NameEmpty));
+        assert_eq!(
+            label_problem(&all, "  ", None),
+            Some(LabelProblem::NameEmpty)
+        );
         assert_eq!(label_problem(&all, "Travail", None), None);
         assert_eq!(
             label_problem(&all, " perso ", None),

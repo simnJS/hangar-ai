@@ -2,8 +2,8 @@
 //! agents assigned to panes, and the draft it hands the store
 //! (`WorkspaceDialog.tsx`).
 
-use crate::state::types::{AGENTS, AgentId, Workspace};
 use crate::state::WorkspaceDraft;
+use crate::state::types::{AGENTS, AgentId, Workspace};
 
 use super::hooks::HooksDraft;
 
@@ -92,12 +92,18 @@ pub fn cycle_cell(assignments: &mut [AgentId], index: usize) {
     let Some(slot) = assignments.get_mut(index) else {
         return;
     };
-    let at = AGENTS.iter().position(|agent| agent.id == *slot).unwrap_or(0);
+    let at = AGENTS
+        .iter()
+        .position(|agent| agent.id == *slot)
+        .unwrap_or(0);
     *slot = AGENTS[(at + 1) % AGENTS.len()].id;
 }
 
 pub fn count_of(assignments: &[AgentId], agent: AgentId) -> usize {
-    assignments.iter().filter(|assigned| **assigned == agent).count()
+    assignments
+        .iter()
+        .filter(|assigned| **assigned == agent)
+        .count()
 }
 
 // ── pane names ────────────────────────────────────────────────────────
@@ -110,11 +116,10 @@ pub fn count_of(assignments: &[AgentId], agent: AgentId) -> usize {
 /// until it does the preview keeps a copy so it can name the cells as the
 /// store will. Replace `pick_pane_names` below by that module's.
 const PANE_NAMES: [&str; 48] = [
-    "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna",
-    "Jude", "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris",
-    "Jack", "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will",
-    "Yara", "Zack", "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby",
-    "Tess", "Vic",
+    "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna", "Jude",
+    "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris", "Jack",
+    "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will", "Yara", "Zack",
+    "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby", "Tess", "Vic",
 ];
 
 /// First free name; falls back to « Ava 2 » once the list runs out.
@@ -221,7 +226,10 @@ mod tests {
 
     #[test]
     fn a_workspace_file_names_its_workspace_without_the_extension() {
-        assert_eq!(workspace_file_name("/x/My project.code-workspace"), "My project");
+        assert_eq!(
+            workspace_file_name("/x/My project.code-workspace"),
+            "My project"
+        );
         assert_eq!(workspace_file_name("C:\\x\\App.CODE-WORKSPACE"), "App");
         assert_eq!(workspace_file_name("/x/notes.txt"), "notes.txt");
     }
@@ -233,14 +241,20 @@ mod tests {
             root("api", "/api", true),
             root("web", "/web", true),
         ];
-        assert_eq!(main_root(&roots).map(|root| root.path.as_str()), Some("/api"));
+        assert_eq!(
+            main_root(&roots).map(|root| root.path.as_str()),
+            Some("/api")
+        );
         assert_eq!(main_root(&[root("gone", "/gone", false)]), None);
         assert_eq!(main_root(&[]), None);
     }
 
     #[test]
     fn the_preview_has_the_columns_of_the_window_grid() {
-        let columns: Vec<_> = LAYOUTS.iter().map(|layout| preview_columns(*layout)).collect();
+        let columns: Vec<_> = LAYOUTS
+            .iter()
+            .map(|layout| preview_columns(*layout))
+            .collect();
         assert_eq!(columns, [1, 2, 2, 4]);
     }
 
@@ -267,12 +281,22 @@ mod tests {
         add_agent(&mut assignments, AgentId::Codex);
         assert_eq!(
             assignments,
-            [AgentId::Claude, AgentId::Claude, AgentId::Codex, AgentId::Shell]
+            [
+                AgentId::Claude,
+                AgentId::Claude,
+                AgentId::Codex,
+                AgentId::Shell
+            ]
         );
         remove_agent(&mut assignments, AgentId::Claude);
         assert_eq!(
             assignments,
-            [AgentId::Claude, AgentId::Shell, AgentId::Codex, AgentId::Shell]
+            [
+                AgentId::Claude,
+                AgentId::Shell,
+                AgentId::Codex,
+                AgentId::Shell
+            ]
         );
         // Nothing to take back, nothing to take it: no change.
         remove_agent(&mut assignments, AgentId::Gemini);
@@ -281,7 +305,12 @@ mod tests {
         add_agent(&mut assignments, AgentId::Opencode);
         assert_eq!(
             assignments,
-            [AgentId::Claude, AgentId::Gemini, AgentId::Codex, AgentId::Gemini]
+            [
+                AgentId::Claude,
+                AgentId::Gemini,
+                AgentId::Codex,
+                AgentId::Gemini
+            ]
         );
     }
 
@@ -309,10 +338,7 @@ mod tests {
 
     #[test]
     fn pane_names_are_the_next_free_ones_in_order() {
-        assert_eq!(
-            pick_pane_names(3, []),
-            ["Ava", "Max", "Leo"]
-        );
+        assert_eq!(pick_pane_names(3, []), ["Ava", "Max", "Leo"]);
         assert_eq!(
             pick_pane_names(2, ["Ava".to_string(), "Leo".to_string()]),
             ["Max", "Mia"]

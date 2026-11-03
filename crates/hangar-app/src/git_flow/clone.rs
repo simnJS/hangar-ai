@@ -44,10 +44,7 @@ pub fn new_clone_job_id() -> String {
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u128(nanos);
     hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
-    format!(
-        "clone-{nanos:x}-{:08x}",
-        hasher.finish() & 0xffff_ffff
-    )
+    format!("clone-{nanos:x}-{:08x}", hasher.finish() & 0xffff_ffff)
 }
 
 /// `Receiving objects 45 %`, or just the phase when git gave no percentage.
@@ -112,7 +109,10 @@ mod tests {
             progress_label("Receiving objects", Some(45)),
             "Receiving objects 45 %"
         );
-        assert_eq!(progress_label("Receiving objects", None), "Receiving objects");
+        assert_eq!(
+            progress_label("Receiving objects", None),
+            "Receiving objects"
+        );
     }
 
     #[test]

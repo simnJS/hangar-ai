@@ -28,20 +28,21 @@ mod picker;
 mod settings_page;
 mod switch;
 mod switcher;
+#[cfg(test)]
+mod tests;
 mod usage;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use iced::{Element, Subscription, Task};
 use iced::futures::stream;
+use iced::{Element, Subscription, Task};
 
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
 use crate::shell::{MenuEntry, Region};
 use crate::state::live::BridgeEvent;
-use crate::state::types::AgentId;
-use crate::state::{Model, Patch, PaneId, Settings, StoreAction, Workspace, WsId};
+use crate::state::{Model, PaneId, Patch, Settings, StoreAction, Workspace, WsId};
 
 #[allow(unused_imports)]
 pub use model::{
@@ -178,6 +179,37 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
         }
 
+        menu @ (Msg::ToggleMenu
+        | Msg::CloseMenu
+        | Msg::Choose { .. }
+        | Msg::Decide(_)
+        | Msg::Back) => switcher_step(st, m, menu),
+
+        Msg::SetWorkspace { ws, id, restart } => set_workspace_account(m, &ws, id, restart),
+        Msg::SetDefault { id, restart } => set_default_account(m, id, restart),
+        Msg::SetPane { ws, pane, id } => set_pane_account(m, &ws, &pane, id),
+
+        page @ (Msg::RenameStart(_)
+        | Msg::RenameInput(_)
+        | Msg::RenameSubmit
+        | Msg::RenameCancel
+        | Msg::RemoveAsk(_)
+        | Msg::RemoveConfirm(_)
+        | Msg::RemoveCancel
+        | Msg::MakeDefault(_)
+        | Msg::LogIn(_)
+        | Msg::AddInput(_)
+        | Msg::AddSubmit
+        | Msg::Added(_)
+        | Msg::Renamed(_)
+        | Msg::Removed(..)) => settings_page::update(&mut st.page, m, sv, page),
+    }
+}
+
+/// The switcher's popover: the list, and the question asked before a switch
+/// that restarts running agents. It needs no service, only the model.
+fn switcher_step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
+    match msg {
         Msg::ToggleMenu => {
             st.switcher = match st.switcher {
                 switcher::Menu::Closed => switcher::Menu::Open,
@@ -210,25 +242,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             st.switcher = switcher::Menu::Open;
             Task::none()
         }
-
-        Msg::SetWorkspace { ws, id, restart } => set_workspace_account(m, &ws, id, restart),
-        Msg::SetDefault { id, restart } => set_default_account(m, id, restart),
-        Msg::SetPane { ws, pane, id } => set_pane_account(m, &ws, &pane, id),
-
-        page @ (Msg::RenameStart(_)
-        | Msg::RenameInput(_)
-        | Msg::RenameSubmit
-        | Msg::RenameCancel
-        | Msg::RemoveAsk(_)
-        | Msg::RemoveConfirm(_)
-        | Msg::RemoveCancel
-        | Msg::MakeDefault(_)
-        | Msg::LogIn(_)
-        | Msg::AddInput(_)
-        | Msg::AddSubmit
-        | Msg::Added(_)
-        | Msg::Renamed(_)
-        | Msg::Removed(..)) => settings_page::update(&mut st.page, m, sv, page),
+        _ => Task::none(),
     }
 }
 
@@ -349,26 +363,34 @@ pub fn on_event(
         CoreEvent::AccountsChanged => Some(refresh()),
         // A session counts for the account its pane was launched on.
         CoreEvent::Bridge { pane, event } => {
-            let Some(BridgeEvent::Usage { rate_limits, .. }) = BridgeEvent::parse(event) else {
-                return None;
-            };
-            if rate_limits.is_empty() {
-                return None;
-            }
-            let account = m.live.accounts.launched.account(pane)?.to_string();
-            let fresh = usage_by_account(
-                &[UsageMeasure {
-                    pane_id: pane.clone(),
-                    at: now_ms(),
-                    rate_limits,
-                }],
-                |_| Some(account.clone()),
-            );
-            m.live.accounts.usage = merge_usage(&m.live.accounts.usage, &fresh);
-            Some(save_usage(st, m, sv))
+            record_usage(m, pane, event, now_ms()).then(|| save_usage(st, m, sv))
         }
         _ => None,
     }
+}
+
+/// A report of a pane's bridge, kept when it carries the plan's limits and
+/// the pane runs on an account. Returns whether the figures changed.
+fn record_usage(m: &mut Model, pane: &PaneId, event: &serde_json::Value, at: u64) -> bool {
+    let Some(BridgeEvent::Usage { rate_limits, .. }) = BridgeEvent::parse(event) else {
+        return false;
+    };
+    if rate_limits.is_empty() {
+        return false;
+    }
+    let Some(account) = m.live.accounts.launched.account(pane).map(str::to_string) else {
+        return false;
+    };
+    let fresh = usage_by_account(
+        &[UsageMeasure {
+            pane_id: pane.clone(),
+            at,
+            rate_limits,
+        }],
+        |_| Some(account.clone()),
+    );
+    m.live.accounts.usage = merge_usage(&m.live.accounts.usage, &fresh);
+    true
 }
 
 // ── switching ─────────────────────────────────────────────────────────
@@ -574,9 +596,4 @@ pub fn has_any(ctx: Ctx<'_>) -> bool {
         .accounts
         .as_ref()
         .is_some_and(|accounts| !accounts.is_empty())
-}
-
-// Used by the views to tell a Claude pane from another.
-fn is_claude(agent: AgentId) -> bool {
-    agent == AgentId::Claude
 }

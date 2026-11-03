@@ -371,7 +371,10 @@ async fn goes_parse_destination_ownership_clone_workspace_message_then_opens_it(
     assert_eq!(workspace.name, "shop");
     assert_eq!(workspace.cwd, "C:\\dev\\shop");
     assert_eq!(
-        workspace.orchestrator.as_ref().map(|pane| pane.name.as_str()),
+        workspace
+            .orchestrator
+            .as_ref()
+            .map(|pane| pane.name.as_str()),
         Some("Kai")
     );
     assert_eq!(deps.messages().len(), 1);
@@ -673,7 +676,9 @@ async fn goes_to_the_given_parent_over_the_projects_folder_and_the_askers_folder
     };
     let outcome = run(&request, &deps).await;
     let log = deps.log();
-    assert!(log.contains(&"clone:https://github.com/boykopovar/AnyPS5.git:E:\\:AnyPS5".to_string()));
+    assert!(
+        log.contains(&"clone:https://github.com/boykopovar/AnyPS5.git:E:\\:AnyPS5".to_string())
+    );
     assert!(log.contains(&"find:E:\\AnyPS5".to_string()));
     let cwd = &workspace_of(&outcome).cwd;
     assert!(cwd.starts_with("E:") && cwd.ends_with("AnyPS5"), "{cwd}");
@@ -724,7 +729,8 @@ async fn never_changes_the_projects_folder_whatever_parent_it_is_given() {
 }
 
 #[tokio::test]
-async fn refuses_a_parent_that_is_relative_holds_dotdot_or_is_the_systems_before_asking_or_cloning() {
+async fn refuses_a_parent_that_is_relative_holds_dotdot_or_is_the_systems_before_asking_or_cloning()
+{
     for parent in [
         "projects",
         "..\\projects",
@@ -780,7 +786,10 @@ async fn tells_the_agent_the_next_step_for_every_refusal_of_the_clone_in_one_sen
         assert_eq!(refused, FromGitRefusal::CloneFailed, "{kind}");
         // « …because. A sentence that ends on a full stop. »
         let after = reason.split("because. ").nth(1).expect(kind);
-        assert!(after.starts_with(|ch: char| ch.is_ascii_uppercase()), "{kind}");
+        assert!(
+            after.starts_with(|ch: char| ch.is_ascii_uppercase()),
+            "{kind}"
+        );
         assert!(after.ends_with('.'), "{kind}");
     }
 }
@@ -895,7 +904,11 @@ async fn does_not_hand_the_first_repositorys_result_to_another_repository_for_th
         let deps = good.clone();
         tokio::spawn(async move { run(&by_agent("good/theirs"), &*deps).await })
     };
-    while !good.log().iter().any(|entry| entry.starts_with("ownership:")) {
+    while !good
+        .log()
+        .iter()
+        .any(|entry| entry.starts_with("ownership:"))
+    {
         yield_now().await;
     }
     let evil = fakes(mine()).sharing(&good);
@@ -920,7 +933,8 @@ async fn does_not_hand_the_first_repositorys_result_to_another_repository_for_th
 }
 
 #[tokio::test]
-async fn refuses_at_once_through_the_real_queue_a_foreign_repository_for_a_folder_already_waiting() {
+async fn refuses_at_once_through_the_real_queue_a_foreign_repository_for_a_folder_already_waiting()
+{
     let clock = Arc::new(Clock::default());
     let queue = ConsentQueue::new(Arc::new(clock), None);
     let mut first = fakes(Options::default());
@@ -979,7 +993,10 @@ async fn reports_a_clone_rust_refused_with_nothing_to_take_back() {
     let (kind, reason) = refusal(&outcome);
     assert_eq!(kind, FromGitRefusal::CloneFailed);
     assert!(reason.contains("already exists"));
-    assert!(!started_something(&deps.log(), &["workspace", "discard", "remove"]));
+    assert!(!started_something(
+        &deps.log(),
+        &["workspace", "discard", "remove"]
+    ));
 }
 
 #[tokio::test]
@@ -991,7 +1008,10 @@ async fn reports_a_broken_task_as_a_failed_clone() {
     });
     let outcome = run(&by_agent("acme/shop"), &deps).await;
     assert_eq!(refusal(&outcome).0, FromGitRefusal::CloneFailed);
-    assert!(!started_something(&deps.log(), &["workspace", "discard", "remove"]));
+    assert!(!started_something(
+        &deps.log(),
+        &["workspace", "discard", "remove"]
+    ));
 }
 
 #[tokio::test]
@@ -1140,7 +1160,8 @@ fn the_first_message_says_the_repositorys_content_is_data_not_instructions() {
 }
 
 #[test]
-fn the_first_message_makes_the_orchestrator_say_what_the_install_would_run_first_when_the_repository_is_not_the_persons() {
+fn the_first_message_makes_the_orchestrator_say_what_the_install_would_run_first_when_the_repository_is_not_the_persons()
+ {
     let yours = first_message(&facts());
     let theirs = first_message(&FirstMessageFacts {
         mine: false,

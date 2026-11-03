@@ -176,7 +176,9 @@ pub fn workspaces_using<'a>(
 ) -> Vec<&'a SwitchWorkspace> {
     workspaces
         .iter()
-        .filter(|workspace| read_account_choice(workspace.claude_account.as_deref()).as_deref() == Some(id))
+        .filter(|workspace| {
+            read_account_choice(workspace.claude_account.as_deref()).as_deref() == Some(id)
+        })
         .collect()
 }
 
@@ -252,7 +254,10 @@ mod tests {
             SwitchWorkspace {
                 id: "w3".into(),
                 claude_account: Some("  ".into()),
-                panes: vec![pane("f", "codex", None, false), pane("g", "claude", None, false)],
+                panes: vec![
+                    pane("f", "codex", None, false),
+                    pane("g", "claude", None, false),
+                ],
             },
         ]
     }
@@ -264,7 +269,10 @@ mod tests {
     #[test]
     fn restarts_only_the_claude_panes_that_follow_the_workspace() {
         let all = workspaces();
-        assert_eq!(ids(&panes_to_restart_on_workspace_change(&all[0])), ["a", "d"]);
+        assert_eq!(
+            ids(&panes_to_restart_on_workspace_change(&all[0])),
+            ["a", "d"]
+        );
         assert_eq!(ids(&panes_to_restart_on_workspace_change(&all[1])), ["e"]);
     }
 
@@ -377,7 +385,10 @@ mod tests {
     #[test]
     fn names_an_account_or_says_unknown() {
         assert_eq!(account_name(&accounts(), Some("perso"), "unknown"), "Perso");
-        assert_eq!(account_name(&accounts(), Some("gone"), "unknown"), "unknown");
+        assert_eq!(
+            account_name(&accounts(), Some("gone"), "unknown"),
+            "unknown"
+        );
         assert_eq!(account_name(&accounts(), None, "unknown"), "unknown");
     }
 
@@ -389,7 +400,10 @@ mod tests {
             default_label(&all, Some("perso"), template, "unknown"),
             "Default (Perso)"
         );
-        assert_eq!(default_label(&all, None, template, "unknown"), "Default (Principal)");
+        assert_eq!(
+            default_label(&all, None, template, "unknown"),
+            "Default (Principal)"
+        );
         assert_eq!(
             default_label(&all, Some("gone"), template, "unknown"),
             "Default (Principal)"
@@ -420,16 +434,31 @@ mod tests {
 
     #[test]
     fn keeps_the_newer_measure_per_account_and_window_and_leaves_the_inputs_alone() {
-        let known = Usage::from([("perso".to_string(), usage_of(window(10.0, 100), window(40.0, 100)))]);
+        let known = Usage::from([(
+            "perso".to_string(),
+            usage_of(window(10.0, 100), window(40.0, 100)),
+        )]);
         let fresh = Usage::from([
             ("perso".to_string(), usage_of(window(20.0, 200), None)),
             ("main".to_string(), usage_of(None, window(5.0, 50))),
         ]);
         let merged = merge_usage(&known, &fresh);
-        assert_eq!(merged["perso"].five_hour.as_ref().map(|w| w.percent_used), Some(20.0));
-        assert_eq!(merged["perso"].weekly.as_ref().map(|w| w.percent_used), Some(40.0));
-        assert_eq!(merged["main"].weekly.as_ref().map(|w| w.percent_used), Some(5.0));
-        assert_eq!(known["perso"].five_hour.as_ref().map(|w| w.percent_used), Some(10.0));
+        assert_eq!(
+            merged["perso"].five_hour.as_ref().map(|w| w.percent_used),
+            Some(20.0)
+        );
+        assert_eq!(
+            merged["perso"].weekly.as_ref().map(|w| w.percent_used),
+            Some(40.0)
+        );
+        assert_eq!(
+            merged["main"].weekly.as_ref().map(|w| w.percent_used),
+            Some(5.0)
+        );
+        assert_eq!(
+            known["perso"].five_hour.as_ref().map(|w| w.percent_used),
+            Some(10.0)
+        );
     }
 
     #[test]
@@ -437,7 +466,10 @@ mod tests {
         let known = Usage::from([("perso".to_string(), usage_of(window(30.0, 300), None))]);
         let fresh = Usage::from([("perso".to_string(), usage_of(window(1.0, 100), None))]);
         let merged = merge_usage(&known, &fresh);
-        assert_eq!(merged["perso"].five_hour.as_ref().map(|w| w.percent_used), Some(30.0));
+        assert_eq!(
+            merged["perso"].five_hour.as_ref().map(|w| w.percent_used),
+            Some(30.0)
+        );
     }
 
     #[test]

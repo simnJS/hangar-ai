@@ -113,10 +113,14 @@ pub fn launch_account_with(
     workspace: Option<&str>,
     pane: Option<&str>,
 ) -> ResolvedAccount {
-    let named = [pane, workspace, default].into_iter().any(|level| {
-        read_account_choice(level).is_some_and(|id| id != MAIN_ACCOUNT)
-    });
-    let accounts = if named { list().unwrap_or_default() } else { Vec::new() };
+    let named = [pane, workspace, default]
+        .into_iter()
+        .any(|level| read_account_choice(level).is_some_and(|id| id != MAIN_ACCOUNT));
+    let accounts = if named {
+        list().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     resolve_account(&accounts, default, workspace, pane)
 }
 
@@ -191,7 +195,11 @@ mod tests {
     }
 
     fn accounts() -> Vec<ClaudeAccount> {
-        vec![account("main", true), account("pro", false), account("perso", false)]
+        vec![
+            account("main", true),
+            account("pro", false),
+            account("perso", false),
+        ]
     }
 
     fn resolved(id: &str, source: AccountSource, missing: Option<&str>) -> ResolvedAccount {
@@ -213,7 +221,14 @@ mod tests {
         assert_eq!(read_account_choice(None), None);
         assert_eq!(read_account_choice(Some("")), None);
         assert_eq!(read_account_choice(Some("   ")), None);
-        for bad in [json!(null), json!(3), json!(true), json!({}), json!([]), json!(["pro"])] {
+        for bad in [
+            json!(null),
+            json!(3),
+            json!(true),
+            json!({}),
+            json!([]),
+            json!(["pro"]),
+        ] {
             assert_eq!(read_account_choice_value(&bad), None, "{bad}");
         }
         assert_eq!(
@@ -305,7 +320,9 @@ mod tests {
                 &accounts(),
                 state.settings.claude_account.as_deref(),
                 ws.claude_account.as_deref(),
-                ws.panes.first().and_then(|pane| pane.claude_account.as_deref()),
+                ws.panes
+                    .first()
+                    .and_then(|pane| pane.claude_account.as_deref()),
             ),
             resolved("main", AccountSource::Default, None)
         );

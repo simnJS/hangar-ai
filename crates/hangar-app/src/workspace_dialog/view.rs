@@ -149,6 +149,16 @@ impl fmt::Display for Choice {
     }
 }
 
+/// What sending the form says: for a folder, with the kits picked in the
+/// section (P14 holds them; `update` cannot read them, so they ride along).
+fn submit_message(st: &State, ctx: Ctx<'_>) -> Message {
+    let kits = match st.source {
+        Source::Folder => crate::kits::draft_kits(&ctx.pkg.kits).to_vec(),
+        Source::Git => Vec::new(),
+    };
+    msg(Msg::Submit(kits))
+}
+
 // ── the dialog ────────────────────────────────────────────────────────
 
 pub fn dialog<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
@@ -189,7 +199,9 @@ pub fn dialog<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     };
     let mut name = field(ctx, &placeholder, &st.name, false);
     if !git_form::fields_disabled(status) {
-        name = name.on_input(|name| msg(Msg::Name(name))).on_submit(msg(Msg::Submit));
+        name = name
+            .on_input(|name| msg(Msg::Name(name)))
+            .on_submit(submit_message(st, ctx));
     }
     form = form.push(labelled(
         ctx,
@@ -213,10 +225,11 @@ pub fn dialog<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let submit = match st.source {
         Source::Git => {
             let (label, disabled) = git_form::from_git_button(status);
-            ui_button::primary(t, ctx.t(label)).on_press_maybe((!disabled).then(|| msg(Msg::Submit)))
+            ui_button::primary(t, ctx.t(label))
+                .on_press_maybe((!disabled).then(|| submit_message(st, ctx)))
         }
         Source::Folder => ui_button::primary(t, ctx.t(Key::CreateSubmit))
-            .on_press_maybe((!st.folder.cwd.is_empty()).then(|| msg(Msg::Submit))),
+            .on_press_maybe((!st.folder.cwd.is_empty()).then(|| submit_message(st, ctx))),
     };
 
     let panel = dialog::dialog(t, ctx.t(Key::CreateTitle), form)
@@ -241,11 +254,16 @@ fn git_fields<'a>(
     let locked = git_form::fields_disabled(status);
 
     let placeholder = ctx.t(Key::CreateGitRepoPlaceholder);
-    let mut repo = field(ctx, &placeholder, &st.git.repo, status == FromGitStatus::Refused);
+    let mut repo = field(
+        ctx,
+        &placeholder,
+        &st.git.repo,
+        status == FromGitStatus::Refused,
+    );
     if !locked {
         repo = repo
             .on_input(|repo| msg(Msg::Repo(repo)))
-            .on_submit(msg(Msg::Submit));
+            .on_submit(submit_message(st, ctx));
     }
     let mut repo_column = column![repo].spacing(tokens::space::SM);
     match (status, st.git.parse()) {
@@ -270,7 +288,12 @@ fn git_fields<'a>(
 
     let parent = st.parent_for(ctx.model);
     let empty = ctx.t(Key::CreateFolderEmpty);
-    let mut path = field(ctx, parent.as_deref().unwrap_or(&empty), &st.git.parent, false);
+    let mut path = field(
+        ctx,
+        parent.as_deref().unwrap_or(&empty),
+        &st.git.parent,
+        false,
+    );
     if !locked {
         path = path.on_input(|parent| msg(Msg::Parent(parent)));
     }
@@ -288,7 +311,10 @@ fn git_fields<'a>(
             parent_column = parent_column.push(typography::hint(
                 t,
                 ctx.i18n
-                    .t_with(Key::CreateGitDestination, &args!("path" => destination.as_str()))
+                    .t_with(
+                        Key::CreateGitDestination,
+                        &args!("path" => destination.as_str()),
+                    )
                     .into_owned(),
             ));
         }
@@ -474,7 +500,12 @@ fn folder_agents<'a>(
         .folder
         .shell_id
         .as_deref()
-        .and_then(|id| options.iter().find(|option| option.id.as_deref() == Some(id)).cloned())
+        .and_then(|id| {
+            options
+                .iter()
+                .find(|option| option.id.as_deref() == Some(id))
+                .cloned()
+        })
         .or(Some(default));
     let detected = locale
         .tn(Key::CreateShellDetected, shells.len(), &[])
@@ -580,7 +611,9 @@ fn folder_agents<'a>(
     form.push(labelled(
         ctx,
         Some(ctx.t(Key::WorktreesHooksTitle).into_owned()),
-        hooks::view(ctx, &st.folder.hooks, |field, text| msg(Msg::Hook(field, text))),
+        hooks::view(ctx, &st.folder.hooks, |field, text| {
+            msg(Msg::Hook(field, text))
+        }),
     ))
 }
 
@@ -665,7 +698,10 @@ fn preview<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         .enumerate()
         .map(|(index, agent)| {
             let is_shell = *agent == AgentId::Shell;
-            let name = names.get(index).cloned().unwrap_or_else(|| (index + 1).to_string());
+            let name = names
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| (index + 1).to_string());
             let head = container(
                 row![
                     text(name)
@@ -698,10 +734,8 @@ fn preview<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(move |_: &iced::Theme, status| {
-                    let hovered = matches!(
-                        status,
-                        button::Status::Hovered | button::Status::Pressed
-                    );
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
                     button::Style {
                         background: Some(t.colors.bg.into()),
                         text_color: t.colors.fg,
@@ -731,7 +765,11 @@ fn preview<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         let rest = pending.split_off(pending.len().min(columns));
         let mut line = row![].spacing(1).height(Length::Fill);
         for cell in pending {
-            line = line.push(container(cell).width(Length::FillPortion(1)).height(Length::Fill));
+            line = line.push(
+                container(cell)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fill),
+            );
         }
         grid = grid.push(line);
         pending = rest;

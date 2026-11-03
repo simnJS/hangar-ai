@@ -19,8 +19,8 @@ use crate::message::{Intent, Message};
 use crate::services::Services;
 use crate::services::inbox::Answer;
 use crate::state::roles::orchestrator_of;
-use crate::state::{AgentId, Model, Pane, Patch, StoreAction, WorkspaceDraft};
 use crate::state::types::PaneRole;
+use crate::state::{AgentId, Model, Pane, Patch, StoreAction, WorkspaceDraft};
 
 use super::Msg;
 use super::clone::{
@@ -172,7 +172,13 @@ impl FromGitDeps for AppDeps {
     // The account the new workspace's panes will start on: nothing is chosen
     // for it yet, so the settings' default, as `launch_account` decides.
     async fn trust_folder(&self, path: &str) -> Result<(), String> {
-        let default = self.services.snapshot().state.settings.claude_account.clone();
+        let default = self
+            .services
+            .snapshot()
+            .state
+            .settings
+            .claude_account
+            .clone();
         let path = path.to_string();
         tokio::task::spawn_blocking(move || {
             let account = accounts::launch_account(default.as_deref(), None, None);
@@ -221,7 +227,11 @@ pub(super) fn create_workspace(m: &mut Model, draft: NewWorkspace) -> Result<Cre
     let id = made.workspace.ok_or_else(unmade)?;
     let Some((pane, model)) = m.workspace(&id).and_then(|ws| {
         let pane = ws.panes.first()?;
-        let model = ws.orchestration.clone().unwrap_or_default().orchestrator_model;
+        let model = ws
+            .orchestration
+            .clone()
+            .unwrap_or_default()
+            .orchestrator_model;
         Some((pane.id.clone(), model))
     }) else {
         m.apply(StoreAction::RemoveWorkspace(id));

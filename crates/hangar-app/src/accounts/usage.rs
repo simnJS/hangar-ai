@@ -189,7 +189,10 @@ mod tests {
         );
         assert_eq!(usage.len(), 2);
         assert_eq!(
-            usage["good"].five_hour.as_ref().map(|window| window.percent_used),
+            usage["good"]
+                .five_hour
+                .as_ref()
+                .map(|window| window.percent_used),
             Some(40.0)
         );
         assert!(usage["empty"].five_hour.is_none());

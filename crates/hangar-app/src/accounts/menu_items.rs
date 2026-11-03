@@ -113,12 +113,8 @@ pub fn menu_entries(ctx: Ctx<'_>, ws: &WsId, pane: Option<&PaneId>) -> Vec<MenuE
             // « Default » here means the pane follows its workspace, so the
             // label names the account the workspace is on.
             let follows = workspace.claude_account.as_deref().or(settings);
-            let items = account_menu_items(
-                ctx.i18n,
-                accounts,
-                follows,
-                pane.claude_account.as_deref(),
-            );
+            let items =
+                account_menu_items(ctx.i18n, accounts, follows, pane.claude_account.as_deref());
             let mut entries = vec![
                 MenuEntry::Separator,
                 MenuEntry::Heading(ctx.t(Key::AccountsPaneMenuHeading).into_owned()),
@@ -175,7 +171,11 @@ mod tests {
             .collect();
         assert_eq!(
             shown,
-            [("Default (Perso)", true), ("Principal", false), ("Perso", false)]
+            [
+                ("Default (Perso)", true),
+                ("Principal", false),
+                ("Perso", false)
+            ]
         );
     }
 
@@ -184,7 +184,11 @@ mod tests {
         let items = account_menu_items(T, &accounts(), None, Some("perso"));
         let checked: Vec<_> = items.iter().map(|item| item.checked).collect();
         assert_eq!(checked, [false, false, true]);
-        let picked: Vec<_> = items.iter().take(2).map(|item| item.select.clone()).collect();
+        let picked: Vec<_> = items
+            .iter()
+            .take(2)
+            .map(|item| item.select.clone())
+            .collect();
         assert_eq!(picked, [None, Some("main".to_string())]);
     }
 

@@ -19,8 +19,8 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::state::{Model, WsId};
 
-use super::hooks::{self, HooksDraft};
 use super::Msg;
+use super::hooks::{self, HooksDraft};
 
 /// The dialog's own state: the fields as typed.
 #[derive(Debug)]
@@ -47,11 +47,7 @@ static NO_HOOKS: HooksDraft = HooksDraft {
     pre_remove: String::new(),
 };
 
-pub fn view<'a>(
-    state: Option<&'a KitsDialog>,
-    ctx: Ctx<'a>,
-    ws: &'a WsId,
-) -> Element<'a, Message> {
+pub fn view<'a>(state: Option<&'a KitsDialog>, ctx: Ctx<'a>, ws: &'a WsId) -> Element<'a, Message> {
     let t = ctx.theme;
     let Some(workspace) = ctx.model.workspace(ws) else {
         return Space::new().width(0).height(0).into();

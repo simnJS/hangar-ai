@@ -50,9 +50,10 @@ pub fn join_folder(parent: &str, name: &str) -> String {
 pub fn same_repo_url(a: &str, b: &str) -> bool {
     fn flat(url: &str) -> String {
         let url = url.trim().trim_end_matches('/');
-        let cut = url.len().checked_sub(4).filter(|at| {
-            url.is_char_boundary(*at) && url[*at..].eq_ignore_ascii_case(".git")
-        });
+        let cut = url
+            .len()
+            .checked_sub(4)
+            .filter(|at| url.is_char_boundary(*at) && url[*at..].eq_ignore_ascii_case(".git"));
         match cut {
             Some(at) => url[..at].to_string(),
             None => url.to_string(),
@@ -173,7 +174,9 @@ pub fn resolve_parent(
     if !configured.is_empty() {
         return Some(configured.to_string());
     }
-    asker_cwd.filter(|cwd| !cwd.is_empty()).and_then(parent_folder)
+    asker_cwd
+        .filter(|cwd| !cwd.is_empty())
+        .and_then(parent_folder)
 }
 
 /// Where a clone of `repo_name` would land in `parent`; `None` until both are
@@ -204,7 +207,10 @@ mod tests {
     #[test]
     fn path_arithmetic_works_for_both_separators() {
         assert_eq!(parent_folder("C:\\dev\\hangar").as_deref(), Some("C:\\dev"));
-        assert_eq!(parent_folder("C:\\dev\\hangar\\").as_deref(), Some("C:\\dev"));
+        assert_eq!(
+            parent_folder("C:\\dev\\hangar\\").as_deref(),
+            Some("C:\\dev")
+        );
         assert_eq!(parent_folder("C:\\dev").as_deref(), Some("C:\\"));
         assert_eq!(parent_folder("C:\\"), None);
         assert_eq!(parent_folder("/home/me/x").as_deref(), Some("/home/me"));
@@ -274,7 +280,10 @@ mod tests {
         settings.projects_folder = Some("  ".into());
         assert_eq!(projects_folder_of(&settings), None);
         settings.projects_folder = Some(" D:\\Projects ".into());
-        assert_eq!(projects_folder_of(&settings).as_deref(), Some("D:\\Projects"));
+        assert_eq!(
+            projects_folder_of(&settings).as_deref(),
+            Some("D:\\Projects")
+        );
     }
 
     #[test]
@@ -290,8 +299,12 @@ mod tests {
     #[test]
     fn clones_go_to_the_typed_folder_else_the_setting_else_beside_the_workspace() {
         assert_eq!(
-            resolve_parent(Some(" E:\\Repos "), Some("D:\\Projects"), Some("C:\\Work\\app"))
-                .as_deref(),
+            resolve_parent(
+                Some(" E:\\Repos "),
+                Some("D:\\Projects"),
+                Some("C:\\Work\\app")
+            )
+            .as_deref(),
             Some("E:\\Repos")
         );
         assert_eq!(

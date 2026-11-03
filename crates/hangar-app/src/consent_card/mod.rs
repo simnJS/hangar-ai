@@ -297,7 +297,9 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
 
     container(content)
         .padding(tokens::space::XXL - 2.0)
-        .width(Length::Fixed(WIDTH.min((ctx.metrics.body_width - 32.0).max(0.0))))
+        .width(Length::Fixed(
+            WIDTH.min((ctx.metrics.body_width - 32.0).max(0.0)),
+        ))
         .style(style::container::toast(t, Tone::Warning))
         .into()
 }
@@ -305,6 +307,9 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use hangar_i18n::Locale;
+    use iced::widget::container;
+
+    use crate::workspace_dialog::testing::{Harness, messages};
 
     use super::*;
 
@@ -382,5 +387,119 @@ mod tests {
         assert_eq!(told.len(), 1);
         assert!(newly_seen(&mut told, &[]).is_empty());
         assert!(told.is_empty());
+    }
+
+    /// The corner of the window the shell puts the card in.
+    fn corner<'a>(card: Element<'a, Message>) -> Element<'a, Message> {
+        container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(16)
+            .align_x(Alignment::End)
+            .align_y(Alignment::End)
+            .into()
+    }
+
+    fn waiting(requests: Vec<ConsentRequest>) -> State {
+        State {
+            pending: Arc::new(requests),
+            ..State::default()
+        }
+    }
+
+    fn answered(messages: &[Message], id: &str, allow: bool) -> bool {
+        messages.iter().any(|message| {
+            matches!(message, Message::Consent(Msg::Answer { id: asked, allow: said })
+                if asked == id && *said == allow)
+        })
+    }
+
+    #[test]
+    fn the_card_shows_what_would_be_cloned_from_whom_and_where() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = waiting(vec![request(Some("Ava"))]);
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        for text in [
+            "Ava wants to clone a repository",
+            "Repository",
+            "https://github.com/evil/tool.git",
+            "Owner",
+            "evil",
+            "Cloned into",
+            "C:\\dev\\tool",
+            "It is not yours: it belongs to someone else.",
+            "Installing its dependencies runs its code on this machine. Its orchestrator tells you what the install would run before it installs anything.",
+            "Refuse",
+            "Clone",
+        ] {
+            assert!(ui.find(text).is_ok(), "{text} is on the card");
+        }
+        h.shot(&mut ui, "consent-card-en-graphite");
+    }
+
+    #[test]
+    fn clone_and_refuse_answer_the_request_on_show() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = waiting(vec![request(Some("Ava"))]);
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        ui.click("Clone").expect("the button is drawn");
+        assert!(answered(&messages(ui), "c1", true));
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        ui.click("Refuse").expect("the button is drawn");
+        assert!(answered(&messages(ui), "c1", false));
+    }
+
+    #[test]
+    fn only_the_first_request_is_shown_and_the_others_are_counted() {
+        let h = Harness::new(Locale::En, "graphite");
+        let second = ConsentRequest {
+            id: "c2".into(),
+            url: "https://github.com/other/second.git".into(),
+            ..request(Some("Max"))
+        };
+        let st = waiting(vec![request(Some("Ava")), second]);
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        assert!(ui.find("Ava wants to clone a repository").is_ok());
+        assert!(ui.find("https://github.com/other/second.git").is_err());
+        assert!(ui.find("1 more waiting").is_ok());
+        ui.click("Clone").expect("the button is drawn");
+        assert!(answered(&messages(ui), "c1", true));
+    }
+
+    #[test]
+    fn nothing_is_drawn_while_nothing_waits() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = State::default();
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        assert!(ui.find("Clone").is_err() && ui.find("Refuse").is_err());
+    }
+
+    #[test]
+    fn an_unknown_asker_and_an_empty_reason_leave_out_what_they_would_say() {
+        let h = Harness::new(Locale::En, "graphite");
+        let st = waiting(vec![ConsentRequest {
+            reason: String::new(),
+            ..request(None)
+        }]);
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        assert!(ui.find("An agent wants to clone a repository").is_ok());
+        assert!(ui.find("It is not yours: .").is_err());
+    }
+
+    #[test]
+    fn the_card_speaks_french_in_a_light_theme() {
+        let h = Harness::new(Locale::Fr, "github-light");
+        let st = waiting(vec![request(Some("Ava"))]);
+        let mut ui = h.show(corner(view(&st, h.ctx())));
+        for text in [
+            "Ava veut cloner un dépôt",
+            "Dépôt",
+            "Propriétaire",
+            "Refuser",
+            "Cloner",
+        ] {
+            assert!(ui.find(text).is_ok(), "{text} is on the card");
+        }
+        h.shot(&mut ui, "consent-card-fr-github-light");
     }
 }

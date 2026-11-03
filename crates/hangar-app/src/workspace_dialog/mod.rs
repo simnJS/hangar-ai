@@ -30,12 +30,13 @@ use hangar_i18n::{Key, Translator, args};
 use iced::{Element, Subscription, Task};
 
 use crate::ctx::Ctx;
+use crate::git_flow::AppDeps;
 use crate::git_flow::clone::{
-    CloneProgress, ParseResult, clean_repo_input, is_progress_of, new_clone_job_id, parse_repo_input,
+    CloneProgress, ParseResult, clean_repo_input, is_progress_of, new_clone_job_id,
+    parse_repo_input,
 };
 use crate::git_flow::flow::{FromGitOutcome, FromGitRequest};
 use crate::git_flow::paths::{projects_folder_of, resolve_parent};
-use crate::git_flow::AppDeps;
 use crate::message::{GitOrigin, Intent, Message};
 use crate::services::{CoreEvent, Services, dialogs};
 use crate::shell::{Notice, Overlay, Region};
@@ -144,13 +145,11 @@ pub struct State {
 
 /// The package's shared read-model, which other packages may read; lives in
 /// `Model.live.workspace_dialog`.
+///
+/// Nothing yet: the kits chosen for a workspace being made are P14's
+/// (`kits::draft_kits`), read when the form is sent.
 #[derive(Debug, Default)]
-pub struct Live {
-    /// The kits chosen for the workspace being made. `kits::workspace_section`
-    /// (P14) edits this list while the dialog is open for a new workspace
-    /// (`ws` `None`); the dialog gives it to the store with the rest.
-    pub draft_kits: Vec<WorkspaceKit>,
-}
+pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::WorkspaceDialog(Msg)`.
 #[derive(Debug, Clone)]
@@ -158,7 +157,10 @@ pub enum Msg {
     // The whole form.
     Source(Source),
     Name(String),
-    Submit,
+    /// Return, or the footer's button. Carries the kits picked in the section
+    /// (`kits::draft_kits`), which only the view can read: they are P14's
+    /// state, and `update` does not see another package's. Empty for a clone.
+    Submit(Vec<WorkspaceKit>),
     /// The footer's Cancel.
     Cancel,
     /// The close cross, the veil and Escape: refused while a clone runs.
@@ -258,7 +260,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
     match msg {
         // The two that start or stop a clone are the only ones that reach
         // the services; the rest of the form is `form`.
-        Msg::Submit if st.source == Source::Git => start_git(st, m, sv),
+        Msg::Submit(_) if st.source == Source::Git => start_git(st, m, sv),
         Msg::Stop => stop_clone(st),
         msg => form(st, m, msg),
     }
@@ -287,10 +289,10 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             }
             Task::none()
         }
-        Msg::Submit => match st.source {
+        Msg::Submit(kits) => match st.source {
             // Started by `update`, which has the services.
             Source::Git => Task::none(),
-            Source::Folder => submit_folder(st, m),
+            Source::Folder => submit_folder(st, m, &kits),
         },
         Msg::Cancel => close(m),
         Msg::Dismiss => {
@@ -381,7 +383,12 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::PickRoot(path) => {
-            if st.folder.roots.iter().any(|root| root.path == path && root.exists) {
+            if st
+                .folder
+                .roots
+                .iter()
+                .any(|root| root.path == path && root.exists)
+            {
                 st.folder.cwd = path;
             }
             Task::none()
@@ -506,10 +513,9 @@ fn schedule_parse(st: &mut State) -> Task<Message> {
         return Task::none();
     }
     let generation = st.git.generation;
-    Task::perform(
-        async { tokio::time::sleep(PARSE_DELAY).await },
-        move |()| Message::WorkspaceDialog(Msg::ParseDue(generation)),
-    )
+    Task::perform(async { tokio::time::sleep(PARSE_DELAY).await }, move |()| {
+        Message::WorkspaceDialog(Msg::ParseDue(generation))
+    })
 }
 
 /// Splits a `.code-workspace` into the folder to open in and the rest.
@@ -537,7 +543,7 @@ fn read_workspace_file(path: String) -> Task<Message> {
     )
 }
 
-fn submit_folder(st: &mut State, m: &mut Model) -> Task<Message> {
+fn submit_folder(st: &mut State, m: &mut Model, kits: &[WorkspaceKit]) -> Task<Message> {
     let Some(draft) = folder::draft_of(&FolderForm {
         name: &st.name,
         cwd: &st.folder.cwd,
@@ -545,7 +551,7 @@ fn submit_folder(st: &mut State, m: &mut Model) -> Task<Message> {
         layout: st.folder.layout,
         assignments: &st.folder.assignments,
         shell_id: st.folder.shell_id.as_deref(),
-        kits: &m.live.workspace_dialog.draft_kits,
+        kits,
         claude_account: st.folder.claude_account.as_deref(),
     }) else {
         return Task::none();
@@ -706,7 +712,7 @@ pub fn on_intent(
 ) -> Option<Task<Message>> {
     match intent {
         Intent::OpenOverlay(Overlay::WorkspaceDialog) => {
-            opened(st, m);
+            opened(st);
             Some(Task::none())
         }
         Intent::OpenOverlay(Overlay::KitsDialog(ws)) | Intent::OpenKitsDialog(ws) => {
@@ -731,11 +737,11 @@ pub fn on_event(
 }
 
 /// The dialog opens: the form starts clean, unless a clone is still running
-/// from when it was closed, which shows its progress again.
-fn opened(st: &mut State, m: &mut Model) {
+/// from when it was closed, which shows its progress again. (The kits section
+/// empties its own draft when the same intent reaches it.)
+fn opened(st: &mut State) {
     if !st.git.running {
         st.reset();
-        m.live.workspace_dialog.draft_kits.clear();
     }
 }
 

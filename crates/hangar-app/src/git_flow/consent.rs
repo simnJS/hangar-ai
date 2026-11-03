@@ -456,7 +456,11 @@ mod tests {
     }
 
     fn ids(queue: &ConsentQueue) -> Vec<String> {
-        queue.pending().iter().map(|entry| entry.id.clone()).collect()
+        queue
+            .pending()
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect()
     }
 
     #[test]
@@ -683,12 +687,30 @@ mod tests {
             Ok(())
         };
         let request = asked("C:\\x\\theirs");
-        assert!(record_consent(&sink, &request, ConsentAnswer::Allow, Locale::En, 1));
-        assert!(!record_consent(&sink, &request, ConsentAnswer::Busy, Locale::En, 1));
+        assert!(record_consent(
+            &sink,
+            &request,
+            ConsentAnswer::Allow,
+            Locale::En,
+            1
+        ));
+        assert!(!record_consent(
+            &sink,
+            &request,
+            ConsentAnswer::Busy,
+            Locale::En,
+            1
+        ));
         assert_eq!(lock(&written).len(), 1);
         assert_eq!(lock(&written)[0].kind, "gitConsent");
         // A log that cannot be written is not an error to anyone.
         let broken = |_: Vec<ActivityEntry>| Err("disk".to_string());
-        assert!(record_consent(&broken, &request, ConsentAnswer::Refuse, Locale::En, 1));
+        assert!(record_consent(
+            &broken,
+            &request,
+            ConsentAnswer::Refuse,
+            Locale::En,
+            1
+        ));
     }
 }

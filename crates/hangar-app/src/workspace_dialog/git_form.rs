@@ -130,7 +130,12 @@ mod tests {
         }
     }
 
-    fn status(input: &str, parse: Option<&ParseResult>, parent: Option<&str>, running: bool) -> FromGitStatus {
+    fn status(
+        input: &str,
+        parse: Option<&ParseResult>,
+        parent: Option<&str>,
+        running: bool,
+    ) -> FromGitStatus {
         from_git_status(&FromGitForm {
             input,
             parse,
@@ -144,18 +149,30 @@ mod tests {
     #[test]
     fn reads_the_forms_status() {
         let ok = ok();
-        assert_eq!(status("  \n", Some(&ok), PARENT, false), FromGitStatus::Empty);
-        assert_eq!(status("acme/shop", None, PARENT, false), FromGitStatus::Checking);
+        assert_eq!(
+            status("  \n", Some(&ok), PARENT, false),
+            FromGitStatus::Empty
+        );
+        assert_eq!(
+            status("acme/shop", None, PARENT, false),
+            FromGitStatus::Checking
+        );
         assert_eq!(
             status("acme/shop", Some(&refused()), PARENT, false),
             FromGitStatus::Refused
         );
-        assert_eq!(status("acme/shop", Some(&ok), None, false), FromGitStatus::NoFolder);
+        assert_eq!(
+            status("acme/shop", Some(&ok), None, false),
+            FromGitStatus::NoFolder
+        );
         assert_eq!(
             status("acme/shop", Some(&ok), Some("  "), false),
             FromGitStatus::NoFolder
         );
-        assert_eq!(status("acme/shop", Some(&ok), PARENT, false), FromGitStatus::Ready);
+        assert_eq!(
+            status("acme/shop", Some(&ok), PARENT, false),
+            FromGitStatus::Ready
+        );
         assert_eq!(status("", Some(&ok), PARENT, true), FromGitStatus::Running);
     }
 
@@ -183,7 +200,10 @@ mod tests {
 
     #[test]
     fn enter_starts_a_ready_form_escape_closes_unless_something_runs() {
-        assert_eq!(from_git_key("Enter", FromGitStatus::Ready), Some(FormKey::Start));
+        assert_eq!(
+            from_git_key("Enter", FromGitStatus::Ready),
+            Some(FormKey::Start)
+        );
         for status in [
             FromGitStatus::Empty,
             FromGitStatus::Checking,
@@ -193,8 +213,14 @@ mod tests {
         ] {
             assert_eq!(from_git_key("Enter", status), None);
         }
-        assert_eq!(from_git_key("Escape", FromGitStatus::Ready), Some(FormKey::Close));
-        assert_eq!(from_git_key("Escape", FromGitStatus::Refused), Some(FormKey::Close));
+        assert_eq!(
+            from_git_key("Escape", FromGitStatus::Ready),
+            Some(FormKey::Close)
+        );
+        assert_eq!(
+            from_git_key("Escape", FromGitStatus::Refused),
+            Some(FormKey::Close)
+        );
         assert_eq!(from_git_key("Escape", FromGitStatus::Running), None);
         assert_eq!(from_git_key("a", FromGitStatus::Ready), None);
     }
