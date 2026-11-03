@@ -13,15 +13,18 @@ edition = "2024"
 name = "hangar-ai"
 path = "src/main.rs"
 
+# `hangar-ui`, `hangar-term`, `hangar-kit-host` and `hangar-model3d` are not
+# here yet, on purpose: they are being built in parallel, the views draw
+# placeholders until they land, and the package that needs one adds it
+# (`TODO(hangar-ui)` and the like mark the places). See PACKAGES.md.
 [dependencies]
 hangar-core.workspace = true
 hangar-theme.workspace = true
-hangar-ui.workspace = true
-hangar-term.workspace = true
-hangar-kit-host.workspace = true
+hangar-i18n.workspace = true
 iced.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rfd.workspace = true
 open.workspace = true
+png.workspace = true

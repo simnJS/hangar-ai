@@ -37,6 +37,9 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "
 dirs = "6.0.0"
 rfd = "0.17"
 open = "5.4"
+# The version iced's `image` feature already builds; hangar-app writes its
+# development screenshots with it.
+png = "0.18"
 # The browser engine of hangar-webview alone: wry drives the platform's webview
 # (WebKitGTK, WebView2, WKWebView) and tao gives it its windows.
 wry = "0.57"
