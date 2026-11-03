@@ -1,0 +1,17 @@
+[package]
+name = "hangar-i18n"
+description = "Hangar's interface strings in English and French, and the function that turns a key into text"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+# `src/generated.rs` is written by `tools/generate.mjs` from the strings of the
+# web app and committed, so building the crate needs no Node. The only
+# dependency is serde, for the `Locale` that settings save as "en" or "fr".
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
