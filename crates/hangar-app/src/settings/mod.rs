@@ -10,6 +10,9 @@
 //! placeholder bodies. The directory is this package's own; replace the
 //! bodies, add files, keep the signatures the shell calls.
 
+pub mod experiments;
+mod format;
+
 use iced::{Element, Subscription, Task};
 
 use crate::ctx::Ctx;
