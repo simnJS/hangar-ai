@@ -1812,6 +1812,8 @@ pub enum Key {
     MobileTailscaleStopped,
     /// `mobile.tailscaleUnserved`
     MobileTailscaleUnserved,
+    /// `mobile.unavailable`
+    MobileUnavailable,
     /// `modal.close`
     ModalClose,
     /// `model.animation`
@@ -3457,7 +3459,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1720;
+pub const KEY_COUNT: usize = 1721;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4361,6 +4363,7 @@ impl Key {
         Key::MobileTailscaleReady,
         Key::MobileTailscaleStopped,
         Key::MobileTailscaleUnserved,
+        Key::MobileUnavailable,
         Key::ModalClose,
         Key::ModelAnimation,
         Key::ModelAxes,
@@ -6086,6 +6089,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "mobile.tailscaleReady", en: Text::plain("Ready. Your phone opens this address:"), fr: Text::plain("C'est prêt. Ton téléphone ouvre cette adresse\u{202f}:") },
     Message { id: "mobile.tailscaleStopped", en: Text::plain("Tailscale is installed but not connected. Open it, sign in, then check again."), fr: Text::plain("Tailscale est installé mais pas connecté. Ouvre-le, connecte-toi, puis vérifie à nouveau.") },
     Message { id: "mobile.tailscaleUnserved", en: Text::plain("Tailscale is connected. One step left: give Hangar Mobile a secure address on your private network."), fr: Text::plain("Tailscale est connecté. Dernière étape\u{202f}: donner à Hangar Mobile une adresse sécurisée sur ton réseau privé.") },
+    Message { id: "mobile.unavailable", en: Text::plain("its data folder could not be opened"), fr: Text::plain("son dossier de données n'a pas pu être ouvert") },
     Message { id: "modal.close", en: Text::plain("Close"), fr: Text::plain("Fermer") },
     Message { id: "model.animation", en: Text::plain("Animation"), fr: Text::plain("Animation") },
     Message { id: "model.axes", en: Text::plain("Axes and origin"), fr: Text::plain("Axes et origine") },

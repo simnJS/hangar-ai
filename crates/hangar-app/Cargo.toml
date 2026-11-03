@@ -38,8 +38,9 @@ rfd.workspace = true
 open.workspace = true
 png.workspace = true
 # Wall-clock dates of the memory view, the local days, weeks and hours of the
-# statistics page (as `Intl.DateTimeFormat` wrote them) and the times in the
-# orchestration briefings; the same build hangar-core already uses.
+# statistics page (as `Intl.DateTimeFormat` wrote them), the dates of the
+# settings' Hangar Mobile page and the times in the orchestration briefings;
+# the same build hangar-core already uses.
 chrono.workspace = true
 # The orchestration engine (P19): plan statuses, and task titles folded to
 # ASCII for branch names.

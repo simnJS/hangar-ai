@@ -335,6 +335,7 @@ const en = {
   "mobile.switchHint":
     "Follow your agents and answer them from your phone. Nothing is opened on the Internet: only your own devices, through Tailscale, can reach it.",
   "mobile.error": "Hangar Mobile could not start: {error}",
+  "mobile.unavailable": "its data folder could not be opened",
   "mobile.tailscale": "Tailscale",
   "mobile.tailscaleMissing":
     "Tailscale is a free app that links your PC and your phone privately, wherever you are. Install it on both and sign in to the same account.",
@@ -1894,6 +1895,7 @@ const fr: Record<Key, string> = {
   "mobile.switchHint":
     "Suis tes agents et réponds-leur depuis ton téléphone. Rien n'est ouvert sur Internet : seuls tes propres appareils, via Tailscale, peuvent y accéder.",
   "mobile.error": "Hangar Mobile n'a pas pu démarrer : {error}",
+  "mobile.unavailable": "son dossier de données n'a pas pu être ouvert",
   "mobile.tailscale": "Tailscale",
   "mobile.tailscaleMissing":
     "Tailscale est une app gratuite qui relie ton PC et ton téléphone en privé, où que tu sois. Installe-la sur les deux et connecte-toi au même compte.",
