@@ -56,7 +56,21 @@ pub fn is_enabled() -> Result<bool, String> {
 }
 
 /// Makes Hangar start at login, or stop doing so.
+///
+/// Never from a run kept off the installed app's data (install.rs,
+/// `isolation_refusal`): the item would start this build at login instead of
+/// the installed app, and taking it out would take the installed app's out.
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
+    set_enabled_unless(
+        crate::install::isolation_refusal("the login item"),
+        enabled,
+    )
+}
+
+fn set_enabled_unless(refusal: Option<String>, enabled: bool) -> Result<(), String> {
+    if let Some(refusal) = refusal {
+        return Err(refusal);
+    }
     let launcher = launcher()?;
     if enabled {
         launcher.enable()
@@ -64,4 +78,21 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
         launcher.disable()
     }
     .map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The refusal comes before the launcher is even built, so neither way
+    /// of the switch reaches the system's login items.
+    #[test]
+    fn a_run_kept_off_the_installed_app_s_data_leaves_the_login_item_alone() {
+        for enabled in [true, false] {
+            assert_eq!(
+                set_enabled_unless(Some("kept off".into()), enabled),
+                Err("kept off".into())
+            );
+        }
+    }
 }
