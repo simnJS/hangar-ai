@@ -173,7 +173,8 @@ mod highlight {
     #[test]
     fn survives_a_range_that_does_not_belong_to_the_text() {
         // A match computed for another label must never panic the renderer.
-        let parts = highlight("é", &[1..9]);
+        let stale = 1..9;
+        let parts = highlight("é", std::slice::from_ref(&stale));
         assert_eq!(parts.iter().map(|part| part.text).collect::<String>(), "é");
     }
 }

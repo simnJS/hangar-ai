@@ -9,7 +9,7 @@
 //!
 //! let rename = dialog::dialog(t, "Rename workspace", input::text_field(t, &self.name)
 //!         .label("Name").on_input(Msg::Name))
-//!     .sub("~/dev/storefront")
+//!     .subtitle("~/dev/storefront")
 //!     .action(button::ghost(t, "Cancel").on_press(Msg::Cancel))
 //!     .action(button::primary(t, "Save").on_press_maybe(valid.then_some(Msg::Save)))
 //!     .on_close(Msg::Cancel);
@@ -69,7 +69,8 @@ pub fn dialog<'a, M: Clone + 'a>(
         width: size::DIALOG_WIDTH,
         // Room for the head and the foot in a window of about 600.
         body_max_height: 420.0,
-        body_padding: Padding::new(space::LG),
+        // In line with the title above it, which starts 18 px in.
+        body_padding: Padding::from([space::XL, 18.0]),
         on_close: None,
         close_tip: String::from("Close"),
     }
@@ -77,7 +78,7 @@ pub fn dialog<'a, M: Clone + 'a>(
 
 impl<'a, M: Clone + 'a> Dialog<'a, M> {
     /// A line in the mono face under the title: the folder it acts on.
-    pub fn sub(mut self, sub: impl Into<String>) -> Self {
+    pub fn subtitle(mut self, sub: impl Into<String>) -> Self {
         self.sub = Some(sub.into());
         self
     }

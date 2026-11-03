@@ -81,13 +81,16 @@ pub enum Outside {
 /// The window's margin that content is kept out of.
 const MARGIN: f32 = 8.0;
 
+/// What draws the veil of a modal layer.
+type Veil<'a> = Box<dyn Fn(&iced::Theme) -> container::Style + 'a>;
+
 /// A layer over the window. See the [module](self).
 #[must_use]
 pub struct Layer<'a, M> {
     base: Element<'a, M>,
     content: Option<Element<'a, M>>,
     placement: Placement,
-    veil: Option<Box<dyn Fn(&iced::Theme) -> container::Style + 'a>>,
+    veil: Option<Veil<'a>>,
     on_dismiss: Option<M>,
     escape: bool,
     outside: Outside,

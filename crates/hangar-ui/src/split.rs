@@ -27,12 +27,13 @@
 use hangar_theme::Theme;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse::{Click, click};
+use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::widget::operation::Focusable;
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell, Widget};
 use iced::keyboard::{self, Key, key::Named};
-use iced::{Background, Element, Event, Length, Point, Rectangle, Size, mouse};
+use iced::{Background, Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
 /// How the two regions lie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -173,6 +174,14 @@ impl Focusable for State {
     }
 }
 
+/// The layout of what a region holds, inside the region's own.
+fn inner(region: Layout<'_>) -> Layout<'_> {
+    region
+        .children()
+        .next()
+        .expect("a split's region always holds its content")
+}
+
 impl<M> Split<'_, M> {
     fn main(&self, size: Size) -> f32 {
         match self.arrange {
@@ -268,22 +277,58 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
             ),
             Arrange::Rows => (Size::new(size.width, first), Size::new(size.width, second)),
         };
-        let exact = |size: Size| layout::Limits::new(size, size);
+        // A region's content is laid out in the room it may take, and stays
+        // as small as it is if it is smaller: only a region that asks to
+        // fill does. The region's own node has the whole room, which is what
+        // the divider is measured from.
+        let room = |size: Size| layout::Limits::new(Size::ZERO, size);
         let (first_at, second_at) = match self.arrange {
             Arrange::Columns => (Point::ORIGIN, Point::new(first + DIVIDER, 0.0)),
             Arrange::Rows => (Point::ORIGIN, Point::new(0.0, first + DIVIDER)),
         };
-        let first_node = self
-            .first
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, &exact(first_size))
-            .move_to(first_at);
-        let second_node = self
-            .second
-            .as_widget_mut()
-            .layout(&mut tree.children[1], renderer, &exact(second_size))
-            .move_to(second_at);
+        let first_content =
+            self.first
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, &room(first_size));
+        let first_node =
+            layout::Node::with_children(first_size, vec![first_content]).move_to(first_at);
+        let second_content =
+            self.second
+                .as_widget_mut()
+                .layout(&mut tree.children[1], renderer, &room(second_size));
+        let second_node =
+            layout::Node::with_children(second_size, vec![second_content]).move_to(second_at);
         layout::Node::with_children(size, vec![first_node, second_node])
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, M, iced::Theme, iced::Renderer>> {
+        // What floats over either region (a menu, a dialog) is still the
+        // window's: the split only has to pass it up.
+        let mut regions = layout.children();
+        let (first_tree, second_tree) = tree.children.split_at_mut(1);
+        let first = self.first.as_widget_mut().overlay(
+            &mut first_tree[0],
+            inner(regions.next()?),
+            renderer,
+            viewport,
+            translation,
+        );
+        let second = self.second.as_widget_mut().overlay(
+            &mut second_tree[0],
+            inner(regions.next()?),
+            renderer,
+            viewport,
+            translation,
+        );
+        let overlays: Vec<_> = first.into_iter().chain(second).collect();
+        (!overlays.is_empty()).then(|| overlay::Group::with_children(overlays).overlay())
     }
 
     fn operate(
@@ -300,7 +345,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
             if let Some(first) = regions.next() {
                 self.first.as_widget_mut().operate(
                     &mut tree.children[0],
-                    first,
+                    inner(first),
                     renderer,
                     operation,
                 );
@@ -308,7 +353,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
             if let Some(second) = regions.next() {
                 self.second.as_widget_mut().operate(
                     &mut tree.children[1],
-                    second,
+                    inner(second),
                     renderer,
                     operation,
                 );
@@ -341,7 +386,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
         self.first.as_widget_mut().update(
             &mut tree.children[0],
             event,
-            first,
+            inner(first),
             cursor,
             renderer,
             clipboard,
@@ -351,7 +396,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
         self.second.as_widget_mut().update(
             &mut tree.children[1],
             event,
-            second,
+            inner(second),
             cursor,
             renderer,
             clipboard,
@@ -390,10 +435,10 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
                     if let Some(point) = cursor.position() {
                         let along = self.along(point) - self.along(bounds.position());
                         let ratio = self.ratio_at(along - state.grab_offset, bounds);
-                        if (ratio - self.ratio).abs() > f32::EPSILON {
-                            if let Some(on_resize) = &self.on_resize {
-                                shell.publish(on_resize(ratio));
-                            }
+                        if (ratio - self.ratio).abs() > f32::EPSILON
+                            && let Some(on_resize) = &self.on_resize
+                        {
+                            shell.publish(on_resize(ratio));
                         }
                         shell.capture_event();
                         shell.request_redraw();
@@ -466,10 +511,10 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
         }
         self.first
             .as_widget()
-            .mouse_interaction(&tree.children[0], first, cursor, viewport, renderer)
+            .mouse_interaction(&tree.children[0], inner(first), cursor, viewport, renderer)
             .max(self.second.as_widget().mouse_interaction(
                 &tree.children[1],
-                second,
+                inner(second),
                 cursor,
                 viewport,
                 renderer,
@@ -496,7 +541,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
             renderer,
             theme,
             style,
-            first,
+            inner(first),
             cursor,
             viewport,
         );
@@ -505,7 +550,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Split<'_, M> {
             renderer,
             theme,
             style,
-            second,
+            inner(second),
             cursor,
             viewport,
         );

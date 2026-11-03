@@ -13,6 +13,7 @@ enum Msg {
     Resize(f32),
     End,
     Reset,
+    Picked,
 }
 
 fn region<'a>() -> Element<'a, Msg> {
@@ -248,5 +249,27 @@ mod keyboard {
         let mut ui = focused();
         ui.click_at(600.0, 300.0);
         assert_eq!(ui.key(Named::ArrowRight), iced::event::Status::Ignored);
+    }
+}
+
+mod overlays {
+    use super::*;
+    use crate::menu::{item, menu};
+
+    #[test]
+    fn what_floats_over_a_region_is_still_reachable() {
+        let t = default_theme();
+        let anchor: Element<'_, Msg> = container(space())
+            .width(Length::Fixed(80.0))
+            .height(Length::Fixed(26.0))
+            .into();
+        let open = crate::layer::dropdown(
+            anchor,
+            Some(menu(t, vec![item("One").on_select(Msg::Picked).into()]).into()),
+        );
+        let mut ui = simulate(split(t, open, region()).ratio(0.5).on_resize(Msg::Resize));
+        // The menu is under the anchor, 8 px in from the window's edge.
+        ui.click_at(40.0, 30.0 + 5.0 + 13.0);
+        assert_eq!(messages(ui), [Msg::Picked]);
     }
 }

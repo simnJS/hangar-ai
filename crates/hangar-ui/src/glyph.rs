@@ -260,10 +260,10 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for StateGlyph {
         // asked to redraw: about 25 times a second, which is smooth enough
         // for a ring that takes 1.7 s to fade and cheap enough for a window
         // of sixteen panes.
-        if self.state.animates() {
-            if let Event::Window(window::Event::RedrawRequested(now)) = event {
-                shell.request_redraw_at(*now + Duration::from_millis(40));
-            }
+        if self.state.animates()
+            && let Event::Window(window::Event::RedrawRequested(now)) = event
+        {
+            shell.request_redraw_at(*now + Duration::from_millis(40));
         }
     }
 

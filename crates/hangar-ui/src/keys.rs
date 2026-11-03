@@ -49,9 +49,12 @@ pub fn on_keyboard<'a, M: 'a>(
     })
 }
 
+/// What answers a keyboard event with a message, or lets it go by.
+type Handler<'a, M> = Box<dyn Fn(&keyboard::Event) -> Option<M> + 'a>;
+
 struct OnKey<'a, M> {
     content: Element<'a, M>,
-    handler: Box<dyn Fn(&keyboard::Event) -> Option<M> + 'a>,
+    handler: Handler<'a, M>,
 }
 
 impl<M> Widget<M, iced::Theme, iced::Renderer> for OnKey<'_, M> {
@@ -93,12 +96,12 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for OnKey<'_, M> {
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) {
-        if let Event::Keyboard(keyboard_event) = event {
-            if let Some(message) = (self.handler)(keyboard_event) {
-                shell.publish(message);
-                shell.capture_event();
-                return;
-            }
+        if let Event::Keyboard(keyboard_event) = event
+            && let Some(message) = (self.handler)(keyboard_event)
+        {
+            shell.publish(message);
+            shell.capture_event();
+            return;
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],

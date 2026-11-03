@@ -64,6 +64,35 @@ fn a_drawing_is_never_empty() {
     }
 }
 
+mod turning {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+
+    use super::*;
+
+    #[test]
+    fn no_turn_and_a_full_turn_are_the_icon_itself() {
+        let plain = Icon::ChevronDown.handle();
+        assert_eq!(turned_handle(Icon::ChevronDown, Radians(0.0)), plain);
+        assert_eq!(turned_handle(Icon::ChevronDown, Radians(TAU)), plain);
+    }
+
+    #[test]
+    fn a_turn_is_made_once_and_kept() {
+        let first = turned_handle(Icon::ChevronDown, Radians(-FRAC_PI_2));
+        let again = turned_handle(Icon::ChevronDown, Radians(-FRAC_PI_2));
+        assert_eq!(first, again);
+        assert_ne!(first, Icon::ChevronDown.handle());
+    }
+
+    #[test]
+    fn a_quarter_turn_back_is_three_quarters_forward() {
+        assert_eq!(
+            turned_handle(Icon::Check, Radians(-FRAC_PI_2)),
+            turned_handle(Icon::Check, Radians(3.0 * FRAC_PI_2))
+        );
+    }
+}
+
 #[test]
 fn the_tint_is_a_colour_the_renderer_replaces_not_one_that_leaks() {
     // `currentColor` has no meaning outside a web page: every drawing must be

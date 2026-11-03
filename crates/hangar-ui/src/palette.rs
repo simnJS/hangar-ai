@@ -418,10 +418,11 @@ impl<T: Clone> Palette<T> {
                     .font(fonts::mono())
                     .style(style::text::secondary(t)),
             )
-            .padding(Padding::from([space::XXS, space::SM])),
+            .padding(Padding::from([space::XXS, space::SM]))
+            .style(style::container::outline(t)),
         )
         .padding(0)
-        .style(style::button::ghost(t))
+        .style(style::button::icon(t))
         .on_press(Msg::Dismiss);
         let search = container(
             row![icon(Icon::Search, 18.0).color(c.fg_muted), field, esc,]
@@ -443,9 +444,8 @@ impl<T: Clone> Palette<T> {
             bottom: 10.0,
             left: 6.0,
         });
-        let mut at = 0;
         let mut previous_group: Option<&str> = None;
-        for ranked in &shown {
+        for (at, ranked) in shown.iter().enumerate() {
             let item = ranked.entry;
             if previous_group != Some(item.group.as_str()) {
                 list = list.push(
@@ -465,7 +465,6 @@ impl<T: Clone> Palette<T> {
                 previous_group = Some(item.group.as_str());
             }
             list = list.push(self.row(t, item, ranked, at, at == selected));
-            at += 1;
         }
         let body: Element<'a, Msg> = if shown.is_empty() {
             container(

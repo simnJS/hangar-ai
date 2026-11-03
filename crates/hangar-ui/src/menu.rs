@@ -2,7 +2,7 @@
 //! drop-down or a right click.
 //!
 //! A [`Menu`] is the list; where it appears and how it goes away is a
-//! [`Layer`](crate::layer::Layer)'s business, so that the same list serves as
+//! [`Layer`]'s business, so that the same list serves as
 //! a drop-down under a button ([`dropdown`]) and as a context menu at the
 //! pointer ([`context_menu`]).
 //!
@@ -525,10 +525,10 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if let Some(pressed) = state.pressed.take() {
                     // A click is a press and a release on the same line.
-                    if hit == Some(pressed) {
-                        if let Some(message) = self.message_of(pressed) {
-                            shell.publish(message);
-                        }
+                    if hit == Some(pressed)
+                        && let Some(message) = self.message_of(pressed)
+                    {
+                        shell.publish(message);
                     }
                     shell.capture_event();
                 }
@@ -554,17 +554,17 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
                     }
                     shell.request_redraw();
                     shell.capture_event();
-                } else if matches!(key, Key::Named(Named::Enter | Named::Space)) {
-                    if let Some(index) = state.highlighted {
-                        let hit = Hit {
-                            index,
-                            action: None,
-                        };
-                        if let Some(message) = self.message_of(hit) {
-                            shell.publish(message);
-                        }
-                        shell.capture_event();
+                } else if matches!(key, Key::Named(Named::Enter | Named::Space))
+                    && let Some(index) = state.highlighted
+                {
+                    let hit = Hit {
+                        index,
+                        action: None,
+                    };
+                    if let Some(message) = self.message_of(hit) {
+                        shell.publish(message);
                     }
+                    shell.capture_event();
                 }
             }
             _ => {}
@@ -650,10 +650,12 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
                             label,
                             font_size::CAPTION,
                             fonts::ui_semibold(),
-                            Point::new(row.x + INSET, row.y + (height + 2.0) / 2.0),
-                            alignment::Horizontal::Left,
                             c.fg_muted,
-                            row,
+                            Line {
+                                anchor: Point::new(row.x + INSET, row.y + (height + 2.0) / 2.0),
+                                align: alignment::Horizontal::Left,
+                                clip: row,
+                            },
                         );
                     }
                     Entry::Item(item) => {
@@ -695,18 +697,28 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
     }
 }
 
-/// Where a text sits: `anchor` is its left, centre or right edge by
-/// `align`, at the vertical middle of its line.
+/// Where a text sits: `anchor` is its left, centre or right edge by `align`,
+/// at the vertical middle of its line, and nothing of it is drawn outside
+/// `clip`.
+struct Line {
+    anchor: Point,
+    align: alignment::Horizontal,
+    clip: Rectangle,
+}
+
 fn draw_text(
     renderer: &mut iced::Renderer,
     content: &str,
     size: f32,
     font: Font,
-    anchor: Point,
-    align: alignment::Horizontal,
     color: Color,
-    clip: Rectangle,
+    line: Line,
 ) {
+    let Line {
+        anchor,
+        align,
+        clip,
+    } = line;
     renderer.fill_text(
         Text {
             content: content.to_string(),
@@ -841,10 +853,12 @@ impl<M: Clone> Menu<'_, M> {
                 keys,
                 font_size::LABEL,
                 fonts::mono(),
-                Point::new(end, middle),
-                alignment::Horizontal::Right,
                 keys_color,
-                row,
+                Line {
+                    anchor: Point::new(end, middle),
+                    align: alignment::Horizontal::Right,
+                    clip: row,
+                },
             );
             end -= 18.0 + text_width(keys, font_size::LABEL, fonts::mono());
         }
@@ -860,10 +874,12 @@ impl<M: Clone> Menu<'_, M> {
             &item.label,
             font_size::BODY,
             fonts::ui(),
-            Point::new(x, middle),
-            alignment::Horizontal::Left,
             text_color,
-            room,
+            Line {
+                anchor: Point::new(x, middle),
+                align: alignment::Horizontal::Left,
+                clip: room,
+            },
         );
     }
 }
@@ -924,10 +940,12 @@ impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for ReasonTip<'_> {
             &self.reason,
             font_size::CAPTION_LG,
             fonts::ui(),
-            Point::new(bounds.x + 8.0, bounds.center_y()),
-            alignment::Horizontal::Left,
             self.theme.colors.fg,
-            bounds,
+            Line {
+                anchor: Point::new(bounds.x + 8.0, bounds.center_y()),
+                align: alignment::Horizontal::Left,
+                clip: bounds,
+            },
         );
     }
 
@@ -1059,11 +1077,11 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for OpenOnRightClick<'_, M
             shell,
             viewport,
         );
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event {
-            if let Some(point) = cursor.position_in(layout.bounds()) {
-                shell.publish((self.on_open)(Vector::new(point.x, point.y)));
-                shell.capture_event();
-            }
+        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event
+            && let Some(point) = cursor.position_in(layout.bounds())
+        {
+            shell.publish((self.on_open)(Vector::new(point.x, point.y)));
+            shell.capture_event();
         }
     }
 

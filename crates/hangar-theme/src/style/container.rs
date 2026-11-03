@@ -246,6 +246,16 @@ pub fn palette_icon(t: &Theme, chosen: bool) -> impl Fn(&iced::Theme) -> Style +
     }
 }
 
+/// A hairline box with nothing in it (`.palette__esc`): the cap of the key
+/// that closes the palette, on a surface of its own.
+pub fn outline(t: &Theme) -> impl Fn(&iced::Theme) -> Style + '_ {
+    move |_| Style {
+        border: hairline(t.colors.line_strong, radius::XS),
+        text_color: Some(t.colors.fg_secondary),
+        ..Style::default()
+    }
+}
+
 /// A small word set on a surface (`.key-row__tag`): "custom", "new".
 pub fn tag(t: &Theme) -> impl Fn(&iced::Theme) -> Style + '_ {
     move |_| Style {

@@ -6,7 +6,7 @@
 //!
 //! panel::panel(t, "Worktrees", column![/* the rows */])
 //!     .icon(Icon::Branch)
-//!     .sub("3")
+//!     .subtitle("3")
 //!     .action(button::icon_button(t, Icon::Plus).small().tip("New worktree").on_press(Msg::New))
 //!
 //! // Just the bar, for a pane's header:
@@ -53,7 +53,7 @@ impl<'a, M: 'a> Header<'a, M> {
     }
 
     /// A word after the title in the muted text: a count, a path.
-    pub fn sub(mut self, sub: impl Into<String>) -> Self {
+    pub fn subtitle(mut self, sub: impl Into<String>) -> Self {
         self.sub = Some(sub.into());
         self
     }
@@ -136,8 +136,8 @@ impl<'a, M: 'a> Panel<'a, M> {
         self
     }
 
-    pub fn sub(mut self, sub: impl Into<String>) -> Self {
-        self.header = self.header.sub(sub);
+    pub fn subtitle(mut self, sub: impl Into<String>) -> Self {
+        self.header = self.header.subtitle(sub);
         self
     }
 

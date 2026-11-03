@@ -22,7 +22,8 @@
 
 mod data;
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use iced::advanced::Widget;
 use iced::advanced::layout::{self, Layout};
@@ -129,17 +130,49 @@ pub fn draw<R: svg::Renderer>(
 ) {
     // The renderer replaces the colour of every pixel of the glyph with the
     // tint's red, green and blue and ignores its alpha, which is carried by
-    // the opacity instead.
+    // the opacity instead. The turn is in the drawing and not asked of the
+    // renderer: the software renderer that iced falls back on without a GPU
+    // loses a glyph it is asked to rotate.
     renderer.draw_svg(
         svg::Svg {
-            handle: icon.handle(),
+            handle: turned_handle(icon, rotation),
             color: Some(Color { a: 1.0, ..color }),
-            rotation,
+            rotation: Radians(0.0),
             opacity: color.a,
         },
         bounds,
         bounds,
     );
+}
+
+/// The handle of an icon turned by `rotation`, to the nearest degree. Made on
+/// first use and kept: the few turns an interface asks for (a folded
+/// chevron) are drawn every frame.
+fn turned_handle(icon: Icon, rotation: Radians) -> svg::Handle {
+    static TURNED: LazyLock<Mutex<HashMap<(Icon, u16), svg::Handle>>> =
+        LazyLock::new(Mutex::default);
+    let degrees = rotation.0.to_degrees().rem_euclid(360.0).round() as u16 % 360;
+    if degrees == 0 {
+        return icon.handle();
+    }
+    let mut turned = TURNED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    turned
+        .entry((icon, degrees))
+        .or_insert_with(|| {
+            let document = format!(
+                concat!(
+                    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" "##,
+                    r##"stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">"##,
+                    r##"<g transform="rotate({} 8 8)">{}</g></svg>"##
+                ),
+                degrees,
+                icon.elements()
+            );
+            svg::Handle::from_memory(document.into_bytes())
+        })
+        .clone()
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for IconView

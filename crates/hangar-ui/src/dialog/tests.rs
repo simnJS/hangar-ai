@@ -40,7 +40,7 @@ fn the_dialog<'a>() -> Dialog<'a, Msg> {
         ]
         .spacing(8),
     )
-    .sub("~/dev/storefront")
+    .subtitle("~/dev/storefront")
     .action(button::ghost(t, "Cancel").on_press(Msg::Close))
     .action(button::primary(t, "Save").on_press(Msg::Save))
     .on_close(Msg::Close)
