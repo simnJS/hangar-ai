@@ -150,4 +150,94 @@ mod position {
         );
         assert_eq!(at, Point::new(800.0 - 220.0 - 8.0, 600.0 - 180.0 - 8.0));
     }
+
+    #[test]
+    fn a_dock_sits_in_the_bottom_right_corner_a_margin_from_the_edges() {
+        let at = position(
+            Placement::BottomEnd,
+            Rectangle::with_size(Size::ZERO),
+            Size::new(460.0, 270.0),
+            WINDOW,
+            4.0,
+            16.0,
+        );
+        assert_eq!(at, Point::new(800.0 - 460.0 - 16.0, 600.0 - 270.0 - 16.0));
+    }
+
+    #[test]
+    fn a_dock_larger_than_the_window_is_pinned_to_the_margin() {
+        let at = position(
+            Placement::BottomEnd,
+            Rectangle::with_size(Size::ZERO),
+            Size::new(900.0, 700.0),
+            WINDOW,
+            4.0,
+            16.0,
+        );
+        assert_eq!(at, Point::new(16.0, 16.0));
+    }
+}
+
+mod dock_interaction {
+    use iced::widget::{button, container};
+    use iced::{Element, Length};
+
+    use super::*;
+    use crate::testing::{Drive, simulate};
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Msg {
+        Page,
+        Dock,
+        Close,
+    }
+
+    fn page<'a>() -> Element<'a, Msg> {
+        button("page")
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .on_press(Msg::Page)
+            .into()
+    }
+
+    fn panel<'a>() -> Element<'a, Msg> {
+        container(button("dock").width(200).height(100).on_press(Msg::Dock)).into()
+    }
+
+    fn messages(ui: iced_test::Simulator<'_, Msg>) -> Vec<Msg> {
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn the_window_under_a_dock_stays_reachable() {
+        let layer = dock(page(), Some(panel())).on_dismiss(Msg::Close);
+        let mut ui = simulate(Element::from(layer));
+        ui.click_at(40.0, 40.0);
+        assert_eq!(messages(ui), [Msg::Page]);
+    }
+
+    #[test]
+    fn the_dock_itself_takes_its_clicks_in_the_corner() {
+        let layer = dock(page(), Some(panel())).on_dismiss(Msg::Close);
+        let mut ui = simulate(Element::from(layer));
+        // 800 x 600 window, 200 x 100 panel, 16 px from the edges.
+        ui.click_at(800.0 - 16.0 - 100.0, 600.0 - 16.0 - 50.0);
+        assert_eq!(messages(ui), [Msg::Dock]);
+    }
+
+    #[test]
+    fn escape_still_dismisses_a_dock() {
+        let layer = dock(page(), Some(panel())).on_dismiss(Msg::Close);
+        let mut ui = simulate(Element::from(layer));
+        ui.key(iced::keyboard::key::Named::Escape);
+        assert_eq!(messages(ui), [Msg::Close]);
+    }
+
+    #[test]
+    fn a_modal_blocks_the_same_click() {
+        let layer = modal(page(), Some(panel())).on_dismiss(Msg::Close);
+        let mut ui = simulate(Element::from(layer));
+        ui.click_at(40.0, 40.0);
+        assert!(!messages(ui).contains(&Msg::Page));
+    }
 }
