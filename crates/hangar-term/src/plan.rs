@@ -88,7 +88,7 @@ pub(crate) struct RowPlan {
 
 /// Whether a character is laid out inside a run: ASCII and the Latin, Greek
 /// and Cyrillic blocks, which monospace fonts carry at the width of a cell.
-fn flows(c: char) -> bool {
+pub(crate) fn flows(c: char) -> bool {
     matches!(c as u32, 0x20..=0x7e | 0xa0..=0x24f | 0x370..=0x52f)
 }
 
@@ -174,6 +174,9 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
     let offset = grid.display_offset() as i32;
     let line = &grid[Line(row as i32 - offset)];
     let default_bg = terminal.color_of_index(NamedColor::Background as usize);
+    // With a letter spacing the font cannot lay a run out: its advance is no
+    // longer the cell's width, so every character is placed in its own cell.
+    let spaced = terminal.font().is_spaced();
 
     let mut plan = RowPlan::default();
     let mut open: Option<OpenRun> = None;
@@ -309,7 +312,7 @@ pub(crate) fn plan_row(terminal: &Terminal, row: usize) -> RowPlan {
             italic: cell.flags.contains(Flags::ITALIC),
         };
         let wide = cell.flags.contains(Flags::WIDE_CHAR);
-        if wide || zerowidth.is_some() || !flows(c) {
+        if wide || zerowidth.is_some() || spaced || !flows(c) {
             flush(&mut open, &mut plan);
             let mut text = String::from(c);
             if let Some(extra) = zerowidth {
@@ -399,6 +402,24 @@ mod tests {
         assert_eq!(runs(&plan), [(0, "hello world")]);
         assert_eq!(plan.runs[0].columns, 11);
         assert!(plan.backgrounds.is_empty());
+    }
+
+    #[test]
+    fn a_letter_spacing_puts_every_character_in_a_cell_of_its_own() {
+        use crate::font::Font;
+        let mut term = terminal("hello", 40, 3);
+        term.set_font(Font::monospace(14.0).with_letter_spacing(2.0));
+        let plan = plan_row(&term, 0);
+        assert_eq!(
+            runs(&plan),
+            [(0, "h"), (1, "e"), (2, "l"), (3, "l"), (4, "o")]
+        );
+        assert!(plan.runs.iter().all(|r| !r.flowing && r.columns == 1));
+        // A tighter one is spaced all the same, and none is one run again.
+        term.set_font(Font::monospace(14.0).with_letter_spacing(-0.5));
+        assert_eq!(plan_row(&term, 0).runs.len(), 5);
+        term.set_font(Font::monospace(14.0));
+        assert_eq!(runs(&plan_row(&term, 0)), [(0, "hello")]);
     }
 
     #[test]

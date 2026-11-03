@@ -916,3 +916,44 @@ fn a_menu_sees_what_the_click_will_decide_on_and_changes_nothing() {
         Some(SleepLine::Refused(_))
     ));
 }
+
+// ---- The trust question -----------------------------------------------------
+
+/// A terminal whose history still holds Claude Code's question and whose
+/// screen holds `screen`.
+struct History {
+    screen: Vec<String>,
+}
+
+const QUESTION: &str = "Quick safety check: Is this a project you trust? Yes, I trust this folder";
+
+impl crate::services::TerminalAccess for History {
+    fn read_lines(&self, _pane: &PaneId, _n: usize) -> Option<Vec<String>> {
+        Some(vec![QUESTION.into(), "welcome back".into()])
+    }
+
+    fn screen_text(&self, _pane: &PaneId) -> Option<Vec<String>> {
+        Some(self.screen.clone())
+    }
+}
+
+#[test]
+fn the_trust_question_is_looked_for_on_the_screen_and_not_in_the_history() {
+    let pane: PaneId = "p1".into();
+    // Answered, and scrolled off: the history holds it, the screen does not.
+    let answered = History {
+        screen: vec!["welcome back".into()],
+    };
+    assert!(!super::agents::is_trust_prompt(&screen_of(
+        &answered, &pane
+    )));
+    // On the screen, it is asked, wherever on it.
+    let asking = History {
+        screen: vec![String::new(), QUESTION.into(), String::new()],
+    };
+    assert!(super::agents::is_trust_prompt(&screen_of(&asking, &pane)));
+    // A pane with no terminal is not asking.
+    struct Nothing;
+    impl crate::services::TerminalAccess for Nothing {}
+    assert_eq!(screen_of(&Nothing, &pane), "");
+}

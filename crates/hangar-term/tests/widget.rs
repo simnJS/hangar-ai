@@ -15,11 +15,11 @@ use iced::advanced::Shell;
 use iced::advanced::clipboard::{self, Clipboard};
 use iced::advanced::input_method;
 use iced::advanced::layout::{Layout, Limits};
-use iced::advanced::renderer::Headless;
+use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::Tree;
 use iced::keyboard::key::{Code, Named, NativeCode, Physical};
 use iced::keyboard::{self, Key, Location, Modifiers};
-use iced::{Element, Event, Pixels, Point, Size, mouse, window};
+use iced::{Color, Element, Event, Pixels, Point, Rectangle, Size, mouse, window};
 
 type Renderer = iced::Renderer;
 
@@ -96,6 +96,83 @@ impl<'a> Harness<'a> {
             window::Event::RedrawRequested(Instant::now()),
         ))
     }
+
+    /// The cursor the widget asks for with the pointer where it is.
+    fn interaction(&self) -> mouse::Interaction {
+        self.element.as_widget().mouse_interaction(
+            &self.tree,
+            Layout::new(&self.node),
+            self.cursor,
+            &Rectangle::with_size(SIZE),
+            &self.renderer,
+        )
+    }
+
+    /// Moves the pointer, as the window would report it.
+    fn point_at(&mut self, position: Point) {
+        self.cursor = mouse::Cursor::Available(position);
+        self.send(Event::Mouse(mouse::Event::CursorMoved { position }));
+    }
+
+    /// The widget drawn on the software renderer: RGBA, one pixel per logical
+    /// pixel.
+    fn draw(&mut self) -> Frame {
+        self.element.as_widget().draw(
+            &self.tree,
+            &mut self.renderer,
+            &iced::Theme::Dark,
+            &Style {
+                text_color: Color::WHITE,
+            },
+            Layout::new(&self.node),
+            self.cursor,
+            &Rectangle::with_size(SIZE),
+        );
+        let size = Size::new(SIZE.width as u32, SIZE.height as u32);
+        Frame {
+            width: size.width as usize,
+            rgba: self.renderer.screenshot(size, 1.0, Color::BLACK),
+        }
+    }
+}
+
+/// A drawn frame.
+struct Frame {
+    width: usize,
+    rgba: Vec<u8>,
+}
+
+impl Frame {
+    fn at(&self, x: usize, y: usize) -> [u8; 3] {
+        let i = (y * self.width + x) * 4;
+        [self.rgba[i], self.rgba[i + 1], self.rgba[i + 2]]
+    }
+
+    /// The columns of the first `rows` pixel rows that hold anything but
+    /// `background`, grouped into the runs of neighbouring columns: where the
+    /// glyphs of a line of text are.
+    fn ink(&self, rows: usize, background: [u8; 3]) -> Vec<std::ops::Range<usize>> {
+        let mut found: Vec<std::ops::Range<usize>> = Vec::new();
+        for x in 0..self.width {
+            let inked = (0..rows).any(|y| {
+                let p = self.at(x, y);
+                p.iter().zip(&background).any(|(a, b)| a.abs_diff(*b) > 24)
+            });
+            if !inked {
+                continue;
+            }
+            match found.last_mut() {
+                Some(run) if run.end == x => run.end = x + 1,
+                _ => found.push(x..x + 1),
+            }
+        }
+        found
+    }
+}
+
+fn rgb8(color: Color) -> [u8; 3] {
+    let c = color.into_rgba8();
+    [c[0], c[1], c[2]]
 }
 
 fn key(key: Key, text: Option<&str>, modifiers: Modifiers) -> Event {
@@ -500,4 +577,253 @@ fn the_physical_key_of_another_layout_still_binds() {
     });
     let out = h.send(event);
     assert!(matches!(out.actions.as_slice(), [Action::Copy]));
+}
+
+// ---- Links ---------------------------------------------------------------------
+
+/// A terminal that printed a line with a URL in it, with the grid the widget
+/// asked for applied, so that its cells are where the widget measured them.
+fn terminal_with_a_link() -> (Terminal, hangar_term::Metrics) {
+    let mut terminal = focused_terminal(Config::default());
+    terminal.feed(b"see https://hangar.ai/docs now\r\n");
+    let metrics = {
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .into(),
+        );
+        h.frame()
+            .actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Resize(m) => Some(m),
+                _ => None,
+            })
+            .expect("a resize request")
+    };
+    terminal.perform(Action::Resize(metrics));
+    (terminal, metrics)
+}
+
+/// The middle of cell (`column`, `row`).
+fn cell_centre(m: hangar_term::Metrics, column: usize, row: usize) -> Point {
+    Point::new(
+        (column as f32 + 0.5) * m.cell_width,
+        (row as f32 + 0.5) * m.cell_height,
+    )
+}
+
+#[test]
+fn a_link_under_the_pointer_looks_clickable_without_a_key_held() {
+    let (terminal, m) = terminal_with_a_link();
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .into(),
+    );
+    h.frame();
+    h.point_at(cell_centre(m, 1, 0));
+    assert_eq!(h.interaction(), mouse::Interaction::Text, "plain text");
+    h.point_at(cell_centre(m, 12, 0));
+    assert_eq!(
+        h.interaction(),
+        mouse::Interaction::Pointer,
+        "a click opens it"
+    );
+    // Shift is a selection's: the click would not open it, so it does not
+    // promise to.
+    h.send(Event::Keyboard(keyboard::Event::ModifiersChanged(
+        Modifiers::SHIFT,
+    )));
+    assert_eq!(h.interaction(), mouse::Interaction::Text);
+    h.send(Event::Keyboard(keyboard::Event::ModifiersChanged(
+        Modifiers::CTRL | Modifiers::SHIFT,
+    )));
+    assert_eq!(h.interaction(), mouse::Interaction::Pointer);
+}
+
+#[test]
+fn a_link_is_not_clickable_over_a_program_that_has_the_mouse() {
+    let (mut terminal, m) = terminal_with_a_link();
+    terminal.feed(b"\x1b[?1000h\x1b[?1006h");
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .into(),
+    );
+    h.frame();
+    h.point_at(cell_centre(m, 12, 0));
+    assert_eq!(h.interaction(), mouse::Interaction::Idle);
+}
+
+#[test]
+fn a_click_on_a_link_comes_out_of_the_terminal_as_an_open() {
+    let (mut terminal, m) = terminal_with_a_link();
+    let at = cell_centre(m, 12, 0);
+    let actions = {
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .into(),
+        );
+        h.frame();
+        h.point_at(at);
+        let mut actions = h
+            .send(Event::Mouse(mouse::Event::ButtonPressed(
+                mouse::Button::Left,
+            )))
+            .actions;
+        actions.extend(
+            h.send(Event::Mouse(mouse::Event::ButtonReleased(
+                mouse::Button::Left,
+            )))
+            .actions,
+        );
+        actions
+    };
+    let mut opened = Vec::new();
+    for action in actions {
+        for event in terminal.perform(action) {
+            if let TerminalEvent::OpenLink(link) = event {
+                opened.push(link.uri);
+            }
+        }
+    }
+    assert_eq!(opened, ["https://hangar.ai/docs"]);
+}
+
+// ---- Looks ---------------------------------------------------------------------
+
+#[test]
+fn rows_land_on_whole_physical_pixels_at_the_scale_the_app_gives() {
+    // The app hands over the system's scale times the interface zoom; rounding
+    // at 1 instead leaves rows of 18.7 physical pixels at a zoom of 1.1, which
+    // fall on 18 and 19 in turn.
+    for scale in [1.0, 1.1, 1.25, 1.5, 2.0] {
+        let terminal = focused_terminal(Config::default());
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(scale)
+                .into(),
+        );
+        let m = h
+            .frame()
+            .actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Resize(m) => Some(m),
+                _ => None,
+            })
+            .expect("a resize request");
+        let physical = m.cell_height * scale;
+        assert!(
+            (physical - physical.round()).abs() < 1e-3,
+            "{scale}: a row is {physical} physical pixels"
+        );
+    }
+}
+
+#[test]
+fn a_letter_spacing_widens_the_cell_and_leaves_fewer_columns() {
+    let measure = |spacing: f32| {
+        let mut terminal = focused_terminal(Config::default());
+        terminal.set_font(Font::monospace(14.0).with_letter_spacing(spacing));
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .into(),
+        );
+        h.frame()
+            .actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Resize(m) => Some(m),
+                _ => None,
+            })
+            .expect("a resize request")
+    };
+    let plain = measure(0.0);
+    let wide = measure(4.0);
+    let tight = measure(-1.0);
+    assert!((wide.cell_width - plain.cell_width - 4.0).abs() < 0.01);
+    assert!((plain.cell_width - tight.cell_width - 1.0).abs() < 0.01);
+    assert_eq!(wide.cell_height, plain.cell_height, "rows are not touched");
+    assert!(wide.columns < plain.columns && plain.columns < tight.columns);
+    // The grid still fits the box.
+    assert!(wide.columns as f32 * wide.cell_width <= SIZE.width);
+}
+
+#[test]
+fn a_letter_spacing_sets_each_character_apart_by_that_much() {
+    // The distance between the first ink of two neighbouring capitals is a
+    // cell wide, so the spacing is the difference between two terminals.
+    let distance = |spacing: f32| {
+        let mut terminal = focused_terminal(Config::default());
+        terminal.set_font(Font::monospace(14.0).with_letter_spacing(spacing));
+        terminal.feed(b"\x1b[?25lHH");
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .scrollbar(false)
+                .into(),
+        );
+        h.frame();
+        let background = rgb8(terminal.palette().background);
+        let ink = h.draw().ink(10, background);
+        // The crossbar joins the stems of an H, so each H is one run of ink.
+        assert_eq!(ink.len(), 2, "{ink:?}");
+        (ink[1].start as f32 - ink[0].start as f32, ink.len())
+    };
+    let (plain, plain_runs) = distance(0.0);
+    let (wide, wide_runs) = distance(6.0);
+    assert_eq!(plain_runs, wide_runs, "the same glyphs are drawn");
+    assert!((wide - plain - 6.0).abs() <= 1.5, "{plain} -> {wide}");
+}
+
+#[test]
+fn a_dimmed_terminal_lets_what_is_behind_it_show_through() {
+    let terminal = focused_terminal(Config::default());
+    let background = rgb8(terminal.palette().background);
+    let behind = Color::from_rgb8(255, 255, 255);
+
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .into(),
+    );
+    assert_eq!(h.draw().at(700, 400), background);
+
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .dimmed(behind, 0.94)
+            .into(),
+    );
+    let dim = h.draw().at(700, 400);
+    for channel in 0..3 {
+        let expected = background[channel] as f32 * 0.94 + 255.0 * 0.06;
+        assert!(
+            (dim[channel] as f32 - expected).abs() <= 1.5,
+            "{dim:?} against {background:?}"
+        );
+    }
+
+    // Opaque is as if it were not dimmed.
+    let mut h = Harness::new(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .dimmed(behind, 1.0)
+            .into(),
+    );
+    assert_eq!(h.draw().at(700, 400), background);
 }

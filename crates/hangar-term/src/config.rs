@@ -40,7 +40,12 @@ pub struct Config {
     /// Whether the kitty keyboard protocol is offered to programs. With it a
     /// program can tell Shift+Enter from Enter and Ctrl+I from Tab, which the
     /// byte stream of a classic terminal cannot express. Programs only get
-    /// the encoding after asking for it, so leaving it on is safe.
+    /// the encoding after asking for it, but a program that can use it asks
+    /// at once, and from then on gets other bytes than a terminal without
+    /// the protocol sends (Escape, Ctrl+letter and Enter with a modifier all
+    /// become `CSI u`). A terminal that replaces one without it, as Hangar's
+    /// replaced xterm.js, turns it off to keep the keys its programs were
+    /// used to.
     pub kitty_keyboard: bool,
     /// Whether Alt sends an escape before the key, which is how shells and
     /// editors read "Meta". When off, Alt+key sends what the layout produces.

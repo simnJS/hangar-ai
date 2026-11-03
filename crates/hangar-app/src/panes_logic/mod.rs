@@ -1258,11 +1258,7 @@ fn tick(m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
         let mut effects = m.live.panes_logic.poll_pane(&info, idle_ms, &amb);
         if m.live.panes_logic.trust_look_due(&pane, now) {
             // The rows of the screen, read a moment after the last output.
-            let screen = sv
-                .terminals()
-                .read_lines(&pane, TRUST_LOOK_LINES)
-                .map(|lines| lines.join("\n"))
-                .unwrap_or_default();
+            let screen = screen_of(sv.terminals().as_ref(), &pane);
             effects.extend(
                 m.live
                     .panes_logic
@@ -1281,8 +1277,17 @@ fn tick(m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
     Task::batch(tasks)
 }
 
-/// How many lines of the screen the trust question is looked for in.
-const TRUST_LOOK_LINES: usize = 60;
+/// The screen the trust question is looked for in: the rows the program
+/// drew, as the old terminal read them (`viewportY` to `viewportY + rows`),
+/// and not the history behind them. A question answered and scrolled off
+/// would otherwise be found again by every look until the history forgot it,
+/// and the pane would read as waiting for an answer it was given.
+fn screen_of(access: &dyn crate::services::TerminalAccess, pane: &PaneId) -> String {
+    access
+        .screen_text(pane)
+        .map(|rows| rows.join("\n"))
+        .unwrap_or_default()
+}
 
 /// How often the transcripts' context is read.
 const CONTEXT_POLL_MS: u64 = 5000;

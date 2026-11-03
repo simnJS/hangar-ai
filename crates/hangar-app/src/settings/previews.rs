@@ -302,6 +302,43 @@ pub fn font_grid<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
 
 // ---- The terminal -------------------------------------------------------------------------------------
 
+/// `content` with `spacing` pixels after every character (the terminal's
+/// `letterSpacing`; negative tightens). iced sets text with the font's own
+/// advances and has no spacing to add to them, so a spaced line is a row of
+/// its characters, which is also how the terminal draws them: one in each
+/// cell. Without a spacing it is the one text it always was.
+fn spaced_text<'a>(
+    content: &str,
+    size: f32,
+    font: Font,
+    line: iced::widget::text::LineHeight,
+    color: Color,
+    spacing: f32,
+) -> Element<'a, Message> {
+    let glyph = |content: String| {
+        text(content)
+            .size(size)
+            .font(font)
+            .line_height(line)
+            .color(color)
+    };
+    if spacing == 0.0 {
+        return glyph(content.to_owned()).into();
+    }
+    let glyphs: Vec<Element<'a, Message>> = content
+        .chars()
+        .map(|c| glyph(c.to_string()).into())
+        .collect();
+    // The spacing follows the last character too, as it does in a cell (a
+    // tightening one is not given back: a pixel of a preview).
+    container(iced::widget::Row::with_children(glyphs).spacing(spacing))
+        .padding(Padding {
+            right: spacing.max(0.0),
+            ..Padding::ZERO
+        })
+        .into()
+}
+
 /// Typography, cursor and padding, shown on the live theme.
 pub fn terminal_preview<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
     let t = ctx.theme;
@@ -310,8 +347,13 @@ pub fn terminal_preview<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
     let font = font_of(&settings.font_family);
     let size = settings.font_size as f32;
     let line = iced::widget::text::LineHeight::Relative(settings.line_height as f32);
-    // A cell of a monospaced face is about 0.6 of its size wide.
-    let cell = size * 0.6;
+    // The terminal's own reading of the setting (a number of pixels, and a
+    // value that is not one counts as none), so the picture spaces what the
+    // panes will.
+    let spacing = crate::panes::letter_spacing_of(settings);
+    // A cell of a monospaced face is about 0.6 of its size wide, and the
+    // spacing is part of it.
+    let cell = size * 0.6 + spacing;
     let tall = size * 1.1;
     let accent = c.accent;
 
@@ -329,29 +371,11 @@ pub fn terminal_preview<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
                 ..container::Style::default()
             })
     };
-    let prompt = row![
-        text("❯")
-            .size(size)
-            .font(font)
-            .line_height(line)
-            .color(c.success),
-        text(" claude --resume")
-            .size(size)
-            .font(font)
-            .line_height(line)
-            .color(c.fg),
-    ];
-    let dim = text("Hangar.AI · 4 panes · session restored")
-        .size(size)
-        .font(font)
-        .line_height(line)
-        .color(c.fg_subtle);
+    let run = |content: &str, color: Color| spaced_text(content, size, font, line, color, spacing);
+    let prompt = row![run("❯", c.success), run(" claude --resume", c.fg)];
+    let dim = run("Hangar.AI · 4 panes · session restored", c.fg_subtle);
     let last = row![
-        text("0123456789 => != -> |&")
-            .size(size)
-            .font(font)
-            .line_height(line)
-            .color(c.fg),
+        run("0123456789 => != -> |&", c.fg),
         container(cursor).padding(Padding {
             left: 1.0,
             top: size * 0.15,

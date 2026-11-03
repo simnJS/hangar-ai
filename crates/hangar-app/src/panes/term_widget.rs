@@ -11,6 +11,7 @@
 //! progress) lives in its tree state, which is the inner widget's own.
 
 use hangar_term::{KeyPress, TerminalView, terminal_view};
+use iced::Color;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, tree};
@@ -34,6 +35,8 @@ pub struct PaneTerminal<'a> {
     pane: &'a PaneId,
     padding: Padding,
     filter: KeyFilter<'a>,
+    dim: Option<(Color, f32)>,
+    scale: Option<f32>,
 }
 
 /// The terminal of `link`. `filter` says which keys the app's keymap takes
@@ -50,10 +53,26 @@ pub fn pane_terminal<'a>(
         pane,
         padding: Padding::new(padding),
         filter,
+        dim: None,
+        scale: None,
     }
 }
 
 impl PaneTerminal<'_> {
+    /// Draws the terminal `opacity` opaque over `behind` (hangar-term's
+    /// `dimmed`): how a pane that is not the focused one steps back.
+    pub fn dimmed(mut self, behind: Color, opacity: f32) -> Self {
+        self.dim = Some((behind, opacity));
+        self
+    }
+
+    /// The scale the window is drawn at, physical pixels to a logical one,
+    /// for the terminal to put its rows on whole physical pixels with.
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.scale = Some(scale);
+        self
+    }
+
     /// Runs `f` on the inner widget, built over the locked terminal.
     fn with<R>(&self, f: impl FnOnce(&mut Inner<'_>) -> R) -> R {
         let guard = self.link.lock();
@@ -64,6 +83,12 @@ impl PaneTerminal<'_> {
         })
         .padding(self.padding)
         .key_filter(move |press| filter(press));
+        if let Some((behind, opacity)) = self.dim {
+            view = view.dimmed(behind, opacity);
+        }
+        if let Some(scale) = self.scale {
+            view = view.scale_factor(scale);
+        }
         f(&mut view)
     }
 }

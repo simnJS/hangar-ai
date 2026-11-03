@@ -94,6 +94,12 @@ pub struct State {
     /// Output is flowing: the panes are looked at every frame
     /// ([`Msg::Frame`]) rather than woken by each one.
     ticking: bool,
+    /// Each window's scale factor as the system says it (the display's, not
+    /// the interface zoom): what a terminal needs to put its rows on whole
+    /// physical pixels. A window is asked once, when it appears, and
+    /// follows the system after.
+    scales: HashMap<iced::window::Id, f32>,
+    asked_scale: HashSet<iced::window::Id>,
 }
 
 /// The pickers of a header.
@@ -183,6 +189,9 @@ pub enum Msg {
         zone: DropZone,
     },
     Search(PaneId, SearchMsg),
+    /// A window's scale factor, as the system gave it (a window asked for it
+    /// when it appeared, or the system changed it).
+    Rescaled(iced::window::Id, f32),
 }
 
 fn done(message: Message) -> Task<Message> {
@@ -386,6 +395,12 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
                 target,
                 zone,
             });
+            Task::none()
+        }
+        Msg::Rescaled(window, factor) => {
+            if factor.is_finite() && factor > 0.0 {
+                st.scales.insert(window, factor);
+            }
             Task::none()
         }
         Msg::Search(pane, search_msg) => {
@@ -666,7 +681,10 @@ fn open_finder(st: &mut State, pane: &PaneId) -> Task<Message> {
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    let mut subscriptions = vec![st.channel.subscription()];
+    let mut subscriptions = vec![
+        st.channel.subscription(),
+        iced::event::listen_with(system_rescaled),
+    ];
     // While output flows, every frame looks at the panes; a window the
     // system draws no frames for (minimised, hidden) is looked at four times
     // a second, so the pane logic still hears what its agents print.
@@ -685,6 +703,37 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         }));
     }
     Subscription::batch(subscriptions)
+}
+
+/// The system changing a window's scale factor (a move to another display,
+/// a change of the display's scale).
+fn system_rescaled(
+    event: iced::Event,
+    _status: iced::event::Status,
+    window: iced::window::Id,
+) -> Option<Message> {
+    match event {
+        iced::Event::Window(iced::window::Event::Rescaled(factor)) => {
+            Some(Message::Panes(Msg::Rescaled(window, factor)))
+        }
+        _ => None,
+    }
+}
+
+/// The scale a terminal drawn in `window` is at: the system's factor for the
+/// window times the interface zoom the app hands iced on top of it
+/// (`App::scale_factor`), which is the physical pixels in a logical one.
+/// A terminal puts its rows on whole physical pixels, and only this tells it
+/// where they fall: with a zoom of 1.1 on a plain display a row of 17 logical
+/// pixels is 18.7, and rows land on 18 or 19 in turn.
+fn scale_of(st: &State, window: iced::window::Id, zoom: f32) -> f32 {
+    let system = st.scales.get(&window).copied().unwrap_or(1.0);
+    system
+        * if zoom.is_finite() && zoom > 0.0 {
+            zoom
+        } else {
+            1.0
+        }
 }
 
 /// Region `main` takes the focus: the focused pane's terminal takes the
@@ -817,6 +866,13 @@ pub fn terminal_access(st: &State) -> Arc<dyn TerminalAccess> {
 /// A grid's size before it has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
 
+/// The letter spacing a pane's terminal is given from the settings, in
+/// logical pixels: what the settings' terminal preview spaces its text by, so
+/// the picture and the panes agree on a value that is out of range.
+pub fn letter_spacing_of(settings: &crate::state::types::Settings) -> f32 {
+    look::font(settings).letter_spacing
+}
+
 /// How often the panes are looked at while output flows and no frame comes.
 const HIDDEN_FRAME: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -916,6 +972,7 @@ fn signature(st: &State, m: &Model) -> u64 {
         &s.font_family,
         s.font_size.to_bits(),
         s.line_height.to_bits(),
+        s.letter_spacing.to_bits(),
         s.cursor_blink,
         s.scrollback,
         s.padding.to_bits(),
@@ -1064,6 +1121,18 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         }
         tasks.push(controller::role_check(rt, m, locale));
     }
+    // A window that appeared is asked what scale it is at; those that went
+    // are forgotten.
+    st.scales.retain(|id, _| m.live.windows.contains_key(id));
+    st.asked_scale.retain(|id| m.live.windows.contains_key(id));
+    for window in m.live.windows.keys().copied() {
+        if st.asked_scale.insert(window) {
+            tasks.push(
+                iced::window::scale_factor(window)
+                    .map(move |factor| Message::Panes(Msg::Rescaled(window, factor))),
+            );
+        }
+    }
     // The menus are placed from their button on screen, and a hidden
     // workspace has none.
     if let Some((open, _)) = &st.picker {
@@ -1170,6 +1239,49 @@ mod tests {
         // A web link still opens.
         let web = ctrl_click("see https://hangar.ai/docs now\r\n", 8);
         assert!(hangar_term::is_web_link(&web.expect("a link")));
+    }
+
+    #[test]
+    fn a_change_of_the_terminal_look_in_the_settings_brings_the_panes_in_line() {
+        use crate::state::types::{AppState, Settings};
+        let mut m = Model::default();
+        m.hydrate(AppState::default());
+        let st = State::default();
+        let before = signature(&st, &m);
+        // Each of these restyles every terminal in place; the sync that does
+        // it only runs when the signature moves.
+        type Change = fn(&mut Settings);
+        let changes: [(&str, Change); 7] = [
+            ("font size", |s| s.font_size += 1.0),
+            ("line height", |s| s.line_height += 0.1),
+            ("letter spacing", |s| s.letter_spacing += 0.5),
+            ("padding", |s| s.padding += 2.0),
+            ("scrollback", |s| s.scrollback += 100),
+            ("cursor blink", |s| s.cursor_blink = !s.cursor_blink),
+            ("theme", |s| s.theme_id = "tokyo-night".into()),
+        ];
+        for (what, change) in changes {
+            let mut m = Model::default();
+            m.hydrate(AppState::default());
+            m.apply(StoreAction::UpdateSettings(Patch::new(change)));
+            assert_ne!(signature(&st, &m), before, "{what}");
+        }
+    }
+
+    #[test]
+    fn a_terminal_is_drawn_at_the_systems_scale_times_the_interface_zoom() {
+        let mut st = State::default();
+        let window = iced::window::Id::unique();
+        // A window nobody has answered for is at 1, with the zoom on top.
+        assert_eq!(scale_of(&st, window, 1.0), 1.0);
+        assert!((scale_of(&st, window, 1.1) - 1.1).abs() < 1e-6);
+        st.scales.insert(window, 1.5);
+        assert!((scale_of(&st, window, 1.1) - 1.65).abs() < 1e-6);
+        // A zoom that is not a number is none.
+        assert_eq!(scale_of(&st, window, f32::NAN), 1.5);
+        assert_eq!(scale_of(&st, window, 0.0), 1.5);
+        // Another window has its own.
+        assert_eq!(scale_of(&st, iced::window::Id::unique(), 1.0), 1.0);
     }
 
     #[test]

@@ -22,6 +22,14 @@ pub struct Font {
     pub size: f32,
     /// The height of a line as a multiple of `size`.
     pub line_height: f32,
+    /// Extra space after every character, in logical pixels (`letterSpacing`
+    /// of the old terminal; negative tightens). It widens the cell, not the
+    /// glyph: each character is centred in a cell of the font's advance plus
+    /// this, so the columns stay a grid and box drawing, backgrounds and the
+    /// cursor follow. A terminal with a spacing sets every character on its
+    /// own, since the font cannot add it to a run, and so cannot form
+    /// ligatures.
+    pub letter_spacing: f32,
     /// Whether the font's ligatures are applied (`->`, `!=`, `==>` in
     /// programming fonts). Off by default: ligatures change how many glyphs a
     /// run of cells shows, which most people do not want in a terminal, and
@@ -35,6 +43,7 @@ impl Default for Font {
             families: Vec::new(),
             size: 13.0,
             line_height: 1.2,
+            letter_spacing: 0.0,
             ligatures: false,
         }
     }
@@ -76,8 +85,27 @@ impl Font {
             families,
             size,
             line_height,
-            ligatures: false,
+            ..Self::default()
         }
+    }
+
+    /// The same font with `px` of space after every character
+    /// ([`letter_spacing`](Self::letter_spacing)). A value that is not a
+    /// finite number counts as none, and the spacing is kept within what a
+    /// cell can bear: a font cannot be squeezed past a third of its size
+    /// without its glyphs overprinting, nor spread past its own size.
+    pub fn with_letter_spacing(mut self, px: f32) -> Self {
+        self.letter_spacing = if px.is_finite() {
+            px.clamp(-self.size / 3.0, self.size)
+        } else {
+            0.0
+        };
+        self
+    }
+
+    /// Whether characters are set one by one because of a spacing.
+    pub(crate) fn is_spaced(&self) -> bool {
+        self.letter_spacing != 0.0
     }
 
     /// The height of a cell in logical pixels, rounded to a whole number of
@@ -176,6 +204,28 @@ mod tests {
         // physical pixels, so 25 of them, which is 16.666... logical.
         assert_eq!(font.cell_height(1.0), 17.0);
         assert!((font.cell_height(1.5) - 25.0 / 1.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_letter_spacing_stays_within_what_a_cell_can_bear() {
+        let font = Font::monospace(12.0);
+        assert_eq!(font.letter_spacing, 0.0);
+        assert!(!font.is_spaced());
+        assert_eq!(font.clone().with_letter_spacing(1.5).letter_spacing, 1.5);
+        assert!(font.clone().with_letter_spacing(-0.5).is_spaced());
+        // Not a number, or a hand-edited extreme.
+        assert_eq!(
+            font.clone().with_letter_spacing(f32::NAN).letter_spacing,
+            0.0
+        );
+        assert_eq!(
+            font.clone()
+                .with_letter_spacing(f32::INFINITY)
+                .letter_spacing,
+            0.0
+        );
+        assert_eq!(font.clone().with_letter_spacing(-50.0).letter_spacing, -4.0);
+        assert_eq!(font.with_letter_spacing(500.0).letter_spacing, 12.0);
     }
 
     #[test]

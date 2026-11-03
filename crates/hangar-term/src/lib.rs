@@ -86,9 +86,13 @@
 //!   taking the focus away from the terminal.
 //! - **Handle the clipboard** ([`Event::SetClipboard`], and
 //!   [`Event::ClipboardLoad`] if [`Config::osc52`] allows it).
-//! - **Open links** on [`Event::OpenLink`] (a click with Ctrl, or Cmd, held)
-//!   with the system browser. Only web links (`http`, `https`) are ever
-//!   reported, or underlined under the pointer ([`is_web_link`]).
+//! - **Open links** on [`Event::OpenLink`] with the system browser: a click
+//!   on a link (it is reported when the button is let go in the cell it was
+//!   pressed in, so a drag that starts on one still selects), or a click with
+//!   Ctrl or Cmd held, which is also how one is opened over a program that has
+//!   the mouse (with Shift, which takes the mouse back). Only web links
+//!   (`http`, `https`) are ever reported, or underlined under the pointer
+//!   ([`is_web_link`]).
 //!
 //! The rest is optional: [`Event::Notification`] (`OSC 9` and `OSC 777`, which
 //! agents use to say a turn is over), [`Event::Bell`], [`Event::UserInput`]
@@ -157,9 +161,15 @@
 //! pass through: true colour is drawn as it is, and `OSC 4`/`10`/`11`/`12`
 //! override the palette until reset.
 //!
+//! A [`Font`] also has a [`letter_spacing`](Font::letter_spacing), in pixels
+//! after every character, which widens the cell and sets each character in
+//! its own; and [`TerminalView::dimmed`] draws a terminal that is not the one
+//! being typed into a little more transparent.
+//!
 //! The widget needs the window's scale factor to round rows to whole pixels:
-//! pass it with [`TerminalView::scale_factor`], or it uses the last one the
-//! window announced.
+//! pass it with [`TerminalView::scale_factor`] (the display's scale times any
+//! zoom the app applies to the window), or it uses the last one the window
+//! announced, which a widget created after that never hears.
 //!
 //! # Searching
 //!
@@ -201,9 +211,9 @@
 //!
 //! # Not done
 //!
-//! Letter spacing, ligatures beyond the font's own (off by default), the
-//! sixel and kitty graphics protocols, and screen-reader support are not
-//! there. The font's real metrics are not available to a widget, so
+//! Ligatures beyond the font's own (off by default, and not with a letter
+//! spacing), the sixel and kitty graphics protocols, and screen-reader support
+//! are not there. The font's real metrics are not available to a widget, so
 //! underlines sit at where a typical monospace font's baseline is.
 
 mod config;

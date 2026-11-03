@@ -25,6 +25,11 @@ struct Session {
 impl Session {
     /// Runs `program args` in a PTY and feeds a terminal with what it prints.
     fn start(program: &str, args: &[&str]) -> Option<Self> {
+        Self::start_with(Config::default(), program, args)
+    }
+
+    /// The same, with a terminal that behaves as `config` says.
+    fn start_with(config: Config, program: &str, args: &[&str]) -> Option<Self> {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -51,7 +56,7 @@ impl Session {
             let _ = child.wait();
         });
         Some(Self {
-            terminal: Terminal::new(Config::default(), 80, 24),
+            terminal: Terminal::new(config, 80, 24),
             master: pair.master,
             writer,
             output,
@@ -199,4 +204,49 @@ fn bracketed_paste_reaches_a_program_that_asked_for_it() {
     session.handle(events);
     let screen = session.wait_for(|s| s.contains("got="));
     assert!(screen.contains("got=^[200~hi^[201~"), "{screen}");
+}
+
+/// What a program that detects the kitty keyboard protocol the way Claude Code
+/// does reads back: it sends the query (`CSI ? u`), then the device-attributes
+/// request (`CSI c`) every terminal answers, and takes what comes before the
+/// answer to that as the answer to the first.
+const DETECT_KITTY: &str = r#"
+    stty raw -echo
+    printf '\033[?u\033[c'
+    seen=""
+    while :; do
+        byte=$(dd bs=1 count=1 2>/dev/null)
+        seen="$seen$byte"
+        case "$byte" in c) break;; esac
+    done
+    stty sane
+    printf 'seen=%s' "$(printf '%s' "$seen" | tr '\033' '^')"
+"#;
+
+#[test]
+fn a_program_detecting_the_kitty_protocol_is_answered_when_it_is_offered() {
+    let Some(mut session) = Session::start("sh", &["-c", DETECT_KITTY]) else {
+        return;
+    };
+    let screen = session.wait_for(|s| s.contains("seen="));
+    // The flags in force (none yet), then the attributes: it may ask for the
+    // protocol, and the keys it is typed to become `CSI u`.
+    assert!(screen.contains("seen=^[?0u^[?6c"), "{screen}");
+}
+
+#[test]
+fn a_program_detecting_the_kitty_protocol_hears_only_the_attributes_when_it_is_not() {
+    // As in xterm.js, which had no protocol to offer: the query goes
+    // unanswered and the device attributes arrive alone, which is how the
+    // program learns it is on a terminal without it.
+    let config = Config {
+        kitty_keyboard: false,
+        ..Config::default()
+    };
+    let Some(mut session) = Session::start_with(config, "sh", &["-c", DETECT_KITTY]) else {
+        return;
+    };
+    let screen = session.wait_for(|s| s.contains("seen="));
+    assert!(screen.contains("seen=^[?6c"), "{screen}");
+    assert!(!screen.contains("?0u"), "{screen}");
 }
