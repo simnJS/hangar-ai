@@ -2,8 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { en, fr } from "../strings/kitsManage";
-import ui from "../../src-tauri/kit-sdk/kit-ui.js?raw";
-import sdk from "../../src-tauri/kit-sdk/kit.js?raw";
+import ui from "../../crates/hangar-core/kit-sdk/kit-ui.js?raw";
+import sdk from "../../crates/hangar-core/kit-sdk/kit.js?raw";
 import type { KitInfo } from "./kits";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));

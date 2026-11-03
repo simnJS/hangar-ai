@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
+import tokenMap from "../../crates/hangar-core/kit-sdk/tokens.json";
 import { FILL_CONTRAST, TEXT_CONTRAST, THEMES, deriveChromeTokens, type TerminalTheme } from "../themes";
 import { contrastRatio } from "./contrast";
 import { withEffectiveKits, type KitInfo, type KitManifest } from "./kits";

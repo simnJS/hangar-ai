@@ -1,4 +1,4 @@
-import server from "../../src-tauri/src/remote/server.rs?raw";
+import server from "../../crates/hangar-core/src/remote/server.rs?raw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearPaneActivity, getPaneActivity, setPaneActivity, type AgentActivity } from "./agentState";
 import type { ControlDeps } from "./control";

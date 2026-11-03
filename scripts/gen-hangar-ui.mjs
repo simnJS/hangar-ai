@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Writes what Hangar UI takes from Hangar: the generated part of
- * src-tauri/kit-sdk/kit.css and the Inter file beside it (docs/kit-ui.md).
+ * crates/hangar-core/kit-sdk/kit.css and the Inter file beside it (docs/kit-ui.md).
  *
  *   node scripts/gen-hangar-ui.mjs
  *
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const SDK = "src-tauri/kit-sdk";
+const SDK = "crates/hangar-core/kit-sdk";
 export const KIT_CSS = `${SDK}/kit.css`;
 const TOKENS = `${SDK}/tokens.json`;
 const FONT_PACKAGE = "node_modules/@fontsource-variable/inter";

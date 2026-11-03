@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
+import tokenMap from "../../crates/hangar-core/kit-sdk/tokens.json";
 // @ts-expect-error A plain script: no types to have.
 import * as generator from "../../scripts/gen-hangar-ui.mjs";
 import { deriveChromeTokens, FILL_CONTRAST, getTheme, TEXT_CONTRAST, THEMES } from "../themes";
@@ -12,9 +12,9 @@ import { typeset } from "./typography";
 // Read by the generator's own reader, as the sheet is what it writes: Vitest
 // empties a `.css` import, `?raw` or not.
 const sheet: string = generator.readText(generator.KIT_CSS);
-const sdkScript: string = generator.readText("src-tauri/kit-sdk/kit.js");
-const uiScript: string = generator.readText("src-tauri/kit-sdk/kit-ui.js");
-const gallery: string = generator.readText("src-tauri/kit-sdk/gallery.html");
+const sdkScript: string = generator.readText("crates/hangar-core/kit-sdk/kit.js");
+const uiScript: string = generator.readText("crates/hangar-core/kit-sdk/kit-ui.js");
+const gallery: string = generator.readText("crates/hangar-core/kit-sdk/gallery.html");
 const docs: string = generator.readText("docs/kit-ui.md");
 const generated: string = generator.generatedIn(sheet);
 const chromeTokens = (id: string) => deriveChromeTokens(getTheme(id));

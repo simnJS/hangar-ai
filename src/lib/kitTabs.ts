@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
-import tokenMap from "../../src-tauri/kit-sdk/tokens.json";
+import tokenMap from "../../crates/hangar-core/kit-sdk/tokens.json";
 import type { Locale } from "../i18n";
 import { deriveChromeTokens, type TerminalTheme } from "../themes";
 import {
