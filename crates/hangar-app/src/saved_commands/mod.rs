@@ -1,72 +1,336 @@
-//! P7: Saved commands.
+//! P7: saved commands (`lib/savedCommands.ts`, `CommandMenu.tsx`,
+//! `CommandDialog.tsx`; inventory §2.1/6).
 //!
-//! Ports CommandMenu.tsx, CommandDialog.tsx, lib/savedCommands.ts. Read
-//! inventory-frontend.md §2.1/6 and crates/hangar-app/PACKAGES.md. Planned
-//! files of this directory (§8.1): mod, menu, dialog.
-//!
-//! This is the stub P0 handed over: the surface the shell calls, with
-//! placeholder bodies. The directory is this package's own; replace the
-//! bodies, add files, keep the signatures the shell calls.
+//! A pane offers its workspace's saved commands, then the global ones
+//! ([`merged`]); that order is also what `command.runN` counts through, so
+//! the menu and the shortcuts never disagree on which one is the third.
+//! Running one types it into the pane, or every pane for a broadcast one
+//! ([`run`]). The menu hangs off the ⚡ button of the pane header
+//! (`menu.rs`), or off its « … » button when the header folded the ⚡ away;
+//! the dialog writes one down (`dialog.rs`).
+
+mod dialog;
+mod menu;
 
 use iced::{Element, Subscription, Task};
+
+use hangar_core::bridge::bridge_enqueue;
+use hangar_core::pty::pty_write;
 
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Region, placeholder};
-use crate::state::{Model, PaneId, WsId};
+use crate::shell::{Overlay, Region};
+use crate::state::types::SavedCommand;
+use crate::state::{
+    AgentActivity, CommandScope, Model, PaneId, Settings, StoreAction, Workspace, WsId,
+};
+
+pub use dialog::DialogMsg;
 
 /// The package's UI state; lives in `App.pkg.saved_commands`.
 #[derive(Debug, Default)]
-pub struct State;
+pub struct State {
+    /// The pane whose menu is open, and whether it hangs off the « … » button.
+    menu: Option<OpenMenu>,
+    dialog: Option<dialog::Form>,
+}
 
-/// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.saved_commands`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenMenu {
+    pane: PaneId,
+    from_more: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::SavedCommands(Msg)`.
 #[derive(Debug, Clone)]
-pub enum Msg {}
+pub enum Msg {
+    /// The ⚡ button: opens the pane's menu, or closes it.
+    ToggleMenu(PaneId),
+    /// Opens the pane's menu off its « … » button (the pane menu's entry).
+    OpenMenu {
+        pane: PaneId,
+        from_more: bool,
+    },
+    /// Escape, Tab, a press elsewhere.
+    CloseMenu,
+    /// Runs a command of the pane's menu.
+    Run {
+        pane: PaneId,
+        scope: CommandScope,
+        id: String,
+    },
+    Edit {
+        pane: PaneId,
+        id: String,
+    },
+    Remove {
+        pane: PaneId,
+        scope: CommandScope,
+        id: String,
+    },
+    Add(PaneId),
+    Dialog(DialogMsg),
+}
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
-    match msg {}
+    match msg {
+        Msg::ToggleMenu(pane) => {
+            let open = OpenMenu {
+                pane,
+                from_more: false,
+            };
+            st.menu = if st.menu.as_ref() == Some(&open) {
+                None
+            } else {
+                Some(open)
+            };
+            Task::none()
+        }
+        Msg::OpenMenu { pane, from_more } => {
+            st.menu = Some(OpenMenu { pane, from_more });
+            Task::none()
+        }
+        Msg::CloseMenu => close_menu(st, m),
+        Msg::Run { pane, scope, id } => {
+            let back = close_menu(st, m);
+            let Some(ws) = crate::palette::sources::workspace_of(m, &pane) else {
+                return back;
+            };
+            let Some(command) = find(ws, m.settings(), scope, &id).cloned() else {
+                return back;
+            };
+            // A broadcast command goes to the whole workspace, which is the
+            // broadcast field's target spelled once and kept.
+            let panes = if command.broadcast {
+                ws.panes.iter().map(|pane| pane.id.clone()).collect()
+            } else {
+                vec![pane]
+            };
+            Task::batch([back, run(sv, &command, panes)])
+        }
+        Msg::Edit { pane, id } => {
+            st.menu = None;
+            let Some(ws) = crate::palette::sources::workspace_of(m, &pane) else {
+                return Task::none();
+            };
+            Task::done(Message::Intent(Intent::OpenOverlay(
+                Overlay::CommandDialog {
+                    ws: ws.id.clone(),
+                    pane,
+                    edit: Some(id),
+                },
+            )))
+        }
+        Msg::Remove { pane, scope, id } => {
+            if let Some(ws) = crate::palette::sources::workspace_of(m, &pane) {
+                let ws = ws.id.clone();
+                m.apply(StoreAction::RemoveSavedCommand { scope, ws, id });
+            }
+            Task::none()
+        }
+        Msg::Add(pane) => {
+            st.menu = None;
+            let Some(ws) = crate::palette::sources::workspace_of(m, &pane) else {
+                return Task::none();
+            };
+            Task::done(Message::Intent(Intent::OpenOverlay(
+                Overlay::CommandDialog {
+                    ws: ws.id.clone(),
+                    pane,
+                    edit: None,
+                },
+            )))
+        }
+        Msg::Dialog(msg) => dialog::update(&mut st.dialog, m, msg),
+    }
 }
 
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    Subscription::none()
+/// Closing hands the keyboard back to the pane's terminal, wherever it was
+/// in the menu: typing is what comes after a menu, whatever it did.
+fn close_menu(st: &mut State, m: &Model) -> Task<Message> {
+    let Some(open) = st.menu.take() else {
+        return Task::none();
+    };
+    match crate::palette::sources::workspace_of(m, &open.pane) {
+        Some(ws) => Task::done(Message::Intent(Intent::FocusPane {
+            ws: ws.id.clone(),
+            pane: open.pane,
+            terminal: true,
+        })),
+        None => Task::none(),
+    }
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+/// What a pane offers: the workspace's own commands, then the global ones
+/// (`mergeCommands`).
+pub fn merged<'a>(ws: &'a Workspace, settings: &'a Settings) -> Vec<&'a SavedCommand> {
+    ws.saved_commands
+        .iter()
+        .chain(settings.saved_commands.iter())
+        .collect()
+}
+
+/// A saved command where it is kept.
+fn find<'a>(
+    ws: &'a Workspace,
+    settings: &'a Settings,
+    scope: CommandScope,
+    id: &str,
+) -> Option<&'a SavedCommand> {
+    let list = match scope {
+        CommandScope::Workspace => &ws.saved_commands,
+        CommandScope::Global => &settings.saved_commands,
+    };
+    list.iter().find(|command| command.id == id)
+}
+
+/// Where a saved command is kept, by its id: the workspace's list first.
+fn locate(ws: &Workspace, settings: &Settings, id: &str) -> Option<(CommandScope, SavedCommand)> {
+    for scope in [CommandScope::Workspace, CommandScope::Global] {
+        if let Some(command) = find(ws, settings, scope, id) {
+            return Some((scope, command.clone()));
+        }
+    }
     None
 }
 
-/// Every intent, after the shell's own handling of it: `Some` when this
-/// package acted on it.
+/// How a command reaches one pane (`runSavedCommand`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Delivery {
+    /// Typed: with a CR when it runs itself, without when it waits on the
+    /// prompt for the person to finish it.
+    Type(String),
+    /// Handed to the pane's hangar-bridge mod, which submits it once its
+    /// Claude Code is free: typed into a permission dialog, the command
+    /// would answer the dialog.
+    Queue(String),
+}
+
+fn delivery(command: &SavedCommand, activity: Option<(AgentActivity, bool)>) -> Delivery {
+    let busy = matches!(
+        activity,
+        Some((AgentActivity::Working | AgentActivity::Waiting, true))
+    );
+    if command.auto_run && busy {
+        Delivery::Queue(command.command.clone())
+    } else if command.auto_run {
+        Delivery::Type(format!("{}\r", command.command))
+    } else {
+        Delivery::Type(command.command.clone())
+    }
+}
+
+/// Types `command` into every pane of `panes`, off the UI thread.
+pub fn run(sv: &Services, command: &SavedCommand, panes: Vec<PaneId>) -> Task<Message> {
+    // What each pane is doing, as the pane logic last published it.
+    let snapshot = sv.snapshot();
+    let deliveries: Vec<(PaneId, Delivery)> = panes
+        .into_iter()
+        .map(|pane| {
+            let activity = snapshot
+                .activity
+                .get(&pane)
+                .map(|state| (state.activity, state.bridged));
+            let delivery = delivery(command, activity);
+            (pane, delivery)
+        })
+        .collect();
+    let core = sv.core().clone();
+    Task::perform(
+        tokio::task::spawn_blocking(move || {
+            for (pane, delivery) in deliveries {
+                match delivery {
+                    // Nothing to tell anyone when a pane has gone meanwhile:
+                    // the web app dropped these errors as well.
+                    Delivery::Type(data) => {
+                        let _ = pty_write(core.pty(), pane, data);
+                    }
+                    Delivery::Queue(text) => {
+                        bridge_enqueue(core.host(), pane, text, None);
+                    }
+                }
+            }
+        }),
+        |_| Message::Noop,
+    )
+}
+
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    let _ = (st, m);
+    Subscription::none()
+}
+
+/// Saved commands own no region, so the shell never calls this.
+pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+    let _ = (st, m, region);
+    None
+}
+
+/// Sets the dialog up when its overlay opens, drops it when it goes, closes
+/// the menu with the other popovers, and runs `command.runN`.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
-    None
+    let task = match intent {
+        Intent::RunSavedCommand { ws, from, index } => {
+            let workspace = m.workspace(ws)?;
+            let command = (*merged(workspace, m.settings()).get(*index)?).clone();
+            let panes = if command.broadcast {
+                workspace.panes.iter().map(|pane| pane.id.clone()).collect()
+            } else {
+                vec![from.clone()]
+            };
+            Some(run(sv, &command, panes))
+        }
+        Intent::ClosePopovers(_) => {
+            st.menu = None;
+            None
+        }
+        _ => None,
+    };
+    dialog::follow(&mut st.dialog, m);
+    task
 }
 
-/// Every core event, after the shell's own handling of it.
 pub fn on_event(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
+    let _ = (st, m, sv, event);
     None
 }
 
-/// The pane header's saved-commands menu (embedded by the pane header).
+/// The pane header's ⚡ button with its menu (embedded by the pane header).
 pub fn menu_view<'a>(st: &'a State, ctx: Ctx<'a>, pane: &'a PaneId) -> Element<'a, Message> {
-    placeholder::stub_inline(ctx, "saved_commands")
+    menu::bolt(st, ctx, pane)
+}
+
+/// Whether the pane's menu is open off its « … » button, for the pane menu,
+/// which then hangs it off that button.
+pub fn open_from_more(st: &State, pane: &PaneId) -> bool {
+    st.menu
+        .as_ref()
+        .is_some_and(|open| open.from_more && &open.pane == pane)
+}
+
+/// The pane's menu hanging off another button than the ⚡ one: the pane
+/// menu's « … », when the header folded the ⚡ away.
+pub fn menu_under<'a>(
+    st: &'a State,
+    ctx: Ctx<'a>,
+    anchor: impl Into<Element<'a, Message>>,
+    pane: &'a PaneId,
+) -> Element<'a, Message> {
+    menu::dropdown(ctx, anchor, pane, open_from_more(st, pane))
 }
 
 /// `Overlay::CommandDialog`: a saved command, new or edited.
@@ -77,5 +341,89 @@ pub fn dialog_view<'a>(
     pane: &'a PaneId,
     edit: Option<&'a str>,
 ) -> Element<'a, Message> {
-    placeholder::stub_modal(ctx, "saved_commands::dialog_view")
+    let _ = (ws, pane, edit);
+    dialog::view(st.dialog.as_ref(), ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command(text: &str, auto_run: bool) -> SavedCommand {
+        SavedCommand {
+            id: "c".into(),
+            command: text.into(),
+            auto_run,
+            ..SavedCommand::default()
+        }
+    }
+
+    #[test]
+    fn a_command_that_runs_itself_ends_with_a_carriage_return() {
+        assert_eq!(
+            delivery(&command("pnpm test", true), None),
+            Delivery::Type("pnpm test\r".into())
+        );
+        assert_eq!(
+            delivery(&command("git commit -m ", false), None),
+            Delivery::Type("git commit -m ".into())
+        );
+    }
+
+    #[test]
+    fn a_busy_bridged_agent_gets_it_queued_and_a_free_one_typed() {
+        let run = command("pnpm test", true);
+        for busy in [AgentActivity::Working, AgentActivity::Waiting] {
+            assert_eq!(
+                delivery(&run, Some((busy, true))),
+                Delivery::Queue("pnpm test".into())
+            );
+            // Without the mod there is nobody to hold it.
+            assert_eq!(
+                delivery(&run, Some((busy, false))),
+                Delivery::Type("pnpm test\r".into())
+            );
+        }
+        assert_eq!(
+            delivery(&run, Some((AgentActivity::Yours, true))),
+            Delivery::Type("pnpm test\r".into())
+        );
+        // One that waits for the person is typed whatever the agent does.
+        assert_eq!(
+            delivery(&command("ls ", false), Some((AgentActivity::Working, true))),
+            Delivery::Type("ls ".into())
+        );
+    }
+
+    #[test]
+    fn a_pane_offers_its_workspace_commands_then_the_global_ones() {
+        let ws = Workspace {
+            saved_commands: vec![SavedCommand {
+                id: "w".into(),
+                ..SavedCommand::default()
+            }],
+            ..Workspace::default()
+        };
+        let settings = Settings {
+            saved_commands: vec![SavedCommand {
+                id: "g".into(),
+                ..SavedCommand::default()
+            }],
+            ..Settings::default()
+        };
+        let ids: Vec<&str> = merged(&ws, &settings)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(ids, ["w", "g"]);
+        assert_eq!(
+            locate(&ws, &settings, "g").map(|(scope, _)| scope),
+            Some(CommandScope::Global)
+        );
+        assert_eq!(
+            locate(&ws, &settings, "w").map(|(scope, _)| scope),
+            Some(CommandScope::Workspace)
+        );
+        assert!(locate(&ws, &settings, "x").is_none());
+    }
 }

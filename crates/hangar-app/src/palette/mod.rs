@@ -1,70 +1,259 @@
-//! P7: Command palette.
+//! P7: the command palette (`CommandPalette.tsx`, inventory §2.1/5).
 //!
-//! Ports CommandPalette.tsx, lib/paletteMatch.ts. Read inventory-frontend.md
-//! §2.1/5 and crates/hangar-app/PACKAGES.md. Planned files of this directory
-//! (§8.1): mod, matching, sources.
+//! The panel, the matching, the ranking, the keys and the highlight are
+//! hangar-ui's `Palette<T>` and `matching` (the port of `paletteMatch.ts`,
+//! with its tests); this package says what it lists (`sources.rs`) and what
+//! running an entry does.
 //!
-//! This is the stub P0 handed over: the surface the shell calls, with
-//! placeholder bodies. The directory is this package's own; replace the
-//! bodies, add files, keep the signatures the shell calls.
+//! The shell pushes and pops `Overlay::Palette` (`Intent::TogglePalette`);
+//! this package follows it in `on_intent`, building the list when the
+//! palette appears and dropping it when it goes. While it is open the list
+//! is rebuilt on every core event and every intent, so an agent changing
+//! state shows in the open list, as `useWorkspaceActivity` made it.
 
-use iced::{Element, Subscription, Task};
+pub mod sources;
 
+use iced::widget::Space;
+use iced::{Element, Length, Subscription, Task, window};
+
+use hangar_i18n::{Key, Translator, args};
+use hangar_ui::palette::{self as panel, Event, Labels, Palette};
+
+use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Region, placeholder};
+use crate::shell::{Focus, Overlay, Region, View, WindowKind};
 use crate::state::Model;
+
+pub use sources::Target;
 
 /// The package's UI state; lives in `App.pkg.palette`.
 #[derive(Debug, Default)]
-pub struct State;
+pub struct State {
+    open: Option<Open>,
+}
 
-/// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.palette`.
+#[derive(Debug)]
+struct Open {
+    palette: Palette<Target>,
+    labels: Labels,
+    /// The window it was opened in, which is where it lists from and draws.
+    window: window::Id,
+    /// Where the keyboard was, to give it back when the palette is dismissed.
+    opener: Option<Focus>,
+}
+
 #[derive(Debug, Default)]
 pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::Palette(Msg)`.
 #[derive(Debug, Clone)]
-pub enum Msg {}
+pub enum Msg {
+    Ui(panel::Msg),
+}
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
-    match msg {}
+    let _ = sv;
+    let Msg::Ui(msg) = msg;
+    let Some(open) = &mut st.open else {
+        return Task::none();
+    };
+    let (event, task) = open.palette.update(msg);
+    let task = task.map(|msg| Message::Palette(Msg::Ui(msg)));
+    match event {
+        Event::None => task,
+        Event::Dismiss => {
+            let Some(open) = st.open.take() else {
+                return task;
+            };
+            Task::batch([task, close(m).chain(give_back(m, open.opener))])
+        }
+        Event::Run(target) => {
+            st.open = None;
+            Task::batch([task, close(m).chain(run(m, target))])
+        }
+    }
+}
+
+/// Closes the palette, if it is still the overlay on top: Escape may have
+/// closed it already.
+fn close(m: &Model) -> Task<Message> {
+    if m.ui.overlays.last() == Some(&Overlay::Palette) {
+        Task::done(Message::Intent(Intent::CloseOverlay))
+    } else {
+        Task::none()
+    }
+}
+
+/// Dismissed without running anything: the keyboard goes back where it was,
+/// else to the terminal of the focused pane.
+fn give_back(m: &Model, opener: Option<Focus>) -> Task<Message> {
+    match opener {
+        Some(Focus::Terminal(pane)) => focus_terminal(m, pane),
+        Some(Focus::Widget(id)) => iced::widget::operation::focus(id),
+        Some(Focus::Region(region)) => Task::done(Message::Intent(Intent::FocusRegion(region))),
+        None => match focused_pane(m) {
+            Some(pane) => focus_terminal(m, pane),
+            None => Task::none(),
+        },
+    }
+}
+
+fn focused_pane(m: &Model) -> Option<String> {
+    let ws = m.active_workspace()?;
+    m.ui.focus_by_workspace.get(&ws.id).cloned()
+}
+
+fn focus_terminal(m: &Model, pane: String) -> Task<Message> {
+    match sources::workspace_of(m, &pane) {
+        Some(ws) => Task::done(Message::Intent(Intent::FocusPane {
+            ws: ws.id.clone(),
+            pane,
+            terminal: true,
+        })),
+        None => Task::none(),
+    }
+}
+
+/// Closed first, then run: whatever the command opens must not open under
+/// the palette, or be closed with it. A command that does not take the
+/// keyboard somewhere of its own hands it back to the terminal first, so
+/// that one which focuses another pane still wins.
+fn run(m: &Model, target: Target) -> Task<Message> {
+    let intent = |intent| Task::done(Message::Intent(intent));
+    match target {
+        Target::Command(id) => {
+            let back = match focused_pane(m) {
+                Some(pane) if !sources::owns_focus(id) => focus_terminal(m, pane),
+                _ => Task::none(),
+            };
+            back.chain(Task::done(Message::Command(id)))
+        }
+        Target::Pane { ws, pane } => intent(Intent::FocusPane {
+            ws,
+            pane,
+            terminal: true,
+        }),
+        Target::Workspace(ws) => {
+            intent(Intent::ActivateWorkspace(ws)).chain(intent(Intent::SetView(View::Terminals)))
+        }
+        Target::Manager => intent(Intent::OpenManager),
+    }
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    let _ = (st, m);
     Subscription::none()
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
+/// The palette owns no region, so the shell never calls this.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
+    let _ = (st, m, region);
     None
 }
 
-/// Every intent, after the shell's own handling of it: `Some` when this
-/// package acted on it.
+/// Follows the overlay stack: the palette appears, goes, or stays with a list
+/// brought up to date.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
+    let _ = (sv, intent);
+    follow(st, m);
     None
 }
 
-/// Every core event, after the shell's own handling of it.
 pub fn on_event(
     st: &mut State,
     m: &mut Model,
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
+    let _ = (sv, event);
+    if st.open.is_some() {
+        follow(st, m);
+    }
     None
 }
 
-/// `Overlay::Palette`. Lists `commands::available()`.
+fn follow(st: &mut State, m: &Model) {
+    let shown = m.ui.overlays.contains(&Overlay::Palette);
+    match (&mut st.open, shown) {
+        (None, true) => st.open = Some(open(m)),
+        (Some(_), false) => st.open = None,
+        (Some(open), true) => {
+            let items = sources::items(m, open.window, translator(m), &m.live.keymap.index);
+            open.palette.set_items(items);
+        }
+        (None, false) => {}
+    }
+}
+
+fn translator(m: &Model) -> Translator {
+    Translator::new(m.locale())
+}
+
+/// The window commands run in: the one with the system's focus, else the
+/// main one.
+fn window_of(m: &Model) -> Option<window::Id> {
+    m.ui.focused_window.or_else(|| {
+        m.live
+            .windows
+            .iter()
+            .find(|(_, kind)| **kind == WindowKind::Main)
+            .map(|(id, _)| *id)
+    })
+}
+
+fn open(m: &Model) -> Open {
+    let i18n = translator(m);
+    let index = &m.live.keymap.index;
+    let window = window_of(m).unwrap_or_else(window::Id::unique);
+    let keys = index.label(CommandId::ViewPalette);
+    Open {
+        palette: Palette::new(sources::items(m, window, i18n, index)),
+        labels: Labels {
+            placeholder: i18n.t(Key::PalettePlaceholder).into_owned(),
+            navigate: i18n.t(Key::PaletteNavigate).into_owned(),
+            run: i18n.t(Key::PaletteRun).into_owned(),
+            close: i18n.t(Key::PaletteClose).into_owned(),
+            esc: i18n.t(Key::PaletteEscKey).into_owned(),
+            // The palette fills `{query}` itself, as the user types.
+            empty: i18n.t(Key::PaletteEmpty).into_owned(),
+            anywhere: (!keys.is_empty()).then(|| {
+                i18n.t_with(Key::PaletteAnywhere, &args!("keys" => keys))
+                    .into_owned()
+            }),
+        },
+        window,
+        opener: m.ui.focus.clone(),
+    }
+}
+
+/// `Overlay::Palette`: the panel a way down from the top, over a veil that
+/// closes it when pressed and released on.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
-    placeholder::stub_modal(ctx, "palette::view")
+    let Some(open) = &st.open else {
+        return Space::new().into();
+    };
+    // The shell draws the overlays in every window; the palette belongs to
+    // the one it was opened in.
+    if open.window != ctx.window && ctx.model.live.windows.contains_key(&open.window) {
+        return Space::new().into();
+    }
+    let t = ctx.theme;
+    let content = open
+        .palette
+        .view(t, &open.labels)
+        .map(|msg| Message::Palette(Msg::Ui(msg)));
+    panel::over(
+        t,
+        Space::new().width(Length::Fill).height(Length::Fill),
+        Some(content),
+        Message::Palette(Msg::Ui(panel::Msg::Dismiss)),
+    )
+    .into()
 }
