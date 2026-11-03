@@ -220,6 +220,11 @@ pub fn view<'a>(
             // With no room for a few words the state word stands alone, rather
             // than trailing off as "Travaille su…".
             if room >= 30.0 * font_size::UI {
+                // TODO(P4, P12): the task a pane is on (`taskForPane`) needs the
+                // board cache (P12's `board::Live`) and the resolver of an
+                // assignee to a pane (P4's `agent_pane`), neither of which
+                // exists yet, so no pane has a task here and the capsule falls
+                // back on the last answer, as it does for a pane with none.
                 let (words, strong) = match detail(activity, &glance, None) {
                     Detail::None => (None, false),
                     Detail::Tool(tool) => (Some(format!("· {tool}")), false),
