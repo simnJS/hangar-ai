@@ -2,13 +2,18 @@
 //!
 //! Ports Board*.tsx, TaskDialog.tsx,
 //! lib/{board,boardDrag,boardFormat,paneTask}.ts. Read inventory-frontend.md
-//! §2.3/1 and crates/hangar-app/PACKAGES.md. Planned files of this directory
-//! (§8.1): mod, model, cache, view, card, filter, task_dialog, dock, format,
-//! drag.
+//! §2.3/1 and crates/hangar-app/PACKAGES.md.
 //!
-//! This is the stub P0 handed over: the surface the shell calls, with
-//! placeholder bodies. The directory is this package's own; replace the
-//! bodies, add files, keep the signatures the shell calls.
+//! What other packages read is [`Live`] (the boards cache, `cache.rs`) and the
+//! pure helpers re-exported below; the views are filled in by the commits
+//! that follow.
+
+pub mod agent_pane;
+pub mod cache;
+pub mod drag;
+pub mod format;
+pub mod model;
+pub mod pane_task;
 
 use iced::{Element, Subscription, Task};
 
@@ -18,17 +23,15 @@ use crate::services::{CoreEvent, Services};
 use crate::shell::{BoardVariant, Region, placeholder};
 use crate::state::Model;
 
+pub use cache::Live;
+// `model::Task` is not re-exported here: this module already names iced's.
+#[allow(unused_imports)]
+pub use model::{Blocked, Column, TaskComment};
+
 /// The package's UI state; lives in `App.pkg.board`.
 /// Owns region `main` in the board view and region `dock`.
 #[derive(Debug, Default)]
 pub struct State;
-
-/// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.board`.
-/// The boards cache by folder (`board_load` + `CoreEvent::BoardChanged`), which
-/// P6, P9 and P19 read.
-#[derive(Debug, Default)]
-pub struct Live;
 
 /// The package's messages, routed by the shell as `Message::Board(Msg)`.
 #[derive(Debug, Clone)]
