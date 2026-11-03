@@ -40,4 +40,6 @@ pub enum Local {
         view: u32,
         handler: Option<HandlerId>,
     },
+    /// A menu opened, by what it holds, or the open one closed.
+    Menu(Option<u64>),
 }

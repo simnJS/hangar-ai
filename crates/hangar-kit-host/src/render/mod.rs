@@ -1,9 +1,10 @@
 //! A kit's view, drawn with iced: every widget of hangar-kit-ui as Hangar UI
 //! draws it in an HTML tab (docs/kit-ui.md), in the tokens of
-//! [`KitStyle`]. A widget's handler becomes a [`KitMessage::Ui`] naming it
-//! and the view it was drawn from; what Hangar keeps itself (a table's
-//! order, a tree's open nodes, a text area's cursor) becomes a
-//! [`KitMessage::Local`].
+//! [`KitStyle`]. Buttons, icons, tooltips and menus are hangar-ui's, in the
+//! theme in use, so a kit's controls are the window's own. A widget's
+//! handler becomes a [`KitMessage::Ui`] naming it and the view it was drawn
+//! from; what Hangar keeps itself (a table's order, a tree's open nodes, a
+//! text area's cursor, which menu is open) becomes a [`KitMessage::Local`].
 
 mod chart;
 mod icons;
@@ -19,8 +20,9 @@ use iced::widget::text::Wrapping;
 use iced::widget::{
     Column, Row, button, canvas, checkbox, column, container, grid, image, pick_list, progress_bar,
     rich_text, row, rule, scrollable, space, span, svg, text, text_editor, text_input, toggler,
-    tooltip,
 };
+
+use hangar_i18n::Key;
 use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Shadow, Theme,
 };
@@ -34,7 +36,7 @@ use hangar_kit_ui::{
 
 use crate::api::KitApi;
 use crate::message::{KitMessage, Local};
-use crate::tab::{Failure, KitTab, LogEntry};
+use crate::tab::{Failure, FailureKind, KitTab, LogEntry};
 
 pub use style::{KitStyle, Palette};
 
@@ -51,7 +53,26 @@ pub(crate) struct Editor {
 pub(crate) enum Picture {
     Raster(image::Handle),
     Vector(svg::Handle),
-    Missing(String),
+    Missing(Missing),
+}
+
+/// Why an image is not drawn.
+pub(crate) enum Missing {
+    /// From the kit's data folder, for a tab without `data.read`.
+    NeedsData,
+    TooLarge,
+    /// What the app said.
+    Refused(String),
+}
+
+impl Missing {
+    fn said(&self, style: KitStyle) -> String {
+        match self {
+            Missing::NeedsData => style.t(Key::KitsTabNativeImageNeedsData).into_owned(),
+            Missing::TooLarge => style.t(Key::KitsTabNativeImageTooLarge).into_owned(),
+            Missing::Refused(why) => why.clone(),
+        }
+    }
 }
 
 /// What Hangar keeps of a tab's widgets between views.
@@ -61,6 +82,9 @@ pub(crate) struct WidgetState {
     pub toggled: HashMap<(String, String), bool>,
     pub editors: HashMap<String, Editor>,
     pub images: HashMap<ImageSource, Picture>,
+    /// The menu open, by what it holds ([`menu_key`]): a menu has no id, and
+    /// what it lists is what tells one from another across views.
+    pub menu: Option<u64>,
 }
 
 /// More images than this in a tab's cache, and it starts again.
@@ -115,20 +139,20 @@ fn load_image(source: &ImageSource, kit: &dyn KitApi, granted: &[String]) -> Pic
                 .iter()
                 .any(|held| held == api::permission::DATA_READ)
             {
-                return Picture::Missing("This image needs data.read".into());
+                return Picture::Missing(Missing::NeedsData);
             }
             path
         }
     };
     match kit.image(source) {
         Ok(bytes) if bytes.len() > api::limits::BINARY_MAX_BYTES => {
-            Picture::Missing("This image is larger than 10 MB".into())
+            Picture::Missing(Missing::TooLarge)
         }
         Ok(bytes) if path.to_ascii_lowercase().ends_with(".svg") => {
             Picture::Vector(svg::Handle::from_memory(bytes))
         }
         Ok(bytes) => Picture::Raster(image::Handle::from_bytes(bytes)),
-        Err(KitError { message, .. }) => Picture::Missing(message),
+        Err(KitError { message, .. }) => Picture::Missing(Missing::Refused(message)),
     }
 }
 
@@ -146,7 +170,11 @@ impl KitTab {
                 };
                 element(&cx, &view.root)
             }
-            (None, None) => center(state_label(style, Status::Running, "Starting…")),
+            (None, None) => center(state_label(
+                style,
+                Status::Running,
+                style.t(Key::KitsTabNativeStarting),
+            )),
         };
         let p = style.palette;
         container(body)
@@ -305,14 +333,31 @@ fn vertical_line(style: KitStyle) -> El<'static> {
         .into()
 }
 
+/// A kit's icon as hangar-ui has it: the twelve of Hangar UI are among the
+/// window's own. One a newer Hangar has is none here.
+fn ui_icon(icon: ui::Icon) -> Option<hangar_ui::Icon> {
+    use hangar_ui::Icon as Hangar;
+    Some(match icon {
+        ui::Icon::Alert => Hangar::Alert,
+        ui::Icon::Check => Hangar::Check,
+        ui::Icon::ChevronDown => Hangar::ChevronDown,
+        ui::Icon::Close => Hangar::Close,
+        ui::Icon::Copy => Hangar::Copy,
+        ui::Icon::Info => Hangar::Info,
+        ui::Icon::Lock => Hangar::Lock,
+        ui::Icon::More => Hangar::More,
+        ui::Icon::Plus => Hangar::Plus,
+        ui::Icon::Restart => Hangar::Restart,
+        ui::Icon::Search => Hangar::Search,
+        ui::Icon::Updown => Hangar::Updown,
+        ui::Icon::Unknown => return None,
+    })
+}
+
 fn icon_image(style: KitStyle, icon: ui::Icon, size: f32, color: Option<Color>) -> El<'static> {
     let color = color.unwrap_or(style.palette.text);
-    match icons::icon(icon) {
-        Some(handle) => svg(handle)
-            .width(size)
-            .height(size)
-            .style(move |_, _| svg::Style { color: Some(color) })
-            .into(),
+    match ui_icon(icon) {
+        Some(which) => hangar_ui::icon(which, size).color(color).into(),
         None => space().width(size).height(size).into(),
     }
 }
@@ -326,7 +371,7 @@ fn glyph_image(style: KitStyle, status: Status, size: f32) -> El<'static> {
         .into()
 }
 
-fn state_label<'a>(style: KitStyle, status: Status, label: &'a str) -> El<'a> {
+fn state_label<'a>(style: KitStyle, status: Status, label: impl text::IntoFragment<'a>) -> El<'a> {
     row![
         glyph_image(style, status, 10.0),
         plain(style, label, TextSize::Control, Tone::Default).color(style.status_text(status))
@@ -338,16 +383,7 @@ fn state_label<'a>(style: KitStyle, status: Status, label: &'a str) -> El<'a> {
 
 fn with_tooltip<'a>(style: KitStyle, content: El<'a>, words: Option<&'a str>) -> El<'a> {
     let Some(words) = words else { return content };
-    let p = style.palette;
-    tooltip(
-        content,
-        container(plain(style, words, TextSize::Meta, Tone::Default))
-            .padding([4, 8])
-            .style(surface(style, Some(p.float), Some(p.border), 6.0)),
-        tooltip::Position::Top,
-    )
-    .gap(4)
-    .into()
+    hangar_ui::tip::over(style.theme, content, words)
 }
 
 fn scroll_style(style: KitStyle) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
@@ -935,40 +971,15 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             .style(surface(style, Some(background), Some(edge), 6.0))
             .into()
         }
-        ui::Element::Button(w) => {
-            let (size, pad) = if w.small {
-                (TextSize::Small, [2, 8])
-            } else {
-                (TextSize::Control, [4, 11])
-            };
-            let mut parts = Vec::new();
-            if let Some(icon) = w.icon {
-                let color = match w.kind {
-                    ButtonKind::Primary => p.on_accent,
-                    ButtonKind::Danger => p.danger,
-                    ButtonKind::Ghost => p.text_dim,
-                    ButtonKind::Default => p.text,
-                };
-                parts.push(icon_image(style, icon, 14.0, Some(color)));
-            }
-            if let Some(label) = &w.label {
-                parts.push(
-                    text(label.as_str())
-                        .size(size.px())
-                        .font(style.weighted(Weight::Medium, false))
-                        .into(),
-                );
-            }
-            let pressable = button(
-                Row::with_children(parts)
-                    .spacing(6)
-                    .align_y(Alignment::Center),
-            )
-            .padding(if w.label.is_none() { [4, 4] } else { pad })
-            .on_press_maybe(w.on_press.map(|handler| cx.message(handler, None)))
-            .style(button_style(style, w.kind));
-            with_tooltip(style, pressable.into(), w.tooltip.as_deref())
-        }
+        ui::Element::Button(w) => kit_button(
+            style,
+            w.kind,
+            w.label.as_deref(),
+            w.icon,
+            w.small,
+            w.tooltip.as_deref(),
+            w.on_press.map(|handler| cx.message(handler, None)),
+        ),
         ui::Element::Link(w) => {
             button(plain(style, w.label.as_str(), TextSize::Body, Tone::Accent))
                 .padding(0)
@@ -1091,10 +1102,10 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
             ];
             if let (false, Some(handler)) = (w.value.is_empty(), w.on_clear) {
                 parts.push(
-                    button(icon_image(style, ui::Icon::Close, 12.0, Some(p.text_dim)))
-                        .padding(2)
+                    hangar_ui::button::icon_button(style.theme, hangar_ui::Icon::Close)
+                        .small()
+                        .icon_size(12.0)
                         .on_press(cx.message(handler, None))
-                        .style(button_style(style, ButtonKind::Ghost))
                         .into(),
                 );
             }
@@ -1349,7 +1360,7 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
                     .into(),
                 Some(Picture::Missing(why)) => plain(
                     style,
-                    w.description.clone().unwrap_or_else(|| why.clone()),
+                    w.description.clone().unwrap_or_else(|| why.said(style)),
                     TextSize::Small,
                     Tone::Faint,
                 )
@@ -1380,7 +1391,7 @@ fn element<'a>(cx: &Cx<'a>, given: &'a ui::Element) -> El<'a> {
         ui::Element::Bars(w) => bars_widget(style, w),
         ui::Element::Unsupported => plain(
             style,
-            "A part of this tab needs a newer Hangar.",
+            style.t(Key::KitsTabNativeNewer),
             TextSize::Small,
             Tone::Faint,
         )
@@ -1736,16 +1747,12 @@ fn tree_lines<'a>(
         let toggle: El<'a> = if node.children.is_empty() {
             space().width(16).into()
         } else {
-            let chevron = svg(icons::icon(ui::Icon::ChevronDown).expect("an icon"))
-                .width(12)
-                .height(12)
-                .rotation(if open {
+            let chevron = hangar_ui::icon(hangar_ui::Icon::ChevronDown, 12.0)
+                .color(p.text_dim)
+                .rotate(if open {
                     0.0
                 } else {
                     -std::f32::consts::FRAC_PI_2
-                })
-                .style(move |_, _| svg::Style {
-                    color: Some(p.text_dim),
                 });
             button(chevron)
                 .padding(2)
@@ -1804,60 +1811,141 @@ impl fmt::Display for Choice {
     }
 }
 
+/// What tells a menu from another across views, a menu having no id: its
+/// label, icon, kind and lines. A view that keeps the menu as it is keeps it
+/// open; one that changes what it lists closes it.
+pub(crate) fn menu_key(w: &ui::Menu) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    w.label.hash(&mut hasher);
+    format!("{:?}{:?}{}", w.icon, w.kind, w.small).hash(&mut hasher);
+    for entry in &w.items {
+        match entry {
+            ui::MenuEntry::Item(item) => {
+                (&item.id, &item.label, &item.hint).hash(&mut hasher);
+                (item.danger, item.disabled, item.checked).hash(&mut hasher);
+            }
+            ui::MenuEntry::Separator => 0u8.hash(&mut hasher),
+        }
+    }
+    hasher.finish()
+}
+
+/// hangar-ui's menu under its button: separators, disabled lines drawn dim,
+/// a check on the chosen ones, the hint at the end. Open is Hangar's to
+/// keep ([`WidgetState::menu`]); choosing a line, or anything else the
+/// person does in the tab, closes it.
 fn menu_widget<'a>(cx: &Cx<'a>, w: &'a ui::Menu) -> El<'a> {
     let style = cx.style;
-    // A pick list stands for the menu until hangar-ui has one: it opens
-    // under its button, above when there is no room, and closes on a click
-    // outside. A line between groups has no place in it, and a disabled
-    // item is left out rather than drawn dim.
-    let choices: Vec<Choice> = w
-        .items
-        .iter()
-        .filter_map(|entry| match entry {
-            ui::MenuEntry::Item(item) if !item.disabled => {
-                let mut label = String::new();
-                if item.checked {
-                    label.push_str("✓ ");
+    let t = style.theme;
+    let key = menu_key(w);
+    let open = cx.widgets.menu == Some(key);
+    let usable = w.on_select.is_some()
+        && w.items
+            .iter()
+            .any(|entry| matches!(entry, ui::MenuEntry::Item(item) if !item.disabled));
+    let toggle = usable.then(|| KitMessage::Local(Local::Menu((!open).then_some(key))));
+    let anchor = match (&w.label, w.icon) {
+        (None, icon) => kit_button(
+            style,
+            w.kind,
+            None,
+            Some(icon.unwrap_or(ui::Icon::More)),
+            w.small,
+            None,
+            toggle,
+        ),
+        (Some(label), icon) => kit_button(
+            style,
+            w.kind,
+            Some(label.as_str()),
+            icon,
+            w.small,
+            None,
+            toggle,
+        ),
+    };
+    let entries = (open && usable).then(|| {
+        let handler = w.on_select;
+        let seq = cx.seq;
+        w.items
+            .iter()
+            .map(|entry| match entry {
+                ui::MenuEntry::Separator => hangar_ui::menu::separator(),
+                ui::MenuEntry::Item(item) => {
+                    let mut line = hangar_ui::menu::item(item.label.clone()).checked(item.checked);
+                    if let Some(hint) = &item.hint {
+                        line = line.shortcut(hint);
+                    }
+                    if item.danger {
+                        line = line.danger();
+                    }
+                    if item.disabled {
+                        line = line.disabled();
+                    } else if let Some(handler) = handler {
+                        line = line.on_select(KitMessage::Ui(UiEvent {
+                            view: seq,
+                            handler,
+                            value: Some(EventValue::Text(item.id.clone())),
+                        }));
+                    }
+                    line.into()
                 }
-                label.push_str(&item.label);
-                if let Some(hint) = &item.hint {
-                    label.push_str("   ");
-                    label.push_str(hint);
-                }
-                Some(Choice {
-                    id: item.id.clone(),
-                    label,
-                })
+            })
+            .collect()
+    });
+    hangar_ui::menu::dropdown(t, anchor, entries)
+        .on_dismiss(KitMessage::Local(Local::Menu(None)))
+        .into()
+}
+
+/// A kit's button as hangar-ui draws one: its kinds are Hangar UI's, an icon
+/// alone makes a square one, and no handler is a button that cannot be
+/// pressed.
+fn kit_button<'a>(
+    style: KitStyle,
+    kind: ButtonKind,
+    label: Option<&str>,
+    icon: Option<ui::Icon>,
+    small: bool,
+    tip: Option<&str>,
+    on_press: Option<KitMessage>,
+) -> El<'a> {
+    let t = style.theme;
+    let icon = icon.and_then(ui_icon);
+    match (label, icon) {
+        (None, Some(which)) => {
+            let mut square = hangar_ui::button::icon_button(t, which).on_press_maybe(on_press);
+            if small {
+                square = square.small();
             }
-            _ => None,
-        })
-        .collect();
-    let placeholder = w.label.clone().unwrap_or_else(|| "⋯".to_owned());
-    match w.on_select {
-        Some(handler) if !choices.is_empty() => {
-            let seq = cx.seq;
-            pick_list(choices, None::<Choice>, move |choice: Choice| {
-                KitMessage::Ui(UiEvent {
-                    view: seq,
-                    handler,
-                    value: Some(EventValue::Text(choice.id)),
-                })
-            })
-            .placeholder(placeholder)
-            .text_size(if w.small {
-                TextSize::Small.px()
-            } else {
-                TextSize::Control.px()
-            })
-            .padding(if w.small { [2, 8] } else { [4, 11] })
-            .style(picker_style(style, w.kind))
-            .menu_style(menu_style(style))
-            .into()
+            if kind == ButtonKind::Danger {
+                square = square.danger();
+            }
+            if let Some(tip) = tip {
+                square = square.tip(tip);
+            }
+            square.into()
         }
-        _ => button(plain(style, placeholder, TextSize::Small, Tone::Faint))
-            .padding([2, 8])
-            .style(button_style(style, w.kind))
-            .into(),
+        (label, icon) => {
+            let label = label.unwrap_or_default().to_owned();
+            let mut pressable = match kind {
+                ButtonKind::Primary => hangar_ui::button::primary(t, label),
+                ButtonKind::Danger => hangar_ui::button::danger(t, label),
+                ButtonKind::Ghost => hangar_ui::button::ghost(t, label),
+                ButtonKind::Default => hangar_ui::button::secondary(t, label),
+            };
+            if let Some(which) = icon {
+                pressable = pressable.icon(which);
+            }
+            if small {
+                pressable = pressable.small();
+            }
+            if let Some(tip) = tip {
+                pressable = pressable.tip(tip);
+            }
+            pressable.on_press_maybe(on_press).into()
+        }
     }
 }
 
@@ -1960,16 +2048,20 @@ fn bars_widget<'a>(style: KitStyle, w: &'a ui::Bars) -> El<'a> {
 
 fn failure_page<'a>(style: KitStyle, failure: &'a Failure, logs: Vec<&'a LogEntry>) -> El<'a> {
     let p = style.palette;
+    let title = match failure.kind {
+        FailureKind::Load => Key::KitsTabNativeNotStarted,
+        _ => Key::KitsTabNativeStopped,
+    };
     let mut parts: Vec<El<'a>> = vec![
         icon_image(style, ui::Icon::Alert, 18.0, Some(p.text_dim)),
-        strong(style, failure.title(), TextSize::Body).into(),
+        strong(style, style.t(title), TextSize::Body).into(),
+        // Why, in the words of the runtime: what a kit's author needs to read.
         plain(style, failure.reason.as_str(), TextSize::Control, Tone::Dim)
             .align_x(Horizontal::Center)
             .into(),
-        button(text("Start it again").size(TextSize::Control.px()))
-            .padding([4, 11])
+        hangar_ui::button::primary(style.theme, style.t(Key::KitsTabNativeStartAgain))
+            .icon(hangar_ui::Icon::Restart)
             .on_press(KitMessage::Reload)
-            .style(button_style(style, ButtonKind::Primary))
             .into(),
     ];
     // What it said last, which is often why.

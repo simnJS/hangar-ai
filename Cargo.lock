@@ -3113,7 +3113,10 @@ dependencies = [
 name = "hangar-kit-host"
 version = "1.12.1"
 dependencies = [
+ "hangar-i18n",
  "hangar-kit-ui",
+ "hangar-theme",
+ "hangar-ui",
  "iced",
  "serde",
  "serde_json",

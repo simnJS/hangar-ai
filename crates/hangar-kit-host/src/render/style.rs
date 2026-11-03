@@ -1,16 +1,19 @@
-//! The colours and faces kits are drawn in. Hangar UI's tokens, by their
-//! names (docs/kit-ui.md, "Tokens"), with the values of its two default
-//! themes, graphite and github-light (crates/hangar-core/kit-sdk/kit.css).
+//! The colours, faces and words kits are drawn in: Hangar UI's tokens, by
+//! their names (docs/kit-ui.md, "Tokens"), taken from the theme in use, the
+//! window's two faces, and the person's language.
 //!
-//! The app gives a [`KitStyle`] made from the theme in use. Until
-//! hangar-theme exists it can take [`KitStyle::dark`] or
-//! [`KitStyle::light`]; once it does, it fills the same struct from the
-//! theme's chrome tokens, the map tokens.json already writes, and this crate
-//! does not change.
+//! Each `--kit-*` token is the chrome token `crates/hangar-core/kit-sdk/
+//! tokens.json` maps it to, the same that an HTML tab's theme event carries
+//! (hangar-theme's `kit_tokens`); a test holds the two to the same values on
+//! every theme, so a native tab and a page of the same kit look alike.
+
+use std::borrow::Cow;
 
 use iced::{Color, Font, font};
 
+use hangar_i18n::{Key, Locale};
 use hangar_kit_ui::{Status, Surface, Tone};
+use hangar_theme::Theme;
 
 /// Hangar UI's colour tokens, `--kit-*` without the prefix.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,116 +53,145 @@ pub struct Palette {
     pub shadow: Color,
 }
 
-const fn rgb(hex: u32) -> Color {
-    Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
-const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
-    Color::from_rgba8(r, g, b, a)
-}
-
 impl Palette {
-    /// graphite, Hangar's default dark theme.
-    pub const DARK: Palette = Palette {
-        bg: rgb(0x1b1c1f),
-        surface: rgb(0x232426),
-        raised: rgb(0x232426),
-        float: rgb(0x202124),
-        field: rgb(0x121316),
-        well: rgb(0x0c0c0e),
-        hover: rgb(0x252629),
-        selected: rgb(0x313234),
-        seg_track: rgb(0x121316),
-        seg_thumb: rgb(0x3d3e41),
-        text: rgb(0xc8c9ce),
-        text_dim: rgb(0x9c9da2),
-        text_muted: rgb(0x8c8d91),
-        text_faint: rgb(0x898a8e),
-        line: rgba(255, 255, 255, 0.07),
-        border: rgba(255, 255, 255, 0.12),
-        border_hover: rgb(0x414245),
-        sep: rgb(0x090a0b),
-        accent: rgb(0x3e8bff),
-        accent_text: rgb(0x68a5ff),
-        accent_soft: rgba(62, 139, 255, 0.14),
-        accent_ring: rgba(62, 139, 255, 0.45),
-        on_accent: rgb(0x0b192e),
-        focus: rgb(0x68a5ff),
-        ok: rgb(0x5fd27f),
-        ok_fill: rgb(0x5fd27f),
-        warn: rgb(0xe7c06b),
-        warn_fill: rgb(0xe7c06b),
-        danger: rgb(0xff7b72),
-        danger_soft: rgba(255, 123, 114, 0.14),
-        neutral: rgb(0x999a9f),
-        neutral_fill: rgb(0x7b7c80),
-        shadow: rgba(0, 0, 0, 0.45),
-    };
-
-    /// github-light, Hangar's default light theme.
-    pub const LIGHT: Palette = Palette {
-        bg: rgb(0xf5f5f5),
-        surface: rgb(0xffffff),
-        raised: rgb(0xededed),
-        float: rgb(0xf0f0f0),
-        field: rgb(0xffffff),
-        well: rgb(0xffffff),
-        hover: rgb(0xebebeb),
-        selected: rgb(0xdedede),
-        seg_track: rgb(0xdedede),
-        seg_thumb: rgb(0xffffff),
-        text: rgb(0x24292f),
-        text_dim: rgb(0x595c61),
-        text_muted: rgb(0x686c71),
-        text_faint: rgb(0x696c71),
-        line: rgba(0, 0, 0, 0.08),
-        border: rgba(0, 0, 0, 0.14),
-        border_hover: rgb(0xcccccc),
-        sep: rgb(0xdbdbdb),
-        accent: rgb(0x0969da),
-        accent_text: rgb(0x085cc0),
-        accent_soft: rgba(9, 105, 218, 0.14),
-        accent_ring: rgba(9, 105, 218, 0.45),
-        on_accent: rgb(0xffffff),
-        focus: rgb(0x085cc0),
-        ok: rgb(0x116329),
-        ok_fill: rgb(0x116329),
-        warn: rgb(0x9b4708),
-        warn_fill: rgb(0xb45309),
-        danger: rgb(0xba1f29),
-        danger_soft: rgba(186, 31, 41, 0.14),
-        neutral: rgb(0x5c6065),
-        neutral_fill: rgb(0x797b7d),
-        shadow: rgba(0, 0, 0, 0.12),
-    };
-}
-
-/// What a kit's widgets are drawn with: the theme's tokens, and Hangar's two
-/// faces. Copied into every style closure, so it is small and `Copy`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KitStyle {
-    pub palette: Palette,
-    /// The interface's face, Inter.
-    pub font: Font,
-    /// The terminals' face.
-    pub mono: Font,
-}
-
-impl KitStyle {
-    pub fn dark() -> Self {
-        KitStyle {
-            palette: Palette::DARK,
-            font: Font::DEFAULT,
-            mono: Font::MONOSPACE,
+    /// The tokens of `theme`, each from the chrome token `tokens.json` names
+    /// for it.
+    pub fn of(theme: &Theme) -> Palette {
+        let c = &theme.colors;
+        Palette {
+            bg: c.chrome,
+            surface: c.card,
+            raised: c.raised,
+            float: c.chrome_bar,
+            field: c.bg,
+            well: c.bg_sunken,
+            hover: c.surface_hover,
+            selected: c.surface_active,
+            seg_track: c.seg_track,
+            seg_thumb: c.seg_thumb,
+            text: c.fg,
+            text_dim: c.fg_secondary,
+            text_muted: c.fg_muted,
+            text_faint: c.fg_subtle,
+            line: c.line,
+            border: c.line_strong,
+            border_hover: c.border_strong,
+            sep: c.sep,
+            accent: c.accent,
+            accent_text: c.accent_hi,
+            accent_soft: c.accent_soft,
+            accent_ring: c.accent_ring,
+            on_accent: c.accent_fg,
+            focus: c.accent_hi,
+            ok: c.success,
+            ok_fill: c.state_working_fill,
+            warn: c.warning,
+            warn_fill: c.state_waiting_fill,
+            danger: c.danger,
+            danger_soft: c.danger_soft,
+            neutral: c.state_idle,
+            neutral_fill: c.state_idle_fill,
+            shadow: c.shadow,
         }
     }
 
-    pub fn light() -> Self {
+    /// The tokens by their `--kit-*` names, to hold against `kit_tokens`.
+    #[cfg(test)]
+    fn named(&self) -> Vec<(&'static str, Color)> {
+        vec![
+            ("--kit-bg", self.bg),
+            ("--kit-surface", self.surface),
+            ("--kit-raised", self.raised),
+            ("--kit-float", self.float),
+            ("--kit-field", self.field),
+            ("--kit-well", self.well),
+            ("--kit-hover", self.hover),
+            ("--kit-selected", self.selected),
+            ("--kit-seg-track", self.seg_track),
+            ("--kit-seg-thumb", self.seg_thumb),
+            ("--kit-text", self.text),
+            ("--kit-text-dim", self.text_dim),
+            ("--kit-text-muted", self.text_muted),
+            ("--kit-text-faint", self.text_faint),
+            ("--kit-line", self.line),
+            ("--kit-border", self.border),
+            ("--kit-border-hover", self.border_hover),
+            ("--kit-sep", self.sep),
+            ("--kit-accent", self.accent),
+            ("--kit-accent-text", self.accent_text),
+            ("--kit-accent-soft", self.accent_soft),
+            ("--kit-accent-ring", self.accent_ring),
+            ("--kit-on-accent", self.on_accent),
+            ("--kit-focus", self.focus),
+            ("--kit-ok", self.ok),
+            ("--kit-ok-fill", self.ok_fill),
+            ("--kit-warn", self.warn),
+            ("--kit-warn-fill", self.warn_fill),
+            ("--kit-danger", self.danger),
+            ("--kit-danger-soft", self.danger_soft),
+            ("--kit-neutral", self.neutral),
+            ("--kit-neutral-fill", self.neutral_fill),
+            ("--kit-shadow", self.shadow),
+        ]
+    }
+}
+
+/// What a kit's widgets are drawn with: the theme in use (hangar-ui's
+/// widgets take it as it is), its tokens, Hangar's two faces, and the
+/// language of the words Hangar says itself (a tab that could not start, a
+/// widget this Hangar does not know). Copied into every style closure, so it
+/// is small and `Copy`.
+#[derive(Debug, Clone, Copy)]
+pub struct KitStyle {
+    pub theme: &'static Theme,
+    pub palette: Palette,
+    /// The interface's face, Inter.
+    pub font: Font,
+    /// What the interface sets in mono.
+    pub mono: Font,
+    pub locale: Locale,
+}
+
+impl PartialEq for KitStyle {
+    fn eq(&self, other: &Self) -> bool {
+        self.theme.id == other.theme.id
+            && self.palette == other.palette
+            && self.font == other.font
+            && self.mono == other.mono
+            && self.locale == other.locale
+    }
+}
+
+impl KitStyle {
+    /// The style of `theme`, in `locale`.
+    pub fn new(theme: &'static Theme, locale: Locale) -> Self {
         KitStyle {
-            palette: Palette::LIGHT,
-            font: Font::DEFAULT,
-            mono: Font::MONOSPACE,
+            theme,
+            palette: Palette::of(theme),
+            font: hangar_theme::fonts::ui(),
+            mono: hangar_theme::fonts::mono(),
+            locale,
         }
+    }
+
+    /// Graphite, the theme kits are shown in outside Hangar when dark.
+    pub fn dark() -> Self {
+        KitStyle::new(default_theme(true), Locale::En)
+    }
+
+    /// GitHub Light, the same when light.
+    pub fn light() -> Self {
+        KitStyle::new(default_theme(false), Locale::En)
+    }
+
+    pub fn with_locale(mut self, locale: Locale) -> Self {
+        self.locale = locale;
+        self
+    }
+
+    /// A word of Hangar's own, in the tab's language.
+    pub(crate) fn t(&self, key: Key) -> Cow<'static, str> {
+        hangar_i18n::t(self.locale, key)
     }
 
     pub(crate) fn tone(&self, tone: Tone) -> Color {
@@ -230,8 +262,49 @@ impl KitStyle {
     }
 }
 
+/// The theme `tokens.json` names for a page opened outside Hangar, in each
+/// scheme.
+fn default_theme(dark: bool) -> &'static Theme {
+    let (dark_id, light_id) = hangar_theme::kit_default_themes();
+    hangar_theme::by_id_or_default(if dark { dark_id } else { light_id })
+}
+
 impl Default for KitStyle {
     fn default() -> Self {
         KitStyle::dark()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_native_tab_has_the_colours_an_html_tab_of_the_same_theme_is_told() {
+        for theme in hangar_theme::themes() {
+            let told = hangar_theme::kit_tokens(theme);
+            for (name, colour) in Palette::of(theme).named() {
+                let sent = told
+                    .iter()
+                    .find(|(token, _)| token == name)
+                    .map(|(_, value)| value.as_str());
+                assert_eq!(
+                    sent,
+                    Some(hangar_theme::css(colour).as_str()),
+                    "{name} on {}",
+                    theme.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_defaults_are_the_themes_the_kits_stylesheet_holds() {
+        assert_eq!(KitStyle::dark().theme.id, "graphite");
+        assert_eq!(KitStyle::light().theme.id, "github-light");
+        assert_eq!(
+            KitStyle::dark().palette.bg,
+            Color::from_rgb8(0x1b, 0x1c, 0x1f)
+        );
     }
 }
