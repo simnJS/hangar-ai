@@ -41,7 +41,6 @@ use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
 
 use super::Msg;
 use super::hub::{Hub, HubChannel};
-use super::launch;
 use super::look::{self, Look};
 use super::pty_link::PaneLink;
 use super::search::Search;
@@ -652,7 +651,7 @@ pub fn launch_ready(
         .collect();
     // Read when the agent starts: a workspace renamed later shows on the
     // next launch.
-    let name = launch::session_name(&pane.name, &ws.name);
+    let name = crate::state::pane_names::session_name(&pane.name, &ws.name);
     let options = LaunchOptions {
         extra_roots: &ws.extra_roots,
         commands: Some(&settings.agent_commands),

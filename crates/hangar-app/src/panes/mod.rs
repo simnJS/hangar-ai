@@ -13,7 +13,7 @@
 //! | `term_widget` | hangar-term's widget over the locked terminal |
 //! | `grid` | The split grid: slots, boundaries, moves, zoom, file drops |
 //! | `workspace_terminals`, `terminal_pane`, `header`, `search`, `zoom_bar`, `gauge` | The views |
-//! | `status`, `geometry`, `look`, `launch` | Pure logic, with the TS tests |
+//! | `status`, `look` | Pure logic, with the TS tests (the layout tree is `state::layout`) |
 //!
 //! Terminals live in this package's state, never in a window: a hidden
 //! workspace draws nothing, and its panes keep consuming their output, on
@@ -27,11 +27,10 @@
 
 mod controller;
 mod gauge;
-mod geometry;
+
 mod grid;
 mod header;
 mod hub;
-mod launch;
 mod look;
 mod press;
 mod pty_link;
@@ -52,13 +51,13 @@ use iced::futures::stream;
 use iced::widget::Space;
 use iced::{Element, Size, Subscription, Task};
 
-use crate::commands::CommandId;
 use crate::ctx::Ctx;
-use crate::message::{Intent, Message};
+use crate::message::{Intent, Message, TerminalAction};
 use crate::pane_menu::Folded;
 use crate::panes_logic::Msg as Logic;
 use crate::services::{CoreEvent, Services, TerminalAccess};
 use crate::shell::{Focus, Region, View, WindowKind};
+use crate::state::layout;
 use crate::state::live::{PaneMcp, PaneStatus};
 use crate::state::types::{DropZone, Pane, SplitDir};
 use crate::state::{Model, PaneId, Patch, StoreAction, Workspace, WsId};
@@ -67,7 +66,6 @@ use controller::{PaneRt, SpawnReport};
 use hub::{Hub, HubChannel};
 use pty_link::{HubEvent, HubKind};
 
-pub use geometry::Turn;
 pub use search::SearchMsg;
 
 /// The package's UI state; lives in `App.pkg.panes`. The terminals and their
@@ -172,7 +170,7 @@ pub enum Msg {
     CancelQueue(PaneId),
     DismissNote(PaneId, String),
     GridSized(WsId, Size),
-    SetRatio(WsId, Vec<Turn>, f64),
+    SetRatio(WsId, layout::Path, f64),
     Move {
         ws: WsId,
         drag: PaneId,
@@ -180,10 +178,6 @@ pub enum Msg {
         zone: DropZone,
     },
     Search(PaneId, SearchMsg),
-    /// A `terminal.*` command for the focused pane of the focused window:
-    /// what the shell's command table (`commands::run`) sends for clear,
-    /// copy, paste, select all, scroll to the top or the bottom, and find.
-    Command(CommandId),
 }
 
 fn done(message: Message) -> Task<Message> {
@@ -312,14 +306,12 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             m.apply(StoreAction::ClosePane { ws, pane });
             Task::none()
         }
-        Msg::Split(ws, pane, dir) => {
-            let dir = dir.unwrap_or_else(|| preferred_dir(st, m, &ws, &pane));
-            intent(Intent::SplitPane {
-                ws,
-                near: Some(pane),
-                dir: Some(dir),
-            })
-        }
+        // Without a direction the shell splits along the pane's longer side.
+        Msg::Split(ws, pane, dir) => intent(Intent::SplitPane {
+            ws,
+            near: Some(pane),
+            dir,
+        }),
         Msg::ToggleZoom(ws, pane) => {
             let zoomed = m.workspace(&ws).and_then(|w| zoomed_pane(m, w));
             let target = (zoomed.as_deref() != Some(pane.as_str())).then_some(pane);
@@ -352,8 +344,8 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         }
         Msg::SetRatio(ws, path, ratio) => {
             if let Some(workspace) = m.workspace(&ws) {
-                let tree = geometry::normalize_tree(&workspace.panes, workspace.tree.as_ref());
-                let next = geometry::with_ratio(&tree, &path, ratio);
+                let tree = layout::normalize_tree(&workspace.panes, workspace.tree.as_ref());
+                let next = layout::with_ratio(&tree, &path, ratio);
                 m.apply(StoreAction::SetTree(ws, next));
             }
             Task::none()
@@ -384,7 +376,6 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             }
             task
         }
-        Msg::Command(command) => run_command(st, m, command),
     }
 }
 
@@ -539,33 +530,30 @@ fn hub_events(
     Task::batch(tasks)
 }
 
-/// The `terminal.*` commands, for the focused pane of the focused window
-/// (App.tsx:1451, through `terminalRegistry.getTerminal(focused)`).
-fn run_command(st: &mut State, m: &Model, command: CommandId) -> Task<Message> {
-    let Some(pane) = keyboard_pane(m) else {
+/// The `terminal.*` commands on a pane's terminal (App.tsx:1451, through
+/// `terminalRegistry.getTerminal(focused)`), as the command table sends
+/// them (`Intent::TerminalAction`).
+fn terminal_action(st: &mut State, pane: &PaneId, action: TerminalAction) -> Task<Message> {
+    let Some(rt) = st.panes.get_mut(pane) else {
         return Task::none();
     };
-    let Some(rt) = st.panes.get_mut(&pane) else {
-        return Task::none();
-    };
-    match command {
-        CommandId::TerminalClear => rt.link.lock().clear(),
-        CommandId::TerminalCopy => {
+    match action {
+        TerminalAction::Clear => rt.link.lock().clear(),
+        TerminalAction::Copy => {
             if let Some(text) = rt.link.lock().selection_text() {
                 return iced::clipboard::write(text);
             }
         }
-        CommandId::TerminalPaste => {
+        TerminalAction::Paste => {
+            let pane = pane.clone();
             return iced::clipboard::read()
                 .map(move |text| Message::Panes(Msg::Paste(pane.clone(), text)));
         }
-        CommandId::TerminalSelectAll => rt.link.lock().select_all(),
-        CommandId::TerminalScrollTop => {
+        TerminalAction::SelectAll => rt.link.lock().select_all(),
+        TerminalAction::ScrollTop => {
             rt.link.lock().perform(Action::Scroll(ScrollTo::Top));
         }
-        CommandId::TerminalScrollBottom => rt.link.lock().scroll_to_bottom(),
-        CommandId::TerminalFind => return open_finder(st, &pane),
-        _ => {}
+        TerminalAction::ScrollBottom => rt.link.lock().scroll_to_bottom(),
     }
     Task::none()
 }
@@ -609,22 +597,12 @@ pub fn on_intent(
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
+    // The focus and the zoom are the shell's to write (`FocusPane`,
+    // `SetZoom`); the sync below gives the keyboard to the terminal they now
+    // name. A respawn (`PaneRespawned`) is a pane id gone and another come,
+    // which the same sync unmounts and mounts.
     let task = match intent {
-        // The focus and the zoom are the shell's transient state; written
-        // here too, idempotently, so the panes work before the shell's own
-        // handling of these intents lands (P0b, `activateRef`). P4 reads the
-        // same fields to know who is watching which pane.
-        Intent::FocusPane { ws, pane, terminal } => {
-            m.ui.focus_by_workspace.insert(ws.clone(), pane.clone());
-            if *terminal {
-                m.ui.focus = Some(Focus::Terminal(pane.clone()));
-            }
-            Some(Task::none())
-        }
-        Intent::SetZoom { ws, on } => {
-            m.ui.zoom_by_workspace.insert(ws.clone(), *on);
-            Some(Task::none())
-        }
+        Intent::TerminalAction { pane, action } => Some(terminal_action(st, pane, *action)),
         Intent::OpenFinder(pane) => Some(open_finder(st, pane)),
         Intent::Broadcast {
             ws,
@@ -733,20 +711,6 @@ pub fn terminal_access(st: &State) -> Arc<dyn TerminalAccess> {
     st.hub.clone()
 }
 
-/// The direction a split without one takes: along the pane's longer side
-/// (`preferredDir`), for the shell's `SplitPane` handling (P0b).
-pub fn preferred_dir(st: &State, m: &Model, ws: &str, pane: &str) -> SplitDir {
-    let Some(workspace) = m.workspace(ws) else {
-        return SplitDir::Row;
-    };
-    let size = st.grid_sizes.get(ws).copied().unwrap_or(UNMEASURED);
-    let tree = geometry::normalize_tree(&workspace.panes, workspace.tree.as_ref());
-    match geometry::compute_layout(&tree).rect(pane) {
-        Some(rect) => geometry::preferred_dir(rect.width * size.width, rect.height * size.height),
-        None => SplitDir::Row,
-    }
-}
-
 /// A grid's size before it has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
 
@@ -760,7 +724,7 @@ pub(crate) fn focused_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
     {
         return Some(pane.clone());
     }
-    let tree = geometry::normalize_tree(&ws.panes, ws.tree.as_ref());
+    let tree = layout::normalize_tree(&ws.panes, ws.tree.as_ref());
     crate::state::layout::leaf_ids(&tree)
         .into_iter()
         .find(|id| !id.is_empty())
@@ -1014,13 +978,13 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
 /// Republishes what other packages read of the panes.
 fn publish(st: &State, m: &mut Model) {
     let mut reports = HashMap::with_capacity(st.panes.len());
-    let mut layouts: HashMap<&str, geometry::GridLayout> = HashMap::new();
+    let mut layouts: HashMap<&str, layout::GridLayout> = HashMap::new();
     for (id, rt) in &st.panes {
         let Some(ws) = m.workspace(&rt.ws) else {
             continue;
         };
         let layout = layouts.entry(ws.id.as_str()).or_insert_with(|| {
-            geometry::compute_layout(&geometry::normalize_tree(&ws.panes, ws.tree.as_ref()))
+            layout::compute_layout(&layout::normalize_tree(&ws.panes, ws.tree.as_ref()))
         });
         let width = pane_width(st, m, ws, layout, id);
         reports.insert(
@@ -1044,7 +1008,7 @@ fn pane_width(
     st: &State,
     m: &Model,
     ws: &Workspace,
-    layout: &geometry::GridLayout,
+    layout: &layout::GridLayout,
     pane: &str,
 ) -> f32 {
     let size = st.grid_sizes.get(&ws.id).copied().unwrap_or(UNMEASURED);
@@ -1052,6 +1016,7 @@ fn pane_width(
         return size.width;
     }
     layout
-        .rect(pane)
-        .map_or(size.width, |rect| rect.width * size.width)
+        .rects
+        .get(pane)
+        .map_or(size.width, |rect| rect.width as f32 * size.width)
 }

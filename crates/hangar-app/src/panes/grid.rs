@@ -38,8 +38,8 @@ use iced::{
 
 use crate::message::Message;
 use crate::panes::Msg;
-use crate::panes::geometry::{self, Handle, Path, Rect};
 use crate::panes::zoom_bar;
+use crate::state::layout::{self as geometry, Handle, Path, Rect};
 use crate::state::types::{DropZone, SplitDir, SplitNode};
 use crate::state::{PaneId, WsId};
 
@@ -176,10 +176,12 @@ struct State {
 /// A fraction of the grid in pixels, snapped to whole pixels so that panes
 /// meet without seams.
 fn to_px(rect: Rect, bounds: Rectangle) -> Rectangle {
-    let x0 = (bounds.x + rect.left * bounds.width).round();
-    let y0 = (bounds.y + rect.top * bounds.height).round();
-    let x1 = (bounds.x + (rect.left + rect.width) * bounds.width).round();
-    let y1 = (bounds.y + (rect.top + rect.height) * bounds.height).round();
+    let (left, top) = (rect.left as f32, rect.top as f32);
+    let (width, height) = (rect.width as f32, rect.height as f32);
+    let x0 = (bounds.x + left * bounds.width).round();
+    let y0 = (bounds.y + top * bounds.height).round();
+    let x1 = (bounds.x + (left + width) * bounds.width).round();
+    let y1 = (bounds.y + (top + height) * bounds.height).round();
     Rectangle {
         x: x0,
         y: y0,
@@ -231,7 +233,7 @@ impl Grid<'_> {
         self.ids
             .iter()
             .zip(&self.rects)
-            .map(|(id, rect)| live.rect(id).unwrap_or(*rect))
+            .map(|(id, rect)| live.rects.get(*id).copied().unwrap_or(*rect))
             .collect()
     }
 
@@ -453,10 +455,19 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                                     *index != moving && child.bounds().contains(*position)
                                 })
                                 .map(|(index, child)| {
-                                    (
-                                        index,
-                                        geometry::zone_at(child.bounds(), position.x, position.y),
-                                    )
+                                    let b = child.bounds();
+                                    let rect = Rect {
+                                        left: f64::from(b.x),
+                                        top: f64::from(b.y),
+                                        width: f64::from(b.width),
+                                        height: f64::from(b.height),
+                                    };
+                                    let zone = geometry::zone_at(
+                                        rect,
+                                        f64::from(position.x),
+                                        f64::from(position.y),
+                                    );
+                                    (index, zone)
                                 });
                             press.target = target;
                             shell.request_redraw();
@@ -768,20 +779,12 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Grid<'_> {
                 && let Some(slot) = layout.children().nth(*target)
             {
                 let rect = slot.bounds();
-                let hint = geometry::zone_rect(
-                    Rect {
-                        left: 0.0,
-                        top: 0.0,
-                        width: 1.0,
-                        height: 1.0,
-                    },
-                    *zone,
-                );
+                let hint = geometry::zone_rect(Rect::FULL, *zone);
                 let area = Rectangle {
-                    x: rect.x + hint.left * rect.width,
-                    y: rect.y + hint.top * rect.height,
-                    width: hint.width * rect.width,
-                    height: hint.height * rect.height,
+                    x: rect.x + hint.left as f32 * rect.width,
+                    y: rect.y + hint.top as f32 * rect.height,
+                    width: hint.width as f32 * rect.width,
+                    height: hint.height as f32 * rect.height,
                 };
                 fill(renderer, area, c.accent_soft, Some((c.accent, 1.0)));
             }
@@ -963,7 +966,7 @@ mod tests {
             .map(|id| Slot {
                 id,
                 name: id,
-                rect: layout.rect(id).unwrap(),
+                rect: layout.rects[id],
                 element: Space::new().width(Length::Fill).height(Length::Fill).into(),
                 ring: None,
             })

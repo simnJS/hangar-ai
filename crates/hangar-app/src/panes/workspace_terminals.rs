@@ -14,8 +14,9 @@ use crate::message::Message;
 use crate::panes::grid::{Grid, Slot};
 use crate::panes::header::PADDING_X;
 use crate::panes::zoom_bar::{self, Other};
-use crate::panes::{State, focused_pane, geometry, terminal_pane, zoomed_pane};
+use crate::panes::{State, focused_pane, terminal_pane, zoomed_pane};
 use crate::state::Workspace;
+use crate::state::layout as geometry;
 
 /// A grid width to fold headers by before the grid has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
@@ -25,7 +26,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
     let c = &t.colors;
     let tree = geometry::normalize_tree(&ws.panes, ws.tree.as_ref());
     let layout = geometry::compute_layout(&tree);
-    let order: Vec<&str> = layout.order().map(String::as_str).collect();
+    let order: Vec<&str> = layout.order.iter().map(String::as_str).collect();
     let focused = focused_pane(ctx.model, ws);
     let zoomed = zoomed_pane(ctx.model, ws);
     let size = st.grid_sizes.get(&ws.id).copied();
@@ -33,7 +34,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
 
     let mut slots = Vec::with_capacity(ws.panes.len());
     for pane in &ws.panes {
-        let (Some(rect), Some(rt)) = (layout.rect(&pane.id), st.panes.get(&pane.id)) else {
+        let (Some(&rect), Some(rt)) = (layout.rects.get(&pane.id), st.panes.get(&pane.id)) else {
             continue;
         };
         let is_focused = focused.as_deref() == Some(pane.id.as_str());
@@ -41,7 +42,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
         let width = if is_zoomed {
             measured.width
         } else {
-            rect.width * measured.width
+            rect.width as f32 * measured.width
         };
         let element = terminal_pane::view(
             st,
