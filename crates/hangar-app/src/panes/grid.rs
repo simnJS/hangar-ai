@@ -239,6 +239,28 @@ fn is_boundary_chord(key: &Key, physical: Physical, modifiers: Modifiers) -> boo
             .is_some_and(|c| c.eq_ignore_ascii_case(&'r'))
 }
 
+/// Whether `key` is one that changes what the next key means and sends
+/// nothing itself.
+fn is_modifier_key(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::Named(
+            Named::Shift
+                | Named::Control
+                | Named::Alt
+                | Named::AltGraph
+                | Named::Super
+                | Named::Meta
+                | Named::Hyper
+                | Named::CapsLock
+                | Named::NumLock
+                | Named::ScrollLock
+                | Named::Fn
+                | Named::FnLock
+        )
+    )
+}
+
 /// What `key` means to a boundary that runs in direction `dir` and has the
 /// keyboard; `None` for the keys that are not for it.
 fn boundary_key(
@@ -381,6 +403,11 @@ impl Grid<'_> {
             return state.selected.is_some();
         };
         let Some(action) = boundary_key(key, physical, modifiers, handle.dir) else {
+            // Holding a modifier down to press Shift+Arrow is not another
+            // key: it changes nothing, and the terminal has no use for it.
+            if is_modifier_key(key) {
+                return false;
+            }
             // Any other key is the terminal's, and ends this.
             state.selected = None;
             shell.request_redraw();
@@ -1681,6 +1708,20 @@ mod keyboard_tests {
         assert_eq!(moved.len(), 2, "{moved:?}");
         assert!((moved[0] - 0.53).abs() < 1e-6, "{moved:?}");
         assert!((moved[1] - 0.65).abs() < 1e-6, "{moved:?}");
+    }
+
+    #[test]
+    fn holding_shift_down_to_press_an_arrow_does_not_give_the_boundary_back() {
+        let (ws, ids) = ids();
+        let mut ui = simulate(grid(&ws, &ids, None, true));
+        ui.simulate([chord()]);
+        // The press of Shift itself comes first, with the modifier not yet
+        // reported on it.
+        ui.simulate([named(Named::Shift, Modifiers::empty())]);
+        ui.simulate([named(Named::ArrowRight, Modifiers::SHIFT)]);
+        let moved = ratios(ui);
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert!((moved[0] - 0.65).abs() < 1e-6, "{moved:?}");
     }
 
     #[test]
