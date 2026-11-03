@@ -17,6 +17,10 @@ pub mod folder;
 pub mod git_form;
 pub mod hooks;
 mod kits_dialog;
+#[cfg(test)]
+pub(crate) mod testing;
+#[cfg(test)]
+mod tests;
 mod view;
 
 use std::path::PathBuf;
@@ -251,6 +255,18 @@ impl State {
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    match msg {
+        // The two that start or stop a clone are the only ones that reach
+        // the services; the rest of the form is `form`.
+        Msg::Submit if st.source == Source::Git => start_git(st, m, sv),
+        Msg::Stop => stop_clone(st),
+        msg => form(st, m, msg),
+    }
+}
+
+/// Everything the form does that needs no service: it only reads and writes
+/// the dialog's state and the model.
+fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
     let t = Translator::new(m.locale());
     match msg {
         Msg::Source(source) => {
@@ -272,7 +288,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Submit => match st.source {
-            Source::Git => start_git(st, m, sv),
+            // Started by `update`, which has the services.
+            Source::Git => Task::none(),
             Source::Folder => submit_folder(st, m),
         },
         Msg::Cancel => close(m),
@@ -459,7 +476,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::GitDone { job, outcome } => git_done(st, m, t, &job, outcome),
-        Msg::Stop => stop_clone(st, sv),
+        // Started by `update`.
+        Msg::Stop => Task::none(),
 
         // ── the kits dialog ──
         Msg::KitsHook(field, text) => {
@@ -488,9 +506,10 @@ fn schedule_parse(st: &mut State) -> Task<Message> {
         return Task::none();
     }
     let generation = st.git.generation;
-    Task::perform(tokio::time::sleep(PARSE_DELAY), move |()| {
-        Message::WorkspaceDialog(Msg::ParseDue(generation))
-    })
+    Task::perform(
+        async { tokio::time::sleep(PARSE_DELAY).await },
+        move |()| Message::WorkspaceDialog(Msg::ParseDue(generation)),
+    )
 }
 
 /// Splits a `.code-workspace` into the folder to open in and the rest.
@@ -649,12 +668,11 @@ fn git_done(
 
 /// Stops the clone. It may not have started yet (the address is being
 /// checked): ask again briefly.
-fn stop_clone(st: &mut State, sv: &Services) -> Task<Message> {
+fn stop_clone(st: &mut State) -> Task<Message> {
     st.git.cancelled = true;
     let Some(job) = st.git.job.clone() else {
         return Task::none();
     };
-    let _ = sv;
     Task::perform(
         async move {
             for _ in 0..STOP_ATTEMPTS {
@@ -688,12 +706,7 @@ pub fn on_intent(
 ) -> Option<Task<Message>> {
     match intent {
         Intent::OpenOverlay(Overlay::WorkspaceDialog) => {
-            // A clone still running when the dialog was closed shows its
-            // progress again; otherwise the form starts clean.
-            if !st.git.running {
-                st.reset();
-                m.live.workspace_dialog.draft_kits.clear();
-            }
+            opened(st, m);
             Some(Task::none())
         }
         Intent::OpenOverlay(Overlay::KitsDialog(ws)) | Intent::OpenKitsDialog(ws) => {
@@ -712,15 +725,29 @@ pub fn on_event(
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     match event {
-        CoreEvent::GitCloneProgress(progress) => {
-            let job = st.git.job.as_deref()?;
-            if is_progress_of(progress, job) {
-                st.git.progress = Some(progress.clone());
-                return Some(Task::none());
-            }
-            None
-        }
+        CoreEvent::GitCloneProgress(progress) => follow(st, progress).then(Task::none),
         _ => None,
+    }
+}
+
+/// The dialog opens: the form starts clean, unless a clone is still running
+/// from when it was closed, which shows its progress again.
+fn opened(st: &mut State, m: &mut Model) {
+    if !st.git.running {
+        st.reset();
+        m.live.workspace_dialog.draft_kits.clear();
+    }
+}
+
+/// Keeps the progress of the clone this dialog follows (the bus carries every
+/// clone's). Returns whether it was that one's.
+fn follow(st: &mut State, progress: &CloneProgress) -> bool {
+    match st.git.job.as_deref() {
+        Some(job) if is_progress_of(progress, job) => {
+            st.git.progress = Some(progress.clone());
+            true
+        }
+        _ => false,
     }
 }
 
