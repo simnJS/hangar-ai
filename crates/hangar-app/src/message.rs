@@ -43,6 +43,9 @@ pub enum Message {
     NoticeExpired(u64),
     /// The main window as `HANGAR_DEV_SCREENSHOT` asked for it (debug builds).
     DevScreenshot(window::Screenshot),
+    /// What only the frame and the command table ask of the shell
+    /// (`shell::Action`); packages send intents instead.
+    Shell(crate::shell::Action),
     Noop,
 
     // One route per package; each `Msg` lives in its package.
