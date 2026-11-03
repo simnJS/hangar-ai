@@ -222,6 +222,19 @@ pub enum Intent {
     /// (`closeWorkspaceModels`). Sent by the command table, only while the
     /// workspace has some; handled by P15 (`preview`).
     ClosePreviews(WsId),
+    /// A pane was given a new id by `StoreAction::RespawnPane`, whoever
+    /// applied it (a restart, an agent or session change, a control op): its
+    /// shell is to be killed and spawned again under `to`. `keeps_session`
+    /// unless the respawn dropped the session it had (a reset), which is when
+    /// a pane owed a resume while asleep keeps it (`carryResume`). Sent by the
+    /// shell after the update that respawned it; handled by P4
+    /// (`panes_logic`: hibernation) and P5 (`panes`: the PTY).
+    PaneRespawned {
+        ws: WsId,
+        from: PaneId,
+        to: PaneId,
+        keeps_session: bool,
+    },
 }
 
 /// What `Intent::TerminalAction` asks of a pane's terminal.
