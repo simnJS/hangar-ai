@@ -109,7 +109,9 @@ impl Live {
 
     /// Whether this task's delivery is running (`useDelivering`).
     pub fn task_delivering(&self, ws: &str, task: &str) -> bool {
-        self.runs.get(ws).is_some_and(|tasks| tasks.contains_key(task))
+        self.runs
+            .get(ws)
+            .is_some_and(|tasks| tasks.contains_key(task))
     }
 
     /// The deliveries running, for the snapshot (`Snapshot::delivering`).
@@ -246,11 +248,20 @@ pub fn on_intent(
         run.end().await;
         let notice = match landed {
             Ok(()) => Notice::Agent(
-                t_with(locale, Key::NeedsYouLanded, &args!("title" => title.as_str())).into_owned(),
+                t_with(
+                    locale,
+                    Key::NeedsYouLanded,
+                    &args!("title" => title.as_str()),
+                )
+                .into_owned(),
             ),
             Err(error) => Notice::Problem(
-                t_with(locale, Key::NeedsYouLandFailed, &args!("error" => error.as_str()))
-                    .into_owned(),
+                t_with(
+                    locale,
+                    Key::NeedsYouLandFailed,
+                    &args!("error" => error.as_str()),
+                )
+                .into_owned(),
             ),
         };
         Message::Intent(Intent::Notice(notice))

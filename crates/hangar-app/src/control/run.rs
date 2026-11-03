@@ -145,10 +145,11 @@ pub fn caller_workspace<'a>(state: &'a AppState, caller: &Caller) -> Option<&'a 
         .iter()
         .filter(|ws| {
             normalize(&ws.cwd) == here
-                || ws
-                    .panes
-                    .iter()
-                    .any(|pane| pane.cwd.as_deref().is_some_and(|cwd| !cwd.is_empty() && normalize(cwd) == here))
+                || ws.panes.iter().any(|pane| {
+                    pane.cwd
+                        .as_deref()
+                        .is_some_and(|cwd| !cwd.is_empty() && normalize(cwd) == here)
+                })
         })
         .collect();
     if exact.len() > 1 {
@@ -188,7 +189,11 @@ fn workspace_names(state: &AppState) -> String {
         .map(|ws| format!("\"{}\"", ws.name))
         .collect::<Vec<_>>()
         .join(", ");
-    if names.is_empty() { "none".into() } else { names }
+    if names.is_empty() {
+        "none".into()
+    } else {
+        names
+    }
 }
 
 /// The workspace a request is for (`workspaceFor`): the one it names, else

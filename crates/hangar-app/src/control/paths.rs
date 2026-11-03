@@ -36,9 +36,8 @@ pub fn resolve_path(base: &str, path: &str) -> String {
     // `split` gives an empty piece between two separators, where the TS's
     // split on runs of them gave none; the head is kept as it is.
     let head = pieces.remove(0);
-    let head_is_drive = head.len() == 2
-        && head.as_bytes()[0].is_ascii_alphabetic()
-        && head.as_bytes()[1] == b':';
+    let head_is_drive =
+        head.len() == 2 && head.as_bytes()[0].is_ascii_alphabetic() && head.as_bytes()[1] == b':';
     let separator = if unc || head_is_drive { "\\" } else { "/" };
     let mut parts: Vec<&str> = Vec::new();
     for part in pieces {
@@ -167,7 +166,10 @@ mod tests {
             resolve_folder("C:\\dev\\shop", "packages/api"),
             "C:\\dev\\shop\\packages\\api"
         );
-        assert_eq!(resolve_folder("/srv/app/", "./web//src"), "/srv/app/web/src");
+        assert_eq!(
+            resolve_folder("/srv/app/", "./web//src"),
+            "/srv/app/web/src"
+        );
         assert_eq!(resolve_folder("/srv/app", "/tmp"), "/tmp");
     }
 
@@ -176,7 +178,10 @@ mod tests {
         assert_eq!(comparable("\\\\?\\C:\\Dev\\A"), "c:/dev/a");
         assert_eq!(comparable("\\\\?\\UNC\\nas\\share"), "//nas/share");
         assert!(inside("C:\\dev\\hangar\\a.glb", &["c:/DEV/hangar/".into()]));
-        assert!(!inside("C:\\dev\\hangar-wt\\a.glb", &["C:\\dev\\hangar".into()]));
+        assert!(!inside(
+            "C:\\dev\\hangar-wt\\a.glb",
+            &["C:\\dev\\hangar".into()]
+        ));
         assert_eq!(basename("C:\\dev\\a\\m.glb"), "m.glb");
         assert_eq!(basename("/srv/x/"), "x");
     }

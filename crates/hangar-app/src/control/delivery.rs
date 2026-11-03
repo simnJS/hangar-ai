@@ -81,7 +81,9 @@ struct Book {
 
 impl Deliveries {
     fn book(&self) -> std::sync::MutexGuard<'_, Book> {
-        self.book.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.book
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     /// Takes the task for one delivery, unless one is under way: then
@@ -278,10 +280,7 @@ pub fn headline(detail: &str) -> String {
 pub fn event_detail(outcome: &Outcome, target: &str) -> String {
     let files = outcome.files.join(", ");
     let line = match outcome.outcome {
-        Kind::Landed => format!(
-            "landed on {target} ({})",
-            short(outcome.merge.as_deref())
-        ),
+        Kind::Landed => format!("landed on {target} ({})", short(outcome.merge.as_deref())),
         Kind::Ready => format!("ready to land on {target}"),
         Kind::Conflict if !files.is_empty() => format!("conflict with {target} in {files}"),
         Kind::Dirty if outcome.in_checkout => {
@@ -605,7 +604,17 @@ async fn submitted(
         let delivery = delivery.clone();
         let summary = summary.clone();
         async move {
-            deliver(&ws, &pane, &task, &plan, summary, &port, delivery.as_ref(), false).await;
+            deliver(
+                &ws,
+                &pane,
+                &task,
+                &plan,
+                summary,
+                &port,
+                delivery.as_ref(),
+                false,
+            )
+            .await;
         }
     };
     port.spawn(Box::pin(run));
@@ -698,7 +707,9 @@ async fn done_in_folder(
         async move {
             port.sleep(CLOSE_AFTER_MS).await;
             let snapshot = port.snapshot();
-            if workspace_in(&snapshot, &ws).is_some_and(|entry| entry.panes.iter().any(|held| held.id == pane)) {
+            if workspace_in(&snapshot, &ws)
+                .is_some_and(|entry| entry.panes.iter().any(|held| held.id == pane))
+            {
                 let _ = port.apply(ModelCmd::ClosePane { ws, pane }).await;
             }
         }
@@ -1033,7 +1044,10 @@ async fn settle(
             delivery
                 .tell(
                     &worker.id,
-                    &format!("\"{}\" was not landed.\n\n{}", current.title, outcome.detail),
+                    &format!(
+                        "\"{}\" was not landed.\n\n{}",
+                        current.title, outcome.detail
+                    ),
                 )
                 .await?;
         }
@@ -1082,7 +1096,12 @@ async fn settle(
             cwd,
             &task.id,
             HANGAR,
-            &failed_comment(kind.as_str(), failures, MAX_FAILED_DELIVERIES, &outcome.detail),
+            &failed_comment(
+                kind.as_str(),
+                failures,
+                MAX_FAILED_DELIVERIES,
+                &outcome.detail,
+            ),
         )
         .await?;
     // One that was waiting to land and no longer can is worked on again.
@@ -1154,7 +1173,10 @@ pub async fn land_delivery(ws: &Workspace, task_id: &str, port: &Port) -> Result
     // Taken before anything is awaited, like a submission.
     let entry = InFlight {
         workspace_id: ws.id.clone(),
-        worker: pane.as_ref().map(|pane| pane.name.clone()).unwrap_or_default(),
+        worker: pane
+            .as_ref()
+            .map(|pane| pane.name.clone())
+            .unwrap_or_default(),
         since: port.now_ms(),
         landing: true,
     };
@@ -1162,7 +1184,15 @@ pub async fn land_delivery(ws: &Workspace, task_id: &str, port: &Port) -> Result
         return Err("This delivery is being tested or landed already.".into());
     }
     let mut started = false;
-    let landed = landing(ws, task_id, pane.as_ref(), port, delivery.as_ref(), &mut started).await;
+    let landed = landing(
+        ws,
+        task_id,
+        pane.as_ref(),
+        port,
+        delivery.as_ref(),
+        &mut started,
+    )
+    .await;
     if !started {
         let_go(port, task_id).await;
     }
@@ -1206,7 +1236,10 @@ async fn landing(
 ) -> Result<(Pane, Plan, Outcome), String> {
     let board = delivery.board_load(&ws.cwd).await?;
     let Some(task) = board.tasks.into_iter().find(|entry| entry.id == task_id) else {
-        return Err(format!("No task {task_id} on the board of \"{}\".", ws.name));
+        return Err(format!(
+            "No task {task_id} on the board of \"{}\".",
+            ws.name
+        ));
     };
     let Some(pane) = pane else {
         return Err(format!(

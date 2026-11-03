@@ -115,7 +115,8 @@ impl RootGrants {
     /// Grants `roots` to `ws`, forgets the workspaces not in `live`, and
     /// answers what core is to allow: every granted folder, once.
     pub fn grant(&mut self, ws: &str, roots: Vec<String>, live: &[String]) -> Vec<String> {
-        self.granted.retain(|(id, _)| live.iter().any(|kept| kept == id));
+        self.granted
+            .retain(|(id, _)| live.iter().any(|kept| kept == id));
         match self.granted.iter_mut().find(|(id, _)| id == ws) {
             Some((_, held)) => *held = roots,
             None => self.granted.push((ws.to_string(), roots)),
@@ -123,10 +124,7 @@ impl RootGrants {
         let mut seen = Vec::new();
         let mut union = Vec::new();
         for root in self.granted.iter().flat_map(|(_, roots)| roots) {
-            let key = root
-                .replace('\\', "/")
-                .trim_end_matches('/')
-                .to_lowercase();
+            let key = root.replace('\\', "/").trim_end_matches('/').to_lowercase();
             if seen.contains(&key) {
                 continue;
             }
@@ -420,7 +418,12 @@ pub(super) fn shown(port: &Port, ws: &Workspace, by: Option<String>, file: Strin
     }
 }
 
-pub(super) fn closed(port: &Port, ws: &Workspace, by: Option<String>, file: String) -> ControlEvent {
+pub(super) fn closed(
+    port: &Port,
+    ws: &Workspace,
+    by: Option<String>,
+    file: String,
+) -> ControlEvent {
     let workspace = ws.name.clone();
     if on_screen(&port.snapshot().state, ws) {
         ControlEvent::ModelClosed {
@@ -503,7 +506,11 @@ async fn open_model(
             modified_ms: file.modified_ms,
         })
         .await?;
-    announce(port, shown(port, ws, caller.pane_name.clone(), title.clone())).await;
+    announce(
+        port,
+        shown(port, ws, caller.pane_name.clone(), title.clone()),
+    )
+    .await;
 
     let settled = preview.when_settled(&id, SETTLE_MS).await;
     if let Some(entry) = &settled
@@ -582,7 +589,11 @@ pub async fn model_snapshot(
     let preview = preview_of(ws, port).await?;
     let listed = preview.list().await?;
     // The preview's other tabs are not the 3D viewer's to render.
-    let models: Vec<&OpenEntry> = listed.entries.iter().filter(|entry| entry.is_model()).collect();
+    let models: Vec<&OpenEntry> = listed
+        .entries
+        .iter()
+        .filter(|entry| entry.is_model())
+        .collect();
     if models.is_empty() {
         return Err(format!(
             "No 3D model is open in \"{}\". Show one with model_show, then take the snapshot.",
@@ -673,7 +684,11 @@ pub async fn model_close(
     let preview = preview_of(ws, port).await?;
     // Its models only: the preview's other tabs are preview_close's.
     let listed = preview.list().await?;
-    let models: Vec<&OpenEntry> = listed.entries.iter().filter(|entry| entry.is_model()).collect();
+    let models: Vec<&OpenEntry> = listed
+        .entries
+        .iter()
+        .filter(|entry| entry.is_model())
+        .collect();
     // The caller's own workspace's preview only: without a path, every model
     // in it.
     let closing: Vec<&OpenEntry> = match text(args.get("path")) {
@@ -763,7 +778,11 @@ pub async fn preview_show(
             modified_ms: file.modified_ms,
         })
         .await?;
-    announce(port, shown(port, ws, caller.pane_name.clone(), title.clone())).await;
+    announce(
+        port,
+        shown(port, ws, caller.pane_name.clone(), title.clone()),
+    )
+    .await;
     answer.insert("opened".into(), json!(true));
     answer.insert("path".into(), json!(file.path));
     answer.insert("mime".into(), json!(file.mime));

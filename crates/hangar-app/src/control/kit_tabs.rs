@@ -18,12 +18,17 @@ use serde_json::{Value, json};
 use crate::state::Workspace;
 
 use super::panes::announce;
-use super::port::{KitParams, OpenEntry, EntryKind, Port, Showing};
+use super::port::{EntryKind, KitParams, OpenEntry, Port, Showing};
 use super::preview::{closed, preview_of, shown, sight, wake_for};
 use super::run::{caller_workspace, unknown};
 use super::types::{Caller, same, text};
 
-pub async fn control(op: &str, args: &Value, caller: &Caller, port: &Port) -> Result<Value, String> {
+pub async fn control(
+    op: &str,
+    args: &Value,
+    caller: &Caller,
+    port: &Port,
+) -> Result<Value, String> {
     let snapshot = port.snapshot();
     let state = &snapshot.state;
     let Some(ws) = caller_workspace(state, caller) else {
@@ -31,9 +36,8 @@ pub async fn control(op: &str, args: &Value, caller: &Caller, port: &Port) -> Re
             Some(pane) => format!(
                 "The pane \"{pane}\" is in no workspace of Hangar, so there is nowhere to open a tab."
             ),
-            None => {
-                "Could not tell which workspace you are in, so there is nowhere to open a tab.".into()
-            }
+            None => "Could not tell which workspace you are in, so there is nowhere to open a tab."
+                .into(),
         });
     };
     let pane = ws
@@ -125,7 +129,12 @@ fn find_tab<'a>(
     })
 }
 
-async fn open(ws: &Workspace, args: &Value, by: Option<String>, port: &Port) -> Result<Value, String> {
+async fn open(
+    ws: &Workspace,
+    args: &Value,
+    by: Option<String>,
+    port: &Port,
+) -> Result<Value, String> {
     let (kit, tab) = named(args)?;
     let reveal = match args.get("reveal") {
         None => true,
@@ -188,7 +197,12 @@ async fn open(ws: &Workspace, args: &Value, by: Option<String>, port: &Port) -> 
 /// With params, the tab holding those very ones; without, every tab of it
 /// open in the workspace. Nothing is asked of the kit: one taken off the
 /// workspace since can still have its tabs closed.
-async fn close(ws: &Workspace, args: &Value, by: Option<String>, port: &Port) -> Result<Value, String> {
+async fn close(
+    ws: &Workspace,
+    args: &Value,
+    by: Option<String>,
+    port: &Port,
+) -> Result<Value, String> {
     let (kit, tab) = named(args)?;
     let preview = preview_of(ws, port).await?;
     let listing = preview.list().await?;
@@ -206,11 +220,9 @@ async fn close(ws: &Workspace, args: &Value, by: Option<String>, port: &Port) ->
         // Not params at all: nothing holds them.
         Some(_) => Some(String::new()),
     };
-    let (closing, left): (Vec<_>, Vec<_>) = open.into_iter().partition(|(_, params)| {
-        wanted
-            .as_ref()
-            .is_none_or(|key| *key == params_key(params))
-    });
+    let (closing, left): (Vec<_>, Vec<_>) = open
+        .into_iter()
+        .partition(|(_, params)| wanted.as_ref().is_none_or(|key| *key == params_key(params)));
     let left: Vec<&KitParams> = left.into_iter().map(|(_, params)| params).collect();
     if closing.is_empty() {
         return Ok(json!({ "closed": [], "open": left }));

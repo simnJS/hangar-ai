@@ -8,9 +8,9 @@
 
 use serde_json::{Value, json};
 
+use crate::state::Workspace;
 use crate::state::roles::orchestrator_of;
 use crate::state::types::PaneRole;
-use crate::state::Workspace;
 
 use super::panes::tell;
 use super::port::{ModelCmd, Port, Projects, is_asleep, is_open};
@@ -51,7 +51,11 @@ fn project_for(port: &Port, reference: Option<&Value>) -> Result<Workspace, Stri
         .map(|ws| format!("\"{}\"", ws.name))
         .collect::<Vec<_>>()
         .join(", ");
-    let names = if names.is_empty() { "none".into() } else { names };
+    let names = if names.is_empty() {
+        "none".into()
+    } else {
+        names
+    };
     let Some(wanted) = text(reference) else {
         return Err(format!(
             "Name the project (its name or folder). Projects: {names}."
@@ -86,7 +90,12 @@ async fn summaries(port: &Port) -> Result<Projects, String> {
     }
 }
 
-pub async fn control(op: &str, args: &Value, caller: &Caller, port: &Port) -> Result<Value, String> {
+pub async fn control(
+    op: &str,
+    args: &Value,
+    caller: &Caller,
+    port: &Port,
+) -> Result<Value, String> {
     let me = manager_calling(port, caller, op)?;
     match op {
         "project_list" => {

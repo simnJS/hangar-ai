@@ -39,11 +39,11 @@ use hangar_core::git::Worktree;
 use hangar_core::kits::KitInfo;
 use hangar_core::shells::ShellInfo;
 
-pub use crate::services::preview::{BoxFuture, SnapshotAngle};
 use crate::message::GitRequest;
+pub use crate::services::preview::{BoxFuture, SnapshotAngle};
 use crate::state::{
     AgentId, PaneActivity, PaneId, PanePatch, Settings, Snapshot, SplitDir, StoreOutcome,
-    WorkspaceDraft, WorkspacePatch, Workspace, WsId,
+    Workspace, WorkspaceDraft, WorkspacePatch, WsId,
 };
 
 use super::types::{Caller, ControlEvent, OrchestratorEvent};
@@ -162,8 +162,12 @@ pub trait AppPort: Send + Sync + 'static {
     /// The hangar-bridge queue: submitted once the Claude Code session is
     /// idle. `from` names the agent's pane (or `hangar`) when the person did
     /// not write it; `None` reads as the person's own words.
-    fn enqueue(&self, pane: &PaneId, text: &str, from: Option<&str>)
-    -> BoxFuture<Result<(), String>>;
+    fn enqueue(
+        &self,
+        pane: &PaneId,
+        text: &str,
+        from: Option<&str>,
+    ) -> BoxFuture<Result<(), String>>;
 
     fn dir_exists(&self, path: &str) -> BoxFuture<bool>;
 
@@ -219,7 +223,7 @@ pub trait AppPort: Send + Sync + 'static {
     }
 
     /// The flow behind `workspace_create` (P8's `git_flow`).
-    fn from_git(&self) -> Option<Arc<dyn FromGit>> {
+    fn git_flow(&self) -> Option<Arc<dyn FromGit>> {
         None
     }
 
@@ -403,9 +407,9 @@ pub enum Showing {
 impl Showing {
     pub fn path(&self) -> &str {
         match self {
-            Showing::Model { path, .. } | Showing::File { path, .. } | Showing::Kit { path, .. } => {
-                path
-            }
+            Showing::Model { path, .. }
+            | Showing::File { path, .. }
+            | Showing::Kit { path, .. } => path,
         }
     }
 }
@@ -528,8 +532,12 @@ pub trait DeliveryDeps: Send + Sync {
     fn shells(&self) -> Vec<ShellInfo>;
     fn board_load(&self, cwd: &str) -> BoxFuture<Result<Board, String>>;
     /// Tells the board's readers (`board:changed`), as the HTTP API does.
-    fn board_update(&self, cwd: &str, id: &str, patch: TaskPatch)
-    -> BoxFuture<Result<Task, String>>;
+    fn board_update(
+        &self,
+        cwd: &str,
+        id: &str,
+        patch: TaskPatch,
+    ) -> BoxFuture<Result<Task, String>>;
     fn board_comment(
         &self,
         cwd: &str,

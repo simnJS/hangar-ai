@@ -5,13 +5,13 @@
 use serde_json::{Value, json};
 
 use crate::state::types::MAX_PANES;
-use crate::state::{AgentId, AppState, Patch, Pane, Snapshot, SplitDir, Workspace};
+use crate::state::{AgentId, AppState, Pane, Patch, Snapshot, SplitDir, Workspace};
 
+use super::paths::resolve_folder;
 use super::port::{ModelCmd, Port, activity_of, is_asleep, is_open, object, workspace_in};
 use super::run::{
     ASLEEP, agent_arg, caller_workspace, effective_cwd, has_pane, key_sequence, ordered, pane_in,
 };
-use super::paths::resolve_folder;
 use super::types::{Caller, ControlEvent, text};
 
 /// What `pane_read` gives without `lines`, and the most it gives.
@@ -37,7 +37,9 @@ pub async fn announce(port: &Port, event: ControlEvent) {
 
 /// The workspace as it stands now, else as the request first saw it.
 fn current(snapshot: &Snapshot, ws: &Workspace) -> Workspace {
-    workspace_in(snapshot, &ws.id).cloned().unwrap_or_else(|| ws.clone())
+    workspace_in(snapshot, &ws.id)
+        .cloned()
+        .unwrap_or_else(|| ws.clone())
 }
 
 pub fn workspace_list(snapshot: &Snapshot, caller: &Caller) -> Value {
@@ -78,7 +80,10 @@ pub async fn pane_list(ws: &Workspace, caller: &Caller, port: &Port) -> Result<V
             ("cwd", json!(effective_cwd(ws, pane))),
             ("running", json!(running)),
             ("activity", activity.unwrap_or(Value::Null)),
-            ("you", json!(caller.pane_id.as_deref() == Some(pane.id.as_str()))),
+            (
+                "you",
+                json!(caller.pane_id.as_deref() == Some(pane.id.as_str())),
+            ),
             ("id", json!(pane.id)),
         ]));
     }
@@ -141,7 +146,9 @@ pub async fn pane_create(
         None => None,
     };
     let model = near.or_else(|| ordered(ws).last().copied());
-    let final_agent = agent.or(model.map(|pane| pane.agent)).unwrap_or(AgentId::Shell);
+    let final_agent = agent
+        .or(model.map(|pane| pane.agent))
+        .unwrap_or(AgentId::Shell);
     let prompt = args
         .get("prompt")
         .and_then(Value::as_str)
@@ -160,11 +167,13 @@ pub async fn pane_create(
             ws: ws.id.clone(),
             agent,
             near: near.map(|pane| pane.id.clone()),
-            dir: Some(if args.get("direction").and_then(Value::as_str) == Some("down") {
-                SplitDir::Col
-            } else {
-                SplitDir::Row
-            }),
+            dir: Some(
+                if args.get("direction").and_then(Value::as_str) == Some("down") {
+                    SplitDir::Col
+                } else {
+                    SplitDir::Row
+                },
+            ),
             cwd: cwd.clone(),
             name: name.clone(),
             init: None,

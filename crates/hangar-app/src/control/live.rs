@@ -29,9 +29,9 @@ use crate::state::{PaneId, Snapshot, WsId};
 use super::Msg;
 use super::delivery::Deliveries;
 use super::port::{
-    AppPort, BoxFuture, CmdOut, DeliveryDeps, EntryKind, EntryStatus, FromGit, Hook,
-    KitTabCatalog, MobileHooks, ModelCmd, ModelFileInfo, OpenEntry, OrchestrationHooks,
-    PaneTerminal, PreviewHost, PreviewHosts, PreviewListing, Showing, SnapshotAngle, workspace_in,
+    AppPort, BoxFuture, CmdOut, DeliveryDeps, EntryKind, EntryStatus, FromGit, Hook, KitTabCatalog,
+    MobileHooks, ModelCmd, ModelFileInfo, OpenEntry, OrchestrationHooks, PaneTerminal, PreviewHost,
+    PreviewHosts, PreviewListing, Showing, SnapshotAngle, workspace_in,
 };
 use super::preview::{RootGrants, model_format_of};
 
@@ -69,7 +69,9 @@ impl Shared {
     }
 
     fn hooks(&self) -> std::sync::RwLockReadGuard<'_, Hooks> {
-        self.hooks.read().unwrap_or_else(|poison| poison.into_inner())
+        self.hooks
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 }
 
@@ -128,9 +130,9 @@ impl AppPort for LivePort {
     fn write(&self, pane: &PaneId, data: &str) -> BoxFuture<Result<(), String>> {
         let pty = self.services.core().pty().clone();
         let (pane, data) = (pane.clone(), data.to_string());
-        Box::pin(async move {
-            blocking(move || hangar_core::pty::pty_write(&pty, pane, data)).await?
-        })
+        Box::pin(
+            async move { blocking(move || hangar_core::pty::pty_write(&pty, pane, data)).await? },
+        )
     }
 
     fn alive(&self, pane: &PaneId) -> BoxFuture<bool> {
@@ -241,7 +243,7 @@ impl AppPort for LivePort {
         self.shared.hooks().kit_tabs.clone()
     }
 
-    fn from_git(&self) -> Option<Arc<dyn FromGit>> {
+    fn git_flow(&self) -> Option<Arc<dyn FromGit>> {
         self.shared.hooks().from_git.clone()
     }
 
@@ -350,7 +352,12 @@ impl DeliveryDeps for LiveDelivery {
         Box::pin(blocking(move || hangar_core::board_load(cwd)))
     }
 
-    fn board_update(&self, cwd: &str, id: &str, patch: TaskPatch) -> BoxFuture<Result<Task, String>> {
+    fn board_update(
+        &self,
+        cwd: &str,
+        id: &str,
+        patch: TaskPatch,
+    ) -> BoxFuture<Result<Task, String>> {
         let (host, cwd, id) = (self.host.clone(), cwd.to_string(), id.to_string());
         Box::pin(async move {
             let task = blocking({
@@ -392,7 +399,12 @@ impl DeliveryDeps for LiveDelivery {
         let (host, pane, text) = (self.host.clone(), pane.clone(), text.to_string());
         Box::pin(async move {
             blocking(move || {
-                hangar_core::bridge::bridge_enqueue(&host, pane, text, Some(super::delivery_text::HANGAR.into()));
+                hangar_core::bridge::bridge_enqueue(
+                    &host,
+                    pane,
+                    text,
+                    Some(super::delivery_text::HANGAR.into()),
+                );
             })
             .await
         })
@@ -462,9 +474,8 @@ impl AccessHost {
 impl PreviewHost for AccessHost {
     fn list(&self) -> BoxFuture<Result<PreviewListing, String>> {
         let snapshot = self.services.snapshot();
-        let on_screen = workspace_in(&snapshot, &self.ws).is_some_and(|ws| {
-            super::run::on_screen(&snapshot.state, ws)
-        });
+        let on_screen = workspace_in(&snapshot, &self.ws)
+            .is_some_and(|ws| super::run::on_screen(&snapshot.state, ws));
         let entries = self
             .services
             .preview()

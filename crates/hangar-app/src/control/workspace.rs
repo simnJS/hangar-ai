@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::message::{GitOrigin, GitRequest};
 use crate::state::roles::orchestrator_of;
 use crate::state::types::OrchestrationSettings;
-use crate::state::{AgentActivity, AppState, Patch, PaneId, Workspace};
+use crate::state::{AgentActivity, AppState, PaneId, Patch, Workspace};
 
 use super::panes::{announce, tell};
 use super::port::{FromGitOutcome, MadeWorkspace, ModelCmd, Port, activity_of};
@@ -45,7 +45,7 @@ pub async fn create(
     state: &AppState,
     port: &Port,
 ) -> Result<Value, String> {
-    let Some(flow) = port.from_git() else {
+    let Some(flow) = port.git_flow() else {
         return Err("This Hangar window cannot create a workspace from a repository.".into());
     };
     string_arg(

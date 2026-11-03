@@ -181,3 +181,70 @@ pub fn announcement(m: &Model, event: &ControlEvent) -> String {
     )
     .into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use hangar_i18n::Locale;
+
+    use super::*;
+    use crate::state::{AppState, Snapshot};
+
+    fn delivery(m: &mut Model, begin: bool) {
+        let (ws, task) = ("w1".to_string(), "t1".to_string());
+        let cmd = if begin {
+            ModelCmd::BeginDelivery { ws, task }
+        } else {
+            ModelCmd::EndDelivery { ws, task }
+        };
+        let _ = carry_out(m, cmd, Answer::channel().0);
+    }
+
+    #[test]
+    fn a_delivery_runs_until_each_of_its_holders_ends_it_and_the_snapshot_says_so() {
+        let mut m = Model::default();
+        // The person's « Fusionner » and the engine's own run of it.
+        delivery(&mut m, true);
+        delivery(&mut m, true);
+        delivery(&mut m, false);
+        assert!(m.live.control.task_delivering("w1", "t1"));
+        assert_eq!(
+            Snapshot::of(&m).delivering.get("w1"),
+            Some(&HashSet::from(["t1".to_string()]))
+        );
+        delivery(&mut m, false);
+        assert!(!m.live.control.is_delivering("w1"));
+        assert!(Snapshot::of(&m).delivering.is_empty());
+        // Ending once more is harmless.
+        delivery(&mut m, false);
+        assert!(Snapshot::of(&m).delivering.is_empty());
+    }
+
+    #[test]
+    fn says_on_screen_what_an_agent_did_in_the_persons_language() {
+        let mut m = Model::default();
+        let mut state = AppState::default();
+        state.settings.locale = Some(Locale::En);
+        m.hydrate(state.clone());
+        let created = ControlEvent::Created {
+            by: Some("Ava".into()),
+            pane: "Reviewer".into(),
+            workspace: "Shop".into(),
+        };
+        assert_eq!(announcement(&m, &created), "Ava opened Reviewer in Shop");
+        let shown = ControlEvent::ModelShownElsewhere {
+            by: None,
+            file: "chair.glb".into(),
+            workspace: "Shop".into(),
+        };
+        assert_eq!(
+            announcement(&m, &shown),
+            "An agent opened chair.glb in the preview of Shop"
+        );
+        state.settings.locale = Some(Locale::Fr);
+        m.hydrate(state);
+        assert_eq!(announcement(&m, &created), "Ava a ouvert Reviewer dans Shop");
+        assert!(announcement(&m, &shown).starts_with("Un agent a ouvert chair.glb dans"));
+    }
+}
