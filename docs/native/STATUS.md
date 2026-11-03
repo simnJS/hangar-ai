@@ -7,8 +7,8 @@ The log of the port: newest entries at the top of each section. The plan is in
 
 | Package | State | Branch / notes |
 | --- | --- | --- |
-| W1.core — `hangar-core` without Tauri | running | agent worktree |
-| W1.term — `hangar-term` | running | agent worktree |
+| W1.core — `hangar-core` without Tauri | **merged** | 804 tests; `Host`, `Event` (16), `Core::start/shutdown`, `PtySink`; core-api.md |
+| W1.term — `hangar-term` | **merged** | 193 tests; dead keys, key_filter, row cache, replay, read_lines |
 | W1.theme — `hangar-theme` | **merged** | 33 themes, 53 tokens, `style::*`, Inter Variable TTF |
 | W1.kits — kit-ui, kit-sdk, kit-host, example | running | agent worktree |
 | W1.webview — `hangar-webview` | **merged** | protocol v1, client, engine (feature), kit bridge, PDF via WebKitGTK's pdf.js |
@@ -25,6 +25,10 @@ The log of the port: newest entries at the top of each section. The plan is in
 
 ### 2026-11-03
 
+- Merged **hangar-core** (`d5ad29d`): no Tauri left; 804 tests pass, clippy clean. `Host` (paths + `broadcast` bus of 16 typed `Event`s, `Event::name()` gives the old event name), `Core::start(host, &runtime)` / `shutdown()` replacing the Tauri setup and `Destroyed` handler, PTY output through a per-pane `PtySink` on the reader thread (never the bus), `model::serve`/`kit_scheme::serve` as pure `http` functions, `notify::show` (notify-rust), `opener.rs` (`open` + per-platform reveal), `autostart.rs` (`auto-launch` 0.5, name `Hangar.AI`, recognises the old login item), `windows.rs` dropped (described in core-api.md for the app). Windows/macOS-only paths not compiled here. `Core::start` not run end to end (it would overwrite the installed app's endpoint file) — hence the next item.
+- **`HANGAR_DATA_ROOT`** added (`Paths::from_env`, used by `Host::new`): with the existing `HANGAR_ENDPOINT_FILE`, a development build touches nothing of the installed Hangar. `scripts/native-dev.sh` runs the app that way (data under `target/dev-home/`). Every agent that runs the app must use it.
+- Merged **hangar-term** (`345a8d7`): 193 tests (170 unit, 17 widget, 5 real-PTY, 1 doc). Dead keys verified by widget tests (`'`+`e` → one `é`, `'`+space → `'`, IME commit not doubled). `key_filter` so the keymap sees keys first; rows planned once and cached, one text item per style run: 16 panes in 0.34 ms/frame of planning (iced's shaping and GPU work excluded), parse at 98 MB/s. Bracketed paste, `shift_enter`, `ctrl_v_pastes`, OSC 9/777/7, bell, mouse modes, 1000-match search cap, one resize per frame, `replay` muting query answers, `read_lines`. Gaps: letter spacing, selection foreground colour, kitty keyboard flag 4 partial, fractional scaling needs the window's factor, 2 MiB parser buffer per terminal, pane opacity.
+- The windows pair: cpal builds for `x86_64-pc-windows-gnu` with `windows`/`windows-core` both at 0.62 (checked), so the lock keeps the consistent 0.62 pair wry needs; the note in hangar-core's manifest now says so.
 - **Inventory** committed (`862d8d6`, `docs/native/inventory-frontend.md`, 4,567 lines): every surface, the persisted model and `state.json` rules, 88 commands, the 21 packages and the shell contract (§8.2). It replaces the wave 3 list of PLAN.md section 6. Its two breakage findings: the `dist-mobile` embed path (in W1.core's brief) and the TS imports of the moved kit SDK (fixed in the same commit: the old app's 2,455 tests pass again, so it stays usable as the behaviour reference; `pnpm install` needs `pnpm approve-builds` for esbuild, or ignore the warning).
 - **P0 split in two**: P0a, a compiling skeleton with every package stub, the `Message`/`Intent` enums and the services, so wave 3 can start as soon as it merges; P0b, the shell's behaviour, in parallel with wave 3.
 - Inventory requirements for the terminal (key filter for shortcuts, glyph-atlas-class rendering for 16 panes, OSC 9/777, replay muting, `read_lines`) sent to the W1.term agent.

@@ -199,13 +199,18 @@ rustup target add wasm32-unknown-unknown        # native kit tabs
 cargo install sccache --locked                   # optional, see below
 cargo check --workspace                          # first build: several minutes
 cargo test --workspace
-cargo run -p hangar-app                          # the native Hangar
+scripts/native-dev.sh                            # the native Hangar, on its own data (see below)
 cargo run -p hangar-term --example shell         # the terminal alone
 ```
 
 Linux build dependencies: those of the old Tauri app cover it (`libwebkit2gtk-4.1-dev`
 only for `hangar-webview --features engine`; `libasound2-dev` for voice; a C/C++
 toolchain and `cmake` for whisper.cpp).
+
+**Never run the native app on the installed Hangar's data** while porting: both
+read the same `state.json`. `scripts/native-dev.sh` sets `HANGAR_DATA_ROOT` and
+`HANGAR_ENDPOINT_FILE` so everything goes under `target/dev-home/` (or
+`HANGAR_DEV_HOME`); run examples that start `hangar_core::Core` the same way.
 
 Optional local cache, not committed (listed in `.git/info/exclude`):
 
