@@ -727,6 +727,7 @@ impl KitTab {
                     Ok(HostCall::FilesPick(request)) => self.pick(request),
                     Ok(HostCall::PasteImage) => self.paste(),
                     Ok(HostCall::CanvasExport(export)) => self.export(*export),
+                    Ok(HostCall::ImageSize(source)) => ready(self.image_size(&source)),
                     Ok(host_call) => self.api.call(host_call),
                     Err(refusal) => ready(Err(refusal)),
                 };
@@ -873,6 +874,37 @@ impl KitTab {
                 .hold(png);
             Ok(json!({ "held": id, "width": image.width, "height": image.height }))
         })
+    }
+
+    /// `image.size`: a picture's size from its header, read as a view's
+    /// image is read (a file read, on the window's thread).
+    fn image_size(&self, source: &ImageSource) -> Result<Value, KitError> {
+        let bytes = match source {
+            ImageSource::Held(id) => self
+                .held
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(id)
+                .map(|bytes| (*bytes).clone())
+                .ok_or_else(|| {
+                    KitError::new(
+                        KitError::NOT_FOUND,
+                        format!("this tab holds no picture {id}"),
+                    )
+                })?,
+            other => self.api.image(other)?,
+        };
+        let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|reader| reader.into_dimensions().ok())
+            .ok_or_else(|| {
+                KitError::new(
+                    KitError::UNSUPPORTED,
+                    "not a raster image Hangar reads: PNG, JPEG, GIF, WebP or BMP",
+                )
+            })?;
+        Ok(json!({ "width": width, "height": height }))
     }
 
     /// `canvas.export`: the picture drawn on a thread of its own (a large

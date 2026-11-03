@@ -734,6 +734,10 @@ fn parse(
             HostCall::PasteImage
         }
         CANVAS_EXPORT => HostCall::CanvasExport(Box::new(canvas_export(params, granted)?)),
+        IMAGE_SIZE => {
+            let asked: api::ImageSize = typed(params)?;
+            HostCall::ImageSize(image_source(&asked.source, granted)?)
+        }
         other => return Err(error(KitError::UNKNOWN, format!("no method {other:?}"))),
     })
 }

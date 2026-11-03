@@ -133,6 +133,13 @@ impl KitApi for Fake {
         })
     }
 
+    fn image(&self, source: &hangar_kit_host::ui::ImageSource) -> Result<Vec<u8>, KitError> {
+        match source {
+            hangar_kit_host::ui::ImageSource::File(path) if path == "shots/a.png" => Ok(png(4, 3)),
+            _ => Err(KitError::new(KitError::NOT_FOUND, "no such picture")),
+        }
+    }
+
     fn pick_file(&self, _request: &hangar_kit_host::ui::api::FilesPick) -> PickFuture {
         Box::pin(std::future::ready(Ok(self.picked.lock().unwrap().clone())))
     }
@@ -341,6 +348,26 @@ fn a_pasted_picture_is_held_and_an_empty_clipboard_is_not_found() {
         shown.contains(&"ui.pasteImage: held-1".to_owned()),
         "{shown:?}"
     );
+}
+
+#[test]
+fn a_pictures_size_is_read_under_its_sources_permission() {
+    let runtime = runtime(Limits::default());
+    for (granted, said) in [
+        (&["files.read"][..], "image.size: 4x3"),
+        (&[][..], "image.size: denied"),
+    ] {
+        let fake = Fake::granting(granted);
+        let (mut tab, effects) = KitTab::start(
+            &runtime,
+            &probe(&runtime),
+            start(&[("calls", "image.size")]),
+            fake.clone(),
+        );
+        settle(&mut tab, effects);
+        assert!(texts(&tab).contains(&said.to_owned()), "{:?}", texts(&tab));
+        assert!(fake.asked().is_empty(), "the app's call is not asked");
+    }
 }
 
 #[test]

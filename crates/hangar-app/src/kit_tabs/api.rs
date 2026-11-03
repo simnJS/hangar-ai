@@ -483,15 +483,16 @@ impl KitApi for TabApi {
             HostCall::Confirm(confirm) => deps.ui(UiCall::Confirm(confirm)),
             HostCall::Copy { text } => deps.ui(UiCall::Copy(text)),
             // A native tab does these itself, through `pick_file`,
-            // `clipboard_image` and `files.writeBinary`; a page has them in
-            // its own document and is answered `unknown` before the gate.
-            native
-            @ (HostCall::FilesPick(_) | HostCall::PasteImage | HostCall::CanvasExport(_)) => {
-                hangar_kit_host::ready(Err(error(
-                    KitError::UNKNOWN,
-                    format!("no method {:?}", native.method()),
-                )))
-            }
+            // `clipboard_image`, `image` and `files.writeBinary`; a page has
+            // them in its own document and is answered `unknown` before the
+            // gate.
+            native @ (HostCall::FilesPick(_)
+            | HostCall::PasteImage
+            | HostCall::CanvasExport(_)
+            | HostCall::ImageSize(_)) => hangar_kit_host::ready(Err(error(
+                KitError::UNKNOWN,
+                format!("no method {:?}", native.method()),
+            ))),
         }
     }
 

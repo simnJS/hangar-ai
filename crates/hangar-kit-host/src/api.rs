@@ -186,6 +186,9 @@ pub enum HostCall {
     /// `canvas.export`: drawn by the tab, which hands the app the PNG as a
     /// [`HostCall::FilesWriteBinary`], never this.
     CanvasExport(Box<api::CanvasExport>),
+    /// `image.size`: read by the tab with [`KitApi::image`], never handed to
+    /// [`KitApi::call`]. Its source is held to its own permission already.
+    ImageSize(ImageSource),
 }
 
 impl HostCall {
@@ -216,6 +219,7 @@ impl HostCall {
             HostCall::FilesPick(_) => FILES_PICK,
             HostCall::PasteImage => UI_PASTE_IMAGE,
             HostCall::CanvasExport(_) => CANVAS_EXPORT,
+            HostCall::ImageSize(_) => IMAGE_SIZE,
         }
     }
 }

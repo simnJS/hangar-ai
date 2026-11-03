@@ -45,6 +45,7 @@ pub mod method {
     pub const FILES_PICK: &str = "files.pick";
     pub const UI_PASTE_IMAGE: &str = "ui.pasteImage";
     pub const CANVAS_EXPORT: &str = "canvas.export";
+    pub const IMAGE_SIZE: &str = "image.size";
 }
 
 /// The permissions a manifest may ask for (docs/kits.md, "Tab permissions").
@@ -139,6 +140,8 @@ pub const METHODS: &[(&str, Needs)] = &[
         method::CANVAS_EXPORT,
         Needs::Permission(permission::FILES_WRITE),
     ),
+    // What it needs is its source's: held to it with its params.
+    (method::IMAGE_SIZE, Needs::Nothing),
 ];
 
 /// The methods a native tab has and an HTML tab does not: a page has these
@@ -150,6 +153,7 @@ pub const NATIVE_ONLY: &[&str] = &[
     method::FILES_PICK,
     method::UI_PASTE_IMAGE,
     method::CANVAS_EXPORT,
+    method::IMAGE_SIZE,
 ];
 
 /// What `method` needs; none for a method there is not.
@@ -629,7 +633,24 @@ impl CanvasExport {
     }
 }
 
+/// `image.size`: the size in pixels of a picture a view may show, read from
+/// its first bytes, under its source's own permission (`data.read` for the
+/// data folder, `files.read` for the workspace): what a canvas over a
+/// capture is as large as, without reading the capture into the module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageSize {
+    pub source: crate::ImageSource,
+}
+request!(ImageSize => method::IMAGE_SIZE, ImageInfo);
+
 // ---------------------------------------------------------------- Results.
+
+/// A picture's size, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageInfo {
+    pub width: u32,
+    pub height: u32,
+}
 
 /// A file the person chose: inside the workspace, its `path`; outside it,
 /// the picture the tab now holds (`held`).

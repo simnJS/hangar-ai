@@ -46,6 +46,9 @@ fn said(method: &str, answer: &Result<Value, KitError>) -> String {
             .and_then(Value::as_str)
         {
             Some(what) => format!("{method}: {what}"),
+            None if method == "image.size" => {
+                format!("{method}: {}x{}", value["width"], value["height"])
+            }
             None if value.is_null() && method == "files.pick" => format!("{method}: cancelled"),
             None => format!("{method}: ok"),
         },
@@ -66,6 +69,7 @@ fn sample(method: &str) -> Value {
         "ui.copy" => json!({ "text": "from init" }),
         "files.pick" => json!({ "extensions": ["png"] }),
         "canvas.export" => export(),
+        "image.size" => json!({ "source": { "file": "shots/a.png" } }),
         _ => Value::Null,
     }
 }

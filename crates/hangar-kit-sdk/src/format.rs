@@ -123,15 +123,17 @@ const MONTHS_FR: [&str; 12] = [
     "déc.",
 ];
 
-/// A moment as a wall clock shows it.
-struct Civil {
-    year: i64,
+/// A moment as the person's wall clock and calendar show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalTime {
+    pub year: i64,
     /// From 1.
-    month: u32,
-    day: u32,
-    hour: u32,
-    minute: u32,
-    second: u32,
+    pub month: u32,
+    /// From 1.
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
+    pub second: u32,
 }
 
 /// The days since 1970-01-01 of a date of the proleptic Gregorian calendar
@@ -164,11 +166,13 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
-fn local(at_ms: i64, utc_offset: i32) -> Civil {
+/// `at_ms` in the person's time zone: a file named for when it was made
+/// (`20251031-211456`), a day of the calendar.
+pub fn local_time(at_ms: i64, utc_offset: i32) -> LocalTime {
     let local = at_ms + utc_offset as i64 * MINUTE_MS;
     let (year, month, day) = civil_from_days(local.div_euclid(DAY_MS));
     let of_day = local.rem_euclid(DAY_MS) / 1000;
-    Civil {
+    LocalTime {
         year,
         month,
         day,
@@ -184,7 +188,7 @@ fn local_day(at_ms: i64, utc_offset: i32) -> i64 {
 
 /// `9:14 PM`, `12:05 AM`: the 12-hour clock of `en`; `09:14 PM` with
 /// `two_digits`, as `Intl` writes an hour of `2-digit`.
-fn twelve_hour(when: &Civil, two_digits: bool) -> String {
+fn twelve_hour(when: &LocalTime, two_digits: bool) -> String {
     let hour = match when.hour % 12 {
         0 => 12,
         hour => hour,
@@ -200,7 +204,7 @@ fn twelve_hour(when: &Civil, two_digits: bool) -> String {
 /// A time in a column, where times line up: `21:14`, or with `seconds`
 /// `21:14:56`, in both languages.
 pub fn clock(at_ms: i64, utc_offset: i32, seconds: bool) -> String {
-    let when = local(at_ms, utc_offset);
+    let when = local_time(at_ms, utc_offset);
     if seconds {
         format!("{:02}:{:02}:{:02}", when.hour, when.minute, when.second)
     } else {
@@ -211,8 +215,8 @@ pub fn clock(at_ms: i64, utc_offset: i32, seconds: bool) -> String {
 /// A moment on its own: `Oct 31, 09:14 PM`, `31 oct., 21:14`, with the year
 /// when it is not this one (`Oct 31, 2024, 09:14 PM`, `31 oct. 2024, 21:14`).
 pub fn date(at_ms: i64, now_ms: i64, utc_offset: i32, locale: &str) -> String {
-    let when = local(at_ms, utc_offset);
-    let same_year = when.year == local(now_ms, utc_offset).year;
+    let when = local_time(at_ms, utc_offset);
+    let same_year = when.year == local_time(now_ms, utc_offset).year;
     let month = when.month as usize - 1;
     if french(locale) {
         let day = format!("{} {}", when.day, MONTHS_FR[month]);
@@ -234,7 +238,7 @@ pub fn date(at_ms: i64, now_ms: i64, utc_offset: i32, locale: &str) -> String {
 }
 
 /// A time inside a sentence: `21 h 13` in French, `9:13 PM` in English.
-fn prose_time(when: &Civil, locale: &str) -> String {
+fn prose_time(when: &LocalTime, locale: &str) -> String {
     if french(locale) {
         format!("{}{NBSP}h{NBSP}{:02}", when.hour, when.minute)
     } else {
@@ -259,7 +263,7 @@ pub fn since(at_ms: i64, now_ms: i64, utc_offset: i32, locale: &str) -> String {
             format!("{minutes}{NBSP}min ago")
         };
     }
-    let when = local(at_ms, utc_offset);
+    let when = local_time(at_ms, utc_offset);
     let time = prose_time(&when, locale);
     match local_day(now_ms, utc_offset) - local_day(at_ms, utc_offset) {
         0 if fr => format!("aujourd'hui à {time}"),
@@ -367,6 +371,20 @@ mod tests {
     fn times_are_written_as_kit_ui_writes_them() {
         assert_eq!(parse_iso("2025-10-31T21:14:56Z"), Some(AT));
         assert_eq!(clock(AT, 60, false), "22:14");
+        assert_eq!(
+            local_time(AT, -120),
+            LocalTime {
+                year: 2025,
+                month: 10,
+                day: 31,
+                hour: 19,
+                minute: 14,
+                second: 56
+            }
+        );
+        // Across the end of a year, east of it.
+        let new_year = parse_iso("2025-12-31T23:30:00Z").unwrap();
+        assert_eq!(local_time(new_year, 60).year, 2026);
         assert_eq!(clock(AT, 0, true), "21:14:56");
         assert_eq!(date(AT, AT, 0, "en"), "Oct 31, 09:14\u{202f}PM");
         assert_eq!(date(AT, AT, 0, "fr"), "31 oct., 21:14");
