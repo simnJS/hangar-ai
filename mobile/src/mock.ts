@@ -92,7 +92,7 @@ interface FakePane extends Pane {
   timer?: ReturnType<typeof setTimeout>;
 }
 
-/** The history's words, as the window writes them (src/lib/activityLog.ts, src/i18n.ts). */
+/** The history's words, as the window writes them (crates/hangar-app/src/mobile/activity_log.rs). */
 const LINES = {
   en: {
     paneWaiting: "{pane} is waiting for you",
@@ -388,7 +388,7 @@ p{margin:0;font-size:16px;line-height:1.5}
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-/** The Content-Type each kind is served with, as src-tauri/src/remote/files.rs serves it. */
+/** The Content-Type each kind is served with, as crates/hangar-core/src/remote/files.rs serves it. */
 const SERVED: Partial<Record<ShareKind, string>> = {
   image: "image/png",
   video: "video/mp4",

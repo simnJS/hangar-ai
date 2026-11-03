@@ -9,7 +9,7 @@ import { typeset } from "../lib/typography";
  * missing from it fails the build. Plural keys come in `_one` / `_other`
  * pairs, chosen by `Intl.PluralRules`. Strings are written with plain spaces;
  * French punctuation and units get their no-break spaces when the dictionary
- * loads (src/lib/typography, shared with the desktop).
+ * loads (lib/typography, the rules the desktop's strings are set with too).
  */
 
 export type Locale = "en" | "fr";

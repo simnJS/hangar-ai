@@ -40,7 +40,7 @@ const KINDS: Record<string, ActionKind> = {
 export const actionKind = (tool: string): ActionKind => KINDS[tool] ?? "other";
 
 /**
- * The PC writes an action's line in English (src-tauri/src/chat/tools.rs):
+ * The PC writes an action's line in English (crates/hangar-core/src/chat/tools.rs):
  * "Edited src/a.ts", "Ran pnpm test", "Read 4 files". Its verb is put in
  * the phone's words; a line in another shape stays as written. The longer
  * shapes come first: "Ran agent: …" before "Ran …".
@@ -62,7 +62,7 @@ const TITLES: { pattern: RegExp; key: Key }[] = [
   { pattern: /^Presented a plan()$/, key: "action.plan" },
 ];
 
-/** The notices the PC writes (src-tauri/src/chat/thread.rs); an error Claude Code reported stays as written. */
+/** The notices the PC writes (crates/hangar-core/src/chat/thread.rs); an error Claude Code reported stays as written. */
 const NOTICES = new Map<string, Key>([
   ["Conversation compacted", "notice.compacted"],
   ["Turn interrupted", "notice.interrupted"],

@@ -3,7 +3,7 @@ import { isIos, isStandalone } from "./device";
 /**
  * Push notifications on the phone: whether this browser can have them, and
  * what turning them on takes. The PC sends them itself
- * (src-tauri/src/remote/push.rs) and the service worker shows them (sw.js);
+ * (crates/hangar-core/src/remote/push.rs) and the service worker shows them (sw.js);
  * the switch the person sees is components/Notifications.tsx.
  *
  * An iPhone gives them only to an app on its Home Screen, from iOS 16.4, and

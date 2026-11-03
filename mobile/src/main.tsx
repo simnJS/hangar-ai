@@ -20,7 +20,7 @@ void bootstrap().then((boot) => {
   );
 });
 
-// The app shell, cached for a start without the network (src/mobile/sw.js).
+// The app shell, cached for a start without the network (src/sw.js).
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {

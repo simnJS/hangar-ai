@@ -91,7 +91,7 @@ export interface Device {
 
 /**
  * What the phone shows a share as, as the PC's preview tells a file apart
- * (src-tauri/src/remote/files.rs): `file` is anything it hands over to be
+ * (crates/hangar-core/src/remote/files.rs): `file` is anything it hands over to be
  * opened or saved.
  */
 export type ShareKind = "image" | "video" | "audio" | "text" | "markdown" | "pdf" | "html" | "file";

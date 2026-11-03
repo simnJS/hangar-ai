@@ -1,6 +1,6 @@
-//! The JSON of the `remote_*` answers (`src/remote/types.ts`): what the
+//! The JSON of the `remote_*` answers (`mobile/remote/types.ts`): what the
 //! window tells Hangar Mobile through core's mobile server, which relays it as
-//! it is to the phone app. The phone stays a web app (`src/mobile`), so these
+//! it is to the phone app. The phone stays a web app (`mobile/`), so these
 //! shapes are its contract: camelCase fields, an optional field left out when
 //! it has nothing to say, `null` where the TS wrote `null`.
 //!

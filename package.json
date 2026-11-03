@@ -11,8 +11,10 @@
     "tauri": "tauri",
     "demo:dev": "vite --config vite.demo.config.ts",
     "demo:build": "vite build --config vite.demo.config.ts && node scripts/demo-singlefile.mjs",
-    "mobile:dev": "vite --config vite.mobile.config.ts",
-    "mobile:build": "vite build --config vite.mobile.config.ts"
+    "mobile:dev": "vite --config mobile/vite.config.ts",
+    "mobile:build": "vite build --config mobile/vite.config.ts",
+    "mobile:test": "vitest run --config mobile/vitest.config.ts",
+    "mobile:typecheck": "tsc -p mobile"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.5",

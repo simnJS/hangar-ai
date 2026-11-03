@@ -1,6 +1,6 @@
 /* Hangar Mobile's service worker: the app shell, kept on the phone.
  *
- * The build (vite.mobile.config.ts) writes this file at the site's root with
+ * The build (mobile/vite.config.ts) writes this file at the site's root with
  * the list of the shell's files and a version drawn from them: a new build is
  * a new worker, which caches the new shell and drops the old one.
  *
@@ -9,7 +9,7 @@
  * cached: the API and the shared files always come from the PC.
  *
  * It also shows the push notifications the PC sends
- * (src-tauri/src/remote/push.rs), app closed or not, and opens the screen one
+ * (crates/hangar-core/src/remote/push.rs), app closed or not, and opens the screen one
  * is about when it is tapped.
  */
 
