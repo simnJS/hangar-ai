@@ -96,6 +96,16 @@ impl Live {
         )
     }
 
+    /// A cache holding `tasks` as the board of `cwd`, already read: for the
+    /// tests of the packages that read it (the cache's own writers are the
+    /// board's).
+    #[cfg(test)]
+    pub(crate) fn hold(&mut self, cwd: &str, tasks: Vec<Task>) {
+        self.boards.entry(cwd.to_owned()).or_insert(None);
+        self.request(cwd);
+        self.answer(cwd, Some(Arc::new(tasks)));
+    }
+
     /// Every folder the cache holds a board for, sorted.
     pub fn folders(&self) -> Vec<&str> {
         let mut folders: Vec<&str> = self.boards.keys().map(String::as_str).collect();

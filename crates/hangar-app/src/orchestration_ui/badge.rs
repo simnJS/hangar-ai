@@ -4,12 +4,10 @@
 //! Nothing at all on every other pane.
 //!
 //! A worker's task is read from the workspace's board, the one its worktree
-//! shares, so a title edited on the board shows here too. The titles are kept
-//! in this package's `State` (`Titles`), loaded by `super::subscription` and
-//! refreshed on `CoreEvent::BoardChanged`; P12 owns the shared boards cache
-//! and this can read it instead once it lands.
-
-use std::collections::HashMap;
+//! shares, so a title edited on the board shows here too. The title is read
+//! from the boards cache (`board::Live`) at every draw: the cache holds the
+//! board of every workspace's folder and reads it again when it changes, so
+//! a title edited from the worktree, or by an agent, follows at once.
 
 use iced::widget::{container, row, text};
 use iced::{Alignment, Element, Length, Padding};
@@ -20,6 +18,7 @@ use hangar_ui::{Icon, icon, tip};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
+use crate::state::Model;
 use crate::state::types::{Pane, PaneRole, Workspace};
 use crate::state::{PaneId, WsId};
 
@@ -34,21 +33,6 @@ const NARROW: f32 = 504.0;
 const NO_TASK: f32 = 408.0;
 const NO_ROLE_WORD: f32 = 480.0;
 const NONE: f32 = 186.0;
-
-/// The tasks' titles, by the folder of the board they are on and their id.
-#[derive(Debug, Default)]
-pub struct Titles(HashMap<String, HashMap<String, String>>);
-
-impl Titles {
-    /// What a board holds now, replacing what was known of it.
-    pub fn set(&mut self, cwd: String, titles: Vec<(String, String)>) {
-        self.0.insert(cwd, titles.into_iter().collect());
-    }
-
-    pub fn get(&self, cwd: &str, task: &str) -> Option<&str> {
-        self.0.get(cwd)?.get(task).map(String::as_str)
-    }
-}
 
 /// Whether the pane has a badge at all, for a header that lays its parts out
 /// by what is there.
@@ -141,6 +125,17 @@ fn lead<'a>(ctx: Ctx<'a>, role: Key, hint: Key, bar_width: f32) -> Element<'a, M
     tip::bottom(t, capsule(t, content, padding), ctx.t(hint))
 }
 
+/// The title of a task of the workspace's board, as the boards cache holds it
+/// now (`board::Live`).
+fn task_title<'a>(m: &'a Model, workspace: &Workspace, task: &str) -> Option<&'a str> {
+    m.live
+        .board
+        .tasks(&workspace.cwd)?
+        .iter()
+        .find(|candidate| candidate.id == task)
+        .map(|candidate| candidate.title.as_str())
+}
+
 /// A worker's: the quiet grey, and the title of the task it is on.
 fn worker<'a>(
     ctx: Ctx<'a>,
@@ -152,7 +147,7 @@ fn worker<'a>(
     let title = pane
         .task_id
         .as_deref()
-        .and_then(|task| ctx.pkg.orchestration_ui.titles.get(&workspace.cwd, task));
+        .and_then(|task| task_title(ctx.model, workspace, task));
     let hint = match title {
         Some(title) => ctx
             .i18n
@@ -195,4 +190,59 @@ fn worker<'a>(
             );
     }
     tip::bottom(t, capsule(t, line.into(), 6.0), hint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::board::model::test_task;
+
+    fn workspace(cwd: &str) -> Workspace {
+        Workspace {
+            id: "wt".into(),
+            cwd: cwd.into(),
+            ..Workspace::default()
+        }
+    }
+
+    fn titled(id: &str, title: &str) -> crate::board::model::Task {
+        let mut task = test_task(id);
+        task.title = title.into();
+        task
+    }
+
+    #[test]
+    fn a_workers_badge_follows_a_title_edited_from_its_worktree() {
+        // The worker's workspace is a worktree of the project, on a folder of
+        // its own; the board it shares is read by the boards cache.
+        let ws = workspace("/work/project-wt");
+        let mut m = Model::default();
+        m.live
+            .board
+            .hold("/work/project-wt", vec![titled("t1", "Draft the page")]);
+        assert_eq!(task_title(&m, &ws, "t1"), Some("Draft the page"));
+
+        // The title is edited (the dialog, a worktree, an agent): the cache
+        // reads the board again, and the next draw says so, with no state of
+        // this package to refresh.
+        m.live.board.hold(
+            "/work/project-wt",
+            vec![titled("t1", "Draft the page, twice")],
+        );
+        assert_eq!(task_title(&m, &ws, "t1"), Some("Draft the page, twice"));
+    }
+
+    #[test]
+    fn a_task_the_board_does_not_have_has_no_title() {
+        let ws = workspace("/work/project-wt");
+        let mut m = Model::default();
+        // Not read yet.
+        assert_eq!(task_title(&m, &ws, "t1"), None);
+        m.live
+            .board
+            .hold("/work/project-wt", vec![titled("t2", "Another")]);
+        assert_eq!(task_title(&m, &ws, "t1"), None);
+        // Another folder's board is not this workspace's.
+        assert_eq!(task_title(&m, &workspace("/elsewhere"), "t2"), None);
+    }
 }

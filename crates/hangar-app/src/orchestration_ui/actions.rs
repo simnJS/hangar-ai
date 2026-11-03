@@ -17,11 +17,10 @@ use std::sync::Mutex;
 use hangar_i18n::Locale;
 
 use crate::state::live::AgentActivity;
+use crate::state::roles::{hq_of, manager_of, orchestration_of, orchestrator_of};
 use crate::state::store::{PanePatch, WorkspaceDraft, WorkspacePatch};
 use crate::state::types::{AgentId, AppState, Pane, PaneId, PaneRole, SplitDir, Workspace, WsId};
 use crate::state::{Model, Patch, StoreAction};
-
-use super::form::settings_of;
 
 /// Why a pane cannot be pinned, or `None` when it can.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,37 +67,6 @@ pub fn pin_refusal(ws: &Workspace, pane_id: &str) -> Option<PinRefusal> {
         return Some(PinRefusal::Taken);
     }
     None
-}
-
-/// The workspace's orchestrator pane, if it has one.
-pub fn orchestrator_of(ws: &Workspace) -> Option<&Pane> {
-    ws.panes
-        .iter()
-        .find(|pane| pane.role == Some(PaneRole::Orchestrator))
-}
-
-/// The workspace's worker panes.
-pub fn workers_of(ws: &Workspace) -> impl Iterator<Item = &Pane> {
-    ws.panes
-        .iter()
-        .filter(|pane| pane.role == Some(PaneRole::Worker))
-}
-
-/// The manager pane, wherever it is: one for the whole of Hangar, which
-/// follows every workspace from the HQ and is neither an orchestrator nor a
-/// worker of the workspace it sits in.
-pub fn manager_of(state: &AppState) -> Option<(&Workspace, &Pane)> {
-    state.workspaces.iter().find_map(|ws| {
-        ws.panes
-            .iter()
-            .find(|pane| pane.role == Some(PaneRole::Manager))
-            .map(|pane| (ws, pane))
-    })
-}
-
-/// The HQ workspace, the manager's, if Hangar has created it.
-pub fn hq_of(state: &AppState) -> Option<&Workspace> {
-    state.workspaces.iter().find(|ws| ws.hq == Some(true))
 }
 
 /// Whether the workspace can have an orchestrator created in it.
@@ -358,7 +326,7 @@ pub fn create(
     if !can_create_orchestrator(ws) {
         return None;
     }
-    let model = settings_of(ws).orchestrator_model;
+    let model = orchestration_of(ws).orchestrator_model;
     // The role goes in with the pane, before it mounts and launches, so it
     // starts as the orchestrator it was created to be.
     store.add_claude_pane(
@@ -446,7 +414,7 @@ fn place_manager(
         return OpenManager::Failed { error: None };
     };
     let hq_id = hq.id.clone();
-    let model = settings_of(hq).orchestrator_model;
+    let model = orchestration_of(hq).orchestrator_model;
     let first_pane = hq.panes.first().map(|pane| pane.id.clone());
 
     let as_manager = {

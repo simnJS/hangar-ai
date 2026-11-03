@@ -18,9 +18,9 @@ use iced::{Alignment, Element, Length, Padding, Radians};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
+use crate::panes_logic::find_agent_pane;
 use crate::state::GlyphState;
 
-use super::agent_pane::find_agent_pane;
 use super::card;
 use super::dock;
 use super::filter;
@@ -46,6 +46,8 @@ pub struct AssigneePane {
 pub(super) struct View<'a> {
     pub st: &'a State,
     pub ctx: Ctx<'a>,
+    /// The folder of the board drawn: what every message that writes names.
+    pub cwd: &'a str,
     pub all: &'a [Task],
     /// `false` until the first read answers.
     pub loaded: bool,
@@ -60,7 +62,7 @@ pub(super) struct View<'a> {
 }
 
 impl<'a> View<'a> {
-    pub fn new(st: &'a State, ctx: Ctx<'a>, cwd: &str, dock: bool) -> View<'a> {
+    pub fn new(st: &'a State, ctx: Ctx<'a>, cwd: &'a str, dock: bool) -> View<'a> {
         let tasks = ctx.model.live.board.tasks(cwd);
         let all: &'a [Task] = tasks.unwrap_or(&[]);
         let shown = select::shown(all, &st.filters);
@@ -73,6 +75,7 @@ impl<'a> View<'a> {
         View {
             st,
             ctx,
+            cwd,
             loaded: tasks.is_some(),
             by_id: index_by_id(all),
             all,
@@ -92,14 +95,12 @@ impl<'a> View<'a> {
     }
 }
 
-/// `paneFor`: the pane an assignee's name leads to, if one clearly does.
+/// `paneFor`: the pane an assignee's name leads to, if one clearly does. The
+/// workspace looked in first is the window's own.
 pub(super) fn pane_for(ctx: Ctx<'_>, assignee: &str) -> Option<AssigneePane> {
     let state = ctx.model.state();
-    let target = find_agent_pane(
-        assignee,
-        &state.workspaces,
-        state.active_workspace_id.as_deref(),
-    )?;
+    let here = ctx.workspace().map(|workspace| workspace.id.as_str());
+    let target = find_agent_pane(assignee, &state.workspaces, here)?;
     let workspace = ctx.model.workspace(&target.workspace_id)?;
     let pane = workspace.panes.iter().find(|p| p.id == target.pane_id)?;
     Some(AssigneePane {
@@ -116,7 +117,7 @@ pub(super) fn pane_for(ctx: Ctx<'_>, assignee: &str) -> Option<AssigneePane> {
 pub(super) fn board<'a>(
     st: &'a State,
     ctx: Ctx<'a>,
-    cwd: &str,
+    cwd: &'a str,
     dock_room: Option<(f32, f32)>,
 ) -> Element<'a, Message> {
     let in_dock = dock_room.is_some();
@@ -146,7 +147,7 @@ fn full_body<'a>(v: &View<'a>, width: f32) -> Element<'a, Message> {
 
     let content: Element<'a, Message> = if !v.loaded {
         skeleton(v)
-    } else if v.all.is_empty() && !v.st.composing {
+    } else if v.all.is_empty() && !v.st.composing.contains(v.cwd) {
         empty(v)
     } else if stacked {
         scrollable(
@@ -213,7 +214,10 @@ fn bar_full<'a>(v: &View<'a>, compact: bool) -> Element<'a, Message> {
         button::secondary(t, tr.t(Key::BoardAddTask))
             .icon(Icon::Plus)
             .small()
-            .on_press(Message::Board(Msg::StartAdding(Column::Todo))),
+            .on_press(Message::Board(Msg::StartAdding(
+                v.cwd.to_owned(),
+                Column::Todo,
+            ))),
     );
 
     container(bar)
@@ -332,7 +336,7 @@ fn dock_body<'a>(v: View<'a>) -> Element<'a, Message> {
 
     let content: Element<'a, Message> = if !v.loaded {
         skeleton(&v)
-    } else if v.all.is_empty() && !v.st.composing {
+    } else if v.all.is_empty() && !v.st.composing.contains(v.cwd) {
         empty(&v)
     } else {
         scrollable(
@@ -369,7 +373,7 @@ fn column_view<'a>(v: &View<'a>, which: Column, in_dock: bool, flow: bool) -> El
     let over =
         v.st.press
             .as_ref()
-            .is_some_and(|press| press.moved && press.over == Some(which));
+            .is_some_and(|press| press.cwd == v.cwd && press.moved && press.over == Some(which));
     let add_label = tr
         .t_with(Key::BoardAddTo, &args!("column" => name.as_str()))
         .into_owned();
@@ -386,7 +390,7 @@ fn column_view<'a>(v: &View<'a>, which: Column, in_dock: bool, flow: bool) -> El
         .small()
         .icon_size(12.0)
         .tip(add_label.clone())
-        .on_press(Message::Board(Msg::StartAdding(which)));
+        .on_press(Message::Board(Msg::StartAdding(v.cwd.to_owned(), which)));
 
     let head: Element<'a, Message> = if in_dock {
         let caret = icon(Icon::ChevronRight, 10.0)
@@ -479,7 +483,7 @@ fn column_view<'a>(v: &View<'a>, which: Column, in_dock: bool, flow: bool) -> El
 
     // While a card is pressed, each column says when the pointer is over it.
     let mut area = mouse_area(surface);
-    if v.st.press.is_some() {
+    if v.st.press.as_ref().is_some_and(|press| press.cwd == v.cwd) {
         area = area
             .on_enter(Message::Board(Msg::Enter(which)))
             .on_exit(Message::Board(Msg::Leave(which)));
@@ -508,27 +512,40 @@ fn add_field<'a>(
     label: String,
 ) -> Option<Element<'a, Message>> {
     let t = v.t();
-    let draft = v.st.drafts.get(&column).map_or("", String::as_str);
-    if !(empty || !draft.is_empty() || v.st.adding == Some(column)) {
+    let cwd = v.cwd.to_owned();
+    let draft =
+        v.st.drafts
+            .get(&(cwd.clone(), column))
+            .map_or("", String::as_str);
+    let asked =
+        v.st.adding
+            .as_ref()
+            .is_some_and(|(at, which)| at == v.cwd && *which == column);
+    if !(empty || !draft.is_empty() || asked) {
         return None;
     }
     let placeholder = v.ctx.t(Key::BoardAdd).into_owned();
+    let (typed_on, submitted_on) = (cwd.clone(), cwd.clone());
     let field = text_input(&placeholder, draft)
         .id(super::add_id(column))
         .size(font_size::UI)
         .padding([6.0, space::LG])
         .width(Length::Fill)
-        .on_input(move |value| Message::Board(Msg::Draft(column, value)))
-        .on_submit(Message::Board(Msg::Submit(column)))
+        .on_input(move |value| Message::Board(Msg::Draft(typed_on.clone(), column, value)))
+        .on_submit(Message::Board(Msg::Submit(submitted_on, column)))
         .style(look::add_field(t));
     // Escape empties what was typed, and goes no further.
     let has_draft = !draft.is_empty();
+    let cleared_on = cwd.clone();
     let field = hangar_ui::keys::on_key(field, move |key, _| match key {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) if has_draft => {
-            Some(Message::Board(Msg::ClearDraft(column)))
+            Some(Message::Board(Msg::ClearDraft(cleared_on.clone(), column)))
         }
         _ => None,
     });
+    // A shortcut the keymap takes is spent before the field sees it, so
+    // Ctrl+Shift+Enter here splits a pane and does not also make the card.
+    let field = crate::keymap::guard(v.ctx, field);
     let field = hangar_ui::tip::over(t, field, label);
     // Something typed can be taken to the full form: a description, a
     // priority, the files its worker may change.
@@ -538,7 +555,7 @@ fn add_field<'a>(
     let details = button::icon_button(t, Icon::Pencil)
         .small()
         .tip(v.ctx.t(Key::BoardAddDetails))
-        .on_press(Message::Board(Msg::AddDetails(column)));
+        .on_press(Message::Board(Msg::AddDetails(cwd, column)));
     Some(
         row![field, details]
             .spacing(space::XS)
@@ -577,7 +594,10 @@ fn empty<'a>(v: &View<'a>) -> Element<'a, Message> {
         button::primary(t, tr.t(Key::BoardEmptyAdd))
             .icon(Icon::Plus)
             .small()
-            .on_press(Message::Board(Msg::StartAdding(Column::Todo))),
+            .on_press(Message::Board(Msg::StartAdding(
+                v.cwd.to_owned(),
+                Column::Todo
+            ))),
         button::secondary(t, tr.t(Key::BoardEmptyMcp))
             .icon(Icon::Plug)
             .small()
