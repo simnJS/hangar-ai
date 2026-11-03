@@ -250,10 +250,13 @@ fn legacy(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<
 
     // The keypad in application mode sends its own sequences, and only then:
     // otherwise its keys are the digits and operators they show.
-    if press.location == Location::Numpad && mode.contains(TermMode::APP_KEYPAD) && !logo
-        && let Some(byte) = keypad_application(press) {
-            return Some(vec![0x1b, b'O', byte]);
-        }
+    if press.location == Location::Numpad
+        && mode.contains(TermMode::APP_KEYPAD)
+        && !logo
+        && let Some(byte) = keypad_application(press)
+    {
+        return Some(vec![0x1b, b'O', byte]);
+    }
 
     if let Key::Named(named) = &press.key {
         if let Some(sequence) = sequence_of(*named) {
@@ -293,10 +296,12 @@ fn legacy(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<
     // text is the point, and neither modifier is meant for the program.
     let alt_gr = ctrl && alt && typed_text(press).is_some();
 
-    if ctrl && !alt_gr
-        && let Some(code) = latin_char(press).and_then(control_code) {
-            return Some(with_escape(vec![code], escape));
-        }
+    if ctrl
+        && !alt_gr
+        && let Some(code) = latin_char(press).and_then(control_code)
+    {
+        return Some(with_escape(vec![code], escape));
+    }
 
     if let Some(text) = typed_text(press) {
         return Some(with_escape(text.as_bytes().to_vec(), escape && !alt_gr));
@@ -438,18 +443,19 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
 
     // Keys that have a classic sequence keep its shape.
     if let Key::Named(named) = &press.key
-        && let Some(sequence) = sequence_of(*named) {
-            if param == 1 && event == 1 {
-                return Some(encode_sequence(sequence, m, mode));
-            }
-            let field = modifiers_field(true);
-            return Some(match sequence {
-                Sequence::Cursor(f) | Sequence::Function(f) => {
-                    format!("\x1b[1{field}{}", f as char).into_bytes()
-                }
-                Sequence::Tilde(n) => format!("\x1b[{n}{field}~").into_bytes(),
-            });
+        && let Some(sequence) = sequence_of(*named)
+    {
+        if param == 1 && event == 1 {
+            return Some(encode_sequence(sequence, m, mode));
         }
+        let field = modifiers_field(true);
+        return Some(match sequence {
+            Sequence::Cursor(f) | Sequence::Function(f) => {
+                format!("\x1b[1{field}{}", f as char).into_bytes()
+            }
+            Sequence::Tilde(n) => format!("\x1b[{n}{field}~").into_bytes(),
+        });
+    }
 
     let plain_modifiers = !(m.control() || m.alt() || m.logo());
     let code = kitty_code(press);
@@ -461,12 +467,19 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
         Key::Named(Named::Enter | Named::Tab | Named::Backspace)
     );
     if legacy_named && !report_all && param == 1 {
-        return if released { None } else { legacy(press, mode, options) };
+        return if released {
+            None
+        } else {
+            legacy(press, mode, options)
+        };
     }
 
     // Text keys with nothing but Shift are typed as text, as they always were,
     // unless the program wants every key as an escape code.
-    if matches!(press.key, Key::Character(_) | Key::Named(Named::Space)) && plain_modifiers && !report_all {
+    if matches!(press.key, Key::Character(_) | Key::Named(Named::Space))
+        && plain_modifiers
+        && !report_all
+    {
         if released {
             return None;
         }
@@ -492,12 +505,14 @@ fn kitty(press: &KeyPress, mode: TermMode, options: &KeyOptions) -> Option<Vec<u
     }
 
     let mut number = code.to_string();
-    if report_alternates && m.shift()
+    if report_alternates
+        && m.shift()
         && let Key::Character(c) = &press.modified_key
-            && let Some(shifted) = c.chars().next()
-                && shifted as u32 != code {
-                    number = format!("{code}:{}", shifted as u32);
-                }
+        && let Some(shifted) = c.chars().next()
+        && shifted as u32 != code
+    {
+        number = format!("{code}:{}", shifted as u32);
+    }
 
     let mut out = format!("\x1b[{number}");
     let text_field = if report_all && report_text && !released {
@@ -538,9 +553,7 @@ mod tests {
         KeyPress {
             modified_key: key.clone(),
             key,
-            physical_key: Physical::Unidentified(
-                iced::keyboard::key::NativeCode::Unidentified,
-            ),
+            physical_key: Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
             location: Location::Standard,
             modifiers,
             text: text.map(str::to_owned),
@@ -552,7 +565,12 @@ mod tests {
         enc_in(key, modifiers, text, TermMode::NONE)
     }
 
-    fn enc_in(key: Key, modifiers: Modifiers, text: Option<&str>, mode: TermMode) -> Option<String> {
+    fn enc_in(
+        key: Key,
+        modifiers: Modifiers,
+        text: Option<&str>,
+        mode: TermMode,
+    ) -> Option<String> {
         encode_key(&press(key, modifiers, text), mode, &KeyOptions::default())
             .map(|b| String::from_utf8(b).unwrap())
     }
@@ -567,7 +585,10 @@ mod tests {
         assert_eq!(enc(ch("a"), NONE, Some("a")).as_deref(), Some("a"));
         assert_eq!(enc(ch("a"), SHIFT, Some("A")).as_deref(), Some("A"));
         assert_eq!(enc(ch("é"), NONE, Some("é")).as_deref(), Some("é"));
-        assert_eq!(enc(Key::Named(Named::Space), NONE, Some(" ")).as_deref(), Some(" "));
+        assert_eq!(
+            enc(Key::Named(Named::Space), NONE, Some(" ")).as_deref(),
+            Some(" ")
+        );
     }
 
     #[test]
@@ -578,11 +599,17 @@ mod tests {
             modified_key: Key::Unidentified,
             ..press(ch("'"), NONE, None)
         };
-        assert_eq!(encode_key(&dead, TermMode::NONE, &KeyOptions::default()), None);
+        assert_eq!(
+            encode_key(&dead, TermMode::NONE, &KeyOptions::default()),
+            None
+        );
         // `e` after it arrives with the composed text.
         assert_eq!(enc(ch("e"), NONE, Some("é")).as_deref(), Some("é"));
         // `'` then space gives the apostrophe itself, on the space key.
-        assert_eq!(enc(Key::Named(Named::Space), NONE, Some("'")).as_deref(), Some("'"));
+        assert_eq!(
+            enc(Key::Named(Named::Space), NONE, Some("'")).as_deref(),
+            Some("'")
+        );
         // And a key that does not combine produces both: the platform reports
         // the accent and the letter in one text.
         assert_eq!(enc(ch("x"), NONE, Some("´x")).as_deref(), Some("´x"));
@@ -597,7 +624,10 @@ mod tests {
         assert_eq!(enc(ch("["), CTRL, None).as_deref(), Some("\u{1b}"));
         assert_eq!(enc(ch("\\"), CTRL, None).as_deref(), Some("\u{1c}"));
         assert_eq!(enc(ch(" "), CTRL, None).as_deref(), Some("\0"));
-        assert_eq!(enc(Key::Named(Named::Space), CTRL, Some(" ")).as_deref(), Some("\0"));
+        assert_eq!(
+            enc(Key::Named(Named::Space), CTRL, Some(" ")).as_deref(),
+            Some("\0")
+        );
         assert_eq!(enc(ch("2"), CTRL, None).as_deref(), Some("\0"));
         assert_eq!(enc(ch("/"), CTRL, None).as_deref(), Some("\u{1f}"));
     }
@@ -615,13 +645,25 @@ mod tests {
     #[test]
     fn alt_is_an_escape_prefix() {
         assert_eq!(enc(ch("b"), ALT, Some("b")).as_deref(), Some("\u{1b}b"));
-        assert_eq!(enc(ch("b"), ALT | SHIFT, Some("B")).as_deref(), Some("\u{1b}B"));
-        assert_eq!(enc(ch("f"), ALT | CTRL, Some("\u{6}")).as_deref(), Some("\u{1b}\u{6}"));
+        assert_eq!(
+            enc(ch("b"), ALT | SHIFT, Some("B")).as_deref(),
+            Some("\u{1b}B")
+        );
+        assert_eq!(
+            enc(ch("f"), ALT | CTRL, Some("\u{6}")).as_deref(),
+            Some("\u{1b}\u{6}")
+        );
         // No text came with it (a platform that eats Option+key): the key is
         // enough.
         assert_eq!(enc(ch("d"), ALT, None).as_deref(), Some("\u{1b}d"));
-        assert_eq!(enc(Key::Named(Named::Backspace), ALT, None).as_deref(), Some("\u{1b}\u{7f}"));
-        assert_eq!(enc(Key::Named(Named::Enter), ALT, None).as_deref(), Some("\u{1b}\r"));
+        assert_eq!(
+            enc(Key::Named(Named::Backspace), ALT, None).as_deref(),
+            Some("\u{1b}\u{7f}")
+        );
+        assert_eq!(
+            enc(Key::Named(Named::Enter), ALT, None).as_deref(),
+            Some("\u{1b}\r")
+        );
     }
 
     #[test]
@@ -631,9 +673,15 @@ mod tests {
 
     #[test]
     fn alt_can_be_left_to_the_layout() {
-        let options = KeyOptions { alt_sends_escape: false, ..KeyOptions::default() };
+        let options = KeyOptions {
+            alt_sends_escape: false,
+            ..KeyOptions::default()
+        };
         let p = press(ch("b"), ALT, Some("∫"));
-        assert_eq!(encode_key(&p, TermMode::NONE, &options), Some("∫".as_bytes().to_vec()));
+        assert_eq!(
+            encode_key(&p, TermMode::NONE, &options),
+            Some("∫".as_bytes().to_vec())
+        );
     }
 
     #[test]
@@ -644,26 +692,68 @@ mod tests {
     #[test]
     fn editing_keys() {
         let named = |n| Key::Named(n);
-        assert_eq!(enc(named(Named::Enter), NONE, Some("\r")).as_deref(), Some("\r"));
-        assert_eq!(enc(named(Named::Enter), SHIFT, Some("\r")).as_deref(), Some("\r"));
-        assert_eq!(enc(named(Named::Backspace), NONE, Some("\u{8}")).as_deref(), Some("\u{7f}"));
-        assert_eq!(enc(named(Named::Backspace), CTRL, None).as_deref(), Some("\u{8}"));
-        assert_eq!(enc(named(Named::Tab), NONE, Some("\t")).as_deref(), Some("\t"));
-        assert_eq!(enc(named(Named::Tab), SHIFT, None).as_deref(), Some("\u{1b}[Z"));
-        assert_eq!(enc(named(Named::Escape), NONE, None).as_deref(), Some("\u{1b}"));
-        assert_eq!(enc(named(Named::Delete), NONE, None).as_deref(), Some("\u{1b}[3~"));
-        assert_eq!(enc(named(Named::Insert), NONE, None).as_deref(), Some("\u{1b}[2~"));
-        assert_eq!(enc(named(Named::PageUp), NONE, None).as_deref(), Some("\u{1b}[5~"));
-        assert_eq!(enc(named(Named::PageDown), NONE, None).as_deref(), Some("\u{1b}[6~"));
+        assert_eq!(
+            enc(named(Named::Enter), NONE, Some("\r")).as_deref(),
+            Some("\r")
+        );
+        assert_eq!(
+            enc(named(Named::Enter), SHIFT, Some("\r")).as_deref(),
+            Some("\r")
+        );
+        assert_eq!(
+            enc(named(Named::Backspace), NONE, Some("\u{8}")).as_deref(),
+            Some("\u{7f}")
+        );
+        assert_eq!(
+            enc(named(Named::Backspace), CTRL, None).as_deref(),
+            Some("\u{8}")
+        );
+        assert_eq!(
+            enc(named(Named::Tab), NONE, Some("\t")).as_deref(),
+            Some("\t")
+        );
+        assert_eq!(
+            enc(named(Named::Tab), SHIFT, None).as_deref(),
+            Some("\u{1b}[Z")
+        );
+        assert_eq!(
+            enc(named(Named::Escape), NONE, None).as_deref(),
+            Some("\u{1b}")
+        );
+        assert_eq!(
+            enc(named(Named::Delete), NONE, None).as_deref(),
+            Some("\u{1b}[3~")
+        );
+        assert_eq!(
+            enc(named(Named::Insert), NONE, None).as_deref(),
+            Some("\u{1b}[2~")
+        );
+        assert_eq!(
+            enc(named(Named::PageUp), NONE, None).as_deref(),
+            Some("\u{1b}[5~")
+        );
+        assert_eq!(
+            enc(named(Named::PageDown), NONE, None).as_deref(),
+            Some("\u{1b}[6~")
+        );
     }
 
     #[test]
     fn shift_enter_can_be_made_a_newline_for_agent_panes() {
-        let options = KeyOptions { shift_enter: Some(b"\x1b\r".to_vec()), ..KeyOptions::default() };
+        let options = KeyOptions {
+            shift_enter: Some(b"\x1b\r".to_vec()),
+            ..KeyOptions::default()
+        };
         let shift_enter = press(Key::Named(Named::Enter), SHIFT, Some("\r"));
-        assert_eq!(encode_key(&shift_enter, TermMode::NONE, &options), Some(b"\x1b\r".to_vec()));
+        assert_eq!(
+            encode_key(&shift_enter, TermMode::NONE, &options),
+            Some(b"\x1b\r".to_vec())
+        );
         let enter = press(Key::Named(Named::Enter), NONE, Some("\r"));
-        assert_eq!(encode_key(&enter, TermMode::NONE, &options), Some(b"\r".to_vec()));
+        assert_eq!(
+            encode_key(&enter, TermMode::NONE, &options),
+            Some(b"\r".to_vec())
+        );
     }
 
     #[test]
@@ -679,16 +769,34 @@ mod tests {
             enc_in(up.clone(), SHIFT, None, TermMode::APP_CURSOR).as_deref(),
             Some("\u{1b}[1;2A")
         );
-        assert_eq!(enc(Key::Named(Named::ArrowRight), CTRL, None).as_deref(), Some("\u{1b}[1;5C"));
-        assert_eq!(enc(Key::Named(Named::ArrowLeft), ALT, None).as_deref(), Some("\u{1b}[1;3D"));
-        assert_eq!(enc(Key::Named(Named::ArrowDown), CTRL | SHIFT, None).as_deref(), Some("\u{1b}[1;6B"));
-        assert_eq!(enc(Key::Named(Named::Home), NONE, None).as_deref(), Some("\u{1b}[H"));
+        assert_eq!(
+            enc(Key::Named(Named::ArrowRight), CTRL, None).as_deref(),
+            Some("\u{1b}[1;5C")
+        );
+        assert_eq!(
+            enc(Key::Named(Named::ArrowLeft), ALT, None).as_deref(),
+            Some("\u{1b}[1;3D")
+        );
+        assert_eq!(
+            enc(Key::Named(Named::ArrowDown), CTRL | SHIFT, None).as_deref(),
+            Some("\u{1b}[1;6B")
+        );
+        assert_eq!(
+            enc(Key::Named(Named::Home), NONE, None).as_deref(),
+            Some("\u{1b}[H")
+        );
         assert_eq!(
             enc_in(Key::Named(Named::End), NONE, None, TermMode::APP_CURSOR).as_deref(),
             Some("\u{1b}OF")
         );
-        assert_eq!(enc(Key::Named(Named::Home), CTRL, None).as_deref(), Some("\u{1b}[1;5H"));
-        assert_eq!(enc(Key::Named(Named::Delete), CTRL, None).as_deref(), Some("\u{1b}[3;5~"));
+        assert_eq!(
+            enc(Key::Named(Named::Home), CTRL, None).as_deref(),
+            Some("\u{1b}[1;5H")
+        );
+        assert_eq!(
+            enc(Key::Named(Named::Delete), CTRL, None).as_deref(),
+            Some("\u{1b}[3;5~")
+        );
     }
 
     #[test]
@@ -696,11 +804,23 @@ mod tests {
         let f = |n| Key::Named(n);
         assert_eq!(enc(f(Named::F1), NONE, None).as_deref(), Some("\u{1b}OP"));
         assert_eq!(enc(f(Named::F4), NONE, None).as_deref(), Some("\u{1b}OS"));
-        assert_eq!(enc(f(Named::F1), SHIFT, None).as_deref(), Some("\u{1b}[1;2P"));
+        assert_eq!(
+            enc(f(Named::F1), SHIFT, None).as_deref(),
+            Some("\u{1b}[1;2P")
+        );
         assert_eq!(enc(f(Named::F5), NONE, None).as_deref(), Some("\u{1b}[15~"));
-        assert_eq!(enc(f(Named::F12), NONE, None).as_deref(), Some("\u{1b}[24~"));
-        assert_eq!(enc(f(Named::F6), CTRL, None).as_deref(), Some("\u{1b}[17;5~"));
-        assert_eq!(enc(f(Named::F20), NONE, None).as_deref(), Some("\u{1b}[34~"));
+        assert_eq!(
+            enc(f(Named::F12), NONE, None).as_deref(),
+            Some("\u{1b}[24~")
+        );
+        assert_eq!(
+            enc(f(Named::F6), CTRL, None).as_deref(),
+            Some("\u{1b}[17;5~")
+        );
+        assert_eq!(
+            enc(f(Named::F20), NONE, None).as_deref(),
+            Some("\u{1b}[34~")
+        );
     }
 
     #[test]
@@ -714,7 +834,10 @@ mod tests {
     fn the_keypad_in_application_mode() {
         let mut p = press(ch("5"), NONE, Some("5"));
         p.location = Location::Numpad;
-        assert_eq!(encode_key(&p, TermMode::NONE, &KeyOptions::default()), Some(b"5".to_vec()));
+        assert_eq!(
+            encode_key(&p, TermMode::NONE, &KeyOptions::default()),
+            Some(b"5".to_vec())
+        );
         assert_eq!(
             encode_key(&p, TermMode::APP_KEYPAD, &KeyOptions::default()),
             Some(b"\x1bOu".to_vec())
@@ -740,31 +863,76 @@ mod tests {
 
     #[test]
     fn kitty_disambiguates_escape_and_modified_enter() {
-        assert_eq!(enc_in(Key::Named(Named::Escape), NONE, None, KITTY_1).as_deref(), Some("\u{1b}[27u"));
-        assert_eq!(enc_in(Key::Named(Named::Enter), SHIFT, None, KITTY_1).as_deref(), Some("\u{1b}[13;2u"));
-        assert_eq!(enc_in(Key::Named(Named::Enter), NONE, Some("\r"), KITTY_1).as_deref(), Some("\r"));
-        assert_eq!(enc_in(Key::Named(Named::Tab), NONE, Some("\t"), KITTY_1).as_deref(), Some("\t"));
-        assert_eq!(enc_in(Key::Named(Named::Tab), SHIFT, None, KITTY_1).as_deref(), Some("\u{1b}[9;2u"));
-        assert_eq!(enc_in(Key::Named(Named::Backspace), CTRL, None, KITTY_1).as_deref(), Some("\u{1b}[127;5u"));
+        assert_eq!(
+            enc_in(Key::Named(Named::Escape), NONE, None, KITTY_1).as_deref(),
+            Some("\u{1b}[27u")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Enter), SHIFT, None, KITTY_1).as_deref(),
+            Some("\u{1b}[13;2u")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Enter), NONE, Some("\r"), KITTY_1).as_deref(),
+            Some("\r")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Tab), NONE, Some("\t"), KITTY_1).as_deref(),
+            Some("\t")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Tab), SHIFT, None, KITTY_1).as_deref(),
+            Some("\u{1b}[9;2u")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Backspace), CTRL, None, KITTY_1).as_deref(),
+            Some("\u{1b}[127;5u")
+        );
     }
 
     #[test]
     fn kitty_sends_modified_letters_as_csi_u_and_plain_ones_as_text() {
-        assert_eq!(enc_in(ch("c"), CTRL, Some("\u{3}"), KITTY_1).as_deref(), Some("\u{1b}[99;5u"));
-        assert_eq!(enc_in(ch("a"), ALT, Some("a"), KITTY_1).as_deref(), Some("\u{1b}[97;3u"));
-        assert_eq!(enc_in(ch("a"), NONE, Some("a"), KITTY_1).as_deref(), Some("a"));
-        assert_eq!(enc_in(ch("a"), SHIFT, Some("A"), KITTY_1).as_deref(), Some("A"));
-        assert_eq!(enc_in(ch("e"), NONE, Some("é"), KITTY_1).as_deref(), Some("é"));
+        assert_eq!(
+            enc_in(ch("c"), CTRL, Some("\u{3}"), KITTY_1).as_deref(),
+            Some("\u{1b}[99;5u")
+        );
+        assert_eq!(
+            enc_in(ch("a"), ALT, Some("a"), KITTY_1).as_deref(),
+            Some("\u{1b}[97;3u")
+        );
+        assert_eq!(
+            enc_in(ch("a"), NONE, Some("a"), KITTY_1).as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            enc_in(ch("a"), SHIFT, Some("A"), KITTY_1).as_deref(),
+            Some("A")
+        );
+        assert_eq!(
+            enc_in(ch("e"), NONE, Some("é"), KITTY_1).as_deref(),
+            Some("é")
+        );
         // A dead key still sends nothing.
-        let dead = KeyPress { modified_key: Key::Unidentified, ..press(ch("'"), NONE, None) };
+        let dead = KeyPress {
+            modified_key: Key::Unidentified,
+            ..press(ch("'"), NONE, None)
+        };
         assert_eq!(encode_key(&dead, KITTY_1, &KeyOptions::default()), None);
     }
 
     #[test]
     fn kitty_keeps_the_classic_shape_of_cursor_keys() {
-        assert_eq!(enc_in(Key::Named(Named::ArrowUp), NONE, None, KITTY_1).as_deref(), Some("\u{1b}[A"));
-        assert_eq!(enc_in(Key::Named(Named::ArrowUp), SHIFT, None, KITTY_1).as_deref(), Some("\u{1b}[1;2A"));
-        assert_eq!(enc_in(Key::Named(Named::Delete), CTRL, None, KITTY_1).as_deref(), Some("\u{1b}[3;5~"));
+        assert_eq!(
+            enc_in(Key::Named(Named::ArrowUp), NONE, None, KITTY_1).as_deref(),
+            Some("\u{1b}[A")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::ArrowUp), SHIFT, None, KITTY_1).as_deref(),
+            Some("\u{1b}[1;2A")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Delete), CTRL, None, KITTY_1).as_deref(),
+            Some("\u{1b}[3;5~")
+        );
     }
 
     #[test]
@@ -772,9 +940,15 @@ mod tests {
         let mode = KITTY_1 | TermMode::REPORT_EVENT_TYPES;
         let mut up = press(Key::Named(Named::ArrowUp), NONE, None);
         up.kind = KeyEventKind::Release;
-        assert_eq!(encode_key(&up, mode, &KeyOptions::default()), Some(b"\x1b[1;1:3A".to_vec()));
+        assert_eq!(
+            encode_key(&up, mode, &KeyOptions::default()),
+            Some(b"\x1b[1;1:3A".to_vec())
+        );
         up.kind = KeyEventKind::Repeat;
-        assert_eq!(encode_key(&up, mode, &KeyOptions::default()), Some(b"\x1b[1;1:2A".to_vec()));
+        assert_eq!(
+            encode_key(&up, mode, &KeyOptions::default()),
+            Some(b"\x1b[1;1:2A".to_vec())
+        );
         up.kind = KeyEventKind::Release;
         // Text keys are typed, and their release is not reported.
         let mut a = press(ch("a"), NONE, None);
@@ -787,9 +961,18 @@ mod tests {
     #[test]
     fn kitty_report_all_keys_sends_everything_as_escape_codes() {
         let mode = KITTY_1 | TermMode::REPORT_ALL_KEYS_AS_ESC;
-        assert_eq!(enc_in(ch("a"), NONE, Some("a"), mode).as_deref(), Some("\u{1b}[97u"));
-        assert_eq!(enc_in(Key::Named(Named::Enter), NONE, Some("\r"), mode).as_deref(), Some("\u{1b}[13u"));
+        assert_eq!(
+            enc_in(ch("a"), NONE, Some("a"), mode).as_deref(),
+            Some("\u{1b}[97u")
+        );
+        assert_eq!(
+            enc_in(Key::Named(Named::Enter), NONE, Some("\r"), mode).as_deref(),
+            Some("\u{1b}[13u")
+        );
         let with_text = mode | TermMode::REPORT_ASSOCIATED_TEXT;
-        assert_eq!(enc_in(ch("a"), SHIFT, Some("A"), with_text).as_deref(), Some("\u{1b}[97;2;65u"));
+        assert_eq!(
+            enc_in(ch("a"), SHIFT, Some("A"), with_text).as_deref(),
+            Some("\u{1b}[97;2;65u")
+        );
     }
 }

@@ -7,7 +7,9 @@
 use std::sync::{Arc, Mutex};
 
 use hangar_core::board::Task;
-use hangar_core::git::{Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree};
+use hangar_core::git::{
+    Changes, CopyResult, DeleteBranchResult, HookReport, RemoveResult, RepoInfo, Worktree,
+};
 use hangar_core::memory::MemoryEntry;
 
 use super::brief::BriefingPort;
@@ -54,7 +56,11 @@ impl LivePort {
     /// `None` when the app went away before answering.
     async fn write(&self, cmd: ModelCmd) -> Option<crate::state::StoreOutcome> {
         let (answer, outcome) = Answer::channel();
-        if !self.handle.services().send(Message::Control(crate::control::Msg::Model(cmd, answer))) {
+        if !self
+            .handle
+            .services()
+            .send(Message::Control(crate::control::Msg::Model(cmd, answer)))
+        {
             return None;
         }
         outcome.await.ok()?.ok()
@@ -63,11 +69,18 @@ impl LivePort {
     /// The same, for a write nothing waits on.
     fn tell(&self, cmd: ModelCmd) {
         let (answer, _) = Answer::channel();
-        self.handle.services().send(Message::Control(crate::control::Msg::Model(cmd, answer)));
+        self.handle
+            .services()
+            .send(Message::Control(crate::control::Msg::Model(cmd, answer)));
     }
 
     fn enqueue_now(&self, pane: &str, text: &str, from: &str) {
-        hangar_core::bridge::bridge_enqueue(&self.host(), pane.into(), text.into(), Some(from.into()));
+        hangar_core::bridge::bridge_enqueue(
+            &self.host(),
+            pane.into(),
+            text.into(),
+            Some(from.into()),
+        );
     }
 }
 
@@ -149,7 +162,11 @@ impl WorkerPort for LivePort {
     }
 
     async fn close_pane(&self, workspace_id: &str, pane: &str) {
-        self.write(ModelCmd::ClosePane { ws: workspace_id.into(), pane: pane.into() }).await;
+        self.write(ModelCmd::ClosePane {
+            ws: workspace_id.into(),
+            pane: pane.into(),
+        })
+        .await;
     }
 
     /// Hibernation's `touchWorkspace`, through P18 to P4: a workspace a
@@ -178,7 +195,9 @@ impl WorkerPort for LivePort {
 
     async fn dir_exists(&self, path: &str) -> bool {
         let path = path.to_string();
-        blocking(move || hangar_core::store::dir_exists(path)).await.unwrap_or(false)
+        blocking(move || hangar_core::store::dir_exists(path))
+            .await
+            .unwrap_or(false)
     }
 
     async fn sleep(&self, ms: u64) {
@@ -190,13 +209,40 @@ impl WorkerPort for LivePort {
         blocking(move || hangar_core::board_load(cwd).tasks).await
     }
 
-    async fn claim(&self, cwd: &str, id: &str, worker: &str, max_attempts: u32, shared_folder: bool) -> Result<Task, String> {
-        let (host, cwd, id, worker) = (self.host(), cwd.to_string(), id.to_string(), worker.to_string());
-        blocking(move || hangar_core::board_claim_worker(&host, cwd, id, worker, max_attempts, Some(shared_folder))).await?
+    async fn claim(
+        &self,
+        cwd: &str,
+        id: &str,
+        worker: &str,
+        max_attempts: u32,
+        shared_folder: bool,
+    ) -> Result<Task, String> {
+        let (host, cwd, id, worker) = (
+            self.host(),
+            cwd.to_string(),
+            id.to_string(),
+            worker.to_string(),
+        );
+        blocking(move || {
+            hangar_core::board_claim_worker(
+                &host,
+                cwd,
+                id,
+                worker,
+                max_attempts,
+                Some(shared_folder),
+            )
+        })
+        .await?
     }
 
     async fn release(&self, cwd: &str, id: &str, worker: &str, undo: bool) -> Result<Task, String> {
-        let (host, cwd, id, worker) = (self.host(), cwd.to_string(), id.to_string(), worker.to_string());
+        let (host, cwd, id, worker) = (
+            self.host(),
+            cwd.to_string(),
+            id.to_string(),
+            worker.to_string(),
+        );
         blocking(move || hangar_core::board_release_worker(&host, cwd, id, worker, undo)).await?
     }
 
@@ -228,19 +274,40 @@ impl WorkerPort for LivePort {
 
     /// Without the workspace's `preRemove` hook, as lib/workerControl.ts
     /// called it: the worktree is only removed once nothing in it is kept.
-    async fn worktree_remove(&self, path: &str, worktree_path: &str, force: bool) -> Result<RemoveResult, String> {
+    async fn worktree_remove(
+        &self,
+        path: &str,
+        worktree_path: &str,
+        force: bool,
+    ) -> Result<RemoveResult, String> {
         hangar_core::git::git_worktree_remove(path.into(), worktree_path.into(), force, None).await
     }
 
-    async fn worktree_hook(&self, path: &str, worktree_path: &str, command: &str) -> Result<Option<HookReport>, String> {
-        hangar_core::git::git_worktree_hook(path.into(), worktree_path.into(), Some(command.into())).await
+    async fn worktree_hook(
+        &self,
+        path: &str,
+        worktree_path: &str,
+        command: &str,
+    ) -> Result<Option<HookReport>, String> {
+        hangar_core::git::git_worktree_hook(path.into(), worktree_path.into(), Some(command.into()))
+            .await
     }
 
-    async fn branch_delete(&self, path: &str, branch: &str, force: bool) -> Result<DeleteBranchResult, String> {
+    async fn branch_delete(
+        &self,
+        path: &str,
+        branch: &str,
+        force: bool,
+    ) -> Result<DeleteBranchResult, String> {
         hangar_core::git::git_branch_delete(path.into(), branch.into(), force).await
     }
 
-    async fn copy_ignored(&self, from: &str, to: &str, patterns: &[&str]) -> Result<CopyResult, String> {
+    async fn copy_ignored(
+        &self,
+        from: &str,
+        to: &str,
+        patterns: &[&str],
+    ) -> Result<CopyResult, String> {
         let patterns = patterns.iter().map(|pattern| pattern.to_string()).collect();
         hangar_core::git::git_copy_untracked(from.into(), to.into(), patterns, Some(true)).await
     }
@@ -266,7 +333,8 @@ impl BriefingPort for LivePort {
 
     async fn load_memory(&self) -> Result<Vec<MemoryEntry>, String> {
         let host = self.host();
-        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries)).await?
+        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries))
+            .await?
     }
 
     fn journal(&self, workspace_id: &str) -> Vec<JournalEntry> {
@@ -314,7 +382,8 @@ impl ProjectsPort for LivePort {
 
     async fn load_memory(&self) -> Result<Vec<MemoryEntry>, String> {
         let host = self.host();
-        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries)).await?
+        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries))
+            .await?
     }
 
     /// Without git installed, nobody can tell.

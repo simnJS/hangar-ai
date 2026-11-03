@@ -271,10 +271,19 @@ fn delivery_words(outcome: DeliveryOutcome) -> &'static str {
 
 /// One event as a line a model reads: who, what, which task, what it means
 /// (`describeEvent`).
-pub fn describe_event(event: &OrchestratorEvent, titles: &dyn Fn(&str) -> Option<String>) -> String {
+pub fn describe_event(
+    event: &OrchestratorEvent,
+    titles: &dyn Fn(&str) -> Option<String>,
+) -> String {
     use OrchestratorEvent as E;
     match event {
-        E::Delivery { task_id, title, worker, outcome, detail } => {
+        E::Delivery {
+            task_id,
+            title,
+            worker,
+            outcome,
+            detail,
+        } => {
             let detail = if detail.trim().is_empty() {
                 String::new()
             } else {
@@ -286,29 +295,56 @@ pub fn describe_event(event: &OrchestratorEvent, titles: &dyn Fn(&str) -> Option
                 delivery_words(*outcome)
             )
         }
-        E::TaskNeedsYou { task_id, title, reason } => format!(
+        E::TaskNeedsYou {
+            task_id,
+            title,
+            reason,
+        } => format!(
             "{} needs the person: {}",
             task_ref(Some(title), task_id),
             one_line(reason, MAX_TEXT)
         ),
-        E::TaskBlocked { task_id, title, by, reason, human_only } => format!(
+        E::TaskBlocked {
+            task_id,
+            title,
+            by,
+            reason,
+            human_only,
+        } => format!(
             "{} blocked {}: {}{}",
             if by == "user" { "The person" } else { by },
             task_ref(Some(title), task_id),
             one_line(reason, MAX_TEXT),
-            if *human_only { " (only the person can unblock it)" } else { "" }
+            if *human_only {
+                " (only the person can unblock it)"
+            } else {
+                ""
+            }
         ),
-        E::TaskUnblocked { task_id, title, how } => format!(
+        E::TaskUnblocked {
+            task_id,
+            title,
+            how,
+        } => format!(
             "{} unblocked: {}",
             task_ref(Some(title), task_id),
             one_line(how, MAX_TEXT)
         ),
-        E::TaskRecheckDue { task_id, title, reason } => format!(
+        E::TaskRecheckDue {
+            task_id,
+            title,
+            reason,
+        } => format!(
             "{}: its recheck day passed and it stays blocked until the person lifts it ({})",
             task_ref(Some(title), task_id),
             one_line(reason, MAX_TEXT)
         ),
-        E::TaskCommented { task_id, title, by, text } => {
+        E::TaskCommented {
+            task_id,
+            title,
+            by,
+            text,
+        } => {
             let who = if by == "user" { "The person" } else { by };
             let title = title.clone();
             format!(
@@ -317,27 +353,46 @@ pub fn describe_event(event: &OrchestratorEvent, titles: &dyn Fn(&str) -> Option
                 one_line(text, MAX_TEXT)
             )
         }
-        E::TaskMoved { task_id, title, from, to, by } => format!(
+        E::TaskMoved {
+            task_id,
+            title,
+            from,
+            to,
+            by,
+        } => format!(
             "{} moved {from} → {to}{}",
             task_ref(Some(title), task_id),
-            by.as_ref().map(|by| format!(" (by {by})")).unwrap_or_default()
+            by.as_ref()
+                .map(|by| format!(" (by {by})"))
+                .unwrap_or_default()
         ),
         E::WorkerStarted { worker, task_id } => {
             format!("{worker} started{}", on_task(task_id.as_deref(), titles))
         }
         E::WorkerStopped { worker, task_id } => {
-            format!("{worker} was stopped{}", on_task(task_id.as_deref(), titles))
+            format!(
+                "{worker} was stopped{}",
+                on_task(task_id.as_deref(), titles)
+            )
         }
         E::WorkerExited { worker, task_id } => format!(
             "{worker}'s session ended{}; the task is still assigned to it",
             on_task(task_id.as_deref(), titles)
         ),
-        E::WorkerWaiting { worker, task_id, for_ms } => format!(
+        E::WorkerWaiting {
+            worker,
+            task_id,
+            for_ms,
+        } => format!(
             "{worker} has been waiting for the person for {}{}: a permission or a question in its pane, which only the person can answer",
             minutes(*for_ms),
             on_task(task_id.as_deref(), titles)
         ),
-        E::WorkerIdle { worker, task_id, for_ms } => format!(
+        E::WorkerIdle {
+            worker,
+            task_id,
+            for_ms,
+        } => format!(
             "{worker} ended its turn {} ago without delivering{}",
             minutes(*for_ms),
             on_task(task_id.as_deref(), titles)
@@ -382,12 +437,19 @@ pub trait LiveView {
 /// for a near one (`other !== entry`); every such look is for another kind
 /// than the entry's, or strictly earlier, so the entry can never match itself
 /// and no identity is needed.
-pub fn settle(batch: &[JournalEntry], journal: &[JournalEntry], live: &dyn LiveView) -> Vec<OrchestratorEvent> {
-    let near = |entry: &JournalEntry, kind: EventKind, matches: &dyn Fn(&OrchestratorEvent) -> bool| {
-        journal.iter().any(|other| {
-            other.event.kind() == kind && other.at.abs_diff(entry.at) <= NEAR_MS && matches(&other.event)
-        })
-    };
+pub fn settle(
+    batch: &[JournalEntry],
+    journal: &[JournalEntry],
+    live: &dyn LiveView,
+) -> Vec<OrchestratorEvent> {
+    let near =
+        |entry: &JournalEntry, kind: EventKind, matches: &dyn Fn(&OrchestratorEvent) -> bool| {
+            journal.iter().any(|other| {
+                other.event.kind() == kind
+                    && other.at.abs_diff(entry.at) <= NEAR_MS
+                    && matches(&other.event)
+            })
+        };
 
     let kept = batch.iter().filter(|entry| {
         use OrchestratorEvent as E;
@@ -446,7 +508,9 @@ pub fn settle(batch: &[JournalEntry], journal: &[JournalEntry], live: &dyn LiveV
             continue;
         }
         match event {
-            OrchestratorEvent::TaskMoved { task_id, to, by, .. } => {
+            OrchestratorEvent::TaskMoved {
+                task_id, to, by, ..
+            } => {
                 // todo → doing → review is one move, todo → review.
                 if let Some(first) = out.iter_mut().find(
                     |e| matches!(e, OrchestratorEvent::TaskMoved { task_id: id, .. } if id == task_id),
@@ -460,7 +524,8 @@ pub fn settle(batch: &[JournalEntry], journal: &[JournalEntry], live: &dyn LiveV
                     continue;
                 }
             }
-            OrchestratorEvent::WorkerWaiting { worker, .. } | OrchestratorEvent::WorkerIdle { worker, .. } => {
+            OrchestratorEvent::WorkerWaiting { worker, .. }
+            | OrchestratorEvent::WorkerIdle { worker, .. } => {
                 let kind = event.kind();
                 if let Some(at) = out
                     .iter()
@@ -500,7 +565,9 @@ pub fn settle(batch: &[JournalEntry], journal: &[JournalEntry], live: &dyn LiveV
     let quoted: HashSet<String> = out
         .iter()
         .filter_map(|e| match e {
-            OrchestratorEvent::TaskNeedsYou { task_id, reason, .. } => Some(format!("{task_id}\n{reason}")),
+            OrchestratorEvent::TaskNeedsYou {
+                task_id, reason, ..
+            } => Some(format!("{task_id}\n{reason}")),
             _ => None,
         })
         .collect();
@@ -508,9 +575,9 @@ pub fn settle(batch: &[JournalEntry], journal: &[JournalEntry], live: &dyn LiveV
         .into_iter()
         .filter(|e| !matches!(e, OrchestratorEvent::TaskMoved { from, to, .. } if from == to))
         .filter(|e| match e {
-            OrchestratorEvent::TaskCommented { task_id, by, text, .. } => {
-                !quoted.contains(&format!("{task_id}\n{by}: {}", one_line(text, MAX_TEXT)))
-            }
+            OrchestratorEvent::TaskCommented {
+                task_id, by, text, ..
+            } => !quoted.contains(&format!("{task_id}\n{by}: {}", one_line(text, MAX_TEXT))),
             _ => true,
         })
         .collect();
@@ -525,7 +592,9 @@ fn is_done(task: Option<&Task>) -> bool {
 
 /// Higher priority first, then the board's own order.
 pub fn by_rank(a: &Task, b: &Task) -> std::cmp::Ordering {
-    b.priority.cmp(&a.priority).then(a.order.total_cmp(&b.order))
+    b.priority
+        .cmp(&a.priority)
+        .then(a.order.total_cmp(&b.order))
 }
 
 /// Tasks nobody holds, in todo, with every dependency done: the next spawns
@@ -539,7 +608,10 @@ pub fn ready_tasks(tasks: &[Task]) -> Vec<&Task> {
                 && task.assignee.as_deref().is_none_or(str::is_empty)
                 && !task.labels.iter().any(|label| label == NEEDS_YOU_LABEL)
                 && task.blocked.is_none()
-                && task.depends_on.iter().all(|id| is_done(by_id.get(id.as_str()).copied()))
+                && task
+                    .depends_on
+                    .iter()
+                    .all(|id| is_done(by_id.get(id.as_str()).copied()))
         })
         .collect();
     ready.sort_by(|a, b| by_rank(a, b));
@@ -548,7 +620,12 @@ pub fn ready_tasks(tasks: &[Task]) -> Vec<&Task> {
 
 /// The message a batch becomes (`renderDelta`).
 pub fn render_delta(events: &[OrchestratorEvent], tasks: &[Task], workspace: &str) -> String {
-    let titles = |id: &str| tasks.iter().find(|task| task.id == id).map(|task| task.title.clone());
+    let titles = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.title.clone())
+    };
     let shown = &events[..events.len().min(MAX_LINES)];
     let mut lines: Vec<String> = shown
         .iter()
@@ -556,7 +633,9 @@ pub fn render_delta(events: &[OrchestratorEvent], tasks: &[Task], workspace: &st
         .collect();
     let hidden = events.len() - shown.len();
     if hidden > 0 {
-        lines.push(format!("- …and {hidden} more: board_list_tasks and worker_list have the rest."));
+        lines.push(format!(
+            "- …and {hidden} more: board_list_tasks and worker_list have the rest."
+        ));
     }
     let head = if events.len() == 1 {
         format!("1 update in workspace \"{workspace}\":")
@@ -690,7 +769,11 @@ pub fn diff_board(
                 OrchestratorEvent::TaskBlocked {
                     task_id: task.id.clone(),
                     title: task.title.clone(),
-                    by: if blocked.by.is_empty() { "an agent".into() } else { blocked.by.clone() },
+                    by: if blocked.by.is_empty() {
+                        "an agent".into()
+                    } else {
+                        blocked.by.clone()
+                    },
                     reason: blocked.reason.clone(),
                     human_only: blocked.human_only,
                 },
@@ -729,7 +812,9 @@ pub fn diff_board(
                     task_id: task.id.clone(),
                     title: task.title.clone(),
                     reason: match last {
-                        Some(last) => format!("{}: {}", last.author, one_line(&last.text, MAX_TEXT)),
+                        Some(last) => {
+                            format!("{}: {}", last.author, one_line(&last.text, MAX_TEXT))
+                        }
                         None => format!("labelled {NEEDS_YOU_LABEL}"),
                     },
                 },
@@ -865,7 +950,14 @@ impl OrchestratorEngine {
 
     /// Hands `event` to the workspace's orchestrator, if it has one
     /// (`post`). `quiet`: journal it, never wake for it.
-    pub fn post(&mut self, io: &dyn EngineIo, workspace_id: &str, event: OrchestratorEvent, quiet: bool, now: u64) {
+    pub fn post(
+        &mut self,
+        io: &dyn EngineIo,
+        workspace_id: &str,
+        event: OrchestratorEvent,
+        quiet: bool,
+        now: u64,
+    ) {
         if self.stopped {
             return;
         }
@@ -878,9 +970,15 @@ impl OrchestratorEngine {
         };
         // Starting and stopping workers is the orchestrator's own doing when
         // it happens during its turn: it already has the tool's answer.
-        let own = matches!(event.kind(), EventKind::WorkerStarted | EventKind::WorkerStopped)
-            && self.in_turn(io, orchestrator);
-        let entry = JournalEntry { at: now, event, quiet: quiet || own };
+        let own = matches!(
+            event.kind(),
+            EventKind::WorkerStarted | EventKind::WorkerStopped
+        ) && self.in_turn(io, orchestrator);
+        let entry = JournalEntry {
+            at: now,
+            event,
+            quiet: quiet || own,
+        };
         let s = self.space(workspace_id);
         s.journal.push(entry.clone());
         if s.journal.len() > JOURNAL_SIZE {
@@ -950,7 +1048,13 @@ impl OrchestratorEngine {
         self.send(io, &ws, &orchestrator, now);
     }
 
-    fn send(&mut self, io: &dyn EngineIo, ws: &Workspace, orchestrator: &Pane, now: u64) -> Option<String> {
+    fn send(
+        &mut self,
+        io: &dyn EngineIo,
+        ws: &Workspace,
+        orchestrator: &Pane,
+        now: u64,
+    ) -> Option<String> {
         // The board as it is now: a landing moved its task, and the next
         // spawns are read off it.
         let _ = self.read(io, ws, now);
@@ -960,7 +1064,11 @@ impl OrchestratorEngine {
         if batch.is_empty() {
             return None;
         }
-        let live = SpaceLive { io, ws, tasks: &s.tasks };
+        let live = SpaceLive {
+            io,
+            ws,
+            tasks: &s.tasks,
+        };
         let events = settle(&batch, &s.journal, &live);
         if events.is_empty() {
             return None;
@@ -986,7 +1094,14 @@ impl OrchestratorEngine {
         let busy = self.in_turn(io, &orchestrator);
         let s = self.space(&ws.id);
         let changes = s.board.as_ref().map(|before| {
-            diff_board(before, &tasks, Reader { name: &orchestrator.name, busy })
+            diff_board(
+                before,
+                &tasks,
+                Reader {
+                    name: &orchestrator.name,
+                    busy,
+                },
+            )
         });
         s.board = Some(snap_board(&tasks));
         s.tasks = tasks;
@@ -1009,7 +1124,9 @@ impl OrchestratorEngine {
         for (ws, _) in orchestrated(&state) {
             for pane in workers_of(&ws) {
                 present.insert(pane.id.clone());
-                let activity = io.activity(&pane.id).map_or(AgentActivity::Idle, |a| a.activity);
+                let activity = io
+                    .activity(&pane.id)
+                    .map_or(AgentActivity::Idle, |a| a.activity);
                 let handed_back = matches!(activity, AgentActivity::Yours | AgentActivity::Idle);
                 let at = match self.workers.iter().position(|(id, _)| *id == pane.id) {
                     Some(at) => at,
@@ -1035,7 +1152,8 @@ impl OrchestratorEngine {
                 w.name = pane.name.clone();
                 w.task_id = pane.task_id.clone();
                 if activity != w.activity {
-                    let was_in_turn = matches!(w.activity, AgentActivity::Working | AgentActivity::Waiting);
+                    let was_in_turn =
+                        matches!(w.activity, AgentActivity::Working | AgentActivity::Waiting);
                     w.after_turn = handed_back && (was_in_turn || w.after_turn);
                     w.activity = activity;
                     w.since = now;
@@ -1096,10 +1214,16 @@ impl OrchestratorEngine {
             if orchestrator(&ws).is_none() || w.exit_sent {
                 continue;
             }
-            if workers_of(&ws).iter().any(|pane| same_name(&pane.name, &w.name)) {
+            if workers_of(&ws)
+                .iter()
+                .any(|pane| same_name(&pane.name, &w.name))
+            {
                 continue;
             }
-            let event = OrchestratorEvent::WorkerExited { worker: w.name.clone(), task_id: w.task_id.clone() };
+            let event = OrchestratorEvent::WorkerExited {
+                worker: w.name.clone(),
+                task_id: w.task_id.clone(),
+            };
             self.post(io, &ws.id, event, false, now);
         }
     }
@@ -1107,7 +1231,11 @@ impl OrchestratorEngine {
     fn exited(&mut self, io: &dyn EngineIo, pane_id: &str, now: u64) {
         let state = io.state();
         for (ws, _) in orchestrated(&state) {
-            let Some(pane) = workers_of(&ws).into_iter().find(|p| p.id == pane_id).cloned() else {
+            let Some(pane) = workers_of(&ws)
+                .into_iter()
+                .find(|p| p.id == pane_id)
+                .cloned()
+            else {
                 continue;
             };
             match self.workers.iter_mut().find(|(id, _)| id == pane_id) {
@@ -1128,7 +1256,10 @@ impl OrchestratorEngine {
                     },
                 )),
             }
-            let event = OrchestratorEvent::WorkerExited { worker: pane.name.clone(), task_id: pane.task_id.clone() };
+            let event = OrchestratorEvent::WorkerExited {
+                worker: pane.name.clone(),
+                task_id: pane.task_id.clone(),
+            };
             self.post(io, &ws.id, event, false, now);
             return;
         }
@@ -1144,10 +1275,22 @@ impl OrchestratorEngine {
     }
 
     /// A report of a pane's hangar-bridge mod (`bridgeEvent`).
-    pub fn bridge_event(&mut self, io: &dyn EngineIo, pane_id: &str, event: &BridgeEvent, now: u64) {
+    pub fn bridge_event(
+        &mut self,
+        io: &dyn EngineIo,
+        pane_id: &str,
+        event: &BridgeEvent,
+        now: u64,
+    ) {
         match event {
             BridgeEvent::Hello { .. } => {
-                self.turns.insert(pane_id.to_string(), Turn { in_turn: false, waiting: false });
+                self.turns.insert(
+                    pane_id.to_string(),
+                    Turn {
+                        in_turn: false,
+                        waiting: false,
+                    },
+                );
                 if let Some((_, w)) = self.workers.iter_mut().find(|(id, _)| id == pane_id) {
                     w.exit_sent = false;
                 }
@@ -1155,7 +1298,10 @@ impl OrchestratorEngine {
             BridgeEvent::Turn(phase) => {
                 self.turns.insert(
                     pane_id.to_string(),
-                    Turn { in_turn: matches!(phase, TurnPhase::Start), waiting: false },
+                    Turn {
+                        in_turn: matches!(phase, TurnPhase::Start),
+                        waiting: false,
+                    },
                 );
             }
             BridgeEvent::Permission { waiting, .. } => {
@@ -1269,8 +1415,14 @@ struct SpaceLive<'a> {
 
 impl LiveView for SpaceLive<'_> {
     fn activity(&self, worker: &str) -> Option<AgentActivity> {
-        let pane = workers_of(self.ws).into_iter().find(|p| same_name(&p.name, worker))?;
-        Some(self.io.activity(&pane.id).map_or(AgentActivity::Idle, |a| a.activity))
+        let pane = workers_of(self.ws)
+            .into_iter()
+            .find(|p| same_name(&p.name, worker))?;
+        Some(
+            self.io
+                .activity(&pane.id)
+                .map_or(AgentActivity::Idle, |a| a.activity),
+        )
     }
 
     fn column(&self, task_id: &str) -> Option<String> {

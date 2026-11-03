@@ -98,7 +98,11 @@ impl Search {
 /// "smart case", which would make the option a toggle that sometimes does
 /// nothing.
 fn pattern(query: &str, options: SearchOptions) -> String {
-    let flag = if options.case_sensitive { "(?-i)" } else { "(?i)" };
+    let flag = if options.case_sensitive {
+        "(?-i)"
+    } else {
+        "(?i)"
+    };
     if options.regex {
         format!("{flag}{query}")
     } else {
@@ -121,7 +125,11 @@ impl Terminal {
     /// An empty query clears the search. A regex that does not compile
     /// returns the reason and leaves the previous search in place, so a
     /// pattern halfway through being typed does not flash the highlights off.
-    pub fn search(&mut self, query: &str, options: SearchOptions) -> Result<SearchStatus, SearchError> {
+    pub fn search(
+        &mut self,
+        query: &str,
+        options: SearchOptions,
+    ) -> Result<SearchStatus, SearchError> {
         if query.is_empty() {
             self.clear_search();
             return Ok(SearchStatus::default());
@@ -264,7 +272,10 @@ impl Terminal {
         // Keep the current match where it is when the list is recomputed: the
         // one that starts at the same cell, or failing that the nearest after.
         search.current = match previous {
-            Some(p) => matches.iter().position(|m| *m.start() >= p).or(matches.len().checked_sub(1)),
+            Some(p) => matches
+                .iter()
+                .position(|m| *m.start() >= p)
+                .or(matches.len().checked_sub(1)),
             None => search.current.filter(|&i| i < matches.len()),
         };
         search.matches = matches;
@@ -323,7 +334,9 @@ mod tests {
     }
 
     fn lines(n: usize) -> String {
-        (0..n).map(|i| format!("line {i} needle {}\r\n", i % 3)).collect()
+        (0..n)
+            .map(|i| format!("line {i} needle {}\r\n", i % 3))
+            .collect()
     }
 
     #[test]
@@ -336,7 +349,10 @@ mod tests {
     #[test]
     fn regex_mode_reads_the_pattern() {
         let mut term = terminal_with("a.c abc a-c\r\n", 40, 5);
-        let options = SearchOptions { regex: true, ..SearchOptions::default() };
+        let options = SearchOptions {
+            regex: true,
+            ..SearchOptions::default()
+        };
         assert_eq!(term.search("a.c", options).unwrap().count, 3);
         assert_eq!(term.search("a\\.c", options).unwrap().count, 1);
     }
@@ -344,17 +360,29 @@ mod tests {
     #[test]
     fn case_is_ignored_unless_asked() {
         let mut term = terminal_with("Foo foo FOO\r\n", 40, 5);
-        assert_eq!(term.search("foo", SearchOptions::default()).unwrap().count, 3);
-        let sensitive = SearchOptions { case_sensitive: true, ..SearchOptions::default() };
+        assert_eq!(
+            term.search("foo", SearchOptions::default()).unwrap().count,
+            3
+        );
+        let sensitive = SearchOptions {
+            case_sensitive: true,
+            ..SearchOptions::default()
+        };
         assert_eq!(term.search("foo", sensitive).unwrap().count, 1);
         // Upper case in the query does not switch the mode on by itself.
-        assert_eq!(term.search("Foo", SearchOptions::default()).unwrap().count, 3);
+        assert_eq!(
+            term.search("Foo", SearchOptions::default()).unwrap().count,
+            3
+        );
     }
 
     #[test]
     fn a_broken_regex_is_reported_and_keeps_the_last_search() {
         let mut term = terminal_with("foo\r\n", 40, 5);
-        let options = SearchOptions { regex: true, ..SearchOptions::default() };
+        let options = SearchOptions {
+            regex: true,
+            ..SearchOptions::default()
+        };
         term.search("fo+", options).unwrap();
         assert!(term.search("fo(", options).is_err());
         assert_eq!(term.search_status().count, 1);
@@ -393,7 +421,10 @@ mod tests {
     fn matches_across_a_soft_wrap_are_found() {
         // Ten columns: "0123456789abcdef" wraps after the ninth cell.
         let mut term = terminal_with("0123456789abcdef\r\n", 10, 5);
-        assert_eq!(term.search("89ab", SearchOptions::default()).unwrap().count, 1);
+        assert_eq!(
+            term.search("89ab", SearchOptions::default()).unwrap().count,
+            1
+        );
     }
 
     #[test]
@@ -404,7 +435,10 @@ mod tests {
         term.clear_search();
         assert!(!term.is_searching());
         assert_eq!(term.search_status(), SearchStatus::default());
-        assert_eq!(term.search("", SearchOptions::default()).unwrap(), SearchStatus::default());
+        assert_eq!(
+            term.search("", SearchOptions::default()).unwrap(),
+            SearchStatus::default()
+        );
     }
 
     #[test]

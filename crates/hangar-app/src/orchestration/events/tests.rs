@@ -47,7 +47,11 @@ impl EngineIo for World {
     }
 
     fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
-        self.sent.borrow_mut().push(Sent { pane: pane.into(), text: text.into(), from: from.into() });
+        self.sent.borrow_mut().push(Sent {
+            pane: pane.into(),
+            text: text.into(),
+            from: from.into(),
+        });
         Ok(())
     }
 }
@@ -107,13 +111,20 @@ fn rig_with(panes: Vec<Pane>) -> Rig {
         engine: OrchestratorEngine::new(),
         io: World {
             state: AppState {
-                workspaces: vec![shop, workspace("plain", "plain", vec![pane("p", "solo", None)])],
+                workspaces: vec![
+                    shop,
+                    workspace("plain", "plain", vec![pane("p", "solo", None)]),
+                ],
                 active_workspace_id: Some("ws".into()),
                 ..AppState::default()
             },
             activities: HashMap::new(),
             tasks: vec![
-                Task { column: "doing".into(), assignee: Some("worker-1".into()), ..task("t1") },
+                Task {
+                    column: "doing".into(),
+                    assignee: Some("worker-1".into()),
+                    ..task("t1")
+                },
                 task("t2"),
             ],
             sent: RefCell::new(Vec::new()),
@@ -135,12 +146,22 @@ fn delivery(outcome: DeliveryOutcome, task_id: &str) -> OrchestratorEvent {
         title: format!("Task {task_id}"),
         worker: "worker-1".into(),
         outcome,
-        detail: if outcome == DeliveryOutcome::Landed { "check passed" } else { "pnpm test exited 1" }.into(),
+        detail: if outcome == DeliveryOutcome::Landed {
+            "check passed"
+        } else {
+            "pnpm test exited 1"
+        }
+        .into(),
     }
 }
 
 fn commented(task_id: &str, title: &str, by: &str, text: &str) -> OrchestratorEvent {
-    OrchestratorEvent::TaskCommented { task_id: task_id.into(), title: title.into(), by: by.into(), text: text.into() }
+    OrchestratorEvent::TaskCommented {
+        task_id: task_id.into(),
+        title: title.into(),
+        by: by.into(),
+        text: text.into(),
+    }
 }
 
 fn moved(task_id: &str, title: &str, from: &str, to: &str) -> OrchestratorEvent {
@@ -154,15 +175,24 @@ fn moved(task_id: &str, title: &str, from: &str, to: &str) -> OrchestratorEvent 
 }
 
 fn started(worker: &str, task_id: Option<&str>) -> OrchestratorEvent {
-    OrchestratorEvent::WorkerStarted { worker: worker.into(), task_id: task_id.map(str::to_string) }
+    OrchestratorEvent::WorkerStarted {
+        worker: worker.into(),
+        task_id: task_id.map(str::to_string),
+    }
 }
 
 fn exited(worker: &str, task_id: Option<&str>) -> OrchestratorEvent {
-    OrchestratorEvent::WorkerExited { worker: worker.into(), task_id: task_id.map(str::to_string) }
+    OrchestratorEvent::WorkerExited {
+        worker: worker.into(),
+        task_id: task_id.map(str::to_string),
+    }
 }
 
 fn stopped(worker: &str, task_id: Option<&str>) -> OrchestratorEvent {
-    OrchestratorEvent::WorkerStopped { worker: worker.into(), task_id: task_id.map(str::to_string) }
+    OrchestratorEvent::WorkerStopped {
+        worker: worker.into(),
+        task_id: task_id.map(str::to_string),
+    }
 }
 
 /* ── batching ──────────────────────────────────────────────────── */
@@ -172,7 +202,10 @@ fn sends_the_events_of_a_few_seconds_as_one_message_from_hangar() {
     let mut r = rig();
     r.post("ws", delivery(DeliveryOutcome::CheckFailed, "t1"));
     r.advance(2_000);
-    r.post("ws", commented("t1", "Task t1", "worker-1", "Fixing the test"));
+    r.post(
+        "ws",
+        commented("t1", "Task t1", "worker-1", "Fixing the test"),
+    );
     r.advance(2_000);
     assert!(r.sent().is_empty());
     r.advance(timing::DEBOUNCE_MS);
@@ -184,14 +217,20 @@ fn sends_the_events_of_a_few_seconds_as_one_message_from_hangar() {
     assert_eq!(lines[0], "2 updates in workspace \"Shop\":");
     assert!(lines[1].contains("Delivery of \"Task t1\" [t1] by worker-1 failed the check"));
     assert!(lines[1].contains("pnpm test exited 1"));
-    assert_eq!(lines[2], "- worker-1 commented on \"Task t1\" [t1]: \"Fixing the test\"");
+    assert_eq!(
+        lines[2],
+        "- worker-1 commented on \"Task t1\" [t1]: \"Fixing the test\""
+    );
 }
 
 #[test]
 fn does_not_let_a_steady_stream_postpone_the_first_event_for_good() {
     let mut r = rig();
     for i in 0..12 {
-        r.post("ws", commented("t1", "Task t1", &format!("w{i}"), &format!("note {i}")));
+        r.post(
+            "ws",
+            commented("t1", "Task t1", &format!("w{i}"), &format!("note {i}")),
+        );
         r.advance(3_000);
     }
     let sent = r.sent();
@@ -219,7 +258,14 @@ fn holds_the_batch_while_the_orchestrator_is_in_a_turn_and_folds_what_comes_mean
 fn believes_the_mod_over_a_pane_still_showing_the_working_of_its_startup() {
     let mut r = rig();
     r.set_activity("o", AgentActivity::Working);
-    r.bridge("o", BridgeEvent::Hello { session_id: "s".into(), model: "sonnet".into(), version: "2".into() });
+    r.bridge(
+        "o",
+        BridgeEvent::Hello {
+            session_id: "s".into(),
+            model: "sonnet".into(),
+            version: "2".into(),
+        },
+    );
     r.post("ws", delivery(DeliveryOutcome::CheckFailed, "t1"));
     r.advance(timing::DEBOUNCE_MS);
     assert_eq!(r.sent().len(), 1);
@@ -228,10 +274,21 @@ fn believes_the_mod_over_a_pane_still_showing_the_working_of_its_startup() {
     r.post("ws", delivery(DeliveryOutcome::Landed, "t1"));
     r.advance(timing::MIN_GAP_MS + timing::DEBOUNCE_MS);
     assert_eq!(r.sent().len(), 1);
-    r.bridge("o", BridgeEvent::Permission { waiting: true, tool: None, input: None });
     r.bridge(
         "o",
-        BridgeEvent::Turn(TurnPhase::End { reason: "answer".into(), duration_ms: 1, answer: String::new() }),
+        BridgeEvent::Permission {
+            waiting: true,
+            tool: None,
+            input: None,
+        },
+    );
+    r.bridge(
+        "o",
+        BridgeEvent::Turn(TurnPhase::End {
+            reason: "answer".into(),
+            duration_ms: 1,
+            answer: String::new(),
+        }),
     );
     r.advance(timing::HOLD_MS);
     assert_eq!(r.sent().len(), 2);
@@ -290,11 +347,16 @@ fn keeps_what_the_orchestrator_did_itself_out_of_its_messages_but_in_its_journal
 fn keeps_the_last_fifty_events_of_a_workspace() {
     let mut r = rig();
     for i in 0..70 {
-        r.post("ws", commented("t1", "Task t1", "worker-1", &format!("n{i}")));
+        r.post(
+            "ws",
+            commented("t1", "Task t1", "worker-1", &format!("n{i}")),
+        );
     }
     let journal = r.engine.journal("ws");
     assert_eq!(journal.len(), 50);
-    assert!(matches!(&journal[0].event, OrchestratorEvent::TaskCommented { text, .. } if text == "n20"));
+    assert!(
+        matches!(&journal[0].event, OrchestratorEvent::TaskCommented { text, .. } if text == "n20")
+    );
 }
 
 /* ── the board ─────────────────────────────────────────────────── */
@@ -333,7 +395,11 @@ fn takes_the_first_read_as_it_is_then_tells_moves_comments_and_needs_you() {
     // The person's question is told once, as what the task needs.
     assert!(text.starts_with("3 updates"), "{text}");
     assert!(text.contains("\"Task t2\" [t2] needs the person: user: Which API?"));
-    assert!(text.contains("worker-1 commented on \"Task t1\" [t1]: \"Done. / Ran pnpm test: 12 passed\""));
+    assert!(
+        text.contains(
+            "worker-1 commented on \"Task t1\" [t1]: \"Done. / Ran pnpm test: 12 passed\""
+        )
+    );
     assert!(!text.contains("The person commented"));
     assert!(text.contains("\"Task t1\" [t1] moved doing → review"));
     assert!(!text.contains("Thanks"));
@@ -343,18 +409,55 @@ fn takes_the_first_read_as_it_is_then_tells_moves_comments_and_needs_you() {
 
 #[test]
 fn takes_a_move_made_during_the_orchestrators_turn_for_its_own() {
-    let before = snap_board(&[task("a"), Task { column: "doing".into(), ..task("b") }]);
+    let before = snap_board(&[
+        task("a"),
+        Task {
+            column: "doing".into(),
+            ..task("b")
+        },
+    ]);
     let after = [
-        Task { column: "doing".into(), ..task("a") },
-        Task { column: "doing".into(), labels: strings(&["needs-you"]), ..task("b") },
+        Task {
+            column: "doing".into(),
+            ..task("a")
+        },
+        Task {
+            column: "doing".into(),
+            labels: strings(&["needs-you"]),
+            ..task("b")
+        },
     ];
-    let own = diff_board(&before, &after, Reader { name: "orch", busy: true });
+    let own = diff_board(
+        &before,
+        &after,
+        Reader {
+            name: "orch",
+            busy: true,
+        },
+    );
     assert_eq!(own.len(), 2);
-    assert!(matches!(&own[0], (OrchestratorEvent::TaskMoved { by: Some(by), .. }, true) if by == "orch"));
-    assert!(matches!(&own[1], (OrchestratorEvent::TaskNeedsYou { reason, .. }, true) if reason == "labelled needs-you"));
-    let theirs = diff_board(&before, &after, Reader { name: "orch", busy: false });
-    assert_eq!(theirs.iter().map(|(_, quiet)| *quiet).collect::<Vec<_>>(), [false, false]);
-    assert!(matches!(&theirs[0].0, OrchestratorEvent::TaskMoved { by: None, .. }));
+    assert!(
+        matches!(&own[0], (OrchestratorEvent::TaskMoved { by: Some(by), .. }, true) if by == "orch")
+    );
+    assert!(
+        matches!(&own[1], (OrchestratorEvent::TaskNeedsYou { reason, .. }, true) if reason == "labelled needs-you")
+    );
+    let theirs = diff_board(
+        &before,
+        &after,
+        Reader {
+            name: "orch",
+            busy: false,
+        },
+    );
+    assert_eq!(
+        theirs.iter().map(|(_, quiet)| *quiet).collect::<Vec<_>>(),
+        [false, false]
+    );
+    assert!(matches!(
+        &theirs[0].0,
+        OrchestratorEvent::TaskMoved { by: None, .. }
+    ));
 }
 
 /* ── settling a batch ──────────────────────────────────────────── */
@@ -384,7 +487,10 @@ impl LiveView for FakeLive {
 fn live(activity: &[(&str, AgentActivity)], columns: &[(&str, &str)]) -> FakeLive {
     FakeLive {
         activity: activity.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
-        columns: columns.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        columns: columns
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
     }
 }
 
@@ -396,7 +502,10 @@ fn folds_the_moves_of_one_task_into_one_and_drops_a_round_trip() {
         entry(moved("b", "B", "todo", "doing"), BASE, false),
         entry(moved("b", "B", "doing", "todo"), BASE, false),
     ];
-    assert_eq!(settle(&moves, &moves, &live(&[], &[])), [moved("a", "A", "todo", "review")]);
+    assert_eq!(
+        settle(&moves, &moves, &live(&[], &[])),
+        [moved("a", "A", "todo", "review")]
+    );
 }
 
 #[test]
@@ -413,7 +522,10 @@ fn drops_what_a_more_telling_event_already_says() {
     journal.extend(batch.clone());
     assert!(settle(&batch, &journal, &live(&[], &[])).is_empty());
     // …unless it is about something else, or long ago.
-    let old = JournalEntry { at: BASE - 10 * timing::NEAR_MS, ..started };
+    let old = JournalEntry {
+        at: BASE - 10 * timing::NEAR_MS,
+        ..started
+    };
     let mut journal = vec![old];
     journal.extend(batch.clone());
     assert_eq!(settle(&batch[..1], &journal, &live(&[], &[])).len(), 1);
@@ -489,7 +601,12 @@ fn removes_repeats_keeps_a_workers_last_two_comments_and_puts_deliveries_first()
     ];
     assert_eq!(
         settle(&batch, &batch, &live(&[], &[])),
-        [delivery(DeliveryOutcome::CheckFailed, "c"), note("two"), note("three"), started("w2", Some("b"))]
+        [
+            delivery(DeliveryOutcome::CheckFailed, "c"),
+            note("two"),
+            note("three"),
+            started("w2", Some("b"))
+        ]
     );
 }
 
@@ -501,17 +618,36 @@ fn lists_a_dozen_lines_at_most_and_counts_the_rest() {
     let text = render_delta(&events, &[], "Shop");
     let lines: Vec<&str> = text.split('\n').collect();
     assert_eq!(lines.len(), 14);
-    assert_eq!(lines[13], "- …and 3 more: board_list_tasks and worker_list have the rest.");
+    assert_eq!(
+        lines[13],
+        "- …and 3 more: board_list_tasks and worker_list have the rest."
+    );
 }
 
 #[test]
 fn names_the_tasks_a_landing_made_ready_or_says_the_board_is_done() {
     let tasks = vec![
-        Task { column: "done".into(), ..task("a") },
-        Task { depends_on: strings(&["a"]), priority: 2, ..task("b") },
-        Task { depends_on: strings(&["a", "z"]), ..task("c") },
-        Task { labels: strings(&["needs-you"]), ..task("d") },
-        Task { assignee: Some("w1".into()), ..task("e") },
+        Task {
+            column: "done".into(),
+            ..task("a")
+        },
+        Task {
+            depends_on: strings(&["a"]),
+            priority: 2,
+            ..task("b")
+        },
+        Task {
+            depends_on: strings(&["a", "z"]),
+            ..task("c")
+        },
+        Task {
+            labels: strings(&["needs-you"]),
+            ..task("d")
+        },
+        Task {
+            assignee: Some("w1".into()),
+            ..task("e")
+        },
     ];
     let ready: Vec<&str> = ready_tasks(&tasks).iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ready, ["b"]);
@@ -519,11 +655,21 @@ fn names_the_tasks_a_landing_made_ready_or_says_the_board_is_done() {
         render_delta(&[delivery(DeliveryOutcome::Landed, "a")], &tasks, "Shop")
             .contains("Ready to start: \"Task b\" [b].")
     );
-    assert!(!render_delta(&[delivery(DeliveryOutcome::CheckFailed, "a")], &tasks, "Shop").contains("Ready to start"));
+    assert!(
+        !render_delta(
+            &[delivery(DeliveryOutcome::CheckFailed, "a")],
+            &tasks,
+            "Shop"
+        )
+        .contains("Ready to start")
+    );
     assert!(
         render_delta(
             &[delivery(DeliveryOutcome::Landed, "a")],
-            &[Task { column: "done".into(), ..task("a") }],
+            &[Task {
+                column: "done".into(),
+                ..task("a")
+            }],
             "Shop"
         )
         .contains("Every task on the board is done")
@@ -533,8 +679,15 @@ fn names_the_tasks_a_landing_made_ready_or_says_the_board_is_done() {
 #[test]
 fn names_a_workers_task_by_its_title() {
     let text = render_delta(
-        &[OrchestratorEvent::WorkerWaiting { worker: "w1".into(), task_id: Some("a".into()), for_ms: 185_000 }],
-        &[Task { title: "Login form".into(), ..task("a") }],
+        &[OrchestratorEvent::WorkerWaiting {
+            worker: "w1".into(),
+            task_id: Some("a".into()),
+            for_ms: 185_000,
+        }],
+        &[Task {
+            title: "Login form".into(),
+            ..task("a")
+        }],
         "Shop",
     );
     assert!(text.contains("w1 has been waiting for the person for 3 min on \"Login form\" [a]"));
@@ -559,7 +712,11 @@ fn tells_a_wait_for_the_person_once_it_passes_two_minutes_once() {
     r.advance(timing::DEBOUNCE_MS);
     let sent = r.sent();
     assert_eq!(sent.len(), 1);
-    assert!(sent[0].text.contains("worker-1 has been waiting for the person for 2 min"));
+    assert!(
+        sent[0]
+            .text
+            .contains("worker-1 has been waiting for the person for 2 min")
+    );
     r.advance(5 * 60_000);
     r.tick();
     r.advance(timing::DEBOUNCE_MS);
@@ -578,7 +735,11 @@ fn tells_a_turn_ended_ten_minutes_ago_without_a_delivery() {
     r.advance(timing::DEBOUNCE_MS);
     let sent = r.sent();
     assert_eq!(sent.len(), 1);
-    assert!(sent[0].text.contains("worker-1 ended its turn 10 min ago without delivering on \"Task t1\" [t1]"));
+    assert!(
+        sent[0]
+            .text
+            .contains("worker-1 ended its turn 10 min ago without delivering on \"Task t1\" [t1]")
+    );
 }
 
 #[test]
@@ -608,10 +769,20 @@ fn does_not_call_a_worker_idle_that_delivered_or_that_never_had_a_turn() {
 fn tells_an_exit_once_whether_claude_code_or_its_shell_said_it() {
     let mut r = rig();
     r.tick();
-    r.bridge("w1", BridgeEvent::End { reason: "exit".into() });
+    r.bridge(
+        "w1",
+        BridgeEvent::End {
+            reason: "exit".into(),
+        },
+    );
     let t = r.t;
     r.engine.pty_exited(&r.io, "w1", t);
-    r.bridge("o", BridgeEvent::End { reason: "exit".into() });
+    r.bridge(
+        "o",
+        BridgeEvent::End {
+            reason: "exit".into(),
+        },
+    );
     r.advance(timing::DEBOUNCE_MS);
     let sent = r.sent();
     assert_eq!(sent.len(), 1);
@@ -650,12 +821,18 @@ fn tells_a_worker_pane_closed_by_hand_not_one_stopped_or_restarted() {
 
 /* ── blocked tasks ─────────────────────────────────────────────── */
 
-const ORCH: Reader<'static> = Reader { name: "orch", busy: false };
+const ORCH: Reader<'static> = Reader {
+    name: "orch",
+    busy: false,
+};
 
 #[test]
 fn tells_a_block_with_its_author_and_reason_and_an_unblock_with_how() {
     let before = snap_board(&[task("a")]);
-    let on = [Task { blocked: Some(blocked("npm release", "Eli", false)), ..task("a") }];
+    let on = [Task {
+        blocked: Some(blocked("npm release", "Eli", false)),
+        ..task("a")
+    }];
     let told = diff_board(&before, &on, ORCH);
     assert!(matches!(
         &told[0].0,
@@ -667,7 +844,14 @@ fn tells_a_block_with_its_author_and_reason_and_an_unblock_with_how() {
     );
 
     let comments = vec![comment("c", "hangar", "recheck passed (2026-11-05)", 2)];
-    let lifted = diff_board(&snap_board(&on), &[Task { comments, ..task("a") }], ORCH);
+    let lifted = diff_board(
+        &snap_board(&on),
+        &[Task {
+            comments,
+            ..task("a")
+        }],
+        ORCH,
+    );
     assert!(matches!(
         &lifted[0].0,
         OrchestratorEvent::TaskUnblocked { how, .. } if how == "recheck passed (2026-11-05)"
@@ -679,13 +863,22 @@ fn tells_a_block_with_its_author_and_reason_and_an_unblock_with_how() {
 fn keeps_the_orchestrators_own_block_quiet_and_says_when_only_a_person_can_lift_one() {
     let own = diff_board(
         &snap_board(&[task("a")]),
-        &[Task { blocked: Some(blocked("npm release", "orch", false)), ..task("a") }],
-        Reader { name: "orch", busy: true },
+        &[Task {
+            blocked: Some(blocked("npm release", "orch", false)),
+            ..task("a")
+        }],
+        Reader {
+            name: "orch",
+            busy: true,
+        },
     );
     assert!(own[0].1);
     let human = diff_board(
         &snap_board(&[task("a")]),
-        &[Task { blocked: Some(blocked("npm release", "Eli", true)), ..task("a") }],
+        &[Task {
+            blocked: Some(blocked("npm release", "Eli", true)),
+            ..task("a")
+        }],
         ORCH,
     );
     assert!(describe_event(&human[0].0, &|_| None).contains("only the person can unblock it"));
@@ -694,10 +887,19 @@ fn keeps_the_orchestrators_own_block_quiet_and_says_when_only_a_person_can_lift_
 #[test]
 fn reminds_once_when_a_human_only_recheck_passes() {
     let human = blocked("npm release", "Eli", true);
-    let reminded = hangar_core::board::Blocked { reminded: Some(5), ..human.clone() };
+    let reminded = hangar_core::board::Blocked {
+        reminded: Some(5),
+        ..human.clone()
+    };
     let due = diff_board(
-        &snap_board(&[Task { blocked: Some(human), ..task("a") }]),
-        &[Task { blocked: Some(reminded), ..task("a") }],
+        &snap_board(&[Task {
+            blocked: Some(human),
+            ..task("a")
+        }]),
+        &[Task {
+            blocked: Some(reminded),
+            ..task("a")
+        }],
         ORCH,
     );
     assert_eq!(due[0].0.kind(), EventKind::TaskRecheckDue);
@@ -705,7 +907,13 @@ fn reminds_once_when_a_human_only_recheck_passes() {
 
 #[test]
 fn does_not_offer_a_blocked_task_as_ready() {
-    let tasks = [Task { blocked: Some(blocked("npm release", "Eli", false)), ..task("a") }, task("b")];
+    let tasks = [
+        Task {
+            blocked: Some(blocked("npm release", "Eli", false)),
+            ..task("a")
+        },
+        task("b"),
+    ];
     let ready: Vec<&str> = ready_tasks(&tasks).iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ready, ["b"]);
 }
@@ -718,7 +926,10 @@ fn an_event_reads_as_the_ts_wrote_it() {
         for_ms: 3,
     })
     .unwrap();
-    assert_eq!(json, serde_json::json!({"kind": "workerWaiting", "worker": "Mia", "taskId": "t1", "forMs": 3}));
+    assert_eq!(
+        json,
+        serde_json::json!({"kind": "workerWaiting", "worker": "Mia", "taskId": "t1", "forMs": 3})
+    );
     let json = serde_json::to_value(delivery(DeliveryOutcome::CheckFailed, "t1")).unwrap();
     assert_eq!(json["outcome"], "checkFailed");
 }

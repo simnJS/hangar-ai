@@ -12,9 +12,7 @@ use alacritty_terminal::term::{self, ClipboardType, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{CursorShape as EmulatorShape, CursorStyle, Processor, Rgb};
 
 use crate::config::{Config, CursorShape, Osc52};
-use crate::event::{
-    Action, ClipboardReply, ClipboardTarget, Event, Metrics, PtySize, ScrollTo,
-};
+use crate::event::{Action, ClipboardReply, ClipboardTarget, Event, Metrics, PtySize, ScrollTo};
 use crate::font::Font;
 use crate::keys::KeyOptions;
 use crate::osc::{Osc, OscScanner};
@@ -193,7 +191,9 @@ impl Terminal {
         for osc in found {
             match osc {
                 Osc::Notification { .. } if replay => {}
-                Osc::Notification { title, body } => events.push(Event::Notification { title, body }),
+                Osc::Notification { title, body } => {
+                    events.push(Event::Notification { title, body })
+                }
                 Osc::WorkingDirectory(path) => events.push(Event::WorkingDirectory(path)),
             }
         }
@@ -335,7 +335,10 @@ impl Terminal {
         }
         self.term.reset_damage();
 
-        let cursor = (self.term.grid().cursor.point, self.term.cursor_style().shape);
+        let cursor = (
+            self.term.grid().cursor.point,
+            self.term.cursor_style().shape,
+        );
         if cursor != self.last_cursor {
             self.last_cursor = cursor;
             self.cursor_generation += 1;
@@ -426,7 +429,11 @@ impl Terminal {
         if before == now || !self.term.mode().contains(TermMode::FOCUS_IN_OUT) {
             return Vec::new();
         }
-        vec![Event::Write(if now { b"\x1b[I".to_vec() } else { b"\x1b[O".to_vec() })]
+        vec![Event::Write(if now {
+            b"\x1b[I".to_vec()
+        } else {
+            b"\x1b[O".to_vec()
+        })]
     }
 
     fn bump_cursor_rows(&mut self) {
@@ -570,7 +577,9 @@ impl Terminal {
 
     /// The selected text, if anything is selected.
     pub fn selection_text(&self) -> Option<String> {
-        self.term.selection_to_string().filter(|text| !text.is_empty())
+        self.term
+            .selection_to_string()
+            .filter(|text| !text.is_empty())
     }
 
     pub fn has_selection(&self) -> bool {
@@ -592,7 +601,10 @@ impl Terminal {
     }
 
     pub(crate) fn selection_range(&self) -> Option<SelectionRange> {
-        self.term.selection.as_ref().and_then(|s| s.to_range(&self.term))
+        self.term
+            .selection
+            .as_ref()
+            .and_then(|s| s.to_range(&self.term))
     }
 
     // ---- What is on screen ------------------------------------------------
@@ -622,7 +634,9 @@ impl Terminal {
     /// spaces. For code that reads the screen the way a person would, such as
     /// spotting a question the agent is waiting on.
     pub fn screen_text(&self) -> Vec<String> {
-        (0..self.rows as i32).map(|row| self.row_text(Line(row), true)).collect()
+        (0..self.rows as i32)
+            .map(|row| self.row_text(Line(row), true))
+            .collect()
     }
 
     /// The text of one row of the grid; `trim` drops the spaces after the
@@ -632,7 +646,10 @@ impl Terminal {
         let mut text = String::new();
         for column in 0..self.columns {
             let cell = &grid[line][Column(column)];
-            if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+            if cell
+                .flags
+                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+            {
                 continue;
             }
             text.push(if cell.c == '\0' { ' ' } else { cell.c });
@@ -675,7 +692,10 @@ impl Terminal {
             return Vec::new();
         }
         let wraps_into_next = |line: Line| {
-            line > top && grid[Line(line.0 - 1)][Column(self.columns - 1)].flags.contains(Flags::WRAPLINE)
+            line > top
+                && grid[Line(line.0 - 1)][Column(self.columns - 1)]
+                    .flags
+                    .contains(Flags::WRAPLINE)
         };
         let mut lines = Vec::new();
         let mut end = last;
@@ -784,7 +804,9 @@ impl Terminal {
         if cell.flags.contains(Flags::WIDE_CHAR_SPACER) && column > 0 {
             column -= 1;
         }
-        let wide = self.term.grid()[point.line][Column(column)].flags.contains(Flags::WIDE_CHAR);
+        let wide = self.term.grid()[point.line][Column(column)]
+            .flags
+            .contains(Flags::WIDE_CHAR);
         let shape = match self.term.cursor_style().shape {
             EmulatorShape::Block | EmulatorShape::HollowBlock => CursorShape::Block,
             EmulatorShape::Beam => CursorShape::Beam,
@@ -815,7 +837,11 @@ impl Terminal {
         if let Some(extra) = zerowidth {
             text.extend(extra.iter());
         }
-        Some((text, cell.flags.contains(Flags::BOLD), cell.flags.contains(Flags::ITALIC)))
+        Some((
+            text,
+            cell.flags.contains(Flags::BOLD),
+            cell.flags.contains(Flags::ITALIC),
+        ))
     }
 
     /// The colour of a palette index as the emulator numbers them: 0 to 255
@@ -951,7 +977,10 @@ mod tests {
         let mut term = terminal(20, 4);
         let events = term.feed(b"\x1b]52;c;?\x07");
         assert!(events.is_empty());
-        term.set_config(Config { osc52: Osc52::CopyAndPaste, ..Config::default() });
+        term.set_config(Config {
+            osc52: Osc52::CopyAndPaste,
+            ..Config::default()
+        });
         let events = term.feed(b"\x1b]52;c;?\x07");
         match &events[0] {
             Event::ClipboardLoad { reply, .. } => {
@@ -975,7 +1004,11 @@ mod tests {
         let events = term.resize(100, 30);
         assert!(matches!(
             events[0],
-            Event::Resize(PtySize { rows: 30, columns: 100, .. })
+            Event::Resize(PtySize {
+                rows: 30,
+                columns: 100,
+                ..
+            })
         ));
         assert_eq!(term.size(), (100, 30));
         assert!(term.resize(100, 30).is_empty());
@@ -1009,7 +1042,9 @@ mod tests {
         // it is still one logical line.
         term.select_all();
         assert_eq!(
-            term.selection_text().map(|t| t.trim_end().to_owned()).as_deref(),
+            term.selection_text()
+                .map(|t| t.trim_end().to_owned())
+                .as_deref(),
             Some("0123456789abcdefghij0123")
         );
     }
@@ -1034,7 +1069,14 @@ mod tests {
 
     #[test]
     fn history_is_capped_by_the_configuration() {
-        let mut term = Terminal::new(Config { scrollback: 5, ..Config::default() }, 20, 3);
+        let mut term = Terminal::new(
+            Config {
+                scrollback: 5,
+                ..Config::default()
+            },
+            20,
+            3,
+        );
         for i in 0..50 {
             term.feed(format!("row {i}\r\n").as_bytes());
         }
@@ -1146,8 +1188,16 @@ mod tests {
         )));
         assert!(term.bell_age(Instant::now()).is_none());
         // The state the replay ends in is reported.
-        assert!(events.iter().any(|e| matches!(e, Event::Title(t) if t == "a title")));
-        assert!(events.iter().any(|e| matches!(e, Event::WorkingDirectory(p) if p == "/tmp/x")));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Title(t) if t == "a title"))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::WorkingDirectory(p) if p == "/tmp/x"))
+        );
         // And after it the terminal answers again.
         assert_eq!(writes(&term.feed(b"\x1b[c")), b"\x1b[?6c");
     }
@@ -1205,7 +1255,10 @@ mod tests {
         let mut term = terminal(10, 6);
         term.feed(b"short\r\n0123456789abcdefghij012\r\nend");
         // Nothing below the last text: the screen's blank rows are not lines.
-        assert_eq!(term.read_lines(10), ["short", "0123456789abcdefghij012", "end"]);
+        assert_eq!(
+            term.read_lines(10),
+            ["short", "0123456789abcdefghij012", "end"]
+        );
         assert_eq!(term.read_lines(2), ["0123456789abcdefghij012", "end"]);
         // Blank lines the program printed are kept in the middle.
         let mut term = terminal(10, 6);

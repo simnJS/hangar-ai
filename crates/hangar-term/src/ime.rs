@@ -91,13 +91,13 @@ impl InputState {
         // a key held down repeats faster than the window is long.
         if let Some(last) = &self.last_text
             && last.road == Road::InputMethod
-                && press.text.as_deref() == Some(last.text.as_str())
-                && bytes == last.text.as_bytes()
-                && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
-            {
-                self.last_text = None;
-                return None;
-            }
+            && press.text.as_deref() == Some(last.text.as_str())
+            && bytes == last.text.as_bytes()
+            && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
+        {
+            self.last_text = None;
+            return None;
+        }
         // Something was typed, so no composition is still going on.
         self.preedit = None;
         self.last_text = match &press.text {
@@ -127,18 +127,21 @@ impl InputState {
             }
             input_method::Event::Commit(text) => {
                 self.preedit = None;
-                let text: String = text.chars().filter(|c| !c.is_control() || *c == '\n').collect();
+                let text: String = text
+                    .chars()
+                    .filter(|c| !c.is_control() || *c == '\n')
+                    .collect();
                 if text.is_empty() {
                     return None;
                 }
                 if let Some(last) = &self.last_text
                     && last.road == Road::KeyEvent
-                        && last.text == text
-                        && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
-                    {
-                        self.last_text = None;
-                        return None;
-                    }
+                    && last.text == text
+                    && now.saturating_duration_since(last.at) < DUPLICATE_WINDOW
+                {
+                    self.last_text = None;
+                    return None;
+                }
                 self.last_text = Some(Typed {
                     text: text.clone(),
                     at: now,
@@ -188,10 +191,16 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(type_key(&mut state, &dead("'"), t0), None);
         let e = press(Key::Character("e".into()), Some("é"));
-        assert_eq!(type_key(&mut state, &e, t0 + Duration::from_millis(120)).as_deref(), Some("é"));
+        assert_eq!(
+            type_key(&mut state, &e, t0 + Duration::from_millis(120)).as_deref(),
+            Some("é")
+        );
         // The next key is just itself: nothing was left pending.
         let a = press(Key::Character("a".into()), Some("a"));
-        assert_eq!(type_key(&mut state, &a, t0 + Duration::from_millis(300)).as_deref(), Some("a"));
+        assert_eq!(
+            type_key(&mut state, &a, t0 + Duration::from_millis(300)).as_deref(),
+            Some("a")
+        );
     }
 
     #[test]
@@ -200,7 +209,10 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(type_key(&mut state, &dead("'"), t0), None);
         let space = press(Key::Named(Named::Space), Some("'"));
-        assert_eq!(type_key(&mut state, &space, t0 + Duration::from_millis(90)).as_deref(), Some("'"));
+        assert_eq!(
+            type_key(&mut state, &space, t0 + Duration::from_millis(90)).as_deref(),
+            Some("'")
+        );
     }
 
     #[test]
@@ -209,7 +221,10 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(type_key(&mut state, &dead("'"), t0), None);
         let second = press(Key::Character("'".into()), Some("´"));
-        assert_eq!(type_key(&mut state, &second, t0 + Duration::from_millis(80)).as_deref(), Some("´"));
+        assert_eq!(
+            type_key(&mut state, &second, t0 + Duration::from_millis(80)).as_deref(),
+            Some("´")
+        );
     }
 
     #[test]
@@ -219,9 +234,15 @@ mod tests {
         assert_eq!(type_key(&mut state, &dead("'"), t0), None);
         // Escape cancels the composition on the platform side.
         let esc = press(Key::Named(Named::Escape), None);
-        assert_eq!(type_key(&mut state, &esc, t0 + Duration::from_millis(80)).as_deref(), Some("\u{1b}"));
+        assert_eq!(
+            type_key(&mut state, &esc, t0 + Duration::from_millis(80)).as_deref(),
+            Some("\u{1b}")
+        );
         let e = press(Key::Character("e".into()), Some("e"));
-        assert_eq!(type_key(&mut state, &e, t0 + Duration::from_millis(160)).as_deref(), Some("e"));
+        assert_eq!(
+            type_key(&mut state, &e, t0 + Duration::from_millis(160)).as_deref(),
+            Some("e")
+        );
     }
 
     #[test]
@@ -229,7 +250,10 @@ mod tests {
         let mut state = InputState::default();
         let t0 = Instant::now();
         assert_eq!(state.input_method(&input_method::Event::Opened, t0), None);
-        assert_eq!(state.input_method(&input_method::Event::Preedit("´".into(), Some(0..2)), t0), None);
+        assert_eq!(
+            state.input_method(&input_method::Event::Preedit("´".into(), Some(0..2)), t0),
+            None
+        );
         assert_eq!(state.preedit().map(|p| p.text.as_str()), Some("´"));
         let out = state.input_method(&input_method::Event::Commit("é".into()), t0);
         assert_eq!(out, Some("é".as_bytes().to_vec()));
@@ -243,13 +267,19 @@ mod tests {
         // The key event first, then the commit a millisecond later.
         let e = press(Key::Character("e".into()), Some("é"));
         assert_eq!(type_key(&mut state, &e, t0).as_deref(), Some("é"));
-        let dup = state.input_method(&input_method::Event::Commit("é".into()), t0 + Duration::from_millis(1));
+        let dup = state.input_method(
+            &input_method::Event::Commit("é".into()),
+            t0 + Duration::from_millis(1),
+        );
         assert_eq!(dup, None);
         // And the other way round.
         let mut state = InputState::default();
         let first = state.input_method(&input_method::Event::Commit("é".into()), t0);
         assert_eq!(first, Some("é".as_bytes().to_vec()));
-        assert_eq!(type_key(&mut state, &e, t0 + Duration::from_millis(1)), None);
+        assert_eq!(
+            type_key(&mut state, &e, t0 + Duration::from_millis(1)),
+            None
+        );
     }
 
     #[test]
@@ -258,9 +288,15 @@ mod tests {
         let t0 = Instant::now();
         let l = press(Key::Character("l".into()), Some("l"));
         assert_eq!(type_key(&mut state, &l, t0).as_deref(), Some("l"));
-        assert_eq!(type_key(&mut state, &l, t0 + Duration::from_millis(80)).as_deref(), Some("l"));
+        assert_eq!(
+            type_key(&mut state, &l, t0 + Duration::from_millis(80)).as_deref(),
+            Some("l")
+        );
         // Likewise a commit that comes well after the key.
-        let again = state.input_method(&input_method::Event::Commit("l".into()), t0 + Duration::from_millis(400));
+        let again = state.input_method(
+            &input_method::Event::Commit("l".into()),
+            t0 + Duration::from_millis(400),
+        );
         assert_eq!(again, Some(b"l".to_vec()));
     }
 
@@ -273,7 +309,11 @@ mod tests {
         // because the window only pairs a key event with an input-method one.
         for i in 0..5 {
             let at = t0 + Duration::from_millis(20 * i);
-            assert_eq!(type_key(&mut state, &l, at).as_deref(), Some("l"), "repeat {i}");
+            assert_eq!(
+                type_key(&mut state, &l, at).as_deref(),
+                Some("l"),
+                "repeat {i}"
+            );
         }
     }
 
@@ -304,7 +344,10 @@ mod tests {
     #[test]
     fn control_characters_in_a_commit_are_not_typed() {
         let mut state = InputState::default();
-        let out = state.input_method(&input_method::Event::Commit("\u{1b}[31m".into()), Instant::now());
+        let out = state.input_method(
+            &input_method::Event::Commit("\u{1b}[31m".into()),
+            Instant::now(),
+        );
         assert_eq!(out, Some(b"[31m".to_vec()));
     }
 }

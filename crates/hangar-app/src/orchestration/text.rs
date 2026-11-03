@@ -172,7 +172,10 @@ mod tests {
         );
         assert_eq!(one_line("  a  \n\n  b   c ", MAX_TEXT), "a / b c");
         assert_eq!(one_line("abcdef", 4), "abc…");
-        assert_eq!(flat("Form done,\ntests next", 240), "Form done, / tests next");
+        assert_eq!(
+            flat("Form done,\ntests next", 240),
+            "Form done, / tests next"
+        );
     }
 
     #[test]

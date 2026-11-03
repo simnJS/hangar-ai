@@ -122,11 +122,11 @@ fn installed(name: &str) -> bool {
     let mut system = iced::advanced::graphics::text::font_system()
         .write()
         .expect("font system lock");
-    system
-        .raw()
-        .db()
-        .faces()
-        .any(|face| face.families.iter().any(|(family, _)| family.eq_ignore_ascii_case(name)))
+    system.raw().db().faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(family, _)| family.eq_ignore_ascii_case(name))
+    })
 }
 
 /// A `'static` copy of a family name.
@@ -136,7 +136,10 @@ fn installed(name: &str) -> bool {
 /// the set of fonts a person tries out is small, so this stays bounded.
 fn intern(name: &str) -> &'static str {
     static NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
-    let mut names = NAMES.get_or_init(Default::default).lock().expect("names lock");
+    let mut names = NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .expect("names lock");
     if let Some(known) = names.get(name) {
         return known;
     }
@@ -164,7 +167,11 @@ mod tests {
 
     #[test]
     fn rows_are_a_whole_number_of_physical_pixels() {
-        let font = Font { size: 13.0, line_height: 1.3, ..Font::default() };
+        let font = Font {
+            size: 13.0,
+            line_height: 1.3,
+            ..Font::default()
+        };
         // 16.9 logical pixels at scale 1 is 17; at scale 1.5 it is 25.35
         // physical pixels, so 25 of them, which is 16.666... logical.
         assert_eq!(font.cell_height(1.0), 17.0);

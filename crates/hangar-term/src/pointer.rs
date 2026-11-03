@@ -14,9 +14,7 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{TermMode, viewport_to_point};
 use iced::keyboard::Modifiers;
 
-use crate::event::{
-    Button, CellPos, ClipboardTarget, Event, Pointer, ScrollTo, Side,
-};
+use crate::event::{Button, CellPos, ClipboardTarget, Event, Pointer, ScrollTo, Side};
 use crate::links;
 use crate::mouse::{self, Code, Kind, Report};
 use crate::terminal::Terminal;
@@ -70,15 +68,30 @@ impl Terminal {
     fn grid_point(&self, at: CellPos) -> Point {
         let column = at.column.clamp(0, self.columns as i32 - 1) as usize;
         let row = at.row.clamp(0, self.rows as i32 - 1) as usize;
-        viewport_to_point(self.term.grid().display_offset(), Point::new(row, Column(column)))
+        viewport_to_point(
+            self.term.grid().display_offset(),
+            Point::new(row, Column(column)),
+        )
     }
 
     pub(crate) fn pointer(&mut self, pointer: Pointer, events: &mut Vec<Event>) {
         match pointer {
-            Pointer::Down { button, at, modifiers } => self.pointer_down(button, at, modifiers, events),
-            Pointer::Up { button, at, modifiers } => self.pointer_up(button, at, modifiers, events),
+            Pointer::Down {
+                button,
+                at,
+                modifiers,
+            } => self.pointer_down(button, at, modifiers, events),
+            Pointer::Up {
+                button,
+                at,
+                modifiers,
+            } => self.pointer_up(button, at, modifiers, events),
             Pointer::Move { at, modifiers } => self.pointer_move(at, modifiers, events),
-            Pointer::Wheel { notches, at, modifiers } => self.wheel(notches, at, modifiers, events),
+            Pointer::Wheel {
+                notches,
+                at,
+                modifiers,
+            } => self.wheel(notches, at, modifiers, events),
             Pointer::Left => self.pointer.last_cell = None,
         }
     }
@@ -86,11 +99,26 @@ impl Terminal {
     fn report(&self, code: Code, kind: Kind, at: CellPos, modifiers: Modifiers) -> Option<Event> {
         let column = at.column.clamp(0, self.columns as i32 - 1) as usize;
         let row = at.row.clamp(0, self.rows as i32 - 1) as usize;
-        mouse::encode(*self.term.mode(), Report { code, kind, column, row, modifiers })
-            .map(Event::Write)
+        mouse::encode(
+            *self.term.mode(),
+            Report {
+                code,
+                kind,
+                column,
+                row,
+                modifiers,
+            },
+        )
+        .map(Event::Write)
     }
 
-    fn pointer_down(&mut self, button: Button, at: CellPos, modifiers: Modifiers, events: &mut Vec<Event>) {
+    fn pointer_down(
+        &mut self,
+        button: Button,
+        at: CellPos,
+        modifiers: Modifiers,
+        events: &mut Vec<Event>,
+    ) {
         events.push(Event::Pressed);
 
         if self.mouse_reporting(modifiers) {
@@ -114,10 +142,11 @@ impl Terminal {
         // is checked before anything else so that following a link never
         // starts a selection.
         if (modifiers.control() || modifiers.logo())
-            && let Some(hit) = links::link_at(&self.term, self.grid_point(at)) {
-                events.push(Event::OpenLink(hit.link));
-                return;
-            }
+            && let Some(hit) = links::link_at(&self.term, self.grid_point(at))
+        {
+            events.push(Event::OpenLink(hit.link));
+            return;
+        }
 
         let now = Instant::now();
         let count = match self.pointer.last_click {
@@ -159,7 +188,13 @@ impl Terminal {
         self.pointer.alt_press = modifiers.alt() && count == 1;
     }
 
-    fn pointer_up(&mut self, button: Button, at: CellPos, modifiers: Modifiers, events: &mut Vec<Event>) {
+    fn pointer_up(
+        &mut self,
+        button: Button,
+        at: CellPos,
+        modifiers: Modifiers,
+        events: &mut Vec<Event>,
+    ) {
         if self.pointer.held != Some(button) {
             return;
         }
@@ -184,11 +219,9 @@ impl Terminal {
         // A click that went nowhere leaves no selection behind; one that went
         // somewhere is kept, and offered to the primary selection.
         let clicks = self.pointer.last_click.map_or(1, |c| c.count);
-        let empty = self
-            .term
-            .selection
-            .as_ref()
-            .is_some_and(|s| s.is_empty() && matches!(s.ty, SelectionType::Simple | SelectionType::Block));
+        let empty = self.term.selection.as_ref().is_some_and(|s| {
+            s.is_empty() && matches!(s.ty, SelectionType::Simple | SelectionType::Block)
+        });
         if empty && clicks == 1 {
             self.term.selection = None;
             if std::mem::take(&mut self.pointer.alt_press) {
@@ -197,12 +230,13 @@ impl Terminal {
             return;
         }
         if self.config.copy_on_select
-            && let Some(text) = self.selection_text() {
-                events.push(Event::SetClipboard {
-                    target: ClipboardTarget::Primary,
-                    text,
-                });
-            }
+            && let Some(text) = self.selection_text()
+        {
+            events.push(Event::SetClipboard {
+                target: ClipboardTarget::Primary,
+                text,
+            });
+        }
     }
 
     /// Alt+click moves the cursor of a shell prompt to the cell clicked, by
@@ -297,7 +331,11 @@ impl Terminal {
             self.pointer.wheel_remainder += notches;
             let whole = self.pointer.wheel_remainder.trunc();
             self.pointer.wheel_remainder -= whole;
-            let code = if whole > 0.0 { Code::WheelUp } else { Code::WheelDown };
+            let code = if whole > 0.0 {
+                Code::WheelUp
+            } else {
+                Code::WheelDown
+            };
             for _ in 0..(whole.abs() as usize).min(MAX_WHEEL_REPORTS) {
                 events.extend(self.report(code, Kind::Press, at, modifiers));
             }
@@ -362,15 +400,26 @@ mod tests {
     }
 
     fn down(term: &mut Terminal, button: Button, pos: CellPos, modifiers: Modifiers) -> Vec<Event> {
-        term.perform(Action::Pointer(Pointer::Down { button, at: pos, modifiers }))
+        term.perform(Action::Pointer(Pointer::Down {
+            button,
+            at: pos,
+            modifiers,
+        }))
     }
 
     fn up(term: &mut Terminal, button: Button, pos: CellPos) -> Vec<Event> {
-        term.perform(Action::Pointer(Pointer::Up { button, at: pos, modifiers: NONE }))
+        term.perform(Action::Pointer(Pointer::Up {
+            button,
+            at: pos,
+            modifiers: NONE,
+        }))
     }
 
     fn drag(term: &mut Terminal, pos: CellPos) -> Vec<Event> {
-        term.perform(Action::Pointer(Pointer::Move { at: pos, modifiers: NONE }))
+        term.perform(Action::Pointer(Pointer::Move {
+            at: pos,
+            modifiers: NONE,
+        }))
     }
 
     fn select(term: &mut Terminal, from: CellPos, to: CellPos) {
@@ -424,14 +473,22 @@ mod tests {
         assert_eq!(term.selection_text().as_deref(), Some("brave"));
         down(&mut term, Button::Left, word, NONE);
         up(&mut term, Button::Left, word);
-        assert_eq!(term.selection_text().as_deref(), Some("hello brave world\n"));
+        assert_eq!(
+            term.selection_text().as_deref(),
+            Some("hello brave world\n")
+        );
     }
 
     #[test]
     fn shift_extends_the_selection() {
         let mut term = terminal("hello world\r\n", 20, 4);
         select(&mut term, at(0, 0, Side::Left), at(4, 0, Side::Right));
-        down(&mut term, Button::Left, at(10, 0, Side::Right), Modifiers::SHIFT);
+        down(
+            &mut term,
+            Button::Left,
+            at(10, 0, Side::Right),
+            Modifiers::SHIFT,
+        );
         up(&mut term, Button::Left, at(10, 0, Side::Right));
         assert_eq!(term.selection_text().as_deref(), Some("hello world"));
     }
@@ -439,7 +496,12 @@ mod tests {
     #[test]
     fn alt_drag_selects_a_block() {
         let mut term = terminal("abcd\r\nefgh\r\nijkl\r\n", 10, 5);
-        down(&mut term, Button::Left, at(1, 0, Side::Left), Modifiers::ALT);
+        down(
+            &mut term,
+            Button::Left,
+            at(1, 0, Side::Left),
+            Modifiers::ALT,
+        );
         drag(&mut term, at(2, 2, Side::Right));
         up(&mut term, Button::Left, at(2, 2, Side::Right));
         assert_eq!(term.selection_text().as_deref(), Some("bc\nfg\njk"));
@@ -511,7 +573,14 @@ mod tests {
 
     #[test]
     fn copy_on_select_offers_the_primary_selection() {
-        let mut term = Terminal::new(Config { copy_on_select: true, ..Config::default() }, 20, 3);
+        let mut term = Terminal::new(
+            Config {
+                copy_on_select: true,
+                ..Config::default()
+            },
+            20,
+            3,
+        );
         term.feed(b"hello\r\n");
         down(&mut term, Button::Left, at(0, 0, Side::Left), NONE);
         drag(&mut term, at(4, 0, Side::Right));
@@ -545,12 +614,20 @@ mod tests {
     #[test]
     fn ctrl_click_on_a_url_opens_it_and_does_not_select() {
         let mut term = terminal("see https://hangar.ai/docs now\r\n", 40, 3);
-        let events = down(&mut term, Button::Left, at(10, 0, Side::Left), Modifiers::CTRL);
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(10, 0, Side::Left),
+            Modifiers::CTRL,
+        );
         let link = events.iter().find_map(|e| match e {
             Event::OpenLink(link) => Some(link.clone()),
             _ => None,
         });
-        assert_eq!(link.map(|l| l.uri).as_deref(), Some("https://hangar.ai/docs"));
+        assert_eq!(
+            link.map(|l| l.uri).as_deref(),
+            Some("https://hangar.ai/docs")
+        );
         assert!(!term.has_selection());
         // Without Ctrl it is an ordinary click.
         let events = down(&mut term, Button::Left, at(10, 0, Side::Left), NONE);
@@ -559,8 +636,17 @@ mod tests {
 
     #[test]
     fn osc_8_hyperlinks_carry_their_own_target() {
-        let mut term = terminal("\x1b]8;;https://hangar.ai/real\x1b\\click me\x1b]8;;\x1b\\ plain\r\n", 40, 3);
-        let events = down(&mut term, Button::Left, at(2, 0, Side::Left), Modifiers::CTRL);
+        let mut term = terminal(
+            "\x1b]8;;https://hangar.ai/real\x1b\\click me\x1b]8;;\x1b\\ plain\r\n",
+            40,
+            3,
+        );
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(2, 0, Side::Left),
+            Modifiers::CTRL,
+        );
         let link = events.iter().find_map(|e| match e {
             Event::OpenLink(link) => Some(link.clone()),
             _ => None,
@@ -569,19 +655,32 @@ mod tests {
         assert_eq!(link.uri, "https://hangar.ai/real");
         assert_eq!(link.source, crate::event::LinkSource::Hyperlink);
         // The text after the link is not part of it.
-        let events = down(&mut term, Button::Left, at(12, 0, Side::Left), Modifiers::CTRL);
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(12, 0, Side::Left),
+            Modifiers::CTRL,
+        );
         assert!(!events.iter().any(|e| matches!(e, Event::OpenLink(_))));
     }
 
     #[test]
     fn urls_that_wrap_over_rows_are_one_link() {
         let mut term = terminal("https://hangar.ai/a/long/path/to/somewhere\r\n", 20, 4);
-        let events = down(&mut term, Button::Left, at(3, 1, Side::Left), Modifiers::CTRL);
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(3, 1, Side::Left),
+            Modifiers::CTRL,
+        );
         let uri = events.iter().find_map(|e| match e {
             Event::OpenLink(link) => Some(link.uri.clone()),
             _ => None,
         });
-        assert_eq!(uri.as_deref(), Some("https://hangar.ai/a/long/path/to/somewhere"));
+        assert_eq!(
+            uri.as_deref(),
+            Some("https://hangar.ai/a/long/path/to/somewhere")
+        );
     }
 
     // ---- reporting ----
@@ -600,7 +699,12 @@ mod tests {
     #[test]
     fn shift_takes_the_mouse_back_for_selecting() {
         let mut term = terminal("hello\r\n\x1b[?1000h\x1b[?1006h", 20, 5);
-        let events = down(&mut term, Button::Left, at(0, 0, Side::Left), Modifiers::SHIFT);
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(0, 0, Side::Left),
+            Modifiers::SHIFT,
+        );
         assert!(writes(&events).is_empty());
         drag(&mut term, at(4, 0, Side::Right));
         up(&mut term, Button::Left, at(4, 0, Side::Right));
@@ -613,7 +717,10 @@ mod tests {
         // Motion with no button is not asked for in this mode.
         assert!(writes(&drag(&mut term, at(1, 1, Side::Left))).is_empty());
         down(&mut term, Button::Left, at(1, 1, Side::Left), NONE);
-        assert_eq!(writes(&drag(&mut term, at(2, 1, Side::Left))), b"\x1b[<32;3;2M");
+        assert_eq!(
+            writes(&drag(&mut term, at(2, 1, Side::Left))),
+            b"\x1b[<32;3;2M"
+        );
         // Still in the same cell: nothing.
         assert!(writes(&drag(&mut term, at(2, 1, Side::Right))).is_empty());
     }
@@ -621,7 +728,10 @@ mod tests {
     #[test]
     fn any_motion_mode_reports_the_pointer_without_a_button() {
         let mut term = terminal("\x1b[?1003h\x1b[?1006h", 20, 5);
-        assert_eq!(writes(&drag(&mut term, at(4, 3, Side::Left))), b"\x1b[<35;5;4M");
+        assert_eq!(
+            writes(&drag(&mut term, at(4, 3, Side::Left))),
+            b"\x1b[<35;5;4M"
+        );
     }
 
     #[test]

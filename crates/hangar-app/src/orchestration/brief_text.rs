@@ -38,7 +38,11 @@ The workspace is not a git repository, and that is fine: do not ask the person t
 "
     };
     let until = if git { "lands" } else { "is done" };
-    let no_commit = if git { ", and no commit, checkout, reset or stash in its checkout" } else { "" };
+    let no_commit = if git {
+        ", and no commit, checkout, reset or stash in its checkout"
+    } else {
+        ""
+    };
     let read_git = if git { ", git log/diff/status" } else { "" };
     let rule_two = if git {
         "2. Never push, open a pull request, tag, release, publish or deploy, and never merge branches yourself: Hangar lands finished work locally, after a check and a review. Pushing and releasing are the person's call; tell them when the work is ready for it."
@@ -52,7 +56,11 @@ The workspace is not a git repository, and that is fine: do not ask the person t
     };
     let spawn_after = if git { "land" } else { "are done" };
     let finish_log = if git { "git log, " } else { "" };
-    let finish_what = if git { "landed (branch, commits)" } else { "was done (the files changed)" };
+    let finish_what = if git {
+        "landed (branch, commits)"
+    } else {
+        "was done (the files changed)"
+    };
     let finish_left = if git { "pushing, releasing, " } else { "" };
     let events = if git {
         "- delivery landed: the task is done and merged. Start the tasks it unblocked.
@@ -165,7 +173,12 @@ project_list, project_status {{workspace}}, project_send {{workspace, text}}, pa
 
 /// `shared_folder`: the worker runs in its workspace's folder, which is not
 /// a git repository.
-pub fn worker_role(workspace: &str, task: &str, orchestrator: Option<&str>, shared_folder: bool) -> String {
+pub fn worker_role(
+    workspace: &str,
+    task: &str,
+    orchestrator: Option<&str>,
+    shared_folder: bool,
+) -> String {
     let lead = match orchestrator {
         Some(name) => format!("the workspace's orchestrator (pane \"{name}\")"),
         None => "the workspace's orchestrator".to_string(),
@@ -224,12 +237,15 @@ Hangar.AI started this Claude Code session to do one board task, {task}, for {le
 pub fn role_message(role: PaneRole, system: &str, context: &str, workspace: &str) -> String {
     let what = match role {
         PaneRole::Manager => {
-            "Hangar has just pinned you as the person's project manager, across every workspace.".to_string()
+            "Hangar has just pinned you as the person's project manager, across every workspace."
+                .to_string()
         }
         PaneRole::Orchestrator => {
             format!("Hangar has just pinned you as the orchestrator of workspace \"{workspace}\".")
         }
-        PaneRole::Worker => format!("Hangar has just made you a worker in workspace \"{workspace}\"."),
+        PaneRole::Worker => {
+            format!("Hangar has just made you a worker in workspace \"{workspace}\".")
+        }
     };
     let close = match role {
         PaneRole::Manager => "Say in one line that you are ready, and wait for the person.",
