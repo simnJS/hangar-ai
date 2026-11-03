@@ -17,7 +17,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 
-/// What came of it. Expected outcomes are values; only a broken IPC rejects.
+/// What came of it. Expected outcomes are values: the call itself never fails.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum EditorOutcome {
