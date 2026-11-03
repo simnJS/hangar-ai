@@ -344,9 +344,22 @@ mod the_diff_shown {
             ..FileDiff::default()
         });
         let texts: Vec<_> = shown.rows.iter().map(|row| row.text.as_str()).collect();
-        assert_eq!(texts, ["@@ -1 +1 @@", "    old", "    new    more"]);
-        assert_eq!(shown.widest, "    new    more".chars().count());
+        // Tab stops every eight columns, as the browser laid them out.
+        assert_eq!(
+            texts,
+            ["@@ -1 +1 @@", "        old", "        new     more"]
+        );
+        assert_eq!(shown.widest, "        new     more".chars().count());
         assert_eq!(shown.last_line, 1);
+    }
+
+    #[test]
+    fn a_tab_reaches_the_next_stop_whatever_came_before_it() {
+        assert_eq!(expand_tabs("\tx", 8), "        x");
+        assert_eq!(expand_tabs("ab\tx", 8), "ab      x");
+        assert_eq!(expand_tabs("abcdefgh\tx", 8), "abcdefgh        x");
+        assert_eq!(expand_tabs("a\t\tb", 8), "a               b");
+        assert_eq!(expand_tabs("no tabs", 8), "no tabs");
     }
 
     #[test]
