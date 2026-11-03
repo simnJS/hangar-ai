@@ -208,6 +208,16 @@ pub enum Intent {
     /// (`suspendShortcuts()` of `useShortcuts.ts`). Handled by `keymap` (P7),
     /// which counts the suspensions; sent by `settings`.
     SuspendShortcuts(bool),
+    /// A pane was given a role (`previous: None`) or lost one (`previous` is
+    /// the role it had): the session is told once, by a message queued for it
+    /// (`announceRole` of lib/orchestratorBrief.ts). Sent by
+    /// `orchestration_ui::actions` after a pin or an unpin; handled by P19
+    /// (`orchestration`), which owns the briefing.
+    AnnounceRole {
+        ws: WsId,
+        pane: PaneId,
+        previous: Option<crate::state::types::PaneRole>,
+    },
 }
 
 /// « From a Git repository » (`FromGitRequest` of lib/workspaceFromGit.ts).

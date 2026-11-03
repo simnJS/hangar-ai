@@ -3039,6 +3039,7 @@ dependencies = [
  "hangar-update",
  "hangar-webview",
  "iced",
+ "iced_test",
  "open",
  "png 0.18.1",
  "rfd",
