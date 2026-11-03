@@ -391,7 +391,10 @@ mod tests {
         assert!(refused.contains("not a WebAssembly module"), "{refused}");
         // The refusal is kept for as long as the file is not written again.
         assert_eq!(runtime.module(&file).err(), Some(refused));
-        let missing = runtime.module(&dir.join("gone.wasm")).err().expect("missing");
+        let missing = runtime
+            .module(&dir.join("gone.wasm"))
+            .err()
+            .expect("missing");
         assert!(missing.contains("gone.wasm"), "{missing}");
         let _ = std::fs::remove_dir_all(&dir);
     }

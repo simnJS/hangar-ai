@@ -451,7 +451,12 @@ fn a_page_that_goes_to_another_document_is_closed_and_the_tab_says_it_left() {
     // The first document to finish loading is the tab's page: nothing is said.
     let page = h.page_of(&id).unwrap();
     assert!(matches!(
-        page.on_event(&Event::Opened { window: window.clone() }, Instant::now()),
+        page.on_event(
+            &Event::Opened {
+                window: window.clone()
+            },
+            Instant::now()
+        ),
         bridge::Handled::Nothing
     ));
     assert_eq!(page.state, WinState::Open);
@@ -473,7 +478,9 @@ fn a_page_that_goes_to_another_document_is_closed_and_the_tab_says_it_left() {
     assert!(page.left);
 
     let mut drawn = simulate(h.body(Locale::En));
-    drawn.find(said(Locale::En, Key::KitsTabLeft)).expect("left");
+    drawn
+        .find(said(Locale::En, Key::KitsTabLeft))
+        .expect("left");
     drawn
         .find(said(Locale::En, Key::KitsTabLeftHint))
         .expect("how to come back");

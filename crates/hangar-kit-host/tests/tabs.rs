@@ -564,7 +564,9 @@ fn entries_under(dir: &Path) -> Vec<PathBuf> {
         .into_iter()
         .filter(|file| {
             file.components().any(|part| part.as_os_str() == "modules")
-                && file.extension().is_none_or(|extension| extension != "stats")
+                && file
+                    .extension()
+                    .is_none_or(|extension| extension != "stats")
         })
         .collect()
 }
@@ -577,7 +579,8 @@ fn cached(dir: &Path) -> KitRuntime {
 /// and draws.
 fn runs(runtime: &KitRuntime, module: &KitModule) {
     let fake = Fake::granting(&["panes.read"]);
-    let (mut tab, effects) = KitTab::start(runtime, module, start(&[("calls", "panes.list")]), fake);
+    let (mut tab, effects) =
+        KitTab::start(runtime, module, start(&[("calls", "panes.list")]), fake);
     assert!(tab.failure().is_none(), "{:?}", tab.failure());
     settle(&mut tab, effects);
     assert!(texts(&tab).contains(&"panes.list: ok".to_owned()));
