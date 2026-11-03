@@ -52,6 +52,11 @@ pub struct Config {
     /// start of a key sequence. Programs that negotiated the kitty protocol
     /// get the proper `CSI 13;2u` instead and never see this.
     pub shift_enter: Option<Vec<u8>>,
+    /// Whether Ctrl+V (and Cmd+V on macOS) pastes, as it does everywhere else
+    /// on the machine, instead of sending `^V` to the program. The price is
+    /// readline's quoted-insert, which is the bargain Windows Terminal makes
+    /// and the old Hangar terminal made. Ctrl+Shift+V pastes either way.
+    pub ctrl_v_pastes: bool,
     /// Whether bold text in the eight dark ANSI colours is drawn in the bright
     /// ones, which is what xterm and the old Hangar terminal did.
     pub bold_is_bright: bool,
@@ -76,6 +81,7 @@ impl Default for Config {
             kitty_keyboard: true,
             alt_sends_escape: true,
             shift_enter: None,
+            ctrl_v_pastes: false,
             bold_is_bright: true,
             copy_on_select: false,
             scroll_multiplier: 3.0,

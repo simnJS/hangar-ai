@@ -41,6 +41,9 @@ pub(crate) struct PointerState {
     reported: bool,
     /// A selection is being dragged.
     selecting: bool,
+    /// The press that started it had Alt held, so that if it turns out to be
+    /// a click, it moves the cursor.
+    alt_press: bool,
     last_click: Option<Click>,
     /// The cell of the last motion report, to send one per cell.
     last_cell: Option<(usize, usize)>,
@@ -154,6 +157,7 @@ impl Terminal {
         self.pointer.held = Some(button);
         self.pointer.reported = false;
         self.pointer.selecting = true;
+        self.pointer.alt_press = modifiers.alt() && count == 1;
     }
 
     fn pointer_up(&mut self, button: Button, at: CellPos, modifiers: Modifiers, events: &mut Vec<Event>) {
@@ -185,9 +189,12 @@ impl Terminal {
             .term
             .selection
             .as_ref()
-            .is_some_and(|s| s.is_empty() && s.ty == SelectionType::Simple);
+            .is_some_and(|s| s.is_empty() && matches!(s.ty, SelectionType::Simple | SelectionType::Block));
         if empty && clicks == 1 {
             self.term.selection = None;
+            if std::mem::take(&mut self.pointer.alt_press) {
+                events.extend(self.move_cursor_to(at));
+            }
             return;
         }
         if self.config.copy_on_select {
@@ -198,6 +205,35 @@ impl Terminal {
                 });
             }
         }
+    }
+
+    /// Alt+click moves the cursor of a shell prompt to the cell clicked, by
+    /// sending the arrow keys that get it there. Only along the cursor's own
+    /// row: moving between rows would be the history to a shell, not the
+    /// cursor. Not on the alternate screen, where the program has its own idea
+    /// of what a click means, and not while scrolled back.
+    fn move_cursor_to(&self, at: CellPos) -> Option<Event> {
+        if self.is_alt_screen() || self.display_offset() != 0 {
+            return None;
+        }
+        let cursor = self.cursor()?;
+        let target = at.column.clamp(0, self.columns as i32 - 1);
+        if at.row != cursor.row as i32 {
+            return None;
+        }
+        let distance = target - cursor.column as i32;
+        if distance == 0 {
+            return None;
+        }
+        let key: &[u8] = match (distance > 0, self.application_cursor()) {
+            (true, true) => b"\x1bOC",
+            (true, false) => b"\x1b[C",
+            (false, true) => b"\x1bOD",
+            (false, false) => b"\x1b[D",
+        };
+        // A wide character is one key press for the shell, not two.
+        let presses = distance.unsigned_abs().min(self.columns as u32) as usize;
+        Some(Event::Write(key.repeat(presses)))
     }
 
     fn pointer_move(&mut self, at: CellPos, modifiers: Modifiers, events: &mut Vec<Event>) {
@@ -409,6 +445,35 @@ mod tests {
         drag(&mut term, at(2, 2, Side::Right));
         up(&mut term, Button::Left, at(2, 2, Side::Right));
         assert_eq!(term.selection_text().as_deref(), Some("bc\nfg\njk"));
+    }
+
+    #[test]
+    fn alt_click_moves_the_cursor_along_its_row() {
+        let mut term = terminal("$ echo hello", 30, 3);
+        // The cursor is at column 12; click on column 7.
+        let pos = at(7, 0, Side::Left);
+        down(&mut term, Button::Left, pos, Modifiers::ALT);
+        let events = up(&mut term, Button::Left, pos);
+        assert_eq!(writes(&events), b"\x1b[D".repeat(5));
+        assert!(!term.has_selection());
+        // Application cursor keys change the encoding.
+        term.feed(b"\x1b[?1h");
+        let pos = at(20, 0, Side::Left);
+        down(&mut term, Button::Left, pos, Modifiers::ALT);
+        let events = up(&mut term, Button::Left, pos);
+        assert_eq!(writes(&events), b"\x1bOC".repeat(8));
+    }
+
+    #[test]
+    fn alt_click_does_nothing_off_the_cursor_row_or_on_the_alternate_screen() {
+        let mut term = terminal("one\r\ntwo", 30, 4);
+        let pos = at(1, 0, Side::Left);
+        down(&mut term, Button::Left, pos, Modifiers::ALT);
+        assert!(writes(&up(&mut term, Button::Left, pos)).is_empty());
+        term.feed(b"\x1b[?1049h abc");
+        let pos = at(1, 0, Side::Left);
+        down(&mut term, Button::Left, pos, Modifiers::ALT);
+        assert!(writes(&up(&mut term, Button::Left, pos)).is_empty());
     }
 
     #[test]

@@ -160,18 +160,42 @@ impl Terminal {
     /// UTF-8 character; the state is kept for the next call. Several reads
     /// are better passed together than one at a time, since the work per call
     /// is the same however little it carries.
+    ///
+    /// A terminal needs no window to be fed: the panes of a workspace that is
+    /// not on screen keep parsing their output, and what they report (the
+    /// answers to queries, a notification) is still returned.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Event> {
+        self.feed_inner(bytes, false)
+    }
+
+    /// Feeds output that was already seen once: the history a window takes
+    /// over from another, or a saved buffer.
+    ///
+    /// The bytes are parsed like any other, but nothing is said back. The
+    /// history holds the queries the program sent when it started (cursor
+    /// position, device attributes, colours), and answering them now would
+    /// write replies nobody is waiting for into the process's input, where
+    /// they show up as typed characters. The bell does not ring and
+    /// notifications and clipboard requests do not fire for the same reason:
+    /// they happened long ago. Titles and the working directory are still
+    /// reported, since they describe the state the replay ends in.
+    pub fn replay(&mut self, bytes: &[u8]) -> Vec<Event> {
+        self.feed_inner(bytes, true)
+    }
+
+    fn feed_inner(&mut self, bytes: &[u8], replay: bool) -> Vec<Event> {
         let mut events = Vec::new();
         self.expire_sync();
         let mut found = Vec::new();
         self.osc.scan(bytes, &mut found);
         self.parser.advance(&mut self.term, bytes);
-        self.collect(&mut events);
+        self.collect(&mut events, replay);
         for osc in found {
-            events.push(match osc {
-                Osc::Notification { title, body } => Event::Notification { title, body },
-                Osc::WorkingDirectory(path) => Event::WorkingDirectory(path),
-            });
+            match osc {
+                Osc::Notification { .. } if replay => {}
+                Osc::Notification { title, body } => events.push(Event::Notification { title, body }),
+                Osc::WorkingDirectory(path) => events.push(Event::WorkingDirectory(path)),
+            }
         }
         if let Some(search) = &mut self.search {
             search.mark_stale();
@@ -211,7 +235,7 @@ impl Terminal {
         let sync_due = self.parser.sync_timeout().sync_timeout();
         if sync_due.is_some_and(|at| now >= at) {
             self.parser.stop_sync(&mut self.term);
-            self.collect(&mut events);
+            self.collect(&mut events, false);
         }
         self.refresh_search(now);
         if self.bell_at.is_some_and(|at| now >= at + BELL_FLASH) {
@@ -222,7 +246,7 @@ impl Terminal {
 
     /// Drains the emulator's queue into events and brings the damage
     /// bookkeeping up to date.
-    fn collect(&mut self, events: &mut Vec<Event>) {
+    fn collect(&mut self, events: &mut Vec<Event>, replay: bool) {
         let queued = std::mem::take(&mut *self.queue.0.lock().expect("event queue lock"));
         // Replies to queries are collapsed into one write: a program that
         // sends several in a row (device attributes, cursor position, colours)
@@ -230,6 +254,15 @@ impl Terminal {
         let mut reply: Vec<u8> = Vec::new();
         for event in queued {
             match event {
+                // Answers, and things that happen once, are for the present
+                // only; a replay swallows them.
+                EmulatorEvent::PtyWrite(_)
+                | EmulatorEvent::ColorRequest(..)
+                | EmulatorEvent::TextAreaSizeRequest(_)
+                | EmulatorEvent::Bell
+                | EmulatorEvent::ClipboardStore(..)
+                | EmulatorEvent::ClipboardLoad(..)
+                    if replay => {}
                 EmulatorEvent::PtyWrite(text) => reply.extend_from_slice(text.as_bytes()),
                 EmulatorEvent::ColorRequest(index, format) => {
                     let (r, g, b) = to_rgb8(self.color_of_index(index));
@@ -409,12 +442,14 @@ impl Terminal {
             Action::Input(bytes) => {
                 self.scroll_to_bottom();
                 self.term.selection = None;
+                events.push(Event::UserInput);
                 events.push(Event::Write(bytes));
             }
             Action::Report(bytes) => events.push(Event::Write(bytes)),
             Action::Paste(text) => {
                 self.scroll_to_bottom();
                 self.term.selection = None;
+                events.push(Event::UserInput);
                 events.push(Event::Write(self.paste_bytes(&text)));
             }
             Action::Resize(metrics) => self.resize_to(metrics, &mut events),
@@ -431,6 +466,7 @@ impl Terminal {
             }
             Action::SelectAll => self.select_all(),
             Action::ClearSelection => self.term.selection = None,
+            Action::FileDropped(path) => events.push(Event::FileDropped(path)),
             Action::Tick => events.extend(self.tick(Instant::now())),
         }
         self.sync_damage();
@@ -586,25 +622,115 @@ impl Terminal {
     /// spaces. For code that reads the screen the way a person would, such as
     /// spotting a question the agent is waiting on.
     pub fn screen_text(&self) -> Vec<String> {
+        (0..self.rows as i32).map(|row| self.row_text(Line(row), true)).collect()
+    }
+
+    /// The text of one row of the grid; `trim` drops the spaces after the
+    /// last character.
+    fn row_text(&self, line: Line, trim: bool) -> String {
         let grid = self.term.grid();
-        (0..self.rows)
-            .map(|row| {
-                let line = Line(row as i32);
-                let mut text = String::new();
-                for column in 0..self.columns {
-                    let cell = &grid[line][Column(column)];
-                    if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
-                        continue;
-                    }
-                    text.push(cell.c);
-                    for extra in cell.zerowidth().into_iter().flatten() {
-                        text.push(*extra);
-                    }
-                }
-                text.truncate(text.trim_end().len());
-                text
-            })
-            .collect()
+        let mut text = String::new();
+        for column in 0..self.columns {
+            let cell = &grid[line][Column(column)];
+            if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                continue;
+            }
+            text.push(if cell.c == '\0' { ' ' } else { cell.c });
+            for extra in cell.zerowidth().into_iter().flatten() {
+                text.push(*extra);
+            }
+        }
+        if trim {
+            text.truncate(text.trim_end().len());
+        }
+        text
+    }
+
+    fn row_is_blank(&self, line: Line) -> bool {
+        let grid = self.term.grid();
+        (0..self.columns).all(|column| {
+            let cell = &grid[line][Column(column)];
+            matches!(cell.c, ' ' | '\0') && cell.zerowidth().is_none_or(|z| z.is_empty())
+        })
+    }
+
+    /// The last `n` lines of text, history included, oldest first.
+    ///
+    /// A line is a logical one: a long line the emulator wrapped over several
+    /// rows is read as the one line it was printed as. The blank rows below
+    /// the last text, which the screen is padded with, are not lines. This is
+    /// what the app's control API reads when an agent asks for the output of a
+    /// pane.
+    pub fn read_lines(&self, n: usize) -> Vec<String> {
+        if n == 0 {
+            return Vec::new();
+        }
+        let grid = self.term.grid();
+        let top = self.term.topmost_line();
+        let mut last = self.term.bottommost_line();
+        while last > top && self.row_is_blank(last) {
+            last = Line(last.0 - 1);
+        }
+        if self.row_is_blank(last) {
+            return Vec::new();
+        }
+        let wraps_into_next = |line: Line| {
+            line > top && grid[Line(line.0 - 1)][Column(self.columns - 1)].flags.contains(Flags::WRAPLINE)
+        };
+        let mut lines = Vec::new();
+        let mut end = last;
+        loop {
+            let mut first = end;
+            while wraps_into_next(first) {
+                first = Line(first.0 - 1);
+            }
+            let mut text = String::new();
+            for line in first.0..=end.0 {
+                text.push_str(&self.row_text(Line(line), line == end.0));
+            }
+            lines.push(text);
+            if lines.len() == n || first == top {
+                break;
+            }
+            end = Line(first.0 - 1);
+        }
+        lines.reverse();
+        lines
+    }
+
+    /// Clears the screen and the history, keeping the line the cursor is on
+    /// as the first one, which is what xterm does: the prompt stays, so the
+    /// shell does not have to be asked to draw it again. Nothing happens on
+    /// the alternate screen, which has no history and belongs to the program.
+    pub fn clear(&mut self) {
+        if self.is_alt_screen() {
+            return;
+        }
+        let cursor = self.term.grid().cursor.point;
+        let row = self.term.grid()[cursor.line].clone();
+        // Erasing the screen pushes it into the history; then the history goes.
+        self.parser.advance(&mut self.term, b"\x1b[2J\x1b[3J");
+        let grid = self.term.grid_mut();
+        grid[Line(0)] = row;
+        grid.cursor.point.line = Line(0);
+        self.term.selection = None;
+        self.term.scroll_display(Scroll::Bottom);
+        self.invalidate_rows();
+        self.sync_damage();
+    }
+
+    /// Whether the program asked for application cursor keys (`CSI ? 1 h`),
+    /// which changes what the arrow keys send. The app's control API reports
+    /// it so that keys it types on a pane's behalf are encoded right.
+    pub fn application_cursor(&self) -> bool {
+        self.term.mode().contains(TermMode::APP_CURSOR)
+    }
+
+    /// Marks every visible row as changed.
+    fn invalidate_rows(&mut self) {
+        self.generation += 1;
+        let generation = self.generation;
+        self.row_generation.iter_mut().for_each(|g| *g = generation);
     }
 
     pub(crate) fn key_options(&self) -> KeyOptions {
@@ -1002,6 +1128,147 @@ mod tests {
         term.feed("日本".as_bytes());
         assert_eq!(term.screen_text()[0], "日本");
         assert_eq!(term.cursor().unwrap().column, 4);
+    }
+
+    #[test]
+    fn a_replay_parses_the_history_and_says_nothing_back() {
+        let mut term = terminal(20, 4);
+        // What a saved buffer holds: the program's start-up queries among its
+        // output, a bell, a notification and a clipboard copy.
+        let history = b"\x1b[c\x1b[6n\x1b]11;?\x07hello\x07\x1b]9;done\x07\x1b]52;c;Y29waWVk\x07\x1b]2;a title\x07\x1b]7;file://h/tmp/x\x07";
+        let events = term.replay(history);
+        assert_eq!(term.screen_text()[0], "hello");
+        assert!(writes(&events).is_empty(), "{events:?}");
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            Event::Bell | Event::Notification { .. } | Event::SetClipboard { .. }
+        )));
+        assert!(term.bell_age(Instant::now()).is_none());
+        // The state the replay ends in is reported.
+        assert!(events.iter().any(|e| matches!(e, Event::Title(t) if t == "a title")));
+        assert!(events.iter().any(|e| matches!(e, Event::WorkingDirectory(p) if p == "/tmp/x")));
+        // And after it the terminal answers again.
+        assert_eq!(writes(&term.feed(b"\x1b[c")), b"\x1b[?6c");
+    }
+
+    #[test]
+    fn a_replay_that_ends_inside_a_sequence_carries_on_in_the_next_feed() {
+        let mut term = terminal(20, 4);
+        term.replay(b"abc\x1b[3");
+        let events = term.feed(b"1mred");
+        assert_eq!(term.screen_text()[0], "abcred");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_256_kib_history_replays_quickly_and_silently() {
+        let mut term = terminal(100, 30);
+        let line = "some output of an agent, with \x1b[1mcolour\x1b[0m and a query \x1b[6n\r\n";
+        let history = line.repeat(256 * 1024 / line.len());
+        let start = Instant::now();
+        let events = term.replay(history.as_bytes());
+        assert!(writes(&events).is_empty());
+        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(term.history_size() > 1000);
+    }
+
+    #[test]
+    fn typing_is_announced_apart_from_the_answers_to_queries() {
+        let mut term = terminal(20, 4);
+        let answer = term.feed(b"\x1b[6n");
+        assert!(!answer.iter().any(|e| matches!(e, Event::UserInput)));
+        let typed = term.perform(Action::Input(b"a".to_vec()));
+        assert!(matches!(typed[0], Event::UserInput));
+        let pasted = term.perform(Action::Paste("a".into()));
+        assert!(matches!(pasted[0], Event::UserInput));
+        // Protocol reports are not typing.
+        let report = term.perform(Action::Report(b"\x1b[I".to_vec()));
+        assert!(!report.iter().any(|e| matches!(e, Event::UserInput)));
+    }
+
+    #[test]
+    fn read_lines_returns_the_last_lines_oldest_first() {
+        let mut term = terminal(20, 4);
+        for i in 0..10 {
+            term.feed(format!("line {i}\r\n").as_bytes());
+        }
+        assert_eq!(term.read_lines(3), ["line 7", "line 8", "line 9"]);
+        // More than there is: all of it, history included.
+        assert_eq!(term.read_lines(100).len(), 10);
+        assert_eq!(term.read_lines(100)[0], "line 0");
+        assert!(term.read_lines(0).is_empty());
+    }
+
+    #[test]
+    fn read_lines_joins_wrapped_rows_and_drops_the_blank_ones_below() {
+        let mut term = terminal(10, 6);
+        term.feed(b"short\r\n0123456789abcdefghij012\r\nend");
+        // Nothing below the last text: the screen's blank rows are not lines.
+        assert_eq!(term.read_lines(10), ["short", "0123456789abcdefghij012", "end"]);
+        assert_eq!(term.read_lines(2), ["0123456789abcdefghij012", "end"]);
+        // Blank lines the program printed are kept in the middle.
+        let mut term = terminal(10, 6);
+        term.feed(b"a\r\n\r\nb\r\n\r\n");
+        assert_eq!(term.read_lines(10), ["a", "", "b"]);
+    }
+
+    #[test]
+    fn read_lines_of_an_empty_terminal_is_empty() {
+        assert!(terminal(10, 4).read_lines(5).is_empty());
+    }
+
+    #[test]
+    fn clear_keeps_the_cursor_line_and_drops_the_rest() {
+        let mut term = terminal(20, 4);
+        for i in 0..10 {
+            term.feed(format!("row {i}\r\n").as_bytes());
+        }
+        term.feed(b"$ prompt");
+        term.clear();
+        assert_eq!(term.history_size(), 0);
+        assert_eq!(term.screen_text(), ["$ prompt", "", "", ""]);
+        let cursor = term.cursor().unwrap();
+        assert_eq!((cursor.row, cursor.column), (0, 8));
+        // Typing goes on from there.
+        term.feed(b" ls");
+        assert_eq!(term.screen_text()[0], "$ prompt ls");
+    }
+
+    #[test]
+    fn clear_leaves_the_alternate_screen_alone() {
+        let mut term = terminal(20, 4);
+        term.feed(b"\x1b[?1049hfull screen");
+        term.clear();
+        assert_eq!(term.screen_text()[0], "full screen");
+    }
+
+    #[test]
+    fn application_cursor_mode_is_visible_to_the_app() {
+        let mut term = terminal(20, 4);
+        assert!(!term.application_cursor());
+        term.feed(b"\x1b[?1h");
+        assert!(term.application_cursor());
+    }
+
+    #[test]
+    fn emoji_and_symbols_have_the_width_unicode_gives_them() {
+        // Unicode 11 and later: emoji are two cells, the symbols agent UIs
+        // draw with are one. A wrong width shifts every column after it.
+        let mut term = terminal(20, 2);
+        term.feed("🚀✅❯●x".as_bytes());
+        assert_eq!(term.screen_text()[0], "🚀✅❯●x");
+        // 🚀 (2) + ✅ (2) + ❯ (1) + ● (1) + x (1) leaves the cursor at 7.
+        assert_eq!(term.cursor().unwrap().column, 7);
+    }
+
+    #[test]
+    fn many_terminals_can_be_fed_without_a_window() {
+        // The panes of workspaces that are not on screen keep parsing.
+        let mut terms: Vec<Terminal> = (0..16).map(|_| terminal(100, 30)).collect();
+        for (i, term) in terms.iter_mut().enumerate() {
+            term.feed(format!("pane {i}\r\n").as_bytes());
+        }
+        assert_eq!(terms[15].screen_text()[0], "pane 15");
     }
 
     #[test]

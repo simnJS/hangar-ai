@@ -9,6 +9,7 @@
 //! behaviour testable without a window.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::keyboard::Modifiers;
@@ -116,6 +117,16 @@ pub enum Event {
     /// The pointer went down in the terminal. The app uses it to give the
     /// pane the focus.
     Pressed,
+    /// The person typed or pasted something, as opposed to the terminal
+    /// answering a query of the program (both arrive as [`Event::Write`]).
+    /// An agent pane that was waiting for the person is waiting no more.
+    UserInput,
+    /// A file was dropped on the terminal. What to type for it is the app's
+    /// to decide, since it depends on the shell (quoting) and on where the
+    /// shell runs (a Windows path under WSL): the app builds the text and
+    /// passes it to [`Terminal::paste_bytes`](crate::Terminal::paste_bytes)
+    /// or as an [`Action::Paste`].
+    FileDropped(PathBuf),
 }
 
 /// A mouse button as the terminal cares about it.
@@ -228,6 +239,8 @@ pub enum Action {
     Copy,
     SelectAll,
     ClearSelection,
+    /// A file was dropped while the pointer was over the terminal.
+    FileDropped(PathBuf),
     /// Time passed: something the terminal was waiting for (a synchronized
     /// update's timeout, a search refresh) may be due. The widget sends it
     /// when [`Terminal::deadline`](crate::Terminal::deadline) is reached.

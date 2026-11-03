@@ -139,6 +139,8 @@ impl Bindings {
     }
 }
 
+type Intercept<'a, Message> = Box<dyn Fn(&KeyPress) -> Option<Message> + 'a>;
+
 /// A terminal as a widget.
 ///
 /// Build it with [`terminal_view`] and put it where it should fill: it takes
@@ -146,7 +148,8 @@ impl Bindings {
 pub struct TerminalView<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     terminal: &'a Terminal,
     on_action: Box<dyn Fn(Action) -> Message + 'a>,
-    intercept: Option<Box<dyn Fn(&KeyPress) -> Option<Message> + 'a>>,
+    intercept: Option<Intercept<'a, Message>>,
+    key_filter: Option<Box<dyn Fn(&KeyPress) -> bool + 'a>>,
     bindings: Bindings,
     padding: Padding,
     scale_factor: Option<f32>,
@@ -164,6 +167,7 @@ pub fn terminal_view<'a, Message, Theme, Renderer>(
         terminal,
         on_action: Box::new(on_action),
         intercept: None,
+        key_filter: None,
         bindings: Bindings::standard(),
         padding: Padding::ZERO,
         scale_factor: None,
@@ -200,6 +204,25 @@ impl<'a, Message, Theme, Renderer> TerminalView<'a, Message, Theme, Renderer> {
     /// search bar, zoom, pane switching) without the terminal typing them.
     pub fn intercept(mut self, f: impl Fn(&KeyPress) -> Option<Message> + 'a) -> Self {
         self.intercept = Some(Box::new(f));
+        self
+    }
+
+    /// Lets the app's keymap see a key before the terminal consumes it.
+    ///
+    /// `iced` hands a key to the focused widget first, and a terminal would
+    /// take every one of them: Ctrl+Tab, Alt+arrows and Ctrl+Shift+P would
+    /// all become input for the program. For each key press (and release)
+    /// the function is asked whether the app takes it. If it says yes, the
+    /// terminal does nothing with the key and does not capture the event, so
+    /// it goes on to the app's own handling (a `keyboard::listen`
+    /// subscription, another widget); if it says no, the key is the
+    /// terminal's: a binding, or bytes for the program.
+    ///
+    /// The filter is a plain predicate, so the app can answer it from its
+    /// keymap without building a message. [`intercept`](Self::intercept) is
+    /// the other way round: the terminal publishes the message itself.
+    pub fn key_filter(mut self, f: impl Fn(&KeyPress) -> bool + 'a) -> Self {
+        self.key_filter = Some(Box::new(f));
         self
     }
 
@@ -593,6 +616,14 @@ where
                 }
             }
 
+            Event::Window(window::Event::FileDropped(path)) => {
+                // The window reports the drop without a position, so the
+                // terminal under the pointer takes it.
+                if cursor.is_over(bounds) {
+                    publish(shell, Action::FileDropped(path.clone()));
+                }
+            }
+
             Event::Window(window::Event::Focused) => publish(shell, Action::WindowFocus(true)),
             Event::Window(window::Event::Unfocused) => {
                 state.input.reset();
@@ -616,12 +647,18 @@ where
                     return;
                 };
                 state.modifiers = press.modifiers;
+                if self.key_filter.as_ref().is_some_and(|f| f(&press)) {
+                    return;
+                }
                 if let Some(message) = self.intercept.as_ref().and_then(|f| f(&press)) {
                     shell.publish(message);
                     shell.capture_event();
                     return;
                 }
-                if let Some(binding) = self.bindings.find(&press) {
+                let binding = self.bindings.find(&press).or_else(|| {
+                    (terminal.config().ctrl_v_pastes && is_paste_key(&press)).then_some(Binding::Paste)
+                });
+                if let Some(binding) = binding {
                     let handled = self.run_binding(binding, terminal, clipboard, shell);
                     if handled {
                         shell.capture_event();
@@ -1112,6 +1149,16 @@ where
 
 // ---- Helpers -----------------------------------------------------------------
 
+/// Ctrl+V, or Cmd+V on macOS, for [`Config::ctrl_v_pastes`](crate::Config).
+fn is_paste_key(press: &KeyPress) -> bool {
+    if press.kind == KeyEventKind::Release {
+        return false;
+    }
+    let paste_modifier = if cfg!(target_os = "macos") { Modifiers::LOGO } else { Modifiers::CTRL };
+    press.modifiers == paste_modifier
+        && press.key.to_latin(press.physical_key).is_some_and(|c| c.eq_ignore_ascii_case(&'v'))
+}
+
 fn convert_button(button: mouse::Button) -> Option<Button> {
     match button {
         mouse::Button::Left => Some(Button::Left),
@@ -1172,10 +1219,14 @@ fn fill_run<Renderer>(
 ) where
     Renderer: text::Renderer<Font = iced::Font>,
 {
+    // `iced` anchors centred text at the middle of its bounds, not at their
+    // left edge.
+    let width = run.columns as f32 * cell.width;
+    let position = if run.flowing { position } else { Point::new(position.x + width / 2.0, position.y) };
     renderer.fill_text(
         Text {
             content: run.text.clone(),
-            bounds: Size::new(run.columns as f32 * cell.width, cell.height),
+            bounds: Size::new(width, cell.height),
             size: Pixels(size),
             line_height: text::LineHeight::Absolute(Pixels(cell.height)),
             font: fonts.pick(run.style.bold, run.style.italic),
@@ -1384,7 +1435,7 @@ fn draw_cursor<Renderer>(
                             shaping: text::Shaping::Advanced,
                             wrapping: text::Wrapping::None,
                         },
-                        origin,
+                        Point::new(origin.x + width / 2.0, origin.y),
                         palette.cursor_text,
                         clip,
                     );
@@ -1507,6 +1558,17 @@ mod tests {
         let mut p = press(Key::Character("с".into()), Modifiers::CTRL | Modifiers::SHIFT);
         p.physical_key = Physical::Code(Code::KeyC);
         assert_eq!(Bindings::standard().find(&p), Some(Binding::Copy));
+    }
+
+    #[test]
+    fn ctrl_v_is_a_paste_only_when_the_configuration_says_so() {
+        let v = Key::Character("v".into());
+        let paste_modifier = if cfg!(target_os = "macos") { Modifiers::LOGO } else { Modifiers::CTRL };
+        assert!(is_paste_key(&press(v.clone(), paste_modifier)));
+        assert!(!is_paste_key(&press(v.clone(), paste_modifier | Modifiers::ALT)));
+        assert!(!is_paste_key(&press(Key::Character("b".into()), paste_modifier)));
+        // The standard bindings alone leave Ctrl+V to the program.
+        assert_eq!(Bindings::standard().find(&press(v, Modifiers::CTRL)), None);
     }
 
     #[test]
