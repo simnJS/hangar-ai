@@ -1,0 +1,12 @@
+[package]
+name = "hangar-ui"
+description = "Hangar's own widgets on iced: icons, buttons, menus, dialogs, the command palette"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+iced.workspace = true
+hangar-theme.workspace = true

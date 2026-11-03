@@ -1,0 +1,13 @@
+[package]
+name = "hangar-kit-sdk"
+description = "Write a Hangar kit tab in Rust, compiled to WebAssembly"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+hangar-kit-ui.workspace = true
+serde.workspace = true
+serde_json.workspace = true

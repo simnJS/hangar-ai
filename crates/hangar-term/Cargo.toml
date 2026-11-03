@@ -1,0 +1,14 @@
+[package]
+name = "hangar-term"
+description = "A terminal for iced: alacritty_terminal's emulation, drawn and typed into natively"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+iced.workspace = true
+alacritty_terminal.workspace = true
+portable-pty.workspace = true
+hangar-theme.workspace = true

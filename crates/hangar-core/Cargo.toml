@@ -1,0 +1,169 @@
+[package]
+name = "hangar-core"
+description = "Everything Hangar does that is not drawing: board, memory, git, orchestration, MCP, kits, Hangar Mobile"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2021"
+
+# What src-tauri/ was, without Tauri: the window asked for each of these
+# through a `#[tauri::command]`, and the native app calls them as functions
+# (docs/native/PLAN.md, "hangar-core"). Events the window listened to go
+# through `host::Events` instead of `AppHandle::emit`.
+[lib]
+name = "hangar_core"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# `raw_value`: the stats leave the bulk of a transcript line unparsed.
+serde_json = { version = "1", features = ["raw_value"] }
+portable-pty = "0.9.0"
+dirs = "6.0.0"
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+# `process` and `io-util`: Hangar Mobile asks the Tailscale CLI, which can sit
+# waiting on the person's browser, so it is read as it goes and given a time
+# limit (remote/tailscale.rs).
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+ureq = { version = "3.3", default-features = false, features = ["json", "rustls", "rustls-webpki-roots", "win-system-proxy"] }
+toml_edit = "0.25.13"
+# Hangar at login, an option of the Mobile settings (remote/mod.rs): the
+# window never calls the plugin, the settings' own commands do. Held at 2.5.1:
+# 2.6 and later need a newer tauri than the one locked, and take dozens of
+# crates with them (among them `windows` 0.62, which cpal cannot build with —
+# see below).
+discord-rich-presence = "1.1.0"
+# Microphone capture for dictation.
+#
+# On Windows this one needs its lockfile left alone: cpal takes `windows` and
+# `windows-core` as two separate dependencies, each accepting 0.61 or 0.62.
+# Cargo satisfies them independently — `windows` 0.61 carrying its own core,
+# next to a bare `windows-core` 0.62 — and cpal then fails to build, with the
+# COM types coming from one crate and the traits implementing them from the
+# other. Cargo.lock pins both halves to 0.61; if a `cargo update` ever pulls
+# them apart again, `cargo update -p windows-core --precise 0.61.2` puts them
+# back.
+cpal = "0.18"
+# Local transcription, through whisper.cpp rather than the ONNX runtime.
+#
+# Not a preference — ONNX cannot be shipped from this pipeline at all. `ort`
+# downloads prebuilt binaries, and there is no build of them for
+# `x86_64-apple-darwin`, which the universal macOS bundle compiles for; the
+# Linux ones need glibc 2.38 while the AppImage is built on 22.04 (2.35) so it
+# keeps running on older distributions. whisper.cpp is compiled from source by
+# its own build script, so neither question comes up: there is no binary to be
+# missing, and it links against whatever glibc is building it.
+#
+# The binding directly rather than through transcribe-rs, which wrapped it
+# until dictation turned out to need the two knobs it does not forward:
+# `n_threads` and `audio_ctx`, which between them are the difference between
+# eight seconds and forty. Nothing else was being used of it — the cloud engine
+# next door talks to Groq over plain HTTP.
+#
+# No `cuda`/`metal`/`vulkan` feature: CPU is fast enough for dictation-length
+# audio, and the installer stays free of vendor GPU libraries.
+whisper-rs = { version = "0.16", default-features = false }
+
+# Physical core count, which `std` does not expose. whisper.cpp defaults to four
+# threads and gets three times slower than it needs to on anything larger; the
+# number that matters is physical cores, not logical — see voice/local.rs.
+num_cpus = "1.17"
+
+# The Groq key, in the OS keychain instead of state.json — see voice/key.rs.
+# `v1` is the set of native stores: Windows Credential Manager, the macOS
+# Keychain, and the Secret Service on Linux through zbus, which is pure Rust and
+# needs no libdbus on the build machine.
+keyring = { version = "4.2", default-features = false, features = ["v1"] }
+
+# The `hangar-model` scheme the 3D preview loads from — see model.rs. One
+# decodes the file path a URL carries; the other turns the `\\?\C:\…` Windows
+# canonicalizes to back into the `C:\…` the window keys its models by. Both
+# were already compiled for tauri, so neither adds a crate to the build.
+percent-encoding = "2.3"
+dunce = "1.0"
+base64 = "0.22"
+
+# The usage statistics — see stats.rs. Codex compresses the rollouts it keeps
+# (`rollout-….jsonl.zst`), so reading its token counts means decoding zstd.
+# ruzstd is a decoder in pure Rust: no C library to build for the universal
+# macOS bundle or the AppImage, and decoding is all the stats ever do.
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
+# Days and hours of the week are the user's own, not UTC's: a turn at 1 a.m.
+# in Paris belongs to that night, not to the evening before. Already compiled
+# for tauri with its clock, so naming it adds no crate.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Hangar Mobile — see remote/. The phone's web app is compiled in from
+# dist-mobile/, and `allow_missing` lets a checkout that never built it compile
+# all the same, serving a placeholder instead. The pairing QR code is drawn as
+# SVG only, so none of `image` comes with it. SHA-256 keeps the phones' tokens
+# hashed at rest, and subtle compares them in constant time: rust-embed and
+# rustls compile both anyway.
+rust-embed = "8.13"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+sha2 = "0.11"
+# The rule a kit's declared command gives each value (kits/manifest.rs). Already
+# in the tree underneath other crates; matches in linear time, whatever a kit
+# writes.
+regex = "1"
+subtle = "2.6"
+# Kits — see kits/manifest.rs: a kit's version, and the Hangar versions it
+# works with (`"hangar": ">=1.6.0"`). Already compiled for tauri at this
+# version, so naming it adds no crate.
+semver = "1"
+# Push notifications to the paired phones, sent by the PC itself (Web Push:
+# RFC 8291 encryption, RFC 8292 VAPID) — see remote/push.rs. web-push-native
+# encrypts, in pure Rust on the RustCrypto crates (p256, hkdf, aes-gcm), where
+# `web-push` goes through `ece` and OpenSSL, a C library none of the bundles
+# carry. It only builds the request; ureq sends it.
+#
+# Without its `vapid` feature, which signs through jwt-simple and some seventy
+# crates (RSA, ML-DSA, P-384…) for one ES256 signature: p256's own ECDSA signs
+# the VAPID token, and rand_core's OsRng draws the key. Both are what
+# web-push-native compiles already, at these versions.
+web-push-native = { version = "0.5", default-features = false }
+p256 = { version = "0.13", features = ["ecdsa"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+# An agent's dev server seen from the phone — see remote/proxy.rs: each
+# request relayed to it over a connection of its own, and a hot-reload
+# WebSocket carried through once both sides have upgraded. Both are compiled
+# already, axum serving with them and the updater's HTTP client bringing
+# hyper's client half, so naming them adds no crate.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+# The mobile server's tests call its router directly, without a socket.
+# Already compiled for axum, with this feature.
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+# The push's encryption checked byte for byte against RFC 8291's example.
+# Already compiled for web-push-native, which encrypts with it.
+ece-native = "0.5"
+
+# Signalling a pane's whole process group on the way out, which `Child::kill`
+# does not do: it reaches the shell only, and leaves the agent behind it.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Toasts that answer a click, which tauri-plugin-notification does not expose —
+# see notify.rs. Already in the tree underneath that plugin, so this only names
+# a crate that was being compiled anyway.
+#
+# Held at 0.7 deliberately: 0.8 moved to `windows` 0.62, which is the version
+# that pulls the pair apart for cpal (see above). 0.7 wants 0.61, the version
+# already locked.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7.3"
+# The process table, to find what a pane's shell started — see procs.rs.
+# Already compiled for tokio, mio and a dozen others at this version, so it
+# only adds the API sets named here. `Win32_System_IO` makes the junctions a
+# Claude account's profile shares the main account's folders through
+# (accounts/link.rs): `mklink /J` without a `cmd` to quote paths for.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Power",
+  "Win32_System_Threading",
+] }

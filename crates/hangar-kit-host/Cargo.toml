@@ -1,0 +1,17 @@
+[package]
+name = "hangar-kit-host"
+description = "Runs kits' WebAssembly tabs, sandboxed, and draws their widget trees with iced"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+hangar-kit-ui.workspace = true
+hangar-theme.workspace = true
+hangar-ui.workspace = true
+iced.workspace = true
+wasmtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true

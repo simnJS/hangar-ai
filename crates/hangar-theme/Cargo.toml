@@ -1,0 +1,12 @@
+[package]
+name = "hangar-theme"
+description = "Hangar's themes as data: window colours, terminal palette and the tokens kits are drawn with"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+iced.workspace = true
+serde.workspace = true

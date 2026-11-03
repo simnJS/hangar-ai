@@ -1,0 +1,13 @@
+[package]
+name = "hangar-kit-ui"
+description = "The native interface library of Hangar kits: a tree of widgets and the events they send back"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+# No iced here: a kit compiles this to WebAssembly, and Hangar draws the tree
+# (hangar-kit-host).
+[dependencies]
+serde.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "hangar-webview"
+description = "A separate process that shows a web page for Hangar: a kit tab written in HTML, a PDF"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "hangar-webview"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
