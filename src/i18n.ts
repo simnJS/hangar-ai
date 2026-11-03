@@ -858,6 +858,9 @@ const en = {
     "3D view of {title}. Drag, or use the arrow keys, to move around; Shift with the arrows orbits, + and - zoom, Home recentres.",
   "model.timeOf": "{time} / {total} s",
   "model.megabytes": "{size} MB",
+  "model.read": "Loading the file",
+  "model.cancel": "Cancel",
+  "model.animationsLater": "Animations are listed here, but this version cannot play them yet.",
 
   "preview.kind.model": "3D model",
   "preview.kind.image": "Image",
@@ -2449,6 +2452,9 @@ const fr: Record<Key, string> = {
     "Vue 3D de {title}. Glisser, ou utiliser les flèches, pour se déplacer ; Maj et les flèches pour tourner, + et - pour zoomer, Origine pour recentrer.",
   "model.timeOf": "{time} / {total} s",
   "model.megabytes": "{size} Mo",
+  "model.read": "Chargement du fichier",
+  "model.cancel": "Annuler",
+  "model.animationsLater": "Les animations sont listées ici, mais cette version ne sait pas encore les lire.",
 
   "preview.kind.model": "Modèle 3D",
   "preview.kind.image": "Image",
