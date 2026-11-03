@@ -193,6 +193,17 @@ fn logic(msg: Logic) -> Task<Message> {
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    // Keys, pointer moves, scrolls and ticks of a terminal come many times a
+    // second, and only a measure or a press can change what the sync and the
+    // reports depend on (`term_settles`).
+    if let Msg::Term(pane, action) = msg {
+        let (task, settles) = term_action(st, m, sv, pane, action);
+        return if settles {
+            settle(st, m, sv, task)
+        } else {
+            task
+        };
+    }
     // Output is the hot path, many batches a second while agents stream:
     // nothing other packages read changes with it.
     let quiet =
@@ -201,6 +212,12 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
     if quiet {
         return task;
     }
+    settle(st, m, sv, task)
+}
+
+/// `task`, once the panes are brought in line with the model and what other
+/// packages read of them is republished.
+fn settle(st: &mut State, m: &mut Model, sv: &Services, task: Task<Message>) -> Task<Message> {
     let synced = sync_if_needed(st, m, sv);
     publish(st, m);
     Task::batch([task, synced])
@@ -208,7 +225,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 
 fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
-        Msg::Term(pane, action) => term_action(st, m, sv, pane, action),
+        // `update` takes these itself; here only for the match to be whole.
+        Msg::Term(pane, action) => term_action(st, m, sv, pane, action).0,
         Msg::Hub(events) => hub_events(st, m, sv, events),
         Msg::Sync => sync(st, m, sv),
         Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
@@ -394,24 +412,55 @@ fn zoom_to(ws: WsId, target: Option<PaneId>) -> Task<Message> {
     Task::batch([focus, intent(Intent::SetZoom { ws, on })])
 }
 
-/// What a terminal widget did, applied, and what the terminal said back.
+/// Whether what a terminal widget did can change what the sync and the
+/// reports depend on: a measure (`measured`, an `Action::Resize`; the first
+/// one starts the shell) or a press among the terminal's `events` (which
+/// gives the pane the focus, and the keyboard back from its search bar).
+/// Typing, pointer moves, scrolls and ticks cannot.
+fn term_settles(measured: bool, events: &[TermEvent]) -> bool {
+    measured
+        || events
+            .iter()
+            .any(|event| matches!(event, TermEvent::Pressed))
+}
+
+/// Whether a link a terminal reported is one Hangar opens: a web link, as
+/// xterm.js's web-links addon was the only one the TS opened. A detected
+/// `file:`, `ssh:` or `git:` URL, or whatever target an `OSC 8` hyperlink
+/// names, would hand the system's handler for that scheme anything a
+/// program printed, on one click.
+fn is_web_link(uri: &str) -> bool {
+    let Some((scheme, rest)) = uri.split_once("://") else {
+        return false;
+    };
+    (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        && !rest.is_empty()
+}
+
+/// What a terminal widget did, applied, and what the terminal said back;
+/// with whether the panes have to be brought in line after it
+/// ([`term_settles`]).
 fn term_action(
     st: &mut State,
     m: &Model,
     sv: &Services,
     pane: PaneId,
     action: Action,
-) -> Task<Message> {
+) -> (Task<Message>, bool) {
     let Some(rt) = st.panes.get_mut(&pane) else {
-        return Task::none();
+        return (Task::none(), false);
     };
     // The first measure of the terminal is the size its shell starts at.
     let measured = matches!(action, Action::Resize(_));
     let events = rt.link.lock().perform(action);
+    let settles = term_settles(measured, &events);
     let mut tasks = Vec::new();
     if measured {
         tasks.push(controller::start(rt, sv, &st.channel));
     }
+    // What the person copies (Ctrl+Shift+C, the selection on Linux) comes as
+    // `SetClipboard` here; what a program asks to copy (`OSC 52`) never
+    // reaches the app (`look::config`).
     for event in events {
         match event {
             TermEvent::Write(bytes) => rt.link.write(bytes),
@@ -420,8 +469,9 @@ fn term_action(
                 ClipboardTarget::Clipboard => iced::clipboard::write(text),
                 ClipboardTarget::Primary => iced::clipboard::write_primary(text),
             }),
-            TermEvent::OpenLink(link) => {
-                // Web links open in the system browser (inventory §9.2).
+            // Web links open in the system browser (inventory §9.2); any
+            // other does nothing (`is_web_link`).
+            TermEvent::OpenLink(link) if is_web_link(&link.uri) => {
                 let _ = open::that_detached(&link.uri);
             }
             TermEvent::Pressed => {
@@ -455,7 +505,7 @@ fn term_action(
             _ => {}
         }
     }
-    Task::batch(tasks)
+    (Task::batch(tasks), settles)
 }
 
 /// The files of one drop, joined into one paste for the pane they landed on:
@@ -493,7 +543,7 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
 }
 
 /// What the reader threads said: output (one wake-up per pane per batch),
-/// an exit, a bell, a notification, a copy.
+/// an exit, a bell, a notification.
 fn hub_events(
     st: &mut State,
     m: &mut Model,
@@ -524,7 +574,6 @@ fn hub_events(
                     .to_owned();
                 tasks.push(logic(Logic::Notification { pane, message }));
             }
-            HubKind::Copy(text) => tasks.push(iced::clipboard::write(text)),
         }
     }
     Task::batch(tasks)
@@ -1019,4 +1068,62 @@ fn pane_width(
         .rects
         .get(pane)
         .map_or(size.width, |rect| rect.width as f32 * size.width)
+}
+
+#[cfg(test)]
+mod tests {
+    use hangar_term::{Link, LinkSource};
+
+    use super::*;
+
+    #[test]
+    fn only_web_links_open() {
+        for uri in [
+            "https://example.com/page?q=1",
+            "http://localhost:5173",
+            "HTTPS://EXAMPLE.COM",
+        ] {
+            assert!(is_web_link(uri), "{uri}");
+        }
+        for uri in [
+            "file:///etc/passwd",
+            "file://host/share",
+            "ssh://git@github.com/x/y",
+            "git://github.com/x/y",
+            "ftp://example.com",
+            "smb://server/share",
+            "javascript:alert(1)",
+            "mailto:someone@example.com",
+            "https://",
+            "https:example.com",
+            " https://example.com",
+            "/home/me/file.txt",
+            "",
+        ] {
+            assert!(!is_web_link(uri), "{uri}");
+        }
+    }
+
+    #[test]
+    fn only_a_measure_or_a_press_settles_the_panes() {
+        let link = || {
+            TermEvent::OpenLink(Link {
+                uri: "https://example.com".into(),
+                source: LinkSource::Detected,
+            })
+        };
+        assert!(term_settles(true, &[]));
+        assert!(term_settles(
+            false,
+            &[TermEvent::UserInput, TermEvent::Pressed]
+        ));
+        // Typing, a pointer move over a link, a scroll, a tick.
+        assert!(!term_settles(false, &[]));
+        assert!(!term_settles(false, &[TermEvent::UserInput]));
+        assert!(!term_settles(false, &[link()]));
+        assert!(!term_settles(
+            false,
+            &[TermEvent::Write(b"\x1b[A".to_vec()), TermEvent::UserInput]
+        ));
+    }
 }
