@@ -81,9 +81,10 @@
 //! `account_add` prepares the profile and answers with `claude auth login`,
 //! which the person runs in a visible Claude Code pane on that account —
 //! `Pane.login` in src/types.ts — and finishes in their browser. Hangar
-//! never logs in, out, or switches an account by itself. `accounts:changed`
-//! is emitted after every change made here, and when a profile's login
-//! appears, changes or goes (`watch`).
+//! never logs in, out, or switches an account by itself.
+//! `Event::AccountsChanged` (the window's `accounts:changed`) is sent after
+//! every change made here, and when a profile's login appears, changes or
+//! goes (`watch`).
 
 mod link;
 mod login;
@@ -99,7 +100,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+
+use crate::host::{Event, Host};
 
 pub use share::Issue;
 use share::{stamp, Stamp};
@@ -109,12 +111,11 @@ use store::Store;
 pub const MAIN: &str = "main";
 /// The agent an account applies to.
 pub const CLAUDE_AGENT: &str = "claude";
-pub const CHANGED_EVENT: &str = "accounts:changed";
 /// What logs a profile in, typed in a pane whose Claude Code runs on it
 /// (checked against Claude Code 2.1.316, which also has `claude` then
 /// `/login`).
 pub const LOGIN_COMMAND: &str = "claude auth login";
-/// How often the logins are looked at for `accounts:changed`.
+/// How often the logins are looked at for `Event::AccountsChanged`.
 const WATCH_EVERY: Duration = Duration::from_secs(3);
 /// Claude Code keeps tokens in the Keychain on macOS, in
 /// `.credentials.json` elsewhere.
@@ -407,21 +408,21 @@ fn projects_with(main: &ClaudeHome, store: &Store) -> Vec<PathBuf> {
 
 #[derive(Debug, Serialize)]
 pub struct LoginCommand {
-    command: String,
+    pub command: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Added {
-    account: Account,
-    login: LoginCommand,
+    pub account: Account,
+    pub login: LoginCommand,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Support {
-    isolated_logins: bool,
+    pub isolated_logins: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    note: Option<String>,
+    pub note: Option<String>,
 }
 
 /// The last list told to the windows, so that the watch does not tell a
@@ -431,15 +432,14 @@ fn last_told() -> &'static Mutex<Option<Vec<Account>>> {
     &LAST
 }
 
-fn tell(app: &AppHandle) {
+fn tell(host: &Host) {
     let now = list();
     if let Ok(mut last) = last_told().lock() {
         *last = Some(now);
     }
-    let _ = app.emit(CHANGED_EVENT, ());
+    let _ = host.emit(Event::AccountsChanged);
 }
 
-#[tauri::command]
 pub fn accounts_list() -> Vec<Account> {
     list()
 }
@@ -447,11 +447,10 @@ pub fn accounts_list() -> Vec<Account> {
 /// A new profile named `label`, ready for its login. An account that could
 /// not share main's conversations is not made: a conversation could not
 /// move to it or from it.
-#[tauri::command]
-pub fn account_add(app: AppHandle, label: String) -> Result<Added, String> {
+pub fn account_add(host: &Host, label: String) -> Result<Added, String> {
     let (main, store) = homes()?;
     let added = add_with(&main, &store, &label, now_ms())?;
-    tell(&app);
+    tell(host);
     Ok(added)
 }
 
@@ -479,8 +478,7 @@ fn add_with(main: &ClaudeHome, store: &Store, label: &str, now: u64) -> Result<A
     })
 }
 
-#[tauri::command]
-pub fn account_rename(app: AppHandle, id: String, label: String) -> Result<Account, String> {
+pub fn account_rename(host: &Host, id: String, label: String) -> Result<Account, String> {
     let (main, store) = homes()?;
     let label = {
         let _guard = lock();
@@ -492,20 +490,19 @@ pub fn account_rename(app: AppHandle, id: String, label: String) -> Result<Accou
         ClaudeHome::profile(store.dir_of(&id))
     };
     let renamed = account(&id, &label, &home);
-    tell(&app);
+    tell(host);
     Ok(renamed)
 }
 
 /// Deletes a profile Hangar made — its folder, its login — once the window
 /// has asked the person. Never main, nothing the links lead to, and not
 /// while a pane still runs on it.
-#[tauri::command]
 pub fn account_remove(
-    app: AppHandle,
-    manager: State<'_, crate::pty::PtyManager>,
+    host: &Host,
+    manager: &crate::pty::PtyManager,
     id: String,
 ) -> Result<(), String> {
-    let running = crate::pty::panes_on(&manager, &id);
+    let running = crate::pty::panes_on(manager, &id);
     if running > 0 {
         return Err(format!(
             "{running} pane(s) still run on this account: switch or close them first."
@@ -513,7 +510,7 @@ pub fn account_remove(
     }
     let (main, store) = homes()?;
     remove_with(&main, &store, &id, now_ms())?;
-    tell(&app);
+    tell(host);
     Ok(())
 }
 
@@ -560,7 +557,6 @@ fn delete_tree(dir: &Path) {
 }
 
 /// Whether logging in to one account here leaves the others logged in.
-#[tauri::command]
 pub fn accounts_support() -> Support {
     if !KEYCHAIN {
         return Support {
@@ -595,7 +591,7 @@ fn support_from(isolated: bool) -> Support {
 /// Tells the windows when a profile's login appears, changes or goes —
 /// the person logged in from a pane, or out — by looking at the accounts'
 /// files every few seconds. Also deletes what a removal could not.
-pub fn watch(app: AppHandle) {
+pub fn watch(host: Host) {
     std::thread::spawn(move || {
         if let Some(root) = store_root() {
             for trash in Store::at(root).trashed() {
@@ -613,7 +609,7 @@ pub fn watch(app: AppHandle) {
                 changed
             };
             if changed {
-                let _ = app.emit(CHANGED_EVENT, ());
+                let _ = host.emit(Event::AccountsChanged);
             }
             std::thread::sleep(WATCH_EVERY);
         }

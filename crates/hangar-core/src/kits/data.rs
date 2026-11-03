@@ -289,13 +289,11 @@ fn open() -> Result<Data, TabError> {
 }
 
 /// `data.read`. `kit` is the window's own record of the tab, never the page's.
-#[tauri::command]
 pub async fn kit_data_read(kit: String, path: String) -> Result<String, TabError> {
     off_thread(move || open()?.read(&kit, &path)).await
 }
 
 /// `data.write`. `kit` is the window's own record of the tab, never the page's.
-#[tauri::command]
 pub async fn kit_data_write(kit: String, path: String, text: String) -> Result<(), TabError> {
     off_thread(move || open()?.write(&kit, &path, &text)).await
 }

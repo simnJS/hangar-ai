@@ -10,7 +10,7 @@
 //!
 //! Everything below the store is a plain function over `Memory`, so the rules
 //! that actually matter (upsert by title, the limits, the ranking) are testable
-//! without a Tauri app or an HTTP server in the way.
+//! without an app or an HTTP server in the way.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+
+use crate::host::{Event, Host};
 
 /// Hard ceilings, enforced with an explicit error rather than by truncating.
 ///
@@ -573,8 +574,8 @@ fn write_memory(dir: &Path, memory: &Memory) -> Result<(), String> {
 /// apart from a string: a refused mutation is the caller's to fix, while a file
 /// that would not open is the machine's problem and, above all, means the write
 /// never happened. server.rs turns the first into a 400 and the second into a
-/// 500; the Tauri commands flatten both back to the message, which is all the
-/// frontend can show.
+/// 500; the window's commands flatten both back to the message, which is all
+/// the frontend can show.
 #[derive(Debug)]
 pub enum StoreError {
     /// `memory.json` could not be read or written. Whatever is on disk is
@@ -638,37 +639,36 @@ pub fn store() -> &'static MemoryStore {
 
 /// Directory holding `memory.json` — the same one as `state.json`, because the
 /// memory belongs to the install, not to any workspace.
-pub fn dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
+pub fn dir(host: &Host) -> Result<PathBuf, String> {
+    let dir = host
+        .paths()
         .app_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
-/// Tells the UI to reload. The payload is empty on purpose: memory is global,
-/// so unlike `board:changed` there is no workspace for a listener to filter on.
-pub fn notify_changed(app: &AppHandle) {
-    let _ = app.emit("memory:changed", "");
+/// Tells the UI to reload. The event carries nothing on purpose: memory is
+/// global, so unlike `Event::BoardChanged` there is no workspace for a
+/// listener to filter on.
+pub fn notify_changed(host: &Host) {
+    let _ = host.emit(Event::MemoryChanged);
 }
 
 // ---------------------------------------------------------------------------
-// Tauri commands
+// The window's commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn memory_load(app: AppHandle) -> Result<Memory, String> {
-    let root = dir(&app)?;
+pub fn memory_load(host: &Host) -> Result<Memory, String> {
+    let root = dir(host)?;
     // Reported rather than swallowed: MemoryView shows the message and stays on
     // an empty list, which is honest, where a silent empty load would look like
     // a memory that never had anything in it.
     store().read(&root).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn memory_create(app: AppHandle, mut input: NewMemory) -> Result<MemoryEntry, String> {
-    let root = dir(&app)?;
+pub fn memory_create(host: &Host, mut input: NewMemory) -> Result<MemoryEntry, String> {
+    let root = dir(host)?;
     // The same identity the board resolves to: a fact learned in a worktree
     // belongs to the project, and the `workspace` search filter runs over this
     // very string. See `shared_workspace` in board.rs.
@@ -678,31 +678,25 @@ pub fn memory_create(app: AppHandle, mut input: NewMemory) -> Result<MemoryEntry
     let (entry, _created) = store()
         .update(&root, |memory| upsert(memory, input))
         .map_err(|e| e.to_string())?;
-    notify_changed(&app);
+    notify_changed(host);
     Ok(entry)
 }
 
-#[tauri::command]
-pub fn memory_update(
-    app: AppHandle,
-    id: String,
-    patch: MemoryPatch,
-) -> Result<MemoryEntry, String> {
-    let root = dir(&app)?;
+pub fn memory_update(host: &Host, id: String, patch: MemoryPatch) -> Result<MemoryEntry, String> {
+    let root = dir(host)?;
     let entry = store()
         .update(&root, |memory| self::patch(memory, &id, patch))
         .map_err(|e| e.to_string())?;
-    notify_changed(&app);
+    notify_changed(host);
     Ok(entry)
 }
 
-#[tauri::command]
-pub fn memory_delete(app: AppHandle, id: String) -> Result<(), String> {
-    let root = dir(&app)?;
+pub fn memory_delete(host: &Host, id: String) -> Result<(), String> {
+    let root = dir(host)?;
     store()
         .update(&root, |memory| delete(memory, &id))
         .map_err(|e| e.to_string())?;
-    notify_changed(&app);
+    notify_changed(host);
     Ok(())
 }
 

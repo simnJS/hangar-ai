@@ -34,9 +34,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::http::HeaderMap;
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::control::{self, ControlError, ControlRequest};
+use crate::host::{Event, Host};
 
 mod activity;
 mod apps;
@@ -52,14 +52,18 @@ mod tailscale;
 
 use activity::ActivityLog;
 pub use activity::Entry as ActivityEntry;
-use apps::{Apps, SlotView};
+use apps::Apps;
+pub use apps::{ShownApp, SlotView};
 use awake::KeepAwake;
+pub use files::Kind as ShareKind;
 use files::Shares;
 pub use files::{NewShare, Share};
 use pairing::{PairError, Pairing};
-use push::{Delivery, Message, PushKey, Subscription, Text};
-use store::{Device, DeviceView, Store};
-use tailscale::TailscaleStatus;
+use push::{Delivery, PushKey, Subscription};
+pub use push::{Lang, Message, Text};
+pub use store::DeviceView;
+use store::{Device, Store};
+pub use tailscale::{Mapping, TailscaleStatus};
 
 /// Beside state.json, in the app data dir.
 const FILE: &str = "remote.json";
@@ -77,32 +81,31 @@ fn now_ms() -> u64 {
 
 /// The main window, as the mobile server reaches it: a phone's calls go out
 /// as internal requests (control.rs), and a phone paired or revoked is
-/// announced as `remote:changed`, for the settings to redraw their list.
+/// announced as `Event::RemoteChanged`, for the settings to redraw their list.
 ///
-/// Two closures rather than the AppHandle itself, so the tests can stand in
-/// for the window — and so a test binary never links the webview runtime,
-/// which on Windows does not even load without the app's manifest.
+/// Three closures rather than the host itself, so the tests can stand in for
+/// the window and answer the calls it is sent, as it would.
 #[derive(Clone)]
 struct Window {
     send: Arc<dyn Fn(ControlRequest) -> Result<(), String> + Send + Sync>,
     changed: Arc<dyn Fn() + Send + Sync>,
-    /// A file shared with the phones, announced as `remote:shared`, for the
-    /// push to listen to.
+    /// A file shared with the phones, announced as `Event::RemoteShared`, for
+    /// the window's history (lib/activityLog) and its push to listen to.
     shared: Arc<dyn Fn(&Share) + Send + Sync>,
 }
 
 impl Window {
-    fn of(app: &AppHandle) -> Self {
-        let events = app.clone();
-        let changes = app.clone();
-        let shares = app.clone();
+    fn of(host: &Host) -> Self {
+        let events = host.clone();
+        let changes = host.clone();
+        let shares = host.clone();
         Self {
             send: Arc::new(move |request| control::emit_internal(&events, request)),
             changed: Arc::new(move || {
-                let _ = changes.emit("remote:changed", ());
+                let _ = changes.emit(Event::RemoteChanged);
             }),
             shared: Arc::new(move |share| {
-                let _ = shares.emit("remote:shared", share);
+                let _ = shares.emit(Event::RemoteShared(share.clone()));
             }),
         }
     }
@@ -192,14 +195,14 @@ pub struct PushOutcome {
 }
 
 impl Remote {
-    pub fn open(app: &AppHandle) -> Result<Arc<Self>, String> {
-        let dir = app
-            .path()
+    pub fn open(host: &Host) -> Result<Arc<Self>, String> {
+        let dir = host
+            .paths()
             .app_data_dir()
             .map_err(|err| format!("no app data dir: {err}"))?;
         Ok(Arc::new(Self::new(
             dir.join(FILE),
-            Window::of(app),
+            Window::of(host),
             CALL_TIMEOUT,
             assets::embedded,
         )))
@@ -658,70 +661,50 @@ fn os_name() -> Option<String> {
 // The settings' commands (Settings → Hangar Mobile)
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub async fn remote_status(remote: State<'_, Arc<Remote>>) -> Result<RemoteStatus, String> {
+pub async fn remote_status(remote: Arc<Remote>) -> Result<RemoteStatus, String> {
     Ok(remote.status().await)
 }
 
-#[tauri::command]
 pub async fn remote_set_enabled(
-    remote: State<'_, Arc<Remote>>,
+    remote: Arc<Remote>,
     enabled: bool,
 ) -> Result<RemoteStatus, String> {
-    remote.inner().set_enabled(enabled).await
+    remote.set_enabled(enabled).await
 }
 
-#[tauri::command]
-pub async fn remote_pair_start(remote: State<'_, Arc<Remote>>) -> Result<PairStart, String> {
+pub async fn remote_pair_start(remote: Arc<Remote>) -> Result<PairStart, String> {
     remote.pair_start().await
 }
 
-#[tauri::command]
-pub fn remote_devices(remote: State<'_, Arc<Remote>>) -> Vec<DeviceView> {
+pub fn remote_devices(remote: &Remote) -> Vec<DeviceView> {
     remote.devices()
 }
 
-#[tauri::command]
-pub fn remote_revoke(remote: State<'_, Arc<Remote>>, id: String) -> Result<(), String> {
+pub fn remote_revoke(remote: &Remote, id: String) -> Result<(), String> {
     remote.revoke(&id)
 }
 
-#[tauri::command]
-pub async fn remote_tailscale(remote: State<'_, Arc<Remote>>) -> Result<TailscaleStatus, String> {
+pub async fn remote_tailscale(remote: Arc<Remote>) -> Result<TailscaleStatus, String> {
     Ok(remote.tailscale().await)
 }
 
 /// Runs `tailscale serve`: only ever from the person's click in the settings.
-#[tauri::command]
-pub async fn remote_tailscale_serve(
-    remote: State<'_, Arc<Remote>>,
-) -> Result<TailscaleStatus, String> {
+pub async fn remote_tailscale_serve(remote: Arc<Remote>) -> Result<TailscaleStatus, String> {
     remote.tailscale_serve().await
 }
 
 /// The two options that keep Hangar reachable: the PC kept awake, and Hangar
 /// started at login.
-#[tauri::command]
-pub fn remote_options(app: AppHandle, remote: State<'_, Arc<Remote>>) -> Options {
-    use tauri_plugin_autostart::ManagerExt;
-    remote.options(app.autolaunch().is_enabled().unwrap_or(false))
+pub fn remote_options(remote: &Remote) -> Options {
+    remote.options(crate::autostart::is_enabled().unwrap_or(false))
 }
 
-#[tauri::command]
-pub fn remote_set_keep_awake(remote: State<'_, Arc<Remote>>, enabled: bool) -> Result<(), String> {
+pub fn remote_set_keep_awake(remote: &Remote, enabled: bool) -> Result<(), String> {
     remote.set_keep_awake(enabled)
 }
 
-#[tauri::command]
-pub fn remote_set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    let launch = app.autolaunch();
-    if enabled {
-        launch.enable()
-    } else {
-        launch.disable()
-    }
-    .map_err(|err| err.to_string())
+pub fn remote_set_autostart(enabled: bool) -> Result<(), String> {
+    crate::autostart::set_enabled(enabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -731,15 +714,13 @@ pub fn remote_set_autostart(app: AppHandle, enabled: bool) -> Result<(), String>
 /// Which of these ports a server listens on, on this PC's loopback: the dev
 /// servers the window can offer the phone. Asked off the main thread, each
 /// port given half a second at most, all at once.
-#[tauri::command]
 pub async fn remote_ports_listening(ports: Vec<u16>) -> Vec<u16> {
     apps::listening(&ports).await
 }
 
 /// For the settings: each slot, the app it shows and when it was last used,
 /// and what Tailscale Serve does with its port.
-#[tauri::command]
-pub async fn remote_app_slots(remote: State<'_, Arc<Remote>>) -> Result<Vec<SlotView>, String> {
+pub async fn remote_app_slots(remote: Arc<Remote>) -> Result<Vec<SlotView>, String> {
     Ok(remote.apps.slots().await)
 }
 
@@ -747,18 +728,13 @@ pub async fn remote_app_slots(remote: State<'_, Arc<Remote>>) -> Result<Vec<Slot
 // The history (lib/activityLog)
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn activity_append(
-    remote: State<'_, Arc<Remote>>,
-    entries: Vec<ActivityEntry>,
-) -> Result<(), String> {
+pub fn activity_append(remote: &Remote, entries: Vec<ActivityEntry>) -> Result<(), String> {
     remote.activity_append(&entries)
 }
 
 /// Newest first, after `since` (ms), at most `limit`.
-#[tauri::command]
 pub fn activity_read(
-    remote: State<'_, Arc<Remote>>,
+    remote: &Remote,
     since: Option<u64>,
     limit: Option<usize>,
 ) -> Vec<ActivityEntry> {
@@ -772,9 +748,8 @@ pub fn activity_read(
 /// A notification to every subscribed phone. `title` and `body` are one text
 /// or `{ en, fr }`, each phone getting its language; `url` is the screen it
 /// opens, `./#/pane/<id>`, `./#/shares`, `./#/`.
-#[tauri::command]
 pub async fn remote_push(
-    remote: State<'_, Arc<Remote>>,
+    remote: Arc<Remote>,
     title: Text,
     body: Text,
     url: String,
@@ -784,8 +759,7 @@ pub async fn remote_push(
 
 /// How many phones take notifications, for the window to know whether to
 /// watch for what it would push.
-#[tauri::command]
-pub async fn remote_push_subscribers(remote: State<'_, Arc<Remote>>) -> Result<usize, String> {
+pub async fn remote_push_subscribers(remote: Arc<Remote>) -> Result<usize, String> {
     Ok(remote.push_subscribers().await)
 }
 
@@ -801,9 +775,9 @@ pub(super) mod tests {
     #[derive(Clone)]
     pub struct Fake {
         pub asked: Arc<Mutex<Vec<String>>>,
-        /// What was announced as `remote:shared`.
+        /// What was announced as `Event::RemoteShared`.
         pub shared: Arc<Mutex<Vec<Share>>>,
-        /// How many times `remote:changed` was.
+        /// How many times `Event::RemoteChanged` was.
         pub changes: Arc<Mutex<usize>>,
         answer: Arc<dyn Fn(&ControlRequest) -> Answer + Send + Sync>,
     }

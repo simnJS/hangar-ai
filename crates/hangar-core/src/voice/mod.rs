@@ -15,16 +15,16 @@ mod groq;
 /// left in state.json by an older version.
 pub mod key;
 mod local;
-/// Public so the command macros can name `voice::models::…` from `lib.rs`:
-/// re-exporting the functions here would leave the generated command items
-/// behind, and `generate_handler!` needs both.
+/// Public: the app calls the catalogue's commands as `voice::models::…`,
+/// where the window invoked them.
 pub mod models;
 mod wav;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::host::{Event, Host};
 
 use capture::Recorder;
 use engine::SttEngine;
@@ -48,15 +48,15 @@ const TRIM_MARGIN_MS: usize = 120;
 /// A recording shorter than this was a mis-hit on the shortcut, not a sentence.
 const MIN_SAMPLES: usize = capture::SAMPLE_RATE as usize / 4;
 
-/// What the interface shows about the dictation.
-#[derive(Clone, Serialize)]
+/// What the interface shows about the dictation: `Event::VoicePhase`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Phase {
     /// `idle`, `recording` or `transcribing`.
-    phase: &'static str,
+    pub phase: &'static str,
     /// Set when a dictation ended badly, and shown as a toast. `None` on every
     /// ordinary transition.
-    error: Option<String>,
+    pub error: Option<String>,
 }
 
 impl Phase {
@@ -72,17 +72,19 @@ impl Phase {
     }
 }
 
-#[derive(Clone, Serialize)]
+/// The microphone's level while recording: `Event::VoiceLevel`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Level {
+pub struct Level {
     /// Peak since the last frame, 0..1.
-    level: f32,
+    pub level: f32,
 }
 
-#[derive(Clone, Serialize)]
+/// What was said: `Event::VoiceText`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Transcript {
-    text: String,
+pub struct Transcript {
+    pub text: String,
 }
 
 /// A model loaded and kept in memory between dictations.
@@ -115,10 +117,9 @@ impl VoiceManager {
 /// Starts recording. Fails if there is no microphone, if the chosen engine
 /// cannot run, or if a recording is already open — which the frontend prevents,
 /// but a stuck key would not.
-#[tauri::command]
 pub async fn voice_start(
-    app: AppHandle,
-    manager: State<'_, VoiceManager>,
+    host: Host,
+    manager: Arc<VoiceManager>,
     config: VoiceConfig,
 ) -> Result<(), String> {
     {
@@ -131,29 +132,23 @@ pub async fn voice_start(
     // Before the microphone rather than after: an undownloaded model or a
     // missing key is a fine thing to be told, and a terrible thing to be told
     // once you have already said your sentence.
-    usable(&app, &config)?;
+    usable(&host, &config)?;
 
     // Opening a device waits on the audio backend, which is a stall the window
     // would be seen to take if this ran where commands run by default.
-    let recorder = tauri::async_runtime::spawn_blocking(Recorder::start)
+    let recorder = tokio::task::spawn_blocking(Recorder::start)
         .await
         .map_err(|err| format!("capture thread failed: {err}"))??;
 
     *manager.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(recorder);
-    let _ = app.emit("voice:phase", Phase::of("recording"));
-    spawn_meter(app);
+    let _ = host.emit(Event::VoicePhase(Phase::of("recording")));
+    spawn_meter(host, manager);
     Ok(())
 }
 
 /// Ends the recording. With `cancel`, the audio is dropped and nothing is
 /// transcribed — the escape hatch for a dictation you thought better of.
-#[tauri::command]
-pub fn voice_stop(
-    app: AppHandle,
-    manager: State<'_, VoiceManager>,
-    config: VoiceConfig,
-    cancel: bool,
-) {
+pub fn voice_stop(host: &Host, manager: &Arc<VoiceManager>, config: VoiceConfig, cancel: bool) {
     let Some(recorder) = manager
         .session
         .lock()
@@ -166,41 +161,41 @@ pub fn voice_stop(
     if cancel {
         // Dropping the recorder stops the thread and closes the device.
         drop(recorder);
-        let _ = app.emit("voice:phase", Phase::of("idle"));
+        let _ = host.emit(Event::VoicePhase(Phase::of("idle")));
         return;
     }
 
-    let _ = app.emit("voice:phase", Phase::of("transcribing"));
+    let _ = host.emit(Event::VoicePhase(Phase::of("transcribing")));
 
     // Off the command thread from here on. Reading the tail of the recording,
     // loading a model and running inference are all measured in hundreds of
     // milliseconds, and the window has a spinner to keep turning.
+    let host = host.clone();
+    let manager = manager.clone();
     std::thread::Builder::new()
         .name("voice-transcribe".into())
-        .spawn(move || {
-            let manager = app.state::<VoiceManager>();
-            match transcribe(&app, &manager, recorder, &config) {
+        .spawn(
+            move || match transcribe(&host, &manager, recorder, &config) {
                 Ok(None) => {
                     // Nothing was said. Not an error worth a toast — the user
                     // knows they said nothing — so it just ends quietly.
-                    let _ = app.emit("voice:phase", Phase::of("idle"));
+                    let _ = host.emit(Event::VoicePhase(Phase::of("idle")));
                 }
                 Ok(Some(transcript)) => {
-                    let _ = app.emit("voice:phase", Phase::of("idle"));
-                    let _ = app.emit("voice:text", transcript);
+                    let _ = host.emit(Event::VoicePhase(Phase::of("idle")));
+                    let _ = host.emit(Event::VoiceText(transcript));
                 }
                 Err(err) => {
-                    let _ = app.emit("voice:phase", Phase::failed(err));
+                    let _ = host.emit(Event::VoicePhase(Phase::failed(err)));
                 }
-            }
-        })
+            },
+        )
         .ok();
 }
 
 /// True while a recording is open, so the interface can recover its own state
 /// after a reload rather than showing a microphone that is not running.
-#[tauri::command]
-pub fn voice_recording(manager: State<'_, VoiceManager>) -> bool {
+pub fn voice_recording(manager: &VoiceManager) -> bool {
     manager
         .session
         .lock()
@@ -209,14 +204,13 @@ pub fn voice_recording(manager: State<'_, VoiceManager>) -> bool {
 }
 
 /// Drops the resident model, freeing its memory until the next dictation.
-#[tauri::command]
-pub fn voice_unload(manager: State<'_, VoiceManager>) {
+pub fn voice_unload(manager: &VoiceManager) {
     manager.unload();
 }
 
 /// `Ok(None)` when there was nothing to transcribe.
 fn transcribe(
-    app: &AppHandle,
+    host: &Host,
     manager: &VoiceManager,
     recorder: Recorder,
     config: &VoiceConfig,
@@ -243,7 +237,7 @@ fn transcribe(
             *loaded = None;
             *loaded = Some(Loaded {
                 key,
-                engine: build(app, config)?,
+                engine: build(host, config)?,
             });
         }
 
@@ -272,9 +266,9 @@ fn transcribe(
 
 /// Whether this configuration could transcribe anything, without loading
 /// anything to find out.
-fn usable(app: &AppHandle, config: &VoiceConfig) -> Result<(), String> {
+fn usable(host: &Host, config: &VoiceConfig) -> Result<(), String> {
     match config.engine {
-        EngineKind::Local if !models::is_installed(app, &config.model) => {
+        EngineKind::Local if !models::is_installed(host, &config.model) => {
             Err("the local model is not downloaded yet — Settings → Voice".into())
         }
         EngineKind::Groq => key::require().map(|_| ()),
@@ -282,10 +276,10 @@ fn usable(app: &AppHandle, config: &VoiceConfig) -> Result<(), String> {
     }
 }
 
-fn build(app: &AppHandle, config: &VoiceConfig) -> Result<Box<dyn SttEngine>, String> {
+fn build(host: &Host, config: &VoiceConfig) -> Result<Box<dyn SttEngine>, String> {
     match config.engine {
         EngineKind::Local => {
-            let path = models::model_file(app, &config.model)?;
+            let path = models::model_file(host, &config.model)?;
             Ok(Box::new(local::LocalEngine::load(&path)?))
         }
         EngineKind::Groq => Ok(Box::new(groq::GroqEngine::new(&config.model))),
@@ -300,12 +294,11 @@ const METER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(60)
 ///
 /// A thread rather than the frontend polling: the alternative is an IPC round
 /// trip fifteen times a second for a number the Rust side already has.
-fn spawn_meter(app: AppHandle) {
+fn spawn_meter(host: Host, manager: Arc<VoiceManager>) {
     std::thread::Builder::new()
         .name("voice-meter".into())
         .spawn(move || loop {
             let level = {
-                let manager = app.state::<VoiceManager>();
                 let session = manager.session.lock().unwrap_or_else(|e| e.into_inner());
                 match session.as_ref() {
                     Some(recorder) => recorder.level(),
@@ -314,7 +307,8 @@ fn spawn_meter(app: AppHandle) {
                     None => return,
                 }
             };
-            if app.emit("voice:level", Level { level }).is_err() {
+            // Nobody listening is a window that is gone.
+            if host.emit(Event::VoiceLevel(Level { level })).is_err() {
                 return;
             }
             std::thread::sleep(METER_INTERVAL);

@@ -28,10 +28,12 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, Offset, TimeZone};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+
+use crate::host::Host;
 
 pub use aggregate::{Bucket, ModelInfo, SessionInfo, Window, ACTIVE_GAP_CAP_MS};
-use parse::{Agent, Digest};
+pub use parse::Agent;
+use parse::Digest;
 
 /// Bumped whenever a digest would come out differently for the same file —
 /// a parser fix — so the caches written before it are dropped, not trusted.
@@ -592,20 +594,19 @@ pub fn usage_stats_at(
     answer(scan, sources, window)
 }
 
-fn cache_path(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_data_dir().ok()?;
+fn cache_path(host: &Host) -> Option<PathBuf> {
+    let dir = host.paths().app_data_dir().ok()?;
     fs::create_dir_all(&dir).ok()?;
     Some(dir.join(CACHE_FILE))
 }
 
-#[tauri::command]
 pub async fn usage_stats(
-    app: AppHandle,
+    host: Host,
     from: Option<i64>,
     to: Option<i64>,
     cached_only: Option<bool>,
 ) -> Result<UsageStats, String> {
-    let disk = cache_path(&app);
+    let disk = cache_path(&host);
     crate::git::off_thread(move || {
         Ok(usage_stats_at(
             &Roots::from_env(),

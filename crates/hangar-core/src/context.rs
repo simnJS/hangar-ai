@@ -330,7 +330,6 @@ fn usage_snapshot(agent: &str, session_id: &str, cwd: &str) -> Option<ContextUsa
 /// agent's own transcript. `None` covers every "show nothing" case: an agent
 /// without a usable transcript, a session not written yet, a file with no
 /// usage line so far.
-#[tauri::command]
 pub async fn context_usage(agent: String, session_id: String, cwd: String) -> Option<ContextUsage> {
     crate::git::off_thread(move || Ok(usage_snapshot(&agent, &session_id, &cwd)))
         .await

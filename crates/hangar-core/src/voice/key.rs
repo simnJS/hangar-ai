@@ -93,17 +93,14 @@ fn migrate_with(state: &mut Value, store: impl FnOnce(&str) -> Result<(), String
 
 /// `true` when a key is saved. An error means the keychain itself could not be
 /// asked, which the settings show as such rather than as "no key".
-#[tauri::command]
 pub async fn voice_key_status() -> Result<bool, String> {
     crate::git::off_thread(|| read().map(|key| key.is_some())).await
 }
 
-#[tauri::command]
 pub async fn voice_key_set(key: String) -> Result<(), String> {
     crate::git::off_thread(move || write(&key)).await
 }
 
-#[tauri::command]
 pub async fn voice_key_clear() -> Result<(), String> {
     crate::git::off_thread(clear).await
 }

@@ -569,7 +569,6 @@ pub fn run(kit: &Loaded, call: &Call, os: &str, search: &Search) -> Result<Outpu
 }
 
 /// `command.run`. The window checked the tab holds `command:<name>`.
-#[tauri::command]
 pub async fn kit_command_run(
     kit: String,
     name: String,

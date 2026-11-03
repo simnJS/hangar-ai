@@ -1,3 +1,30 @@
+//! The panes' pseudo-terminals: one shell each, spawned, written to, resized
+//! and killed here, its output read on a thread of its own.
+//!
+//! # Where a pane's output goes
+//!
+//! The Tauri app emitted every chunk a pane printed as a `pty:output` event to
+//! every window, and each window's terminal picked its own out by id. Here a
+//! pane is spawned with a sink of its own (`PtySink`), and its reader thread
+//! hands the sink each chunk, then the shell's end:
+//!
+//! - not the host's broadcast bus (host.rs): a pane's output is most of what
+//!   the backend ever says — a build log, an agent redrawing its interface
+//!   sixty times a second — and is only ever for that pane. On the bus, every
+//!   subscriber would be handed a copy of every pane's every chunk, and a
+//!   burst of it would push the rarer events, a control request among them,
+//!   out of a bus that keeps a bounded number;
+//! - a callback rather than a channel made here: the app decides what a
+//!   chunk turns into — bytes fed to the pane's terminal, a wake-up of the
+//!   renderer, a message to its event loop — with no channel type of ours to
+//!   go through first, and no queue of ours between the shell and the screen.
+//!
+//! The sink is called on the reader thread, so it must not block for long:
+//! while it runs, the shell's output waits in the pty. It is set once, at
+//! spawn: a pane belongs to the one app that spawned it, whichever of its
+//! windows draws it, so a window taking a pane over routes the output inside
+//! the app and reads `pty_history` for what came before.
+
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,7 +33,6 @@ use std::time::Duration;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One live pseudo-terminal, owned by the manager for the lifetime of a pane.
 struct PtySession {
@@ -32,7 +58,7 @@ const HISTORY_BYTES: usize = 256 * 1024;
 /// The tail of a pane's output, and how many bytes it has printed in all.
 ///
 /// `end` is what lets a window that subscribed to the live output before
-/// asking for the history put the two together: every `pty:output` carries
+/// asking for the history put the two together: every `PtyOutput` carries
 /// the total it brings the pane to, so a chunk the history already holds is
 /// recognised and dropped instead of printed twice.
 #[derive(Default)]
@@ -59,14 +85,14 @@ impl History {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PtyHistory {
-    data: String,
-    end: u64,
+    pub data: String,
+    pub end: u64,
     /// The Claude account the pane's Claude Code was started on, for a window
     /// taking it over; absent for a pane that is not Claude Code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    account: Option<String>,
+    pub account: Option<String>,
 }
 
 /// Everything the manager tracks, behind one lock: an id is live, being reaped,
@@ -119,19 +145,36 @@ impl Drop for Reaping<'_> {
 /// shell that refuses to die fails one pane instead of hanging the command.
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Clone, Serialize)]
-struct PtyOutput {
-    id: String,
-    data: String,
+/// A chunk of what a pane printed, whole UTF-8 sequences only: the Tauri
+/// window's `pty:output`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PtyOutput {
+    pub id: String,
+    pub data: String,
     /// Bytes the pane has printed in all, this chunk included.
-    seq: u64,
+    pub seq: u64,
 }
 
-#[derive(Clone, Serialize)]
-struct PtyExit {
-    id: String,
-    code: Option<u32>,
+/// A shell that ended on its own: the Tauri window's `pty:exit`. Never sent
+/// for a pane killed with `pty_kill`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PtyExit {
+    pub id: String,
+    /// Always `None`: the reader sees the end of the output, not the status.
+    pub code: Option<u32>,
 }
+
+/// What a pane's reader thread hands its sink.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PtyEvent {
+    Output(PtyOutput),
+    /// The last event a sink is handed.
+    Exit(PtyExit),
+}
+
+/// Where a pane's output goes: called on the pane's reader thread, in order,
+/// for as long as the shell prints (see the top of this file).
+pub type PtySink = Box<dyn FnMut(PtyEvent) + Send + 'static>;
 
 /// Pulls every complete UTF-8 sequence out of `pending`, leaving a partial
 /// trailing codepoint in place so it can be completed by the next read.
@@ -323,13 +366,13 @@ fn apply_account(cmd: &mut CommandBuilder, agent: Option<&str>, dir: Option<&std
 #[serde(rename_all = "camelCase")]
 pub struct Spawned {
     /// Kits the pane was given that stay out of it, and why.
-    kit_issues: Vec<crate::kits::LaunchIssue>,
+    pub kit_issues: Vec<crate::kits::LaunchIssue>,
     /// The Claude account the pane's Claude Code runs on: the one asked for,
     /// or main when it is gone. Absent for a pane that is not Claude Code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    account: Option<String>,
+    pub account: Option<String>,
     /// What the account's profile could not take from the main account.
-    account_issues: Vec<crate::accounts::Issue>,
+    pub account_issues: Vec<crate::accounts::Issue>,
 }
 
 /// How many live panes were started on `account`.
@@ -342,12 +385,12 @@ pub fn panes_on(manager: &PtyManager, account: &str) -> usize {
         .count()
 }
 
-// The arguments are the command's IPC fields, named as the frontend sends them.
+// The arguments after `output` are the command's IPC fields, named as the
+// frontend sent them.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
 pub fn pty_spawn(
-    app: AppHandle,
-    manager: State<'_, PtyManager>,
+    manager: &PtyManager,
+    output: PtySink,
     id: String,
     cwd: String,
     shell: Option<crate::shells::ShellInfo>,
@@ -481,7 +524,7 @@ pub fn pty_spawn(
         },
     );
 
-    let reader_app = app.clone();
+    let mut output = output;
     let reader_id = id.clone();
     let reader_live = live;
     std::thread::spawn(move || {
@@ -504,14 +547,11 @@ pub fn pty_spawn(
                         // history in between finds the chunk there, and drops
                         // the event when it arrives.
                         let seq = history.lock().unwrap().push(&text);
-                        let _ = reader_app.emit(
-                            "pty:output",
-                            PtyOutput {
-                                id: reader_id.clone(),
-                                data: text,
-                                seq,
-                            },
-                        );
+                        output(PtyEvent::Output(PtyOutput {
+                            id: reader_id.clone(),
+                            data: text,
+                            seq,
+                        }));
                     }
                 }
                 Err(_) => break,
@@ -521,13 +561,10 @@ pub fn pty_spawn(
         // pane is already gone as far as the frontend is concerned, and the id
         // may have been handed to a new shell in the meantime.
         if reader_live.load(Ordering::Relaxed) {
-            let _ = reader_app.emit(
-                "pty:exit",
-                PtyExit {
-                    id: reader_id,
-                    code: None,
-                },
-            );
+            output(PtyEvent::Exit(PtyExit {
+                id: reader_id,
+                code: None,
+            }));
         }
     });
 
@@ -538,8 +575,7 @@ pub fn pty_spawn(
     })
 }
 
-#[tauri::command]
-pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
+pub fn pty_write(manager: &PtyManager, id: String, data: String) -> Result<(), String> {
     let mut registry = manager.lock();
     let session = registry.sessions.get_mut(&id).ok_or("pty not found")?;
     session
@@ -549,13 +585,7 @@ pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: String) -> Re
     session.writer.flush().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn pty_resize(
-    manager: State<'_, PtyManager>,
-    id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
+pub fn pty_resize(manager: &PtyManager, id: String, cols: u16, rows: u16) -> Result<(), String> {
     let registry = manager.lock();
     let session = registry.sessions.get(&id).ok_or("pty not found")?;
     session
@@ -576,13 +606,10 @@ pub fn pty_resize(
 /// pane's console either. A pane closed by hand keeps the gentler kill, which
 /// leaves alone what the user deliberately started out of it, an editor or a
 /// browser.
-#[tauri::command]
-pub fn pty_kill(
-    app: AppHandle,
-    manager: State<'_, PtyManager>,
-    id: String,
-    tree: Option<bool>,
-) -> Result<(), String> {
+///
+/// The manager comes as an `Arc` because the reap outlives the call, on a
+/// thread of its own that holds on to it.
+pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Result<(), String> {
     crate::bridge::forget(&id);
     // Taken out under the lock, reaped outside it: `wait` blocks until the
     // shell is really gone, and a shell that takes its time — one still
@@ -602,20 +629,20 @@ pub fn pty_kill(
     };
     session.live.store(false, Ordering::Relaxed);
 
-    // Off this thread, and not as a courtesy: a Tauri command that is not
-    // `async` runs on the main thread, so every millisecond spent in `wait`
-    // here is a millisecond the window does not repaint, scroll or answer a
-    // key. That bill is never zero on unix — `kill` sends SIGHUP first and
+    // Off this thread, and not as a courtesy: a command that is not `async`
+    // runs where it is called — the main thread, as Tauri called it — so
+    // every millisecond spent in `wait` here is a millisecond the window does
+    // not repaint, scroll or answer a key. That bill is never zero on unix — `kill` sends SIGHUP first and
     // waits out a grace period, and an interactive shell installs a handler
     // for SIGHUP rather than dying on it — and a shell that hangs on the way
     // out froze the window for good.
     //
     // Nothing waits on this thread. `dying` already holds the id, and the
     // spawn that wants it back blocks on the condvar until the reap ends.
+    let manager = manager.clone();
     std::thread::spawn(move || {
-        let manager = app.state::<PtyManager>();
         let _reaping = Reaping {
-            manager: manager.inner(),
+            manager: &manager,
             id,
         };
 
@@ -663,8 +690,7 @@ fn reap_process_group(session: &PtySession) {
 fn reap_process_group(_session: &PtySession) {}
 
 /// The tail of a live pane's output, for a window taking the pane over.
-#[tauri::command]
-pub fn pty_history(manager: State<'_, PtyManager>, id: String) -> Result<PtyHistory, String> {
+pub fn pty_history(manager: &PtyManager, id: String) -> Result<PtyHistory, String> {
     let registry = manager.lock();
     let session = registry.sessions.get(&id).ok_or("pty not found")?;
     let history = session.history.lock().unwrap();
@@ -675,8 +701,7 @@ pub fn pty_history(manager: State<'_, PtyManager>, id: String) -> Result<PtyHist
     })
 }
 
-#[tauri::command]
-pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {
+pub fn pty_alive(manager: &PtyManager, id: String) -> bool {
     manager.lock().sessions.contains_key(&id)
 }
 
@@ -687,9 +712,8 @@ pub fn pty_alive(manager: State<'_, PtyManager>, id: String) -> bool {
 /// Off the main thread: reading the process table is a few milliseconds on
 /// Windows and a `ps` on unix, and a command that is not `async` would spend
 /// them where the window repaints.
-#[tauri::command]
 pub async fn pty_has_children(
-    manager: State<'_, PtyManager>,
+    manager: Arc<PtyManager>,
     ids: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let shells: Vec<(String, u32)> = {
@@ -704,7 +728,7 @@ pub async fn pty_has_children(
     if shells.is_empty() {
         return Ok(Vec::new());
     }
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         // Unreadable is not empty: answering "nothing runs" without having
         // looked would let a dev server be closed.
         let table = crate::procs::table().ok_or("the process table could not be read")?;
@@ -1073,5 +1097,64 @@ mod tests {
         // Whole lines only, so a replay never opens mid-sequence.
         assert!(history.text.starts_with('é'));
         assert!(history.text.ends_with('\n'));
+    }
+
+    /// What the window heard as `pty:output` and `pty:exit` reaches the sink
+    /// the pane was spawned with, in order, the history matching every chunk.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_s_output_then_its_end_reach_its_sink() {
+        let manager = Arc::new(PtyManager::default());
+        let (sent, received) = std::sync::mpsc::channel();
+        let shell = crate::shells::ShellInfo {
+            id: "sh".into(),
+            label: "sh".into(),
+            program: "/bin/sh".into(),
+            args: args(&["-c", "printf hangar"]),
+        };
+        pty_spawn(
+            &manager,
+            Box::new(move |event| {
+                let _ = sent.send(event);
+            }),
+            "p-sink".into(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(shell),
+            80,
+            24,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("spawned");
+
+        let mut printed = String::new();
+        loop {
+            match received
+                .recv_timeout(Duration::from_secs(10))
+                .expect("an event")
+            {
+                PtyEvent::Output(chunk) => {
+                    assert_eq!(chunk.id, "p-sink");
+                    printed.push_str(&chunk.data);
+                    assert_eq!(chunk.seq, printed.len() as u64);
+                }
+                PtyEvent::Exit(exit) => {
+                    assert_eq!(exit.id, "p-sink");
+                    break;
+                }
+            }
+        }
+        assert!(printed.contains("hangar"), "{printed:?}");
+        assert_eq!(
+            pty_history(&manager, "p-sink".into()).unwrap().end,
+            printed.len() as u64
+        );
+        pty_kill(&manager, "p-sink".into(), None).unwrap();
+        assert!(!pty_alive(&manager, "p-sink".into()));
     }
 }

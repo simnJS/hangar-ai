@@ -17,7 +17,6 @@ pub struct WorkspaceRoot {
     pub exists: bool,
 }
 
-#[tauri::command]
 pub fn read_code_workspace(path: String) -> Result<Vec<WorkspaceRoot>, String> {
     let file = Path::new(&path);
     let raw = fs::read_to_string(file).map_err(|e| format!("{path}: {e}"))?;
@@ -40,7 +39,6 @@ pub fn read_code_workspace(path: String) -> Result<Vec<WorkspaceRoot>, String> {
 /// The `.code-workspace` sitting directly in `dir`, if there is exactly one
 /// obvious candidate. Used to offer the workspace file to someone who picked
 /// the folder holding it.
-#[tauri::command]
 pub fn find_code_workspace(dir: String) -> Option<String> {
     let entries = fs::read_dir(&dir).ok()?;
     let mut found: Vec<PathBuf> = entries

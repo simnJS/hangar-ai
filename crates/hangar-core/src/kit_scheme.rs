@@ -24,6 +24,10 @@
 //!   kit's folder once links are followed, only web file types, and never a
 //!   hidden file (`.env`, `.git/…`).
 //!
+//! What the list above says of Tauri is the webview the Tauri window was: a
+//! webview that serves this scheme now (`serve`) owes the kit's pages the
+//! same, no IPC of its own reachable from a document of the scheme.
+//!
 //! The tab reaches Hangar only by `postMessage`, answered by the window
 //! (src/lib/kitApi.ts) with what the person granted the kit on the
 //! workspace. The two commands that read the workspace's files for it are in
@@ -37,12 +41,11 @@ pub mod files;
 
 use std::path::{Path, PathBuf};
 
-use tauri::http::{header, response::Builder, Method, Request, Response, StatusCode};
-use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
+use http::{header, response::Builder, Method, Request, Response, StatusCode};
 
 use crate::model::{self, Span, MEGABYTE};
 
-/// Registered in lib.rs.
+/// The scheme's name, for the webview that registers it with `serve`.
 pub const SCHEME: &str = "hangar-kit";
 
 /// `KIT_SDK_PATH` in src/lib/kits.ts.
@@ -99,13 +102,6 @@ const BASES: [&str; 3] = [
     "http://hangar-kit.localhost",
     "https://hangar-kit.localhost",
     "hangar-kit://localhost",
-];
-
-/// Hangar's own pages, the only other origins that may read kit files.
-const APP_ORIGINS: [&str; 3] = [
-    "tauri://localhost",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
 ];
 
 /// The largest kit file served: each is read whole into memory.
@@ -289,15 +285,21 @@ fn refuse(status: StatusCode, reason: String) -> Response<Vec<u8>> {
     )
 }
 
-/// Answers one request to the scheme, `kits` being the kits it may serve.
-pub(crate) fn answer(request: &Request<Vec<u8>>, kits: &[KitRoot]) -> Response<Vec<u8>> {
+/// Answers one request to the scheme, `kits` being the kits it may serve and
+/// `origins` those of Hangar's own pages, the only other pages that may read
+/// kit files.
+pub(crate) fn answer(
+    request: &Request<Vec<u8>>,
+    kits: &[KitRoot],
+    origins: &[String],
+) -> Response<Vec<u8>> {
     // A kit's page is opaque (`null`); a navigation or a plain `<img>` sends
     // no Origin. Any other origin is a page that has no business here: one a
     // tab navigated its frame to, for instance.
     if let Some(origin) = request.headers().get(header::ORIGIN) {
         let allowed = origin
             .to_str()
-            .is_ok_and(|origin| origin == "null" || APP_ORIGINS.contains(&origin));
+            .is_ok_and(|origin| origin == "null" || origins.iter().any(|own| own == origin));
         if !allowed {
             return refuse(
                 StatusCode::FORBIDDEN,
@@ -431,9 +433,8 @@ pub(crate) fn answer(request: &Request<Vec<u8>>, kits: &[KitRoot]) -> Response<V
 
 /// The installed kits that can be used now, by canonical folder. Read at
 /// each request, so a kit removed or broken stops being served at once.
-async fn usable_kits() -> Vec<KitRoot> {
-    crate::kits::kits_list()
-        .await
+fn usable_kits() -> Vec<KitRoot> {
+    crate::kits::list_now()
         .unwrap_or_default()
         .into_iter()
         .filter(|kit| kit.error.is_none() && kit.manifest.is_some())
@@ -446,35 +447,41 @@ async fn usable_kits() -> Vec<KitRoot> {
         .collect()
 }
 
-/// The `hangar-kit` handler registered in lib.rs: the work leaves the
-/// webview's thread, which Tauri calls it on.
-pub fn serve<R: Runtime>(
-    _ctx: UriSchemeContext<'_, R>,
-    request: Request<Vec<u8>>,
-    responder: UriSchemeResponder,
-) {
-    tauri::async_runtime::spawn(async move {
-        let kits = if library_file(request.uri().path()).is_some() {
-            Vec::new()
-        } else {
-            usable_kits().await
-        };
-        let response = tauri::async_runtime::spawn_blocking(move || answer(&request, &kits))
-            .await
-            .unwrap_or_else(|_| {
-                refuse(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "the kit file could not be served".into(),
-                )
-            });
-        responder.respond(response);
-    });
+/// The `hangar-kit` scheme's answer to one request: what a webview
+/// registering the scheme hands back.
+///
+/// `origins` are those of the pages Hangar's own interface is served from in
+/// that webview, as for `model::serve` (the Tauri window's were
+/// `tauri://localhost` and `http(s)://tauri.localhost`). A kit's own pages,
+/// whose origin the sandbox makes `null`, and requests without an Origin are
+/// answered whatever they are.
+///
+/// It reads the kits' index and the file where it is called, so the caller
+/// runs it off the window's thread, as Tauri's handler moved it to the
+/// blocking pool.
+pub fn serve(request: &Request<Vec<u8>>, origins: &[String]) -> Response<Vec<u8>> {
+    let kits = if library_file(request.uri().path()).is_some() {
+        Vec::new()
+    } else {
+        usable_kits()
+    };
+    answer(request, &kits, origins)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::tests::{header_of, link, temp_dir, write};
+
+    /// `answer`, Hangar's own pages being where the Tauri window had them.
+    fn answer(request: &Request<Vec<u8>>, kits: &[KitRoot]) -> Response<Vec<u8>> {
+        let own = [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+        ];
+        super::answer(request, kits, &own.map(String::from))
+    }
 
     fn get(path: &str, origin: Option<&str>) -> Request<Vec<u8>> {
         let mut request = Request::builder().uri(format!("http://hangar-kit.localhost{path}"));
@@ -826,6 +833,21 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
         let _ = std::fs::remove_file(sibling);
+    }
+
+    /// The scheme as a webview asks it, with its own pages' origins: the
+    /// library is answered without the kits being read.
+    #[test]
+    fn serve_takes_the_host_s_own_pages_as_hangar_s() {
+        let own = ["hangar://localhost".to_string()];
+        for origin in [None, Some("null"), Some("hangar://localhost")] {
+            let response = serve(&get(SDK_PATH, origin), &own);
+            assert_eq!(status(&response), StatusCode::OK, "{origin:?}");
+        }
+        for origin in ["tauri://localhost", "https://example.com"] {
+            let response = serve(&get(SDK_PATH, Some(origin)), &own);
+            assert_eq!(status(&response), StatusCode::FORBIDDEN, "{origin}");
+        }
     }
 
     #[test]

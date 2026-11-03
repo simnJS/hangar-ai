@@ -118,14 +118,12 @@ fn display(path: &Path) -> String {
 }
 
 /// `files.read`: the text of `path`, relative to the workspace folder `root`.
-#[tauri::command]
 pub async fn kit_file_read(root: String, path: String) -> Result<String, String> {
     crate::git::off_thread(move || read_text(&root, &path)).await
 }
 
 /// `preview.show`: the canonical path of the file `path` names inside the
 /// workspace folder `root`, for the preview to open.
-#[tauri::command]
 pub async fn kit_workspace_path(root: String, path: String) -> Result<String, String> {
     crate::git::off_thread(move || resolve(&root, &path).map(|real| display(&real))).await
 }

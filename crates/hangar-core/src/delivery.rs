@@ -2329,7 +2329,6 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
     report
 }
 
-#[tauri::command]
 pub async fn delivery_preflight(
     workspace: String,
     worktree: String,
@@ -2351,9 +2350,8 @@ pub async fn delivery_preflight(
 
 /// Takes as long as the delivery does — the check and the review are minutes —
 /// on a thread of its own, never the window's.
-#[tauri::command]
 pub async fn delivery_run(delivery: Delivery) -> Outcome {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         deliver(
             &delivery,
             &Claude {
@@ -2366,14 +2364,13 @@ pub async fn delivery_run(delivery: Delivery) -> Outcome {
     .unwrap_or_else(|err| Outcome::error(format!("the delivery stopped unexpectedly: {err}")))
 }
 
-#[tauri::command]
 pub async fn delivery_cleanup(
     worktree: String,
     branch: String,
     target: String,
     task_id: String,
 ) -> Cleanup {
-    tauri::async_runtime::spawn_blocking(move || cleanup(&worktree, &branch, &target, &task_id, 10))
+    tokio::task::spawn_blocking(move || cleanup(&worktree, &branch, &target, &task_id, 10))
         .await
         .unwrap_or(Cleanup {
             worktree_removed: false,
@@ -2382,7 +2379,6 @@ pub async fn delivery_cleanup(
         })
 }
 
-#[tauri::command]
 pub fn delivery_running() -> Vec<Running> {
     stages().lock().unwrap().values().cloned().collect()
 }

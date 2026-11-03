@@ -678,13 +678,11 @@ pub fn list(root: &str, raw: Option<&str>, pattern: Option<&str>) -> Result<List
 
 /// `files.read` for a tab holding `files.write` as well. `root` is the window's
 /// own record of the tab, never the page's, as for all of these.
-#[tauri::command]
 pub async fn kit_files_read(root: String, path: String) -> Result<String, TabError> {
     off_thread(move || read(&root, &path)).await
 }
 
 /// `files.write`.
-#[tauri::command]
 pub async fn kit_files_write(
     root: String,
     path: String,
@@ -695,7 +693,6 @@ pub async fn kit_files_write(
 }
 
 /// `files.writeBinary`.
-#[tauri::command]
 pub async fn kit_files_write_binary(
     root: String,
     path: String,
@@ -705,7 +702,6 @@ pub async fn kit_files_write_binary(
 }
 
 /// `files.readBinary`. `hidden`: the tab holds `files.write` as well.
-#[tauri::command]
 pub async fn kit_files_read_binary(
     root: String,
     path: String,
@@ -715,7 +711,6 @@ pub async fn kit_files_read_binary(
 }
 
 /// `files.list`.
-#[tauri::command]
 pub async fn kit_files_list(
     root: String,
     path: Option<String>,

@@ -5,10 +5,10 @@
 //! The panes are not Rust's to touch. They live in the window's store — their
 //! names, their agents, the split tree, the sessions to resume — and a pane
 //! created behind the window's back would be a PTY nothing draws. So the HTTP
-//! API only relays: each request goes to the main window as a
-//! `control:request` event, the window carries it out against its store and
-//! answers through `control_reply`, and the API hands that answer back to the
-//! agent that asked.
+//! API only relays: each request goes to the window as an
+//! `Event::ControlRequest` (the Tauri window's `control:request`), the window
+//! carries it out against its store and answers through `control_reply`, and
+//! the API hands that answer back to the agent that asked.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -16,8 +16,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
+
+use crate::host::{Event, Host};
 
 /// What the window knows how to do. Anything else is refused here, before the
 /// window is bothered with it.
@@ -106,9 +107,9 @@ fn pending() -> &'static Mutex<HashMap<String, oneshot::Sender<Answer>>> {
     PENDING.get_or_init(Default::default)
 }
 
-/// One request as the window receives it, on `control:request` or
-/// `control:internal`; its answer comes back through `control_reply`.
-#[derive(Clone, Serialize)]
+/// One request as the window receives it, in `Event::ControlRequest` or
+/// `Event::ControlInternal`; its answer comes back through `control_reply`.
+#[derive(Debug, Clone, Serialize)]
 pub struct ControlRequest {
     pub id: String,
     pub op: String,
@@ -158,7 +159,7 @@ async fn wait(
 }
 
 /// Sends `op` to the window and waits for what it did.
-pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, ControlError> {
+pub async fn ask(host: &Host, op: &str, args: Value) -> Result<Value, ControlError> {
     if !OPERATIONS.contains(&op) {
         return Err(ControlError::Refused(format!("unknown operation '{op}'")));
     }
@@ -168,8 +169,9 @@ pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, Contro
         op: op.to_string(),
         args,
     };
-    // Every window hears it; only the main one, which owns the store, answers.
-    if let Err(err) = app.emit("control:request", request) {
+    // Every subscriber hears it; the window, which owns the store, answers
+    // once. Nobody subscribed is no window to wait for.
+    if let Err(err) = host.emit(Event::ControlRequest(request)) {
         forget(&id);
         return Err(ControlError::Unavailable(format!(
             "could not reach the window: {err}"
@@ -185,17 +187,17 @@ pub async fn ask(app: &AppHandle, op: &str, args: Value) -> Result<Value, Contro
 /// whether or not pane control is on. The answer comes back through
 /// `control_reply` like any other.
 pub async fn ask_internal(
-    app: &AppHandle,
+    host: &Host,
     op: &str,
     args: Value,
     limit: Duration,
 ) -> Result<Value, ControlError> {
-    ask_internal_via(|request| emit_internal(app, request), op, args, limit).await
+    ask_internal_via(|request| emit_internal(host, request), op, args, limit).await
 }
 
 /// How an internal request reaches the window: on its own event.
-pub(crate) fn emit_internal(app: &AppHandle, request: ControlRequest) -> Result<(), String> {
-    app.emit("control:internal", request)
+pub(crate) fn emit_internal(host: &Host, request: ControlRequest) -> Result<(), String> {
+    host.emit(Event::ControlInternal(request))
         .map_err(|err| err.to_string())
 }
 
@@ -223,9 +225,8 @@ pub(crate) async fn ask_internal_via(
     wait(&id, receiver, limit).await
 }
 
-/// The window's answer to a `control:request`. An id nobody waits for any
-/// more — the request timed out — is dropped.
-#[tauri::command]
+/// The window's answer to a control request, internal or not. An id nobody
+/// waits for any more — the request timed out — is dropped.
 pub fn control_reply(id: String, ok: bool, value: Option<Value>, error: Option<String>) {
     let Some(sender) = pending().lock().unwrap().remove(&id) else {
         return;
@@ -306,6 +307,61 @@ mod tests {
         .await;
         assert!(matches!(answer, Err(ControlError::Unavailable(_))));
         assert!(!pending().lock().unwrap().contains_key(&booked));
+    }
+
+    fn host() -> Host {
+        Host::with_paths(crate::paths::Paths::rooted(&std::env::temp_dir()))
+    }
+
+    #[tokio::test]
+    async fn a_request_reaches_the_window_on_the_bus_and_comes_back_answered() {
+        let host = host();
+        let mut events = host.subscribe();
+        let window = tokio::spawn(async move {
+            match events.recv().await.unwrap() {
+                Event::ControlRequest(request) => {
+                    assert_eq!(request.op, "pane_list");
+                    control_reply(request.id, true, Some(json!(["Ava"])), None);
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        });
+        assert_eq!(ask(&host, "pane_list", json!({})).await, Ok(json!(["Ava"])));
+        window.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_internal_request_goes_out_on_its_own_event() {
+        let host = host();
+        let mut events = host.subscribe();
+        let window = tokio::spawn(async move {
+            match events.recv().await.unwrap() {
+                Event::ControlInternal(request) => {
+                    assert_eq!(request.op, "orchestrator_briefing");
+                    control_reply(request.id, false, None, Some("no role".into()));
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        });
+        assert_eq!(
+            ask_internal(
+                &host,
+                "orchestrator_briefing",
+                json!({}),
+                Duration::from_secs(1)
+            )
+            .await,
+            Err(ControlError::Refused("no role".into()))
+        );
+        window.await.unwrap();
+    }
+
+    /// No window subscribed: the agent hears so at once, rather than after
+    /// the twenty seconds a window that does not answer is given.
+    #[tokio::test]
+    async fn a_request_nobody_listens_for_is_unavailable_at_once() {
+        let outcome = ask(&host(), "pane_list", json!({})).await;
+        assert!(matches!(outcome, Err(ControlError::Unavailable(_))));
     }
 
     #[test]

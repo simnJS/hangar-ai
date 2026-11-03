@@ -30,13 +30,17 @@
 //!   the images beside it, a video — it can show but never read, and a script
 //!   or a stylesheet beside it goes out as `text/plain` with `nosniff`, which
 //!   no webview runs or applies: a page's scripts and styles must be inline.
+//!
+//! What this says of Tauri is the webview the Tauri window was: a webview
+//! that serves the scheme now (`model::serve`) owes a page the same, no IPC
+//! of its own reachable from a document of the scheme.
 
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
+use http::{header, response::Builder, Method, Request, Response, StatusCode};
 use serde::Serialize;
-use tauri::http::{header, response::Builder, Method, Request, Response, StatusCode};
 
 use crate::model::{self, Accept, Span, MAX_BYTES, MEGABYTE};
 
@@ -225,8 +229,8 @@ const HEAD_BYTES: u64 = 64 * 1024;
 
 /// The most of a video or an audio file one response carries. A player asks
 /// for `bytes=0-` and is given this much, then asks for the next part as it
-/// plays: HTTP lets a server send less than an open range asks for, and
-/// Tauri's responder holds each body whole in memory.
+/// plays: HTTP lets a server send less than an open range asks for, and a
+/// response (model.rs, `serve`) holds each body whole in memory.
 const CHUNK: u64 = 8 * MEGABYTE;
 
 /// What a name says a file is, before its bytes are read.
@@ -495,15 +499,15 @@ pub(crate) fn inspect(requested: &Path, roots: &[PathBuf]) -> Result<Shown, Refu
 pub struct PreviewFile {
     /// Canonical, in the platform's everyday form, as `model_stat` gives it:
     /// the string the panel builds the file's URL from.
-    path: String,
-    kind: Kind,
+    pub path: String,
+    pub kind: Kind,
     /// The Content-Type the file's URL answers with.
-    mime: &'static str,
-    size: u64,
+    pub mime: &'static str,
+    pub size: u64,
     /// The file's name, for its tab.
-    name: String,
+    pub name: String,
     /// Epoch milliseconds, for the panel to notice a rewritten file.
-    modified_ms: u64,
+    pub modified_ms: u64,
 }
 
 impl From<Shown> for PreviewFile {
@@ -528,7 +532,6 @@ impl From<Shown> for PreviewFile {
 /// What a file the window is about to show is, or the reason it may not show
 /// it. The folders are those `model_allow_roots` last allowed, as for a
 /// model.
-#[tauri::command]
 pub async fn preview_inspect(path: String) -> Result<PreviewFile, String> {
     let roots = model::allowed_roots();
     crate::git::off_thread(move || {

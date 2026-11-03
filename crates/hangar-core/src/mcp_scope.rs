@@ -39,8 +39,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Manager};
 
+use crate::host::Host;
 use crate::install::{server_entry, LEGACY_SERVER_KEYS, SERVER_KEY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -779,9 +779,9 @@ fn write_if_changed(path: &Path, body: &str) -> Result<(), String> {
     })
 }
 
-fn scope_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
+fn scope_dir(host: &Host) -> Result<PathBuf, String> {
+    let dir = host
+        .paths()
         .app_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?
         .join("mcp");
@@ -791,7 +791,6 @@ fn scope_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// The servers a Claude Code session started in `cwd` on `account` (main
 /// when absent) would load by itself.
-#[tauri::command]
 pub fn mcp_servers(cwd: String, account: Option<String>) -> Discovery {
     match ClaudeFiles::locate(account.as_deref(), false) {
         Some(files) => discover(&files, Path::new(&cwd)),
@@ -813,9 +812,8 @@ pub fn mcp_servers(cwd: String, account: Option<String>) -> Discovery {
 ///
 /// `account` is the Claude account the pane runs on: its servers are the
 /// ones its Claude Code would have, read from its profile (accounts.rs).
-#[tauri::command]
 pub fn mcp_scope_write(
-    app: AppHandle,
+    host: &Host,
     workspace_id: String,
     workspace_cwd: String,
     cwd: String,
@@ -832,7 +830,7 @@ pub fn mcp_scope_write(
         }
         _ => Vec::new(),
     };
-    let path = scope_dir(&app)?.join(file_name(&workspace_id, &workspace_cwd, &cwd));
+    let path = scope_dir(host)?.join(file_name(&workspace_id, &workspace_cwd, &cwd));
     let body = serde_json::to_string_pretty(&config.body).map_err(|e| e.to_string())?;
     write_if_changed(&path, &body)?;
     Ok(ScopeFile {
@@ -846,9 +844,8 @@ pub fn mcp_scope_write(
 /// Deletes a workspace's files once it goes back to Claude Code's own
 /// configuration: they hold copies of the servers' entries, and nothing reads
 /// them any more.
-#[tauri::command]
-pub fn mcp_scope_clear(app: AppHandle, workspace_id: String) -> Result<(), String> {
-    let dir = scope_dir(&app)?;
+pub fn mcp_scope_clear(host: &Host, workspace_id: String) -> Result<(), String> {
+    let dir = scope_dir(host)?;
     let stem = file_stem(&workspace_id);
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
         let name = entry.file_name();
@@ -955,7 +952,6 @@ fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
 /// Starts a workspace's Claude Code on `folder` without the trust question,
 /// for a repository that is the person's own. `account` is the workspace's
 /// Claude account (main when absent).
-#[tauri::command]
 pub fn claude_trust_folder(folder: String, account: Option<String>) -> Result<Trusted, String> {
     let files = ClaudeFiles::locate(account.as_deref(), true).ok_or("no home directory")?;
     trust_folder(&files.config, Path::new(&folder))

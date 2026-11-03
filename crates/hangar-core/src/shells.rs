@@ -236,7 +236,6 @@ fn discover() -> Vec<ShellInfo> {
     found
 }
 
-#[tauri::command]
 pub fn detect_shells() -> Vec<ShellInfo> {
     discover()
 }

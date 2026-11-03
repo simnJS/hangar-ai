@@ -35,10 +35,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 
-pub use manifest::Manifest;
-use store::{Entry, Loaded, Source, Store, UpdateInfo};
+use crate::host::{Event, Host};
+
+// Named here for the app, which reads what the commands answer with.
+pub use hooks::Hook;
+pub use manifest::{
+    CommandArg, CommandRun, DeclaredCommand, Manifest, SetupRun, SetupStep, Tab, TabParam,
+};
+pub use plugin::{Inspection, PluginInfo, RunKind, Running, SetupCommand};
+pub use setup::StepStatus;
+pub use source::GitSource;
+use store::Store;
+pub use store::{Entry, Loaded, Source, UpdateInfo};
 
 /// A call of a tab's that failed, as the page is told: `code` is the protocol's
 /// (docs/kits.md), which the page tells apart. `src/lib/kitApi.ts` passes it on.
@@ -72,21 +81,17 @@ impl TabError {
     }
 }
 
-/// Runs a tab's call away from the webview's thread.
+/// Runs a tab's call away from the window's thread.
 async fn off_thread<T: Send + 'static>(
     task: impl FnOnce() -> Result<T, TabError> + Send + 'static,
 ) -> Result<T, TabError> {
-    tauri::async_runtime::spawn_blocking(task)
+    tokio::task::spawn_blocking(task)
         .await
         .map_err(|err| TabError::new(TabError::FAILED, err.to_string()))?
 }
 
 /// What a manifest's `hangar` requirement is checked against.
 pub const HANGAR_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Sent with no payload whenever the list `kits_list` returns may have
-/// changed: the index, or the manifest of an installed kit.
-pub const CHANGED_EVENT: &str = "kits:changed";
 
 /// `~/.hangar/kits/`, or beside the endpoint file a development build run
 /// next to an installed Hangar was given, as for the bridge's mod (bridge.rs).
@@ -336,45 +341,49 @@ fn list(store: &Store) -> Result<Vec<KitInfo>, String> {
         .collect())
 }
 
-/// Tells the windows, and lets the watcher know this change was announced.
-fn changed(app: &AppHandle) {
+/// Tells the windows, with `Event::KitsChanged` (sent whenever the list
+/// `kits_list` returns may have changed: the index, or the manifest of an
+/// installed kit), and lets the watcher know this change was announced.
+fn changed(host: &Host) {
     remember_fingerprint();
-    let _ = app.emit(CHANGED_EVENT, ());
+    let _ = host.emit(Event::KitsChanged);
 }
 
-#[tauri::command]
 pub async fn kits_list() -> Result<Vec<KitInfo>, String> {
-    crate::git::off_thread(|| list(&open()?)).await
+    crate::git::off_thread(list_now).await
 }
 
-#[tauri::command]
-pub async fn kit_add_folder(app: AppHandle, path: String) -> Result<KitInfo, String> {
+/// `kits_list`, where it is called: for the `hangar-kit` scheme, which is
+/// answered off the window's thread already (kit_scheme.rs).
+pub(crate) fn list_now() -> Result<Vec<KitInfo>, String> {
+    list(&open()?)
+}
+
+pub async fn kit_add_folder(host: Host, path: String) -> Result<KitInfo, String> {
     crate::git::off_thread(move || {
         let store = open()?;
         let entry = store.add_folder(&path, now_ms())?;
-        changed(&app);
+        changed(&host);
         Ok(info(&store, entry))
     })
     .await
 }
 
-#[tauri::command]
-pub async fn kit_add_git(app: AppHandle, url: String) -> Result<KitInfo, String> {
+pub async fn kit_add_git(host: Host, url: String) -> Result<KitInfo, String> {
     crate::git::off_thread(move || {
         let store = open()?;
         let entry = store.add_git(&url, now_ms())?;
-        changed(&app);
+        changed(&host);
         Ok(info(&store, entry))
     })
     .await
 }
 
-#[tauri::command]
-pub async fn kit_remove(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn kit_remove(host: Host, id: String) -> Result<(), String> {
     crate::git::off_thread(move || {
         let result = open()?.remove(&id);
         // Out of the index even when its clone could not all be deleted.
-        changed(&app);
+        changed(&host);
         result
     })
     .await
@@ -393,34 +402,31 @@ fn catalog_tag(store: &Store, id: &str) -> Option<String> {
     gallery::tag_for(&listed.kits, id, &git.url)
 }
 
-#[tauri::command]
-pub async fn kit_check_update(app: AppHandle, id: String) -> Result<Option<UpdateInfo>, String> {
+pub async fn kit_check_update(host: Host, id: String) -> Result<Option<UpdateInfo>, String> {
     crate::git::off_thread(move || {
         let store = open()?;
         let tag = catalog_tag(&store, &id);
         let found = store.check_update(&id, now_ms(), tag.as_deref())?;
         if found.is_some() {
-            let _ = app.emit(CHANGED_EVENT, ());
+            let _ = host.emit(Event::KitsChanged);
         }
         Ok(found)
     })
     .await
 }
 
-#[tauri::command]
-pub async fn kit_update(app: AppHandle, id: String) -> Result<KitInfo, String> {
+pub async fn kit_update(host: Host, id: String) -> Result<KitInfo, String> {
     crate::git::off_thread(move || {
         let store = open()?;
         let tag = catalog_tag(&store, &id);
         let entry = store.update(&id, tag.as_deref())?;
-        changed(&app);
+        changed(&host);
         Ok(info(&store, entry))
     })
     .await
 }
 
-#[tauri::command]
-pub async fn kit_inspect(id: String) -> Result<plugin::Inspection, String> {
+pub async fn kit_inspect(id: String) -> Result<Inspection, String> {
     crate::git::off_thread(move || {
         let store = open()?;
         let kit = store.loaded(&store.entry(&id)?)?;
@@ -429,13 +435,11 @@ pub async fn kit_inspect(id: String) -> Result<plugin::Inspection, String> {
     .await
 }
 
-#[tauri::command]
-pub async fn kit_setup_status(id: String) -> Result<Vec<setup::StepStatus>, String> {
+pub async fn kit_setup_status(id: String) -> Result<Vec<StepStatus>, String> {
     crate::git::off_thread(move || setup::status(&open()?, &id, manifest::current_os())).await
 }
 
-#[tauri::command]
-pub async fn kit_setup_mark(id: String, step_id: String) -> Result<Vec<setup::StepStatus>, String> {
+pub async fn kit_setup_mark(id: String, step_id: String) -> Result<Vec<StepStatus>, String> {
     crate::git::off_thread(move || {
         setup::mark(&open()?, &id, &step_id, manifest::current_os(), now_ms())
     })
@@ -484,9 +488,9 @@ fn remember_fingerprint() {
     }
 }
 
-/// Sends `kits:changed` when the index or a kit's manifest changes on disk —
-/// a linked folder being edited, mostly.
-pub fn watch(app: AppHandle) {
+/// Sends `Event::KitsChanged` when the index or a kit's manifest changes on
+/// disk — a linked folder being edited, mostly.
+pub fn watch(host: Host) {
     std::thread::spawn(move || {
         remember_fingerprint();
         loop {
@@ -503,7 +507,7 @@ pub fn watch(app: AppHandle) {
                 *last = Some(now);
                 drop(last);
                 if !first {
-                    let _ = app.emit(CHANGED_EVENT, ());
+                    let _ = host.emit(Event::KitsChanged);
                 }
             }
         }

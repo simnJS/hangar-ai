@@ -2,10 +2,11 @@
 //!
 //! Every call on Discord's local IPC blocks: opening the pipe while Discord is
 //! closed, writing to it, waiting for the reply to a command. None of that
-//! belongs on a Tauri command thread, so the whole conversation lives in one
-//! worker thread. The frontend never talks to Discord — it hands over the
-//! presence it wants shown and forgets about it; the worker owns connecting,
-//! reconnecting, rate limiting and giving up quietly when Discord is not there.
+//! belongs on the thread the window calls a command on, so the whole
+//! conversation lives in one worker thread. The frontend never talks to
+//! Discord — it hands over the presence it wants shown and forgets about it;
+//! the worker owns connecting, reconnecting, rate limiting and giving up
+//! quietly when Discord is not there.
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -283,7 +284,7 @@ fn worker(shared: Arc<Shared>) {
     }
 }
 
-/// Handle held by Tauri, shared with the worker thread.
+/// Handle held by the `Core` (lib.rs), shared with the worker thread.
 #[derive(Default)]
 pub struct DiscordPresence {
     shared: Arc<Shared>,
@@ -365,12 +366,10 @@ impl DiscordPresence {
     }
 }
 
-#[tauri::command]
-pub fn discord_presence_set(presence: tauri::State<'_, DiscordPresence>, wanted: Option<Presence>) {
+pub fn discord_presence_set(presence: &DiscordPresence, wanted: Option<Presence>) {
     presence.set(wanted);
 }
 
-#[tauri::command]
-pub fn discord_presence_status(presence: tauri::State<'_, DiscordPresence>) -> Status {
+pub fn discord_presence_status(presence: &DiscordPresence) -> Status {
     presence.status()
 }

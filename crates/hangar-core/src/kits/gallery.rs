@@ -326,7 +326,6 @@ pub fn load(root: Option<&Path>, now_ms: u64, fetch: impl FnOnce() -> Fetched) -
     }
 }
 
-#[tauri::command]
 pub async fn kit_gallery_list() -> Result<Gallery, String> {
     crate::git::off_thread(|| {
         let root: Option<PathBuf> = super::kits_root();

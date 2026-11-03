@@ -26,7 +26,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+
+use crate::host::{Event, Host};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -37,8 +38,6 @@ const CLONE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// `gh` answers from its cache or one HTTP call; past this it is stuck (on a
 /// login prompt, or a dead network).
 const GH_TIMEOUT: Duration = Duration::from_secs(15);
-
-const PROGRESS_EVENT: &str = "git-clone:progress";
 
 // ---------------------------------------------------------------------------
 // Parsing an address
@@ -262,7 +261,6 @@ pub fn parse_repo(input: &str) -> Result<RepoRef, String> {
     })
 }
 
-#[tauri::command]
 pub fn git_repo_parse(input: String) -> ParseResult {
     match parse_repo(&input) {
         Ok(repo) => ParseResult::Ok { repo },
@@ -427,9 +425,8 @@ fn gh_text(args: &[&str]) -> Result<String, String> {
     })
 }
 
-#[tauri::command]
 pub async fn git_repo_ownership(owner: String, host: String) -> Ownership {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         if !host.eq_ignore_ascii_case("github.com") {
             return ownership(false, "ownership is only checked on github.com");
         }
@@ -969,7 +966,6 @@ pub fn cancel_job(job_id: &str) -> bool {
     }
 }
 
-#[tauri::command]
 pub fn git_clone_cancel(job_id: String) -> bool {
     cancel_job(&job_id)
 }
@@ -1130,9 +1126,8 @@ fn discard_clone(path: &str, window: Duration) -> DiscardOutcome {
     }
 }
 
-#[tauri::command]
 pub async fn git_clone_discard(path: String) -> DiscardOutcome {
-    tauri::async_runtime::spawn_blocking(move || discard_clone(&path, DISCARD_WINDOW))
+    tokio::task::spawn_blocking(move || discard_clone(&path, DISCARD_WINDOW))
         .await
         .unwrap_or_else(|_| discard_refused("failed", "the removal was interrupted"))
 }
@@ -1409,15 +1404,14 @@ fn clone_into(request: &CloneRequest, progress: &dyn Fn(&str, Option<u8>)) -> Cl
     }
 }
 
-#[tauri::command]
 pub async fn git_clone(
-    app: AppHandle,
+    host: Host,
     url: String,
     parent: String,
     name: String,
     job_id: String,
 ) -> CloneOutcome {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let request = CloneRequest {
             url: &url,
             parent: &parent,
@@ -1427,14 +1421,11 @@ pub async fn git_clone(
             timeout: CLONE_TIMEOUT,
         };
         clone_into(&request, &|phase, percent| {
-            let _ = app.emit(
-                PROGRESS_EVENT,
-                CloneProgress {
-                    job_id: job_id.clone(),
-                    phase: phase.to_string(),
-                    percent,
-                },
-            );
+            let _ = host.emit(Event::GitCloneProgress(CloneProgress {
+                job_id: job_id.clone(),
+                phase: phase.to_string(),
+                percent,
+            }));
         })
     })
     .await

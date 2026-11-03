@@ -169,9 +169,8 @@ fn open(cwd: &str, from_code_workspace: bool) -> EditorOutcome {
     }
 }
 
-#[tauri::command]
 pub async fn open_in_vscode(cwd: String, from_code_workspace: bool) -> EditorOutcome {
-    tauri::async_runtime::spawn_blocking(move || open(&cwd, from_code_workspace))
+    tokio::task::spawn_blocking(move || open(&cwd, from_code_workspace))
         .await
         .unwrap_or_else(|err| EditorOutcome::Failed {
             error: err.to_string(),
