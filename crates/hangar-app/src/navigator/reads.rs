@@ -134,13 +134,20 @@ pub struct KitTab {
 /// The tabs of the workspace's kits, and whether the installed kits are still
 /// being read; `None` when no kit is enabled on it, and the button is not
 /// there (`kitTabs`, `kitsLoading`).
-///
-/// TODO(P14, P16): the installed kits live in `kits::Live` and the tabs a
-/// workspace may open come from `kit_tabs`; both are empty stubs, so the
-/// Kits button stays out of the bar until they answer.
 pub fn kit_tabs(m: &Model, ws: &Workspace) -> Option<(Vec<KitTab>, bool)> {
-    let _ = (m, ws);
-    None
+    if !crate::kit_tabs::has_kits(m, ws) {
+        return None;
+    }
+    let tabs = crate::kit_tabs::choices(m, ws)
+        .into_iter()
+        .map(|choice| KitTab {
+            kit_id: choice.kit_id,
+            tab_id: choice.tab.id,
+            title: choice.tab.title,
+            kit: choice.kit_name,
+        })
+        .collect();
+    Some((tabs, m.live.kits.loading()))
 }
 
 /// What the toolbar's 3D button needs of the preview: some model is open,
