@@ -55,7 +55,8 @@ cargo test -p hangar-app && cargo clippy -p hangar-app --all-targets -- -D warni
 3. **The persisted model changes only through `m.apply(StoreAction)`**, which
    answers the new ids (`StoreOutcome`), schedules the save and republishes
    the snapshot. `m.state()` reads it; there is no other way to write it.
-   (The store's semantics land in P0b; until then `apply` changes nothing.)
+   It runs against the state as the last action left it, so two in a row
+   each see the other's change, as the TS `update` did.
 4. **Ask other packages through intents**, never by calling their `update`:
    return `Task::done(Message::Intent(Intent::…))`. The shell handles its part
    (pushing an overlay, focusing a pane), then offers the intent to every
@@ -82,14 +83,17 @@ to the code as `#[cfg(test)]`; comments are full sentences that explain why.
 
 | Item | Where | What |
 | --- | --- | --- |
-| `Model` | `state/mod.rs` | `state()` (the `AppState` of `state/types.rs`), `apply(StoreAction)`, `settings()`, `workspace(id)`, `active_workspace()`, `theme()`, `locale()`, `ui` (`state/live.rs`: view, overlays, drawer, focus per workspace, zoom, opened ids, notice, available agents, shells…), `live` (every package's `Live`, `hydrated`, `windows`). |
+| `Model` | `state/mod.rs` | `state()` (the `AppState` of `state/types.rs`), `apply(StoreAction)`, `settings()`, `workspace(id)`, `active_workspace()`, `theme()`, `locale()`, `ui` (`state/live.rs`: view, overlays, drawer, focus per workspace, zoom, opened ids, notice, available agents, shells…), `live` (every package's `Live`, `hydrated`, `windows`, `signals`). Per window: `window_workspace(w)`, `view_in(w)`, `overlays_in(w)`, `drawer_in(w)`, `theme_in(w)`, `focused_window()`, `window_of(ws)`; `focused_pane(ws)`. `ui.view`, `ui.overlays`, `ui.drawer` and `ui.focus` are the focused window's; the others' wait in `ui.parked`. |
+| Store helpers | `state/` | `store::{make_pane, make_workspace, new_id}`, `layout::*` (layout.ts: `normalize_tree`, `reading_order`, `neighbor_of`, `compute_layout`…), `pane_names::*`, `folders::{sidebar_order, place_before}`, `roles::{orchestration_of, orchestrator_of, workers_of, manager_of, hq_of}`. |
+| `live.signals` | `state/live.rs` | What a package tells the shell, which the shell reads: `preview[ws]` (P15 writes `entries` and `unseen`; the shell's toggles write `open`/`expanded`, which P15 reads, and P15 sets `open` when it reveals an entry), `needs_you` (P6: the item count, `view.needsYou` live while > 0). The snapshot takes P4's activity and sleepers and P18's deliveries from their own read-models. |
 | Shared value types | `state/live.rs` | `AgentActivity`, `PaneActivity`, `GlyphState`, `RateLimit`, `PlanLimits`, `PaneInsight`, `BridgeEvent` (with `BridgeEvent::parse`), `QueuedPrompt`. P4 owns their meaning; ask in your report if one needs a field. |
 | `Services` | `services/mod.rs` | `core()` (`host()`, `pty()`, `core()` for the voice, Discord and Mobile managers), `terminals()` (`TerminalAccess`, P5), `preview()` (`PreviewAccess`, P15), `send(Message)`, `snapshot()`, `snapshots()`. Clone it onto a tokio task. |
 | hangar-core | the crate | Call it directly: [core-api.md](../../docs/native/core-api.md) maps every former `invoke` to its function. Sync ones that touch disk or git go on `tokio::task::spawn_blocking` inside `Task::perform`. |
 | `CoreEvent` | `services/events.rs` | Every core event but control requests, offered to every package's `on_event`. Control requests go to P18 as `control::Msg::Request(ControlRequest)` with a `Reply` (first `send` wins). A pane's output is not an event: P5 gets it from its `PtySink`, and sends `CoreEvent::PtyExit` through the inbox when a shell ends. |
-| `Ctx<'a>` | `ctx.rs` | `model`, `pkg` (every package's `State`, read-only, for embeds), `i18n` (`Translator`), `theme` (`&'static hangar_theme::Theme`), `metrics` (`scale`, `body_width`), `keymap`, `window`, `now`. `Copy`. |
+| `Ctx<'a>` | `ctx.rs` | `model`, `pkg` (every package's `State`, read-only, for embeds), `i18n` (`Translator`), `theme` (`&'static hangar_theme::Theme`, the window's workspace's), `metrics` (`scale`, `body_width`), `keymap`, `window`, `now`; and the window's own `workspace()`, `view()` (read it rather than `ui.view`) and `panels()` (where the side panels go). `Copy`. |
 | Shell types | `shell/` | `View`, `Region`, `Focus`, `Drawer`, `Overlay`, `SettingsCategory`, `Notice`, `Notification`, `PanelMode`, `BoardVariant`, and the stand-ins `CloseReason`, `MenuEntry` until hangar-ui has them. |
-| Commands | `commands/` | `CommandId` (the 88, `as_str`/`FromStr`, `section`, `label_key`, `label_n`, `in_palette`), `available(m, w)`, `run(m, w, id)`. |
+| Commands | `commands/` | `CommandId` (the 88, `as_str`/`FromStr`, `section`, `label_key`, `label_n`, `in_palette`), `available(m, w)` (the live ones, in keymap order), `is_available(m, w, id)`, `run(m, w, id)` (nothing when not live). |
+| Shell intents | `message.rs` | The shell sends `Intent::PaneRespawned` after every `RespawnPane`, whoever applied it (P4 carries the resume, P5 respawns the PTY). The command table sends `TerminalAction` (P5), `Dictate` (P6), `ClosePreviews` (P15). |
 | Placeholders | `shell/placeholder.rs` | `stub`, `stub_inline`, `stub_modal`: what the stubs draw. Delete their calls as you replace them. |
 
 Dependencies: `hangar-core`, `hangar-theme`, `hangar-i18n`, `hangar-term`,
@@ -115,7 +119,7 @@ included, and set up its state in `on_intent(Intent::OpenOverlay(…))`.
 
 | Pkg | Directory | Route | Shell calls | Region / overlay | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P4 | `panes_logic` | `PanesLogic` | `state_glyph_state(m, pane) -> GlyphState` | – | Fill `Live` with activity, insight, plan limits, hibernation, branch cache from `CoreEvent::Bridge`/`BridgeQueue`; feed the snapshot's `activity`/`asleep` (tell P0b the field names). |
+| P4 | `panes_logic` | `PanesLogic` | `state_glyph_state(m, pane) -> GlyphState`; `Live::activity_map()`, `asleep_ids()` for the snapshot | – | Fill `Live` with activity, insight, plan limits, hibernation, branch cache from `CoreEvent::Bridge`/`BridgeQueue`; bump `live.version` when they change so the snapshot is republished. |
 | P5 | `panes` | `Panes` | `view_workspace(st, ctx, ws, hidden)` for every opened workspace; `terminal_access(st) -> Arc<dyn TerminalAccess>` once at boot | region `main` (terminals view) | Terminals and PTY links live in `State`, never in a window. `pty_spawn` takes a `PtySink`: push output into a channel your subscription drains. Hidden workspaces draw nothing but keep consuming output. |
 | P6 | `navigator` | `Navigator` | `view(st, ctx)` | region `navigator` | Main window only. Embeds `accounts::badge`. |
 | P6 | `toolbar` | `Toolbar` | `view(st, ctx)` | region `toolbar` | Embeds `needs_you::button(&ctx.pkg.needs_you, ctx)`, `accounts::switcher(&ctx.pkg.accounts, ctx)`. |
@@ -141,18 +145,23 @@ included, and set up its state in `on_intent(Intent::OpenOverlay(…))`.
 | P12 | `board` | `Board` | `view(st, ctx, BoardVariant)`, `task_view(st, ctx, cwd, task)` | regions `main` (board view) and `dock`; `Overlay::Task` | Owns the boards cache in `Live`. |
 | P13 | `settings` | `Settings` | `view(st, ctx, SettingsCategory)` | `Overlay::Settings` | Embeds `accounts::settings_page`, `kits::settings_view`. `discord` and `experiments` go in this directory. |
 | P14 | `kits` | `Kits` | `activation_view(st, ctx, kit, ws)`, `workspace_section(st, ctx, ws)`, `settings_view(st, ctx)` | `Overlay::KitActivation` | Installed kits in `Live`. |
-| P15 | `preview` | `Preview` | `view_panel(st, ctx, PanelMode)`, `view_entry(st, ctx, ws, entry)`; `preview_access(st) -> Arc<dyn PreviewAccess>` once at boot | region `model` | The frame does not show the panel yet: P0b adds it once `Live` says a workspace has a preview open (tell P0b how to ask). |
+| P15 | `preview` | `Preview` | `view_panel(st, ctx, PanelMode)`, `view_entry(st, ctx, ws, entry)`; `preview_access(st) -> Arc<dyn PreviewAccess>` once at boot | region `model` | The frame shows the panel (docked, drawer or expanded) from `live.signals.preview[ws]`: keep `entries` and `unseen` there. The shell handles `TogglePreview`, `ClosePreviewPanel` and `TogglePreviewExpand` itself, on that entry's `open`/`expanded`. |
 | P16 | `kit_tabs` | `KitTabs` | `view(st, ctx, ws, tab)` (called by `preview::view_entry`) | – | Wave 2. |
 | P17 | `model3d_view` | `Model3d` | `view(st, ctx, ws, entry)` (called by `preview::view_entry`) | – | Wave 2. |
 | P18 | `control` | `Control` | `Msg::Request(ControlRequest)` (the shell routes core's requests here) | – | `Msg::Model(ModelCmd, Answer<…>)` and `ModelCmd` are yours to shape with P19 and P20; the stub answers every request with an error until you land. Requests before hydration never reach you. |
 | P19 | `orchestration` | `Orchestration` | – | – | Start the runtime on hydration (`m.live.hydrated` in `on_event`/`update`), not before. |
 | P20 | `mobile` | `Mobile` | – | – | `remote_*` requests come through P18's dispatch. |
 
-## What the shell does not do yet (P0b)
+## What the shell does (P0b)
 
-The store's semantics (`apply` changes nothing yet, so nothing is saved),
-hydration fix-ups (unique pane names, dangling folder ids), side panels as
-drawers, the preview panel slot, F6 over the regions actually shown, Escape
-and focus restore rules, multi-window detach/reattach, most of
-`commands::run`, the snapshot's activity, asleep and delivering sets. Code
-against the contracts above; they do not change when those land.
+The store's semantics (every action of store.tsx, with its tests), hydration
+(unique pane names, dangling folder ids, legacy trees) and persistence (the
+debounced save, a flush on exit, unknown fields, nulls and unreadable values
+written back as they were); boot and reopening detached windows; one view,
+overlay stack, drawer and focus per window; detach, reattach, a workspace
+window's close and bounds; side panels docked or as drawers (sidePanels.ts),
+drawers closing on Escape, a press outside or their toggle; F6 over the
+regions shown; Escape (only when nothing captured it) and the focus given back
+when an overlay or a drawer closes; the 88 commands; notices; the theme of
+each window; activate-pane (`Intent::FocusPane`). What packages fill in, the
+frame draws: the drawers' content, the preview panel, the regions' entries.

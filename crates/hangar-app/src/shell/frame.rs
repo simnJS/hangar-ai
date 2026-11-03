@@ -2,26 +2,29 @@
 //!
 //! ```text
 //! navigator │ toolbar
-//!           │ ─────────────────────────────────────────
+//!           │ ───────────────────────────────────────────────────────────
 //!           │ main: terminals · board · memory · stats │ preview │ dock │ inspector
-//!           │ ─────────────────────────────────────────
+//!           │ ───────────────────────────────────────────────────────────
 //!           │ status bar
+//! + drawers over the right of the work area, the preview expanded over all of it
 //! + floating: update banner, consent card, voice HUD, notice, chord hint
 //! + overlays, top one last
 //! ```
 //!
 //! The frame gives each region its size and its surface (the theme's chrome
 //! colours, the hairlines between them); the region's content is its owner's
-//! view. A workspace window is the same frame without the navigator.
+//! view. A workspace window is the same frame without the navigator. Where
+//! each side panel goes (docked, drawer, hidden) is `ctx.panels()`
+//! (side_panels.rs).
 
-use iced::widget::{Space, column, container, row, rule, stack, text};
+use iced::widget::{Space, column, container, mouse_area, opaque, row, rule, stack};
 use iced::{Alignment, Element, Length};
 
 use hangar_theme::{style, tokens};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::{BoardVariant, View, overlay, placeholder};
+use crate::shell::{Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder};
 use crate::state::Workspace;
 
 /// The main window.
@@ -30,13 +33,13 @@ pub fn main<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
         return window_surface(ctx, placeholder::boot(ctx));
     }
     let p = ctx.pkg;
-    let body: Element<'a, Message> = match ctx.model.active_workspace() {
-        None => placeholder::no_workspace(ctx),
-        Some(ws) if ws.detached == Some(true) => placeholder::elsewhere(ctx, ws),
-        Some(ws) => workspace_body(ctx, ws),
+    let body: Element<'a, Message> = match (ctx.workspace(), ctx.model.active_workspace()) {
+        (Some(ws), _) => workspace_body(ctx, ws),
+        (None, Some(ws)) if ws.detached == Some(true) => placeholder::elsewhere(ctx, ws),
+        _ => placeholder::no_workspace(ctx),
     };
     let mut frame = row![].height(Length::Fill);
-    if ctx.model.settings().navigator_open {
+    if ctx.panels().navigator {
         frame = frame
             .push(
                 container(crate::navigator::view(&p.navigator, ctx))
@@ -59,99 +62,199 @@ pub fn workspace_window<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Mess
     layered(ctx, window_surface(ctx, workspace_body(ctx, ws)))
 }
 
+/// The width of the row the terminals share with the side panels, in a
+/// window `width` wide: what `side_panels::place` places in.
+pub fn body_width(width: f32, navigator: bool) -> f32 {
+    if navigator {
+        (width - tokens::size::SIDEBAR_WIDTH - tokens::BORDER_WIDTH).max(0.0)
+    } else {
+        width
+    }
+}
+
 /// Toolbar, main area with its side panels, status bar.
 fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
-    let settings = ctx.model.settings();
-    let toolbar = container(crate::toolbar::view(&p.toolbar, ctx))
-        .width(Length::Fill)
-        .height(tokens::size::TOOLBAR_HEIGHT)
-        .style(style::container::toolbar(ctx.theme));
+    let panels = ctx.panels();
+    // The toolbar's buttons open and close the drawers themselves: the
+    // pointer over it is not "outside" a drawer (shell/drawer.rs).
+    let toolbar = mouse_area(
+        container(crate::toolbar::view(&p.toolbar, ctx))
+            .width(Length::Fill)
+            .height(tokens::size::TOOLBAR_HEIGHT)
+            .style(style::container::toolbar(ctx.theme)),
+    )
+    .on_enter(Message::Shell(Action::PointerOverToolbar(true)))
+    .on_exit(Message::Shell(Action::PointerOverToolbar(false)));
     let status = container(crate::status_bar::view(&p.status_bar, ctx))
         .width(Length::Fill)
         .height(tokens::size::STATUS_BAR_HEIGHT)
         .style(style::container::statusbar(ctx.theme));
 
     let mut body = row![work_area(ctx, ws)].height(Length::Fill);
-    // TODO(P0b): `side_panels::place` decides docked or drawer from the
-    // measured body width; every panel is docked at its setting's width
-    // until then.
-    if settings.inspector_open {
-        body = body.push(vertical_sep(ctx)).push(
-            container(crate::inspector::view(&p.inspector, ctx))
-                .width(settings.inspector_width as f32)
-                .height(Length::Fill)
-                .style(style::container::panel(ctx.theme)),
-        );
+    let inspector = panels.inspector;
+    if inspector.shown && !inspector.drawer {
+        body = body.push(vertical_sep(ctx)).push(side(
+            ctx,
+            crate::inspector::view(&p.inspector, ctx),
+            inspector.width,
+        ));
+    }
+    let mut layers = stack![body].width(Length::Fill).height(Length::Fill);
+    if inspector.shown && inspector.drawer {
+        layers = layers.push(drawer(
+            ctx,
+            crate::inspector::view(&p.inspector, ctx),
+            inspector.width,
+        ));
     }
 
     column![
         toolbar,
         horizontal_sep(ctx),
-        body,
+        layers,
         horizontal_sep(ctx),
         status
     ]
     .into()
 }
 
-/// Region `main`, with the preview panel and the board dock beside it.
+/// Region `main`, with the preview panel and the board dock beside it, or
+/// over it as drawers.
 fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
-    let ui = &ctx.model.ui;
-    let main: Element<'a, Message> = match ui.view {
-        View::Terminals => {
-            // Every workspace opened once stays alive while hidden: its
-            // terminals keep consuming output (PACKAGES.md, P5).
-            let mut layers = stack![].width(Length::Fill).height(Length::Fill);
-            for id in &ui.opened_ids {
-                let Some(opened) = ctx.model.workspace(id) else {
-                    continue;
-                };
-                if opened.detached == Some(true) && opened.id != ws.id {
-                    continue;
-                }
-                let hidden = opened.id != ws.id;
-                layers = layers.push(crate::panes::view_workspace(
-                    &p.panes, ctx, &opened.id, hidden,
-                ));
+    let panels = ctx.panels();
+    let terminals = ctx.view() == View::Terminals;
+
+    // Every workspace opened once stays drawn, hidden, whatever the view:
+    // the grids keep their place in the tree, so their widgets keep their
+    // state, and their terminals keep consuming output (PACKAGES.md, P5). A
+    // workspace window draws its own workspace's alone; the main window
+    // never draws one shown in a window of its own.
+    let own_window = matches!(
+        ctx.model.live.windows.get(&ctx.window),
+        Some(WindowKind::Workspace(_))
+    );
+    let mut main = stack![].width(Length::Fill).height(Length::Fill);
+    if own_window {
+        main = main.push(crate::panes::view_workspace(
+            &p.panes, ctx, &ws.id, !terminals,
+        ));
+    } else {
+        for id in &ctx.model.ui.opened_ids {
+            let Some(opened) = ctx.model.workspace(id) else {
+                continue;
+            };
+            if opened.detached == Some(true) {
+                continue;
             }
-            layers.into()
+            let hidden = opened.id != ws.id || !terminals;
+            main = main.push(crate::panes::view_workspace(
+                &p.panes, ctx, &opened.id, hidden,
+            ));
         }
-        View::Board => crate::board::view(&p.board, ctx, BoardVariant::Full),
-        View::Memory => crate::memory::view(&p.memory, ctx),
-        View::Stats => crate::stats::view(&p.stats, ctx),
-    };
+    }
+    match ctx.view() {
+        View::Terminals => {}
+        View::Board => main = main.push(crate::board::view(&p.board, ctx, BoardVariant::Full)),
+        View::Memory => main = main.push(crate::memory::view(&p.memory, ctx)),
+        View::Stats => main = main.push(crate::stats::view(&p.stats, ctx)),
+    }
+
     let mut area = row![container(main).width(Length::Fill).height(Length::Fill)];
-    // TODO(P0b, P15): the preview panel (region `model`), shown while the
-    // workspace has a preview open: `preview::view_panel(st, ctx, mode)`.
-    let settings = ctx.model.settings();
-    if settings.board_dock_open && ui.view == View::Terminals {
-        let width = settings.board_dock_width as f32;
-        area = area.push(vertical_sep(ctx)).push(
-            container(crate::board::view(
-                &p.board,
-                ctx,
-                BoardVariant::Dock {
-                    width,
-                    drawer: false,
-                },
-            ))
+    let model_mode = panels.model_mode();
+    if let Some(PanelMode::Docked { width }) = model_mode {
+        area = area.push(vertical_sep(ctx)).push(side(
+            ctx,
+            crate::preview::view_panel(&p.preview, ctx, PanelMode::Docked { width }),
+            width,
+        ));
+    }
+    let dock = panels.dock;
+    if dock.shown && !dock.drawer {
+        let board = crate::board::view(
+            &p.board,
+            ctx,
+            BoardVariant::Dock {
+                width: dock.width,
+                drawer: false,
+            },
+        );
+        area = area
+            .push(vertical_sep(ctx))
+            .push(side(ctx, board, dock.width));
+    }
+
+    let mut layers = stack![area].width(Length::Fill).height(Length::Fill);
+    match model_mode {
+        Some(PanelMode::Expanded) => {
+            layers = layers.push(opaque(
+                container(crate::preview::view_panel(
+                    &p.preview,
+                    ctx,
+                    PanelMode::Expanded,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(style::container::panel(ctx.theme)),
+            ));
+        }
+        Some(PanelMode::Drawer { width }) => {
+            let panel = crate::preview::view_panel(&p.preview, ctx, PanelMode::Drawer { width });
+            layers = layers.push(drawer(ctx, panel, width));
+        }
+        _ => {}
+    }
+    if dock.shown && dock.drawer {
+        let board = crate::board::view(
+            &p.board,
+            ctx,
+            BoardVariant::Dock {
+                width: dock.width,
+                drawer: true,
+            },
+        );
+        layers = layers.push(drawer(ctx, board, dock.width));
+    }
+    layers.into()
+}
+
+/// A docked side panel, `width` wide.
+fn side<'a>(ctx: Ctx<'a>, content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
+    container(content)
+        .width(width)
+        .height(Length::Fill)
+        .style(style::container::panel(ctx.theme))
+        .into()
+}
+
+/// A side panel as a drawer over the right of what is under it. Opaque, so a
+/// press on it never reaches the terminal underneath; its mouse area tells
+/// the shell when the pointer is over it, for "a press outside closes it".
+fn drawer<'a>(ctx: Ctx<'a>, content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
+    let panel = mouse_area(
+        container(content)
             .width(width)
             .height(Length::Fill)
-            .style(style::container::panel(ctx.theme)),
-        );
-    }
-    area.into()
+            .style(style::container::popover(ctx.theme)),
+    )
+    .on_enter(Message::Shell(Action::PointerOverDrawer(true)))
+    .on_exit(Message::Shell(Action::PointerOverDrawer(false)));
+    container(opaque(panel))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .into()
 }
 
 /// The floating pieces and the overlays over a window's frame.
 fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message> {
     let p = ctx.pkg;
     let mut layers = stack![frame];
+    let focused = ctx.model.is_focused_window(ctx.window);
 
     // The update banner and the consent card are the main window's only.
-    if ctx.model.live.windows.get(&ctx.window) == Some(&crate::shell::WindowKind::Main) {
+    if ctx.model.live.windows.get(&ctx.window) == Some(&WindowKind::Main) {
         layers = layers
             .push(
                 container(crate::update_banner::view(&p.update_banner, ctx))
@@ -169,33 +272,30 @@ fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message
     }
 
     // The voice HUD, the notice and the chord hint share the bottom centre,
-    // above the status bar.
-    let mut bottom = column![crate::voice::hud(&p.voice, ctx)]
-        .spacing(tokens::space::SM)
-        .align_x(Alignment::Center);
-    if let Some(notice) = crate::shell::notice::view(ctx) {
-        bottom = bottom.push(notice);
-    }
-    if !ctx.model.ui.pending_chords.is_empty() {
-        // TODO(P7): `keymap.pending` with the chords as the keymap shows them.
-        bottom = bottom.push(
-            container(text(ctx.model.ui.pending_chords.join(" ")).size(tokens::font_size::UI))
-                .padding([tokens::space::XS, tokens::space::MD])
-                .style(style::container::tooltip(ctx.theme)),
+    // above the status bar, in the window the person is in.
+    if focused {
+        let mut bottom = column![crate::voice::hud(&p.voice, ctx)]
+            .spacing(tokens::space::SM)
+            .align_x(Alignment::Center);
+        if let Some(notice) = crate::shell::notice::view(ctx) {
+            bottom = bottom.push(notice);
+        }
+        if let Some(hint) = crate::keymap::chord_hint(ctx) {
+            bottom = bottom.push(hint);
+        }
+        layers = layers.push(
+            container(column![
+                bottom,
+                Space::new().height(tokens::size::STATUS_BAR_HEIGHT + 12.0)
+            ])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::End),
         );
     }
-    layers = layers.push(
-        container(column![
-            bottom,
-            Space::new().height(tokens::size::STATUS_BAR_HEIGHT + 12.0)
-        ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::End),
-    );
 
-    for overlay in &ctx.model.ui.overlays {
+    for overlay in ctx.model.overlays_in(ctx.window) {
         layers = layers.push(overlay::view(ctx, overlay));
     }
     layers.into()

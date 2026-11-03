@@ -1,0 +1,187 @@
+{
+  "workspaces": [
+    {
+      "id": "6f0c2a8e-1b7d-4c55-9a0e-3f2b8d1c4e01",
+      "name": "hangar",
+      "cwd": "/home/dev/code/hangar",
+      "extraRoots": [],
+      "panes": [
+        {
+          "id": "0b9d7c21-0d0e-4b8f-8c4e-2a1f6e3d9b10",
+          "name": "Ava",
+          "agent": "claude",
+          "sessionId": "3c2f1e0d-9b8a-4765-a321-0fedcba98765",
+          "cwd": null,
+          "shellId": null,
+          "title": null,
+          "role": "orchestrator",
+          "model": "opus"
+        },
+        {
+          "id": "1c8e6b32-1e1f-4c90-9d5f-3b2a7f4e0c21",
+          "name": "Max",
+          "agent": "claude",
+          "sessionId": null,
+          "cwd": "/home/dev/code/hangar/.worktrees/board-filters",
+          "shellId": null,
+          "title": null,
+          "role": "worker",
+          "taskId": "t-42",
+          "model": "sonnet",
+          "portBase": 4100
+        },
+        {
+          "id": "2d7f5a43-2f20-4da1-8e60-4c3b8a5f1d32",
+          "name": "Leo",
+          "agent": "shell",
+          "sessionId": null,
+          "cwd": null,
+          "shellId": "bash",
+          "title": "cargo watch"
+        }
+      ],
+      "themeId": null,
+      "shellId": null,
+      "tree": {
+        "type": "split",
+        "dir": "row",
+        "ratio": 0.62,
+        "a": { "type": "pane", "id": "0b9d7c21-0d0e-4b8f-8c4e-2a1f6e3d9b10" },
+        "b": {
+          "type": "split",
+          "dir": "col",
+          "ratio": 0.5,
+          "a": { "type": "pane", "id": "1c8e6b32-1e1f-4c90-9d5f-3b2a7f4e0c21" },
+          "b": { "type": "pane", "id": "2d7f5a43-2f20-4da1-8e60-4c3b8a5f1d32" }
+        }
+      },
+      "savedCommands": [
+        { "id": "c-build", "label": "Build", "command": "cargo build", "autoRun": true, "broadcast": false }
+      ],
+      "folderId": "f-work",
+      "mcp": { "mode": "custom", "enabled": ["hangar", "github"] },
+      "kits": [{ "id": "hangar.figma", "granted": ["files.read", "net"] }],
+      "orchestration": {
+        "maxWorkers": 4,
+        "maxAttempts": 2,
+        "autoMerge": false,
+        "checkCommand": "cargo test",
+        "orchestratorModel": "opus",
+        "workerModel": "sonnet",
+        "reviewerModel": "sonnet",
+        "branch": "develop",
+        "permissionMode": "acceptEdits"
+      },
+      "mobilePorts": [3000, 5173],
+      "claudeAccount": "travail",
+      "worktreeHooks": { "postCreate": "pnpm install" }
+    },
+    {
+      "id": "7a1d3b9f-2c8e-4d66-8b1f-4a3c9e2d5f02",
+      "name": "site",
+      "cwd": "/home/dev/code/site",
+      "extraRoots": ["/home/dev/code/site-assets"],
+      "panes": [
+        {
+          "id": "3e6a4b54-3021-4eb2-9f71-5d4c9b6a2e43",
+          "name": "Mia",
+          "agent": "codex",
+          "sessionId": "rollout-2026-10-30",
+          "cwd": null,
+          "shellId": null,
+          "title": null
+        }
+      ],
+      "themeId": "solarized-light",
+      "shellId": "zsh",
+      "tree": { "type": "pane", "id": "3e6a4b54-3021-4eb2-9f71-5d4c9b6a2e43" },
+      "savedCommands": [],
+      "folderId": null,
+      "detached": true,
+      "windowBounds": { "x": 1940, "y": 64, "width": 1200, "height": 800 }
+    },
+    {
+      "id": "8b2e4c0a-3d9f-4e77-9c20-5b4d0f3e6a03",
+      "name": "HQ",
+      "cwd": "/home/dev/.local/share/com.simnjs.iabench/hq",
+      "extraRoots": [],
+      "panes": [
+        {
+          "id": "4f5b3c65-4132-4fc3-8082-6e5d0c7b3f54",
+          "name": "Sam",
+          "agent": "claude",
+          "sessionId": null,
+          "cwd": null,
+          "shellId": null,
+          "title": null,
+          "role": "manager",
+          "login": false,
+          "sharedFolder": true
+        }
+      ],
+      "themeId": null,
+      "shellId": null,
+      "tree": null,
+      "savedCommands": [],
+      "folderId": null,
+      "hq": true
+    }
+  ],
+  "folders": [
+    { "id": "f-work", "name": "Work", "collapsed": false },
+    { "id": "f-side", "name": "Side projects", "collapsed": true }
+  ],
+  "activeWorkspaceId": "6f0c2a8e-1b7d-4c55-9a0e-3f2b8d1c4e01",
+  "settings": {
+    "themeId": "graphite",
+    "locale": "fr",
+    "shellId": null,
+    "fontFamily": "\"Cascadia Code\", \"JetBrains Mono\", Consolas, \"Courier New\", monospace",
+    "fontSize": 14,
+    "lineHeight": 1.3,
+    "letterSpacing": 0,
+    "cursorStyle": "bar",
+    "cursorBlink": true,
+    "scrollback": 10000,
+    "padding": 10,
+    "agentCommands": { "claude": "claude --verbose" },
+    "autoResume": true,
+    "hibernateIdle": true,
+    "hibernateAfterMin": 15,
+    "claudeBridge": true,
+    "launchDelayMs": 700,
+    "notifyOnIdle": true,
+    "notifyIdleMs": 3000,
+    "notifyOnlyWhenAway": true,
+    "keybindings": { "pane.split": ["Mod+D"], "view.stats": [], "some.futureCommand": ["Ctrl+Q"] },
+    "savedCommands": [
+      { "id": "c-status", "label": "", "command": "git status", "autoRun": true, "broadcast": true }
+    ],
+    "voiceEnabled": false,
+    "voiceEngine": "local",
+    "voiceModel": "whisper-small-q5_1",
+    "voiceCloudModel": "whisper-large-v3-turbo",
+    "voiceLanguage": "",
+    "voiceCleanup": false,
+    "voiceCleanupModel": "",
+    "voiceCleanupHint": "",
+    "voiceSubmit": false,
+    "discordPresence": false,
+    "discordShowWorkspace": true,
+    "discordShowAgents": true,
+    "discordAppId": "",
+    "boardDockOpen": true,
+    "boardDockWidth": 420,
+    "modelPanelWidth": 440,
+    "navigatorOpen": true,
+    "inspectorOpen": true,
+    "inspectorWidth": 296,
+    "inspectorCollapsed": ["files"],
+    "uiScale": 100,
+    "agentPaneControl": true,
+    "claudeAccount": "main",
+    "experiments": ["kits-gallery"],
+    "kitsEverywhere": [{ "id": "hangar.notes", "granted": [] }],
+    "projectsFolder": "/home/dev/code"
+  }
+}

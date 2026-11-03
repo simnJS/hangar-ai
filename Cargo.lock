@@ -3048,6 +3048,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "unicode-normalization",
+ "uuid 1.24.0",
 ]
 
 [[package]]

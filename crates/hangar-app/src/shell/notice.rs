@@ -11,6 +11,7 @@ use iced::widget::{container, row, text};
 use iced::{Element, Task};
 
 use hangar_theme::{style, tokens};
+use hangar_ui::icon::{Icon, icon};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
@@ -68,18 +69,31 @@ pub fn expire(model: &mut Model, id: u64) {
     }
 }
 
-/// The pill, when there is a notice.
-///
-/// TODO(hangar-ui): the pill widget and the warning, moon and agent glyphs.
+/// The pill, when there is a notice (`.voice-pill--notice` and its kinds): a
+/// problem in the danger colour behind a warning sign; a workspace asleep
+/// behind a moon, an agent's act behind an "i", both in the text colour with
+/// a muted mark.
 pub fn view<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
     let (_, notice) = ctx.model.ui.notice.as_ref()?;
-    let theme = ctx.theme;
-    let line = row![text(notice.text()).size(tokens::font_size::UI)]
-        .spacing(tokens::space::SM)
-        .padding([tokens::space::SM, tokens::space::XL]);
+    let colors = &ctx.theme.colors;
+    let (glyph, mark, ink) = match notice {
+        Notice::Problem(_) => (Icon::Alert, colors.danger, colors.danger),
+        Notice::Asleep(_) => (Icon::Moon, colors.fg_muted, colors.fg),
+        Notice::Agent(_) => (Icon::Info, colors.fg_muted, colors.fg),
+    };
+    let line = row![
+        icon(glyph, tokens::font_size::BODY).color(mark),
+        text(notice.text())
+            .size(tokens::font_size::UI)
+            .color(ink)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(tokens::space::MD)
+    .align_y(iced::Alignment::Center)
+    .padding([tokens::space::SM, tokens::space::XXL]);
     Some(
         container(line)
-            .style(style::container::tooltip(theme))
+            .style(style::container::tooltip(ctx.theme))
             .into(),
     )
 }

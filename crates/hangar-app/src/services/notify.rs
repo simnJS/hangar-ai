@@ -2,8 +2,9 @@
 //! comes back clicked as `CoreEvent::NotificationActivated`, which the shell
 //! turns into `Intent::FocusPane`.
 //!
-//! TODO(P0b): the window-focus rules of `notifyOnlyWhenAway` live with the
-//! callers (P4's idle notices, P6's needs-you); this only sends.
+//! Whether to notify at all (`notifyOnIdle`, `notifyOnlyWhenAway` and the
+//! window having the focus) is the callers' to decide, as it was in the TS
+//! (P4's idle notices, P6's Needs-you): this only sends.
 
 use iced::Task;
 
