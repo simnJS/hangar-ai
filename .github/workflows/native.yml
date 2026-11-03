@@ -77,4 +77,6 @@ jobs:
         run: cargo clippy -p hangar-webview --all-targets --features engine --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --locked
+        # Every failing test binary, not only the first: a platform difference
+        # in one crate must not hide one in another.
+        run: cargo test --workspace --locked --no-fail-fast
