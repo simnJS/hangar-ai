@@ -284,6 +284,13 @@ impl<T: Clone> Palette<T> {
         &self.query
     }
 
+    /// Replaces what the palette lists, keeping what is typed and the row
+    /// chosen (kept inside the list as it shrinks): for a list that follows
+    /// live state while it is open, such as the agents' states.
+    pub fn set_items(&mut self, items: Vec<Item<T>>) {
+        self.items = items;
+    }
+
     /// The items the query keeps, flattened in the order they are listed.
     fn shown(&self) -> Vec<Ranked<'_, Item<T>>> {
         filter_palette(&self.items, &self.query)

@@ -94,6 +94,20 @@ mod choosing {
     }
 
     #[test]
+    fn new_items_keep_what_is_typed_and_the_row_chosen() {
+        let mut palette = palette();
+        run(&mut palette, Msg::Query("re".into()));
+        run(&mut palette, Msg::Next);
+        let chosen = palette.chosen().map(|item| item.value.clone());
+        palette.set_items(items());
+        assert_eq!(palette.query(), "re");
+        assert_eq!(palette.chosen().map(|item| item.value.clone()), chosen);
+        // A list that shrank keeps the choice inside it.
+        palette.set_items(items().into_iter().take(1).collect());
+        assert_eq!(palette.selected(), 0);
+    }
+
+    #[test]
     fn the_pointer_resting_on_a_row_chooses_it() {
         let mut palette = palette();
         run(&mut palette, Msg::Hover(3));
