@@ -580,6 +580,74 @@ async fn closing_the_previews_of_a_workspace_closes_every_tab_and_the_panel() {
     assert!(h.st.windows.get(&second).is_none());
 }
 
+/* ── the grip ──────────────────────────────────────────────────── */
+
+impl Harness {
+    /// The width the frame is told to draw the panel at while its grip is
+    /// held.
+    fn held(&self) -> Option<f32> {
+        self.model
+            .live
+            .signals
+            .panel_drag
+            .filter(|drag| drag.panel == crate::shell::Drawer::Model)
+            .map(|drag| drag.width)
+    }
+
+    fn width(&self) -> f64 {
+        self.model.settings().model_panel_width
+    }
+
+    fn drawn(&self) -> f32 {
+        let main = self.model.main_window().expect("a main window");
+        crate::shell::Panels::of(&self.model, main).model.width
+    }
+}
+
+#[tokio::test]
+async fn the_grip_draws_the_panel_where_the_pointer_is_and_saves_on_release() {
+    use super::grip::GripEvent;
+    let mut h = Harness::new("grip");
+    h.show(&h.write("notes.txt", "plain\n")).await;
+    let before = h.width();
+    let revision = h.model.revision();
+    h.send(Msg::Grip(GripEvent::Begin));
+    h.send(Msg::Grip(GripEvent::Drag(30.0)));
+    h.send(Msg::Grip(GripEvent::Drag(60.0)));
+    // Drawn at the pointer, with nothing written.
+    assert_eq!(h.held(), Some(before as f32 + 60.0));
+    assert_eq!(h.drawn(), before as f32 + 60.0);
+    assert_eq!(h.width(), before);
+    assert_eq!(h.model.revision(), revision);
+    h.send(Msg::Grip(GripEvent::End));
+    assert_eq!(h.held(), None);
+    assert_eq!(h.width(), before + 60.0);
+    assert_eq!(h.model.revision(), revision + 1, "one write, on release");
+    let _ = std::fs::remove_dir_all(&h.dir);
+}
+
+#[tokio::test]
+async fn escape_drops_the_grip_and_the_panel_keeps_its_width() {
+    use super::grip::GripEvent;
+    let mut h = Harness::new("grip-escape");
+    h.show(&h.write("notes.txt", "plain\n")).await;
+    let before = h.width();
+    let revision = h.model.revision();
+    h.send(Msg::Grip(GripEvent::Begin));
+    h.send(Msg::Grip(GripEvent::Drag(-80.0)));
+    assert_eq!(h.held(), Some(before as f32 - 80.0));
+    h.send(Msg::Grip(GripEvent::Cancel));
+    assert_eq!(h.held(), None);
+    assert_eq!(h.drawn(), before as f32);
+    assert_eq!(h.width(), before);
+    assert_eq!(h.model.revision(), revision);
+    // A release where the press was writes nothing either.
+    h.send(Msg::Grip(GripEvent::Begin));
+    h.send(Msg::Grip(GripEvent::End));
+    assert_eq!(h.model.revision(), revision);
+    let _ = std::fs::remove_dir_all(&h.dir);
+}
+
 #[tokio::test]
 async fn the_hook_for_the_control_bus_goes_out_once_the_state_is_read() {
     use crate::control::Hook;
