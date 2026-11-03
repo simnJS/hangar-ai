@@ -2,8 +2,10 @@
 
 An audit of `feat/native-rust` against the old React app, by reading the code. Use it to decide what to fix before the parity checklist (PLAN.md §8) can be ticked. It was first written on 2026-11-03 at commit `4fe0c10`. **It was re-graded the same day at `c4949b1`**, after the fix wave: P15, P16 (kit tabs), P17's 3D view, P20 (Hangar Mobile, window side), packaging, WP1–WP8 (the first version's §7) and the final integration pass.
 
+**Since wave 5 (2026-11-03) the old app's sources are no longer on the branch.** Every `src/…`, `src-tauri/…` and `demo/…` path below names a file of tag `v1.12.1`: read it with `git show v1.12.1:src/lib/x.ts`, list them with `git ls-tree -r --name-only v1.12.1 src/`, search them with `git grep <word> v1.12.1 -- src/`. Hangar Mobile is the exception: it moved, as TypeScript, to `mobile/`.
+
 How it was checked:
-- **Reading.** Every surface, command, setting, control op and event in [inventory-frontend.md](inventory-frontend.md) was compared, with the TypeScript in `src/` as the reference. In this pass every row that was not `done` was read again in the current code.
+- **Reading.** Every surface, command, setting, control op and event in [inventory-frontend.md](inventory-frontend.md) was compared, with the TypeScript in `src/` (now at tag `v1.12.1`) as the reference. In this pass every row that was not `done` was read again in the current code.
 - **Tests.** `cargo test -p hangar-app` passes 2951 tests, with 0 failures and 3 ignored (it was 2408). The workspace's other crates were not re-run here; STATUS records them green.
 - **Dead-code pass.** `main.rs:12` still allows dead code crate-wide. `cargo rustc -p hangar-app --profile=check -- --force-warn dead_code` now lists 122 items (it was 144). They are mostly constants and pure ports that tests use, see §5.2.
 - **Marker pass.** `grep -rn "TODO(P" crates/` finds nothing (there were 27).
@@ -253,7 +255,7 @@ Of 65 rows, 53 were `done` and still are. The 12 rows below were not.
 | Header name tooltip `pane.jump {keys}` | partial → done | `panes/header.rs:144-154`, test `:714` | – |
 | Zoom bar: Escape after Tab | partial → partial | `panes/zoom_bar.rs` | iced buttons take no focus |
 
-Logic modules (§3): 61 of 64 are ported with at least as many tests. The five that were in flight are done: `kitTabs` (37 TS cases) and `kitApi` (104) are in `kit_tabs/` (176 tests); `remote*` and `activityLog` are in `mobile/` (149 tests, STATUS counts the same); `hangarUi` stays a script-generated sheet served by `hangar-core/src/kit_scheme.rs` (its vitest stays on the TS side). Three are partial: `windows` (most of it dropped by design), `typography` (applied when the dictionaries are generated, no runtime module), `kitActivation` (52 Rust cases for 82 TS ones). `webgl` is dropped (n/a).
+Logic modules (§3): 61 of 64 are ported with at least as many tests. The five that were in flight are done: `kitTabs` (37 TS cases) and `kitApi` (104) are in `kit_tabs/` (176 tests); `remote*` and `activityLog` are in `mobile/` (149 tests, STATUS counts the same); `hangarUi` stays a script-generated sheet served by `hangar-core/src/kit_scheme.rs`; its vitest went with `src/` in wave 5, and `hangar-theme`'s `kit` tests took over its colour checks (the sheet's two themes, and every pair of the components at 4.5:1 and 3:1 on all 33 themes), not its checks of `kit.js`, `kit-ui.js`, the gallery and `kit-ui.md`. Three are partial: `windows` (most of it dropped by design), `typography` (applied when the dictionaries are generated, no runtime module), `kitActivation` (52 Rust cases for 82 TS ones). `webgl` is dropped (n/a).
 
 ### 2.7 Preview panel and file viewers (§2.4/1.5–1.6) — new rows
 
@@ -481,7 +483,7 @@ Verify: every defect found is a new row in §2.
 
 1. Get CI green: the 7 failing tests of the first run (macOS keymap guard tests, Windows path and webview-serving tests, the Ubuntu `hangar-model3d` capture). Another agent is on it: read `git log` before starting.
 2. Add a Linux packaging smoke job: install the `.deb` in a container, run `hangar-ai --version`, check `hangar-webview` sits beside it.
-3. Point `scripts/preview*.ps1|nsi` at the native layout (they still name `src-tauri/`); give `hangar-webview` its Windows icon resource.
+3. ~~Point `scripts/preview*.ps1|nsi` at the native layout~~ (wave 5 deleted the Tauri-only preview and pointed `scripts/installer-art.ps1` at `packaging/`); give `hangar-webview` its Windows icon resource.
 4. On real machines: install, start, detach a workspace, open a PDF and an HTML kit tab (WebView2, WKWebView), update from an old install, sign with the real key.
 
 Verify: a CI run with every job green; the checklist of PACKAGING.md ticked on Windows and macOS.

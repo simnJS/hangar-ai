@@ -6,9 +6,6 @@ contact_links:
   - name: Ask on Discord
     url: https://discord.gg/hangarai
     about: Questions, setups and ideas, with the people who use Hangar.AI.
-  - name: Try the browser demo
-    url: https://hangar.simnjs.fr/demo/
-    about: Check how something is meant to work before reporting it.
   # Uncomment once GitHub Discussions are enabled on the repository:
   # - name: Questions and ideas
   #   url: https://github.com/hangar-ai/hangar/discussions

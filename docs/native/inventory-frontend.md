@@ -2,9 +2,11 @@
 
 This is the map of the React frontend (`src/`, branch `feat/native-rust`) for the iced 0.14 rewrite. It is written so that an agent with no other context can take **one work package (§8)** and port it.
 
+> **Since wave 5 (2026-11-03) the React app's sources are no longer on the branch.** Every `src/…`, `src-tauri/…` and `demo/…` path in this document names a file of tag `v1.12.1`: read it with `git show v1.12.1:src/lib/x.ts`, list them with `git ls-tree -r --name-only v1.12.1 src/`, search them with `git grep <word> v1.12.1 -- src/`. The phone app moved, still TypeScript: `src/mobile/` is `mobile/src/`, and the desktop modules it imported are under `mobile/lib/` and `mobile/remote/`. The strings' source is `crates/hangar-i18n/dict/*.json`.
+
 - Each package lists the files it owns, the TypeScript it ports, what it needs from the shell, and the sections of this document to read.
 - The backend (`crates/hangar-core`) is out of scope, except where the frontend's contract with it matters.
-- `src/mobile` stays a web app. §5/2 lists what the desktop must keep serving for it.
+- `src/mobile` stays a web app (now `mobile/`). §5/2 lists what the desktop must keep serving for it.
 
 Inventory written 2026-11-03 from commit `44cfd25`, by reading the whole frontend.
 
@@ -44,6 +46,8 @@ The frontend calls the backend in two ways:
 - **Behaviour oracle.** The vitest suites are the specification. Port each test file next to its Rust module as `#[cfg(test)]`, keeping the same inputs and expected strings.
 
 ### 0.3 Breakages found on this branch (fix before using the TS as an oracle)
+
+Both were fixed before wave 5, and the TS they concern is now only at tag `v1.12.1`.
 
 1. **Mobile assets are no longer embedded.** `crates/hangar-core/src/remote/assets.rs:19` has `#[folder = "../dist-mobile/"]`. This is relative to the crate, so it now points at `crates/dist-mobile/`. Vite writes `<repo>/dist-mobile/` (`vite.mobile.config.ts:72`). Because of `allow_missing`, the build silently serves the placeholder page.
    - Fix: `"../../dist-mobile/"`.
