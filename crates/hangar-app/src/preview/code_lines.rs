@@ -86,12 +86,21 @@ pub fn view<'a, M: Clone + 'a>(t: &'a Theme, lines: &'a Lines, wrap: bool) -> El
             horizontal: scrollable::Scrollbar::default(),
         }
     };
-    scrollable(body.width(if wrap { Length::Fill } else { Length::Shrink }))
-        .direction(direction)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(style::scrollable::default(t))
-        .into()
+    // The page's colour reaches the edges whatever the lines' width.
+    container(
+        scrollable(body.width(if wrap { Length::Fill } else { Length::Shrink }))
+            .direction(direction)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(style::scrollable::default(t)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(t.colors.bg)),
+        ..Default::default()
+    })
+    .into()
 }
 
 #[cfg(test)]

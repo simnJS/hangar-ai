@@ -561,8 +561,47 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
             .map(|part| part.text.as_ref())
             .collect();
         let id = model::heading_id(&words, &mut self.ids.borrow_mut());
-        let look = markdown::heading(settings, level, heading, index, Self::on_link_click);
-        container(look).id(heading_widget(&id)).into()
+        // Semibold, with a line under the first two levels (`h1`, `h2`).
+        let spans: Vec<text::Span<'static, Uri, Font>> = heading
+            .spans(settings.style)
+            .iter()
+            .cloned()
+            .map(|part| part.font(fonts::ui_semibold()))
+            .collect();
+        let size = match level {
+            HeadingLevel::H1 => settings.h1_size,
+            HeadingLevel::H2 => settings.h2_size,
+            HeadingLevel::H3 => settings.h3_size,
+            HeadingLevel::H4 => settings.h4_size,
+            HeadingLevel::H5 => settings.h5_size,
+            HeadingLevel::H6 => settings.h6_size,
+        };
+        let mut words = column![
+            rich_text(spans)
+                .size(size)
+                .on_link_click(Self::on_link_click)
+        ]
+        .spacing(4);
+        match level {
+            HeadingLevel::H1 => {
+                words = words.push(
+                    iced::widget::rule::horizontal(1).style(style::rule::strong(self.t)),
+                );
+            }
+            HeadingLevel::H2 => {
+                words = words
+                    .push(iced::widget::rule::horizontal(1).style(style::rule::hairline(self.t)));
+            }
+            _ => {}
+        }
+        container(words)
+            .padding(padding::top(if index > 0 {
+                settings.text_size / 2.0
+            } else {
+                0.0.into()
+            }))
+            .id(heading_widget(&id))
+            .into()
     }
 
     fn code_block(

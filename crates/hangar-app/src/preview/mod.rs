@@ -63,6 +63,9 @@ pub mod viewer;
 pub mod webview;
 pub mod windowed;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -283,24 +286,47 @@ async fn blocking<T: Send + 'static>(
         .map_err(|err| format!("the task stopped: {err}"))?
 }
 
+/// What this package takes of the services: the model's snapshots, which the
+/// store reads off the UI thread, and the way back into `update`. Nothing else
+/// of them is needed, which is what lets the tests drive the package without
+/// a running core.
+pub(crate) struct Env {
+    snapshots: tokio::sync::watch::Receiver<Arc<crate::state::Snapshot>>,
+    inbox: crate::services::Inbox,
+}
+
+impl Env {
+    fn of(sv: &Services) -> Env {
+        Env {
+            snapshots: sv.snapshots(),
+            inbox: sv.inbox().clone(),
+        }
+    }
+}
+
 /// Gives the store the model's snapshots, which only the shell offers off the
 /// UI thread.
-fn link(st: &mut State, sv: &Services) {
+fn link(st: &mut State, env: &Env) {
     if !st.linked {
-        st.shared.attach(sv.snapshots());
+        st.shared.attach(env.snapshots.clone());
         st.linked = true;
     }
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
-    link(st, sv);
+    step(st, m, &Env::of(sv), msg)
+}
+
+/// `update`, for whoever has an `Env`.
+fn step(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
+    link(st, env);
     m.live.preview.sync();
-    let first = handle(st, m, sv, msg);
-    let then = reconcile(st, m, sv);
+    let first = handle(st, m, env, msg);
+    let then = reconcile(st, m, env);
     Task::batch([first, then])
 }
 
-fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Changed => Task::none(),
         Msg::Spin => {
@@ -334,8 +360,8 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         }
         Msg::Tab(key) => tab_key(st, m, key),
         Msg::Grip(event) => grip_event(st, m, event),
-        Msg::Viewer(id, revision, msg) => viewer_update(st, m, sv, &id, revision, msg),
-        Msg::Web(msg) => web_update(st, m, sv, msg),
+        Msg::Viewer(id, revision, msg) => viewer_update(st, m, env, &id, revision, msg),
+        Msg::Web(msg) => web_update(st, m, env, msg),
         Msg::Watched(id, revision, found) => watched(st, m, &id, revision, found),
         Msg::Settled(id, revision, first, again) => {
             st.watching.remove(&id);
@@ -459,7 +485,7 @@ fn grip_event(st: &mut State, m: &mut Model, event: grip::Event2) -> Task<Messag
 
 /// Brings everything that depends on the store in line with it: the view's
 /// copy, the viewers of the files in front, the helper's windows.
-fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
+fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     m.live.preview.sync();
     let mut tasks = Vec::new();
 
@@ -574,7 +600,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         .collect();
     for entry in opening {
         st.windows.mark_tried(&entry.id);
-        tasks.push(open_window(st, m, sv, &entry));
+        tasks.push(open_window(st, m, env, &entry));
     }
     Task::batch(tasks)
 }
@@ -655,7 +681,7 @@ fn translate(m: &Model, key: Key) -> String {
 fn viewer_update(
     st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    env: &Env,
     id: &str,
     revision: u64,
     msg: ViewerMsg,
@@ -768,7 +794,7 @@ fn viewer_update(
             Task::none()
         }
         ViewerMsg::Markdown(msg) => markdown_update(st, id, revision, msg, locale),
-        ViewerMsg::Window(action) => window_action(st, m, sv, &entry, action),
+        ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
 }
 
@@ -830,7 +856,7 @@ fn kind_of(entry: &Entry) -> Kind {
 
 /// Opens (or opens again) an entry's window, starting the helper if it is not
 /// running.
-fn open_window(st: &mut State, m: &Model, sv: &Services, entry: &Entry) -> Task<Message> {
+fn open_window(st: &mut State, m: &Model, env: &Env, entry: &Entry) -> Task<Message> {
     let theme = m.theme();
     let helper = st.shared.helper().clone();
     match helper.client() {
@@ -844,7 +870,7 @@ fn open_window(st: &mut State, m: &Model, sv: &Services, entry: &Entry) -> Task<
                 return Task::none();
             }
             st.helper_starting = true;
-            let inbox = sv.inbox().clone();
+            let inbox = env.inbox.clone();
             Task::perform(
                 async move {
                     match tokio::task::spawn_blocking(move || helper.start(inbox)).await {
@@ -858,7 +884,7 @@ fn open_window(st: &mut State, m: &Model, sv: &Services, entry: &Entry) -> Task<
     }
 }
 
-fn web_update(st: &mut State, m: &mut Model, sv: &Services, msg: WebMsg) -> Task<Message> {
+fn web_update(st: &mut State, m: &mut Model, env: &Env, msg: WebMsg) -> Task<Message> {
     let theme = m.theme();
     match msg {
         WebMsg::Started(Ok(HelperHandle(client))) => {
@@ -905,7 +931,7 @@ fn web_update(st: &mut State, m: &mut Model, sv: &Services, msg: WebMsg) -> Task
         }
         WebMsg::Gone => {
             st.windows.lost();
-            let _ = sv;
+            let _ = env;
             Task::none()
         }
     }
@@ -914,7 +940,7 @@ fn web_update(st: &mut State, m: &mut Model, sv: &Services, msg: WebMsg) -> Task
 fn window_action(
     st: &mut State,
     m: &Model,
-    sv: &Services,
+    env: &Env,
     entry: &Entry,
     action: windowed::Action,
 ) -> Task<Message> {
@@ -922,7 +948,7 @@ fn window_action(
     match action {
         windowed::Action::Open => {
             st.windows.mark_tried(&entry.id);
-            open_window(st, m, sv, entry)
+            open_window(st, m, env, entry)
         }
         windowed::Action::Focus => {
             if let Some(client) = client {
@@ -1199,7 +1225,7 @@ pub fn on_intent(
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
-    link(st, sv);
+    link(st, &Env::of(sv));
     match intent {
         Intent::ShowPreview(request) => {
             let shared = st.shared.clone();

@@ -470,10 +470,10 @@ impl Windows {
             .cloned()
             .collect();
         for id in gone {
-            if let Some(win) = self.wins.remove(&id) {
-                if let Some(client) = client {
-                    let _ = client.close(&win.name);
-                }
+            if let Some(win) = self.wins.remove(&id)
+                && let Some(client) = client
+            {
+                let _ = client.close(&win.name);
             }
             self.tried.remove(&id);
         }
@@ -547,9 +547,7 @@ impl Windows {
                 state: hangar_webview::PageLoadState::Finished,
                 ..
             } => {
-                let Some(win) = self.by_window(window) else {
-                    return None;
-                };
+                let win = self.by_window(window)?;
                 let (name, kind, looping, speed) =
                     (win.name.clone(), win.kind, win.looping, win.speed);
                 if let Some(client) = client {

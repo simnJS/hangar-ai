@@ -290,7 +290,7 @@ pub fn view<'a>(ctx: Ctx<'a>, ws: &'a WsId, scope: &'a Scope, spin: usize) -> El
         )
         .height(Length::Fill)
         .style(move |_| container::Style {
-            background: active.then(|| iced::Background::Color(t.colors.chrome)),
+            background: active.then_some(iced::Background::Color(t.colors.chrome)),
             ..Default::default()
         });
         tabs = tabs.push(tab);

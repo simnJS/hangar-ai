@@ -145,9 +145,29 @@ static RULES: LazyLock<Vec<(Scope, Option<Class>)>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Scopes that make what is inside them a name rather than a value: the key of
+/// a JSON object is a string to the grammar, an attribute to highlight.js.
+static KEYS: LazyLock<Vec<Scope>> = LazyLock::new(|| {
+    [
+        "meta.mapping.key",
+        "support.type.property-name",
+        "entity.name.tag.yaml",
+    ]
+    .iter()
+    .filter_map(|scope| Scope::new(scope).ok())
+    .collect()
+});
+
 /// The class of a stack of scopes: the innermost scope a rule speaks for.
 fn class_of(stack: &ScopeStack) -> Class {
-    for scope in stack.as_slice().iter().rev() {
+    let scopes = stack.as_slice();
+    if scopes
+        .iter()
+        .any(|scope| KEYS.iter().any(|key| key.is_prefix_of(*scope)))
+    {
+        return Class::Attr;
+    }
+    for scope in scopes.iter().rev() {
         for (prefix, class) in RULES.iter() {
             if prefix.is_prefix_of(*scope) {
                 return class.unwrap_or(Class::Plain);
@@ -410,6 +430,17 @@ mod tests {
             "{:?}",
             classes(&docker, 0)
         );
+    }
+
+    #[test]
+    fn the_names_of_a_mapping_are_attributes_and_its_values_are_what_they_are() {
+        let json = highlight_file("{\"key\": \"text\"}", "a.json", Some("json")).unwrap();
+        assert!(has(&json, 0, "key", Class::Attr), "{:?}", classes(&json, 0));
+        assert!(has(&json, 0, "text", Class::String), "{:?}", classes(&json, 0));
+        let yaml = highlight_file("name: hangar\n", "a.yml", Some("yaml")).unwrap();
+        assert!(has(&yaml, 0, "name", Class::Attr), "{:?}", classes(&yaml, 0));
+        let toml = highlight_file("name = \"hangar\"\n", "a.toml", Some("ini")).unwrap();
+        assert!(has(&toml, 0, "hangar", Class::String), "{:?}", classes(&toml, 0));
     }
 
     #[test]

@@ -386,6 +386,7 @@ fn header<'a>(response: &'a SchemeResponse, name: &str) -> Option<&'a str> {
 
 #[tokio::test]
 async fn serves_a_page_from_the_folders_the_preview_may_read_and_nothing_else() {
+    let _turn = crate::preview::tests::ROOTS.lock().await;
     let dir = std::env::temp_dir().join(format!("hangar-webview-serve-{}", std::process::id()));
     let outside =
         std::env::temp_dir().join(format!("hangar-webview-outside-{}", std::process::id()));
