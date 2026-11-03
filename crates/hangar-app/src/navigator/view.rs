@@ -21,7 +21,10 @@ use hangar_ui::{Icon, button as ui_button, glyph, icon, keys, tip};
 
 use super::drag::{self, Drag, DragItem, DragKind, DropTarget, Hit};
 use super::model::{NavFolder, NavInput, RowKind, build_nav_tree, namesake_hints, row_key};
-use super::{MenuState, Msg, State, clock, filter_id, menu, plan, reads, rename_id, skin, status};
+use super::{
+    MenuState, Msg, State, clock, filter_id, geometry, list_id, menu, plan, reads, rename_id, skin,
+    status,
+};
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
@@ -31,9 +34,7 @@ use crate::state::types::Workspace;
 use crate::state::{AgentActivity, WsId};
 
 /// A workspace's row, and a folder's heading (`--nav-row`).
-pub const ROW_HEIGHT: f32 = 28.0;
-/// The space above a folder, which with its heading is what groups it.
-const FOLDER_GAP: f32 = 10.0;
+pub const ROW_HEIGHT: f32 = geometry::ROW_HEIGHT;
 /// Where a workspace's name starts: the padding, the icon and the gap, which
 /// a drop marker starts at too (`--nav-name-x`).
 const NAME_X: f32 = 32.0;
@@ -84,7 +85,7 @@ pub fn sidebar<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         drag: st.drag.as_ref(),
     };
 
-    let mut list = column![].spacing(1).width(Length::Fill);
+    let mut list = column![].spacing(geometry::GAP).width(Length::Fill);
     for ws in &tree.loose {
         list = list.push(workspace_row(&frame, ws));
     }
@@ -174,13 +175,20 @@ pub fn sidebar<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         column![list, below, root]
             .spacing(space::XS)
             .padding(Padding {
-                top: 2.0,
+                top: geometry::LIST_PAD_TOP,
                 right: PAD,
                 bottom: 6.0,
                 left: PAD,
             }),
     )
     .height(Length::Fill)
+    .id(list_id())
+    .on_scroll(|viewport| {
+        msg(Msg::Scrolled {
+            offset: viewport.absolute_offset().y,
+            height: viewport.bounds().height,
+        })
+    })
     .style(style::scrollable::default(t));
     // The pointer leaving the list ends the target a drag would land on.
     let scroll = mouse_area(scroll).on_exit(msg(Msg::ListExit));
@@ -760,9 +768,9 @@ fn folder_block<'a>(f: &Frame<'a>, entry: &NavFolder<'a>) -> Element<'a, Message
         into,
     );
 
-    let mut block = column![Space::new().height(FOLDER_GAP), head].spacing(1);
+    let mut block = column![Space::new().height(geometry::FOLDER_GAP), head].spacing(geometry::GAP);
     if entry.expanded {
-        let mut body = column![].spacing(1);
+        let mut body = column![].spacing(geometry::GAP);
         for ws in &entry.workspaces {
             body = body.push(workspace_row(f, ws));
         }
@@ -772,7 +780,7 @@ fn folder_block<'a>(f: &Frame<'a>, entry: &NavFolder<'a>) -> Element<'a, Message
                     .size(font_size::CAPTION)
                     .color(t.colors.fg_muted),
             )
-            .height(26)
+            .height(geometry::PLACEHOLDER_HEIGHT)
             .width(Length::Fill)
             .padding([0.0, PAD])
             .align_y(Alignment::Center)
@@ -792,12 +800,12 @@ fn folder_block<'a>(f: &Frame<'a>, entry: &NavFolder<'a>) -> Element<'a, Message
                 empty.into()
             };
             body = body.push(container(empty).padding(Padding {
-                bottom: 4.0,
+                bottom: geometry::PLACEHOLDER_GAP,
                 ..Padding::ZERO
             }));
         }
         block = block.push(container(body).padding(Padding {
-            bottom: 2.0,
+            bottom: geometry::BODY_PAD,
             ..Padding::ZERO
         }));
     }

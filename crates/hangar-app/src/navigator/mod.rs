@@ -13,14 +13,14 @@
 //! rest. The keys are read while the shell says the navigator has the focus
 //! (F6, or a click in it).
 //!
-//! Gaps with the web navigator, all of iced's: buttons take no keyboard focus
-//! and a text field reports no blur, so a rename is settled by Enter, Escape,
-//! or a press anywhere else; and the list does not scroll by itself to the
-//! row the keyboard moves to.
+//! Gaps with the web navigator, both iced's: buttons take no keyboard focus and
+//! a text field reports no blur, so a rename is settled by Enter, Escape, or a
+//! press that nothing else took.
 
 pub mod clock;
 pub mod drag;
 pub mod editor;
+pub mod geometry;
 pub mod menu;
 pub mod model;
 pub mod plan;
@@ -58,6 +58,11 @@ fn rename_id() -> Id {
 
 fn filter_id() -> Id {
     Id::new("hangar-nav-filter")
+}
+
+/// The scrollable list, which the keyboard scrolls to the row it is on.
+fn list_id() -> Id {
+    Id::new("hangar-nav-list")
 }
 
 /// A name being typed over a row's (`renaming`, `draft`).
@@ -103,6 +108,8 @@ pub struct State {
     /// (`setPlanLimits`); the navigator is their only reader, so it keeps the
     /// latest report itself until that lands, and `State::plan` then goes.
     plan: Option<PlanLimits>,
+    /// Where the list is scrolled to and how tall it is.
+    scroll: (f32, f32),
 }
 
 impl Default for State {
@@ -118,6 +125,7 @@ impl Default for State {
             note: None,
             note_serial: 0,
             plan: reads::dev_plan(),
+            scroll: (0.0, 0.0),
         }
         .with_dev_view()
     }
@@ -245,6 +253,11 @@ pub enum Msg {
     Key(Key, Modifiers),
 
     // The rest.
+    /// The list was scrolled, or resized.
+    Scrolled {
+        offset: f32,
+        height: f32,
+    },
     NewFolder,
     HideNavigator,
     /// A workspace was removed: forget its MCP scope files.
@@ -589,6 +602,10 @@ fn step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
         Msg::Key(key, modifiers) => on_key(st, m, key, modifiers),
 
+        Msg::Scrolled { offset, height } => {
+            st.scroll = (offset, height);
+            Task::none()
+        }
         Msg::NewFolder => create_folder(st, m).1,
         Msg::HideNavigator => intent(Intent::ToggleNavigator),
         Msg::EditorDone(note) => {
@@ -690,6 +707,44 @@ fn run_action(st: &mut State, m: &mut Model, action: menu::Action) -> Task<Messa
 /// goes to the parent; Enter and Space toggle a folder or open a workspace;
 /// F2 renames; the menu key, or Shift+F10, opens the row's menu under it.
 fn on_key(st: &mut State, m: &mut Model, key: Key, modifiers: Modifiers) -> Task<Message> {
+    let before = st.cursor.clone();
+    let task = walk(st, m, key, modifiers);
+    // The row the keyboard moved to is scrolled into view, as a focused element
+    // is in a page.
+    if st.cursor != before {
+        Task::batch([task, reveal_cursor(st, m)])
+    } else {
+        task
+    }
+}
+
+/// Scrolls the list just far enough for the row the keyboard is on.
+fn reveal_cursor(st: &State, m: &Model) -> Task<Message> {
+    let Some(key) = st.cursor.as_deref() else {
+        return Task::none();
+    };
+    let projects = projects(m);
+    let tree = build_nav_tree(&NavInput {
+        workspaces: &projects,
+        folders: &m.state().folders,
+        query: &st.query,
+        attention_only: st.attention_only,
+        wants_you: &|pane| reads::wants_you(m, &pane.to_string()),
+    });
+    let spans = geometry::spans(&tree);
+    let Some(span) = spans.iter().find(|span| span.key == key) else {
+        return Task::none();
+    };
+    match geometry::reveal(span, st.scroll.0, st.scroll.1) {
+        Some(y) => iced::widget::operation::scroll_to(
+            list_id(),
+            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y },
+        ),
+        None => Task::none(),
+    }
+}
+
+fn walk(st: &mut State, m: &mut Model, key: Key, modifiers: Modifiers) -> Task<Message> {
     if modifiers.alt() || modifiers.control() || modifiers.command() {
         return Task::none();
     }
