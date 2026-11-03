@@ -34,16 +34,42 @@ const ELLIPSIS: char = '…';
 /// even the ellipsis fits, that is what is returned: a cell that narrow shows
 /// that something is there.
 pub fn fit_tail(content: &str, max: f32, measure: impl Fn(&str) -> f32) -> String {
+    fit(content, max, measure, Cut::Start)
+}
+
+/// The longest head of `content` that fits in `max` before an ellipsis: the
+/// same as [`fit_tail`] for a text whose end is what can go (an id, a
+/// sentence).
+pub fn fit_head(content: &str, max: f32, measure: impl Fn(&str) -> f32) -> String {
+    fit(content, max, measure, Cut::End)
+}
+
+/// Which end of the text is given up when the room is short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cut {
+    Start,
+    End,
+}
+
+fn fit(content: &str, max: f32, measure: impl Fn(&str) -> f32, cut: Cut) -> String {
     // An unknown room (NaN) cuts nothing, as an unbounded one does.
     if max.is_nan() || measure(content) <= max {
         return content.to_string();
     }
     let starts: Vec<usize> = content.char_indices().map(|(at, _)| at).collect();
-    let tail = |kept: usize| {
-        let from = starts[starts.len() - kept];
-        let mut shown = String::with_capacity(content.len() - from + ELLIPSIS.len_utf8());
-        shown.push(ELLIPSIS);
-        shown.push_str(&content[from..]);
+    let kept = |count: usize| {
+        let mut shown = String::with_capacity(content.len() + ELLIPSIS.len_utf8());
+        match cut {
+            Cut::Start => {
+                shown.push(ELLIPSIS);
+                shown.push_str(&content[starts[starts.len() - count]..]);
+            }
+            Cut::End => {
+                let upto = starts.get(count).copied().unwrap_or(content.len());
+                shown.push_str(&content[..upto]);
+                shown.push(ELLIPSIS);
+            }
+        }
         shown
     };
     // `fits` holds a number of characters that fit and `too_many` one that
@@ -51,7 +77,7 @@ pub fn fit_tail(content: &str, max: f32, measure: impl Fn(&str) -> f32) -> Strin
     let (mut fits, mut too_many) = (0, starts.len());
     while fits + 1 < too_many {
         let middle = fits + (too_many - fits) / 2;
-        if measure(&tail(middle)) <= max {
+        if measure(&kept(middle)) <= max {
             fits = middle;
         } else {
             too_many = middle;
@@ -60,7 +86,7 @@ pub fn fit_tail(content: &str, max: f32, measure: impl Fn(&str) -> f32) -> Strin
     if fits == 0 {
         ELLIPSIS.to_string()
     } else {
-        tail(fits)
+        kept(fits)
     }
 }
 
@@ -73,6 +99,7 @@ pub struct TailText {
     font: Font,
     color: Option<Color>,
     width: Length,
+    cut: Cut,
 }
 
 /// `content` on one line, cut from its start when the room is short.
@@ -84,10 +111,18 @@ pub fn tail_text(content: impl Into<String>) -> TailText {
         font: Font::DEFAULT,
         color: None,
         width: Length::Fill,
+        cut: Cut::Start,
     }
 }
 
 impl TailText {
+    /// Gives up the end instead of the start: the ordinary ellipsis, for a
+    /// cell that holds a name or an id and not a path.
+    pub fn cut_end(mut self) -> Self {
+        self.cut = Cut::End;
+        self
+    }
+
     pub fn size(mut self, size: f32) -> Self {
         self.size = size;
         self
@@ -156,9 +191,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
                 Size::new(natural, height),
             );
         let (text_size, font) = (self.size, self.font);
-        self.shown = fit_tail(&self.content, size.width, |candidate| {
-            text_width(candidate, text_size, font)
-        });
+        self.shown = fit(
+            &self.content,
+            size.width,
+            |candidate| text_width(candidate, text_size, font),
+            self.cut,
+        );
         layout::Node::new(size)
     }
 
@@ -234,6 +272,14 @@ mod tests {
     fn it_cuts_between_characters_not_bytes() {
         // "/été" is four characters and six bytes.
         assert_eq!(fit_tail("/données/été", 5.0, units), "…/été");
+    }
+
+    #[test]
+    fn the_end_can_be_the_part_that_goes() {
+        assert_eq!(fit_head("abcdefgh", 5.0, units), "abcd…");
+        assert_eq!(fit_head("abcde", 5.0, units), "abcde");
+        assert_eq!(fit_head("abcdefgh", 0.0, units), "…");
+        assert_eq!(fit_head("été-été", 4.0, units), "été…");
     }
 
     #[test]
