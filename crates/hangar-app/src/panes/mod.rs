@@ -424,19 +424,6 @@ fn term_settles(measured: bool, events: &[TermEvent]) -> bool {
             .any(|event| matches!(event, TermEvent::Pressed))
 }
 
-/// Whether a link a terminal reported is one Hangar opens: a web link, as
-/// xterm.js's web-links addon was the only one the TS opened. A detected
-/// `file:`, `ssh:` or `git:` URL, or whatever target an `OSC 8` hyperlink
-/// names, would hand the system's handler for that scheme anything a
-/// program printed, on one click.
-fn is_web_link(uri: &str) -> bool {
-    let Some((scheme, rest)) = uri.split_once("://") else {
-        return false;
-    };
-    (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
-        && !rest.is_empty()
-}
-
 /// What a terminal widget did, applied, and what the terminal said back;
 /// with whether the panes have to be brought in line after it
 /// ([`term_settles`]).
@@ -469,9 +456,13 @@ fn term_action(
                 ClipboardTarget::Clipboard => iced::clipboard::write(text),
                 ClipboardTarget::Primary => iced::clipboard::write_primary(text),
             }),
-            // Web links open in the system browser (inventory §9.2); any
-            // other does nothing (`is_web_link`).
-            TermEvent::OpenLink(link) if is_web_link(&link.uri) => {
+            // Web links open in the system browser (inventory §9.2), as
+            // xterm.js's web-links addon was the only one the TS opened. The
+            // terminal reports no other (a `file:`, `ssh:` or `git:` URL, or
+            // a hyperlink elsewhere, would hand the system's handler for its
+            // scheme anything a program printed); this checks it again
+            // right before the opener.
+            TermEvent::OpenLink(link) if hangar_term::is_web_link(&link.uri) => {
                 let _ = open::that_detached(&link.uri);
             }
             TermEvent::Pressed => {
@@ -1076,34 +1067,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn only_web_links_open() {
-        for uri in [
-            "https://example.com/page?q=1",
-            "http://localhost:5173",
-            "HTTPS://EXAMPLE.COM",
-        ] {
-            assert!(is_web_link(uri), "{uri}");
-        }
-        for uri in [
-            "file:///etc/passwd",
-            "file://host/share",
-            "ssh://git@github.com/x/y",
-            "git://github.com/x/y",
-            "ftp://example.com",
-            "smb://server/share",
-            "javascript:alert(1)",
-            "mailto:someone@example.com",
-            "https://",
-            "https:example.com",
-            " https://example.com",
-            "/home/me/file.txt",
-            "",
-        ] {
-            assert!(!is_web_link(uri), "{uri}");
-        }
-    }
-
     /// The link a Ctrl+click at `column` of the first row reports, in a
     /// pane's terminal that printed `text`.
     fn ctrl_click(text: &str, column: i32) -> Option<String> {
@@ -1129,19 +1092,18 @@ mod tests {
 
     #[test]
     fn a_ctrl_click_on_a_file_link_or_a_hyperlink_elsewhere_opens_nothing() {
-        // The terminal reports each as a link; the pane opens none of them.
-        let file = ctrl_click("see file:///etc/passwd now\r\n", 8);
-        assert_eq!(file.as_deref(), Some("file:///etc/passwd"));
-        assert!(!is_web_link(&file.unwrap()));
-        let marked = ctrl_click(
-            "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
-            2,
+        // A pane's terminal reports neither as a link (nor underlines it).
+        assert_eq!(ctrl_click("see file:///etc/passwd now\r\n", 8), None);
+        assert_eq!(
+            ctrl_click(
+                "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
+                2,
+            ),
+            None
         );
-        assert_eq!(marked.as_deref(), Some("ssh://attacker.example/x"));
-        assert!(!is_web_link(&marked.unwrap()));
         // A web link still opens.
         let web = ctrl_click("see https://hangar.ai/docs now\r\n", 8);
-        assert!(is_web_link(&web.expect("a link")));
+        assert!(hangar_term::is_web_link(&web.expect("a link")));
     }
 
     #[test]

@@ -665,6 +665,47 @@ mod tests {
     }
 
     #[test]
+    fn a_link_elsewhere_than_the_web_is_no_link() {
+        // A hyperlink to another scheme, and a detected `file:` URL: neither
+        // opens, so a Ctrl+click is an ordinary click.
+        for text in [
+            "\x1b]8;;ssh://attacker.example/x\x1b\\click me\x1b]8;;\x1b\\\r\n",
+            "file:///etc/passwd\r\n",
+        ] {
+            let mut term = terminal(text, 40, 3);
+            let events = down(
+                &mut term,
+                Button::Left,
+                at(2, 0, Side::Left),
+                Modifiers::CTRL,
+            );
+            assert!(
+                !events.iter().any(|e| matches!(e, Event::OpenLink(_))),
+                "{text:?}"
+            );
+        }
+        // Text a foreign hyperlink marks may still hold a web address.
+        let mut term = terminal(
+            "\x1b]8;;file:///x\x1b\\https://hangar.ai/a\x1b]8;;\x1b\\\r\n",
+            40,
+            3,
+        );
+        let events = down(
+            &mut term,
+            Button::Left,
+            at(4, 0, Side::Left),
+            Modifiers::CTRL,
+        );
+        let link = events.iter().find_map(|e| match e {
+            Event::OpenLink(link) => Some(link.clone()),
+            _ => None,
+        });
+        let link = link.expect("the address in the text");
+        assert_eq!(link.uri, "https://hangar.ai/a");
+        assert_eq!(link.source, crate::event::LinkSource::Detected);
+    }
+
+    #[test]
     fn urls_that_wrap_over_rows_are_one_link() {
         let mut term = terminal("https://hangar.ai/a/long/path/to/somewhere\r\n", 20, 4);
         let events = down(

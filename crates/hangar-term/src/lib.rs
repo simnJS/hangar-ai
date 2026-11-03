@@ -87,7 +87,8 @@
 //! - **Handle the clipboard** ([`Event::SetClipboard`], and
 //!   [`Event::ClipboardLoad`] if [`Config::osc52`] allows it).
 //! - **Open links** on [`Event::OpenLink`] (a click with Ctrl, or Cmd, held)
-//!   with the system browser.
+//!   with the system browser. Only web links (`http`, `https`) are ever
+//!   reported, or underlined under the pointer ([`is_web_link`]).
 //!
 //! The rest is optional: [`Event::Notification`] (`OSC 9` and `OSC 777`, which
 //! agents use to say a turn is over), [`Event::Bell`], [`Event::UserInput`]
@@ -230,6 +231,7 @@ pub use event::{
 pub use font::Font;
 pub use ime::{InputState, Preedit};
 pub use keys::{KeyEventKind, KeyOptions, KeyPress, encode_key};
+pub use links::is_web_link;
 pub use palette::{Palette, xterm_indexed};
 pub use search::{MAX_MATCHES, SearchDirection, SearchError, SearchOptions, SearchStatus};
 pub use terminal::Terminal;
