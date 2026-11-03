@@ -19,10 +19,11 @@ around the terminals, and needs a fraction of the memory and processor it did.
     opens in a separate helper program, `hangar-webview`, in a window of its own.
   - Measured on the same Linux machine, 1.12.1 against 2.0.0:
     - starting cold: 0.96 s, now 0.57 s;
-    - memory at rest: 238 MB, now 166 MB;
-    - 16 terminals printing non-stop for 30 s: 8.3 GB of memory, now 249 MB, and 4.4
-      processor cores, now 2.7;
-    - the echo of a key typed while 15 terminals print: none within 20 s, now 2.4 ms.
+    - memory at rest: 238 MiB, now 166 MiB;
+    - 16 terminals printing non-stop for 30 s: 8.1 GiB of memory, now 249 MiB, and 4.4
+      processor cores, now 2.4;
+    - the echo of text sent to a pane while 15 others print: none within a minute, now
+      2.5 ms.
 - **Claude Code only.** Hangar runs Claude Code and plain shells. Codex, Gemini CLI and
   OpenCode are gone, with their launch, session resume, statistics, prices and settings.
   - A pane saved with one of them opens as a shell in the same folder, says so once in its
@@ -58,7 +59,7 @@ around the terminals, and needs a fraction of the memory and processor it did.
 - **On Linux, Hangar draws its own title bar.** The toolbar is the window's title bar, in
   your theme, with the buttons your desktop shows, on its side (GNOME's button layout). Drag
   it to move the window, double-click it to maximise, right-click it for the window menu;
-  the edges resize the window. **Appearance › Use the system's title bar** brings the
+  the edges resize the window, and its corners are rounded as GNOME's own windows are. **Appearance › Use the system's title bar** brings the
   system's back. macOS and Windows keep theirs.
 - **Not there yet.**
   - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux

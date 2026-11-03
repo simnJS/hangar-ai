@@ -143,6 +143,7 @@ pub fn run() -> iced::Result {
     iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::theme)
+        .style(App::style)
         .subscription(App::subscription)
         .scale_factor(App::scale_factor)
         .font(hangar_theme::fonts::INTER_VARIABLE)
@@ -543,6 +544,18 @@ impl App {
             .get(theme.id)
             .cloned()
             .unwrap_or_else(|| hangar_theme::to_iced(theme))
+    }
+
+    /// What a window is cleared to before its frame is drawn: nothing, on
+    /// Linux, so that the corners the frame rounds are see-through
+    /// (shell/title_bar.rs).
+    fn style(&self, theme: &iced::Theme) -> iced::theme::Style {
+        use iced::theme::Base;
+        let mut style = theme.base();
+        if cfg!(target_os = "linux") {
+            style.background_color = iced::Color::TRANSPARENT;
+        }
+        style
     }
 
     /// The themes the windows are drawn in, built when first needed.

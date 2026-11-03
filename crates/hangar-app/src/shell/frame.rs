@@ -24,9 +24,8 @@ use hangar_theme::{style, tokens};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::{
-    Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder, title_bar,
-};
+use crate::shell::title_bar::{self, Corners};
+use crate::shell::{Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder};
 use crate::state::Workspace;
 
 /// The main window.
@@ -49,7 +48,11 @@ pub fn main<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
                 container(crate::navigator::view(&p.navigator, ctx))
                     .width(tokens::size::SIDEBAR_WIDTH)
                     .height(Length::Fill)
-                    .style(style::container::sidebar(ctx.theme)),
+                    .style(title_bar::rounded_style(
+                        ctx,
+                        Corners::LEFT,
+                        style::container::sidebar(ctx.theme),
+                    )),
             )
             .push(vertical_sep(ctx));
     }
@@ -100,14 +103,22 @@ fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
         container(crate::toolbar::view(&p.toolbar, ctx))
             .width(Length::Fill)
             .height(tokens::size::TOOLBAR_HEIGHT)
-            .style(style::container::toolbar(ctx.theme)),
+            .style(title_bar::rounded_style(
+                ctx,
+                Corners::top(ctx),
+                style::container::toolbar(ctx.theme),
+            )),
     ))
     .on_enter(Message::Shell(Action::PointerOverToolbar(true)))
     .on_exit(Message::Shell(Action::PointerOverToolbar(false)));
     let status = container(crate::status_bar::view(&p.status_bar, ctx))
         .width(Length::Fill)
         .height(tokens::size::STATUS_BAR_HEIGHT)
-        .style(style::container::statusbar(ctx.theme));
+        .style(title_bar::rounded_style(
+            ctx,
+            Corners::bottom(ctx),
+            style::container::statusbar(ctx.theme),
+        ));
 
     let mut body = row![work_area(ctx, ws)].height(Length::Fill);
     let inspector = panels.inspector;
@@ -324,12 +335,17 @@ fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message
     layers.into()
 }
 
-/// The page under everything, in the theme's colours.
+/// The page under everything, in the theme's colours, rounded at the
+/// window's corners when they are.
 fn window_surface<'a>(ctx: Ctx<'a>, content: Element<'a, Message>) -> Element<'a, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(style::container::window(ctx.theme))
+        .style(title_bar::rounded_style(
+            ctx,
+            Corners::ALL,
+            style::container::window(ctx.theme),
+        ))
         .into()
 }
 

@@ -14,7 +14,13 @@
 //!   (`button-layout`, read once at start: GNOME's `':close'` gives a close
 //!   button alone, `'close,minimize:'` puts two on the left);
 //! - the window's edges resize it, and a hairline outlines it, while it is
-//!   not maximised.
+//!   not maximised;
+//! - its corners are rounded as GNOME's own windows are, while it is neither
+//!   maximised nor full screen. The window is transparent on Linux for that:
+//!   what draws at a corner (the window's page, the navigator, the toolbar,
+//!   the status bar) rounds that corner of its own background
+//!   ([`corners`]). A dialog's veil stays square, so a window's corners are
+//!   dimmed with it.
 //!
 //! "Use the system's title bar" (Appearance) gives the system's back, for a
 //! desktop that draws one in its own colours (KDE's, a tiling window
@@ -26,6 +32,7 @@ use std::time::{Duration, Instant};
 use hangar_i18n::Key;
 use hangar_theme::{Theme, tokens};
 use hangar_ui::{Icon, icon, tip};
+use iced::border::Radius;
 use iced::mouse::Interaction;
 use iced::widget::{Space, button, column, container, mouse_area, row};
 use iced::window::{self, Direction};
@@ -92,8 +99,8 @@ impl Layout {
 #[derive(Debug)]
 pub struct Live {
     pub layout: Layout,
-    /// The windows that are maximised: no edges to resize, no outline, and
-    /// their middle button brings them back.
+    /// The windows that are maximised or full screen: square corners, no
+    /// edges to resize, no outline, and the middle button brings them back.
     pub maximized: HashSet<window::Id>,
     /// Whether the windows have the system's title bar now: they open without
     /// it on Linux, before the settings are read, and the setting turns it
@@ -306,7 +313,11 @@ pub fn bare_band<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
         .width(Length::Fill)
         .height(tokens::size::TOOLBAR_HEIGHT)
         .padding([0.0, tokens::space::MD])
-        .style(hangar_theme::style::container::toolbar(ctx.theme));
+        .style(rounded_style(
+            ctx,
+            Corners::top(ctx),
+            hangar_theme::style::container::toolbar(ctx.theme),
+        ));
     Some(band(ctx, strip))
 }
 
@@ -314,6 +325,94 @@ pub fn bare_band<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
 /// it a corner reaches.
 const EDGE: f32 = 4.0;
 const CORNER: f32 = 12.0;
+
+/// The radius of a window's corners: libadwaita's, what GNOME's own
+/// windows have.
+pub const RADIUS: f32 = 12.0;
+
+/// Which corners of a region are the window's corners.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Corners {
+    pub top_left: bool,
+    pub top_right: bool,
+    pub bottom_right: bool,
+    pub bottom_left: bool,
+}
+
+impl Corners {
+    pub const ALL: Corners = Corners {
+        top_left: true,
+        top_right: true,
+        bottom_right: true,
+        bottom_left: true,
+    };
+    pub const LEFT: Corners = Corners {
+        top_left: true,
+        top_right: false,
+        bottom_right: false,
+        bottom_left: true,
+    };
+
+    /// The top two, or the top right one when the navigator holds the left.
+    pub fn top(ctx: Ctx<'_>) -> Corners {
+        Corners {
+            top_left: !navigator_drawn(ctx),
+            top_right: true,
+            ..Corners::default()
+        }
+    }
+
+    /// The bottom two, or the bottom right one when the navigator holds the
+    /// left.
+    pub fn bottom(ctx: Ctx<'_>) -> Corners {
+        Corners {
+            bottom_right: true,
+            bottom_left: !navigator_drawn(ctx),
+            ..Corners::default()
+        }
+    }
+}
+
+/// Whether this window's corners are rounded now.
+fn rounded(ctx: Ctx<'_>) -> bool {
+    drawn(ctx.model.settings()) && !maximized(ctx)
+}
+
+/// The radius a region's background takes at `which` of its corners: the
+/// window's, less the outline's hairline, while the corners are rounded.
+pub fn corners(ctx: Ctx<'_>, which: Corners) -> Radius {
+    if !rounded(ctx) {
+        return Radius::default();
+    }
+    let r = |on: bool| {
+        if on {
+            RADIUS - tokens::BORDER_WIDTH
+        } else {
+            0.0
+        }
+    };
+    Radius {
+        top_left: r(which.top_left),
+        top_right: r(which.top_right),
+        bottom_right: r(which.bottom_right),
+        bottom_left: r(which.bottom_left),
+    }
+}
+
+/// A container's style with its background rounded at `which` corners of
+/// the window.
+pub fn rounded_style<'a>(
+    ctx: Ctx<'a>,
+    which: Corners,
+    style: impl Fn(&iced::Theme) -> container::Style + 'a,
+) -> impl Fn(&iced::Theme) -> container::Style + 'a {
+    let radius = corners(ctx, which);
+    move |theme| {
+        let mut look = style(theme);
+        look.border.radius = radius;
+        look
+    }
+}
 
 /// The window's edges and corners, over everything else: what resizes a
 /// window without the system's title bar. Nothing while it is maximised.
@@ -369,10 +468,11 @@ pub fn edges<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
     )
 }
 
-/// `frame` outlined by a hairline, which tells the window from what is
-/// behind it now that the system draws no edge. Not while it is maximised.
+/// `frame` outlined by a hairline, rounded at the window's corners, which
+/// tells the window from what is behind it now that the system draws no
+/// edge. Not while it is maximised.
 pub fn outline<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message> {
-    if !drawn(ctx.model.settings()) || maximized(ctx) {
+    if !rounded(ctx) {
         return frame;
     }
     let t = ctx.theme;
@@ -384,7 +484,7 @@ pub fn outline<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Mes
             border: Border {
                 color: t.colors.line_strong,
                 width: tokens::BORDER_WIDTH,
-                radius: 0.0.into(),
+                radius: RADIUS.into(),
             },
             ..container::Style::default()
         })

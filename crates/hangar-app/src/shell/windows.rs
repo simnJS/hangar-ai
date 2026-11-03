@@ -78,6 +78,9 @@ fn base() -> Settings {
     #[cfg(target_os = "linux")]
     {
         settings.platform_specific.application_id = "hangar-ai".into();
+        // For the rounded corners of the title bar Hangar draws
+        // (title_bar.rs): the frame paints everything else.
+        settings.transparent = true;
     }
     settings
 }

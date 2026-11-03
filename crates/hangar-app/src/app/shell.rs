@@ -236,12 +236,20 @@ impl App {
         }
     }
 
-    /// Asks whether window `w` is maximised now, for its title bar.
+    /// Asks whether window `w` is maximised or full screen now, for its
+    /// title bar and its corners.
     fn ask_maximized(&self, w: window::Id) -> Task<Message> {
         if !title_bar::drawn(self.model.settings()) {
             return Task::none();
         }
-        window::is_maximized(w).map(move |on| Message::Shell(Action::Maximized(w, on)))
+        window::is_maximized(w).then(move |maximized| {
+            window::mode(w).map(move |mode| {
+                Message::Shell(Action::Maximized(
+                    w,
+                    maximized || mode == window::Mode::Fullscreen,
+                ))
+            })
+        })
     }
 
     /// The window's events the shell answers.

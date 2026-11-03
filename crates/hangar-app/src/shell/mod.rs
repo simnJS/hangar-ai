@@ -76,6 +76,7 @@ pub enum Action {
     TitleBar(iced::window::Id, title_bar::Press),
     /// The desktop's button layout has been read, or could not be.
     TitleBarLayout(Option<title_bar::Layout>),
-    /// Whether this window is maximised, asked after it changed size.
+    /// Whether this window is maximised or full screen, asked after it
+    /// changed size.
     Maximized(iced::window::Id, bool),
 }
