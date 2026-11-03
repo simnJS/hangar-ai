@@ -232,7 +232,9 @@ impl<'a, M: 'a> Section<'a, M> {
 impl<'a, M: 'a> From<Section<'a, M>> for Element<'a, M> {
     fn from(s: Section<'a, M>) -> Self {
         let t = s.theme;
-        let mut head = column![typography::heading(t, s.title).size(13.0)].spacing(2);
+        let mut head =
+            column![typography::heading(t, s.title).size(hangar_theme::tokens::font_size::BODY)]
+                .spacing(2);
         if let Some(hint) = s.hint {
             head = head.push(typography::hint(t, hint));
         }

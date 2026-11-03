@@ -272,7 +272,9 @@ fn section<'a>(
     if titled || section.hint.is_some() {
         let mut head = column![].spacing(2);
         if titled {
-            head = head.push(typography::heading(t, section.title).size(13.0));
+            head = head.push(
+                typography::heading(t, section.title).size(hangar_theme::tokens::font_size::BODY),
+            );
         }
         if let Some(hint) = section.hint {
             head = head.push(typography::hint(t, hint));

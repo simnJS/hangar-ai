@@ -28,8 +28,10 @@ use hangar_ui::selectable::{Doc, Source, selectable};
 
 use super::highlight::{self, Lines};
 
-/// The size of code, in points (`.preview-code`: 12 px).
-const SIZE: f32 = 12.0;
+/// The size of code: the interface's (`.preview-code` was 12 px, the
+/// interface size of the web app; both gained a pixel natively, see
+/// `hangar_theme::tokens::font_size`).
+const SIZE: f32 = hangar_theme::tokens::font_size::UI;
 /// And its line, 1.55 of it, which is what a row is tall (`line-height: 1.55`).
 pub const ROW: f32 = SIZE * 1.55;
 /// What a mono digit takes of its size, near enough for the common faces: the
@@ -249,10 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn code_is_set_at_the_size_of_the_web_app() {
-        assert_eq!(SIZE, 12.0);
+    fn code_is_set_at_the_interface_size_on_rows_of_1_55() {
         assert!((hangar_theme::tokens::font_size::UI - SIZE).abs() < f32::EPSILON);
-        assert!((ROW - 18.6).abs() < 1e-4);
+        assert!((ROW - SIZE * 1.55).abs() < 1e-4);
     }
 
     #[test]

@@ -49,29 +49,31 @@ pub mod space {
 
 /// Font sizes. The window reads in 12 and 13; the small ones carry metadata.
 pub mod font_size {
-    // The four smallest sizes are the stylesheet's plus up to half a pixel: a
-    // browser drew them with the system's subpixel smoothing, and smoothed in
-    // grey they read too thin. The others are the stylesheet's own.
+    // Every text size is the stylesheet's plus a pixel (the three smallest a
+    // pixel and a half, the 11.5 px step a pixel and a quarter, to keep the
+    // scale strictly rising): a browser drew them with the system's subpixel
+    // smoothing, and smoothed in grey the same sizes read too thin. The icon
+    // size is the stylesheet's own.
     /// A mono counter or a version (`.nav-top__version`).
-    pub const MICRO: f32 = 10.5;
+    pub const MICRO: f32 = 11.5;
     /// A group label in small capitals (`.nav-section`), a key hint.
-    pub const LABEL: f32 = 11.0;
+    pub const LABEL: f32 = 12.0;
     /// A caption, a metadata line.
-    pub const CAPTION: f32 = 11.5;
+    pub const CAPTION: f32 = 12.5;
     /// A tiny button, a row's secondary line.
-    pub const CAPTION_LG: f32 = 11.75;
+    pub const CAPTION_LG: f32 = 12.75;
     /// The toolbar, the navigator, the status bar, fields, the palette.
-    pub const UI: f32 = 12.0;
+    pub const UI: f32 = 13.0;
     /// The navigator's title.
-    pub const UI_LG: f32 = 12.5;
+    pub const UI_LG: f32 = 13.5;
     /// The page's text: `body`, menu items.
-    pub const BODY: f32 = 13.0;
+    pub const BODY: f32 = 14.0;
     /// A dialog's or a page's title.
-    pub const TITLE: f32 = 15.0;
+    pub const TITLE: f32 = 16.0;
     /// The palette's search glyph.
     pub const ICON_LG: f32 = 17.0;
     /// The big number of a statistic.
-    pub const DISPLAY: f32 = 26.0;
+    pub const DISPLAY: f32 = 27.0;
 }
 
 /// Font weights, as the numbers of CSS. The stylesheets also use 550 and 650
