@@ -24,7 +24,9 @@ use hangar_theme::{style, tokens};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::shell::{Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder};
+use crate::shell::{
+    Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder, title_bar,
+};
 use crate::state::Workspace;
 
 /// The main window.
@@ -35,8 +37,10 @@ pub fn main<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
     let p = ctx.pkg;
     let body: Element<'a, Message> = match (ctx.workspace(), ctx.model.active_workspace()) {
         (Some(ws), _) => workspace_body(ctx, ws),
-        (None, Some(ws)) if ws.detached == Some(true) => placeholder::elsewhere(ctx, ws),
-        _ => placeholder::no_workspace(ctx),
+        (None, Some(ws)) if ws.detached == Some(true) => {
+            with_bare_band(ctx, placeholder::elsewhere(ctx, ws))
+        }
+        _ => with_bare_band(ctx, placeholder::no_workspace(ctx)),
     };
     let mut frame = row![].height(Length::Fill);
     if ctx.panels().navigator {
@@ -50,7 +54,16 @@ pub fn main<'a>(ctx: Ctx<'a>) -> Element<'a, Message> {
             .push(vertical_sep(ctx));
     }
     frame = frame.push(container(body).width(Length::Fill).height(Length::Fill));
-    layered(ctx, window_surface(ctx, frame.into()))
+    title_bar::outline(ctx, layered(ctx, window_surface(ctx, frame.into())))
+}
+
+/// A placeholder under the band Hangar's title bar needs where there is no
+/// toolbar to be it.
+fn with_bare_band<'a>(ctx: Ctx<'a>, body: Element<'a, Message>) -> Element<'a, Message> {
+    match title_bar::bare_band(ctx) {
+        Some(band) => column![band, horizontal_sep(ctx), body].into(),
+        None => body,
+    }
 }
 
 /// A workspace's own window: the main window's frame for that workspace,
@@ -59,7 +72,10 @@ pub fn workspace_window<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Mess
     if !ctx.model.live.hydrated {
         return window_surface(ctx, placeholder::boot(ctx));
     }
-    layered(ctx, window_surface(ctx, workspace_body(ctx, ws)))
+    title_bar::outline(
+        ctx,
+        layered(ctx, window_surface(ctx, workspace_body(ctx, ws))),
+    )
 }
 
 /// The width of the row the terminals share with the side panels, in a
@@ -77,13 +93,15 @@ fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
     let panels = ctx.panels();
     // The toolbar's buttons open and close the drawers themselves: the
-    // pointer over it is not "outside" a drawer (shell/drawer.rs).
-    let toolbar = mouse_area(
+    // pointer over it is not "outside" a drawer (shell/drawer.rs). It is
+    // the title bar too, when Hangar draws that.
+    let toolbar = mouse_area(title_bar::band(
+        ctx,
         container(crate::toolbar::view(&p.toolbar, ctx))
             .width(Length::Fill)
             .height(tokens::size::TOOLBAR_HEIGHT)
             .style(style::container::toolbar(ctx.theme)),
-    )
+    ))
     .on_enter(Message::Shell(Action::PointerOverToolbar(true)))
     .on_exit(Message::Shell(Action::PointerOverToolbar(false)));
     let status = container(crate::status_bar::view(&p.status_bar, ctx))
@@ -297,6 +315,11 @@ fn layered<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message
 
     for overlay in ctx.model.overlays_in(ctx.window) {
         layers = layers.push(overlay::view(ctx, overlay));
+    }
+    // Over everything, an open sheet's backdrop included: a window is
+    // resized from its edges whatever it shows.
+    if let Some(edges) = title_bar::edges(ctx) {
+        layers = layers.push(edges);
     }
     layers.into()
 }

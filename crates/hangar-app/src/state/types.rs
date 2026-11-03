@@ -437,6 +437,11 @@ pub struct Settings {
     pub inspector_collapsed: Vec<String>,
     /// Percent, clamped to 90–130 where it is read.
     pub ui_scale: f64,
+    /// The system draws the windows' title bars, not Hangar (Linux only:
+    /// shell/title_bar.rs). Written only when on, so a file the app wrote
+    /// before it had the setting is written back the same.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub system_title_bar: bool,
     pub agent_pane_control: bool,
     /// `"main"` by default; `null` is kept as the person wrote it.
     pub claude_account: Option<String>,
@@ -497,6 +502,7 @@ impl Default for Settings {
             inspector_width: 296.0,
             inspector_collapsed: Vec::new(),
             ui_scale: 100.0,
+            system_title_bar: false,
             agent_pane_control: true,
             claude_account: Some("main".into()),
             experiments: Vec::new(),

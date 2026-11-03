@@ -186,15 +186,17 @@ fn general_has_every_row_of_the_old_schema_with_its_default() {
 #[test]
 fn appearance_terminal_shell_and_notifications_have_every_row_too() {
     let built = World::new().build();
-    assert_eq!(
-        table(&built, SettingsCategory::Appearance),
-        [
-            r#"uiScale: slider UiScale = 100 [90..130 by 5] "100 %""#,
-            "navigatorOpen: toggle NavigatorOpen = true",
-            "inspectorOpen: toggle InspectorOpen = true",
-            r#"themePick: custom Themes { active: "graphite" }"#,
-        ]
-    );
+    // The title bar's row is Linux's alone: elsewhere the system's stays.
+    let mut appearance = vec![
+        r#"uiScale: slider UiScale = 100 [90..130 by 5] "100 %""#,
+        "navigatorOpen: toggle NavigatorOpen = true",
+        "inspectorOpen: toggle InspectorOpen = true",
+    ];
+    if cfg!(target_os = "linux") {
+        appearance.push("systemTitleBar: toggle SystemTitleBar = false");
+    }
+    appearance.push(r#"themePick: custom Themes { active: "graphite" }"#);
+    assert_eq!(table(&built, SettingsCategory::Appearance), appearance);
     assert_eq!(
         table(&built, SettingsCategory::Terminal),
         [
@@ -360,15 +362,14 @@ fn the_rows_that_need_a_workspace_exist_only_with_one() {
     let mut world = World::new();
     world.workspace = Some(workspace("Shop"));
     let with = world.build();
+    let mut appearance = vec!["uiScale", "navigatorOpen", "inspectorOpen"];
+    if cfg!(target_os = "linux") {
+        appearance.push("systemTitleBar");
+    }
+    appearance.extend(["themeScope", "themePick"]);
     assert_eq!(
         ids(category(&with, SettingsCategory::Appearance)),
-        [
-            "uiScale",
-            "navigatorOpen",
-            "inspectorOpen",
-            "themeScope",
-            "themePick"
-        ]
+        appearance
     );
     assert_eq!(
         ids(category(&with, SettingsCategory::Shell)),

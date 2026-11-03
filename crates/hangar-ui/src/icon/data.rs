@@ -81,11 +81,13 @@ pub enum Icon {
     Play,
     Pause,
     Copy,
+    Maximize,
+    Unmaximize,
 }
 
 impl Icon {
     /// All of them, in the order of the web app's table.
-    pub const ALL: [Icon; 75] = [
+    pub const ALL: [Icon; 77] = [
         Icon::Layout1,
         Icon::Layout2,
         Icon::Layout4,
@@ -161,6 +163,8 @@ impl Icon {
         Icon::Play,
         Icon::Pause,
         Icon::Copy,
+        Icon::Maximize,
+        Icon::Unmaximize,
     ];
 
     /// The name the web app knows it by (`"splitRight"`), which is what the
@@ -242,6 +246,8 @@ impl Icon {
             Icon::Play => "play",
             Icon::Pause => "pause",
             Icon::Copy => "copy",
+            Icon::Maximize => "maximize",
+            Icon::Unmaximize => "unmaximize",
         }
     }
 
@@ -324,6 +330,8 @@ impl Icon {
             Icon::Play => r##"<path d="M5.2 3.4v9.2l7.3-4.6z" fill="#000"/>"##,
             Icon::Pause => r##"<rect x="4.3" y="3.5" width="2.4" height="9" rx=".6" fill="#000" stroke="none"/><rect x="9.3" y="3.5" width="2.4" height="9" rx=".6" fill="#000" stroke="none"/>"##,
             Icon::Copy => r##"<rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"/><path d="M10.6 5.4V3.9a1.5 1.5 0 0 0-1.5-1.5H3.9a1.5 1.5 0 0 0-1.5 1.5v5.2a1.5 1.5 0 0 0 1.5 1.5h1.5"/>"##,
+            Icon::Maximize => r##"<rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.2"/>"##,
+            Icon::Unmaximize => r##"<rect x="3.25" y="5.75" width="7" height="7" rx="1.1"/><path d="M5.75 3.25h5.8a1.2 1.2 0 0 1 1.2 1.2v5.8"/>"##,
         }
     }
 }

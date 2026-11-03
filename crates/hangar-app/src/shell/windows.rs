@@ -170,9 +170,12 @@ pub fn bounds_of(
 }
 
 /// Opens the main window: its id now, for the model's window table, and the
-/// task that opens it.
-pub fn open_main() -> (window::Id, Task<Message>) {
-    let (id, opened) = window::open(main_settings());
+/// task that opens it. `decorated`: with the system's title bar.
+pub fn open_main(decorated: bool) -> (window::Id, Task<Message>) {
+    let (id, opened) = window::open(Settings {
+        decorations: decorated,
+        ..main_settings()
+    });
     (id, opened.discard())
 }
 

@@ -3132,6 +3132,7 @@ dependencies = [
  "avif-parse",
  "base64 0.22.1",
  "chrono",
+ "dirs 6.0.0",
  "hangar-core",
  "hangar-i18n",
  "hangar-kit-host",

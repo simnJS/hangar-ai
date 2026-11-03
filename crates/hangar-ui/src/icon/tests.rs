@@ -11,7 +11,7 @@ fn the_enum_is_in_the_order_of_the_table_the_handles_are_indexed_by() {
 
 #[test]
 fn every_icon_of_the_web_app_is_there() {
-    assert_eq!(Icon::ALL.len(), 75);
+    assert_eq!(Icon::ALL.len(), 77);
     // A few from each family of `Icon.tsx`, by the names it gives them.
     for name in [
         "layout1",

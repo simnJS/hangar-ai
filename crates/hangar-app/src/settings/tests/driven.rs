@@ -79,9 +79,9 @@ fn clicking_a_switch_flips_it() {
 #[test]
 fn clicking_a_theme_card_picks_the_theme() {
     let words = said(SettingsCategory::Appearance, State::default(), |ui| {
-        ui.click("Nord").expect("the card is on the page");
+        ui.click("Dracula").expect("the card is on the page");
     });
-    assert_eq!(words, [r#"Settings(Change(Set(Theme, Text("nord"))))"#]);
+    assert_eq!(words, [r#"Settings(Change(Set(Theme, Text("dracula"))))"#]);
 }
 
 #[test]

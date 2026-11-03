@@ -224,7 +224,7 @@ impl App {
         );
 
         let mut model = Model::default();
-        let (main_window, open) = windows::open_main();
+        let (main_window, open) = windows::open_main(model.live.title_bar.decorated);
         model.live.windows.insert(main_window, WindowKind::Main);
 
         let mut app = App {
@@ -261,7 +261,17 @@ impl App {
             None => Task::none(),
         };
         let hooks = hooks::install(&app.services);
-        (app, Task::batch([open, load, detect, screenshot, hooks]))
+        let layout = if cfg!(target_os = "linux") {
+            Task::perform(crate::shell::title_bar::read_layout(), |layout| {
+                Message::Shell(crate::shell::Action::TitleBarLayout(layout))
+            })
+        } else {
+            Task::none()
+        };
+        (
+            app,
+            Task::batch([open, load, detect, screenshot, hooks, layout]),
+        )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {

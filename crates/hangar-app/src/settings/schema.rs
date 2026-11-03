@@ -428,7 +428,21 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
                             CommandId::ViewInspector,
                         ))
                         .keywords("inspector inspecteur panneau droite right details détails"),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(cfg!(target_os = "linux").then(|| {
+                        toggle(
+                            "systemTitleBar",
+                            tx(Key::SettingsSystemTitleBar),
+                            settings.system_title_bar,
+                            Target::SystemTitleBar,
+                        )
+                        .hint(tx(Key::SettingsSystemTitleBarHint))
+                        .keywords(
+                            "title bar barre de titre fenêtre window decorations décorations buttons boutons gnome kde",
+                        )
+                    }))
+                    .collect(),
                 ),
                 section("theme", tx(Key::SettingsTheme), {
                     let mut items = Vec::new();

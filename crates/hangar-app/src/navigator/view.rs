@@ -218,43 +218,52 @@ fn message<'a>(t: &'a Theme, words: String) -> Element<'a, Message> {
 // ---- The top ----------------------------------------------------------------------------------
 
 /// The mark, the name, the version and the button that hides the navigator,
-/// level with the toolbar beside it so the window reads as one band.
+/// level with the toolbar beside it so the window reads as one band: the
+/// title bar's left end when Hangar draws it, with the window's buttons the
+/// desktop puts on the left.
 fn top<'a>(f: &Frame<'a>) -> Element<'a, Message> {
     let t = f.ctx.theme;
     let tr = f.ctx.i18n;
     let version = env!("CARGO_PKG_VERSION");
-    row![
-        logo(t, 15.0),
-        text("Hangar.AI")
-            .size(font_size::UI_LG)
-            .font(fonts::ui_semibold())
-            .wrapping(text::Wrapping::None),
-        tip::bottom(
-            t,
-            text(version)
-                .size(font_size::MICRO)
-                .font(fonts::mono())
-                .color(t.colors.fg_subtle),
-            tr.t_with(Key::SidebarVersion, &args!("version" => version))
-                .into_owned(),
-        ),
-        Space::new().width(Length::Fill),
-        ui_button::icon_button(t, Icon::SidebarLeft)
-            .tip(tr.t(Key::SidebarHide).into_owned())
-            .keys(reads::binding(&f.ctx, CommandId::ViewNavigator))
-            .icon_size(16.0)
-            .on_press(msg(Msg::HideNavigator)),
-    ]
-    .spacing(7)
-    .align_y(Alignment::Center)
-    .height(size::TOOLBAR_HEIGHT)
-    .padding(Padding {
-        top: 0.0,
-        right: 10.0,
-        bottom: 0.0,
-        left: 16.0,
-    })
-    .into()
+    let controls = crate::shell::title_bar::navigator(f.ctx);
+    let has_controls = controls.is_some();
+    let mut top = row![].spacing(7).align_y(Alignment::Center);
+    if let Some(controls) = controls {
+        top = top.push(controls).push(Space::new().width(space::XS));
+    }
+    let top = top
+        .extend([
+            logo(t, 15.0),
+            text("Hangar.AI")
+                .size(font_size::UI_LG)
+                .font(fonts::ui_semibold())
+                .wrapping(text::Wrapping::None)
+                .into(),
+            tip::bottom(
+                t,
+                text(version)
+                    .size(font_size::MICRO)
+                    .font(fonts::mono())
+                    .color(t.colors.fg_subtle),
+                tr.t_with(Key::SidebarVersion, &args!("version" => version))
+                    .into_owned(),
+            ),
+            Space::new().width(Length::Fill).into(),
+            ui_button::icon_button(t, Icon::SidebarLeft)
+                .tip(tr.t(Key::SidebarHide).into_owned())
+                .keys(reads::binding(&f.ctx, CommandId::ViewNavigator))
+                .icon_size(16.0)
+                .on_press(msg(Msg::HideNavigator))
+                .into(),
+        ])
+        .height(size::TOOLBAR_HEIGHT)
+        .padding(Padding {
+            top: 0.0,
+            right: 10.0,
+            bottom: 0.0,
+            left: if has_controls { 10.0 } else { 16.0 },
+        });
+    crate::shell::title_bar::band(f.ctx, top)
 }
 
 /// The project manager's HQ: one click opens it, made if it was not there.

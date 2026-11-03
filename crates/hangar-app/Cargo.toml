@@ -35,6 +35,7 @@ iced.workspace = true
 # (shell/dev_screenshot.rs).
 iced_runtime.workspace = true
 tokio.workspace = true
+dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rfd.workspace = true

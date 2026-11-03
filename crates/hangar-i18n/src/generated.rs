@@ -2664,6 +2664,10 @@ pub enum Key {
     SettingsShowNavigatorHint,
     /// `settings.size`
     SettingsSize,
+    /// `settings.systemTitleBar`
+    SettingsSystemTitleBar,
+    /// `settings.systemTitleBarHint`
+    SettingsSystemTitleBarHint,
     /// `settings.theme`
     SettingsTheme,
     /// `settings.themeDark`
@@ -3170,6 +3174,14 @@ pub enum Key {
     TaskTitle,
     /// `task.writeComment`
     TaskWriteComment,
+    /// `titleBar.close`
+    TitleBarClose,
+    /// `titleBar.maximize`
+    TitleBarMaximize,
+    /// `titleBar.minimize`
+    TitleBarMinimize,
+    /// `titleBar.restore`
+    TitleBarRestore,
     /// `toolbar.activity.context`
     ToolbarActivityContext,
     /// `toolbar.activity.contextHint`
@@ -3559,7 +3571,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1771;
+pub const KEY_COUNT: usize = 1777;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4889,6 +4901,8 @@ impl Key {
         Key::SettingsShowNavigator,
         Key::SettingsShowNavigatorHint,
         Key::SettingsSize,
+        Key::SettingsSystemTitleBar,
+        Key::SettingsSystemTitleBarHint,
         Key::SettingsTheme,
         Key::SettingsThemeDark,
         Key::SettingsThemeHint,
@@ -5142,6 +5156,10 @@ impl Key {
         Key::TaskThreadHint,
         Key::TaskTitle,
         Key::TaskWriteComment,
+        Key::TitleBarClose,
+        Key::TitleBarMaximize,
+        Key::TitleBarMinimize,
+        Key::TitleBarRestore,
         Key::ToolbarActivityContext,
         Key::ToolbarActivityContextHint,
         Key::ToolbarActivityGoTo,
@@ -6665,6 +6683,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "settings.showNavigator", en: Text::plain("Show the navigator"), fr: Text::plain("Afficher le navigateur") },
     Message { id: "settings.showNavigatorHint", en: Text::plain("Workspaces and their agents, on the left"), fr: Text::plain("Les workspaces et leurs agents, à gauche") },
     Message { id: "settings.size", en: Text::plain("Size"), fr: Text::plain("Taille") },
+    Message { id: "settings.systemTitleBar", en: Text::plain("Use the system's title bar"), fr: Text::plain("Utiliser la barre de titre du système") },
+    Message { id: "settings.systemTitleBarHint", en: Text::plain("Hangar draws its own, in its theme, with the buttons your desktop shows. Turn this on for the bar your desktop draws instead."), fr: Text::plain("Hangar dessine la sienne, aux couleurs de son thème, avec les boutons que montre ton bureau. Active ceci pour retrouver celle que dessine ton bureau.") },
     Message { id: "settings.theme", en: Text::plain("Theme"), fr: Text::plain("Thème") },
     Message { id: "settings.themeDark", en: Text::plain("Dark"), fr: Text::plain("Sombres") },
     Message { id: "settings.themeHint", en: Text::plain("Terminal palette — the whole window follows it"), fr: Text::plain("Palette des terminaux — toute la fenêtre la suit") },
@@ -6918,6 +6938,10 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "task.threadHint", en: Text::plain("this is where agents talk to each other"), fr: Text::plain("c'est ici que les agents se parlent") },
     Message { id: "task.title", en: Text::plain("Task"), fr: Text::plain("Tâche") },
     Message { id: "task.writeComment", en: Text::plain("Write a message…"), fr: Text::plain("Écrire un message…") },
+    Message { id: "titleBar.close", en: Text::plain("Close"), fr: Text::plain("Fermer") },
+    Message { id: "titleBar.maximize", en: Text::plain("Maximize"), fr: Text::plain("Agrandir") },
+    Message { id: "titleBar.minimize", en: Text::plain("Minimize"), fr: Text::plain("Réduire") },
+    Message { id: "titleBar.restore", en: Text::plain("Restore"), fr: Text::plain("Restaurer") },
     Message { id: "toolbar.activity.context", en: Text::plain("{pct}%"), fr: Text::plain("{pct}\u{202f}%") },
     Message { id: "toolbar.activity.contextHint", en: Text::plain("{pct}% of the context used; the agent compacts on its own as it nears the limit"), fr: Text::plain("{pct}\u{202f}% du contexte utilisé\u{202f}; l'agent compacte automatiquement à l'approche de la limite") },
     Message { id: "toolbar.activity.goTo", en: Text::plain("{summary} — go to {name}"), fr: Text::plain("{summary} — aller à {name}") },

@@ -43,6 +43,7 @@ pub enum Target {
     UiScale,
     NavigatorOpen,
     InspectorOpen,
+    SystemTitleBar,
     /// The workspace pins the theme it shows (on), or follows the global one.
     ThemeScope,
     /// A theme card: the workspace's own when it pins one, else the global.
@@ -222,6 +223,7 @@ pub fn apply(settings: &mut Settings, target: &Target, value: &Value) -> bool {
         (T::UiScale, Number(percent)) => settings.ui_scale = *percent,
         (T::NavigatorOpen, Bool(on)) => settings.navigator_open = *on,
         (T::InspectorOpen, Bool(on)) => settings.inspector_open = *on,
+        (T::SystemTitleBar, Bool(on)) => settings.system_title_bar = *on,
         (T::Theme, Text(id)) => settings.theme_id = id.clone(),
         (T::FontFamily, Text(stack)) => settings.font_family = stack.clone(),
         (T::FontSize, Number(px)) => settings.font_size = *px,
@@ -371,6 +373,7 @@ mod tests {
             (Target::AgentPaneControl, |s| s.agent_pane_control),
             (Target::NavigatorOpen, |s| s.navigator_open),
             (Target::InspectorOpen, |s| s.inspector_open),
+            (Target::SystemTitleBar, |s| s.system_title_bar),
             (Target::CursorBlink, |s| s.cursor_blink),
             (Target::NotifyOnIdle, |s| s.notify_on_idle),
             (Target::NotifyOnlyWhenAway, |s| s.notify_only_when_away),

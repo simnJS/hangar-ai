@@ -33,7 +33,7 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::navigator::reads;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Region, View, WindowKind};
+use crate::shell::{Region, View, WindowKind, title_bar};
 use crate::state::layout;
 use crate::state::types::{MAX_PANES, Workspace};
 use crate::state::{AgentActivity, Model, PaneId, WsId};
@@ -314,7 +314,13 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let Some(ws) = ctx.workspace() else {
         return Space::new().into();
     };
-    responsive(move |size| bar(st, ctx, ws, size.width)).into()
+    // The window's buttons, when Hangar draws its title bar, take their room
+    // first; the rest is laid out for what is left.
+    responsive(move |size| {
+        let room = title_bar::toolbar_room(ctx);
+        bar(st, ctx, ws, (size.width - room).max(0.0))
+    })
+    .into()
 }
 
 /// The toolbar, laid out for `width` logical pixels.
@@ -335,8 +341,12 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     let icon_views = width < 64.0 * EM;
     let folded = width < 46.0 * EM;
 
-    // ---- The lead: the navigator's door, the name, the views.
+    // ---- The lead: the window's buttons the desktop puts on the left, the
+    // navigator's door, the name, the views.
     let mut lead = row![].spacing(space::MD).align_y(Alignment::Center);
+    if let Some(controls) = title_bar::toolbar(ctx, title_bar::Side::Start) {
+        lead = lead.push(controls);
+    }
     if is_main && !settings.navigator_open {
         lead = lead.push(
             ui_button::icon_button(t, Icon::SidebarLeft)
@@ -442,6 +452,10 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
                 .keys(keys(CommandId::ViewInspector))
                 .on_press(Message::Intent(Intent::ToggleInspector)),
         );
+    // The window's buttons the desktop puts on the right, last.
+    if let Some(controls) = title_bar::toolbar(ctx, title_bar::Side::End) {
+        trail = trail.push(Space::new().width(space::MD)).push(controls);
+    }
 
     row![
         container(lead).width(Length::Shrink),

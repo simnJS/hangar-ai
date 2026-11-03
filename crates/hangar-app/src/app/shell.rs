@@ -13,7 +13,7 @@ use crate::message::{Intent, Message};
 use crate::shell::drawer::{self, DrawerCloseReason};
 use crate::shell::{
     Action, Drawer, Focus, Overlay, Panels, Region, View, WindowKind, frame, notice, regions,
-    windows,
+    title_bar, windows,
 };
 use crate::state::folders::sidebar_order;
 use crate::state::layout::{compute_layout, normalize_tree, preferred_dir};
@@ -195,8 +195,53 @@ impl App {
                 }
             }
             Action::Quit => return self.quit(),
+            Action::TitleBar(w, press) => return self.title_bar_press(w, press),
+            Action::TitleBarLayout(layout) => {
+                self.model.live.title_bar.layout = layout.unwrap_or_default();
+            }
+            Action::Maximized(w, on) => {
+                let maximized = &mut self.model.live.title_bar.maximized;
+                if on {
+                    maximized.insert(w);
+                } else {
+                    maximized.remove(&w);
+                }
+            }
         }
         Task::none()
+    }
+
+    /// A press on the title bar Hangar draws (shell/title_bar.rs).
+    fn title_bar_press(&mut self, w: window::Id, press: title_bar::Press) -> Task<Message> {
+        use title_bar::{Control, Press};
+        match press {
+            Press::Band => {
+                let now = std::time::Instant::now();
+                let bar = &mut self.model.live.title_bar;
+                if title_bar::is_double(bar.last_press, w, now) {
+                    bar.last_press = None;
+                    window::toggle_maximize(w)
+                } else {
+                    bar.last_press = Some((w, now));
+                    window::drag(w)
+                }
+            }
+            Press::Menu => window::show_system_menu(w),
+            Press::Control(Control::Minimize) => window::minimize(w, true),
+            Press::Control(Control::Maximize) => window::toggle_maximize(w),
+            // As the system's close button would: a workspace window brings
+            // its workspace back, the main one ends the app.
+            Press::Control(Control::Close) => self.window_event(w, window::Event::CloseRequested),
+            Press::Edge(direction) => window::drag_resize(w, direction),
+        }
+    }
+
+    /// Asks whether window `w` is maximised now, for its title bar.
+    fn ask_maximized(&self, w: window::Id) -> Task<Message> {
+        if !title_bar::drawn(self.model.settings()) {
+            return Task::none();
+        }
+        window::is_maximized(w).map(move |on| Message::Shell(Action::Maximized(w, on)))
     }
 
     /// The window's events the shell answers.
@@ -212,6 +257,7 @@ impl App {
             },
             window::Event::Closed => {
                 let kind = self.model.live.windows.remove(&id);
+                self.model.live.title_bar.maximized.remove(&id);
                 self.model.ui.parked.remove(&id);
                 self.model.ui.body_width.remove(&id);
                 self.window_sizes.remove(&id);
@@ -250,11 +296,11 @@ impl App {
                     self.window_positions
                         .insert(id, Point::new(at.x * scale, at.y * scale));
                 }
-                Task::none()
+                self.ask_maximized(id)
             }
             window::Event::Resized(size) => {
                 self.window_sizes.insert(id, size * scale);
-                self.bounds_moved(id)
+                Task::batch([self.bounds_moved(id), self.ask_maximized(id)])
             }
             window::Event::Moved(at) => {
                 self.window_positions
@@ -283,6 +329,27 @@ impl App {
     /// What follows a change (App.tsx's effects), run after every message.
     pub(super) fn follow_changes(&mut self) -> Vec<Task<Message>> {
         let mut tasks = Vec::new();
+
+        // The system's title bar, given back or taken away: every window at
+        // once, so that they all have the one the setting says.
+        let decorated = !title_bar::drawn(self.model.settings());
+        if self.model.live.title_bar.decorated != decorated {
+            self.model.live.title_bar.decorated = decorated;
+            tasks.extend(
+                self.model
+                    .live
+                    .windows
+                    .keys()
+                    .map(|&w| window::toggle_decorations(w)),
+            );
+            tasks.extend(
+                self.model
+                    .live
+                    .windows
+                    .keys()
+                    .map(|&w| self.ask_maximized(w)),
+            );
+        }
 
         // Every respawn, whoever applied it, is announced.
         for respawn in self.model.take_respawns() {
@@ -973,11 +1040,14 @@ impl App {
         else {
             return Task::none();
         };
-        let settings = windows::workspace_settings_at(
-            workspace.window_bounds,
-            screen,
-            self.model.settings().scale_factor(),
-        );
+        let settings = window::Settings {
+            decorations: self.model.live.title_bar.decorated,
+            ..windows::workspace_settings_at(
+                workspace.window_bounds,
+                screen,
+                self.model.settings().scale_factor(),
+            )
+        };
         let (id, open) = windows::open_workspace(settings);
         self.model
             .window_opened(id, WindowKind::Workspace(ws.clone()));

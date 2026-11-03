@@ -14,6 +14,7 @@ pub mod overlay;
 pub mod placeholder;
 pub mod regions;
 pub mod side_panels;
+pub mod title_bar;
 pub mod ui;
 pub mod windows;
 
@@ -70,4 +71,11 @@ pub enum Action {
     /// SIGTERM, SIGINT or SIGHUP: the app ends as when its main window
     /// closes, its last change saved and its panes killed.
     Quit,
+    /// A press on Hangar's own title bar, its buttons or its edges
+    /// (title_bar.rs).
+    TitleBar(iced::window::Id, title_bar::Press),
+    /// The desktop's button layout has been read, or could not be.
+    TitleBarLayout(Option<title_bar::Layout>),
+    /// Whether this window is maximised, asked after it changed size.
+    Maximized(iced::window::Id, bool),
 }
