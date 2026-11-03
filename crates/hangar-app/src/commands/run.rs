@@ -25,7 +25,7 @@ use crate::state::PaneId;
 use crate::state::layout::{Direction, leaf_ids, neighbor_of, normalize_tree};
 use crate::state::roles::{orchestrator_of, workers_of};
 use crate::state::types::DropZone;
-use crate::state::types::{AgentId, SplitDir};
+use crate::state::types::{AgentId, SplitDir, SplitNode};
 use crate::state::{Model, Patch, Settings, StoreAction, Workspace, folders::sidebar_order};
 
 /// The bounds of the terminals' font size (the settings' slider).
@@ -41,6 +41,11 @@ struct Scope<'a> {
     /// The workspace the window shows.
     ws: Option<&'a Workspace>,
     view: View,
+    /// The arrangement of its panes on screen (App.tsx's `tree`), which
+    /// every pane command acts on. A workspace without a pane has none:
+    /// `normalize_tree` answers it a lone empty leaf, a pane that does not
+    /// exist for the commands to focus, restart or split.
+    tree: Option<SplitNode>,
     /// The window's panes in reading order.
     order: Vec<PaneId>,
     focused: Option<PaneId>,
@@ -51,9 +56,10 @@ impl<'a> Scope<'a> {
         let main = !matches!(m.live.windows.get(&w), Some(WindowKind::Workspace(_)));
         let state = m.state();
         let ws = m.window_workspace(w);
-        let order = ws.map_or_else(Vec::new, |ws| {
-            leaf_ids(&normalize_tree(&ws.panes, ws.tree.as_ref()))
-        });
+        let tree = ws
+            .filter(|ws| !ws.panes.is_empty())
+            .map(|ws| normalize_tree(&ws.panes, ws.tree.as_ref()));
+        let order = tree.as_ref().map_or_else(Vec::new, leaf_ids);
         Scope {
             main,
             workspaces: if main {
@@ -63,6 +69,7 @@ impl<'a> Scope<'a> {
             },
             ws,
             view: m.view_in(w),
+            tree,
             order,
             focused: ws
                 .and_then(|ws| m.focused_pane(ws))
@@ -164,8 +171,9 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     }
 
     // Everything below acts on panes, which are only on screen, and only
-    // what a key can be about, in the terminals view.
-    if scope.view != View::Terminals {
+    // what a key can be about, in the terminals view, and only where there
+    // are some (App.tsx: `view !== "terminals" || !tree`).
+    if scope.view != View::Terminals || scope.tree.is_none() {
         return live;
     }
     live.extend([
@@ -280,7 +288,21 @@ fn message(m: &Model, w: window::Id, id: CommandId) -> Option<Message> {
 
     // The commands that need no workspace.
     match id {
-        ViewSettings => return Some(Message::Shell(Action::ToggleSettings)),
+        // Through the intents every opening and closing of the sheet goes
+        // through, so the settings package syncs with it: a sheet opened any
+        // other way would not know it is open, and its first category click
+        // would land back on General.
+        ViewSettings => {
+            let open = m
+                .overlays_in(w)
+                .iter()
+                .any(|overlay| matches!(overlay, Overlay::Settings(_)));
+            return if open {
+                Some(Message::Shell(Action::CloseSettings))
+            } else {
+                intent(Intent::OpenSettings(None))
+            };
+        }
         ViewShortcuts => return intent(Intent::OpenSettings(Some(SettingsCategory::Shortcuts))),
         WorkspaceNew => return intent(Intent::OpenOverlay(Overlay::WorkspaceDialog)),
         // The same key closes it again, as in any editor.
@@ -365,11 +387,12 @@ fn message(m: &Model, w: window::Id, id: CommandId) -> Option<Message> {
         PaneTidy => return intent(Intent::Tidy(wid)),
         _ => {}
     }
+    // Moving between the window's own panes is App.tsx's `focusPane` alone:
+    // not the landing of `Intent::FocusPane`, which closes the overlays.
     let focus = |pane: &PaneId| {
-        intent(Intent::FocusPane {
+        intent(Intent::SelectPane {
             ws: wid.clone(),
             pane: pane.clone(),
-            terminal: true,
         })
     };
     if let Some(n) = FOCUS.iter().position(|command| *command == id) {
@@ -387,8 +410,8 @@ fn message(m: &Model, w: window::Id, id: CommandId) -> Option<Message> {
     }
 
     let focused = scope.focused.clone()?;
-    let tree = normalize_tree(&ws.panes, ws.tree.as_ref());
-    let toward = |dir: Direction| neighbor_of(&tree, &focused, dir);
+    let tree = scope.tree.as_ref()?;
+    let toward = |dir: Direction| neighbor_of(tree, &focused, dir);
     let terminal = |action| {
         intent(Intent::TerminalAction {
             pane: focused.clone(),

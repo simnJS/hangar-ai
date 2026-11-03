@@ -321,10 +321,11 @@ impl Model {
     /// to be written back on every save until the app writes those fields.
     pub fn hydrate_read(&mut self, mut state: AppState, kept: Vec<Kept>) {
         fix_up(&mut state);
-        if let Some(active) = state.active_workspace_id.clone()
-            && !self.ui.opened_ids.contains(&active)
-        {
-            self.ui.opened_ids.push(active);
+        // The active one is on screen at once. A detached one joins when its
+        // window opens again (`Model::window_opened`), so its panes start
+        // there and not before.
+        if let Some(active) = &state.active_workspace_id {
+            self.mount(active);
         }
         self.unread = if kept.is_empty() {
             Unread::default()

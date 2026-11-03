@@ -31,7 +31,8 @@ pub struct Ui {
     pub confirm_reset: bool,
     pub confirm_stop_workers: bool,
     pub needs_you_open: bool,
-    /// The status bar's broadcast input.
+    /// The focused window's broadcast input; the other windows' wait in
+    /// `parked` (`Model::broadcast_in`).
     pub broadcast: String,
     /// The one-line notice at the bottom, with the id its expiry names.
     pub notice: Option<(u64, Notice)>,
@@ -54,10 +55,10 @@ pub struct Ui {
     /// What had the keyboard when each overlay opened, parallel to
     /// `overlays`: closing one gives the keyboard back.
     pub overlay_openers: Vec<Option<Focus>>,
-    /// The view, drawer and focus of every window but the focused one. Each
-    /// window has its own, as each Tauri window had its own App: `view`,
-    /// `drawer` and `focus` above are the focused window's, and trade places
-    /// with these when the focus moves (`Model::view_in`).
+    /// The view, overlays, drawer, focus and broadcast text of every window
+    /// but the focused one. Each window has its own, as each Tauri window had
+    /// its own App: the fields above are the focused window's, and trade
+    /// places with these when the focus moves (`Model::view_in`).
     pub parked: HashMap<window::Id, WindowUi>,
     /// Where the pointer is, for the drawers' "a press outside closes it".
     pub pointer: Pointer,
@@ -72,6 +73,9 @@ pub struct WindowUi {
     pub drawer: Option<Drawer>,
     pub drawer_opener: Option<Focus>,
     pub focus: Option<Focus>,
+    /// What its broadcast field holds: a line typed in one window and left
+    /// there is not sent from, or shown in, another.
+    pub broadcast: String,
 }
 
 /// Over which of the frame's parts the pointer is, as their mouse areas
@@ -97,6 +101,19 @@ pub struct Signals {
     /// P6: how many items Needs-you lists; `view.needsYou` is live while
     /// there are some.
     pub needs_you: usize,
+    /// P9, P12, P15: a side panel's grip is held, and this is the width the
+    /// panel is drawn at meanwhile, in points (the setting's unit). Its
+    /// package writes the setting once, when the grip is let go, and clears
+    /// this: the frame (`Panels::of`) follows the pointer without a store
+    /// action, a save and a snapshot for every move of it.
+    pub panel_drag: Option<PanelDrag>,
+}
+
+/// A side panel's width while its grip is held (`Signals::panel_drag`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelDrag {
+    pub panel: Drawer,
+    pub width: f32,
 }
 
 /// A workspace's preview panel (the panel part of `lib/modelStore.ts`).

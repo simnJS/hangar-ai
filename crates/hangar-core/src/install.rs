@@ -149,6 +149,34 @@ fn detected(target: &Target) -> bool {
     }
 }
 
+/// Why this run must not write `what`, when it is one kept off the installed
+/// app's data.
+///
+/// `HANGAR_DATA_ROOT` (paths.rs) moves the state, the endpoint, the mods, the
+/// kits and the accounts of a development build away from the installed
+/// Hangar's. The agents' MCP configs and the login item cannot be moved that
+/// way: they live where the agents and the system look for them, and what
+/// this run would write there is its own executable, a build under
+/// `target/`. The installed app's entry would be replaced by one that stops
+/// working at the next `cargo build`, and the PC would start that build at
+/// login. So a run kept off the data is kept off these too. The variable
+/// decides rather than the build profile, because `native-dev.sh --release`
+/// is such a run as well, and a debug build started with
+/// `HANGAR_DEV_USE_REAL_DATA` uses the real files on purpose (main.rs).
+pub(crate) fn isolation_refusal(what: &str) -> Option<String> {
+    refusal_for(std::env::var_os("HANGAR_DATA_ROOT"), what)
+}
+
+fn refusal_for(root: Option<std::ffi::OsString>, what: &str) -> Option<String> {
+    root.filter(|root| !root.is_empty()).map(|root| {
+        format!(
+            "This run keeps off the installed Hangar's files (HANGAR_DATA_ROOT is {}), \
+             so it does not write {what}: that would point them at this build.",
+            Path::new(&root).display()
+        )
+    })
+}
+
 fn executable() -> Result<String, String> {
     std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
@@ -382,10 +410,34 @@ pub fn mcp_targets(workspace_cwd: String) -> Vec<TargetStatus> {
 }
 
 pub fn mcp_install(ids: Vec<String>, workspace_cwd: String) -> Vec<InstallReport> {
+    install_unless(
+        isolation_refusal("the agents' MCP configs"),
+        ids,
+        workspace_cwd,
+    )
+}
+
+/// `mcp_install`, or with `refusal` the same reports, each failed with it and
+/// no file touched.
+fn install_unless(
+    refusal: Option<String>,
+    ids: Vec<String>,
+    workspace_cwd: String,
+) -> Vec<InstallReport> {
     TARGETS
         .iter()
         .filter(|t| ids.iter().any(|id| id == t.id))
         .map(|target| {
+            if let Some(refusal) = &refusal {
+                return InstallReport {
+                    id: target.id.to_string(),
+                    ok: false,
+                    message: refusal.clone(),
+                    path: config_path(target, &workspace_cwd)
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                };
+            }
             let path = match config_path(target, &workspace_cwd) {
                 Some(p) => p,
                 None => {
@@ -527,6 +579,39 @@ mod tests {
         assert!(!found.stale());
         assert_eq!(found.command.as_deref(), Some(&*exe.to_string_lossy()));
         fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// A development run on a data root of its own writes no agent config:
+    /// every target asked for is answered, failed, and its file left alone.
+    #[test]
+    fn a_run_kept_off_the_installed_app_s_data_writes_no_config() {
+        let project = temp_config("isolated");
+        let cwd = project.parent().unwrap().to_string_lossy().into_owned();
+        let refusal = refusal_for(Some("/tmp/dev-home".into()), "the agents' MCP configs");
+        assert!(refusal
+            .as_deref()
+            .is_some_and(|why| why.contains("HANGAR_DATA_ROOT")));
+
+        let reports = install_unless(
+            refusal.clone(),
+            vec!["claude-code".into(), "cursor".into()],
+            cwd.clone(),
+        );
+
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|r| !r.ok && Some(&r.message) == refusal.as_ref()));
+        assert!(reports[0].path.ends_with(".mcp.json"), "{}", reports[0].path);
+        assert!(!Path::new(&cwd).join(".mcp.json").exists());
+        assert!(!Path::new(&cwd).join(".cursor").exists());
+        fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn only_a_data_root_that_names_a_folder_keeps_a_run_off() {
+        assert_eq!(refusal_for(None, "x"), None);
+        assert_eq!(refusal_for(Some("".into()), "x"), None);
+        assert!(refusal_for(Some("/d".into()), "the login item")
+            .is_some_and(|why| why.contains("the login item")));
     }
 
     #[test]

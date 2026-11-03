@@ -33,6 +33,30 @@ pub const WORKSPACE_MIN_SIZE: Size = Size::new(640.0, 420.0);
 /// (App.tsx: 700 ms after a move or a resize).
 pub const BOUNDS_SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
 
+/// Why a workspace's window is being opened, which decides what a window
+/// that never opens undoes (App.tsx's `detach` and its reopening at boot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opening {
+    /// The person sent it there: it comes back to the main window, shown,
+    /// with the `window.openFailed` notice.
+    Detach,
+    /// It was in a window of its own when the app last quit: it comes back
+    /// into the main window quietly, as the TS reopening did.
+    Boot,
+}
+
+/// How long a workspace window made by `open_workspace` has to report itself
+/// open (`window::Event::Opened`) before it counts as one that failed.
+///
+/// iced has no answer for a window the system refuses: winit's error makes
+/// iced 0.14 panic in its event loop ("Create window"), so that failure ends
+/// the app before any code here could undo the detach. What is left to catch
+/// is a window that never comes, and this is how long it is waited for. The
+/// `Opened` event follows the window's creation within a frame, so ten
+/// seconds is only ever reached by a window that is not coming; one that
+/// still shows up afterwards is closed (`App::window_event`).
+pub const OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The name the desktop knows the app's windows by, and their icon.
 ///
 /// On Linux the application id is what a compositor matches against the

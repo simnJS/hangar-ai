@@ -1,10 +1,13 @@
-//! Stand-ins for the hangar-ui types the shell's contracts name, until that
-//! crate lands (W2.ui, being built in parallel).
+//! Two value types the shell's contracts name, kept here for good.
 //!
-//! TODO(hangar-ui): replace each with a `pub use` of hangar-ui's own type
-//! (`hangar_ui::popover::CloseReason`, the context menu's entry model), so
-//! the packages that already name `crate::shell::CloseReason` and
-//! `crate::shell::MenuEntry` keep compiling.
+//! They were stand-ins for hangar-ui's own, until that crate landed. It has
+//! no counterpart to either: no close reason, since a hangar-ui layer
+//! reports a dismissal and leaves the reason to its owner, and its menu
+//! entry (`hangar_ui::menu::Entry`) is the widget's own input, built with an
+//! `Item` per line and holding no `Clone`, which a menu kept in a package's
+//! state and an entry embedded across packages (`accounts::menu_items`) both
+//! need. So they stay the shell's: a package describes its menu with
+//! `MenuEntry` and its view turns that into hangar-ui's entries.
 
 /// Why a popover or a menu closed (`ToolbarMenu`'s close reasons): the owner
 /// decides where the focus goes from it.

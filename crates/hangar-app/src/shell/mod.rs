@@ -48,8 +48,11 @@ pub enum Action {
     Pressed(iced::window::Id),
     /// `view.needsYou`: the Needs-you list opens under its button.
     OpenNeedsYou,
-    /// `view.settings`: the settings close when open, else open on General.
-    ToggleSettings,
+    /// `view.settings` while the sheet is open: it closes, with whatever was
+    /// opened over it (a kit's activation, which the TS drew inside the
+    /// sheet), one `Intent::CloseOverlay` at a time so every package hears
+    /// each close. Closed, the key opens it through `Intent::OpenSettings`.
+    CloseSettings,
     /// `app.fullscreen`, for this window.
     ToggleFullscreen(iced::window::Id),
     /// The size of the main window's screen is known: workspace `ws`'s
@@ -58,7 +61,13 @@ pub enum Action {
         ws: crate::state::WsId,
         screen: Option<iced::Size>,
     },
+    /// `windows::OPEN_TIMEOUT` has passed since this workspace window was
+    /// made: undone, unless it reported itself open meanwhile.
+    OpenTimedOut(iced::window::Id),
     /// A workspace window has been still for a while since this move or
     /// resize: its bounds are written if nothing moved it since.
     BoundsSettled(iced::window::Id, u64),
+    /// SIGTERM, SIGINT or SIGHUP: the app ends as when its main window
+    /// closes, its last change saved and its panes killed.
+    Quit,
 }

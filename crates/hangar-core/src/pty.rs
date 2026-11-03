@@ -652,9 +652,12 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
             .and_then(|_| Some((session.child.process_id()?, crate::procs::table()?)))
             .map(|(pid, table)| crate::procs::descendants(&table, pid, crate::procs::started))
             .unwrap_or_default();
+        // So is the group: a shell that ends on the hangup is reaped inside
+        // `kill`, and a reaped shell's group can no longer be asked for.
+        let group = process_group(&session);
         let _ = session.child.kill();
         crate::procs::terminate(&below);
-        reap_process_group(&session);
+        kill_group(group);
         let _ = session.child.wait();
         // Closing the master is what ends the reader thread, so it happens
         // before the id is handed back rather than at the end of the scope.
@@ -664,30 +667,46 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
     Ok(())
 }
 
-/// Kills whatever the shell left running behind it.
+/// A pane's process group, to kill whatever the shell left running behind it.
 ///
 /// `Child::kill` signals the shell alone, and an agent it started outlives it:
 /// re-parented, still holding the pty open, still burning cpu on a pane that is
 /// gone from screen. The shell owns a session of its own — the pty gave it one
 /// — so its process group is exactly the pane and nothing else.
 ///
-/// Guarded against ever naming our own group: a pty that somehow did not get
-/// its own session would otherwise make this the last thing the app does.
+/// Read while the shell is still there, since a reaped shell's group can no
+/// longer be asked for. Guarded against ever naming our own group: a pty that
+/// somehow did not get its own session would otherwise make the kill the last
+/// thing the app does.
 #[cfg(unix)]
-fn reap_process_group(session: &PtySession) {
-    let Some(pid) = session.child.process_id() else {
-        return;
-    };
-    unsafe {
-        let group = libc::getpgid(pid as libc::pid_t);
-        if group > 0 && group != libc::getpgrp() {
-            libc::killpg(group, libc::SIGKILL);
+fn process_group(session: &PtySession) -> Option<libc::pid_t> {
+    let pid = session.child.process_id()?;
+    let group = unsafe { libc::getpgid(pid as libc::pid_t) };
+    (group > 0 && group != unsafe { libc::getpgrp() }).then_some(group)
+}
+
+#[cfg(not(unix))]
+fn process_group(_session: &PtySession) -> Option<i32> {
+    None
+}
+
+#[cfg(unix)]
+fn signal_group(group: Option<libc::pid_t>, signal: libc::c_int) {
+    if let Some(group) = group {
+        unsafe {
+            libc::killpg(group, signal);
         }
     }
 }
 
+/// Kills what is left of a pane's group, outright.
+#[cfg(unix)]
+fn kill_group(group: Option<libc::pid_t>) {
+    signal_group(group, libc::SIGKILL);
+}
+
 #[cfg(not(unix))]
-fn reap_process_group(_session: &PtySession) {}
+fn kill_group(_group: Option<i32>) {}
 
 /// The tail of a live pane's output, for a window taking the pane over.
 pub fn pty_history(manager: &PtyManager, id: String) -> Result<PtyHistory, String> {
@@ -742,12 +761,37 @@ pub async fn pty_has_children(
     .map_err(|e| e.to_string())?
 }
 
-/// Kills every live pane. Used on window close so no shell is left behind.
+/// Kills every live pane, with everything running in it: the app is ending
+/// (`Core::shutdown`), and nothing a pane started is to outlive it.
+///
+/// Every pane's group is hung up first, all at once, as a terminal that
+/// closes would: what handles the hangup ends cleanly, and the shells that
+/// end on it are gone before each one's `kill` waits out its grace. Then each
+/// shell is killed (`Child::kill`), and what is left in the groups — what
+/// ignored the hangup, an agent started with `nohup` — is killed outright, as
+/// `pty_kill` does for one pane.
 pub fn kill_all(manager: &PtyManager) {
-    let mut registry = manager.lock();
-    for (_, mut session) in registry.sessions.drain() {
+    // Out of the registry and its lock: the kills wait, and nothing else
+    // needs the panes now.
+    let mut sessions: Vec<PtySession> = manager
+        .lock()
+        .sessions
+        .drain()
+        .map(|(_, session)| session)
+        .collect();
+    let groups: Vec<_> = sessions.iter().map(process_group).collect();
+    for session in &sessions {
         session.live.store(false, Ordering::Relaxed);
+    }
+    #[cfg(unix)]
+    for group in &groups {
+        signal_group(*group, libc::SIGHUP);
+    }
+    for session in &mut sessions {
         let _ = session.child.kill();
+    }
+    for group in groups {
+        kill_group(group);
     }
 }
 
@@ -1156,5 +1200,102 @@ mod tests {
         );
         pty_kill(&manager, "p-sink".into(), None).unwrap();
         assert!(!pty_alive(&manager, "p-sink".into()));
+    }
+
+    /// Spawns `script` under /bin/sh in pane `id`, and answers the pid it
+    /// prints as `started:<pid>`.
+    #[cfg(unix)]
+    fn spawn_printing_a_pid(manager: &PtyManager, id: &str, script: &str) -> libc::pid_t {
+        let (sent, received) = std::sync::mpsc::channel();
+        let shell = crate::shells::ShellInfo {
+            id: "sh".into(),
+            label: "sh".into(),
+            program: "/bin/sh".into(),
+            args: args(&["-c", script]),
+        };
+        pty_spawn(
+            manager,
+            Box::new(move |event| {
+                let _ = sent.send(event);
+            }),
+            id.into(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(shell),
+            80,
+            24,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("spawned");
+        let mut printed = String::new();
+        loop {
+            match received
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the pid")
+            {
+                PtyEvent::Output(chunk) => printed.push_str(&chunk.data),
+                PtyEvent::Exit(_) => panic!("the shell ended early: {printed:?}"),
+            }
+            if let Some(pid) = printed
+                .split("started:")
+                .nth(1)
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|pid| pid.parse().ok())
+                .filter(|_| printed.trim_end().ends_with(|c: char| c.is_ascii_digit()))
+            {
+                return pid;
+            }
+        }
+    }
+
+    /// Whether `pid` is gone within a few seconds (a process reparented to
+    /// init is reaped there, which takes a moment).
+    #[cfg(unix)]
+    fn ends(pid: libc::pid_t) -> bool {
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        false
+    }
+
+    /// Quitting takes the whole pane along: a process that ignores the
+    /// hangup, which `Child::kill` alone would leave running once its shell
+    /// is gone, is killed with its group.
+    #[cfg(unix)]
+    #[test]
+    fn quitting_kills_what_ignores_the_hangup_too() {
+        let manager = PtyManager::default();
+        let pid = spawn_printing_a_pid(
+            &manager,
+            "p-quit",
+            "trap '' HUP; sleep 60 & echo started:$!; wait",
+        );
+        kill_all(&manager);
+        assert!(!pty_alive(&manager, "p-quit".into()));
+        assert!(ends(pid), "sleep {pid} outlived the app");
+    }
+
+    /// A shell that ends on the hangup is reaped inside `kill`; its group,
+    /// read before, still goes.
+    #[cfg(unix)]
+    #[test]
+    fn closing_a_pane_kills_its_group_even_when_the_shell_ended_first() {
+        let manager = Arc::new(PtyManager::default());
+        let pid = spawn_printing_a_pid(
+            &manager,
+            "p-close",
+            "(trap '' HUP; exec sleep 60) & echo started:$!; wait",
+        );
+        pty_kill(&manager, "p-close".into(), None).unwrap();
+        assert!(ends(pid), "sleep {pid} outlived its pane");
     }
 }

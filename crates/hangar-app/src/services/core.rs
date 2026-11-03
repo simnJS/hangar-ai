@@ -74,11 +74,34 @@ impl CoreHandles {
     }
 }
 
-/// `load_state`: the raw JSON of `state.json`, `None` when there is none yet.
-/// Core moves a plaintext Groq key to the keychain and quarantines an
-/// unreadable file (`state.json.corrupt.*`) before answering.
-pub async fn load_state(host: Host) -> Result<Option<Value>, String> {
-    blocking(move || hangar_core::store::load_state(&host)).await
+/// `load_state`, read: `None` when there is no file yet. Core moves a
+/// plaintext Groq key to the keychain and sets an unreadable file aside
+/// (`state.json.corrupt.*`) before answering. The lenient read runs here
+/// too, off the UI thread, and a document it turns down is set aside the
+/// same way: whatever the boot cannot use is out of the way of the first
+/// save, or held so that no save goes over it (`hangar_core::store::Rescue`).
+pub async fn load_state(
+    host: Host,
+) -> Result<Option<Box<crate::state::Loaded>>, hangar_core::store::LoadError> {
+    let reader = host.clone();
+    let read = tokio::task::spawn_blocking(move || {
+        let Some(value) = hangar_core::store::load_state_checked(&reader)? else {
+            return Ok(None);
+        };
+        match crate::state::read_checked(value) {
+            Ok((state, kept)) => Ok(Some(Box::new(crate::state::Loaded { state, kept }))),
+            Err(reason) => Err(hangar_core::store::set_aside_state(&reader, reason)),
+        }
+    })
+    .await;
+    // The read itself broke down: the file was not used, so it goes the way
+    // of any file that could not be.
+    read.unwrap_or_else(|err| {
+        Err(hangar_core::store::set_aside_state(
+            &host,
+            format!("the read stopped: {err}"),
+        ))
+    })
 }
 
 /// `save_state`: the whole state as `Model::to_json` made it, written to

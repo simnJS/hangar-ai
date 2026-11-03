@@ -2900,6 +2900,14 @@ pub enum Key {
     SleepWorker,
     /// `sleep.working`
     SleepWorking,
+    /// `state.loadFailed`
+    StateLoadFailed,
+    /// `state.loadHeld`
+    StateLoadHeld,
+    /// `state.loadKept`
+    StateLoadKept,
+    /// `state.saveHeld`
+    StateSaveHeld,
     /// `stats.agentsTitle`
     StatsAgentsTitle,
     /// `stats.allProjects`
@@ -3278,6 +3286,8 @@ pub enum Key {
     WindowElsewhereTitle,
     /// `window.inOwnWindow`
     WindowInOwnWindow,
+    /// `window.noAnswer`
+    WindowNoAnswer,
     /// `window.openFailed`
     WindowOpenFailed,
     /// `window.reattach`
@@ -3545,7 +3555,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1764;
+pub const KEY_COUNT: usize = 1769;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4993,6 +5003,10 @@ impl Key {
         Key::SleepWaiting,
         Key::SleepWorker,
         Key::SleepWorking,
+        Key::StateLoadFailed,
+        Key::StateLoadHeld,
+        Key::StateLoadKept,
+        Key::StateSaveHeld,
         Key::StatsAgentsTitle,
         Key::StatsAllProjects,
         Key::StatsChartKeys,
@@ -5182,6 +5196,7 @@ impl Key {
         Key::WindowElsewhereBody,
         Key::WindowElsewhereTitle,
         Key::WindowInOwnWindow,
+        Key::WindowNoAnswer,
         Key::WindowOpenFailed,
         Key::WindowReattach,
         Key::WindowReattachHint,
@@ -6762,6 +6777,10 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "sleep.waiting", en: Text::plain("{name} is waiting for your answer"), fr: Text::plain("{name} attend ta réponse") },
     Message { id: "sleep.worker", en: Text::plain("{name} is working for the orchestrator"), fr: Text::plain("{name} travaille pour l'orchestrateur") },
     Message { id: "sleep.working", en: Text::plain("{name} is still working"), fr: Text::plain("{name} travaille encore") },
+    Message { id: "state.loadFailed", en: Text::plain("Could not read state.json: {error}"), fr: Text::plain("Impossible de lire state.json\u{202f}: {error}") },
+    Message { id: "state.loadHeld", en: Text::plain("Could not read state.json ({error}). It stays as it is, and nothing will be saved over it until it can be moved aside."), fr: Text::plain("Impossible de lire state.json ({error}). Il reste tel quel, et rien ne sera enregistré par-dessus tant qu'il ne pourra pas être mis de côté.") },
+    Message { id: "state.loadKept", en: Text::plain("Could not read state.json ({error}). It is kept as {path}, and Hangar.AI starts empty."), fr: Text::plain("Impossible de lire state.json ({error}). Il est conservé sous {path}, et Hangar.AI démarre à vide.") },
+    Message { id: "state.saveHeld", en: Text::plain("Not saved, so that the unreadable state.json stays as it is: {error}"), fr: Text::plain("Non enregistré, pour que le state.json illisible reste tel quel\u{202f}: {error}") },
     Message { id: "stats.agentsTitle", en: Text::plain("By agent"), fr: Text::plain("Par agent") },
     Message { id: "stats.allProjects", en: Text::plain("All projects"), fr: Text::plain("Tous les projets") },
     Message { id: "stats.chartKeys", en: Text::plain("Arrow keys move from one column to the next"), fr: Text::plain("Les flèches passent d'une colonne à l'autre") },
@@ -6951,6 +6970,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "window.elsewhereBody", en: Text::plain("Its panes run there. Closing that window brings the workspace back here, agents still running."), fr: Text::plain("Ses panneaux tournent là-bas. Fermer cette fenêtre ramène le workspace ici, agents toujours en marche.") },
     Message { id: "window.elsewhereTitle", en: Text::plain("{name} is open in its own window"), fr: Text::plain("{name} est ouvert dans sa propre fenêtre") },
     Message { id: "window.inOwnWindow", en: Text::plain("Open in a window of its own"), fr: Text::plain("Ouvert dans sa propre fenêtre") },
+    Message { id: "window.noAnswer", en: Text::plain("the system never showed it"), fr: Text::plain("le système ne l'a jamais affichée") },
     Message { id: "window.openFailed", en: Text::plain("Could not open the window: {error}"), fr: Text::plain("Impossible d'ouvrir la fenêtre\u{202f}: {error}") },
     Message { id: "window.reattach", en: Text::plain("Back to the main window"), fr: Text::plain("Revenir dans la fenêtre principale") },
     Message { id: "window.reattachHint", en: Text::plain("Bring this workspace back into the main window. Its agents keep running."), fr: Text::plain("Ramener ce workspace dans la fenêtre principale. Ses agents continuent de tourner.") },

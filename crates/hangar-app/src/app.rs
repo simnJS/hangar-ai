@@ -186,8 +186,17 @@ pub struct App {
     /// The last move or resize of each workspace window, for its debounced
     /// bounds.
     bounds_seq: HashMap<window::Id, u64>,
-    /// Workspaces whose window is asked for and not open yet.
-    opening: HashSet<String>,
+    /// Workspaces whose window is asked for and not made yet, and why.
+    opening: HashMap<String, windows::Opening>,
+    /// Workspace windows made and not reported open yet: unless they are by
+    /// `windows::OPEN_TIMEOUT`, the detach is undone.
+    unopened: HashMap<window::Id, (String, windows::Opening)>,
+    /// Workspace windows given up on, closed if they still come.
+    abandoned: HashSet<window::Id>,
+    /// `state.json` could neither be used nor moved aside at boot: core
+    /// refuses every save until it can be (store.rs), and a refusal is told
+    /// as such.
+    save_held: bool,
     /// The active workspace and the focused window's view as the last update
     /// left them, for what follows a change of either.
     last_active: Option<String>,
@@ -233,7 +242,10 @@ impl App {
             window_sizes: HashMap::new(),
             window_positions: HashMap::new(),
             bounds_seq: HashMap::new(),
-            opening: HashSet::new(),
+            opening: HashMap::new(),
+            unopened: HashMap::new(),
+            abandoned: HashSet::new(),
+            save_held: false,
             last_active: None,
             last_view: crate::shell::View::default(),
             kit_opened: false,
@@ -282,12 +294,19 @@ impl App {
             Message::Saved(revision, result) => match result {
                 Ok(()) => {
                     self.saved = self.saved.max(revision);
+                    // A held file is only ever written over once core could
+                    // move it aside: the hold is over.
+                    self.save_held = false;
                     Task::none()
                 }
-                Err(error) => crate::shell::notice::show(
-                    &mut self.model,
-                    crate::shell::Notice::Problem(error),
-                ),
+                Err(error) => {
+                    let notice = save_notice(
+                        Translator::new(self.model.locale()),
+                        self.save_held,
+                        error,
+                    );
+                    crate::shell::notice::show(&mut self.model, notice)
+                }
             },
             Message::Core(event) => self.core_event(event),
             Message::Window(id, event) => self.window_event(id, event),
@@ -325,36 +344,34 @@ impl App {
     /// workspaces that were detached when the app last closed open again.
     /// What is gated on hydration (control, engines, hibernation, notices)
     /// reads `live.hydrated`, which is now set.
-    fn booted(&mut self, loaded: Result<Option<serde_json::Value>, String>) -> Task<Message> {
-        let ((state, kept), problem) = match loaded {
-            Ok(Some(value)) => (crate::state::read_state_keeping(value), None),
-            Ok(None) => (Default::default(), None),
-            // Core has already moved an unreadable file aside; start empty.
-            Err(error) => (Default::default(), Some(error)),
+    fn booted(
+        &mut self,
+        loaded: Result<Option<Box<crate::state::Loaded>>, hangar_core::store::LoadError>,
+    ) -> Task<Message> {
+        // A file that could not be used starts the app empty. It has been
+        // moved out of the way of the first save already, or core holds it:
+        // no save goes over it until it can be moved (store.rs), and the
+        // person is told each time one is refused (`Message::Saved`).
+        let (loaded, problem) = match loaded {
+            Ok(loaded) => (loaded.map(|loaded| *loaded).unwrap_or_default(), None),
+            Err(error) => (crate::state::Loaded::default(), Some(error)),
         };
-        self.model.hydrate_read(state, kept);
+        self.model.hydrate_read(loaded.state, loaded.kept);
         // Hydrating is not a change: nothing to save until something changes.
         self.saved = self.model.revision();
         self.last_active = self.model.state().active_workspace_id.clone();
         self.publish_snapshot();
 
-        let detached: Vec<String> = self
+        let mut tasks: Vec<Task<Message>> = self
             .model
-            .state()
-            .workspaces
-            .iter()
-            .filter(|ws| ws.detached == Some(true))
-            .map(|ws| ws.id.clone())
-            .collect();
-        let mut tasks: Vec<Task<Message>> = detached
+            .detached_workspaces()
             .into_iter()
-            .map(|ws| self.ask_workspace_window(ws))
+            .map(|ws| self.ask_workspace_window(ws, windows::Opening::Boot))
             .collect();
         if let Some(error) = problem {
-            tasks.push(crate::shell::notice::show(
-                &mut self.model,
-                crate::shell::Notice::Problem(error),
-            ));
+            self.save_held = error.rescue == hangar_core::store::Rescue::Held;
+            let notice = load_notice(Translator::new(self.model.locale()), &error);
+            tasks.push(crate::shell::notice::show(&mut self.model, notice));
         }
         Task::batch(tasks)
     }
@@ -535,6 +552,7 @@ impl App {
         let mut subscriptions = vec![
             services::events::subscription(&self.bus),
             services::inbox::subscription(&self.inbox),
+            Subscription::run(quit_signals),
             window::events().map(|(id, event)| Message::Window(id, event)),
             // Escape alone, and only when nothing used it: one a field or a
             // hangar-ui layer took (a layer dismisses on it and captures it)
@@ -591,5 +609,145 @@ impl App {
             return self.intent(Intent::CloseOverlay);
         }
         self.close_drawer(crate::shell::DrawerCloseReason::Escape)
+    }
+}
+
+/// The signals that ask the app to end: `kill` and a session's logout
+/// (SIGTERM), Ctrl+C in the terminal it was started from (SIGINT), that
+/// terminal closing (SIGHUP). Each becomes the same quit as the main
+/// window's close, so the last change is saved and every pane's processes
+/// are killed instead of being left to the system's default, which ended the
+/// app on the spot and left behind whatever ignored the hangup.
+///
+/// Once heard, a signal no longer ends the process by itself. A second one,
+/// while the first quit is under way, does: whoever sends it again means it.
+fn quit_signals() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(1, async |mut output| {
+        use iced::futures::SinkExt;
+        // The listeners are made once, before the first wait, so that no
+        // signal falls between two of them.
+        let Some(mut signals) = QuitSignals::listen() else {
+            // They cannot be listened to: the system's default stays, which
+            // is how the app was before.
+            return;
+        };
+        signals.next().await;
+        let _ = output
+            .send(Message::Shell(crate::shell::Action::Quit))
+            .await;
+        signals.next().await;
+        std::process::exit(130);
+    })
+}
+
+#[cfg(unix)]
+struct QuitSignals([tokio::signal::unix::Signal; 3]);
+
+#[cfg(unix)]
+impl QuitSignals {
+    fn listen() -> Option<QuitSignals> {
+        use tokio::signal::unix::{SignalKind, signal};
+        Some(QuitSignals([
+            signal(SignalKind::terminate()).ok()?,
+            signal(SignalKind::interrupt()).ok()?,
+            signal(SignalKind::hangup()).ok()?,
+        ]))
+    }
+
+    async fn next(&mut self) {
+        let [term, int, hup] = &mut self.0;
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+            _ = hup.recv() => {}
+        }
+    }
+}
+
+/// Ctrl+C in the console a development build runs in; a release build on
+/// Windows has none.
+#[cfg(not(unix))]
+struct QuitSignals;
+
+#[cfg(not(unix))]
+impl QuitSignals {
+    fn listen() -> Option<QuitSignals> {
+        Some(QuitSignals)
+    }
+
+    async fn next(&mut self) {
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// What the person is told when `state.json` could not be used: where it was
+/// kept, or that it stays and nothing will be saved over it.
+fn load_notice(t: Translator, error: &hangar_core::store::LoadError) -> crate::shell::Notice {
+    use hangar_core::store::Rescue;
+    use hangar_i18n::{Key, args};
+    let reason = error.reason.as_str();
+    crate::shell::Notice::Problem(
+        match &error.rescue {
+            Rescue::KeptAs(path) => t.t_with(
+                Key::StateLoadKept,
+                &args!("error" => reason, "path" => path.display().to_string()),
+            ),
+            Rescue::Held => t.t_with(Key::StateLoadHeld, &args!("error" => reason)),
+            Rescue::NoFile => t.t_with(Key::StateLoadFailed, &args!("error" => reason)),
+        }
+        .into_owned(),
+    )
+}
+
+/// A save that failed; while the file is held, a refusal that keeps it.
+fn save_notice(t: Translator, held: bool, error: String) -> crate::shell::Notice {
+    crate::shell::Notice::Problem(if held {
+        t.t_with(
+            hangar_i18n::Key::StateSaveHeld,
+            &hangar_i18n::args!("error" => error),
+        )
+        .into_owned()
+    } else {
+        error
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hangar_core::store::{LoadError, Rescue};
+    use hangar_i18n::Locale;
+
+    #[test]
+    fn a_load_problem_says_what_became_of_the_file() {
+        let kept = LoadError {
+            reason: "it is not UTF-8 text".into(),
+            rescue: Rescue::KeptAs("/d/state.json.corrupt.1".into()),
+        };
+        let text = load_notice(Translator::new(Locale::En), &kept);
+        assert_eq!(
+            text.text(),
+            "Could not read state.json (it is not UTF-8 text). It is kept as \
+             /d/state.json.corrupt.1, and Hangar.AI starts empty."
+        );
+        let held = LoadError {
+            reason: "permission denied".into(),
+            rescue: Rescue::Held,
+        };
+        assert!(
+            load_notice(Translator::new(Locale::Fr), &held)
+                .text()
+                .starts_with("Impossible de lire state.json (permission denied). Il reste tel quel")
+        );
+        assert_eq!(
+            save_notice(Translator::new(Locale::En), true, "still there".into()).text(),
+            "Not saved, so that the unreadable state.json stays as it is: still there"
+        );
+        assert_eq!(
+            save_notice(Translator::new(Locale::En), false, "disk full".into()).text(),
+            "disk full"
+        );
     }
 }
