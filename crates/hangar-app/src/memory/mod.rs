@@ -482,6 +482,9 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
 }
 
 #[cfg(test)]
+mod guarded;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

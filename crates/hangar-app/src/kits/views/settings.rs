@@ -838,10 +838,13 @@ fn add_view<'a>(
     let mut git: Vec<Element<'a, Message>> = vec![
         typography::body(ctx.theme, add.git_label.clone()).into(),
         row![
-            input::text_field(ctx.theme, &st.page.git_url)
-                .placeholder(GIT_PLACEHOLDER)
-                .on_input(|url| msg(Msg::GitUrl(url)))
-                .on_submit(msg(Msg::AddGit)),
+            crate::keymap::guard(
+                ctx,
+                input::text_field(ctx.theme, &st.page.git_url)
+                    .placeholder(GIT_PLACEHOLDER)
+                    .on_input(|url| msg(Msg::GitUrl(url)))
+                    .on_submit(msg(Msg::AddGit)),
+            ),
             button::secondary(ctx.theme, add.git_button.clone())
                 .on_press_maybe(add.git_enabled.then(|| msg(Msg::AddGit))),
         ]
