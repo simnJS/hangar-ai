@@ -99,6 +99,8 @@ The log of the port: newest entries at the top of each section. The plan is in
 
 Taken while the owner was away, each with its reason; revisit any of them freely.
 
+- **The old React/Tauri sources are still on the branch (wave 5 not done).** The native app does not use them: it is Rust only, with a browser engine only in the separate `hangar-webview` helper. They stay for three reasons: the phone app (`src/mobile`) imports `src/lib/{stats,statsModel,typography,inspectorFormat,remote}` and `src/remote/*`; the website's browser demo (`pnpm demo:build`) builds the whole React app; and the 2,455 TS tests are the behaviour oracle for the remaining parity rows. Wave 5, when the owner wants it: move `src/mobile` and the modules it imports to `mobile/` (with `mobile.html`, `vite.mobile.config.ts`, `public/mobile`), point `crates/hangar-core/build.rs` and `remote/assets.rs` at its output, decide the demo's fate, then delete `src/`, `src-tauri/`, `index.html`, `vite.config.ts`, `vite.demo.config.ts`, the desktop parts of `package.json`, and replace `ci.yml` by `native.yml`.
+
 - **The MCP panel no longer restarts a Claude pane that is mid-turn**; it names the held panes and restarts them once their turn ends (the old app warned and restarted them anyway).
 - **Programs in a pane cannot write or read the clipboard (OSC 52).** The old app ignored OSC 52 too; letting any program a pane runs read the clipboard silently would be a leak. Copy stays an explicit action.
 - **A pane opened to log in to an account starts with no kits**, as the old code's comment intended (its code passed the kits turned on everywhere).
