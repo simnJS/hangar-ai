@@ -774,15 +774,19 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
             }
             Event::Mouse(mouse::Event::ButtonPressed(_)) => self.state.pressed_outside = false,
             Event::Mouse(mouse::Event::ButtonReleased(_))
-                if self.settings.outside == Outside::Block && !over_panel =>
+                if self.settings.outside == Outside::Block =>
             {
                 // Only a click that began outside is a click on the veil: a
                 // drag that selected text in a field and let go outside the
-                // dialog must not close it mid-edit.
-                if std::mem::take(&mut self.state.pressed_outside) {
-                    self.dismiss(shell);
+                // dialog must not close it mid-edit, and a press on the veil
+                // let go inside must not leave a click waiting for later.
+                let began_outside = std::mem::take(&mut self.state.pressed_outside);
+                if !over_panel {
+                    if began_outside {
+                        self.dismiss(shell);
+                    }
+                    shell.capture_event();
                 }
-                shell.capture_event();
             }
             Event::Mouse(mouse::Event::WheelScrolled { .. })
             | Event::Touch(_)

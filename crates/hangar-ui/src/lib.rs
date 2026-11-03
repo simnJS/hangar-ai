@@ -3,17 +3,30 @@
 //!
 //! See docs/native/PLAN.md, "hangar-ui".
 
+pub mod badge;
 pub mod button;
+pub mod dialog;
+pub mod empty;
+pub mod form;
 pub mod glyph;
 pub mod icon;
 pub mod input;
+pub mod keycap;
+pub mod keys;
 pub mod layer;
+pub mod list;
 pub mod matching;
 pub mod menu;
 pub mod menu_nav;
+pub mod palette;
+pub mod panel;
+pub mod section;
 pub mod shortcut;
+pub mod shortcut_field;
+pub mod tabs;
 pub mod text;
 pub mod tip;
+pub mod toast;
 
 pub use icon::{Icon, icon};
 
