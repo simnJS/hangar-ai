@@ -492,6 +492,9 @@ pub struct Settings {
     pub discord_app_id: String,
     pub board_dock_open: bool,
     pub board_dock_width: f64,
+    /// The width of 1.x's preview panel, read and written back as it was for
+    /// 1.x: this version has no such panel, every preview being a pane of the
+    /// grid.
     pub model_panel_width: f64,
     pub navigator_open: bool,
     pub inspector_open: bool,

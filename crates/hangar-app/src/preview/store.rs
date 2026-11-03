@@ -19,7 +19,7 @@
 //! opening (the views read a snapshot and compare ids), and the tests of
 //! those.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -312,6 +312,12 @@ pub enum What {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedKitTab {
+    /// The entry's id, which is its view pane's in the workspace's grid
+    /// (`state.json`'s `viewPanes` and `tree`): the tab comes back as that
+    /// pane, where the person left it. A file written before the tabs were
+    /// panes has none, and the tab comes back as a new pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub kit_id: String,
     pub tab_id: String,
     pub path: String,
@@ -349,6 +355,7 @@ fn read_saved_tab(raw: &Value) -> Option<SavedKitTab> {
         params.insert(name.clone(), value.as_str()?.to_string());
     }
     Some(SavedKitTab {
+        id: text("id").filter(|id| !id.is_empty()).map(str::to_string),
         kit_id: kit_id.into(),
         tab_id: tab_id.into(),
         path: path.into(),
@@ -375,12 +382,16 @@ pub type KitTabWatcher = Box<dyn FnMut(&KitTabParams, Option<&KitTabCaller>) + S
 pub struct WatchId(u64);
 
 /// The workspaces the windows have on screen (the main window's active one and
-/// every workspace in a window of its own), and whether the preview panel is
-/// on screen with each (`noteModelView`): kept for the agents' answers, since
-/// a file shown elsewhere is not one the user can see.
+/// every workspace in a window of its own), whether each one's grid is drawn
+/// there (the terminals view, not the board or the stats), and which entries
+/// have their pane on screen (`noteModelView`): kept for the agents' answers,
+/// since a file shown elsewhere is not one the user can see, and for what
+/// runs only while it is seen (a kit tab that waits for its first look, a
+/// helper window, a playing clip).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
     screens: BTreeMap<WsId, bool>,
+    shown: BTreeSet<String>,
 }
 
 impl View {
@@ -389,9 +400,16 @@ impl View {
         self.screens.contains_key(workspace)
     }
 
-    /// And its preview panel is drawn there: what is in front can be seen.
+    /// And its grid is drawn there: its view panes can be seen, but one
+    /// zoomed over the others.
     pub fn panel_shown(&self, workspace: &str) -> bool {
         self.screens.get(workspace).copied().unwrap_or(false)
+    }
+
+    /// The entry's pane is on screen: its workspace's grid is drawn, and no
+    /// other pane is zoomed over it.
+    pub fn shows(&self, id: &str) -> bool {
+        self.shown.contains(id)
     }
 }
 
@@ -461,9 +479,23 @@ impl Store {
         self.revision
     }
 
+    /// Whether the workspace's saved kit tabs have been read back
+    /// (`restore_kit_tabs`): until then its view panes wait for their
+    /// entries, rather than being dropped for having none.
+    pub fn is_restored(&self, workspace: &str) -> bool {
+        self.restored.contains(workspace)
+    }
+
+    /// An id no entry has: a tab brought back from `kit-tabs.json` keeps the
+    /// one an earlier run gave it, which is its pane's.
     fn new_id(&mut self) -> String {
-        self.next_id += 1;
-        format!("p{:x}-{}", (self.clock)(), self.next_id)
+        loop {
+            self.next_id += 1;
+            let id = format!("p{:x}-{}", (self.clock)(), self.next_id);
+            if self.entry(&id).is_none() {
+                return id;
+            }
+        }
     }
 
     /// Replaces the scopes named in `patch`; `None` drops one. A scope with
@@ -904,6 +936,7 @@ impl Store {
             .filter_map(|entry| {
                 let kit = entry.kit()?;
                 Some(SavedKitTab {
+                    id: Some(entry.id.clone()),
                     kit_id: kit.kit_id.clone(),
                     tab_id: kit.tab_id.clone(),
                     path: entry.path.clone(),
@@ -932,11 +965,17 @@ impl Store {
         let scope = self.scope(workspace).clone();
         let paths: HashSet<&str> = scope.entries.iter().map(|e| e.path.as_str()).collect();
         let saved = read_saved_tabs(self.saved.as_deref(), workspace);
+        let mut taken: HashSet<String> = self.entries().map(|entry| entry.id.clone()).collect();
         let arriving: Vec<Entry> = saved
             .into_iter()
             .filter(|tab| !paths.contains(tab.path.as_str()))
             .map(|tab| {
-                let id = self.new_id();
+                // Its own id when it has one no entry uses: the id of its pane.
+                let id = match tab.id.filter(|id| !taken.contains(id)) {
+                    Some(id) => id,
+                    None => self.new_id(),
+                };
+                taken.insert(id.clone());
                 self.kit_tab_entry(
                     id,
                     workspace.to_string(),
@@ -1176,13 +1215,29 @@ impl Store {
 
     /* ── what the window shows ───────────────────────────────────── */
 
-    /// Which workspaces the windows have on screen, and whether the preview
-    /// panel is on screen with each (`noteModelView`). It changes nothing a
-    /// view draws: nobody is woken.
+    /// Which workspaces the windows have on screen, and whether the grid is
+    /// drawn with each (`noteModelView`). It changes nothing a view draws:
+    /// nobody is woken.
     pub fn note_screens(&mut self, screens: impl IntoIterator<Item = (WsId, bool)>) {
-        self.view = View {
-            screens: screens.into_iter().collect(),
-        };
+        self.view.screens = screens.into_iter().collect();
+    }
+
+    /// Which entries have their pane on screen (`View::shows`). It changes
+    /// nothing a view draws either.
+    pub fn note_shown(&mut self, shown: impl IntoIterator<Item = String>) {
+        self.view.shown = shown.into_iter().collect();
+    }
+
+    /// One entry's pane put on screen or taken off it, the others as they
+    /// were: the tests share the process's store, and each says what is on
+    /// screen of its own entries only.
+    #[cfg(test)]
+    pub fn set_shown(&mut self, id: &str, shown: bool) {
+        if shown {
+            self.view.shown.insert(id.to_string());
+        } else {
+            self.view.shown.remove(id);
+        }
     }
 
     pub fn view(&self) -> &View {

@@ -1,19 +1,22 @@
-//! P15: Preview panel and 2D viewers.
+//! P15: the previews and the 2D viewers.
 //!
-//! Ports `ModelPanel.tsx` (the panel: tabs, grip, expand, hide),
-//! `components/preview/*` except `KitTabView`, and `lib/{preview,modelStore,
-//! modelHost,modelFiles}.ts`. Read inventory-frontend.md §2.4/1.5–1.6, §2.4/3
-//! and crates/hangar-app/PACKAGES.md.
+//! Ports `components/preview/*` except `KitTabView`, and
+//! `lib/{preview,modelStore,modelHost,modelFiles}.ts`. Read
+//! inventory-frontend.md §2.4/1.5–1.6, §2.4/3 and crates/hangar-app/PACKAGES.md.
+//! 1.x drew the previews in a panel beside the terminals, with a tab per
+//! entry (`ModelPanel.tsx`); here every entry is a pane of its workspace's
+//! grid, a view pane beside the terminals (`panes.rs`), and there is no panel.
 //!
 //! # What is here
 //!
-//! - **The store** (`store.rs`): what each workspace has open, which tab is in
-//!   front, whether its panel shows. Plain data with the rules of
-//!   `modelStore.ts`; `access.rs` shares it under a lock between the UI, the
-//!   agents' control operations (`PreviewAccess`, `preview_access`) and the
-//!   kit tabs and 3D view of P16 and P17, and keeps the kit tabs in
-//!   `<app data>/kit-tabs.json`.
-//! - **The panel** (`panel.rs`, `tabs.rs`, `grip.rs`): drawn by `view_panel`.
+//! - **The store** (`store.rs`): what each workspace has open. Plain data
+//!   with the rules of `modelStore.ts`; `access.rs` shares it under a lock
+//!   between the UI, the agents' control operations (`PreviewAccess`,
+//!   `preview_access`) and the kit tabs and 3D view of P16 and P17, and keeps
+//!   the kit tabs in `<app data>/kit-tabs.json`.
+//! - **The panes** (`panes.rs`, `head.rs`): every entry a pane of the grid,
+//!   which the panes package draws with what `head.rs` says of the entry and
+//!   the body `view_entry` draws.
 //! - **The viewers**: images with zoom and pan (`image.rs`, `image_stage.rs`),
 //!   text and code, coloured by `two-face`'s grammars (`text.rs`,
 //!   `code_lines.rs`, `highlight.rs`), Markdown on iced's `markdown`
@@ -21,28 +24,26 @@
 //! - **The helper** (`webview.rs`, `windowed.rs`): a PDF, an HTML page, a
 //!   video or a sound opens in a window of `hangar-webview`, which loads the
 //!   file through hangar-core's `model::serve`.
-//! - **File watching** (`Msg::Tick`): the file in front is looked at every
-//!   1.5 s and read again when it was rewritten.
+//! - **File watching** (`Msg::Tick`): the file of each view pane on screen is
+//!   looked at every 1.5 s and read again when it was rewritten.
 //!
-//! # With the shell (P0b)
+//! # With the shell and the panes (P0b, P5)
 //!
-//! The shell draws the panel (`view_panel`, in the mode `Panels` gives it:
-//! docked, a drawer or expanded) and owns whether it is open or expanded: its
-//! toggles write `open` and `expanded` in `live.signals.preview[ws]`, and
-//! `TogglePreview`, `ClosePreviewPanel` and `TogglePreviewExpand` are not
-//! handled here. This package keeps `entries` and `unseen` there from the
-//! store, and the store's `panel_open` and `expanded` agree with `open` and
-//! `expanded` (`sync_panels`): what the shell toggles reaches the store, what
-//! an agent reveals reaches the shell. The panel's own buttons send the
-//! shell's intents. `Intent::ClosePreviews(ws)` closes every tab of a
-//! workspace.
+//! After every change of the store the panes follow it (`panes::sync`): an
+//! entry opened is a view pane of the grid, beside the focused pane, and one
+//! closed takes its pane with it. The panes package draws the view pane, its
+//! header and its moves; its close is `Intent::CloseView`, handled here.
+//! `Intent::ClosePreviews(ws)` closes every entry of a workspace, and so its
+//! view panes.
 //!
 //! # With the control bus (P18)
 //!
 //! Once the state is read this package installs `Hook::Preview` (`hosts.rs`):
-//! a `PreviewHost` per workspace over the same store, which lists the tab in
-//! front, whether the panel is drawn, a model's findings and a kit tab's
-//! params, and opens, reveals, reloads, waits for and closes entries.
+//! a `PreviewHost` per workspace over the same store, which lists the entry
+//! last brought forward, whether the grid is drawn, a model's findings and a
+//! kit tab's params, and opens, reveals, reloads, waits for and closes
+//! entries. What the agents open and close is laid out again by the control
+//! bus (`ModelCmd::ViewsChanged`).
 //!
 //! # For P16, P17, P18
 //!
@@ -61,19 +62,18 @@ pub mod code_lines;
 pub mod decode;
 pub mod dev;
 pub mod glyph;
-pub mod grip;
+pub mod head;
 pub mod highlight;
 pub mod hosts;
 pub mod image;
 pub mod image_stage;
 pub mod markdown;
 pub mod model;
-pub mod panel;
+pub mod panes;
 pub mod parts;
 pub mod powershell;
 pub mod roots;
 pub mod store;
-pub mod tabs;
 pub mod text;
 pub mod travelling;
 pub mod viewer;
@@ -89,8 +89,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iced::futures::stream::{self, StreamExt};
-use iced::keyboard::{self, Key as KeyboardKey, key::Named};
-use iced::{Element, Event, Subscription, Task};
+use iced::{Element, Subscription, Task};
 
 use hangar_i18n::{Key, args};
 
@@ -98,7 +97,6 @@ use self::access::Shared;
 use self::model::{FileKind, Kind};
 use self::parts::Notice;
 use self::store::{Body, Entry, Scope, Status};
-use self::tabs::TabKey;
 use self::text::{Head, Load};
 use self::viewer::{Coloured, Loaded, ViewerMsg, ViewerState, language_for};
 use self::webview::{HelperHandle, StartError, WebMsg};
@@ -106,8 +104,8 @@ use crate::control::{self, Hook};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, PreviewAccess, Services};
-use crate::shell::{Drawer, Focus, PanelMode, Panels, Region};
-use crate::state::{Model, PanelDrag, Patch, PreviewPanel, Settings, StoreAction, WsId};
+use crate::shell::Region;
+use crate::state::{Model, WsId};
 
 /// How often the file in front is looked at for a newer version
 /// (`WATCH_MS`).
@@ -119,14 +117,6 @@ const SETTLE: Duration = Duration::from_millis(300);
 const SPIN: Duration = Duration::from_millis(100);
 /// How often the package looks for the state to have been read.
 const HYDRATION: Duration = Duration::from_millis(250);
-
-/// A drag of the grip: the width it started from and the one the pointer
-/// has reached, in points.
-#[derive(Debug, Clone, Copy)]
-struct Dragging {
-    start: f64,
-    to: f64,
-}
 
 /// The package's UI state; lives in `App.pkg.preview`.
 #[derive(Debug)]
@@ -151,48 +141,13 @@ pub struct State {
     pub(crate) spin: usize,
     /// Numbers the texts read, so that a colouring finds its own.
     generation: u64,
-    grip: Option<Dragging>,
     helper_starting: bool,
     /// The workspaces as of the last look, to see one go.
     known: Vec<WsId>,
     /// `HANGAR_DEV_PREVIEW` has been looked at (dev.rs).
     dev_done: bool,
-    /// The tab in front of each workspace as of the last look.
-    fronts: HashMap<WsId, Option<String>>,
-    /// What the shell and the store last agreed on for each workspace's panel.
-    agreed: HashMap<WsId, Agreed>,
     /// The hook for the control bus has been sent.
     hosted: bool,
-    /// The shell is about to give the panel the keyboard because of a press
-    /// in it (a tab, the text of a file, the expand button): `focus_entry` is
-    /// not to put it on the image in front. Read and cleared by `focus_entry`,
-    /// which only sees the state by reference.
-    skip_stage: std::cell::Cell<bool>,
-    /// The arrows, Home, End and Delete are the tab strip's while the panel
-    /// has the keyboard: they are after a tab was pressed or F6 came in, and
-    /// are not after a press in the text of a file, where Delete closing the
-    /// tab would be a trap.
-    strip_keys: std::cell::Cell<bool>,
-}
-
-/// A workspace's panel as the shell's signals and the store both held it at
-/// the last look (`sync_panels`): which of them moved since is what is told
-/// to the other.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Agreed {
-    open: bool,
-    expanded: bool,
-    unseen: bool,
-}
-
-impl Agreed {
-    fn of(scope: &Scope) -> Agreed {
-        Agreed {
-            open: scope.panel_open,
-            expanded: scope.expanded,
-            unseen: scope.unseen,
-        }
-    }
 }
 
 impl Default for State {
@@ -209,15 +164,10 @@ impl Default for State {
             watching: HashSet::new(),
             spin: 0,
             generation: 0,
-            grip: None,
             helper_starting: false,
             known: Vec::new(),
             dev_done: false,
-            fronts: HashMap::new(),
-            agreed: HashMap::new(),
             hosted: false,
-            skip_stage: std::cell::Cell::new(false),
-            strip_keys: std::cell::Cell::new(false),
         }
     }
 }
@@ -229,9 +179,8 @@ impl std::fmt::Debug for Shared {
 }
 
 /// The package's shared read-model, which other packages may read; lives in
-/// `Model.live.preview`.
-/// The preview of each workspace: entries, the active one, panel open,
-/// expanded, unseen.
+/// `Model.live.preview`: the entries of each workspace, which its view panes
+/// draw.
 #[derive(Debug)]
 pub struct Live {
     shared: Arc<Shared>,
@@ -280,20 +229,6 @@ impl Live {
         !self.scopes.is_empty()
     }
 
-    pub fn panel_open(&self, workspace: &str) -> bool {
-        self.scope(workspace).is_some_and(|scope| scope.panel_open)
-    }
-
-    pub fn expanded(&self, workspace: &str) -> bool {
-        self.scope(workspace).is_some_and(|scope| scope.expanded)
-    }
-
-    /// An agent opened or changed something here that has not been on screen
-    /// since: what the toolbar's button says.
-    pub fn unseen(&self, workspace: &str) -> bool {
-        self.scope(workspace).is_some_and(|scope| scope.unseen)
-    }
-
     fn entry(&self, id: &str) -> Option<&Entry> {
         self.scopes
             .values()
@@ -311,12 +246,6 @@ pub enum Msg {
     Tick,
     /// A step of the spinners.
     Spin,
-    /// A tab was pressed.
-    Activate(WsId, String),
-    Close(WsId, String),
-    /// A key of the tab strip.
-    Tab(TabKey),
-    Grip(grip::GripEvent),
     Viewer(String, u64, ViewerMsg),
     Web(WebMsg),
     /// What the look at the file in front found.
@@ -329,6 +258,9 @@ pub enum Msg {
         Result<model::PreviewFile, String>,
     ),
     NoticeGone(String, u64),
+    /// The person opened entry `id` of workspace `ws`: its pane takes the
+    /// focus, once it is in the grid.
+    Opened(WsId, String),
 }
 
 /// A shorthand for the message a viewer's task ends with.
@@ -393,24 +325,6 @@ fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::Tick => watch(st, m),
-        Msg::Activate(ws, id) => {
-            st.shared.edit(|store| store.activate_model(&id));
-            // A pressed tab has the keyboard, as it did in the TS: the arrows,
-            // Home, End and Delete are the strip's from then on (the panel is
-            // the focused region), until the keyboard goes elsewhere.
-            st.skip_stage.set(true);
-            st.strip_keys.set(true);
-            Task::batch([
-                strip_to(st, &ws),
-                Task::done(Message::Intent(Intent::FocusRegion(Region::Model))),
-            ])
-        }
-        Msg::Close(_, id) => {
-            st.shared.edit(|store| store.close_model(&id));
-            Task::none()
-        }
-        Msg::Tab(key) => tab_key(st, m, key),
-        Msg::Grip(event) => grip_event(st, m, event),
         Msg::Viewer(id, revision, msg) => viewer_update(st, m, env, &id, revision, msg),
         Msg::Web(msg) => web_update(st, m, env, msg),
         Msg::Watched(id, revision, found) => watched(st, m, &id, revision, found),
@@ -436,194 +350,32 @@ fn handle(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
             }
             Task::none()
         }
+        Msg::Opened(ws, id) => {
+            m.live.preview.sync();
+            panes::sync(m);
+            Task::done(Message::Intent(Intent::FocusPane {
+                ws,
+                pane: id,
+                terminal: true,
+            }))
+        }
     }
 }
 
 /// The workspaces the windows have on screen (the main window's active one,
-/// and every one in a window of its own), each with whether its preview panel
-/// is drawn there: docked, as a drawer that is open, or expanded. The shell
-/// decides (`Panels`), from the room, the view and the signals.
+/// and every one in a window of its own), each with whether its grid is drawn
+/// there: the terminals view, where the view panes are, rather than the
+/// board, the memory or the stats.
 fn screens(m: &Model) -> BTreeMap<WsId, bool> {
     let mut screens = BTreeMap::new();
     for window in m.live.windows.keys() {
         let Some(workspace) = m.window_workspace(*window) else {
             continue;
         };
-        let shown = Panels::of(m, *window).model.shown;
+        let shown = m.live.hydrated && m.view_in(*window) == crate::shell::View::Terminals;
         *screens.entry(workspace.id.clone()).or_insert(false) |= shown;
     }
     screens
-}
-
-/// The window the person is in, the workspace it draws and where its panels
-/// stand.
-fn focused(m: &Model) -> Option<(WsId, Panels)> {
-    let window = m.focused_window()?;
-    let workspace = m.window_workspace(window)?;
-    Some((workspace.id.clone(), Panels::of(m, window)))
-}
-
-/// The shell's signals and the store both hold a workspace's panel: how many
-/// entries it has and whether something is news (this package's to write),
-/// whether it is open and whether it is expanded (the shell's toggles write
-/// them, and an agent revealing an entry does through the store). Each side
-/// is told what the other changed since the last look; when both moved, the
-/// store's word stands. The shell only ever clears `unseen`.
-///
-/// The store keeps `expanded` to a panel that is open, as `setModelPanel`
-/// did, and no panel exists for a workspace with nothing open.
-fn sync_panels(st: &mut State, m: &mut Model) {
-    let held: HashMap<WsId, (usize, Agreed)> = st.shared.read(|store| {
-        store
-            .scopes()
-            .iter()
-            .map(|(ws, scope)| (ws.clone(), (scope.entries.len(), Agreed::of(scope))))
-            .collect()
-    });
-    let mut workspaces: HashSet<WsId> = held.keys().cloned().collect();
-    workspaces.extend(m.live.signals.preview.keys().cloned());
-    for ws in workspaces {
-        let (mut entries, mut store) = held.get(&ws).copied().unwrap_or_default();
-        let shell = m.live.signals.preview.get(&ws).copied().unwrap_or_default();
-        let last = st.agreed.get(&ws).copied().unwrap_or_default();
-        let pick = |store: bool, shell: bool, last: bool| if store != last { store } else { shell };
-        let wanted = Agreed {
-            open: pick(store.open, shell.open, last.open),
-            expanded: pick(store.expanded, shell.expanded, last.expanded),
-            unseen: store.unseen && !(last.unseen && !shell.unseen),
-        };
-        if wanted != store {
-            st.shared.edit(|edit| {
-                if wanted.open != store.open || wanted.expanded != store.expanded {
-                    edit.set_model_panel(&ws, Some(wanted.open), Some(wanted.expanded));
-                }
-                if !wanted.unseen {
-                    edit.mark_models_seen(&ws);
-                }
-            });
-            (entries, store) = st.shared.read(|read| {
-                let scope = read.scope(&ws);
-                (scope.entries.len(), Agreed::of(scope))
-            });
-        }
-        if entries == 0 {
-            m.live.signals.preview.remove(&ws);
-            st.agreed.remove(&ws);
-            continue;
-        }
-        let panel = PreviewPanel {
-            entries,
-            open: store.open,
-            expanded: store.expanded,
-            unseen: store.unseen,
-        };
-        if m.live.signals.preview.get(&ws) != Some(&panel) {
-            m.live.signals.preview.insert(ws.clone(), panel);
-        }
-        st.agreed.insert(ws, store);
-    }
-}
-
-/// Brings the strip to the tab in front: an agent may bring forward one that
-/// sits past the panel's edge. The least that shows the whole of it, by where
-/// the tab is (`tabs::reveal_tab`).
-fn strip_to(st: &State, ws: &str) -> Task<Message> {
-    let front = st
-        .shared
-        .read(|store| Some(store.scope(ws).active_id.clone()));
-    match front {
-        Some(Some(id)) => tabs::reveal_tab(&id),
-        _ => Task::none(),
-    }
-}
-
-fn tab_key(st: &mut State, m: &Model, key: TabKey) -> Task<Message> {
-    let Some((ws, _)) = focused(m) else {
-        return Task::none();
-    };
-    let scope = st.shared.read(|store| store.scope(&ws).clone());
-    let ids: Vec<String> = scope.entries.iter().map(|entry| entry.id.clone()).collect();
-    if key == TabKey::CloseActive {
-        if let Some(active) = scope.active_id {
-            st.shared.edit(|store| store.close_model(&active));
-        }
-        return Task::none();
-    }
-    if let Some(at) = tabs::target_of(key, &ids, scope.active_id.as_deref()) {
-        let id = ids[at].clone();
-        st.shared.edit(|store| store.activate_model(&id));
-        return strip_to(st, &ws);
-    }
-    Task::none()
-}
-
-/// While the grip is held, the panel is drawn at the width the pointer has
-/// reached (`live.signals.panel_drag`, which `Panels::of` reads) and nothing
-/// is written; the setting is saved once, on release, as the TS did, instead
-/// of a save and a snapshot for every move. Escape drops the drag and the
-/// panel keeps its width. The widest it may be is what the shell leaves it
-/// beside the terminals and the other panels (`Slot::max`).
-fn grip_event(st: &mut State, m: &mut Model, event: grip::GripEvent) -> Task<Message> {
-    let width = m.settings().model_panel_width;
-    let Some((_, panels)) = focused(m) else {
-        end_grip(st, m);
-        return Task::none();
-    };
-    let max = f64::from(panels.model.max);
-    let wanted = match event {
-        grip::GripEvent::Begin => {
-            let start = grip::clamp_width(width, max);
-            st.grip = Some(Dragging { start, to: start });
-            return Task::none();
-        }
-        grip::GripEvent::Drag(moved) => {
-            if let Some(held) = st.grip.as_mut() {
-                held.to = grip::dragged_width(held.start, f64::from(moved), max);
-                let to = held.to;
-                m.live.signals.panel_drag = Some(PanelDrag {
-                    panel: Drawer::Model,
-                    width: to as f32,
-                });
-            }
-            return Task::none();
-        }
-        grip::GripEvent::End => {
-            let held = st.grip;
-            end_grip(st, m);
-            match held {
-                Some(held) => held.to,
-                None => return Task::none(),
-            }
-        }
-        grip::GripEvent::Cancel => {
-            end_grip(st, m);
-            return Task::none();
-        }
-        grip::GripEvent::Reset => {
-            end_grip(st, m);
-            grip::default_width()
-        }
-        grip::GripEvent::Nudge(step) => grip::clamp_width(width + f64::from(step), max),
-    };
-    if (wanted - width).abs() >= 0.5 {
-        m.apply(StoreAction::UpdateSettings(Patch::new(
-            move |settings: &mut Settings| settings.model_panel_width = wanted,
-        )));
-    }
-    Task::none()
-}
-
-/// The grip is let go of, or dropped: the panel goes back to being drawn at
-/// its setting. Another panel's held grip is not the preview's to let go.
-fn end_grip(st: &mut State, m: &mut Model) {
-    st.grip = None;
-    if m.live
-        .signals
-        .panel_drag
-        .is_some_and(|drag| drag.panel == Drawer::Model)
-    {
-        m.live.signals.panel_drag = None;
-    }
 }
 
 /* ── what to do after each change ──────────────────────────────── */
@@ -670,35 +422,37 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     }
     m.live.preview.sync();
 
-    // The shell's panel and the store's agree, then the shell says which
-    // panels are on screen: what they show has been seen.
-    sync_panels(st, m);
+    // Every entry is a pane of its workspace's grid: the panes follow what
+    // opened and closed (panes.rs).
+    let synced = panes::sync(m);
+    if let Some(words) = synced.notice(m) {
+        tasks.push(Task::done(Message::Intent(Intent::Notice(
+            crate::shell::Notice::Problem(words),
+        ))));
+    }
+
+    // The store hears which grids are on screen and which panes in them.
     let screens = screens(m);
+    let grids: std::collections::BTreeSet<WsId> = screens
+        .iter()
+        .filter(|(_, shown)| **shown)
+        .map(|(ws, _)| ws.clone())
+        .collect();
+    let shown = panes::shown(m, &grids);
     st.shared.edit(|store| {
         store.note_screens(screens.iter().map(|(ws, shown)| (ws.clone(), *shown)));
-        for (ws, shown) in &screens {
-            if *shown {
-                store.mark_models_seen(ws);
-            }
-        }
+        store.note_shown(shown.iter().cloned());
     });
-    sync_panels(st, m);
     m.live.preview.sync();
 
+    // The files of the workspaces on screen, each with whether its pane is.
     let mut front_files: Vec<(WsId, Entry, bool)> = Vec::new();
-    for (ws, shown) in &screens {
+    for ws in screens.keys() {
         let Some(scope) = m.live.preview.scope(ws) else {
             continue;
         };
-        if let Some(front) = scope.active()
-            && front.is_file()
-        {
-            front_files.push((ws.clone(), front.clone(), *shown));
-        }
-        // The strip follows what an agent brought forward.
-        if st.fronts.get(ws) != Some(&scope.active_id) {
-            st.fronts.insert(ws.clone(), scope.active_id.clone());
-            tasks.push(strip_to(st, ws));
+        for entry in scope.entries.iter().filter(|entry| entry.is_file()) {
+            front_files.push((ws.clone(), entry.clone(), shown.contains(&entry.id)));
         }
     }
 
@@ -721,10 +475,14 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     st.notices.retain(|id, _| every.contains_key(id.as_str()));
     st.missing.retain(|id, _| every.contains_key(id.as_str()));
     st.watching.retain(|id| every.contains_key(id.as_str()));
-    for (_, entry, _) in &front_files {
+    for (_, entry, seen) in &front_files {
         let Body::File { kind, .. } = &entry.body else {
             continue;
         };
+        // A viewer reads its file once its pane is on screen, and keeps it.
+        if !seen && !st.viewers.contains_key(&entry.id) {
+            continue;
+        }
         let current = st
             .viewers
             .get(&entry.id)
@@ -1002,7 +760,10 @@ fn viewer_update(
             );
             Task::batch([iced::clipboard::write(text), done])
         }
-        ViewerMsg::Pressed => content_pressed(st, m),
+        // The press is in a view pane, which the grid gives the focus (and
+        // so takes the keyboard from a terminal, whose Ctrl+C would interrupt
+        // what runs in it where here it copies what is selected).
+        ViewerMsg::Pressed => Task::none(),
         ViewerMsg::Selected(text) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.selection = text;
@@ -1014,9 +775,7 @@ fn viewer_update(
             id,
             Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
         ),
-        ViewerMsg::Image(image::Msg::Gesture(image_stage::Gesture::Pressed)) => {
-            content_pressed(st, m)
-        }
+        ViewerMsg::Image(image::Msg::Gesture(image_stage::Gesture::Pressed)) => Task::none(),
         ViewerMsg::Image(msg) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.picture.update(msg);
@@ -1026,19 +785,6 @@ fn viewer_update(
         ViewerMsg::Markdown(msg) => markdown_update(st, m, id, revision, msg, locale),
         ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
-}
-
-/// The pointer went down in the text of a file or a page: the keyboard is the
-/// panel's, which a terminal that had it has to be told (its Ctrl+C would
-/// interrupt what runs in it, where here it copies what is selected). The
-/// strip's keys are not: Delete would close the tab one is reading.
-fn content_pressed(st: &State, m: &Model) -> Task<Message> {
-    st.strip_keys.set(false);
-    if m.ui.focus == Some(Focus::Region(Region::Model)) {
-        return Task::none();
-    }
-    st.skip_stage.set(true);
-    Task::done(Message::Intent(Intent::FocusRegion(Region::Model)))
 }
 
 /// Brings the text of an entry back to its top: the lines and the rendered
@@ -1069,7 +815,8 @@ fn markdown_update(
         move |msg: markdown::Msg| viewer_message(&id, revision, ViewerMsg::Markdown(msg))
     };
     match msg {
-        markdown::Msg::Pressed => return content_pressed(st, m),
+        // The grid gives the pane the focus (`ViewerMsg::Pressed`).
+        markdown::Msg::Pressed => return Task::none(),
         markdown::Msg::Selected(text) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.selection = text;
@@ -1336,29 +1083,30 @@ async fn inspect(path: String) -> Result<model::PreviewFile, String> {
     model::from_core(&found)
 }
 
-/// Looks at the file in front of each panel on screen, as the 3D view
-/// watches its model: a newer modification time, steady for a moment, has the
-/// viewer read it again. A file that disappears or is now refused keeps its
-/// last version on screen, and the reason is said.
+/// Looks at the file of each view pane on screen, as the 3D view watches
+/// its model: a newer modification time, steady for a moment, has the viewer
+/// read it again. A file that disappears or is now refused keeps its last
+/// version on screen, and the reason is said.
 fn watch(st: &mut State, m: &Model) -> Task<Message> {
     let mut tasks = Vec::new();
+    let view = st.shared.read(|store| store.view().clone());
     for (ws, shown) in screens(m) {
         let Some(scope) = m.live.preview.scope(&ws).filter(|_| shown) else {
             continue;
         };
-        let Some(front) = scope
-            .active()
-            .filter(|entry| entry.is_file() || entry.is_model())
-        else {
-            continue;
-        };
-        if !st.watching.insert(front.id.clone()) {
-            continue;
+        for entry in scope
+            .entries
+            .iter()
+            .filter(|entry| (entry.is_file() || entry.is_model()) && view.shows(&entry.id))
+        {
+            if !st.watching.insert(entry.id.clone()) {
+                continue;
+            }
+            let (id, revision, path) = (entry.id.clone(), entry.revision, entry.path.clone());
+            tasks.push(Task::perform(inspect(path), move |found| {
+                Message::Preview(Msg::Watched(id.clone(), revision, found))
+            }));
         }
-        let (id, revision, path) = (front.id.clone(), front.revision, front.path.clone());
-        tasks.push(Task::perform(inspect(path), move |found| {
-            Message::Preview(Msg::Watched(id.clone(), revision, found))
-        }));
     }
     Task::batch(tasks)
 }
@@ -1432,70 +1180,6 @@ fn changes(shared: &Arc<Shared>) -> Subscription<Message> {
     })
 }
 
-/// Whether the strip's keys are being listened for: the panel has the keyboard
-/// and the keys are the strip's (see `State::strip_keys`).
-fn tab_keys_listen(st: &State, m: &Model) -> bool {
-    m.ui.focus == Some(Focus::Region(Region::Model)) && st.strip_keys.get()
-}
-
-/// The keys the tab strip answers while the panel has the keyboard.
-fn tab_keys(
-    event: Event,
-    status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    if status == iced::event::Status::Captured {
-        return None;
-    }
-    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
-        return None;
-    };
-    if modifiers.control() || modifiers.alt() || modifiers.command() {
-        return None;
-    }
-    let key = match key {
-        KeyboardKey::Named(Named::ArrowRight) => TabKey::Next,
-        KeyboardKey::Named(Named::ArrowLeft) => TabKey::Previous,
-        KeyboardKey::Named(Named::Home) => TabKey::First,
-        KeyboardKey::Named(Named::End) => TabKey::Last,
-        KeyboardKey::Named(Named::Delete) => TabKey::CloseActive,
-        _ => return None,
-    };
-    Some(Message::Preview(Msg::Tab(key)))
-}
-
-/// Whether Escape is the panel's to answer: it is expanded and has the
-/// keyboard. In the TS the keydown was the panel's own, so a terminal or a
-/// field elsewhere kept its Escape.
-fn escape_collapses_here(m: &Model) -> bool {
-    m.ui.focus == Some(Focus::Region(Region::Model)) && escape_would_collapse(m)
-}
-
-/// Whether the focused window's panel is expanded.
-fn escape_would_collapse(m: &Model) -> bool {
-    m.focused_window()
-        .is_some_and(|window| Panels::of(m, window).model_expanded)
-}
-
-/// Expanded, Escape puts the panel back beside the terminals, like leaving a
-/// full-screen view; anything inside that handles Escape itself keeps it.
-fn escape_collapses(
-    event: Event,
-    status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    if status == iced::event::Status::Captured {
-        return None;
-    }
-    match event {
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key: KeyboardKey::Named(Named::Escape),
-            ..
-        }) => Some(Message::Intent(Intent::TogglePreviewExpand)),
-        _ => None,
-    }
-}
-
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let mut subscriptions = vec![changes(&st.shared)];
     let live = &m.live.preview;
@@ -1520,42 +1204,19 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     if loading {
         subscriptions.push(iced::time::every(SPIN).map(|_| Message::Preview(Msg::Spin)));
     }
-    if tab_keys_listen(st, m) {
-        subscriptions.push(iced::event::listen_with(tab_keys));
-    }
-    if escape_collapses_here(m) {
-        subscriptions.push(iced::event::listen_with(escape_collapses));
-    }
     Subscription::batch(subscriptions)
 }
 
-/// What takes the focus when F6 reaches region `Model`, which this package
-/// owns: the image in front, or the panel as a whole. Nothing when no panel
-/// is shown.
+/// What takes the focus when F6 reaches a region this package owns. It owns
+/// none since the previews are panes of the grid (region `main`), so the
+/// shell never calls it.
 pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let pressed = st.skip_stage.replace(false);
-    let window = m.focused_window()?;
-    if !Panels::of(m, window).model.shown {
-        return None;
-    }
-    let ws = m.window_workspace(window)?;
-    let front = m.live.preview.scope(&ws.id)?.active()?;
-    if pressed {
-        return Some(Task::none());
-    }
-    // F6: the keys of the strip, or the image's own.
-    st.strip_keys.set(true);
-    if front.file_kind() == Some(FileKind::Image) {
-        return Some(iced::widget::operation::focus(viewer::stage_id(&front.id)));
-    }
-    Some(Task::none())
+    let _ = (st, m, region);
+    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
-/// package acted on it. The shell's toggles (`TogglePreview`,
-/// `ClosePreviewPanel`, `TogglePreviewExpand`) are not handled here: they
-/// have just written `open` and `expanded` in the signals, which the store
-/// is told of before anything else looks at it.
+/// package acted on it.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
@@ -1568,28 +1229,29 @@ pub fn on_intent(
 /// `on_intent`, for whoever has an `Env`.
 fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Task<Message>> {
     link(st, env);
-    sync_panels(st, m);
     match intent {
+        // The person's own open lands on its pane; an agent's does not move
+        // the keyboard.
         Intent::ShowPreview(request) => {
             let shared = st.shared.clone();
             let request = request.clone();
+            let ws = request.ws.clone();
+            let person = request.opened_by.is_none();
             Some(Task::perform(
                 async move { shared.show_request(request).await },
-                |shown| match shown {
+                move |shown| match shown {
+                    Ok(id) if person => Message::Preview(Msg::Opened(ws.clone(), id)),
                     Ok(_) => Message::Noop,
                     Err(why) => Message::Intent(Intent::Notice(crate::shell::Notice::Problem(why))),
                 },
             ))
         }
-        // Expanding takes the keyboard into the panel, as pressing its
-        // button did in the TS (the focus was on the button, inside it), so
-        // that Escape puts it back.
-        Intent::TogglePreviewExpand if escape_would_collapse(m) => {
-            st.skip_stage.set(true);
-            st.strip_keys.set(false);
-            Some(Task::done(Message::Intent(Intent::FocusRegion(
-                Region::Model,
-            ))))
+        // A view pane's cross: its entry closes, the pane with it.
+        Intent::CloseView { pane, .. } => {
+            st.shared.edit(|store| store.close_model(pane));
+            m.live.preview.sync();
+            panes::sync(m);
+            Some(Task::none())
         }
         Intent::ActivateWorkspace(ws) => {
             if m.live.hydrated {
@@ -1597,14 +1259,16 @@ fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Ta
             }
             None
         }
-        // `view.closeModels`: the workspace's preview goes away. The shell
-        // is told at once, so that it stops drawing a panel with nothing in
-        // it; the viewers and the helper's windows follow the store's change.
+        // `view.closeModels`: every entry of the workspace closes, and its
+        // view panes with them, at once; the viewers and the helper's windows
+        // follow the store's change.
         Intent::ClosePreviews(ws) => {
             st.shared.edit(|store| store.close_workspace_models(ws));
-            sync_panels(st, m);
+            m.live.preview.sync();
+            panes::sync(m);
             Some(Task::none())
         }
+
         _ => None,
     }
 }
@@ -1619,13 +1283,8 @@ pub fn on_event(
     None
 }
 
-/// Region `model`: the preview panel, docked, as a drawer, or expanded.
-pub fn view_panel<'a>(st: &'a State, ctx: Ctx<'a>, mode: PanelMode) -> Element<'a, Message> {
-    panel::view(st, ctx, mode)
-}
-
-/// The body of the panel for one entry: a file viewer, or a slot for
-/// `model3d_view::view` and `kit_tabs::view`.
+/// The body of an entry's view pane: a file viewer, the 3D view
+/// (`model3d_view::view`) or a kit tab (`kit_tabs::view`).
 pub fn view_entry<'a>(
     st: &'a State,
     ctx: Ctx<'a>,
@@ -1633,7 +1292,13 @@ pub fn view_entry<'a>(
     entry: &'a str,
 ) -> Element<'a, Message> {
     match ctx.model.live.preview.entry(entry) {
-        Some(found) => panel::entry_body(st, ctx, ws, found),
+        Some(found) => match &found.body {
+            Body::Model { .. } => {
+                crate::model3d_view::view(&ctx.pkg.model3d_view, ctx, ws, &found.id)
+            }
+            Body::Kit(_) => crate::kit_tabs::view(&ctx.pkg.kit_tabs, ctx, ws, &found.id),
+            Body::File { .. } => viewer::view(st, ctx, ws, found),
+        },
         None => parts::loading(ctx, entry, None),
     }
 }

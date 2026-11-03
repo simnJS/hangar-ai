@@ -25,7 +25,7 @@ use hangar_theme::{style, tokens};
 use crate::ctx::Ctx;
 use crate::message::Message;
 use crate::shell::title_bar::{self, Corners};
-use crate::shell::{Action, BoardVariant, PanelMode, View, WindowKind, overlay, placeholder};
+use crate::shell::{Action, BoardVariant, View, WindowKind, overlay, placeholder};
 use crate::state::Workspace;
 
 /// The main window.
@@ -148,8 +148,8 @@ fn workspace_body<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     .into()
 }
 
-/// Region `main`, with the preview panel and the board dock beside it, or
-/// over it as drawers.
+/// Region `main`, with the board dock beside it, or over it as a drawer.
+/// What the previews show is in the grid, as panes (`preview::panes`).
 fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let p = ctx.pkg;
     let panels = ctx.panels();
@@ -191,14 +191,6 @@ fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     }
 
     let mut area = row![container(main).width(Length::Fill).height(Length::Fill)];
-    let model_mode = panels.model_mode();
-    if let Some(PanelMode::Docked { width }) = model_mode {
-        area = area.push(vertical_sep(ctx)).push(side(
-            ctx,
-            crate::preview::view_panel(&p.preview, ctx, PanelMode::Docked { width }),
-            width,
-        ));
-    }
     let dock = panels.dock;
     if dock.shown && !dock.drawer {
         let board = crate::board::view(
@@ -215,25 +207,6 @@ fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     }
 
     let mut layers = stack![area].width(Length::Fill).height(Length::Fill);
-    match model_mode {
-        Some(PanelMode::Expanded) => {
-            layers = layers.push(opaque(
-                container(crate::preview::view_panel(
-                    &p.preview,
-                    ctx,
-                    PanelMode::Expanded,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(style::container::panel(ctx.theme)),
-            ));
-        }
-        Some(PanelMode::Drawer { width }) => {
-            let panel = crate::preview::view_panel(&p.preview, ctx, PanelMode::Drawer { width });
-            layers = layers.push(drawer(ctx, panel, width));
-        }
-        _ => {}
-    }
     if dock.shown && dock.drawer {
         let board = crate::board::view(
             &p.board,

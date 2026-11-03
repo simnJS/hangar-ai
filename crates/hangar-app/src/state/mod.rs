@@ -43,7 +43,7 @@ pub struct Loaded {
 #[allow(unused_imports)]
 pub use live::{
     AgentActivity, BridgeEvent, GlyphState, Live, PaneActivity, PaneInsight, PanelDrag, PlanLimits,
-    PreviewPanel, Signals, Ui, WindowUi,
+    Signals, Ui, WindowUi,
 };
 pub use snapshot::Snapshot;
 #[allow(unused_imports)]
@@ -219,10 +219,21 @@ impl Model {
         }
     }
 
-    /// The focused pane of workspace `ws`, when it is one of its panes.
+    /// The focused pane of workspace `ws`, when it is one of its terminals:
+    /// `None` while a view pane has the focus, which no terminal command is
+    /// about.
     pub fn focused_pane<'a>(&self, ws: &'a Workspace) -> Option<&'a Pane> {
         let id = self.ui.focus_by_workspace.get(&ws.id)?;
         ws.panes.iter().find(|pane| &pane.id == id)
+    }
+
+    /// The focused pane of workspace `ws`, a terminal or a view, when it is
+    /// still one of its grid's.
+    pub fn focused_leaf<'a>(&'a self, ws: &Workspace) -> Option<&'a PaneId> {
+        self.ui
+            .focus_by_workspace
+            .get(&ws.id)
+            .filter(|id| ws.has_leaf(id))
     }
 
     /// Workspace `ws` is drawn from now on: it joins `ui.opened_ids`, so its

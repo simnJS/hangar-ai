@@ -22,7 +22,7 @@ pub use drawer::{Drawer, DrawerCloseReason};
 pub use notice::{Notice, Notification};
 pub use overlay::{Overlay, SettingsCategory};
 pub use regions::{Focus, Region};
-pub use side_panels::{BoardVariant, PanelMode, Panels};
+pub use side_panels::{BoardVariant, Panels};
 pub use ui::{CloseReason, MenuEntry};
 pub use windows::WindowKind;
 

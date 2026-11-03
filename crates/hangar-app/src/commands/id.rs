@@ -1,5 +1,8 @@
 //! Every command a shortcut or the palette can run: the 88 of `COMMANDS` in
-//! `src/lib/shortcuts.ts` (inventory §1.10), in its order.
+//! `src/lib/shortcuts.ts` (inventory §1.10), in its order, but
+//! `view.modelPreview`, which showed and hid a preview panel that previews no
+//! longer have: each is a pane of the grid. A binding saved for it is kept, as
+//! any id this version does not know is.
 //!
 //! The order matters: the dispatcher runs the first command of the keymap
 //! with a live handler (P7), and the settings list them in it. The string ids
@@ -166,7 +169,6 @@ commands! {
     ViewTerminals = "view.terminals", View, CmdViewTerminals;
     ViewBoard = "view.board", View, CmdViewBoard;
     ViewBoardDock = "view.boardDock", View, CmdViewBoardDock;
-    ViewModelPreview = "view.modelPreview", View, CmdViewModelPreview;
     ViewCloseModels = "view.closeModels", View, CmdViewCloseModels;
     ViewMemory = "view.memory", View, CmdViewMemory;
     ViewStats = "view.stats", View, CmdViewStats;
@@ -235,10 +237,10 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn there_are_88_commands_each_with_its_own_id() {
-        assert_eq!(CommandId::ALL.len(), 88);
+    fn there_are_87_commands_each_with_its_own_id() {
+        assert_eq!(CommandId::ALL.len(), 87);
         let ids: HashSet<&str> = CommandId::ALL.iter().map(|c| c.as_str()).collect();
-        assert_eq!(ids.len(), 88);
+        assert_eq!(ids.len(), 87);
     }
 
     #[test]

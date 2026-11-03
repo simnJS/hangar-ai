@@ -21,20 +21,18 @@ pub enum Region {
     Navigator,
     Toolbar,
     Main,
-    /// The preview panel (3D models, files, kit tabs).
-    Model,
     /// The board beside the terminals.
     Dock,
     Inspector,
     Status,
 }
 
-/// The F6 order (`REGION_ORDER`).
-pub const ORDER: [Region; 7] = [
+/// The F6 order (`REGION_ORDER`). The previews are panes of the grid, in
+/// `Main`, where the 1.x order had their panel after it.
+pub const ORDER: [Region; 6] = [
     Region::Navigator,
     Region::Toolbar,
     Region::Main,
-    Region::Model,
     Region::Dock,
     Region::Inspector,
     Region::Status,
@@ -45,14 +43,16 @@ impl Region {
     /// the TS focused the panel itself: it takes the focus even when its
     /// package has no control of its own to give it.
     pub fn is_panel(self) -> bool {
-        matches!(self, Region::Model | Region::Dock | Region::Inspector)
+        matches!(self, Region::Dock | Region::Inspector)
     }
 }
 
 /// What has the keyboard (`Model.ui.focus`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Focus {
-    /// A pane's terminal (hangar-term keeps its own focus flag).
+    /// A pane of the grid: its terminal (hangar-term keeps its own focus
+    /// flag), or a view pane, whose widgets take the keyboard as they are
+    /// clicked.
     Terminal(PaneId),
     /// A region as a whole: a drawer, a panel.
     Region(Region),
@@ -103,9 +103,6 @@ pub fn shown(panels: &Panels, has_workspace: bool) -> Vec<Region> {
     }
     if has_workspace {
         shown.extend([Region::Toolbar, Region::Main, Region::Status]);
-        if panels.model.shown {
-            shown.push(Region::Model);
-        }
         if panels.dock.shown {
             shown.push(Region::Dock);
         }
@@ -122,15 +119,15 @@ mod tests {
 
     use super::*;
 
-    const ALL: [Region; 7] = ORDER;
+    const ALL: [Region; 6] = ORDER;
     use Region::*;
 
     #[test]
     fn walks_the_regions_as_they_sit_on_screen() {
         assert_eq!(next_region(&ALL, Some(Navigator), 1), Some(Toolbar));
         assert_eq!(next_region(&ALL, Some(Toolbar), 1), Some(Main));
-        assert_eq!(next_region(&ALL, Some(Main), 1), Some(Model));
-        assert_eq!(next_region(&ALL, Some(Model), 1), Some(Dock));
+        assert_eq!(next_region(&ALL, Some(Main), 1), Some(Dock));
+
         assert_eq!(next_region(&ALL, Some(Dock), 1), Some(Inspector));
         assert_eq!(next_region(&ALL, Some(Inspector), 1), Some(Status));
     }

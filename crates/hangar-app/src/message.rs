@@ -115,9 +115,6 @@ pub enum Intent {
     FocusInspector,
     ToggleDock,
     CloseDock,
-    TogglePreview,
-    ClosePreviewPanel,
-    TogglePreviewExpand,
     /// F6 (`1`) and Shift+F6 (`-1`).
     CycleRegion(i8),
     FocusRegion(Region),
@@ -259,6 +256,14 @@ pub enum Intent {
     /// as they are, so a dialog open over the panes keeps what was typed in
     /// it. Sent by the command table; handled by the shell.
     SelectPane {
+        ws: WsId,
+        pane: PaneId,
+    },
+    /// A view pane closes (its header's cross, `pane.close` on it): the
+    /// preview's entry it draws closes, which closes the pane, and a helper
+    /// window it had (`preview::panes`). Sent by P5 (`panes`) and the command
+    /// table; handled by P15 (`preview`).
+    CloseView {
         ws: WsId,
         pane: PaneId,
     },

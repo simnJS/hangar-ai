@@ -16,7 +16,7 @@ use crate::shell::{
     title_bar, windows,
 };
 use crate::state::folders::sidebar_order;
-use crate::state::layout::{compute_layout, normalize_tree, preferred_dir};
+use crate::state::layout::{compute_layout, grid_tree, preferred_dir};
 use crate::state::types::{AgentId, WindowBounds};
 use crate::state::{Model, PaneId, PanePatch, Patch, Settings, StoreAction, Workspace, WsId};
 
@@ -74,15 +74,6 @@ impl App {
             Intent::FocusInspector => return self.focus_inspector(w),
             Intent::ToggleDock => return self.toggle_dock(w),
             Intent::CloseDock => return self.close_panel(w, Drawer::Dock),
-            Intent::TogglePreview => return self.toggle_preview(w),
-            Intent::ClosePreviewPanel => return self.close_panel(w, Drawer::Model),
-            Intent::TogglePreviewExpand => {
-                if let Some(ws) = self.window_ws(w) {
-                    let panel = self.model.live.signals.preview.entry(ws).or_default();
-                    panel.open = true;
-                    panel.expanded = !panel.expanded;
-                }
-            }
             Intent::CycleRegion(step) => return self.cycle_region(w, step),
             Intent::FocusRegion(region) => return self.focus_region(w, region),
             Intent::SplitPane { ws, near, dir } => self.split_pane(w, ws, near, dir),
@@ -141,13 +132,9 @@ impl App {
                 self.model.ui.confirm_stop_workers = armed;
             }
             Intent::StopWorkers(_) => self.model.ui.confirm_stop_workers = false,
-            // A kit tab the person asked for goes to the terminals view, and
-            // the preview comes over them as a drawer when there is no room
-            // beside them, which an agent's file never does.
-            Intent::OpenKitTab { .. } => {
-                self.set_view(w, View::Terminals);
-                self.kit_opened = true;
-            }
+            // A kit tab the person asked for goes to the terminals view: it
+            // opens as a pane of the grid (kit_tabs, preview::panes).
+            Intent::OpenKitTab { .. } => self.set_view(w, View::Terminals),
             Intent::Notice(text) => return notice::show(&mut self.model, text),
             Intent::Notify(notification) => {
                 return crate::services::notify::send(&self.services, notification);
@@ -376,11 +363,6 @@ impl App {
             self.model.mount(id);
         }
         if active != self.last_active {
-            // A preview drawer of one workspace does not come over the next
-            // one's terminals.
-            if self.model.ui.drawer == Some(Drawer::Model) {
-                self.model.ui.drawer = None;
-            }
             // Picking a detached workspace brings its window forward.
             if let Some(ws) = active.as_ref().and_then(|id| self.model.workspace(id))
                 && ws.detached == Some(true)
@@ -399,14 +381,15 @@ impl App {
         self.last_active = active;
         self.last_view = self.model.ui.view;
 
-        // Keep the focus on a pane that still exists after a layout change.
+        // Keep the focus on a pane that still exists after a layout change: a
+        // terminal or a view, and the first terminal once it is gone.
         let shown: Vec<(WsId, PaneId)> = self
             .model
             .live
             .windows
             .keys()
             .filter_map(|w| self.model.window_workspace(*w))
-            .filter(|ws| self.model.focused_pane(ws).is_none())
+            .filter(|ws| self.model.focused_leaf(ws).is_none())
             .filter_map(|ws| {
                 ws.panes
                     .first()
@@ -465,23 +448,13 @@ impl App {
         }
     }
 
-    /// Drawers the windows' changes ended (`drawer::settle`), and what a
-    /// shown preview has seen.
+    /// Drawers the windows' changes ended (`drawer::settle`).
     fn settle_drawers(&mut self) {
         let windows: Vec<window::Id> = self.model.live.windows.keys().copied().collect();
         for w in windows {
             let panels = Panels::of(&self.model, w);
             let view = self.model.view_in(w);
             if self.model.is_focused_window(w) {
-                // The person asked for a kit tab: without room, the preview
-                // comes as a drawer, once the tab is there.
-                if self.kit_opened && panels.models_open {
-                    self.kit_opened = false;
-                    if panels.model.drawer && !panels.model_expanded && view == View::Terminals {
-                        drawer::open(&mut self.model.ui, Drawer::Model);
-                    }
-                }
-                let panels = Panels::of(&self.model, w);
                 let settled = drawer::settle(self.model.ui.drawer, &panels, view);
                 if settled != self.model.ui.drawer {
                     self.model.ui.drawer = settled;
@@ -489,13 +462,6 @@ impl App {
                 }
             } else if let Some(parked) = self.model.ui.parked.get_mut(&w) {
                 parked.drawer = drawer::settle(parked.drawer, &panels, view);
-            }
-            let panels = Panels::of(&self.model, w);
-            if panels.model.shown
-                && let Some(ws) = self.model.window_workspace(w).map(|ws| ws.id.clone())
-                && let Some(panel) = self.model.live.signals.preview.get_mut(&ws)
-            {
-                panel.unseen = false;
             }
         }
     }
@@ -567,7 +533,7 @@ impl App {
             // Deleted since: the raised window is all it gets.
             return Task::none();
         };
-        let exists = workspace.panes.iter().any(|p| p.id == pane);
+        let exists = workspace.has_leaf(&pane);
         let detached = workspace.detached == Some(true);
         let w = if detached {
             self.model.window_of(&ws).unwrap_or(self.main_window)
@@ -644,8 +610,7 @@ impl App {
     /// area's size: what `preferredDir` measured in the DOM.
     fn pane_size(&self, w: window::Id, ws: &str, pane: Option<&str>) -> Option<(f32, f32)> {
         let workspace = self.model.workspace(ws)?;
-        let tree = normalize_tree(&workspace.panes, workspace.tree.as_ref());
-        let rect = *compute_layout(&tree).rects.get(pane?)?;
+        let rect = *compute_layout(&grid_tree(workspace)).rects.get(pane?)?;
         let scale = self.model.settings().scale_factor();
         let window = self.window_sizes.get(&w)?;
         let panels = Panels::of(&self.model, w);
@@ -664,8 +629,7 @@ impl App {
             .copied()
             .unwrap_or(window.width / scale)
             - docked(panels.inspector)
-            - docked(panels.dock)
-            - docked(panels.model);
+            - docked(panels.dock);
         let height = window.height / scale
             - hangar_theme::tokens::size::TOOLBAR_HEIGHT
             - hangar_theme::tokens::size::STATUS_BAR_HEIGHT;
@@ -763,55 +727,16 @@ impl App {
         Task::none()
     }
 
-    /// The preview's toolbar button: docked when there is room and it is
-    /// open, a drawer the person opens otherwise. An agent showing something
-    /// never throws a drawer over the terminals someone is typing in.
-    fn toggle_preview(&mut self, w: window::Id) -> Task<Message> {
-        let Some(ws) = self.window_ws(w) else {
-            return Task::none();
-        };
-        if self.model.view_in(w) != View::Terminals {
-            self.set_view(w, View::Terminals);
-            self.model.live.signals.preview.entry(ws).or_default().open = true;
-            if Panels::of(&self.model, w).model.drawer {
-                return self.open_drawer(w, Drawer::Model);
-            }
-            return Task::none();
-        }
-        let panels = Panels::of(&self.model, w);
-        let panel = self.model.live.signals.preview.entry(ws).or_default();
-        if panels.model_expanded {
-            panel.open = false;
-            return Task::none();
-        }
-        if panels.model.drawer {
-            return self.toggle_drawer(w, Drawer::Model);
-        }
-        panel.open = !panel.open;
-        if !panel.open {
-            return self.after_docked_close(Region::Model);
-        }
-        Task::none()
-    }
-
     /// A panel's own close: its drawer, else its docked setting.
     fn close_panel(&mut self, w: window::Id, which: Drawer) -> Task<Message> {
         let panels = Panels::of(&self.model, w);
         let slot = panels.slot(which);
-        if slot.drawer
-            && self.model.drawer_in(w) == Some(which)
-            && !(which == Drawer::Model && panels.model_expanded)
-        {
+        if slot.drawer && self.model.drawer_in(w) == Some(which) {
             return self.close_drawer(DrawerCloseReason::Toggle);
         }
         match which {
             Drawer::Inspector => self.update_settings(|s| s.inspector_open = false),
             Drawer::Dock => self.update_settings(|s| s.board_dock_open = false),
-            Drawer::Model => {
-                if let Some(ws) = self.window_ws(w) {
-                    self.model.live.signals.preview.entry(ws).or_default().open = false;
-                }
-            }
         }
         self.after_docked_close(which.region())
     }
@@ -911,7 +836,6 @@ impl App {
                 View::Memory => crate::memory::focus_entry(&p.memory, m, region),
                 View::Stats => crate::stats::focus_entry(&p.stats, m, region),
             },
-            Region::Model => crate::preview::focus_entry(&p.preview, m, region),
             Region::Dock => crate::board::focus_entry(&p.board, m, region),
             Region::Inspector => crate::inspector::focus_entry(&p.inspector, m, region),
             Region::Status => crate::status_bar::focus_entry(&p.status_bar, m, region),
@@ -926,8 +850,8 @@ impl App {
                     .focused_window()
                     .and_then(|w| self.model.window_workspace(w))
                 {
-                    Some(ws) => match self.model.focused_pane(ws) {
-                        Some(pane) => Focus::Terminal(pane.id.clone()),
+                    Some(ws) => match self.model.focused_leaf(ws) {
+                        Some(pane) => Focus::Terminal(pane.clone()),
                         None => Focus::Region(region),
                     },
                     None => Focus::Region(region),
@@ -1163,9 +1087,8 @@ fn load_window_ui(ui: &mut crate::state::Ui, w: window::Id) {
 /// was typed in it; closing it gives the keyboard to the panes, which is to
 /// this pane (`restore_focus` enters them through the focused one).
 fn select_pane(m: &mut Model, ws: &str, pane: &str) {
-    let exists = m
-        .workspace(ws)
-        .is_some_and(|w| w.panes.iter().any(|p| p.id == pane));
+    let exists = m.workspace(ws).is_some_and(|w| w.has_leaf(pane));
+
     if !exists {
         return;
     }

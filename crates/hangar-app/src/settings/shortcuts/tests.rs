@@ -288,7 +288,7 @@ fn without_a_query_every_command_is_listed_by_section() {
     let sections: Vec<Section> = all.iter().map(|(section, _)| *section).collect();
     assert_eq!(sections, Section::ALL);
     let total: usize = all.iter().map(|(_, commands)| commands.len()).sum();
-    assert_eq!(total, 88);
+    assert_eq!(total, CommandId::ALL.len());
     assert!(all[0].1.contains(&CommandId::PaneSplit));
 }
 

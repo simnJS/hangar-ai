@@ -412,8 +412,8 @@ fn web_event(st: &mut State, event: &hangar_webview::Event) -> Task<Message> {
     Task::none()
 }
 
-/// What a tab is now: its entry, whether it is in front of a panel on
-/// screen, its workspace's theme.
+/// What a tab is now: its entry, whether its pane is on screen, its
+/// workspace's theme.
 struct Seen {
     entry: Entry,
     shown: bool,
@@ -421,7 +421,8 @@ struct Seen {
 }
 
 /// Every kit tab of every workspace as the preview last synced it, and
-/// whether it is in front of a panel on screen.
+/// whether its pane is on screen: its workspace's grid drawn by a window,
+/// and no other pane zoomed over it.
 fn seen_tabs(st: &State, m: &Model) -> Vec<Seen> {
     let view = st.shared.read(|store| store.view().clone());
     let mut seen = Vec::new();
@@ -430,8 +431,7 @@ fn seen_tabs(st: &State, m: &Model) -> Vec<Seen> {
             continue;
         };
         for entry in scope.entries.iter().filter(|entry| entry.is_kit_tab()) {
-            let shown =
-                view.panel_shown(&ws.id) && scope.active_id.as_deref() == Some(entry.id.as_str());
+            let shown = view.shows(&entry.id);
             seen.push(Seen {
                 entry: entry.clone(),
                 shown,
@@ -484,8 +484,8 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     m.live.preview.sync();
     let installed = st.installed.get();
 
-    // Every kit tab of every workspace, and whether it is in front of a
-    // panel on screen; one shown is no longer waiting for its first look.
+    // Every kit tab of every workspace, and whether its pane is on screen;
+    // one shown is no longer waiting for its first look.
     let seen = seen_tabs(st, m);
     for tab in &seen {
         if tab.shown && tab.entry.kit().is_some_and(|kit| kit.restored) {
@@ -607,8 +607,8 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
             .is_some_and(|page| page.revision == entry.revision);
         if open {
             keep_page.insert(entry.id.clone());
-            // The window is on screen while its tab is in front of a panel
-            // that is, and hidden otherwise.
+            // The window is on screen while its tab's pane is, and hidden
+            // otherwise.
             let client = st.shared.helper().client();
             if let Some(page) = st.pages.get_mut(&entry.id) {
                 page.set_seen(client.as_deref(), tab.shown);
@@ -936,7 +936,9 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it. `OpenKitTab` is the person's (the toolbar's Kits
-/// menu, the palette): the tab opens in its workspace's preview, in front.
+/// menu, the palette): the tab opens as a pane of its workspace's grid,
+/// beside the focused pane, and takes the focus; a tab open already is
+/// focused where it is.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
@@ -954,8 +956,21 @@ pub fn on_intent(
     if choice.tab.singleton {
         open = open.singleton();
     }
-    st.shared.edit(|store| store.open_kit_tab(open));
-    Some(reconcile(st, m, &Env::of(sv)))
+    let id = st.shared.edit(|store| store.open_kit_tab(open));
+    m.live.preview.sync();
+    let synced = crate::preview::panes::sync(m);
+    let mut tasks = vec![reconcile(st, m, &Env::of(sv))];
+    match synced.notice(m) {
+        Some(words) => tasks.push(Task::done(Message::Intent(Intent::Notice(
+            crate::shell::Notice::Problem(words),
+        )))),
+        None => tasks.push(Task::done(Message::Intent(Intent::FocusPane {
+            ws: ws.clone(),
+            pane: id,
+            terminal: true,
+        }))),
+    }
+    Some(Task::batch(tasks))
 }
 
 /// Whether a core event is one that changes what `panes.list` tells: a
@@ -994,7 +1009,7 @@ fn tell_of_event(st: &mut State, m: &Model, event: &CoreEvent) -> Option<Task<Me
     Some(tell(st, m, &seen))
 }
 
-/// A kit tab in the preview panel's body (called by `preview::view_entry`):
+/// A kit tab in the body of its view pane (called by `preview::view_entry`):
 /// a native tab drawn by hangar-kit-host, or the card of an HTML one's
 /// window.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a WsId, tab: &'a str) -> Element<'a, Message> {

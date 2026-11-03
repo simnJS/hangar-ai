@@ -1,8 +1,9 @@
 //! Docked or drawer (`src/lib/sidePanels.ts`, test 209/21; inventory §1.11).
 //!
-//! The panels on the right of the terminals (the preview, the board dock and
-//! the inspector) each sit beside them while that leaves the terminals at
-//! least `TERMINALS_MIN` pixels. Without that room a panel stops taking any:
+//! The panels on the right of the terminals (the board dock and the
+//! inspector) each sit beside them while that leaves the terminals at least
+//! `TERMINALS_MIN` pixels. What a preview shows is no side panel: it is a pane
+//! of the grid (`preview::panes`). Without that room a panel stops taking any:
 //! it becomes a drawer over the right of the work area, shown only while asked
 //! for, so a narrow window keeps its terminals whatever the saved state says.
 //!
@@ -25,23 +26,8 @@ pub const TERMINALS_MIN: f32 = 640.0;
 pub const INSPECTOR_MIN: f32 = 240.0;
 pub const INSPECTOR_MAX: f32 = 440.0;
 pub const DOCK_MIN: f32 = 300.0;
-/// A 3D view narrower than this shows a model as a sliver.
-pub const MODEL_MIN: f32 = 320.0;
 /// The strip of work area a drawer, however wide, always leaves uncovered.
 pub const DRAWER_MARGIN: f32 = 48.0;
-
-/// How the preview panel is drawn (`preview::view_panel`'s `mode`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PanelMode {
-    Docked {
-        width: f32,
-    },
-    Drawer {
-        width: f32,
-    },
-    /// Over the whole main area.
-    Expanded,
-}
 
 /// Which board `board::view` draws.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,10 +56,6 @@ pub struct SidePanelsInput {
     pub inspector: PanelInput,
     /// `None` when the terminals are not on screen, the only place it goes.
     pub dock: Option<PanelInput>,
-    /// The preview, beside the terminals like the dock. `None` while nothing
-    /// is open, off screen with the terminals, or expanded over the whole
-    /// work area, where it takes no room from anyone.
-    pub model: Option<PanelInput>,
 }
 
 /// Where one panel goes (`PanelPlace`).
@@ -91,7 +73,6 @@ pub struct PanelPlace {
 pub struct SidePanels {
     pub inspector: PanelPlace,
     pub dock: PanelPlace,
-    pub model: PanelPlace,
 }
 
 pub fn clamp_inspector(width: f32) -> f32 {
@@ -102,10 +83,6 @@ pub fn clamp_dock(width: f32) -> f32 {
     width.max(DOCK_MIN).round()
 }
 
-pub fn clamp_model_panel(width: f32) -> f32 {
-    width.max(MODEL_MIN).round()
-}
-
 /// `placeSidePanels`.
 ///
 /// When both are open and only one fits, the inspector is the one that turns
@@ -113,31 +90,20 @@ pub fn clamp_model_panel(width: f32) -> f32 {
 /// panes, while the inspector details one pane that its header and the
 /// toolbar already sum up. It reserves the dock's minimum width, not its
 /// saved one, so a wide dock narrows before the inspector gives way.
-///
-/// The preview goes before both: it is what an agent has just put in front of
-/// the person, and it only exists while something is open. The dock gives
-/// way to it the way the inspector gives way to the dock.
 pub fn place(input: SidePanelsInput) -> SidePanels {
     let SidePanelsInput {
         room,
         scale,
         inspector,
         dock,
-        model,
     } = input;
     let inspector_px = clamp_inspector(inspector.width) * scale;
     let dock_min_px = DOCK_MIN * scale;
     let dock_wanted = dock.map_or(dock_min_px, |dock| clamp_dock(dock.width) * scale);
-    let model_min_px = MODEL_MIN * scale;
-    let model_wanted = model.map_or(model_min_px, |model| clamp_model_panel(model.width) * scale);
-    let model_open = model.is_some_and(|model| model.open);
     let dock_open = dock.is_some_and(|dock| dock.open);
 
-    let model_counts = model_open && room - model_min_px >= TERMINALS_MIN;
-    let beside_model = room - if model_counts { model_min_px } else { 0.0 };
-    let dock_counts = dock_open && beside_model - dock_min_px >= TERMINALS_MIN;
-    let reserved =
-        if model_counts { model_min_px } else { 0.0 } + if dock_counts { dock_min_px } else { 0.0 };
+    let dock_counts = dock_open && room - dock_min_px >= TERMINALS_MIN;
+    let reserved = if dock_counts { dock_min_px } else { 0.0 };
     let inspector_fits = room - inspector_px - reserved >= TERMINALS_MIN;
 
     let inspector_place = if inspector_fits {
@@ -154,40 +120,11 @@ pub fn place(input: SidePanelsInput) -> SidePanels {
         }
     };
 
-    // What the preview and the dock share with the terminals: the row, less a
-    // docked inspector.
-    let workarea = room
+    // What the dock shares with the terminals: the row, less a docked
+    // inspector.
+    let dock_area = room
         - if inspector.open && inspector_fits {
             inspector_px
-        } else {
-            0.0
-        };
-
-    let model_fits = workarea - model_min_px >= TERMINALS_MIN;
-    let dock_kept = if dock_open && workarea - model_min_px - dock_min_px >= TERMINALS_MIN {
-        dock_min_px
-    } else {
-        0.0
-    };
-    let model_room = workarea
-        - if model_fits {
-            TERMINALS_MIN + dock_kept
-        } else {
-            DRAWER_MARGIN
-        };
-    let model_place = PanelPlace {
-        fits: model_fits,
-        width: if model_fits {
-            model_wanted.min(model_room).max(model_min_px)
-        } else {
-            model_wanted.min(model_room).max(0.0)
-        },
-        max: clamp_model_panel(model_room / scale),
-    };
-
-    let dock_area = workarea
-        - if model_open && model_fits {
-            model_place.width
         } else {
             0.0
         };
@@ -211,7 +148,6 @@ pub fn place(input: SidePanelsInput) -> SidePanels {
     SidePanels {
         inspector: inspector_place,
         dock: dock_place,
-        model: model_place,
     }
 }
 
@@ -235,11 +171,6 @@ pub struct Panels {
     pub scale: f32,
     pub inspector: Slot,
     pub dock: Slot,
-    pub model: Slot,
-    /// The workspace has something open in its preview.
-    pub models_open: bool,
-    /// The preview covers the work area (terminals view only).
-    pub model_expanded: bool,
     /// The navigator is drawn (the main window's alone).
     pub navigator: bool,
 }
@@ -251,13 +182,6 @@ impl Panels {
         let scale = settings.scale_factor();
         let terminals = m.view_in(w) == View::Terminals;
         let drawer = m.drawer_in(w);
-        let preview = m
-            .window_workspace(w)
-            .and_then(|ws| m.live.signals.preview.get(&ws.id))
-            .copied()
-            .unwrap_or_default();
-        let models_open = preview.entries > 0;
-        let model_expanded = models_open && preview.expanded && terminals;
         // Until the row has been measured, everything counts as fitting.
         let room =
             m.ui.body_width
@@ -280,10 +204,6 @@ impl Panels {
                 open: settings.board_dock_open,
                 width: width(Drawer::Dock, settings.board_dock_width),
             }),
-            model: (terminals && models_open && !model_expanded).then_some(PanelInput {
-                open: preview.open,
-                width: width(Drawer::Model, settings.model_panel_width),
-            }),
         });
         let slot = |place: PanelPlace, shown: bool| Slot {
             shown,
@@ -302,22 +222,11 @@ impl Panels {
             } else {
                 drawer == Some(Drawer::Dock)
             };
-        let model_shown = terminals
-            && models_open
-            && (model_expanded
-                || if sides.model.fits {
-                    preview.open
-                } else {
-                    drawer == Some(Drawer::Model)
-                });
         let has_workspace = m.window_workspace(w).is_some();
         Panels {
             scale,
             inspector: slot(sides.inspector, has_workspace && inspector_shown),
             dock: slot(sides.dock, has_workspace && dock_shown),
-            model: slot(sides.model, has_workspace && model_shown),
-            models_open,
-            model_expanded,
             navigator: m.live.windows.get(&w) == Some(&WindowKind::Main) && settings.navigator_open,
         }
     }
@@ -327,26 +236,7 @@ impl Panels {
         match drawer {
             Drawer::Inspector => self.inspector,
             Drawer::Dock => self.dock,
-            Drawer::Model => self.model,
         }
-    }
-
-    /// The preview's mode, when it is shown.
-    pub fn model_mode(&self) -> Option<PanelMode> {
-        if !self.model.shown {
-            return None;
-        }
-        Some(if self.model_expanded {
-            PanelMode::Expanded
-        } else if self.model.drawer {
-            PanelMode::Drawer {
-                width: self.model.width,
-            }
-        } else {
-            PanelMode::Docked {
-                width: self.model.width,
-            }
-        })
     }
 }
 
@@ -368,7 +258,6 @@ mod tests {
                 width: 296.0,
             },
             dock: None,
-            model: None,
         };
         patch(&mut input);
         input
@@ -381,9 +270,6 @@ mod tests {
             open: false,
             width: 296.0,
         }
-    }
-    fn near(a: f32, b: f32) -> bool {
-        (a - b).abs() < 1e-3
     }
 
     #[test]
@@ -563,98 +449,13 @@ mod tests {
         assert_eq!(with_open.dock.width, with_closed.dock.width);
     }
 
-    // with the 3D preview
-
-    fn with_model(patch: impl FnOnce(&mut SidePanelsInput)) -> SidePanelsInput {
-        input(|i| {
-            i.model = open(440.0);
-            patch(i);
-        })
-    }
-
-    #[test]
-    fn places_nothing_differently_while_no_model_is_open() {
-        let before = place(input(|i| i.dock = open(420.0)));
-        let after = place(input(|i| {
-            i.dock = open(420.0);
-            i.model = None;
-        }));
-        assert_eq!(after.inspector, before.inspector);
-        assert_eq!(after.dock, before.dock);
-    }
-
-    #[test]
-    fn docks_the_preview_at_its_width_when_the_terminals_keep_their_room() {
-        let sides = place(with_model(|i| i.room = 1920.0 - NAV));
-        assert!(sides.model.fits);
-        assert_eq!(sides.model.width, 440.0);
-        assert!(sides.inspector.fits);
-    }
-
-    #[test]
-    fn makes_the_inspector_a_drawer_before_it_squeezes_the_preview() {
-        let sides = place(with_model(|i| i.room = 1280.0 - NAV));
-        assert!(!sides.inspector.fits);
-        assert!(sides.model.fits);
-        assert!(near(
-            sides.model.width,
-            440f32.min(1280.0 - NAV - TERMINALS_MIN)
-        ));
-    }
-
-    #[test]
-    fn keeps_the_preview_beside_the_terminals_and_makes_the_dock_the_drawer_when_only_one_fits() {
-        let sides = place(with_model(|i| {
-            i.room = TERMINALS_MIN + MODEL_MIN + 100.0;
-            i.inspector = closed_inspector();
-            i.dock = open(420.0);
-        }));
-        assert!(sides.model.fits);
-        assert!(!sides.dock.fits);
-    }
-
-    #[test]
-    fn leaves_the_dock_its_minimum_beside_the_preview_while_there_is_room_for_both() {
-        let room = TERMINALS_MIN + MODEL_MIN + DOCK_MIN + 60.0;
-        let sides = place(with_model(|i| {
-            i.room = room;
-            i.inspector = closed_inspector();
-            i.dock = open(420.0);
-        }));
-        assert!(sides.model.fits);
-        assert!(sides.dock.fits);
-        assert!(near(
-            sides.model.width + sides.dock.width,
-            room - TERMINALS_MIN
-        ));
-        assert_eq!(sides.dock.width, DOCK_MIN);
-    }
-
-    #[test]
-    fn becomes_a_drawer_in_half_of_a_1920_screen_the_same_width_as_docked() {
-        let model = place(with_model(|i| i.room = 960.0 - NAV)).model;
-        assert!(!model.fits);
-        assert_eq!(model.width, 440.0);
-    }
-
-    #[test]
-    fn never_lets_a_drag_take_the_terminals_room_with_the_preview() {
-        let model = place(with_model(|i| {
-            i.room = TERMINALS_MIN + 500.0;
-            i.inspector = closed_inspector();
-        }))
-        .model;
-        assert_eq!(model.max, 500.0);
-    }
-
     #[test]
     fn everything_fits_until_the_row_is_measured() {
-        let sides = place(with_model(|i| {
+        let sides = place(input(|i| {
             i.room = f32::INFINITY;
             i.dock = open(420.0);
         }));
-        assert!(sides.inspector.fits && sides.dock.fits && sides.model.fits);
-        assert_eq!(sides.model.width, 440.0);
+        assert!(sides.inspector.fits && sides.dock.fits);
         assert_eq!(sides.dock.width, 420.0);
         assert_eq!(sides.inspector.max, INSPECTOR_MAX);
     }

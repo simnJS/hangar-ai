@@ -22,7 +22,7 @@ use crate::message::{Intent, Message, TerminalAction};
 use crate::orchestration_ui::actions::{can_create_orchestrator, pin_refusal};
 use crate::shell::{Action, Overlay, SettingsCategory, View, WindowKind};
 use crate::state::PaneId;
-use crate::state::layout::{Direction, leaf_ids, neighbor_of, normalize_tree};
+use crate::state::layout::{Direction, grid_tree, leaf_ids, neighbor_of};
 use crate::state::roles::{orchestrator_of, workers_of};
 use crate::state::types::DropZone;
 use crate::state::types::{AgentId, SplitDir, SplitNode};
@@ -41,14 +41,19 @@ struct Scope<'a> {
     /// The workspace the window shows.
     ws: Option<&'a Workspace>,
     view: View,
-    /// The arrangement of its panes on screen (App.tsx's `tree`), which
-    /// every pane command acts on. A workspace without a pane has none:
-    /// `normalize_tree` answers it a lone empty leaf, a pane that does not
-    /// exist for the commands to focus, restart or split.
+    /// The arrangement of its panes on screen (App.tsx's `tree`), terminals
+    /// and views, which every pane command acts on. A workspace without a
+    /// pane has none: `normalize_tree` answers it a lone empty leaf, a pane
+    /// that does not exist for the commands to focus, restart or split.
     tree: Option<SplitNode>,
-    /// The window's panes in reading order.
+    /// The window's panes in reading order, terminals and views: Ctrl+1…9
+    /// count every pane on screen.
     order: Vec<PaneId>,
+    /// The focused pane, a terminal or a view.
     focused: Option<PaneId>,
+    /// The focused pane is a view: what acts on a terminal, its agent or its
+    /// shell is not about it.
+    view_focused: bool,
 }
 
 impl<'a> Scope<'a> {
@@ -56,10 +61,12 @@ impl<'a> Scope<'a> {
         let main = !matches!(m.live.windows.get(&w), Some(WindowKind::Workspace(_)));
         let state = m.state();
         let ws = m.window_workspace(w);
-        let tree = ws
-            .filter(|ws| !ws.panes.is_empty())
-            .map(|ws| normalize_tree(&ws.panes, ws.tree.as_ref()));
+        let tree = ws.filter(|ws| !ws.panes.is_empty()).map(grid_tree);
         let order = tree.as_ref().map_or_else(Vec::new, leaf_ids);
+        let focused = ws.and_then(|ws| m.focused_leaf(ws)).cloned();
+        let view_focused = ws
+            .zip(focused.as_deref())
+            .is_some_and(|(ws, focused)| ws.has_view(focused));
         Scope {
             main,
             workspaces: if main {
@@ -71,9 +78,8 @@ impl<'a> Scope<'a> {
             view: m.view_in(w),
             tree,
             order,
-            focused: ws
-                .and_then(|ws| m.focused_pane(ws))
-                .map(|pane| pane.id.clone()),
+            focused,
+            view_focused,
         }
     }
 }
@@ -152,13 +158,8 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     ]);
     // Only while there is something to show or close: otherwise the keys
     // fall through, and the palette does not offer them.
-    if m.live
-        .signals
-        .preview
-        .get(&ws.id)
-        .is_some_and(|p| p.entries > 0)
-    {
-        live.extend([ViewModelPreview, ViewCloseModels]);
+    if !ws.view_panes.is_empty() {
+        live.insert(ViewCloseModels);
     }
     if can_create_orchestrator(ws) {
         live.insert(WorkspaceNewOrchestrator);
@@ -186,7 +187,7 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     if ws.panes.iter().any(|pane| pane.agent != AgentId::Shell) {
         live.insert(PaneResetAll);
     }
-    if ws.panes.len() > 1 {
+    if ws.pane_count() > 1 {
         live.insert(PaneTidy);
     }
     live.extend(FOCUS.iter().take(scope.order.len()));
@@ -197,9 +198,32 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     let Some(focused) = scope.focused.as_deref() else {
         return live;
     };
+    // A view moves, swaps, zooms and closes like any pane; nothing else of
+    // a pane is about it, and its keys reach what it shows.
+    let moves = [
+        PaneFocusLeft,
+        PaneFocusRight,
+        PaneFocusUp,
+        PaneFocusDown,
+        PaneSwapLeft,
+        PaneSwapRight,
+        PaneSwapUp,
+        PaneSwapDown,
+    ];
+    if scope.view_focused {
+        live.insert(PaneClose);
+        if ws.pane_count() > 1 {
+            live.insert(PaneZoom);
+        }
+        live.extend(moves);
+        return live;
+    }
     live.insert(PaneRestart);
     if ws.panes.len() > 1 {
-        live.extend([PaneClose, PaneZoom]);
+        live.insert(PaneClose);
+    }
+    if ws.pane_count() > 1 {
+        live.insert(PaneZoom);
     }
     if ws
         .panes
@@ -217,15 +241,8 @@ fn live(m: &Model, w: window::Id) -> HashSet<CommandId> {
     }
     let saved = ws.saved_commands.len() + settings.saved_commands.len();
     live.extend(RUN.iter().take(saved));
+    live.extend(moves);
     live.extend([
-        PaneFocusLeft,
-        PaneFocusRight,
-        PaneFocusUp,
-        PaneFocusDown,
-        PaneSwapLeft,
-        PaneSwapRight,
-        PaneSwapUp,
-        PaneSwapDown,
         TerminalClear,
         TerminalSelectAll,
         TerminalScrollTop,
@@ -343,7 +360,6 @@ fn message(m: &Model, w: window::Id, id: CommandId) -> Option<Message> {
         ViewTerminals => return intent(Intent::SetView(View::Terminals)),
         ViewBoard => return intent(Intent::SetView(View::Board)),
         ViewBoardDock => return intent(Intent::ToggleDock),
-        ViewModelPreview => return intent(Intent::TogglePreview),
         ViewCloseModels => return intent(Intent::ClosePreviews(wid)),
         ViewMemory => return intent(Intent::SetView(View::Memory)),
         ViewStats => return intent(Intent::SetView(View::Stats)),
@@ -432,10 +448,15 @@ fn message(m: &Model, w: window::Id, id: CommandId) -> Option<Message> {
             pane: focused.clone(),
             patch: Patch::none(),
         }),
+        PaneClose if scope.view_focused => intent(Intent::CloseView {
+            ws: wid,
+            pane: focused.clone(),
+        }),
         PaneClose => store(StoreAction::ClosePane {
             ws: wid,
             pane: focused.clone(),
         }),
+
         PaneZoom => intent(Intent::SetZoom {
             on: !m.ui.zoom_by_workspace.get(&wid).copied().unwrap_or(false),
             ws: wid,

@@ -1,6 +1,6 @@
 //! What the chrome reads from the other packages' read-models: the shortcut
-//! of a command, the tabs of a workspace's kits, and the preview button's
-//! state, each for the window that asks.
+//! of a command and the tabs of a workspace's kits, each for the window
+//! that asks.
 
 use std::collections::BTreeMap;
 
@@ -8,9 +8,7 @@ use hangar_core::kits::{KitInfo, Manifest, Source, Tab};
 
 use super::*;
 use crate::app::Packages;
-use crate::navigator::testing::{ctx, ctx_in, detach, model_of, pane, workspace};
-use crate::shell::View;
-use crate::state::live::PreviewPanel;
+use crate::navigator::testing::{ctx, model_of, pane, workspace};
 use crate::state::types::{AgentId, AppState, WorkspaceKit};
 
 fn model() -> Model {
@@ -215,87 +213,4 @@ fn a_kit_enabled_everywhere_is_offered_by_every_workspace() {
         let (tabs, _) = kit_tabs(&m, m.workspace(ws).unwrap()).unwrap();
         assert_eq!(titles(&tabs), ["Deploy/Runs"]);
     }
-}
-
-// ---- The preview button ------------------------------------------------------------------------
-
-fn preview(entries: usize, open: bool, unseen: bool) -> PreviewPanel {
-    PreviewPanel {
-        entries,
-        open,
-        expanded: false,
-        unseen,
-    }
-}
-
-#[test]
-fn the_button_is_there_once_something_is_open_and_lit_while_it_waits_unseen() {
-    let mut m = model();
-    m.ui.view = View::Terminals;
-    let pkg = Packages::default();
-    let ws = m.workspace("a").unwrap();
-
-    assert_eq!(models(&ctx(&m, &pkg), ws), Models::default());
-
-    m.live
-        .signals
-        .preview
-        .insert("a".into(), preview(2, false, true));
-    let waiting = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
-    assert_eq!(
-        waiting,
-        Models {
-            open: true,
-            shown: false,
-            unseen: true
-        }
-    );
-
-    // The panel on screen has been seen.
-    m.live
-        .signals
-        .preview
-        .insert("a".into(), preview(2, true, true));
-    let shown = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
-    assert_eq!(
-        shown,
-        Models {
-            open: true,
-            shown: true,
-            unseen: false
-        }
-    );
-}
-
-#[test]
-fn the_preview_is_shown_over_the_terminals_only() {
-    let mut m = model();
-    m.ui.view = View::Board;
-    m.live
-        .signals
-        .preview
-        .insert("a".into(), preview(1, true, false));
-    let pkg = Packages::default();
-    let on_the_board = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
-    assert!(on_the_board.open);
-    assert!(!on_the_board.shown);
-}
-
-#[test]
-fn a_workspace_window_reads_its_own_workspaces_preview() {
-    let mut m = model();
-    m.ui.view = View::Terminals;
-    let own = detach(&mut m, "b");
-    m.live
-        .signals
-        .preview
-        .insert("a".into(), preview(3, true, false));
-    let pkg = Packages::default();
-
-    // Workspace `a` has a preview open, in the main window; `b` has none.
-    let main = models(&ctx(&m, &pkg), m.workspace("a").unwrap());
-    assert!(main.open);
-    let ctx_own = ctx_in(&m, &pkg, own);
-    let in_window = models(&ctx_own, m.workspace("b").unwrap());
-    assert_eq!(in_window, Models::default());
 }

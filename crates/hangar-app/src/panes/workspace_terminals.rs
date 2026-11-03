@@ -1,5 +1,7 @@
 //! Every pane of one workspace (`WorkspaceTerminals.tsx`, inventory §2.1/12):
-//! the grid, a pane per slot, the zoom.
+//! the grid, a pane per slot, the zoom. A slot holds a terminal, or a view
+//! of what a preview shows (`view_pane.rs`): both are leaves of the same
+//! tree, moved, resized, zoomed and focused alike.
 //!
 //! The shell draws this for each opened workspace; a workspace off screen
 //! draws nothing, and its panes go on running and parsing their output all
@@ -16,10 +18,10 @@ use crate::message::Message;
 use crate::panes::grid::{Grid, Slot};
 use crate::panes::header::PADDING_X;
 use crate::panes::zoom_bar::{self, Other};
-use crate::panes::{State, focused_pane, keyboard_free, terminal_pane, zoomed_pane};
-use crate::state::Workspace;
+use crate::panes::{State, focused_pane, keyboard_free, terminal_pane, view_pane, zoomed_pane};
 use crate::state::layout as geometry;
 use crate::state::types::SplitDir;
+use crate::state::{AgentActivity, Workspace};
 
 /// A grid width to fold headers by before the grid has measured itself.
 const UNMEASURED: Size = Size::new(1000.0, 700.0);
@@ -27,7 +29,7 @@ const UNMEASURED: Size = Size::new(1000.0, 700.0);
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
     let t = ctx.theme;
     let c = &t.colors;
-    let tree = geometry::normalize_tree(&ws.panes, ws.tree.as_ref());
+    let tree = geometry::grid_tree(ws);
     let layout = geometry::compute_layout(&tree);
     let order: Vec<&str> = layout.order.iter().map(String::as_str).collect();
     let focused = focused_pane(ctx.model, ws);
@@ -35,36 +37,37 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
     let size = st.grid_sizes.get(&ws.id).copied();
     let measured = size.unwrap_or(UNMEASURED);
 
-    let mut slots = Vec::with_capacity(ws.panes.len());
-    for pane in &ws.panes {
-        let (Some(&rect), Some(rt)) = (layout.rects.get(&pane.id), st.panes.get(&pane.id)) else {
-            continue;
-        };
-        let is_focused = focused.as_deref() == Some(pane.id.as_str());
-        let is_zoomed = zoomed.as_deref() == Some(pane.id.as_str());
+    let many = ws.pane_count() > 1;
+    let place = |id: &str| {
+        let is_focused = focused.as_deref() == Some(id);
+        let is_zoomed = zoomed.as_deref() == Some(id);
+        let rect = layout
+            .rects
+            .get(id)
+            .copied()
+            .unwrap_or(geometry::Rect::FULL);
         let width = if is_zoomed {
             measured.width
         } else {
             rect.width as f32 * measured.width
         };
-        let element = terminal_pane::view(
-            st,
-            ctx,
-            ws,
-            pane,
-            rt,
-            terminal_pane::Placing {
-                focused: is_focused,
-                zoomed: is_zoomed,
-                can_close: ws.panes.len() > 1,
-                can_zoom: ws.panes.len() > 1,
-                width: width.max(PADDING_X),
-                index: order
-                    .iter()
-                    .position(|id| *id == pane.id)
-                    .unwrap_or_default(),
-            },
-        );
+        terminal_pane::Placing {
+            focused: is_focused,
+            zoomed: is_zoomed,
+            can_close: ws.panes.len() > 1,
+            can_zoom: many,
+            width: width.max(PADDING_X),
+            index: order.iter().position(|at| *at == id).unwrap_or_default(),
+        }
+    };
+    let mut slots = Vec::with_capacity(ws.pane_count());
+    for pane in &ws.panes {
+        let (Some(&rect), Some(rt)) = (layout.rects.get(&pane.id), st.panes.get(&pane.id)) else {
+            continue;
+        };
+        let placing = place(&pane.id);
+        let is_focused = placing.focused;
+        let element = terminal_pane::view(st, ctx, ws, pane, rt, placing);
         // The outline says what the pane wants, an answer or (finished, or a
         // shell whose command is done) your turn; else the focus ring. Never
         // the accent for the first two: it would pass for the focused pane.
@@ -86,35 +89,62 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
             rect,
             element,
             ring,
+            terminal: true,
+        });
+    }
+    // The views after the terminals, in the order they were opened: the
+    // slots keep a stable order whatever the arrangement.
+    for view in &ws.view_panes {
+        let Some(&rect) = layout.rects.get(&view.id) else {
+            continue;
+        };
+        let placing = place(&view.id);
+        let ring = placing.focused.then(|| c.accent.scale_alpha(0.66));
+        let hovered = st.hovered.as_deref() == Some(view.id.as_str());
+        slots.push(Slot {
+            id: &view.id,
+            name: view_pane::name_of(ctx, &ws.id, &view.id),
+            rect,
+            element: view_pane::view(ctx, ws, &view.id, hovered, placing),
+            ring,
+            terminal: false,
         });
     }
     if slots.is_empty() {
         return Space::new().into();
     }
 
+    let names: HashMap<&str, &str> = ws
+        .panes
+        .iter()
+        .map(|pane| (pane.id.as_str(), pane.name.as_str()))
+        .chain(
+            ws.view_panes
+                .iter()
+                .map(|view| (view.id.as_str(), view_pane::name_of(ctx, &ws.id, &view.id))),
+        )
+        .collect();
+
     let zoom_bar = zoomed.as_ref().and_then(|zoomed| {
-        let name = ws.panes.iter().find(|p| &p.id == zoomed)?.name.as_str();
+        let name = *names.get(zoomed.as_str())?;
         let others = order
             .iter()
             .filter(|id| *id != zoomed)
             .filter_map(|id| {
-                let pane = ws.panes.iter().find(|p| p.id == *id)?;
-                Some(Other {
-                    id: &pane.id,
-                    name: &pane.name,
-                    activity: ctx.model.live.panes_logic.activity_or_idle(&pane.id),
-                })
+                let (&id, &name) = names.get_key_value(*id)?;
+                // A view has no agent: it rests.
+                let activity = if ws.has_view(id) {
+                    AgentActivity::Idle
+                } else {
+                    ctx.model.live.panes_logic.activity_or_idle(id)
+                };
+                Some(Other { id, name, activity })
             })
             .collect();
         Some(zoom_bar::view(ctx, &ws.id, name, others, measured.width))
     });
 
     let tr = ctx.i18n;
-    let names: HashMap<&str, &str> = ws
-        .panes
-        .iter()
-        .map(|pane| (pane.id.as_str(), pane.name.as_str()))
-        .collect();
     let mut grid = Grid::new(
         &ws.id,
         t,
@@ -124,8 +154,9 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, M
         zoom_bar,
         ws.panes
             .iter()
-            .find(|p| Some(&p.id) == focused.as_ref())
-            .map(|p| &p.id),
+            .map(|p| &p.id)
+            .chain(ws.view_panes.iter().map(|v| &v.id))
+            .find(|id| Some(*id) == focused.as_ref()),
         size,
         move |count| tr.tn(Key::DropPaste, count, &[]).into_owned(),
     );

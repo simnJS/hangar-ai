@@ -148,7 +148,7 @@ impl Harness {
         &mut self.pkg.kit_tabs
     }
 
-    /// The person opens the tab: it is in front, in a panel on screen.
+    /// The person opens the tab: its pane is on screen.
     ///
     /// The 3D view's tests also say what is on screen in the process's store,
     /// and what one says another unsays: the screen is put back, a few times,
@@ -165,8 +165,12 @@ impl Harness {
             self.entry_id()
         };
         for _ in 0..20 {
-            shared.edit(|store| store.note_screens([(ws.clone(), true)]));
+            shared.edit(|store| {
+                store.note_screens([(ws.clone(), true)]);
+                store.set_shown(&id, true);
+            });
             let _ = self.step(Msg::Changed);
+
             if self.pkg.kit_tabs.pages.contains_key(&id) {
                 break;
             }

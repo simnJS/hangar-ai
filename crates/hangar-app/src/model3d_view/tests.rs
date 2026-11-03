@@ -54,6 +54,9 @@ struct Harness {
     inbox: Inbox,
     /// Keeps the inbox open.
     _receiver: inbox::InboxReceiver,
+    /// The model whose pane is on screen: the last one shown, as the newest
+    /// pane is the one the person looks at, until `look_at` says another.
+    front: Option<String>,
 }
 
 impl Harness {
@@ -96,6 +99,26 @@ impl Harness {
             dir,
             inbox,
             _receiver: receiver,
+            front: None,
+        }
+    }
+
+    /// The pane of model `id` is the one on screen, the last one's no
+    /// longer is.
+    fn look_at(&mut self, id: &str) {
+        let before = self.front.replace(id.to_string());
+        self.shared.edit(|store| {
+            if let Some(before) = &before {
+                store.set_shown(before, false);
+            }
+            store.set_shown(id, true);
+        });
+    }
+
+    /// No pane of this test's models is on screen.
+    fn look_away(&mut self) {
+        if let Some(before) = self.front.take() {
+            self.shared.edit(|store| store.set_shown(&before, false));
         }
     }
 
@@ -105,7 +128,7 @@ impl Harness {
         let path = self.dir.write(name, bytes);
         let format = ModelFormat::from_path(&path).expect("a model's name");
         let ws = self.ws.clone();
-        self.shared.edit(|store| {
+        let id = self.shared.edit(|store| {
             store.show_file(ShowFile {
                 workspace_id: ws,
                 path: path.to_string_lossy().into_owned(),
@@ -116,7 +139,9 @@ impl Harness {
                     format: format.extension().into(),
                 },
             })
-        })
+        });
+        self.look_at(&id);
+        id
     }
 
     /// The file was rewritten.
@@ -407,7 +432,7 @@ fn models_nobody_looks_at_are_dropped_past_the_budget_and_come_back_when_wanted(
         h.tick();
         h.land(id);
     }
-    // The one in front is kept, and the last three used of the others.
+    // The one on screen is kept, and the last three used of the others.
     let kept: Vec<bool> = ids.iter().map(|id| h.slot(id).has_content()).collect();
     assert_eq!(kept, [false, true, true, true, true], "the oldest goes");
     let revision = h.entry(&ids[0]).revision;
@@ -418,8 +443,8 @@ fn models_nobody_looks_at_are_dropped_past_the_budget_and_come_back_when_wanted(
     // It stays open, and ready, for the store.
     assert_eq!(h.entry(&ids[0]).status, Status::Ready);
 
-    // Brought to the front, it is read again without a word to the store.
-    h.shared.edit(|store| store.activate_model(&ids[0]));
+    // Its pane on screen again, it is read again without a word to the store.
+    h.look_at(&ids[0]);
     h.tick();
     assert!(h.slot(&ids[0]).loading(revision));
     assert_eq!(h.entry(&ids[0]).status, Status::Ready);
@@ -492,7 +517,7 @@ fn a_workspace_put_to_sleep_lets_its_models_go_and_gets_them_back_on_waking() {
     // Its model is still listed.
     assert_eq!(h.entry(&id).status, Status::Ready);
 
-    // Awake again, the model in front comes back.
+    // Awake again, the model on screen comes back.
     h.tick();
     assert!(h.slot(&id).loading(h.entry(&id).revision));
 }
@@ -1259,12 +1284,11 @@ fn a_reload_of_the_file_keeps_the_clip_and_the_time_the_person_was_at() {
 #[test]
 fn the_view_is_built_again_for_the_slider_only_while_a_clip_plays_in_front() {
     let (mut h, id) = animated_scene("anim-tick");
-    let ws = h.ws.clone();
-    // The store does not know the panel is drawn yet.
+    // The store does not know its pane is on screen yet.
+    h.look_away();
     assert!(!animating_in_front(&h.st));
-    h.shared
-        .edit(|store| store.note_screens([(ws.clone(), true)]));
-    assert!(animating_in_front(&h.st), "playing, in front, on screen");
+    h.look_at(&id);
+    assert!(animating_in_front(&h.st), "playing, its pane on screen");
     // A viewport that cannot draw has no slider to move.
     h.slot(&id)
         .viewer
@@ -1275,23 +1299,21 @@ fn the_view_is_built_again_for_the_slider_only_while_a_clip_plays_in_front() {
         .pretend_rendering(hangar_model3d::Rendering::Drawing);
     assert!(animating_in_front(&h.st));
 
-    h.shared
-        .edit(|store| store.note_screens([(ws.clone(), false)]));
-    assert!(!animating_in_front(&h.st), "the panel is hidden");
-    h.shared
-        .edit(|store| store.note_screens([(ws.clone(), true)]));
+    h.look_away();
+    assert!(!animating_in_front(&h.st), "its pane is hidden");
+    h.look_at(&id);
 
     h.send(Msg::PlayPause(id.clone()));
     assert!(!animating_in_front(&h.st), "paused");
     h.send(Msg::PlayPause(id.clone()));
     assert!(animating_in_front(&h.st));
 
-    // Another model comes to the front: this one is no longer watched.
+    // Another pane is zoomed over it: this one is no longer watched.
     let other = h.show("other.glb", &samples::cube_glb());
     assert_ne!(other, id);
     assert!(!animating_in_front(&h.st));
     // Leave the shared store as it was found.
-    h.shared.edit(|store| store.note_screens([]));
+    h.look_away();
 }
 
 #[test]

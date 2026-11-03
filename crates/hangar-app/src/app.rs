@@ -202,9 +202,6 @@ pub struct App {
     /// left them, for what follows a change of either.
     last_active: Option<String>,
     last_view: crate::shell::View,
-    /// A kit tab was opened by the person: once the panel is placed, a
-    /// preview without room opens as a drawer (App.tsx's `kitOpened`).
-    kit_opened: bool,
 }
 
 impl App {
@@ -249,7 +246,6 @@ impl App {
             save_held: false,
             last_active: None,
             last_view: crate::shell::View::default(),
-            kit_opened: false,
         };
         app.cache_themes();
         let host = core.host().clone();

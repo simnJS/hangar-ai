@@ -38,6 +38,7 @@ pub mod search;
 mod status;
 mod term_widget;
 mod terminal_pane;
+mod view_pane;
 mod workspace_terminals;
 mod zoom_bar;
 
@@ -115,6 +116,9 @@ pub enum Picker {
 #[derive(Debug, Default)]
 pub struct Live {
     reports: HashMap<PaneId, PaneReport>,
+    /// Each grid's size as it last measured itself: where a pane opened
+    /// beside another splits it, along its longer side (`split_dir`).
+    grid_sizes: HashMap<WsId, Size>,
 }
 
 /// One mounted pane, as the rest of the window sees it.
@@ -137,6 +141,23 @@ impl Live {
 
     pub fn reports(&self) -> impl Iterator<Item = (&PaneId, &PaneReport)> {
         self.reports.iter()
+    }
+
+    /// The direction to split pane `near` of workspace `ws` in: along its
+    /// longer side on screen (`layout::preferred_dir`), from its share of the
+    /// grid as the grid last measured itself; a row before it has.
+    pub fn split_dir(&self, ws: &Workspace, near: Option<&str>) -> SplitDir {
+        let size = near.and_then(|near| {
+            let grid = self.grid_sizes.get(&ws.id)?;
+            let rect = *layout::compute_layout(&layout::grid_tree(ws))
+                .rects
+                .get(near)?;
+            Some((
+                rect.width as f32 * grid.width,
+                rect.height as f32 * grid.height,
+            ))
+        });
+        layout::preferred_dir(size)
     }
 }
 
@@ -335,7 +356,12 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             pane,
             patch: Patch::none(),
         }),
+        // A view is the preview's entry: closing the pane closes it there,
+        // its helper window with it.
         Msg::Close(ws, pane) => {
+            if m.workspace(&ws).is_some_and(|w| w.has_view(&pane)) {
+                return intent(Intent::CloseView { ws, pane });
+            }
             m.apply(StoreAction::ClosePane { ws, pane });
             Task::none()
         }
@@ -372,12 +398,13 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             Task::none()
         }
         Msg::GridSized(ws, size) => {
-            st.grid_sizes.insert(ws, size);
+            st.grid_sizes.insert(ws.clone(), size);
+            m.live.panes.grid_sizes.insert(ws, size);
             Task::none()
         }
         Msg::SetRatio(ws, path, ratio) => {
             if let Some(workspace) = m.workspace(&ws) {
-                let tree = layout::normalize_tree(&workspace.panes, workspace.tree.as_ref());
+                let tree = layout::grid_tree(workspace);
                 let next = layout::with_ratio(&tree, &path, ratio);
                 m.apply(StoreAction::SetTree(ws, next));
             }
@@ -878,18 +905,16 @@ const HIDDEN_FRAME: std::time::Duration = std::time::Duration::from_millis(250);
 
 // ---- Where the panes stand --------------------------------------------------
 
-/// The pane of `ws` that has the focus: the one the shell remembers, else
-/// the first in reading order.
+/// The pane of `ws` that has the focus, a terminal or a view: the one the
+/// shell remembers, else the first in reading order. A view with the focus
+/// leaves every terminal without the keyboard.
 pub(crate) fn focused_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
     if let Some(pane) = m.ui.focus_by_workspace.get(&ws.id)
-        && ws.panes.iter().any(|p| &p.id == pane)
+        && ws.has_leaf(pane)
     {
         return Some(pane.clone());
     }
-    let tree = layout::normalize_tree(&ws.panes, ws.tree.as_ref());
-    crate::state::layout::leaf_ids(&tree)
-        .into_iter()
-        .find(|id| !id.is_empty())
+    layout::grid_order(ws).into_iter().find(|id| !id.is_empty())
 }
 
 /// The pane drawn over the whole grid: the focused one, while the
@@ -897,7 +922,7 @@ pub(crate) fn focused_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
 /// the focus around.
 pub(crate) fn zoomed_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
     let on = m.ui.zoom_by_workspace.get(&ws.id).copied().unwrap_or(false);
-    (on && ws.panes.len() > 1)
+    (on && ws.pane_count() > 1)
         .then(|| focused_pane(m, ws))
         .flatten()
 }
@@ -984,6 +1009,7 @@ fn signature(st: &State, m: &Model) -> u64 {
             continue;
         };
         (&ws.id, &ws.theme_id, ws.detached).hash(&mut hash);
+        ws.view_panes.len().hash(&mut hash);
         for pane in &ws.panes {
             pane.id.hash(&mut hash);
             if pane.role.is_some() {
@@ -1078,7 +1104,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     // A split, a close or a preset ends the zoom, as it does in tmux: the
     // person asked for a change of the arrangement and expects to see it.
     for id in m.ui.opened_ids.clone() {
-        let Some(count) = m.workspace(&id).map(|ws| ws.panes.len()) else {
+        let Some(count) = m.workspace(&id).map(Workspace::pane_count) else {
             continue;
         };
         if let Some(before) = st.pane_counts.insert(id.clone(), count)
@@ -1158,9 +1184,9 @@ fn publish(st: &State, m: &mut Model) {
         let Some(ws) = m.workspace(&rt.ws) else {
             continue;
         };
-        let layout = layouts.entry(ws.id.as_str()).or_insert_with(|| {
-            layout::compute_layout(&layout::normalize_tree(&ws.panes, ws.tree.as_ref()))
-        });
+        let layout = layouts
+            .entry(ws.id.as_str())
+            .or_insert_with(|| layout::compute_layout(&layout::grid_tree(ws)));
         let width = pane_width(st, m, ws, layout, id);
         reports.insert(
             id.clone(),
@@ -1176,6 +1202,10 @@ fn publish(st: &State, m: &mut Model) {
         m.live.panes.reports = reports;
         m.live.version += 1;
     }
+    m.live
+        .panes
+        .grid_sizes
+        .retain(|ws, _| st.grid_sizes.contains_key(ws));
 }
 
 /// A pane's width on screen, from its grid's last measured size.

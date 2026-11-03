@@ -7,8 +7,7 @@
 //!
 //! Activity, the sleeping workspaces and the plan's limits are `panes_logic`'s
 //! (`Model.live.panes_logic`), the shortcuts are the keymap's, the kits are
-//! `kits::Live`'s, and the preview button reads what the frame itself reads
-//! to place the preview panel. Nothing here keeps a copy.
+//! `kits::Live`'s. Nothing here keeps a copy.
 
 use crate::commands::CommandId;
 use crate::ctx::Ctx;
@@ -129,40 +128,6 @@ pub fn kit_tabs(m: &Model, ws: &Workspace) -> Option<(Vec<KitTab>, bool)> {
         })
         .collect();
     Some((tabs, m.live.kits.loading()))
-}
-
-/// What the toolbar's 3D button needs of the preview: some model is open,
-/// the panel shows it, and something was opened or rewritten since the panel
-/// was last on screen (`modelsOpen`, `modelShown`, `modelsUnseen`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Models {
-    pub open: bool,
-    pub shown: bool,
-    pub unseen: bool,
-}
-
-/// The preview of the workspace this window draws.
-///
-/// It reads what the frame reads to place the panel (`Panels::of`, over
-/// `live.signals.preview`, which the preview package keeps) rather than the
-/// preview's own `Live`: whether the panel is on screen depends on the room
-/// the window has (docked, a drawer, or over the terminals), and the button
-/// and the panel must never disagree about it. Something an agent opened that
-/// waits behind the button lights it (`models.unseen && !modelShown`).
-pub fn models(ctx: &Ctx<'_>, ws: &Workspace) -> Models {
-    let panels = ctx.panels();
-    let waiting = ctx
-        .model
-        .live
-        .signals
-        .preview
-        .get(&ws.id)
-        .is_some_and(|panel| panel.unseen);
-    Models {
-        open: panels.models_open,
-        shown: panels.model.shown,
-        unseen: waiting && !panels.model.shown,
-    }
 }
 
 /// When a workspace fell asleep (`useAsleep`), in ms since the epoch.

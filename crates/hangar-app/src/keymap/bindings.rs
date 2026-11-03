@@ -111,7 +111,6 @@ pub fn defaults(id: CommandId, platform: Platform) -> &'static [&'static str] {
         C::ViewTerminals => &["Mod+Alt+T"],
         C::ViewBoard => &["Mod+Alt+B"],
         C::ViewBoardDock => &["Mod+Alt+Shift+B"],
-        C::ViewModelPreview => &["Mod+Alt+P"],
         // Unbound: a stray chord should not close what an agent is showing.
         C::ViewCloseModels => &[],
         // K for knowledge: M is the MCP panel's.

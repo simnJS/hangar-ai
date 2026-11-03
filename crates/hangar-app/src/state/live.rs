@@ -89,13 +89,10 @@ pub struct Pointer {
 /// package that writes it; the shell only reads.
 #[derive(Debug, Default)]
 pub struct Signals {
-    /// P15: each workspace's preview panel. A workspace with no entry has
-    /// nothing open.
-    pub preview: HashMap<WsId, PreviewPanel>,
     /// P6: how many items Needs-you lists; `view.needsYou` is live while
     /// there are some.
     pub needs_you: usize,
-    /// P9, P12, P15: a side panel's grip is held, and this is the width the
+    /// P9, P12: a side panel's grip is held, and this is the width the
     /// panel is drawn at meanwhile, in points (the setting's unit). Its
     /// package writes the setting once, when the grip is let go, and clears
     /// this: the frame (`Panels::of`) follows the pointer without a store
@@ -108,25 +105,6 @@ pub struct Signals {
 pub struct PanelDrag {
     pub panel: Drawer,
     pub width: f32,
-}
-
-/// A workspace's preview panel (the panel part of `lib/modelStore.ts`).
-///
-/// `entries` and `unseen` are P15's to write. `open` and `expanded` are
-/// written by the shell's toggles (`Intent::TogglePreview`,
-/// `ClosePreviewPanel`, `TogglePreviewExpand`), which decide drawer or
-/// docked, and by P15 when it reveals an entry (`setModelPanel(ws, {open})`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PreviewPanel {
-    /// How many entries (models, files, kit tabs) are open.
-    pub entries: usize,
-    /// Docked beside the terminals; ignored while it does not fit, where the
-    /// drawer is `ui.drawer`.
-    pub open: bool,
-    /// Over the whole work area.
-    pub expanded: bool,
-    /// Something an agent opened or changed waits behind the toolbar button.
-    pub unseen: bool,
 }
 
 /// `Model.live`: every package's shared read-model, and the shell's own.

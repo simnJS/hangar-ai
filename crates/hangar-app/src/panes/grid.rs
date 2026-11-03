@@ -69,6 +69,9 @@ pub struct Slot<'a> {
     /// The outline drawn over the pane: the focus ring, or the colour of what
     /// it wants while it waits for the person.
     pub ring: Option<Color>,
+    /// A terminal, which takes the files dropped on it; a view pane (what a
+    /// preview shows) takes none.
+    pub terminal: bool,
 }
 
 /// The grid of workspace `ws`.
@@ -82,6 +85,7 @@ pub struct Grid<'a> {
     names: Vec<&'a str>,
     rects: Vec<Rect>,
     rings: Vec<Option<Color>>,
+    terminals: Vec<bool>,
     zoomed: Option<usize>,
     tree: SplitNode,
     handles: Vec<Handle>,
@@ -122,6 +126,7 @@ impl<'a> Grid<'a> {
             names: Vec::new(),
             rects: Vec::new(),
             rings: Vec::new(),
+            terminals: Vec::new(),
             zoomed,
             tree,
             handles,
@@ -136,6 +141,7 @@ impl<'a> Grid<'a> {
             grid.names.push(slot.name);
             grid.rects.push(slot.rect);
             grid.rings.push(slot.ring);
+            grid.terminals.push(slot.terminal);
             grid.children.push(slot.element);
         }
         if let (Some(_), Some(bar)) = (grid.zoomed, zoom_bar) {
@@ -487,6 +493,8 @@ impl Grid<'_> {
     /// it is not known, the focused pane does, which is where the person is
     /// working; when it is known to be elsewhere (over a side panel), no
     /// pane does.
+    ///
+    /// Only a terminal takes a file: over a view pane, nothing does.
     fn drop_target(&self, layout: Layout<'_>, cursor: mouse::Cursor) -> Option<usize> {
         match cursor.position() {
             Some(at) => self.slot_at(layout, at),
@@ -495,6 +503,7 @@ impl Grid<'_> {
                 .and_then(|focused| self.ids.iter().position(|id| *id == focused))
                 .filter(|index| !self.behind(*index)),
         }
+        .filter(|index| self.terminals.get(*index).copied().unwrap_or(false))
     }
 
     /// The slot whose pane is under `position`, ignoring those behind a zoom.
@@ -1320,6 +1329,7 @@ mod tests {
                 rect: layout.rects[id],
                 element: Space::new().width(Length::Fill).height(Length::Fill).into(),
                 ring: None,
+                terminal: true,
             })
             .collect();
         Grid::new(
@@ -1530,6 +1540,7 @@ mod keyboard_tests {
                 rect: layout.rects[id],
                 element: Space::new().width(Length::Fill).height(Length::Fill).into(),
                 ring: None,
+                terminal: true,
             })
             .collect();
         let grid = Grid::new(

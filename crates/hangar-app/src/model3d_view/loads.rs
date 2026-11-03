@@ -11,8 +11,9 @@
 //! - the ones the store marks as loading (an agent just showed them, or their
 //!   file was rewritten), in any workspace, so the agent hears what the viewer
 //!   found and the person finds the model ready;
-//! - the one in front, when it is not in memory (it was dropped to make room
-//!   for others, or its workspace was asleep);
+//! - those whose pane is on screen, when not in memory (dropped to make room
+//!   for others, or their workspace was asleep);
+
 //! - any a snapshot asks for (`Msg::Ensure`).
 //!
 //! Closed tabs let go of their models, and so does a workspace put to sleep:
@@ -49,7 +50,7 @@ pub struct Want {
     pub revision: u64,
     pub modified_ms: u64,
     pub status: Status,
-    /// In front in its workspace's preview.
+    /// Its pane is on screen.
     pub front: bool,
     /// And a window shows the workspace.
     pub on_screen: bool,
@@ -68,8 +69,7 @@ pub fn wants(shared: &Shared) -> Vec<Want> {
                 revision: entry.revision,
                 modified_ms: entry.modified_ms,
                 status: entry.status,
-                front: store.scope(&entry.workspace_id).active_id.as_deref()
-                    == Some(entry.id.as_str()),
+                front: store.view().shows(&entry.id),
                 on_screen: store.view().on_screen(&entry.workspace_id),
             })
             .collect()

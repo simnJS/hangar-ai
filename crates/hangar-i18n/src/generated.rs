@@ -406,8 +406,6 @@ pub enum Key {
     CmdViewMcp,
     /// `cmd.view.memory`
     CmdViewMemory,
-    /// `cmd.view.modelPreview`
-    CmdViewModelPreview,
     /// `cmd.view.navigator`
     CmdViewNavigator,
     /// `cmd.view.needsYou`
@@ -1860,8 +1858,6 @@ pub enum Key {
     ModelClip,
     /// `model.close`
     ModelClose,
-    /// `model.collapse`
-    ModelCollapse,
     /// `model.copied`
     ModelCopied,
     /// `model.copyImage`
@@ -1872,18 +1868,10 @@ pub enum Key {
     ModelDownloadBytes,
     /// `model.drawFailed`
     ModelDrawFailed,
-    /// `model.empty`
-    ModelEmpty,
-    /// `model.emptyHint`
-    ModelEmptyHint,
     /// `model.errorTitle`
     ModelErrorTitle,
-    /// `model.expand`
-    ModelExpand,
     /// `model.grid`
     ModelGrid,
-    /// `model.hide`
-    ModelHide,
     /// `model.lost`
     ModelLost,
     /// `model.materials`
@@ -1898,8 +1886,6 @@ pub enum Key {
     ModelNormalsTooMany,
     /// `model.openedBy`
     ModelOpenedBy,
-    /// `model.panel`
-    ModelPanel,
     /// `model.parse`
     ModelParse,
     /// `model.pause`
@@ -1940,8 +1926,6 @@ pub enum Key {
     ModelTime,
     /// `model.timeOf`
     ModelTimeOf,
-    /// `model.toggleHint`
-    ModelToggleHint,
     /// `model.tools`
     ModelTools,
     /// `model.triangles`
@@ -2352,6 +2336,8 @@ pub enum Key {
     PreviewMediaFailed,
     /// `preview.mediaFailedHint`
     PreviewMediaFailedHint,
+    /// `preview.noRoom`
+    PreviewNoRoom,
     /// `preview.openDefault`
     PreviewOpenDefault,
     /// `preview.openFailed`
@@ -3571,7 +3557,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1777;
+pub const KEY_COUNT: usize = 1770;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -3772,7 +3758,6 @@ impl Key {
         Key::CmdViewInspector,
         Key::CmdViewMcp,
         Key::CmdViewMemory,
-        Key::CmdViewModelPreview,
         Key::CmdViewNavigator,
         Key::CmdViewNeedsYou,
         Key::CmdViewNextRegion,
@@ -4499,18 +4484,13 @@ impl Key {
         Key::ModelCaptureFailed,
         Key::ModelClip,
         Key::ModelClose,
-        Key::ModelCollapse,
         Key::ModelCopied,
         Key::ModelCopyImage,
         Key::ModelDownload,
         Key::ModelDownloadBytes,
         Key::ModelDrawFailed,
-        Key::ModelEmpty,
-        Key::ModelEmptyHint,
         Key::ModelErrorTitle,
-        Key::ModelExpand,
         Key::ModelGrid,
-        Key::ModelHide,
         Key::ModelLost,
         Key::ModelMaterials,
         Key::ModelMegabytes,
@@ -4518,7 +4498,6 @@ impl Key {
         Key::ModelNormals,
         Key::ModelNormalsTooMany,
         Key::ModelOpenedBy,
-        Key::ModelPanel,
         Key::ModelParse,
         Key::ModelPause,
         Key::ModelPlay,
@@ -4539,7 +4518,6 @@ impl Key {
         Key::ModelTabs,
         Key::ModelTime,
         Key::ModelTimeOf,
-        Key::ModelToggleHint,
         Key::ModelTools,
         Key::ModelTriangles,
         Key::ModelUnavailable,
@@ -4745,6 +4723,7 @@ impl Key {
         Key::PreviewLoop,
         Key::PreviewMediaFailed,
         Key::PreviewMediaFailedHint,
+        Key::PreviewNoRoom,
         Key::PreviewOpenDefault,
         Key::PreviewOpenFailed,
         Key::PreviewOpened,
@@ -5554,7 +5533,6 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "cmd.view.inspector", en: Text::plain("Show or hide the inspector"), fr: Text::plain("Afficher ou masquer l'inspecteur") },
     Message { id: "cmd.view.mcp", en: Text::plain("Open the MCP connection"), fr: Text::plain("Ouvrir la connexion MCP") },
     Message { id: "cmd.view.memory", en: Text::plain("Show the memory"), fr: Text::plain("Afficher la mémoire") },
-    Message { id: "cmd.view.modelPreview", en: Text::plain("Show or hide the preview"), fr: Text::plain("Afficher ou masquer l'aperçu") },
     Message { id: "cmd.view.navigator", en: Text::plain("Show or hide the navigator"), fr: Text::plain("Afficher ou masquer le navigateur") },
     Message { id: "cmd.view.needsYou", en: Text::plain("Show what needs you"), fr: Text::plain("Afficher ce qui a besoin de toi") },
     Message { id: "cmd.view.nextRegion", en: Text::plain("Focus the next region"), fr: Text::plain("Aller à la zone suivante") },
@@ -6281,18 +6259,13 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "model.captureFailed", en: Text::plain("Capture failed: {error}"), fr: Text::plain("Échec de la capture\u{202f}: {error}") },
     Message { id: "model.clip", en: Text::plain("Clip to play"), fr: Text::plain("Animation à lire") },
     Message { id: "model.close", en: Text::plain("Close {title}"), fr: Text::plain("Fermer {title}") },
-    Message { id: "model.collapse", en: Text::plain("Back beside the terminals"), fr: Text::plain("Remettre à côté des terminaux") },
     Message { id: "model.copied", en: Text::plain("Image copied"), fr: Text::plain("Image copiée") },
     Message { id: "model.copyImage", en: Text::plain("Copy the image"), fr: Text::plain("Copier l'image") },
     Message { id: "model.download", en: Text::plain("Downloading"), fr: Text::plain("Téléchargement") },
     Message { id: "model.downloadBytes", en: Text::plain("{loaded} of {total}"), fr: Text::plain("{loaded} sur {total}") },
     Message { id: "model.drawFailed", en: Text::plain("This model could not be drawn"), fr: Text::plain("Ce modèle n'a pas pu être dessiné") },
-    Message { id: "model.empty", en: Text::plain("Nothing open"), fr: Text::plain("Rien d'ouvert") },
-    Message { id: "model.emptyHint", en: Text::plain("Agents open their files here with preview_show, and 3D models with model_show."), fr: Text::plain("Les agents ouvrent ici leurs fichiers avec preview_show, et leurs modèles 3D avec model_show.") },
     Message { id: "model.errorTitle", en: Text::plain("This model could not be opened"), fr: Text::plain("Impossible d'ouvrir ce modèle") },
-    Message { id: "model.expand", en: Text::plain("Fill the work area"), fr: Text::plain("Occuper toute la zone de travail") },
     Message { id: "model.grid", en: Text::plain("Grid"), fr: Text::plain("Grille") },
-    Message { id: "model.hide", en: Text::plain("Hide the preview"), fr: Text::plain("Masquer l'aperçu") },
     Message { id: "model.lost", en: Text::plain("The graphics card dropped the 3D view."), fr: Text::plain("La carte graphique a interrompu la vue 3D.") },
     Message { id: "model.materials", en: Text::plural("material", "materials"), fr: Text::plural("matériau", "matériaux") },
     Message { id: "model.megabytes", en: Text::plain("{size} MB"), fr: Text::plain("{size} Mo") },
@@ -6300,7 +6273,6 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "model.normals", en: Text::plain("Normals"), fr: Text::plain("Normales") },
     Message { id: "model.normalsTooMany", en: Text::plain("Normals: too many vertices to draw"), fr: Text::plain("Normales\u{202f}: trop de sommets pour les tracer") },
     Message { id: "model.openedBy", en: Text::plain("opened by {name}"), fr: Text::plain("ouvert par {name}") },
-    Message { id: "model.panel", en: Text::plain("Preview"), fr: Text::plain("Aperçu") },
     Message { id: "model.parse", en: Text::plain("Reading the file"), fr: Text::plain("Lecture du fichier") },
     Message { id: "model.pause", en: Text::plain("Pause"), fr: Text::plain("Pause") },
     Message { id: "model.play", en: Text::plain("Play"), fr: Text::plain("Lecture") },
@@ -6321,7 +6293,6 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "model.tabs", en: Text::plain("Open files"), fr: Text::plain("Fichiers ouverts") },
     Message { id: "model.time", en: Text::plain("Animation time"), fr: Text::plain("Position dans l'animation") },
     Message { id: "model.timeOf", en: Text::plain("{time} / {total}\u{a0}s"), fr: Text::plain("{time} / {total}\u{a0}s") },
-    Message { id: "model.toggleHint", en: Text::plain("Show or hide the preview of what agents opened"), fr: Text::plain("Afficher ou masquer l'aperçu de ce que les agents ont ouvert") },
     Message { id: "model.tools", en: Text::plain("View"), fr: Text::plain("Affichage") },
     Message { id: "model.triangles", en: Text::plural("triangle", "triangles"), fr: Text::plural("triangle", "triangles") },
     Message { id: "model.unavailable", en: Text::plain("3D rendering is not available here"), fr: Text::plain("Le rendu 3D n'est pas disponible ici") },
@@ -6527,6 +6498,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "preview.loop", en: Text::plain("Loop"), fr: Text::plain("Lire en boucle") },
     Message { id: "preview.mediaFailed", en: Text::plain("This file cannot be played here"), fr: Text::plain("Ce fichier ne peut pas être lu ici") },
     Message { id: "preview.mediaFailedHint", en: Text::plain("This window may not have its codec. Find it in its folder to play it elsewhere."), fr: Text::plain("Il manque peut-être son codec à cette fenêtre. Retrouve-le dans son dossier pour le lire ailleurs.") },
+    Message { id: "preview.noRoom", en: Text::plain("No room for {title}: a workspace holds {max} panes at most. Close one, then open it again."), fr: Text::plain("Pas de place pour {title}\u{202f}: un espace de travail tient {max} panneaux au plus. Fermes-en un, puis ouvre-le à nouveau.") },
     Message { id: "preview.openDefault", en: Text::plain("Open in the default app"), fr: Text::plain("Ouvrir dans l'app par défaut") },
     Message { id: "preview.openFailed", en: Text::plain("Could not open it: {error}"), fr: Text::plain("Impossible de l'ouvrir\u{202f}: {error}") },
     Message { id: "preview.opened", en: Text::plain("Opened in the default app"), fr: Text::plain("Ouvert dans l'app par défaut") },

@@ -539,9 +539,9 @@ pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::batch(subscriptions)
 }
 
-/// A clip is playing in a model that is in front in a workspace whose preview
-/// panel is drawn: the slider of its bar has to move. A model nobody can see
-/// does not move (its widget is not drawn), so it asks for nothing.
+/// A clip is playing in a model whose pane is on screen: the slider of its
+/// bar has to move. A model nobody can see does not move (its widget is not
+/// drawn), so it asks for nothing.
 fn animating_in_front(st: &State) -> bool {
     if st.slots.is_empty() {
         return false;
@@ -552,10 +552,8 @@ fn animating_in_front(st: &State) -> bool {
                 .playback()
                 .is_some_and(|playback| playback.playing)
                 && !slot.viewer.rendering().is_problem()
-                && store.entry(id).is_some_and(|entry| {
-                    store.scope(&entry.workspace_id).active_id.as_deref() == Some(id.as_str())
-                        && store.view().panel_shown(&entry.workspace_id)
-                })
+                && store.entry(id).is_some()
+                && store.view().shows(id)
         })
     })
 }
@@ -588,7 +586,7 @@ pub fn on_event(
     None
 }
 
-/// A 3D model in the preview panel's body (called by `preview::view_entry`).
+/// A 3D model in the body of its view pane (called by `preview::view_entry`).
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a WsId, entry: &'a str) -> Element<'a, Message> {
     let Some(found) = ctx
         .model

@@ -23,7 +23,6 @@ use super::side_panels::Panels;
 pub enum Drawer {
     Inspector,
     Dock,
-    Model,
 }
 
 impl Drawer {
@@ -32,7 +31,6 @@ impl Drawer {
         match self {
             Drawer::Inspector => Region::Inspector,
             Drawer::Dock => Region::Dock,
-            Drawer::Model => Region::Model,
         }
     }
 }
@@ -78,15 +76,14 @@ pub fn close(ui: &mut Ui, reason: DrawerCloseReason) -> Option<Focus> {
 }
 
 /// The drawer still open once the window has changed: one the window grew
-/// wide enough to dock, or a board or preview drawer whose terminals left the
-/// screen, is over, so narrowing again does not bring it back. The keyboard
+/// wide enough to dock, or a board drawer whose terminals left the screen, is
+/// over, so narrowing again does not bring it back. The keyboard
 /// stays where it is: only a real close gives it back.
 pub fn settle(drawer: Option<Drawer>, panels: &Panels, view: View) -> Option<Drawer> {
     let terminals = view == View::Terminals;
     match drawer? {
         Drawer::Inspector if !panels.inspector.drawer => None,
         Drawer::Dock if !panels.dock.drawer || !terminals => None,
-        Drawer::Model if !panels.model.drawer || !terminals || !panels.models_open => None,
         open => Some(open),
     }
 }
@@ -106,7 +103,7 @@ mod tests {
     use super::*;
     use crate::shell::side_panels::Slot;
 
-    fn panels(inspector: bool, dock: bool, model: bool, models_open: bool) -> Panels {
+    fn panels(inspector: bool, dock: bool) -> Panels {
         let slot = |drawer| Slot {
             shown: true,
             drawer,
@@ -117,9 +114,6 @@ mod tests {
             scale: 1.0,
             inspector: slot(inspector),
             dock: slot(dock),
-            model: slot(model),
-            models_open,
-            model_expanded: false,
             navigator: true,
         }
     }
@@ -151,7 +145,7 @@ mod tests {
     #[test]
     fn without_an_opener_the_keyboard_goes_back_to_the_panes() {
         let mut ui = Ui::default();
-        open(&mut ui, Drawer::Model);
+        open(&mut ui, Drawer::Dock);
         assert_eq!(
             close(&mut ui, DrawerCloseReason::Toggle),
             Some(Focus::Region(Region::Main))
@@ -165,22 +159,18 @@ mod tests {
 
     #[test]
     fn a_drawer_that_now_fits_or_whose_terminals_left_is_over() {
-        let narrow = panels(true, true, true, true);
+        let narrow = panels(true, true);
         assert_eq!(
             settle(Some(Drawer::Inspector), &narrow, View::Board),
             Some(Drawer::Inspector)
         );
         assert_eq!(settle(Some(Drawer::Dock), &narrow, View::Board), None);
         assert_eq!(
-            settle(Some(Drawer::Model), &narrow, View::Terminals),
-            Some(Drawer::Model)
+            settle(Some(Drawer::Dock), &narrow, View::Terminals),
+            Some(Drawer::Dock)
         );
-        let closed_models = panels(true, true, true, false);
-        assert_eq!(
-            settle(Some(Drawer::Model), &closed_models, View::Terminals),
-            None
-        );
-        let wide = panels(false, false, false, true);
+        let wide = panels(false, false);
+
         assert_eq!(
             settle(Some(Drawer::Inspector), &wide, View::Terminals),
             None

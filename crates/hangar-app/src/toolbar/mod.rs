@@ -419,17 +419,6 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     if let Some(kits) = kits_button(st, ctx, ws) {
         trail = trail.push(kits);
     }
-    // The preview's button: `Intent::TogglePreview` decides between the
-    // docked panel and a drawer, as the room the window has allows.
-    let models = reads::models(&ctx, ws);
-    if models.open {
-        trail = trail.push(
-            ui_button::toggle_button(t, Icon::Cube, models.shown)
-                .tip(tr.t(Key::ModelToggleHint).into_owned())
-                .keys(keys(CommandId::ViewModelPreview))
-                .on_press(Message::Intent(Intent::TogglePreview)),
-        );
-    }
     trail = trail
         .push(
             ui_button::toggle_button(t, Icon::Board, settings.board_dock_open)

@@ -113,7 +113,7 @@ fn the_pane_commands_need_a_pane_to_act_on_in_the_terminals_view() {
             WorkspaceNext,
             WorkspaceSleep,
             CommandRun1,
-            ViewModelPreview,
+            ViewCloseModels,
             ViewNeedsYou,
         ]
     ));
@@ -154,25 +154,65 @@ fn what_packages_tell_the_shell_turns_their_commands_on() {
     let (mut m, w) = model();
     let ws = add(&mut m, &[AgentId::Shell]);
     m.live.signals.needs_you = 2;
-    m.live.signals.preview.insert(
+    // A view pane in the grid: there is a preview to close.
+    m.apply(StoreAction::AddView {
         ws,
-        crate::state::PreviewPanel {
-            entries: 1,
-            ..Default::default()
-        },
-    );
+        id: "p1".into(),
+        near: None,
+        dir: None,
+    });
     m.apply(StoreAction::UpdateSettings(Patch::new(
         |s: &mut Settings| s.voice_enabled = true,
     )));
+    assert!(has(&m, w, &[ViewNeedsYou, ViewCloseModels, VoiceDictate]));
+}
+
+#[test]
+fn a_focused_view_pane_moves_zooms_and_closes_and_lets_its_keys_through() {
+    let (mut m, w) = model();
+    let ws = add(&mut m, &[AgentId::Claude, AgentId::Shell]);
+    m.apply(StoreAction::AddView {
+        ws: ws.clone(),
+        id: "p1".into(),
+        near: None,
+        dir: None,
+    });
+    m.ui.focus_by_workspace.insert(ws.clone(), "p1".into());
     assert!(has(
         &m,
         w,
         &[
-            ViewNeedsYou,
-            ViewModelPreview,
-            ViewCloseModels,
-            VoiceDictate
+            PaneClose,
+            PaneZoom,
+            PaneFocusLeft,
+            PaneSwapLeft,
+            PaneFocus3,
+            PaneNext
         ]
+    ));
+    // Nothing about a terminal, its agent or its shell.
+    assert!(lacks(
+        &m,
+        w,
+        &[
+            PaneRestart,
+            PaneSessions,
+            PanePinOrchestrator,
+            TerminalCopy,
+            TerminalPaste,
+            TerminalFind,
+            CommandRun1
+        ]
+    ));
+    // Its close is the view's, not a terminal's.
+    assert!(matches!(
+        message(&m, w, PaneClose),
+        Some(Message::Intent(Intent::CloseView { pane, .. })) if pane == "p1"
+    ));
+    // Ctrl+3 reaches it: the numbers count every pane on screen.
+    assert!(matches!(
+        message(&m, w, PaneFocus3),
+        Some(Message::Intent(Intent::SelectPane { pane, .. })) if pane == "p1"
     ));
 }
 
