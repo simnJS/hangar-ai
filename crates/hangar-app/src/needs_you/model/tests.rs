@@ -111,9 +111,12 @@ fn world(tasks: Vec<Task>, waiting: &[&str]) -> World {
         None,
     );
     let site = workspace("site", vec![plain("leo"), plain("eve")], None);
-    let boards: Boards = [(orchestrated.cwd.clone(), tasks), (site.cwd.clone(), vec![])]
-        .into_iter()
-        .collect();
+    let boards: Boards = [
+        (orchestrated.cwd.clone(), tasks),
+        (site.cwd.clone(), vec![]),
+    ]
+    .into_iter()
+    .collect();
     World {
         workspaces: vec![orchestrated, site],
         waiting: waiting.iter().map(|id| id.to_string()).collect(),
@@ -415,7 +418,12 @@ fn says_nothing_about_what_was_already_waiting_when_a_board_is_first_read() {
 
 #[test]
 fn tells_of_a_question_or_a_delivery_that_appears_once_the_board_is_known() {
-    let mut memory = notice_delta(&NoticeMemory::default(), &world(vec![], &[]).items(), &loaded()).0;
+    let mut memory = notice_delta(
+        &NoticeMemory::default(),
+        &world(vec![], &[]).items(),
+        &loaded(),
+    )
+    .0;
     let both = world(vec![question("1"), delivery("2")], &[]).items();
     let (next, fresh) = notice_delta(&memory, &both, &loaded());
     assert_eq!(kinds(&fresh), [Kind::Question, Kind::Land]);
@@ -427,7 +435,12 @@ fn tells_of_a_question_or_a_delivery_that_appears_once_the_board_is_known() {
 
 #[test]
 fn tells_again_of_an_item_that_left_and_came_back() {
-    let mut memory = notice_delta(&NoticeMemory::default(), &world(vec![], &[]).items(), &loaded()).0;
+    let mut memory = notice_delta(
+        &NoticeMemory::default(),
+        &world(vec![], &[]).items(),
+        &loaded(),
+    )
+    .0;
     memory = notice_delta(&memory, &world(vec![question("1")], &[]).items(), &loaded()).0;
     memory = notice_delta(&memory, &world(vec![], &[]).items(), &loaded()).0;
     let (_, fresh) = notice_delta(&memory, &world(vec![question("1")], &[]).items(), &loaded());
@@ -436,7 +449,12 @@ fn tells_again_of_an_item_that_left_and_came_back() {
 
 #[test]
 fn leaves_the_agents_waiting_in_a_dialog_to_their_own_panes_notification() {
-    let memory = notice_delta(&NoticeMemory::default(), &world(vec![], &[]).items(), &loaded()).0;
+    let memory = notice_delta(
+        &NoticeMemory::default(),
+        &world(vec![], &[]).items(),
+        &loaded(),
+    )
+    .0;
     let (_, fresh) = notice_delta(&memory, &world(vec![], &["eve"]).items(), &loaded());
     assert!(fresh.is_empty());
 }

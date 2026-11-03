@@ -11,6 +11,8 @@
 pub mod clock;
 pub mod editor;
 pub mod model;
+pub mod reads;
+pub mod skin;
 
 use iced::{Element, Subscription, Task};
 

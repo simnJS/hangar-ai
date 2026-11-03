@@ -87,7 +87,11 @@ fn agent_label(pane: &Pane) -> &'static str {
 /// tree only lists ids; an empty workspace would otherwise come back as one
 /// nameless leaf.
 pub fn reading_order(ws: &Workspace) -> Vec<&Pane> {
-    let by_id: HashMap<&str, &Pane> = ws.panes.iter().map(|pane| (pane.id.as_str(), pane)).collect();
+    let by_id: HashMap<&str, &Pane> = ws
+        .panes
+        .iter()
+        .map(|pane| (pane.id.as_str(), pane))
+        .collect();
     reading_order_ids(&ws.panes, ws.tree.as_ref())
         .iter()
         .filter_map(|id| by_id.get(id.as_str()).copied())
@@ -123,7 +127,10 @@ pub fn reading_order_ids(panes: &[Pane], tree: Option<&SplitNode>) -> Vec<PaneId
     if kept.len() == leaves.len() && kept.len() == ids.len() {
         return kept;
     }
-    let missing = ids.into_iter().filter(|id| !seen.contains(id.as_str())).cloned();
+    let missing = ids
+        .into_iter()
+        .filter(|id| !seen.contains(id.as_str()))
+        .cloned();
     kept.into_iter().chain(missing).collect()
 }
 
@@ -134,7 +141,9 @@ pub fn closed_by_preset<'a>(ws: &'a Workspace, count: u8) -> Vec<&'a Pane> {
 }
 
 fn segments(path: &str) -> Vec<&str> {
-    path.split(['\\', '/']).filter(|part| !part.is_empty()).collect()
+    path.split(['\\', '/'])
+        .filter(|part| !part.is_empty())
+        .collect()
 }
 
 /// What tells apart workspaces that share a name, since their folder is no
@@ -217,7 +226,11 @@ pub fn build_nav_tree<'a>(input: &NavInput<'a, '_>) -> NavTree<'a> {
         })
     };
 
-    let known: HashSet<&str> = input.folders.iter().map(|folder| folder.id.as_str()).collect();
+    let known: HashSet<&str> = input
+        .folders
+        .iter()
+        .map(|folder| folder.id.as_str())
+        .collect();
     let loose: Vec<&Workspace> = input
         .workspaces
         .iter()
@@ -317,11 +330,7 @@ pub fn sidebar_order<'a>(
     let known: HashSet<&str> = folders.iter().map(|folder| folder.id.as_str()).collect();
     let mut ordered: Vec<&Workspace> = workspaces
         .iter()
-        .filter(|ws| {
-            ws.folder_id
-                .as_deref()
-                .is_none_or(|id| !known.contains(id))
-        })
+        .filter(|ws| ws.folder_id.as_deref().is_none_or(|id| !known.contains(id)))
         .collect();
     for folder in folders {
         ordered.extend(

@@ -157,10 +157,7 @@ mod tests {
     #[test]
     fn says_a_reset_later_today_with_its_time() {
         let now = at(3, 9, 0);
-        assert_eq!(
-            reset_when(at(3, 20, 1), now, FR),
-            "remise à zéro à 20 h 01"
-        );
+        assert_eq!(reset_when(at(3, 20, 1), now, FR), "remise à zéro à 20 h 01");
         assert_eq!(
             reset_when(at(3, 20, 1), now, EN),
             "resets at 8:01\u{202f}PM"
