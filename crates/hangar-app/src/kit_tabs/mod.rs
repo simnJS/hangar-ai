@@ -114,6 +114,10 @@ pub struct State {
     windows: u64,
     /// `HANGAR_DEV_KIT_TABS` has been looked at (dev.rs).
     dev_done: bool,
+    /// Tabs whose window the person asked for with the panel's buttons (open
+    /// it, reload it): the next window of each is theirs, and may take the
+    /// keyboard whoever opened the tab.
+    asked: HashSet<String>,
 }
 
 impl Default for State {
@@ -131,6 +135,7 @@ impl Default for State {
             helper_starting: false,
             windows: 0,
             dev_done: false,
+            asked: HashSet::new(),
         }
     }
 }
@@ -227,6 +232,7 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         },
         Msg::Reload(id) => {
             st.unloadable.remove(&id);
+            st.asked.insert(id.clone());
             st.shared.edit(|store| store.reload_kit_tab(&id));
             Task::none()
         }
@@ -286,15 +292,17 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         }
         Msg::OpenWindow(id) => {
             // A new window and a new host, the next time the tab is looked at,
-            // which is now: it is in front.
+            // which is now: it is in front. It is the person's.
+            st.asked.insert(id.clone());
             if let Some(page) = st.pages.remove(&id) {
                 drop_page(st, &id, page);
             }
             Task::none()
         }
         Msg::FocusWindow(id) => {
-            if let (Some(page), Some(client)) = (st.pages.get(&id), st.shared.helper().client()) {
-                let _ = client.focus(page.window());
+            if let (Some(page), Some(client)) = (st.pages.get_mut(&id), st.shared.helper().client())
+            {
+                page.bring_forward(&client);
             }
             Task::none()
         }
@@ -561,6 +569,12 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             .is_some_and(|page| page.revision == entry.revision);
         if open {
             keep_page.insert(entry.id.clone());
+            // The window is on screen while its tab is in front of a panel
+            // that is, and hidden otherwise.
+            let client = st.shared.helper().client();
+            if let Some(page) = st.pages.get_mut(&entry.id) {
+                page.set_seen(client.as_deref(), tab.shown);
+            }
             continue;
         }
         if !tab.shown {
@@ -572,18 +586,26 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         st.windows += 1;
         let window = format!("{}{}-{}", bridge::PREFIX, entry.id, st.windows);
         let api = tab_api(st, sv, entry, &kit.kit_id, &kit.tab_id);
+        // A window the person asked for is theirs; one for a tab an agent or a
+        // hook opened does not take the keyboard from whoever is typing, and
+        // where the window system would give it to any window it maps, is not
+        // opened until the person asks (`bridge::PageTab::arriving`).
+        let by_agent = entry.opened_by.is_some() && !st.asked.remove(&entry.id);
         let mut page = PageTab::new(
             PageHost::new(window, api),
             &kit.kit_id,
             url,
             entry.revision,
             &entry.title,
-        );
+        )
+        .arriving(by_agent, hangar_webview::opens_unfocused());
         page.watch = Some(watch(st, sv, &entry.id));
         route(st, sv);
-        match st.shared.helper().client() {
-            Some(client) => page.open(&client, bridge::background_of(tab.theme)),
-            None => tasks.extend(start_helper(st, sv)),
+        if !page.held {
+            match st.shared.helper().client() {
+                Some(client) => page.open(&client, bridge::background_of(tab.theme)),
+                None => tasks.extend(start_helper(st, sv)),
+            }
         }
         st.pages.insert(entry.id.clone(), page);
         keep_page.insert(entry.id.clone());
@@ -615,6 +637,7 @@ fn reconcile(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     }
     let live: HashSet<&str> = seen.iter().map(|tab| tab.entry.id.as_str()).collect();
     st.unloadable.retain(|id, _| live.contains(id.as_str()));
+    st.asked.retain(|id| live.contains(id.as_str()));
 
     tasks.push(tell(st, m, &seen));
     Task::batch(tasks)

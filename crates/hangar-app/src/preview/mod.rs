@@ -112,8 +112,6 @@ const WATCH: Duration = Duration::from_millis(1500);
 const SETTLE: Duration = Duration::from_millis(300);
 /// How often a spinner turns a step.
 const SPIN: Duration = Duration::from_millis(100);
-/// How long after a player loads the engine is asked whether it plays.
-const PROBE: Duration = Duration::from_millis(1500);
 /// How often the package looks for the state to have been read.
 const HYDRATION: Duration = Duration::from_millis(250);
 
@@ -716,34 +714,33 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     }
 
     // The helper's windows: the ones whose file went are closed, the ones
-    // whose file was rewritten load it again, and the file in front of a
-    // panel on screen opens its own once.
+    // whose file was rewritten load it again, each is on screen only while
+    // its entry is in front of a panel on screen (an awake workspace's, and
+    // drawn), and the file in front of such a panel opens its own once
+    // (webview.rs, `Windows`).
+    let in_helper = |entry: &Entry| {
+        entry
+            .file_kind()
+            .is_some_and(|kind| kind.kind().viewer().in_helper())
+    };
     let helper_entries: HashMap<&str, &Entry> = every
         .iter()
-        .filter(|(_, entry)| {
-            entry
-                .file_kind()
-                .is_some_and(|kind| kind.kind().viewer().in_helper())
-        })
+        .filter(|(_, entry)| in_helper(entry))
         .map(|(id, entry)| (*id, *entry))
         .collect();
     let client = st.shared.helper().client();
     st.windows.reconcile(client.as_deref(), &helper_entries);
-    let opening: Vec<Entry> = front_files
-        .iter()
-        .filter(|(_, entry, shown)| {
-            *shown
-                && entry
-                    .file_kind()
-                    .is_some_and(|kind| kind.kind().viewer().in_helper())
-                && !st.windows.was_tried(&entry.id)
-                && st.windows.get(&entry.id).is_none()
-        })
-        .map(|(_, entry, _)| entry.clone())
-        .collect();
-    for entry in opening {
+    let seen = webview::seen_entries(
+        front_files
+            .iter()
+            .filter(|(_, entry, _)| in_helper(entry))
+            .map(|(ws, entry, shown)| (ws.as_str(), entry, *shown)),
+        |ws| m.live.panes_logic.is_asleep(ws),
+    );
+    st.windows.set_seen(client.as_deref(), &seen);
+    for (entry, keyboard) in st.windows.to_open(&seen) {
         st.windows.mark_tried(&entry.id);
-        tasks.push(open_window(st, m, env, &entry));
+        tasks.push(open_window(st, m, env, &entry, keyboard));
     }
     Task::batch(tasks)
 }
@@ -1035,17 +1032,26 @@ fn kind_of(entry: &Entry) -> Kind {
 }
 
 /// Opens (or opens again) an entry's window, starting the helper if it is not
-/// running.
-fn open_window(st: &mut State, m: &Model, env: &Env, entry: &Entry) -> Task<Message> {
+/// running. `keyboard`: the window asks for the keyboard, which only a window
+/// the person asked for does (`Windows::to_open`).
+fn open_window(
+    st: &mut State,
+    m: &Model,
+    env: &Env,
+    entry: &Entry,
+    keyboard: bool,
+) -> Task<Message> {
     let theme = m.theme();
     let helper = st.shared.helper().clone();
     match helper.client() {
         Some(client) => {
-            st.windows.open(Some(&client), entry, kind_of(entry), theme);
+            st.windows
+                .open(Some(&client), entry, kind_of(entry), theme, keyboard);
             Task::none()
         }
         None => {
-            st.windows.open(None, entry, kind_of(entry), theme);
+            st.windows
+                .open(None, entry, kind_of(entry), theme, keyboard);
             if st.helper_starting {
                 return Task::none();
             }
@@ -1098,16 +1104,6 @@ fn web_update(st: &mut State, m: &mut Model, env: &Env, msg: WebMsg) -> Task<Mes
                     ))));
                 }
             }
-            if let Some(entry) = handled.probe {
-                // Asked twice: a codec the engine lacks says so a moment after
-                // the load, a slow file a little later.
-                for after in [PROBE, PROBE * 3] {
-                    let entry = entry.clone();
-                    tasks.push(Task::perform(tokio::time::sleep(after), move |()| {
-                        Message::Preview(Msg::Web(WebMsg::Probe(entry.clone())))
-                    }));
-                }
-            }
             if let hangar_webview::Event::Error {
                 window: None,
                 message,
@@ -1119,12 +1115,6 @@ fn web_update(st: &mut State, m: &mut Model, env: &Env, msg: WebMsg) -> Task<Mes
                 ))));
             }
             Task::batch(tasks)
-        }
-        WebMsg::Probe(entry) => {
-            if let Some(client) = st.shared.helper().client() {
-                st.windows.probe_media(&client, &entry);
-            }
-            Task::none()
         }
         WebMsg::Gone => {
             st.windows.lost();
@@ -1145,7 +1135,8 @@ fn window_action(
     match action {
         windowed::Action::Open => {
             st.windows.mark_tried(&entry.id);
-            open_window(st, m, env, entry)
+            // The person's click: the window may take the keyboard.
+            open_window(st, m, env, entry, true)
         }
         windowed::Action::Focus => {
             if let Some(client) = client {
@@ -1154,10 +1145,35 @@ fn window_action(
             Task::none()
         }
         windowed::Action::Reload => {
-            if let Some(client) = client {
+            // The TS's reload mounted the frame again, whatever had become of
+            // it, and read the source again when it was the one shown
+            // (`head.retry()`): a window that was closed comes back, and a
+            // source is read from the file once more.
+            let source = st
+                .viewers
+                .get(&entry.id)
+                .is_some_and(|viewer| viewer.source);
+            let plan = webview::Reload::of(source, st.windows.state(&entry.id));
+            let mut tasks = Vec::new();
+            if plan.reread {
+                tasks.push(viewer_update(
+                    st,
+                    m,
+                    env,
+                    &entry.id,
+                    entry.revision,
+                    ViewerMsg::Retry,
+                ));
+            }
+            if plan.reopen {
+                st.windows.mark_tried(&entry.id);
+                tasks.push(open_window(st, m, env, entry, true));
+            } else if plan.navigate
+                && let Some(client) = client
+            {
                 st.windows.reload(&client, entry);
             }
-            Task::none()
+            Task::batch(tasks)
         }
         windowed::Action::Loop(on) => {
             st.windows
