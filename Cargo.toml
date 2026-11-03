@@ -83,6 +83,9 @@ base64 = "0.22"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 ab_glyph = "0.2"
 iced_test = "0.14"
+# iced's `UserInterface`, which iced itself builds: hangar-app's development
+# screenshots lay the main window's view out and draw it off screen with it.
+iced_runtime = "0.14"
 # The version hangar-core already builds: hangar-app's orchestration engine
 # reads plans with it.
 regex = "1"

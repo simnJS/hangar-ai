@@ -26,7 +26,12 @@ cargo test -p hangar-app && cargo clippy -p hangar-app --all-targets -- -D warni
   folder; put a `data/state.json` there to start on a given state.
 - `HANGAR_DEV_SCREENSHOT` is how you see your surface: screen capture is
   refused on the GNOME Wayland session. `HANGAR_DEV_SCREENSHOT_AFTER_MS`
-  (default 3000) is the wait before the capture.
+  (default 3000) is the wait before the capture. The picture is the main
+  window's view drawn off screen at that moment, at the window's size and
+  scale (shell/dev_screenshot.rs says why not iced's `window::screenshot`):
+  what the widgets keep themselves, a scroll offset or the caret, starts
+  afresh in it. `HANGAR_DEV_KIT_TABS=<kit>/<tab>?<param>=<value>&…` opens
+  kit tabs first (kit_tabs/dev.rs).
 - `-j 16` at most; other agents build on the same machine. Never `cargo clean`.
 
 ## The rules (inventory §8.2)

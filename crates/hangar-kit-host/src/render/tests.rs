@@ -967,3 +967,132 @@ fn a_workspace_image_needs_files_read_and_a_held_one_is_the_tabs() {
         Some(Picture::Raster(_))
     ));
 }
+
+/* ── a text area across the views a kit sends ───────────────────────── */
+
+/// `given` drawn as the window draws a frame: laid out (a few times first, as
+/// iced does after each message), then drawn and read back at once, at
+/// 400×160 and a scale of 1.
+fn text_area_pixels(widgets: &WidgetState, given: &ui::Element) -> Vec<u8> {
+    use iced::advanced::renderer::{Headless, Style};
+    use iced_test::runtime::UserInterface;
+    use iced_test::runtime::user_interface::Cache;
+
+    iced::advanced::graphics::text::font_system()
+        .write()
+        .expect("the font system")
+        .load_font(Cow::Borrowed(hangar_theme::fonts::INTER_VARIABLE));
+    let backend = std::env::var("ICED_TEST_BACKEND").ok();
+    let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+        hangar_theme::fonts::ui(),
+        Settings::default().default_text_size,
+        backend.as_deref(),
+    ))
+    .expect("a renderer");
+    let size = Size::new(400.0, 160.0);
+    let mut cache = Cache::default();
+    for _ in 0..3 {
+        cache = UserInterface::build(draw(widgets, given), size, cache, &mut renderer).into_cache();
+    }
+    let mut drawn = UserInterface::build(draw(widgets, given), size, cache, &mut renderer);
+    let theme = hangar_theme::to_iced(KitStyle::dark().theme);
+    drawn.draw(
+        &mut renderer,
+        &theme,
+        &Style {
+            text_color: Color::WHITE,
+        },
+        iced::mouse::Cursor::Unavailable,
+    );
+    renderer.screenshot(Size::new(400, 160), 1.0, Color::BLACK)
+}
+
+/// A kit's view with a note: a line that the kit changes from one view to the
+/// next, as a status line, and the note's text area.
+fn text_area_page(seq: u32, note: Option<&str>) -> ui::Element {
+    let mut children = vec![ui::Element::Text(ui::Text::new(format!("View {seq}")))];
+    if let Some(note) = note {
+        let mut area = ui::TextArea::new("note", note);
+        area.on_input = Some(HandlerId(4));
+        children.push(ui::Element::TextArea(area));
+    }
+    ui::Element::Column(ui::Column::new(children))
+}
+
+/// How many pixels of two pictures of one size are visibly apart.
+fn apart(a: &[u8], b: &[u8]) -> usize {
+    assert_eq!(a.len(), b.len());
+    let (a, b) = (a.as_chunks::<4>().0, b.as_chunks::<4>().0);
+    a.iter()
+        .zip(b)
+        .filter(|(a, b)| a.iter().zip(b.iter()).any(|(a, b)| a.abs_diff(*b) > 40))
+        .count()
+}
+
+/// A text area's text is drawn in every view a kit sends, whatever else
+/// changed: the content Hangar keeps for it lives across views, keyed by its
+/// id, so what the person typed stays until the kit gives another value, and
+/// a text area that went and came back starts again from the kit's.
+#[test]
+fn a_text_area_draws_its_text_through_view_rebuilds() {
+    let note = "No error under the field:\nthe page reloaded empty.";
+    let held = crate::tab::Held::default();
+    let sync = |widgets: &mut WidgetState, root: &ui::Element, seq: u32| {
+        widgets.sync(
+            &ui::abi::View {
+                seq,
+                root: root.clone(),
+            },
+            &NoImages,
+            &[],
+            &held,
+        );
+    };
+    let text = |widgets: &WidgetState| widgets.editors.get("note").map(|e| e.content.text());
+
+    // An empty text area: the picture with no text in it.
+    let mut empty = WidgetState::default();
+    let empty_page = text_area_page(1, Some(""));
+    sync(&mut empty, &empty_page, 1);
+    let blank = text_area_pixels(&empty, &empty_page);
+
+    let mut widgets = WidgetState::default();
+    for seq in 1..=3 {
+        let page = text_area_page(seq, Some(note));
+        sync(&mut widgets, &page, seq);
+        assert_eq!(text(&widgets).as_deref(), Some(note), "view {seq}");
+        // The line above differs from the blank page's too, by a digit at
+        // most: the note is most of what differs.
+        let ink = apart(&text_area_pixels(&widgets, &page), &blank);
+        assert!(ink > 150, "view {seq}: the note is drawn ({ink} pixels)");
+    }
+
+    // The person types; the kit's next view still gives the old value, as it
+    // does until it has read what was typed: the typed text stays.
+    widgets
+        .editors
+        .get_mut("note")
+        .expect("the note's editor")
+        .content
+        .perform(text_editor::Action::Edit(text_editor::Edit::Insert('!')));
+    let page = text_area_page(4, Some(note));
+    sync(&mut widgets, &page, 4);
+    assert_eq!(text(&widgets), Some(format!("!{note}")));
+    assert!(apart(&text_area_pixels(&widgets, &page), &blank) > 150);
+
+    // The kit gives another value: it replaces the text.
+    let page = text_area_page(5, Some("Fixed in the next build."));
+    sync(&mut widgets, &page, 5);
+    assert_eq!(text(&widgets).as_deref(), Some("Fixed in the next build."));
+    assert!(apart(&text_area_pixels(&widgets, &page), &blank) > 100);
+
+    // Gone from a view, it is forgotten; back, it starts from the kit's value.
+    let page = text_area_page(6, None);
+    sync(&mut widgets, &page, 6);
+    assert_eq!(text(&widgets), None);
+    let page = text_area_page(7, Some(note));
+    sync(&mut widgets, &page, 7);
+    assert_eq!(text(&widgets).as_deref(), Some(note));
+    let ink = apart(&text_area_pixels(&widgets, &page), &blank);
+    assert!(ink > 150, "drawn again ({ink} pixels)");
+}

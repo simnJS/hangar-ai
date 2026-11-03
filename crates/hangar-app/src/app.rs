@@ -321,9 +321,17 @@ impl App {
                 crate::shell::notice::expire(&mut self.model, id);
                 Task::none()
             }
-            Message::DevScreenshot(shot) => {
+            Message::DevScreenshot(due) => {
                 if let Some(path) = crate::shell::dev_screenshot::requested() {
-                    match crate::shell::dev_screenshot::write(&path, &shot) {
+                    let main = self.main_window;
+                    let taken = crate::shell::dev_screenshot::take(
+                        &path,
+                        self.view(main),
+                        due,
+                        self.scale_factor(main),
+                        &self.theme(main),
+                    );
+                    match taken {
                         Ok(()) => eprintln!("screenshot written to {}", path.display()),
                         Err(error) => eprintln!("screenshot failed: {error}"),
                     }

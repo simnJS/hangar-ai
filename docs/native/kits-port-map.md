@@ -83,7 +83,10 @@ A port never touches the hangar repository: everything below is in `hangar-kit-s
    `target/dev-home/`), then Settings → Kits → link the kit's folder (read live), open the tab; after
    each `build-native.sh`, reload the tab from its bar (a module whose file changed is compiled
    again). Without Hangar: `cargo run -p hangar-kit-host --example preview -- ~/dev/kits/kit-ci/tabs/ci.wasm`
-   (`--light`, `--fr`), a pretend Hangar with two panes and every permission.
+   (`--light`, `--fr`), a pretend Hangar with two panes and every permission. A picture of the tab
+   without a click, once the kit is linked and enabled on the active workspace:
+   `HANGAR_DEV_KIT_TABS='ci-status/ci?id=42' HANGAR_DEV_SCREENSHOT=/tmp/ci.png scripts/native-dev.sh`
+   (the params after `?`, joined by `&`).
 
 **Rules every port keeps** (kit-ui.md, "The rules a kit follows"): every string through
 `i18n::Strings` in English and French, one primary action, the empty, loading, failed and denied

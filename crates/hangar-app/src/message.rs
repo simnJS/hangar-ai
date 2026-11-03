@@ -41,8 +41,9 @@ pub enum Message {
     Store(StoreAction),
     Tick(Instant),
     NoticeExpired(u64),
-    /// The main window as `HANGAR_DEV_SCREENSHOT` asked for it (debug builds).
-    DevScreenshot(window::Screenshot),
+    /// The main window is due for the picture `HANGAR_DEV_SCREENSHOT` asked
+    /// for (debug builds).
+    DevScreenshot(crate::shell::dev_screenshot::Due),
     /// What only the frame and the command table ask of the shell
     /// (`shell::Action`); packages send intents instead.
     Shell(crate::shell::Action),
