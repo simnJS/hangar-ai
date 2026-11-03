@@ -1462,13 +1462,26 @@ mod tests {
     fn a_wasm_entry_is_a_native_tab_under_schema_2() {
         let kit = Folder::new("native-tab");
         kit.file("tabs/hello.wasm", "\0asm");
+        // `\` and `.` parts are folded, and `.WASM` is a module in any case;
+        // what is looked for is then a file the folder holds under no case.
         let manifest = kit
-            .parse(&native_kit(2, json!({ "entry": "tabs\\.\\Hello.WASM" })))
+            .parse(&native_kit(2, json!({ "entry": "tabs\\.\\Absent.WASM" })))
             .unwrap_err();
         assert!(
             manifest.starts_with("tabs[0].entry: not found"),
             "{manifest}"
         );
+        // The same name in another case is the same file only where the
+        // filesystem says so: not on Linux, but on Windows and on a Mac's
+        // usual volume, which answer for the manifest as they do for any
+        // other lookup.
+        let recased = kit.parse(&native_kit(2, json!({ "entry": "tabs\\.\\Hello.WASM" })));
+        if kit.root.join("tabs").join("Hello.WASM").exists() {
+            assert!(recased.is_ok(), "{recased:?}");
+        } else {
+            let why = recased.unwrap_err();
+            assert!(why.starts_with("tabs[0].entry: not found"), "{why}");
+        }
 
         let manifest = kit
             .parse(&native_kit(2, json!({ "entry": "./tabs//hello.wasm" })))
