@@ -961,6 +961,12 @@ fn viewer_update(
             };
             viewer.source = !viewer.source;
             viewer.scroll = code_lines::Scroll::default();
+            // The lines and the rendered page are not the same text.
+            viewer.doc.clear();
+            viewer.selection.clear();
+            if let Some(rendered) = &viewer.rendered {
+                rendered.clear_selection();
+            }
             // A source is read the first time it is asked for.
             if viewer.source && viewer.load.is_none() {
                 viewer.load = Some(Load::Loading);
@@ -969,12 +975,8 @@ fn viewer_update(
             to_top(id)
         }
         ViewerMsg::Copy => {
-            let Some(text) = st
-                .viewers
-                .get(id)
-                .and_then(ViewerState::text)
-                .map(|ready| ready.text.clone())
-            else {
+            // What is selected, when something is; else the whole text.
+            let Some(text) = st.viewers.get(id).and_then(ViewerState::copy_text) else {
                 return Task::none();
             };
             let done = notify(
@@ -984,6 +986,17 @@ fn viewer_update(
             );
             Task::batch([iced::clipboard::write(text), done])
         }
+        ViewerMsg::Selected(text) => {
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.selection = text;
+            }
+            Task::none()
+        }
+        ViewerMsg::Copied => notify(
+            st,
+            id,
+            Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
+        ),
         ViewerMsg::Image(msg) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
                 viewer.picture.update(msg);
@@ -1021,6 +1034,22 @@ fn markdown_update(
         let id = id.to_string();
         move |msg: markdown::Msg| viewer_message(&id, revision, ViewerMsg::Markdown(msg))
     };
+    match msg {
+        markdown::Msg::Selected(text) => {
+            if let Some(viewer) = st.viewers.get_mut(id) {
+                viewer.selection = text;
+            }
+            return Task::none();
+        }
+        markdown::Msg::Copied => {
+            return notify(
+                st,
+                id,
+                Notice::info(hangar_i18n::t(locale, Key::PreviewCopied)),
+            );
+        }
+        _ => {}
+    }
     let Some(rendered) = st.viewers.get_mut(id).and_then(|v| v.rendered.as_mut()) else {
         return Task::none();
     };
@@ -1030,6 +1059,8 @@ fn markdown_update(
             Task::none()
         }
         markdown::Msg::Found(y) => markdown::scroll_by(scroll, y).map(to_message),
+        // Handled above, before the page is looked for.
+        markdown::Msg::Selected(_) | markdown::Msg::Copied => Task::none(),
         markdown::Msg::Link(href) => {
             if let Some(anchor) = markdown::Rendered::anchor(&href) {
                 return markdown::scroll_to_heading(scroll, &anchor).map(to_message);

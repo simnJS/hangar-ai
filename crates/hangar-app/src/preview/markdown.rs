@@ -44,6 +44,7 @@ use iced::widget::{column, container, image, rich_text, span, text};
 use iced::{Element, Font, Length, Padding, Rectangle, Task, border, padding};
 
 use hangar_theme::{Theme, fonts, style, tokens};
+use hangar_ui::selectable::{Doc, selectable};
 
 use super::animated;
 use super::decode::{self, Animation, Loaded};
@@ -59,6 +60,11 @@ pub enum Msg {
     Scrolled(f32),
     /// A heading was found, this far down the page.
     Found(f32),
+    /// What is selected on the page, said when the pointer is let go: empty
+    /// when nothing is.
+    Selected(String),
+    /// Ctrl+C copied the selection.
+    Copied,
 }
 
 /// What a press on a link asks of the app.
@@ -91,6 +97,8 @@ pub struct Rendered {
     /// them with: read by [`load_images`], never by the view.
     wanted: Vec<(Uri, PathBuf)>,
     offset: f32,
+    /// What is selected on the page, kept across the views built of it.
+    doc: Doc,
 }
 
 impl std::fmt::Debug for Rendered {
@@ -145,7 +153,13 @@ impl Rendered {
             images,
             wanted,
             offset: 0.0,
+            doc: Doc::new(iced::Color::TRANSPARENT),
         }
+    }
+
+    /// Selects nothing.
+    pub fn clear_selection(&self) {
+        self.doc.clear();
     }
 
     /// The files the page asks for, to be read by [`load_images`].
@@ -646,6 +660,9 @@ fn settings(t: &Theme) -> Settings {
 struct Page<'a> {
     t: &'a Theme,
     images: &'a HashMap<Uri, Resolved>,
+    /// Where the page's text is selected: each paragraph, heading and line of
+    /// code is a block of it.
+    doc: &'a Doc,
     /// The ids given so far, for the -1, -2 of a repeated title.
     ids: RefCell<HashMap<String, usize>>,
 }
@@ -702,6 +719,26 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
         }
     }
 
+    fn paragraph(&self, settings: Settings, text: &markdown::Text) -> Element<'a, Msg> {
+        let spans = text.spans(settings.style);
+        // A line break inside a paragraph (a hard break) cannot be told apart
+        // by line from a place in its text, so such a paragraph is iced's own
+        // and cannot be selected.
+        if spans.iter().any(|part| part.text.contains('\n')) {
+            return rich_text(spans)
+                .size(settings.text_size)
+                .on_link_click(Msg::Link)
+                .into();
+        }
+        let block: Element<'static, Msg> = self
+            .doc
+            .block::<Uri, Msg>(spans)
+            .size(settings.text_size)
+            .on_link_click(Msg::Link)
+            .into();
+        block
+    }
+
     fn heading(
         &self,
         settings: Settings,
@@ -730,12 +767,13 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
             HeadingLevel::H5 => settings.h5_size,
             HeadingLevel::H6 => settings.h6_size,
         };
-        let mut words = column![
-            rich_text(spans)
-                .size(size)
-                .on_link_click(Self::on_link_click)
-        ]
-        .spacing(4);
+        let words_block: Element<'static, Msg> = self
+            .doc
+            .block::<Uri, Msg>(spans)
+            .size(size)
+            .on_link_click(Msg::Link)
+            .into();
+        let mut words = column![words_block].spacing(4);
         match level {
             HeadingLevel::H1 => {
                 words = words
@@ -782,17 +820,24 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
                             }
                         })
                         .collect();
-                    rich_text(spans).size(settings.code_size).into()
+                    self.doc
+                        .block::<Uri, Msg>(spans)
+                        .size(settings.code_size)
+                        .into()
                 })
                 .collect(),
             None => lines
                 .iter()
                 .map(|line| {
-                    rich_text(line.spans(settings.style))
+                    let row: Element<'static, Msg> = self
+                        .doc
+                        .block::<Uri, Msg>(line.spans(settings.style))
                         .font(mono)
                         .size(settings.code_size)
                         .color(t.colors.fg)
-                        .into()
+                        .on_link_click(Msg::Link)
+                        .into();
+                    row
                 })
                 .collect(),
         };
@@ -831,26 +876,32 @@ pub fn view<'a>(
     rendered: &'a Rendered,
     scroll: iced::widget::Id,
 ) -> Element<'a, Msg> {
+    rendered.doc.begin();
+    rendered.doc.paint(t.terminal.selection);
     let page = Page {
         t,
         images: &rendered.images,
+        doc: &rendered.doc,
         ids: RefCell::new(HashMap::new()),
     };
     let body = markdown::view_with(rendered.content.items(), settings(t), &page);
+    let body = container(body)
+        .padding(Padding {
+            top: 20.0,
+            right: 32.0,
+            bottom: 44.0,
+            left: 32.0,
+        })
+        .width(Length::Fill)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(t.colors.bg)),
+            text_color: Some(t.colors.fg),
+            ..Default::default()
+        });
     iced::widget::scrollable(
-        container(body)
-            .padding(Padding {
-                top: 20.0,
-                right: 32.0,
-                bottom: 44.0,
-                left: 32.0,
-            })
-            .width(Length::Fill)
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(t.colors.bg)),
-                text_color: Some(t.colors.fg),
-                ..Default::default()
-            }),
+        selectable(&rendered.doc, body)
+            .on_select(Msg::Selected)
+            .on_copy(|| Msg::Copied),
     )
     .id(scroll)
     .on_scroll(|viewport| Msg::Scrolled(viewport.absolute_offset().y))

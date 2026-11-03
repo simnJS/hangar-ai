@@ -245,11 +245,13 @@ impl Doc {
             .map(|span| span.text.as_ref())
             .collect();
         let len = text.len();
-        self.lock().texts.insert(number, Arc::from(text));
+        let text: Arc<str> = Arc::from(text);
+        self.lock().texts.insert(number, text.clone());
         Block {
             doc: self.clone(),
             number,
             len,
+            text,
             spans: Box::new(spans),
             size: None,
             line_height: LineHeight::default(),
@@ -505,6 +507,9 @@ pub struct Block<'a, Link: Clone + 'static, M> {
     doc: Doc,
     number: usize,
     len: usize,
+    /// The text of the spans, which an operation reads (a test finds a
+    /// block by it).
+    text: Arc<str>,
     spans: Box<dyn AsRef<[Span<'a, Link, Font>]> + 'a>,
     size: Option<Pixels>,
     line_height: LineHeight,
@@ -778,6 +783,16 @@ impl<Link: Clone + 'static, M> Widget<M, iced::Theme, iced::Renderer> for Block<
             }
             _ => {}
         }
+    }
+
+    fn operate(
+        &mut self,
+        _tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        operation.text(None, layout.bounds(), &self.text);
     }
 
     fn mouse_interaction(

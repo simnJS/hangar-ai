@@ -22,7 +22,7 @@ use super::image_stage::Measured;
 use super::model::{self, FileKind, Size as FrameSize};
 use super::store::Status;
 use super::text::Load;
-use super::viewer::{Coloured, Loaded, ViewerMsg};
+use super::viewer::{Coloured, Loaded, ViewerMsg, ViewerState};
 use super::webview::{StartError, WebMsg, WinState};
 use super::{Env, Live, Msg, State, link, reconcile, text, viewer_update};
 use crate::app::Packages;
@@ -764,6 +764,96 @@ async fn the_status_of_a_file_is_ready_at_once_and_a_model_waits_for_its_viewer(
         Status::Ready
     );
     assert_eq!(h.st.viewers.get(&id).map(|v| v.kind), Some(FileKind::Text));
+}
+
+/* ── selecting text ────────────────────────────────────────────── */
+
+/// A triple click on the text `target` of the panel's view: the messages the
+/// viewer was told, in order.
+fn click_thrice(h: &Harness, target: &str, size: Size) -> Vec<ViewerMsg> {
+    let pkg = Packages::default();
+    let ctx = h.ctx(window::Id::unique(), &pkg, Locale::En, "graphite");
+    let mut ui = simulate(super::view_panel(&h.st, ctx, PanelMode::Expanded), size);
+    for _ in 0..3 {
+        ui.click(target).expect("the text is on screen");
+    }
+    ui.into_messages()
+        .filter_map(|message| match message {
+            Message::Preview(Msg::Viewer(_, _, msg)) => Some(msg),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_line_of_code_is_selected_with_the_pointer_and_copy_takes_only_that() {
+    let mut h = Harness::new("select-code");
+    let path = h.write("notes.txt", "first line\nsecond line\nthird line\n");
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let told = click_thrice(&h, "second line", Size::new(900.0, 600.0));
+    let selected = told
+        .iter()
+        .rev()
+        .find_map(|msg| match msg {
+            ViewerMsg::Selected(text) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the viewer is told what was selected");
+    assert_eq!(selected, "second line");
+    h.viewer(&id, ViewerMsg::Selected(selected));
+    assert_eq!(
+        h.st.viewers.get(&id).and_then(ViewerState::copy_text),
+        Some("second line".into())
+    );
+    // With nothing selected, Copy takes the whole file.
+    h.viewer(&id, ViewerMsg::Selected(String::new()));
+    assert_eq!(
+        h.st.viewers.get(&id).and_then(ViewerState::copy_text),
+        Some("first line\nsecond line\nthird line\n".into())
+    );
+}
+
+#[tokio::test]
+async fn a_selection_is_let_go_when_the_source_is_toggled() {
+    let mut h = Harness::new("select-toggle");
+    let path = h.write("NOTES.md", "# Title\n\ntext\n");
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    h.viewer(&id, ViewerMsg::Selected("text".into()));
+    h.viewer(&id, ViewerMsg::ToggleSource);
+    let viewer = h.st.viewers.get(&id).expect("mounted");
+    assert_eq!(viewer.selection, "", "the lines are not the page's text");
+}
+
+#[tokio::test]
+async fn a_paragraph_of_a_page_is_selected_with_the_pointer_and_link_text_is_text() {
+    let mut h = Harness::new("select-page");
+    let path = h.write(
+        "README.md",
+        "# Title\n\nSome *emphasised* words and [a link](https://example.com) here.\n\nSecond paragraph.\n",
+    );
+    let id = h.show(&path).await;
+    h.read_text(&id);
+    let told = click_thrice(&h, "Second paragraph.", Size::new(900.0, 600.0));
+    let selected = told.iter().rev().find_map(|msg| match msg {
+        ViewerMsg::Markdown(super::markdown::Msg::Selected(text)) => Some(text.clone()),
+        _ => None,
+    });
+    assert_eq!(selected.as_deref(), Some("Second paragraph."), "{told:?}");
+    // The text of a paragraph is what its spans say, links and emphasis
+    // included, in one piece.
+    let told = click_thrice(
+        &h,
+        "Some emphasised words and a link here.",
+        Size::new(900.0, 600.0),
+    );
+    assert!(
+        told.iter().any(|msg| matches!(msg,
+            ViewerMsg::Markdown(super::markdown::Msg::Selected(text))
+                if text == "Some emphasised words and a link here.")),
+        "{told:?}"
+    );
 }
 
 /* ── the views ─────────────────────────────────────────────────── */

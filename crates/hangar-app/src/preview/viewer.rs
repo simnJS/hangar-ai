@@ -13,6 +13,7 @@ use iced::{Alignment, Element, Length};
 
 use hangar_i18n::Key;
 use hangar_theme::{style, tokens};
+use hangar_ui::selectable::Doc;
 
 use super::code_lines;
 use super::glyph::Glyph;
@@ -71,6 +72,11 @@ pub enum ViewerMsg {
     /// The lines scrolled: which rows to build next.
     CodeScrolled(code_lines::Scroll),
     Copy,
+    /// What is selected in the lines or the page, said when the pointer is let
+    /// go: empty when nothing is. The bar's Copy takes it over the whole text.
+    Selected(String),
+    /// Ctrl+C copied the selection, which the widget put on the clipboard.
+    Copied,
     Image(image::Msg),
     Markdown(markdown::Msg),
     /// The pictures of a Markdown page that were read from the disk.
@@ -93,6 +99,10 @@ pub struct ViewerState {
     pub generation: u64,
     /// Where the lines of the text are scrolled to.
     pub scroll: code_lines::Scroll,
+    /// What is selected among the lines, and what is selected of the lines or
+    /// of the rendered page (the viewer shows one at a time).
+    pub doc: Doc,
+    pub selection: String,
 }
 
 impl ViewerState {
@@ -106,6 +116,18 @@ impl ViewerState {
             rendered: None,
             generation: 0,
             scroll: code_lines::Scroll::default(),
+            doc: Doc::new(iced::Color::TRANSPARENT),
+            selection: String::new(),
+        }
+    }
+
+    /// What the Copy button copies: what is selected when something is, else
+    /// the whole text of the file.
+    pub fn copy_text(&self) -> Option<String> {
+        if self.selection.is_empty() {
+            self.text().map(|ready| ready.text.clone())
+        } else {
+            Some(self.selection.clone())
         }
     }
 
@@ -213,7 +235,7 @@ fn viewer_view<'a>(
             ];
             column![
                 parts::bar(t, tools, aside),
-                code_stage(st, ctx, load, entry, viewer.scroll),
+                code_stage(st, ctx, load, entry, viewer),
             ]
             .into()
         }
@@ -249,7 +271,7 @@ fn viewer_view<'a>(
                 .collect();
             let stage: Element<'a, ViewerMsg> =
                 if viewer.source {
-                    code_stage(st, ctx, load, entry, viewer.scroll)
+                    code_stage(st, ctx, load, entry, viewer)
                 } else {
                     reading::stage(ctx, load, &entry.title, ViewerMsg::Retry, |_| match &viewer
                         .rendered
@@ -296,7 +318,7 @@ fn viewer_view<'a>(
                     .collect();
                 return column![
                     parts::bar(t, tools, aside),
-                    code_stage(st, ctx, load, entry, viewer.scroll)
+                    code_stage(st, ctx, load, entry, viewer)
                 ]
                 .into();
             }
@@ -336,7 +358,7 @@ fn viewer_view<'a>(
             let bar = windowed::bar(ctx, &bar, ViewerMsg::Window, ViewerMsg::ToggleWrap, copy);
             let stage: Element<'a, ViewerMsg> = if kind == FileKind::Html && viewer.source {
                 let load = viewer.load.as_ref().unwrap_or(&Load::Loading);
-                code_stage(st, ctx, load, entry, viewer.scroll)
+                code_stage(st, ctx, load, entry, viewer)
             } else {
                 let card = windowed::card(ctx, entry, kind_of, win, ViewerMsg::Window);
                 if kind == FileKind::Html {
@@ -361,13 +383,27 @@ fn code_stage<'a>(
     ctx: Ctx<'a>,
     load: &'a Load,
     entry: &'a Entry,
-    scroll: code_lines::Scroll,
+    viewer: &'a ViewerState,
 ) -> Element<'a, ViewerMsg> {
     let t = ctx.theme;
     let wrap = st.wrap;
     let id = code_id(&entry.id);
+    let (scroll, doc) = (viewer.scroll, viewer.doc.clone());
     reading::stage(ctx, load, &entry.title, ViewerMsg::Retry, move |ready| {
-        code_lines::view(t, &ready.lines, wrap, scroll, ViewerMsg::CodeScrolled, id)
+        let select = code_lines::Select {
+            doc,
+            on_select: ViewerMsg::Selected,
+            on_copy: || ViewerMsg::Copied,
+        };
+        code_lines::view(
+            t,
+            &ready.lines,
+            wrap,
+            scroll,
+            ViewerMsg::CodeScrolled,
+            id,
+            select,
+        )
     })
 }
 
