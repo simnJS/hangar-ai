@@ -3028,12 +3028,12 @@ name = "hangar-app"
 version = "1.12.1"
 dependencies = [
  "hangar-core",
- "hangar-kit-host",
+ "hangar-i18n",
  "hangar-term",
  "hangar-theme",
- "hangar-ui",
  "iced",
  "open",
+ "png 0.18.1",
  "rfd",
  "serde",
  "serde_json",
