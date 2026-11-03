@@ -27,6 +27,7 @@ hangar-term = { path = "crates/hangar-term" }
 hangar-kit-ui = { path = "crates/hangar-kit-ui" }
 hangar-kit-sdk = { path = "crates/hangar-kit-sdk" }
 hangar-kit-host = { path = "crates/hangar-kit-host" }
+hangar-webview = { path = "crates/hangar-webview" }
 hangar-i18n = { path = "crates/hangar-i18n" }
 hangar-update = { path = "crates/hangar-update" }
 hangar-model3d = { path = "crates/hangar-model3d" }

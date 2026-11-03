@@ -22,6 +22,14 @@ hangar-core.workspace = true
 hangar-theme.workspace = true
 hangar-i18n.workspace = true
 hangar-term.workspace = true
+# Declared once here, before the packages start, so two of them adding the
+# same crate never collide in this file (docs/native/AGENT_BRIEF.md).
+hangar-ui.workspace = true
+hangar-kit-ui.workspace = true
+hangar-kit-host.workspace = true
+hangar-webview.workspace = true
+hangar-model3d.workspace = true
+hangar-update.workspace = true
 iced.workspace = true
 tokio.workspace = true
 serde.workspace = true
