@@ -2196,6 +2196,8 @@ pub enum Key {
     PaneNoSession,
     /// `pane.notOnPath`
     PaneNotOnPath,
+    /// `pane.noteDismiss`
+    PaneNoteDismiss,
     /// `pane.queue`
     PaneQueue,
     /// `pane.restart`
@@ -3477,7 +3479,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1730;
+pub const KEY_COUNT: usize = 1731;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4573,6 +4575,7 @@ impl Key {
         Key::PaneNewSession,
         Key::PaneNoSession,
         Key::PaneNotOnPath,
+        Key::PaneNoteDismiss,
         Key::PaneQueue,
         Key::PaneRestart,
         Key::PaneRestartNow,
@@ -6308,6 +6311,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "pane.newSession", en: Text::plain("new"), fr: Text::plain("nouvelle") },
     Message { id: "pane.noSession", en: Text::plain("No session stored — click to pick one"), fr: Text::plain("Aucune session mémorisée — cliquer pour en choisir une") },
     Message { id: "pane.notOnPath", en: Text::plain("{agent} not found on PATH"), fr: Text::plain("{agent} introuvable dans le PATH") },
+    Message { id: "pane.noteDismiss", en: Text::plain("Dismiss the note"), fr: Text::plain("Masquer la note") },
     Message { id: "pane.queue", en: Text::plural("{n} prompt waits for the agent to be free. Click to cancel it.", "{n} prompts wait for the agent to be free. Click to cancel them."), fr: Text::plural("{n} prompt attend que l'agent soit libre. Clique pour l'annuler.", "{n} prompts attendent que l'agent soit libre. Clique pour les annuler.") },
     Message { id: "pane.restart", en: Text::plain("Restart pane"), fr: Text::plain("Relancer le panneau") },
     Message { id: "pane.restartNow", en: Text::plain("Restart"), fr: Text::plain("Relancer") },
