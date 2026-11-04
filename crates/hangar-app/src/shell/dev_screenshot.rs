@@ -45,6 +45,85 @@ pub fn requested() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The folder captures taken on demand go to (`HANGAR_DEV_CAPTURE_DIR`, debug
+/// builds): the pictures of the README and the site, of a session of real
+/// agents that a capture must not end. The main window then opens at
+/// [`capture_size`], and each `SIGUSR1` the app gets (`kill -USR1 <pid>`)
+/// writes what it shows, at `HANGAR_DEV_CAPTURE_SCALE` (2 by default), to
+/// `capture-<milliseconds>.png` there.
+pub fn capture_dir() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var_os("HANGAR_DEV_CAPTURE_DIR")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The main window's size while captures are taken on demand:
+/// `HANGAR_DEV_CAPTURE_SIZE` (`1280x720` by default), so that every capture
+/// lays the panes out the same way.
+pub fn capture_size() -> Option<Size> {
+    capture_dir()?;
+    let asked = std::env::var("HANGAR_DEV_CAPTURE_SIZE").ok();
+    Some(
+        asked
+            .as_deref()
+            .and_then(|size| size.split_once('x'))
+            .and_then(|(w, h)| Some(Size::new(w.parse().ok()?, h.parse().ok()?)))
+            .unwrap_or(Size::new(1280.0, 720.0)),
+    )
+}
+
+/// Physical pixels per pixel of the window in an on-demand capture.
+fn capture_scale() -> f32 {
+    std::env::var("HANGAR_DEV_CAPTURE_SCALE")
+        .ok()
+        .and_then(|scale| scale.parse().ok())
+        .filter(|scale: &f32| *scale > 0.0)
+        .unwrap_or(2.0)
+}
+
+/// A message for each `SIGUSR1`: the person (or a script) asks for a capture.
+pub fn on_demand() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(1, async |mut output| {
+        #[cfg(unix)]
+        {
+            use iced::futures::SinkExt;
+            use tokio::signal::unix::{SignalKind, signal};
+            let Ok(mut asked) = signal(SignalKind::user_defined1()) else {
+                return;
+            };
+            while asked.recv().await.is_some() {
+                let _ = output.send(Message::DevCapture(None)).await;
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = &mut output;
+    })
+}
+
+/// Draws `view`, the main window's, laid out in the window's `size` (in the
+/// view's units: after the interface size `ui_scale`), at the capture scale,
+/// and writes it to a new file in `dir`.
+pub fn take_on_demand(
+    dir: &Path,
+    view: Element<'_, Message>,
+    size: Size,
+    ui_scale: f32,
+    theme: &iced::Theme,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    let shot = render(view, size, capture_scale() * ui_scale, theme, None)?;
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis())
+        .unwrap_or_default();
+    let path = dir.join(format!("capture-{millis}.png"));
+    write(&path, &shot)?;
+    Ok(path)
+}
+
 /// What the picture needs of the window, asked of it once the wait is over.
 #[derive(Debug, Clone, Copy)]
 pub struct Due {

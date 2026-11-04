@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use iced::{keyboard, window};
+use iced::{Size, keyboard, window};
 
 use crate::commands::CommandId;
 use crate::services::{CoreEvent, PreviewRequest};
@@ -44,6 +44,9 @@ pub enum Message {
     /// The main window is due for the picture `HANGAR_DEV_SCREENSHOT` asked
     /// for (debug builds).
     DevScreenshot(crate::shell::dev_screenshot::Due),
+    /// A capture asked for on demand (`HANGAR_DEV_CAPTURE_DIR`, debug
+    /// builds): `None` when asked, then the main window's size once known.
+    DevCapture(Option<Size>),
     /// What only the frame and the command table ask of the shell
     /// (`shell::Action`); packages send intents instead.
     Shell(crate::shell::Action),

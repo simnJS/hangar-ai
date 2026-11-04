@@ -175,10 +175,16 @@ pub fn bounds_of(
 /// Opens the main window: its id now, for the model's window table, and the
 /// task that opens it. `decorated`: with the system's title bar.
 pub fn open_main(decorated: bool) -> (window::Id, Task<Message>) {
-    let (id, opened) = window::open(Settings {
+    let mut settings = Settings {
         decorations: decorated,
         ..main_settings()
-    });
+    };
+    // Captures taken on demand all lay the panes out at one size.
+    if let Some(size) = crate::shell::dev_screenshot::capture_size() {
+        settings.size = size;
+        settings.min_size = Some(size);
+    }
+    let (id, opened) = window::open(settings);
     (id, opened.discard())
 }
 

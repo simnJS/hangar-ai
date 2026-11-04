@@ -24,6 +24,7 @@ pub fn carry_out(
 ) -> iced::Task<Message> {
     let mut then = None;
     let mut touched = None;
+    let mut run = Vec::new();
     let outcome = match cmd {
         // A pane an agent opens or closes (pane_create, pane_close, the
         // orchestrator's workers) lays the workspace out again rather than
@@ -112,6 +113,22 @@ pub fn carry_out(
             touched = Some(ws);
             StoreOutcome::default()
         }
+        ModelCmd::DevCommand {
+            command,
+            query,
+            stats_project,
+        } => {
+            run.extend(command.map(Message::Command));
+            if let Some(project) = stats_project {
+                run.push(Message::Stats(crate::stats::Msg::SetProject(Some(project))));
+            }
+            if let Some(query) = query {
+                run.push(Message::Palette(crate::palette::Msg::Ui(
+                    hangar_ui::palette::Msg::Query(query),
+                )));
+            }
+            StoreOutcome::default()
+        }
         ModelCmd::Activate { ws, pane } => {
             then = Some(Intent::FocusPane {
                 ws,
@@ -173,6 +190,13 @@ pub fn carry_out(
     let mut tasks = vec![reply];
     if let Some(intent) = then {
         tasks.push(iced::Task::done(Message::Intent(intent)));
+    }
+    // One after the other: the palette opens before its field is filled.
+    if !run.is_empty() {
+        let chained = run.into_iter().fold(iced::Task::none(), |before, message| {
+            before.chain(iced::Task::done(message))
+        });
+        tasks.push(chained);
     }
     if let Some(workspace) = touched {
         tasks.push(iced::Task::done(Message::PanesLogic(

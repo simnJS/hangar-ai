@@ -38,6 +38,9 @@ pub async fn run(op: &str, args: Value, port: &Port, gate: Gate) -> Result<Value
     if op == "workspace_list" {
         return Ok(super::panes::workspace_list(&snapshot, &caller));
     }
+    if op == "dev_command" && cfg!(debug_assertions) {
+        return dev_command(&args, port).await;
+    }
     // The project manager works across workspaces: manager.rs finds its own.
     if op.starts_with("project_") {
         return super::manager::control(op, &args, &caller, port).await;
@@ -90,6 +93,33 @@ pub async fn run(op: &str, args: Value, port: &Port, gate: Gate) -> Result<Value
         "preview_close" => super::preview::preview_close(&ws, &args, &caller, port).await,
         _ => Err(unknown(op)),
     }
+}
+
+/// Runs a command of the palette by its id (`view.board`), or fills the open
+/// palette's field with `query` (debug builds: the captures of the README and
+/// the site).
+async fn dev_command(args: &Value, port: &Port) -> Result<Value, String> {
+    let id = args.get("command").and_then(Value::as_str);
+    let command = id
+        .map(|id| {
+            id.parse::<crate::commands::CommandId>()
+                .map_err(|_| format!("No command is called \"{id}\"."))
+        })
+        .transpose()?;
+    let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_string);
+    let (query, stats_project) = (text("query"), text("stats_project"));
+    if command.is_none() && query.is_none() && stats_project.is_none() {
+        return Err(
+            "Give command (a command id, such as view.board), query or stats_project.".into(),
+        );
+    }
+    port.apply(ModelCmd::DevCommand {
+        command,
+        query,
+        stats_project,
+    })
+    .await?;
+    Ok(serde_json::json!({ "ran": id }))
 }
 
 /// An operation nobody answers.

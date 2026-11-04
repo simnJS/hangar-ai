@@ -345,6 +345,28 @@ impl App {
                 }
                 self.quit()
             }
+            Message::DevCapture(None) => {
+                let main = self.main_window;
+                window::size(main).map(|size| Message::DevCapture(Some(size)))
+            }
+            Message::DevCapture(Some(size)) => {
+                if let Some(dir) = crate::shell::dev_screenshot::capture_dir() {
+                    let main = self.main_window;
+                    let ui_scale = self.scale_factor(main);
+                    let taken = crate::shell::dev_screenshot::take_on_demand(
+                        &dir,
+                        self.view(main),
+                        size * (1.0 / ui_scale),
+                        ui_scale,
+                        &self.theme(main),
+                    );
+                    match taken {
+                        Ok(path) => eprintln!("capture written to {}", path.display()),
+                        Err(error) => eprintln!("capture failed: {error}"),
+                    }
+                }
+                Task::none()
+            }
             Message::Shell(action) => self.shell_action(action),
             Message::Tick(_) | Message::Noop => Task::none(),
             // Routed above.
@@ -594,6 +616,9 @@ impl App {
                 _ => None,
             }),
         ];
+        if crate::shell::dev_screenshot::capture_dir().is_some() {
+            subscriptions.push(Subscription::run(crate::shell::dev_screenshot::on_demand));
+        }
         // A drawer is open somewhere: a press outside it closes it.
         let drawer_open = self.model.ui.drawer.is_some()
             || self

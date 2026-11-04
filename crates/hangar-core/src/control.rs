@@ -160,7 +160,10 @@ async fn wait(
 
 /// Sends `op` to the window and waits for what it did.
 pub async fn ask(host: &Host, op: &str, args: Value) -> Result<Value, ControlError> {
-    if !OPERATIONS.contains(&op) {
+    // `dev_command` switches the window's views for the captures of the README
+    // and the site, in debug builds only, and is no tool an agent is shown.
+    let dev = op == "dev_command" && cfg!(debug_assertions);
+    if !OPERATIONS.contains(&op) && !dev {
         return Err(ControlError::Refused(format!("unknown operation '{op}'")));
     }
     let (id, receiver) = book();

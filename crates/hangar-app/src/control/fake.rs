@@ -712,6 +712,9 @@ impl Fake {
                 self.push(format!("open:{ws}"));
             }
             ModelCmd::Touch(ws) => self.push(format!("touch:{ws}")),
+            ModelCmd::DevCommand { command, query, .. } => {
+                self.push(format!("dev:{command:?}:{query:?}"))
+            }
             ModelCmd::Activate { ws, pane } => self.push(format!("activate:{ws}:{pane}")),
             ModelCmd::Detach(ws) => self.push(format!("detach:{ws}")),
             ModelCmd::Reattach(ws) => self.push(format!("reattach:{ws}")),

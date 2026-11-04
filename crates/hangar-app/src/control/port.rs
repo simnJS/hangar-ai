@@ -104,6 +104,17 @@ pub enum ModelCmd {
     OpenWorkspace(WsId),
     /// An agent acting on a workspace is using it: its sleep waits.
     Touch(WsId),
+    /// A command of the palette, run as a shortcut runs it, and the open
+    /// palette's field filled with `query` (`dev_command`, debug builds): how
+    /// the captures of the README and the site switch views with no one at
+    /// the keyboard. The palette opens in a later update than the one that
+    /// runs its command, so its query is a call of its own. `stats_project`
+    /// filters the statistics on one project, as its menu does.
+    DevCommand {
+        command: Option<crate::commands::CommandId>,
+        query: Option<String>,
+        stats_project: Option<String>,
+    },
     /// Switches the window to the workspace and focuses the pane.
     Activate {
         ws: WsId,
