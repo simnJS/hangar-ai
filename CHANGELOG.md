@@ -99,6 +99,11 @@ around the terminals, and needs a fraction of the memory and processor it did.
   capsule in the middle is gone: the pane's own header and the inspector say what it is
   doing. **Appearance › Use the system's title bar** brings the
   system's back. macOS and Windows keep theirs.
+- **No limit on the workers.** The orchestrator decides how many workers run at once and
+  how many times a task is tried: **Workers at once** and **Attempts per task** are gone
+  from the orchestration settings, and Hangar no longer hands a task back to you after its
+  second worker or its third failed delivery. 1.x, reading the same file, goes back to its
+  defaults, 3 workers and 2 attempts.
 - **Not there yet.**
   - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux
     is where it was used.

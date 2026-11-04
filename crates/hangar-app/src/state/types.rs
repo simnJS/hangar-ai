@@ -292,11 +292,15 @@ pub struct WorktreeHooks {
 
 /// How a workspace's orchestrator works. Missing fields read as
 /// `ORCHESTRATION_DEFAULTS` (`lib/orchestration.ts:15`).
+///
+/// The old app also kept `maxWorkers` and `maxAttempts` here, the most
+/// workers at once and the most one task gets. This version sets no such
+/// limit, the orchestrator deciding both (owner's decision, 2026-11-04): a
+/// file that holds them reads as if it did not, and they are left out of the
+/// file at the next save. 1.x then reads its own defaults for them, 3 and 2.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrchestrationSettings {
-    pub max_workers: u32,
-    pub max_attempts: u32,
     pub auto_merge: bool,
     pub check_command: Option<String>,
     pub orchestrator_model: String,
@@ -310,8 +314,6 @@ pub struct OrchestrationSettings {
 impl Default for OrchestrationSettings {
     fn default() -> Self {
         OrchestrationSettings {
-            max_workers: 3,
-            max_attempts: 2,
             auto_merge: true,
             check_command: None,
             orchestrator_model: "opus".into(),

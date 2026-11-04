@@ -471,7 +471,7 @@ mod tests {
         let (state, kept) = read(json!({
             "workspaces": [
                 {"id": "w1", "name": 5, "panes": [{"id": "p1", "agent": "aider"}, 3],
-                 "orchestration": {"maxWorkers": "many", "autoMerge": false}},
+                 "orchestration": {"workerModel": 5, "autoMerge": false}},
                 "not a workspace"
             ],
             "folders": [{"id": "f1", "name": "Work", "collapsed": "yes"}, {"id": "f2"}],
@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(ws.panes[0].id, "p1");
         assert_eq!(ws.panes[0].agent, AgentId::Shell);
         let orchestration = ws.orchestration.as_ref().unwrap();
-        assert_eq!(orchestration.max_workers, 3);
+        assert_eq!(orchestration.worker_model, "sonnet");
         assert!(!orchestration.auto_merge);
         // One folder's bad field does not cost the others.
         assert_eq!(state.folders.len(), 2);
@@ -511,8 +511,8 @@ mod tests {
         ));
         assert!(has(
             Owner::Orchestration("w1".into()),
-            "maxWorkers",
-            json!("many")
+            "workerModel",
+            json!(5)
         ));
         assert!(has(Owner::Folder("f1".into()), "collapsed", json!("yes")));
         assert!(has(Owner::Settings, "fontSize", json!("big")));
@@ -527,6 +527,35 @@ mod tests {
             list: "workspaces".into(),
             raw: json!("not a workspace")
         }));
+    }
+
+    /// 1.x's limits, `maxWorkers` and `maxAttempts`, which this version does
+    /// not have: a file that holds them reads as one that does not, however
+    /// they are written, and nothing of them is set aside to come back.
+    #[test]
+    fn the_limits_of_the_old_app_read_as_nothing_and_are_not_written_back() {
+        let (state, kept) = read(json!({
+            "workspaces": [
+                {"id": "w1", "orchestration": {"maxWorkers": 5, "maxAttempts": 4, "autoMerge": false}},
+                {"id": "w2", "orchestration": {"maxWorkers": "many", "maxAttempts": 2.5}}
+            ]
+        }));
+        assert!(kept.is_empty(), "{kept:?}");
+        let orchestration = |at: usize| state.workspaces[at].orchestration.clone().unwrap();
+        assert_eq!(
+            orchestration(0),
+            OrchestrationSettings {
+                auto_merge: false,
+                ..OrchestrationSettings::default()
+            }
+        );
+        assert_eq!(orchestration(1), OrchestrationSettings::default());
+        let written = serde_json::to_value(&state).unwrap();
+        for ws in written["workspaces"].as_array().unwrap() {
+            let orchestration = ws["orchestration"].as_object().unwrap();
+            assert!(!orchestration.contains_key("maxWorkers"), "{ws}");
+            assert!(!orchestration.contains_key("maxAttempts"), "{ws}");
+        }
     }
 
     #[test]

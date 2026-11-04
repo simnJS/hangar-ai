@@ -336,7 +336,7 @@ async fn sets_the_check_command_of_the_orchestrators_own_workspace_and_says_so_o
     let saved: serde_json::Value = serde_json::from_str(&patches[0]["patch:w1:".len()..]).unwrap();
     matches(
         &saved,
-        json!({"checkCommand": "pnpm build && pnpm test", "maxWorkers": 3}),
+        json!({"checkCommand": "pnpm build && pnpm test", "autoMerge": true}),
     );
     assert!(
         fake.log()
@@ -410,12 +410,13 @@ async fn keeps_a_command_that_is_one_line_of_reasonable_length() {
 #[tokio::test]
 async fn a_panel_edit_made_while_the_check_is_set_survives_it() {
     let fake = with_orchestrator();
-    // The operation reads the model, and the person changes the workers and
-    // automatic landing in the panel before its write lands.
+    // The operation reads the model, and the person changes the target
+    // branch, automatic landing and the workers' model in the panel before
+    // its write lands.
     let read = fake.port().snapshot();
     fake.patch("w1", |ws| {
         ws.orchestration = Some(OrchestrationSettings {
-            max_workers: 5,
+            branch: Some("develop".into()),
             auto_merge: false,
             worker_model: "opus".into(),
             ..OrchestrationSettings::default()
@@ -438,7 +439,7 @@ async fn a_panel_edit_made_while_the_check_is_set_survives_it() {
         .clone()
         .unwrap();
     assert_eq!(saved.check_command.as_deref(), Some("make check"));
-    assert_eq!(saved.max_workers, 5);
+    assert_eq!(saved.branch.as_deref(), Some("develop"));
     assert!(!saved.auto_merge);
     assert_eq!(saved.worker_model, "opus");
 }

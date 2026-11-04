@@ -130,8 +130,8 @@ fn settings_line(ws: &Workspace, git: bool) -> String {
             None => "no check command".into(),
         };
         return format!(
-            "Settings: at most {} workers at once, {} attempts per task, {check}; workers run {}. Not a git repository: workers share the workspace's folder, and a task is done when its worker delivers. Nothing is merged or pushed.",
-            settings.max_workers, settings.max_attempts, settings.worker_model
+            "Settings: {check}; workers run {}. Not a git repository: workers share the workspace's folder, and a task is done when its worker delivers. Nothing is merged or pushed.",
+            settings.worker_model
         );
     }
     let branch = match &settings.branch {
@@ -150,18 +150,18 @@ fn settings_line(ws: &Workspace, git: bool) -> String {
         )
     };
     format!(
-        "Settings: at most {} workers at once, {} attempts per task, {check}, {landing}; workers run {}. Nothing is ever pushed.",
-        settings.max_workers, settings.max_attempts, settings.worker_model
+        "Settings: {check}, {landing}; workers run {}. Nothing is ever pushed.",
+        settings.worker_model
     )
 }
 
-fn task_line(task: &Task, by_id: &HashMap<&str, &Task>, max_attempts: u32) -> String {
+fn task_line(task: &Task, by_id: &HashMap<&str, &Task>) -> String {
     let mut parts = vec![task_ref(Some(&task.title), &task.id)];
     if let Some(assignee) = task.assignee.as_deref().filter(|a| !a.is_empty()) {
         parts.push(assignee.to_string());
     }
     if task.attempts > 0 {
-        parts.push(format!("attempt {}/{max_attempts}", task.attempts));
+        parts.push(format!("attempt {}", task.attempts));
     }
     if task.priority > 1 {
         parts.push(format!("priority {}", task.priority));
@@ -193,7 +193,7 @@ fn task_line(task: &Task, by_id: &HashMap<&str, &Task>, max_attempts: u32) -> St
     format!("- {}", parts.join(" · "))
 }
 
-fn board_section(tasks: &[Task], max_attempts: u32) -> Vec<String> {
+fn board_section(tasks: &[Task]) -> Vec<String> {
     if tasks.is_empty() {
         return vec!["Board: empty.".into()];
     }
@@ -223,7 +223,7 @@ fn board_section(tasks: &[Task], max_attempts: u32) -> Vec<String> {
                 break;
             }
             listed += 1;
-            lines.push(task_line(task, &by_id, max_attempts));
+            lines.push(task_line(task, &by_id));
             if let Some(last) = task.comments.last()
                 && column != "todo"
             {
@@ -411,7 +411,6 @@ fn manager_briefing(inputs: &BriefingInputs<'_>) -> Briefing {
 
 fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefing {
     let title = plan_title(ws, &inputs.state.workspaces);
-    let settings = orchestration_of(ws);
     let workers = workers_of(ws);
     let mut lines = vec![
         format!(
@@ -424,9 +423,9 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
         String::new(),
         settings_line(ws, inputs.git),
         if workers.is_empty() {
-            format!("Workers: none running (up to {}).", settings.max_workers)
+            "Workers: none running.".to_string()
         } else {
-            format!("Workers ({} of {}):", workers.len(), settings.max_workers)
+            format!("Workers ({}):", workers.len())
         },
     ];
     for worker in &workers {
@@ -445,7 +444,7 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
         lines.push(format!("- {}{on}: {doing}", worker.name));
     }
     lines.push(String::new());
-    lines.extend(board_section(inputs.tasks, settings.max_attempts));
+    lines.extend(board_section(inputs.tasks));
     lines.push(String::new());
     lines.extend(plan_section(
         find_plan(inputs.memory, &title, ws),
@@ -483,7 +482,7 @@ fn worker_briefing(ws: &Workspace, pane: &Pane, inputs: &BriefingInputs<'_>) -> 
     match task {
         Some(task) => {
             let attempt = if task.attempts > 0 {
-                format!(", attempt {} of {}", task.attempts, settings.max_attempts)
+                format!(", attempt {}", task.attempts)
             } else {
                 String::new()
             };

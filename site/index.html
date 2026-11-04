@@ -225,7 +225,7 @@
       <p class="head__lede">
         <span class="wide-only">Orchestration turns one Claude Code pane into a lead that plans and delegates
         instead of writing code. </span>Hangar does the parts a prompt should not be trusted with: the
-        worktrees, the limits, the checks and the merge.
+        worktrees, the checks and the merge.
       </p>
     </header>
 
@@ -287,8 +287,8 @@
           <p>
             Each task goes to a worker: a new Claude Code pane<span class="wide-only">, on Sonnet by
             default,</span> on a branch of its own in its own git worktree<span class="wide-only">, with 20
-            ports set aside so their dev servers do not fight over one</span>. Three run at once by
-            default, and Hangar refuses a fourth.
+            ports set aside so their dev servers do not fight over one</span>. The orchestrator decides
+            how many run at once: Hangar sets no limit.
           </p>
         </div>
         <figure class="step__art">
@@ -371,12 +371,12 @@
         </figure>
       </div>
       <div class="pair__item">
-        <h3>Limits a prompt cannot talk its way past</h3>
+        <h3>Settings a prompt cannot talk its way past</h3>
         <p>
-          Workers at once, attempts per task<span class="wide-only">, overlapping files, permissions, the check
-          command</span> and the branch work lands on are set per workspace and enforced by Hangar, not asked of
-          the model.<span class="wide-only"> The models are set there too: by default Opus plans, Sonnet
-          works and Sonnet reviews.</span>
+          Permissions<span class="wide-only">, the check command</span> and the branch work lands on are set per
+          workspace and enforced by Hangar, not asked of the model. How many workers run at once, and how
+          many times a task is tried, is the orchestrator's call.<span class="wide-only"> The models are set
+          there too: by default Opus plans, Sonnet works and Sonnet reviews.</span>
         </p>
         <figure class="crop crop--orch">
           <picture>
@@ -385,7 +385,7 @@
             <source type="image/avif" data-crop="orch" srcset="img/orch-604.avif?v=f07d7994f7 604w, img/orch-1208.avif?v=ceae6713fb 1208w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="604" height="676">
             <source type="image/webp" data-crop="orch" srcset="img/orch-604.webp?v=4482f8b8dd 604w, img/orch-1208.webp?v=8380bc55f8 1208w" sizes="(min-width: 960px) 520px, calc(100vw - 32px)" width="604" height="676">
             <img data-crop="orch" src="img/orch-604.webp?v=4482f8b8dd" width="604" height="676" loading="lazy" decoding="async"
-              alt="The Orchestration settings of checkout-v2: Iris orchestrates, with 2 workers running; workers at once 3; attempts per task 2; permissions Auto, where Claude Code judges what is safe; merge by itself off, so a delivery waits for you in Needs you; check command node --test.">
+              alt="The Orchestration settings of checkout-v2: Iris orchestrates, with 2 workers running; permissions Auto, where Claude Code judges what is safe; merge by itself off, so a delivery waits for you in Needs you; check command node --test.">
           </picture>
         </figure>
       </div>

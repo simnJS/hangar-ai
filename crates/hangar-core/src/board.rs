@@ -481,7 +481,9 @@ pub fn claim_task(board: &mut Board, id: &str, agent: &str) -> Result<Task, Stri
 /// Hands a todo task to the worker an orchestrator is starting on it
 /// (lib/workerControl.ts), and counts the attempt. Everything that stands in
 /// the way is refused here, under the board's lock, and each refusal says
-/// what to do instead: an orchestrator reads it.
+/// what to do instead: an orchestrator reads it. How many attempts a task
+/// gets is not among them: the count is the orchestrator's to read, and when
+/// to stop is its call.
 ///
 /// `shared_folder`: the workspace is not a git repository, so the worker
 /// starts in its folder beside the others rather than in a worktree of its
@@ -490,7 +492,6 @@ pub fn claim_for_worker(
     board: &mut Board,
     id: &str,
     worker: &str,
-    max_attempts: u32,
     shared_folder: bool,
 ) -> Result<Task, String> {
     let task = board.tasks.iter().find(|t| t.id == id).ok_or_else(|| {
@@ -549,14 +550,6 @@ pub fn claim_for_worker(
             "\"{title}\" depends on tasks that are not done: {}. Get those done first; drop one from \
              depends_on (board_update_task) only if it no longer matters.",
             waiting.join(", ")
-        ));
-    }
-    if task.attempts >= max_attempts {
-        return Err(format!(
-            "\"{title}\" has had {} worker(s) already, the most one task gets (maxAttempts {max_attempts}). \
-             Do not start another: add the label needs-you (board_update_task labels, keeping its other \
-             labels) and comment on the task what went wrong and what you need from the person.",
-            task.attempts
         ));
     }
     let clash = if shared_folder {
@@ -966,10 +959,10 @@ fn blocked_advice(blocked: &Blocked) -> String {
 /// It lands in `todo` with nobody on it, so it holds no worker and no file
 /// (`ownership_clash` only looks at `doing`). A task that was being worked on
 /// gives the attempt back: it was stopped by the wait, not by the worker's
-/// failure, and the next worker should not start one short. `attempts` counts
-/// workers started (`claim_for_worker`); an agent's plain claim does not count,
-/// so a task an agent held and blocks has at worst one attempt more than it
-/// used, never fewer.
+/// failure, and the count an orchestrator reads should not say otherwise.
+/// `attempts` counts workers started (`claim_for_worker`); an agent's plain
+/// claim does not count, so a task an agent held and blocks has at worst one
+/// attempt more than it used, never fewer.
 pub fn block_task(
     board: &mut Board,
     id: &str,
@@ -1467,7 +1460,7 @@ mod tests {
         let mut board = Board::default();
         let id = owned(&mut board, "Login form", &["src/login/**"]);
 
-        let claimed = claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
+        let claimed = claim_for_worker(&mut board, &id, "Leo", false).unwrap();
         assert_eq!(claimed.column, "doing");
         assert_eq!(claimed.assignee.as_deref(), Some("Leo"));
         assert_eq!(claimed.attempts, 1);
@@ -1485,7 +1478,7 @@ mod tests {
         claim_task(&mut board, &doing, "ava").unwrap();
 
         let refusal =
-            |board: &mut Board, id: &str| claim_for_worker(board, id, "Leo", 2, false).unwrap_err();
+            |board: &mut Board, id: &str| claim_for_worker(board, id, "Leo", false).unwrap_err();
         assert!(refusal(&mut board, "nope").contains("board_list_tasks"));
         assert!(refusal(&mut board, &done).contains("done already"));
         assert!(refusal(&mut board, &review).contains("in review"));
@@ -1539,20 +1532,18 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_claim_stops_at_the_attempt_limit() {
+    fn a_worker_claim_counts_every_attempt_and_refuses_none_for_their_number() {
         let mut board = Board::default();
         let id = owned(&mut board, "Flaky", &["src/flaky.rs"]);
-        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
-        release_worker(&mut board, &id, "Leo", false).unwrap();
-        claim_for_worker(&mut board, &id, "Mia", 2, false).unwrap();
-        release_worker(&mut board, &id, "Mia", false).unwrap();
+        for worker in ["Leo", "Mia", "Sam", "Ivy", "Zoe"] {
+            claim_for_worker(&mut board, &id, worker, false).unwrap();
+            release_worker(&mut board, &id, worker, false).unwrap();
+        }
+        assert_eq!(board.tasks[0].attempts, 5);
 
-        let refused = claim_for_worker(&mut board, &id, "Sam", 2, false).unwrap_err();
-        assert!(refused.contains("2 worker(s) already"), "{refused}");
-        assert!(refused.contains("needs-you"), "{refused}");
-        assert_eq!(board.tasks[0].column, "todo");
-        // The limit is the setting's, not a constant.
-        assert!(claim_for_worker(&mut board, &id, "Sam", 3, false).is_ok());
+        // A sixth is started like the first: when to stop is the orchestrator's call.
+        let claimed = claim_for_worker(&mut board, &id, "Ava", false).unwrap();
+        assert_eq!((claimed.column.as_str(), claimed.attempts), ("doing", 6));
     }
 
     #[test]
@@ -1560,9 +1551,9 @@ mod tests {
         let mut board = Board::default();
         let first = todo_task(&mut board);
         let second = todo_task(&mut board);
-        claim_for_worker(&mut board, &first, "Leo", 2, false).unwrap();
+        claim_for_worker(&mut board, &first, "Leo", false).unwrap();
 
-        let refused = claim_for_worker(&mut board, &second, "Mia", 2, false).unwrap_err();
+        let refused = claim_for_worker(&mut board, &second, "Mia", false).unwrap_err();
         assert!(refused.contains("says which files it owns"), "{refused}");
         assert!(refused.contains("Set owns"), "{refused}");
         // Once it says what it owns, it runs beside the other one.
@@ -1575,7 +1566,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(claim_for_worker(&mut board, &second, "Mia", 2, false).is_ok());
+        assert!(claim_for_worker(&mut board, &second, "Mia", false).is_ok());
     }
 
     #[test]
@@ -1587,25 +1578,25 @@ mod tests {
         let overlapping = owned(&mut board, "Overlapping", &["docs/guide.md"]);
 
         // Alone, a task that owns nothing runs.
-        claim_for_worker(&mut board, &unscoped, "Leo", 2, true).unwrap();
+        claim_for_worker(&mut board, &unscoped, "Leo", true).unwrap();
         // Beside it, nothing else does, however scoped.
-        let refused = claim_for_worker(&mut board, &scoped, "Mia", 2, true).unwrap_err();
+        let refused = claim_for_worker(&mut board, &scoped, "Mia", true).unwrap_err();
         assert!(
             refused.contains("does not say which files it owns"),
             "{refused}"
         );
         assert!(refused.contains("not a git repository"), "{refused}");
         // In a repository, worktrees keep them apart until they land.
-        claim_for_worker(&mut board, &scoped, "Mia", 2, false).unwrap();
+        claim_for_worker(&mut board, &scoped, "Mia", false).unwrap();
         release_worker(&mut board, &scoped, "Mia", true).unwrap();
 
         release_worker(&mut board, &unscoped, "Leo", true).unwrap();
-        claim_for_worker(&mut board, &scoped, "Mia", 2, true).unwrap();
-        let refused = claim_for_worker(&mut board, &unscoped, "Leo", 2, true).unwrap_err();
+        claim_for_worker(&mut board, &scoped, "Mia", true).unwrap();
+        let refused = claim_for_worker(&mut board, &unscoped, "Leo", true).unwrap_err();
         assert!(refused.contains("Set owns on this task"), "{refused}");
         // Scoped and apart, they run side by side; sharing a file, they do not.
-        claim_for_worker(&mut board, &other, "Sam", 2, true).unwrap();
-        let refused = claim_for_worker(&mut board, &overlapping, "Ivy", 2, true).unwrap_err();
+        claim_for_worker(&mut board, &other, "Sam", true).unwrap();
+        let refused = claim_for_worker(&mut board, &overlapping, "Ivy", true).unwrap_err();
         assert!(refused.contains("owns too"), "{refused}");
     }
 
@@ -1615,7 +1606,7 @@ mod tests {
         let id = owned(&mut board, "Login", &["src/login/**"]);
 
         // A start that never got going takes its attempt back.
-        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
+        claim_for_worker(&mut board, &id, "Leo", false).unwrap();
         let undone = release_worker(&mut board, &id, "Leo", true).unwrap();
         assert_eq!(
             (undone.column.as_str(), undone.assignee, undone.attempts),
@@ -1624,12 +1615,12 @@ mod tests {
         assert_eq!(undone.doing_since, None);
 
         // A stopped worker's attempt still counts.
-        claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap();
+        claim_for_worker(&mut board, &id, "Leo", false).unwrap();
         let stopped = release_worker(&mut board, &id, "Leo", false).unwrap();
         assert_eq!((stopped.column.as_str(), stopped.attempts), ("todo", 1));
 
         // Waiting for review: it stays where it is.
-        claim_for_worker(&mut board, &id, "Mia", 2, false).unwrap();
+        claim_for_worker(&mut board, &id, "Mia", false).unwrap();
         move_to(&mut board, &id, "review");
         let kept = release_worker(&mut board, &id, "Mia", false).unwrap();
         assert_eq!(
@@ -1723,7 +1714,7 @@ mod tests {
 
         let plain = claim_task(&mut board, &id, "ava").unwrap_err();
         assert!(plain.contains("npm release"), "{plain}");
-        let worker = claim_for_worker(&mut board, &id, "Leo", 2, false).unwrap_err();
+        let worker = claim_for_worker(&mut board, &id, "Leo", false).unwrap_err();
         assert!(
             worker.contains("blocked") && worker.contains("npm release"),
             "{worker}"
@@ -1742,7 +1733,7 @@ mod tests {
         block_task(&mut board, &first, block("a decision"), TODAY).unwrap();
 
         assert!(next_task(&board).is_none());
-        let refused = claim_for_worker(&mut board, &second, "Leo", 2, false).unwrap_err();
+        let refused = claim_for_worker(&mut board, &second, "Leo", false).unwrap_err();
         assert!(refused.contains("blocked: a decision"), "{refused}");
     }
 
@@ -1767,8 +1758,8 @@ mod tests {
         let mut board = Board::default();
         let mine = owned(&mut board, "mine", &["src/a/"]);
         let other = owned(&mut board, "other", &["src/a/"]);
-        claim_for_worker(&mut board, &mine, "Leo", 2, false).unwrap();
-        assert!(claim_for_worker(&mut board, &other, "Mia", 2, false).is_err());
+        claim_for_worker(&mut board, &mine, "Leo", false).unwrap();
+        assert!(claim_for_worker(&mut board, &other, "Mia", false).is_err());
 
         let blocked = block_task(&mut board, &mine, block("waiting"), TODAY).unwrap();
         assert_eq!(
@@ -1780,7 +1771,7 @@ mod tests {
             ("todo", None, 0)
         );
         assert!(blocked.doing_since.is_none());
-        claim_for_worker(&mut board, &other, "Mia", 2, false).unwrap();
+        claim_for_worker(&mut board, &other, "Mia", false).unwrap();
     }
 
     #[test]

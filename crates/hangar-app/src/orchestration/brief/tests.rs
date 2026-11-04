@@ -74,7 +74,6 @@ fn setup() -> Setup {
     );
     shop.orchestration = Some(OrchestrationSettings {
         check_command: Some("pnpm test".into()),
-        max_workers: 2,
         ..OrchestrationSettings::default()
     });
     let state = AppState {
@@ -375,15 +374,45 @@ fn gives_it_the_rules_it_is_held_to_and_the_tools_it_has() {
     }
 }
 
+/// Hangar sets no limit on the workers (owner's decision, 2026-11-04): the
+/// orchestrator is told how many run and how many times a task is tried are
+/// its own call, and nothing it is handed reads as a limit.
+#[test]
+fn leaves_how_many_workers_and_how_many_attempts_to_the_orchestrator() {
+    let Briefing {
+        system, context, ..
+    } = build(&setup()).unwrap();
+    for needed in [
+        "Hangar sets no limit on how many workers run at once or how many times a task is tried: you decide both.",
+        "Hangar still refuses what would break the work",
+        "No task goes back to the person by itself, however often it fails",
+    ] {
+        assert!(system.contains(needed), "{needed}");
+    }
+    for limit in ["worker limit", "out of attempts", "attempts per task"] {
+        assert!(!system.contains(limit), "{limit}");
+    }
+    for limit in [
+        "at most",
+        "workers at once",
+        "attempts per task",
+        "attempt 1/",
+        " of 2",
+    ] {
+        assert!(!context.contains(limit), "{limit}\n---\n{context}");
+    }
+}
+
 #[test]
 fn hands_back_the_board_its_plan_and_the_latest_events() {
     let context = build(&setup()).unwrap().context;
     for needed in [
         "# Hangar state at 14:05, workspace \"Shop\" (C:\\dev\\shop)",
-        "at most 2 workers at once, 2 attempts per task, check `pnpm test`",
+        "Settings: check `pnpm test`, deliveries land on the workspace's current branch by themselves",
+        "Workers (2):",
         "- worker-1 on \"Login form\" [t1]: working",
         "Board: 2 todo, 1 doing, 0 review, 1 done.",
-        "- \"Login form\" [t1] · worker-1 · attempt 1/2 · owns src/login/**, src/login.test.ts",
+        "- \"Login form\" [t1] · worker-1 · attempt 1 · owns src/login/**, src/login.test.ts",
         "  last comment, worker-1: \"Form done, / tests next\"",
         "- \"Settings page\" [t2] · owns src/settings/** · after \"Login form\" [t1]",
         "- \"Docs\" [t3] · priority 3 · owns nothing yet · ready",
@@ -567,7 +596,7 @@ fn gives_it_its_task_its_files_its_check_and_its_ports() {
         assert!(system.contains(needed), "{needed}");
     }
     for needed in [
-        "Your task \"Login form\" [t1]: in doing, attempt 1 of 2.",
+        "Your task \"Login form\" [t1]: in doing, attempt 1.",
         "Owns: src/login/**, src/login.test.ts.",
         "Orchestrator: pane \"orch\". Check: `pnpm test`. Ports: 41000 to 41019 (HANGAR_PORT_BASE).",
         "Description:\nGoal: a login form.",

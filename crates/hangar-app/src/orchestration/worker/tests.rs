@@ -361,11 +361,10 @@ impl WorkerPort for World {
         _cwd: &str,
         id: &str,
         worker: &str,
-        max_attempts: u32,
         shared: bool,
     ) -> Result<Task, String> {
         self.push(format!(
-            "claim:{id}:{worker}:{max_attempts}{}",
+            "claim:{id}:{worker}{}",
             if shared { ":shared" } else { "" }
         ));
         let mut tasks = self.tasks.lock().unwrap();
@@ -395,12 +394,6 @@ impl WorkerPort for World {
                 "\"{}\" depends on tasks that are not done: {}.",
                 entry.title,
                 waiting.join(", ")
-            ));
-        }
-        if entry.attempts >= max_attempts {
-            return Err(format!(
-                "\"{}\" has had {} worker(s) already. Add the label needs-you.",
-                entry.title, entry.attempts
             ));
         }
         let clash = tasks.iter().find(|other| {
@@ -638,7 +631,7 @@ async fn claims_the_task_checks_out_a_worktree_from_the_target_branch_opens_the_
     assert_eq!(spawned["worker"], "Mia");
     assert_eq!(
         spawned["task"],
-        json!({"id": "login-1", "title": "Login form", "attempt": 1, "maxAttempts": 2})
+        json!({"id": "login-1", "title": "Login form", "attempt": 1})
     );
     assert_eq!(spawned["model"], "sonnet");
     assert_eq!(spawned["branch"], branch);
@@ -674,7 +667,7 @@ async fn claims_the_task_checks_out_a_worktree_from_the_target_branch_opens_the_
     assert_eq!(
         app.log()[..7],
         [
-            "claim:login-1:Mia:2".to_string(),
+            "claim:login-1:Mia".to_string(),
             format!("worktree:{path}:{branch}:main:true"),
             format!("copy:{REPO}:{path}"),
             format!("add:{add}"),
@@ -882,42 +875,45 @@ async fn gives_each_worker_a_block_of_ports_no_pane_of_any_workspace_has() {
     assert_eq!(allocate_port_base(&[odd], []), Some(PORT_POOL_START + 40));
 }
 
+/// Hangar sets no limit on how many workers run at once: the orchestrator
+/// decides. A fourth, past the 3 of 1.x's default, starts like the first.
 #[tokio::test]
-async fn refuses_beyond_max_workers_before_touching_anything() {
+async fn starts_every_worker_it_is_asked_for_a_fourth_and_more_included() {
     let app = world(Options {
-        tasks: tasks_one_two(),
-        orchestration: Some(OrchestrationSettings {
-            max_workers: 1,
-            ..Default::default()
-        }),
+        tasks: (1..=5)
+            .map(|n| Task {
+                owns: vec![format!("part{n}/**")],
+                ..job(&format!("t{n}"), &format!("Part {n}"), &[])
+            })
+            .collect(),
         ..Options::default()
     });
-    app.call("worker_spawn", json!({"task": "t1"}))
-        .await
-        .unwrap();
-    app.clear_log();
+    for n in 1..=5 {
+        let spawned = app
+            .call("worker_spawn", json!({"task": format!("t{n}")}))
+            .await
+            .unwrap();
+        assert_eq!(spawned["task"]["id"], format!("t{n}"));
+    }
 
-    let refused = err(app.call("worker_spawn", json!({"task": "t2"})).await);
-    assert!(
-        refused.contains("already runs 1 worker(s) (\"Mia\"), its limit (maxWorkers 1)"),
-        "{refused}"
-    );
-    assert!(refused.contains("worker_stop"));
-    assert!(app.log().is_empty());
-    assert_eq!(app.task("t2").column, "todo");
+    assert_eq!(workers_of(&app.shop()).len(), 5);
+    for n in 1..=5 {
+        assert_eq!(app.task(&format!("t{n}")).column, "doing");
+    }
+    assert_eq!(app.events().len(), 5);
 }
 
 #[tokio::test]
-async fn counts_a_start_still_under_way_against_max_workers_and_never_hands_two_the_same_name_or_ports()
+async fn counts_a_start_still_under_way_against_the_room_left_and_never_hands_two_the_same_name_or_ports()
  {
+    // One pane short of full: two starts at once cannot both take it.
+    let mut crowded = vec![orchestrator_pane()];
+    crowded.extend((2..MAX_PANES).map(|at| shell(&format!("s{at}"), &format!("S{at}"))));
     let limited = World {
         yields: true,
         ..world(Options {
             tasks: tasks_one_two(),
-            orchestration: Some(OrchestrationSettings {
-                max_workers: 1,
-                ..Default::default()
-            }),
+            panes: Some(crowded),
             ..Options::default()
         })
     };
@@ -926,7 +922,8 @@ async fn counts_a_start_still_under_way_against_max_workers_and_never_hands_two_
         limited.call("worker_spawn", json!({"task": "t2"}))
     );
     assert!(one.is_ok());
-    assert!(two.unwrap_err().contains("already runs 1 worker(s)"));
+    assert!(two.unwrap_err().contains("is full"));
+    assert_eq!(limited.task("t2").column, "todo");
 
     let roomy = World {
         yields: true,
@@ -957,10 +954,6 @@ async fn passes_on_every_refusal_of_the_claim_and_leaves_nothing_behind() {
                 depends_on: strings(&["busy"]),
                 ..job("later", "Later", &["c/**"])
             },
-            Task {
-                attempts: 2,
-                ..job("tired", "Tired", &["d/**"])
-            },
             job("clash", "Clash", &["src/shared/**"]),
         ],
         ..Options::default()
@@ -969,7 +962,6 @@ async fn passes_on_every_refusal_of_the_claim_and_leaves_nothing_behind() {
         ("nope", "No task nope"),
         ("busy", "in doing already"),
         ("later", "depends on tasks that are not done: busy"),
-        ("tired", "2 worker(s) already"),
         ("clash", "owns files that \"Busy\" owns too"),
     ];
     for (id, refusal) in cases {
@@ -978,7 +970,6 @@ async fn passes_on_every_refusal_of_the_claim_and_leaves_nothing_behind() {
     }
     assert!(app.log().iter().all(|line| line.starts_with("claim:")));
     assert_eq!(app.shop().panes.len(), 2);
-    assert_eq!(app.task("tired").attempts, 2);
     assert!(app.events().is_empty());
 }
 
@@ -1018,11 +1009,14 @@ async fn starts_workers_on_tasks_with_disjoint_files_and_refuses_the_third_that_
     );
 }
 
+/// Hangar sets no limit on the workers one task gets: the orchestrator
+/// decides when to stop. A task 1.x's default would have handed back after
+/// two starts as many as it is asked for, each told which attempt it is.
 #[tokio::test]
-async fn tells_a_later_attempt_it_is_one_up_to_max_attempts() {
+async fn starts_a_task_again_however_many_workers_it_had_and_tells_it_which_attempt_it_is() {
     let app = world(Options {
         tasks: vec![Task {
-            attempts: 1,
+            attempts: 4,
             ..job("t1", "Again", &["a/**"])
         }],
         ..Options::default()
@@ -1032,12 +1026,15 @@ async fn tells_a_later_attempt_it_is_one_up_to_max_attempts() {
         .await
         .unwrap();
 
-    assert_eq!(spawned["task"]["attempt"], 2);
-    assert_eq!(spawned["task"]["maxAttempts"], 2);
+    assert_eq!(spawned["task"]["attempt"], 5);
+    assert!(spawned["task"].get("maxAttempts").is_none());
+    assert_eq!(app.task("t1").attempts, 5);
+    let brief = app.brief(spawned["worker"].as_str().unwrap());
     assert!(
-        app.brief(spawned["worker"].as_str().unwrap())
-            .contains("This is attempt 2 of 2")
+        brief.contains("This is attempt 5: an earlier worker did not finish it."),
+        "{brief}"
     );
+    assert!(!brief.contains("attempt 5 of"), "{brief}");
 }
 
 #[tokio::test]
@@ -1390,7 +1387,7 @@ async fn starts_the_worker_in_its_folder_no_worktree_no_branch_and_a_brief_that_
                 .any(|p| line.starts_with(p))
         })
         .collect();
-    assert_eq!(made, ["claim:t1:Mia:2:shared"]);
+    assert_eq!(made, ["claim:t1:Mia:shared"]);
     let brief = app.brief("Mia");
     assert!(brief.contains(&format!(
         "You work in the workspace's own folder: {REPO}. It is not a git repository"
@@ -1498,8 +1495,9 @@ async fn lists_each_worker_with_its_task_branch_ports_and_delivery() {
 
     let listed = app.call("worker_list", json!({})).await.unwrap();
     assert_eq!(listed["workspace"], "Shop");
-    assert_eq!(listed["maxWorkers"], 3);
-    assert_eq!(listed["maxAttempts"], 2);
+    // No limit to tell: the orchestrator decides how many run.
+    assert!(listed.get("maxWorkers").is_none());
+    assert!(listed.get("maxAttempts").is_none());
     assert_eq!(
         listed["workers"][0],
         json!({
@@ -1794,7 +1792,6 @@ fn facts<'a>(owns: &'a [String]) -> BriefFacts<'a> {
         port_base: PORT_POOL_START,
         check_command: None,
         attempt: 1,
-        max_attempts: 2,
         hook_failure: None,
     }
 }

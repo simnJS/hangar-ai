@@ -88,8 +88,10 @@ static CHECK_NONE: LazyLock<Regex> =
 static REVIEW: LazyLock<Regex> = LazyLock::new(|| {
     regex(r"^Review \(.*?\): (approved|changes requested)\.(?: Notes: ([\s\S]*))?$")
 });
+/// A failed delivery's comment, counted `<n> of <max>` on boards written while
+/// a task could fail a set number of times, `<n>` since.
 static FAILED: LazyLock<Regex> =
-    LazyLock::new(|| regex(r"^Delivery failed \((\w+), \d+ of \d+\): ([\s\S]*)$"));
+    LazyLock::new(|| regex(r"^Delivery failed \((\w+), \d+(?: of \d+)?\): ([\s\S]*)$"));
 static BLOCKING: LazyLock<Regex> = LazyLock::new(|| regex(r"^- (.+?)(?::(\d+))?: (.+)$"));
 
 fn is_check_line(line: &str) -> bool {

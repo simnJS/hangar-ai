@@ -251,12 +251,11 @@ pub fn board_claim_worker(
     cwd: String,
     id: String,
     worker: String,
-    max_attempts: u32,
     shared_folder: Option<bool>,
 ) -> Result<board::Task, String> {
     let shared_folder = shared_folder.unwrap_or(false);
     let task = ui_store().update(&cwd, |b| {
-        board::claim_for_worker(b, &id, &worker, max_attempts, shared_folder)
+        board::claim_for_worker(b, &id, &worker, shared_folder)
     })?;
     let _ = host.emit(Event::BoardChanged { cwd });
     Ok(task)

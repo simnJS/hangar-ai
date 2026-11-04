@@ -1,6 +1,8 @@
 //! « Orchestration »: how a workspace's orchestrator works (`OrchestrationPanel.tsx`):
-//! how many workers at once, how many tries a task gets, whether a delivery
-//! lands by itself, what checks it, where it lands, and on which models.
+//! what its agents may do without asking, whether a delivery lands by
+//! itself, what checks it, where it lands, and on which models. How many
+//! workers run at once and how many tries a task gets are not here: the
+//! orchestrator decides both, and Hangar sets no limit on either.
 //!
 //! A form with a draft rather than switches saved as they flip, like the MCP
 //! servers' panel: half of it is typed, and a check command saved one letter
@@ -15,13 +17,12 @@ use iced::{Alignment, Element, Length, Padding};
 
 use hangar_i18n::{Key, args};
 use hangar_theme::{fonts, style, tokens};
-use hangar_ui::input::{NumberField, NumberMsg};
 use hangar_ui::{Icon, button, dialog, form, icon, input, text as typography};
 
 use super::form::{
     DEFAULT_ORCHESTRATOR_MODEL, DEFAULT_REVIEWER_MODEL, DEFAULT_WORKER_MODEL, Draft, Field,
-    MAX_ATTEMPTS, MAX_WORKERS, MODEL_SUGGESTIONS, Problem, draft_of, draft_problems,
-    normalize_draft, same_settings, stored_orchestration,
+    MODEL_SUGGESTIONS, Problem, draft_of, draft_problems, normalize_draft, same_settings,
+    stored_orchestration,
 };
 use super::{Msg, State};
 use crate::ctx::Ctx;
@@ -45,8 +46,6 @@ pub enum ModelField {
 /// The panel's messages.
 #[derive(Debug, Clone)]
 pub enum PanelMsg {
-    Workers(NumberMsg),
-    Attempts(NumberMsg),
     /// A mode of `ORCHESTRATION_PERMISSION_MODES`, or empty for the person's own.
     Permission(String),
     AutoMerge(bool),
@@ -60,32 +59,22 @@ pub enum PanelMsg {
     CreateOrchestrator,
 }
 
-/// The panel while it is open: the draft, and the number fields it keeps
-/// half-typed text in. Made again each time the panel opens, so what was
-/// abandoned is gone, as the keyed React component's was.
+/// The panel while it is open: the draft. Made again each time the panel
+/// opens, so what was abandoned is gone, as the keyed React component's was.
 #[derive(Debug)]
 pub struct Panel {
     pub ws: WsId,
     draft: Draft,
-    workers: NumberField,
-    attempts: NumberField,
 }
 
 impl Panel {
     pub fn open(m: &Model, ws: &str) -> Option<Panel> {
         let ws = m.workspace(ws)?;
-        let draft = draft_of(ws);
         Some(Panel {
             ws: ws.id.clone(),
-            workers: count_field(draft.max_workers, MAX_WORKERS.min, MAX_WORKERS.max),
-            attempts: count_field(draft.max_attempts, MAX_ATTEMPTS.min, MAX_ATTEMPTS.max),
-            draft,
+            draft: draft_of(ws),
         })
     }
-}
-
-fn count_field(value: f64, min: u32, max: u32) -> NumberField {
-    NumberField::new(value, f64::from(min), f64::from(max), 1.0)
 }
 
 fn model_field(draft: &mut Draft, which: ModelField) -> &mut String {
@@ -102,24 +91,12 @@ pub fn update(st: &mut State, m: &mut Model, msg: PanelMsg) -> iced::Task<Messag
         return iced::Task::none();
     };
     match msg {
-        PanelMsg::Workers(message) => {
-            panel.workers.update(message);
-            panel.draft.max_workers = panel.workers.value();
-        }
-        PanelMsg::Attempts(message) => {
-            panel.attempts.update(message);
-            panel.draft.max_attempts = panel.attempts.value();
-        }
         PanelMsg::Permission(mode) => panel.draft.permission_mode = mode,
         PanelMsg::AutoMerge(on) => panel.draft.auto_merge = on,
         PanelMsg::Check(text) => panel.draft.check_command = text,
         PanelMsg::Branch(text) => panel.draft.branch = text,
         PanelMsg::Model(which, text) => *model_field(&mut panel.draft, which) = text,
-        PanelMsg::Reset => {
-            panel.draft = draft_of(&Workspace::default());
-            panel.workers.set(panel.draft.max_workers);
-            panel.attempts.set(panel.draft.max_attempts);
-        }
+        PanelMsg::Reset => panel.draft = draft_of(&Workspace::default()),
         PanelMsg::Save => return save(panel, m),
         PanelMsg::CreateOrchestrator => {
             let ws = panel.ws.clone();
@@ -199,25 +176,7 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
     let body = column![
         typography::label(t, ctx.t(Key::OrchIntro)),
         status(ctx, ws),
-        form::section(t, ctx.t(Key::OrchSectionWorkers)).group(vec![
-            count_row(
-                ctx,
-                Key::OrchMaxWorkers,
-                Key::OrchMaxWorkersHint,
-                &panel.workers,
-                orchestration_defaults().max_workers,
-                PanelMsg::Workers,
-            ),
-            count_row(
-                ctx,
-                Key::OrchMaxAttempts,
-                Key::OrchMaxAttemptsHint,
-                &panel.attempts,
-                orchestration_defaults().max_attempts,
-                PanelMsg::Attempts,
-            ),
-            permission_row(ctx, draft),
-        ]),
+        form::section(t, ctx.t(Key::OrchSectionWorkers)).group(vec![permission_row(ctx, draft)]),
         form::section(t, ctx.t(Key::OrchSectionDeliveries)).group(vec![
             form::row(
                 t,
@@ -354,34 +313,6 @@ fn status<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
         .into()
 }
 
-/// A stepper row: the number field, and the default beside it.
-fn count_row<'a>(
-    ctx: Ctx<'a>,
-    label_key: Key,
-    hint_key: Key,
-    field: &'a NumberField,
-    default: u32,
-    on_message: fn(NumberMsg) -> PanelMsg,
-) -> Element<'a, Message> {
-    let t = ctx.theme;
-    let control = row![
-        container(input::number_input(t, field, move |message| msg(
-            on_message(message)
-        )))
-        .width(130.0),
-        typography::hint(
-            t,
-            ctx.i18n
-                .t_with(Key::OrchDefault, &args!("value" => default))
-        ),
-    ]
-    .spacing(tokens::space::LG)
-    .align_y(Alignment::Center);
-    form::row(t, ctx.t(label_key), control)
-        .hint(ctx.t(hint_key))
-        .into()
-}
-
 fn permission_row<'a>(ctx: Ctx<'a>, draft: &'a Draft) -> Element<'a, Message> {
     let t = ctx.theme;
     let mut options = vec![Mode {
@@ -490,4 +421,53 @@ fn model_row<'a>(
                 .t_with(Key::OrchDefault, &args!("value" => default)),
         )
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    //! The panel drawn as a window would lay it out.
+
+    use super::*;
+    use crate::app::Packages;
+    use crate::navigator::testing::{ctx, model_of, simulate};
+    use crate::state::types::AppState;
+
+    /// Hangar sets no limit on the workers (owner's decision, 2026-11-04):
+    /// the panel has no field for how many run at once or how many times a
+    /// task is tried, and says the orchestrator decides.
+    #[test]
+    fn offers_no_limit_on_the_workers_and_says_the_orchestrator_decides() {
+        let model = model_of(AppState {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                name: "Shop".into(),
+                cwd: "/code/shop".into(),
+                ..Workspace::default()
+            }],
+            ..AppState::default()
+        });
+        let st = State {
+            panel: Panel::open(&model, "w1"),
+            ..State::default()
+        };
+        let pkg = Packages::default();
+        let ws: WsId = "w1".into();
+        let mut ui = simulate(view(&st, ctx(&model, &pkg), &ws));
+        for shown in [
+            "Permissions",
+            "Merge by itself",
+            "Check command",
+            "Target branch",
+        ] {
+            assert!(ui.find(shown).is_ok(), "{shown}");
+        }
+        for gone in ["Workers at once", "Attempts per task"] {
+            assert!(ui.find(gone).is_err(), "{gone}");
+        }
+        let intro = "It decides how many workers run at once and how many times a task is tried.";
+        assert!(
+            ctx(&model, &pkg).t(Key::OrchIntro).contains(intro),
+            "{intro}"
+        );
+    }
 }

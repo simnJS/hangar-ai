@@ -7,7 +7,9 @@
 //! repository, and says what happened. What follows is decided here, where
 //! the board, the panes and the orchestrator are: a landed task is done and
 //! its worker goes; a failed one goes back to its worker, as a message from
-//! Hangar, with what to fix, until the third failure, which is the person's.
+//! Hangar, with what to fix, however many times it fails. Hangar never hands
+//! it to the person for that: whether to keep trying, reassign it or ask the
+//! person is the orchestrator's call, and it hears of every failure.
 //!
 //! One that passed but waits for the person stands for the branch as it was
 //! tested: new commits on it replace it with a delivery of their own, through
@@ -41,8 +43,6 @@ use super::types::{
     Caller, DeliveryOutcomeKind, DeliveryState, OrchestratorEvent, outcome_name, outcome_of, text,
 };
 
-/// Failed deliveries of one task before it goes to the person.
-pub const MAX_FAILED_DELIVERIES: usize = 3;
 /// A worker done without git keeps its pane this long: its answer has to
 /// reach it first.
 const CLOSE_AFTER_MS: u64 = 5_000;
@@ -1073,51 +1073,34 @@ async fn settle(
         return Ok(());
     }
 
-    // A failure: back to the worker, with what to fix.
+    // A failure: back to the worker, with what to fix, however many came
+    // before. The orchestrator hears of each one and decides when to stop.
     let failures = current
         .comments
         .iter()
         .filter(|comment| comment.author == HANGAR && comment.text.starts_with(FAILED))
         .count()
         + 1;
-    let last = failures >= MAX_FAILED_DELIVERIES;
     delivery
         .board_comment(
             cwd,
             &task.id,
             HANGAR,
-            &failed_comment(
-                outcome_name(kind),
-                failures,
-                MAX_FAILED_DELIVERIES,
-                &outcome.detail,
-            ),
+            &failed_comment(outcome_name(kind), failures, &outcome.detail),
         )
         .await?;
     // One that was waiting to land and no longer can is worked on again.
-    let labels = if last {
-        with_label(
-            &without(&current.labels, &[READY_TO_LAND_LABEL]),
-            NEEDS_YOU_LABEL,
-        )
-    } else {
-        without(&current.labels, &[READY_TO_LAND_LABEL])
-    };
-    if current.column != "doing" || labels.len() != current.labels.len() || last {
+    let labels = without(&current.labels, &[READY_TO_LAND_LABEL]);
+    if current.column != "doing" || labels.len() != current.labels.len() {
         delivery
             .board_update(cwd, &task.id, moved("doing", labels))
             .await?;
     }
     if let Some(worker) = worker {
-        let next = if last {
-            format!(
-                "This is failed delivery {failures} of {MAX_FAILED_DELIVERIES} for this task: stop working on it \
-                 now. The task is marked needs-you; the orchestrator and the person have been told."
-            )
-        } else if outcome.outcome == Kind::Error {
+        let next = if outcome.outcome == Kind::Error {
             "If it fails again the same way, stop and say so in a comment on the task.".into()
         } else {
-            format!("Failed deliveries so far: {failures} of {MAX_FAILED_DELIVERIES}.")
+            format!("Failed deliveries so far: {failures}.")
         };
         delivery
             .tell(
@@ -1130,23 +1113,9 @@ async fn settle(
             .await?;
     }
     post(format!(
-        "{} (failed delivery {failures} of {MAX_FAILED_DELIVERIES})",
+        "{} (failed delivery {failures})",
         event_detail(outcome, target)
     ));
-    if last {
-        port.post_event(
-            &ws.id,
-            OrchestratorEvent::TaskNeedsYou {
-                task_id: task.id.clone(),
-                title: current.title.clone(),
-                reason: format!(
-                    "{MAX_FAILED_DELIVERIES} deliveries failed, the last one: {}",
-                    event_detail(outcome, target)
-                ),
-            },
-            false,
-        );
-    }
     Ok(())
 }
 

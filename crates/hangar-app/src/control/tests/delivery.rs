@@ -753,7 +753,7 @@ async fn a_failure_goes_back_to_the_worker_with_what_to_do_and_the_task_stays_it
     assert_eq!(s.task().column, "doing");
     assert!(s.fake.logged("close:").is_empty());
     assert!(s.fake.log().contains(&format!(
-        "comment:t1:hangar:Delivery failed (conflict, 1 of 3): {detail}"
+        "comment:t1:hangar:Delivery failed (conflict, 1): {detail}"
     )));
     let told = s.line("tell:p2:");
     contains(
@@ -761,19 +761,24 @@ async fn a_failure_goes_back_to_the_worker_with_what_to_do_and_the_task_stays_it
         "Your delivery of \"Add the export button\" did not land.",
     );
     contains(&told, "conflicts in src/a.ts, src/b.ts");
-    contains(&told, "Failed deliveries so far: 1 of 3.");
+    contains(&told, "Failed deliveries so far: 1.");
     let events = s.events();
     assert_eq!(events.len(), 1);
     matches(
         &events[0],
         json!({"kind": "delivery", "outcome": "conflict",
-               "detail": "conflict with main in src/a.ts, src/b.ts (failed delivery 1 of 3)"}),
+               "detail": "conflict with main in src/a.ts, src/b.ts (failed delivery 1)"}),
     );
 }
 
+/// Hangar sets no limit on a task's failed deliveries (owner's decision,
+/// 2026-11-04): the third, which 1.x handed to the person, goes back to the
+/// worker like the first, and so does every one after it. The orchestrator
+/// hears of each, counted, and decides when to stop.
 #[tokio::test]
-async fn the_third_failure_is_the_persons() {
+async fn a_third_failure_and_every_one_after_it_go_back_to_the_worker_not_to_the_person() {
     let s = setup();
+    // Two as boards on disk carry them, written while there was a most.
     let earlier = |n: u32| Comment {
         id: format!("c{n}"),
         author: "hangar".into(),
@@ -783,29 +788,28 @@ async fn the_third_failure_is_the_persons() {
     let mut held = task();
     held.comments = vec![earlier(1), earlier(2)];
     s.set_tasks(vec![held]);
-    s.now(
-        Kind::CheckFailed,
-        "The check `pnpm test` failed (exit 1) on worker/t1 merged onto main.",
-        |_| {},
-    );
+    let detail = "The check `pnpm test` failed (exit 1) on worker/t1 merged onto main.";
 
-    s.submit(json!({})).await.unwrap();
-    s.fake.settle().await;
+    for n in 3..=5 {
+        lock(&s.events.0).clear();
+        s.now(Kind::CheckFailed, detail, |_| {});
+        s.submit(json!({})).await.unwrap();
+        s.fake.settle().await;
 
-    assert_eq!(s.task().column, "doing");
-    assert_eq!(s.task().labels, vec!["ui", "needs-you"]);
-    contains(&s.line("tell:p2:"), "stop working on it now");
-    let kinds: Vec<_> = s
-        .events()
-        .iter()
-        .map(|event| event["kind"].clone())
-        .collect();
-    assert_eq!(kinds, vec![json!("delivery"), json!("taskNeedsYou")]);
-    matches(
-        &s.events()[1],
-        json!({"kind": "taskNeedsYou", "taskId": "t1",
-               "reason": "3 deliveries failed, the last one: The check `pnpm test` failed (exit 1) on worker/t1 merged onto main."}),
-    );
+        assert_eq!(s.task().column, "doing");
+        assert_eq!(s.task().labels, vec!["ui"], "failure {n}");
+        assert!(s.fake.log().contains(&format!(
+            "comment:t1:hangar:Delivery failed (checkFailed, {n}): {detail}"
+        )));
+        let told = s.fake.logged("tell:p2:").pop().unwrap();
+        contains(&told, &format!("Failed deliveries so far: {n}."));
+        assert!(!told.contains("stop working on it"), "{told}");
+        let events = s.events();
+        assert_eq!(events.len(), 1, "failure {n}: {events:?}");
+        matches(&events[0], json!({"kind": "delivery", "taskId": "t1"}));
+        let said = events[0]["detail"].as_str().unwrap();
+        assert!(said.ends_with(&format!("(failed delivery {n})")), "{said}");
+    }
 }
 
 #[tokio::test]
@@ -829,7 +833,7 @@ async fn tells_the_orchestrator_the_fact_it_acts_on_not_the_workers_instructions
     s.fake.settle().await;
     matches(
         &s.events()[0],
-        json!({"detail": "`pnpm test` exited 1: FAIL  src/export.test.ts > exports a row per task (failed delivery 1 of 3)"}),
+        json!({"detail": "`pnpm test` exited 1: FAIL  src/export.test.ts > exports a row per task (failed delivery 1)"}),
     );
 
     lock(&s.events.0).clear();
@@ -859,7 +863,7 @@ async fn tells_the_orchestrator_the_fact_it_acts_on_not_the_workers_instructions
     s.fake.settle().await;
     matches(
         &s.events()[0],
-        json!({"detail": "review: src/export/csv.ts:14: Commas inside a title are not quoted. (+1 more) (failed delivery 2 of 3)"}),
+        json!({"detail": "review: src/export/csv.ts:14: Commas inside a title are not quoted. (+1 more) (failed delivery 2)"}),
     );
 }
 
@@ -1202,16 +1206,16 @@ async fn with_new_commits_that_fail_counts_that_failure_once_and_nothing_waits_a
     assert_eq!(s.task().column, "doing");
     assert_eq!(s.task().labels, vec!["ui"]);
     assert!(s.fake.log().contains(
-        &"comment:t1:hangar:Delivery failed (conflict, 2 of 3): Merging worker/t1 onto main conflicts in src/a.ts."
+        &"comment:t1:hangar:Delivery failed (conflict, 2): Merging worker/t1 onto main conflicts in src/a.ts."
             .to_string()
     ));
-    contains(&s.line("tell:p2:"), "Failed deliveries so far: 2 of 3.");
+    contains(&s.line("tell:p2:"), "Failed deliveries so far: 2.");
     let events = s.events();
     assert_eq!(events.len(), 1);
     matches(
         &events[0],
         json!({"kind": "delivery", "outcome": "conflict",
-               "detail": "conflict with main in src/a.ts (failed delivery 2 of 3)"}),
+               "detail": "conflict with main in src/a.ts (failed delivery 2)"}),
     );
 }
 

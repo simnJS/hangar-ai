@@ -5,23 +5,16 @@
 //! Reading is `state::roles::orchestration_of`'s (the TS `orchestrationOf` of
 //! lib/orchestration): it takes whatever is stored, hand-edited or not, and
 //! falls back field by field. This is the other way round, a form the person is filling in, and
-//! holds them to a little more: a range for the counts, a shape for the names
-//! a command line will carry.
+//! holds them to a little more: a shape for the names a command line will
+//! carry.
+//!
+//! The TS form also had steppers for the workers at once and the attempts per
+//! task. This version sets no such limit: the orchestrator decides both.
 
 use crate::state::roles::{
     ORCHESTRATION_PERMISSION_MODES, orchestration_defaults, orchestration_of,
 };
 use crate::state::types::{OrchestrationSettings, Workspace};
-
-/// What a stepper offers, both ends included.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Range {
-    pub min: u32,
-    pub max: u32,
-}
-
-pub const MAX_WORKERS: Range = Range { min: 1, max: 8 };
-pub const MAX_ATTEMPTS: Range = Range { min: 1, max: 5 };
 
 /// Offered under the model fields; Claude Code takes a full model id as well.
 pub const MODEL_SUGGESTIONS: [&str; 3] = ["opus", "sonnet", "haiku"];
@@ -32,13 +25,9 @@ pub const DEFAULT_ORCHESTRATOR_MODEL: &str = "opus";
 pub const DEFAULT_WORKER_MODEL: &str = "sonnet";
 pub const DEFAULT_REVIEWER_MODEL: &str = "sonnet";
 
-/// The fields as the panel holds them: text stays text until it is saved. The
-/// counts are numbers that may not be whole or even finite (a draft is
-/// whatever was typed), which `normalize_draft` holds to their range.
+/// The fields as the panel holds them: text stays text until it is saved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Draft {
-    pub max_workers: f64,
-    pub max_attempts: f64,
     pub auto_merge: bool,
     pub check_command: String,
     pub orchestrator_model: String,
@@ -86,8 +75,6 @@ impl Problems {
 pub fn draft_of(ws: &Workspace) -> Draft {
     let settings = orchestration_of(ws);
     Draft {
-        max_workers: f64::from(settings.max_workers),
-        max_attempts: f64::from(settings.max_attempts),
         auto_merge: settings.auto_merge,
         check_command: settings.check_command.unwrap_or_default(),
         orchestrator_model: settings.orchestrator_model,
@@ -96,19 +83,6 @@ pub fn draft_of(ws: &Workspace) -> Draft {
         branch: settings.branch.unwrap_or_default(),
         permission_mode: settings.permission_mode.unwrap_or_default(),
     }
-}
-
-/// `Math.round` of JavaScript: halves go up. A count is clamped by it, so a
-/// typed 2.5 reads as 3, as it did.
-fn round(value: f64) -> f64 {
-    (value + 0.5).floor()
-}
-
-fn clamp(value: f64, range: Range, fallback: u32) -> u32 {
-    if !value.is_finite() {
-        return fallback;
-    }
-    round(value).clamp(f64::from(range.min), f64::from(range.max)) as u32
 }
 
 /// A model name goes on a command line (`--model <name>`): an alias, or an id
@@ -161,10 +135,10 @@ pub fn draft_problems(draft: &Draft) -> Problems {
     Problems(problems)
 }
 
-/// The settings a draft stands for: counts held to their range, names
-/// trimmed, a blank model back to its default, a blank check or branch to
-/// none. Fields with a problem (`draft_problems`) are the caller's to refuse;
-/// here they fall back to the default like a blank one.
+/// The settings a draft stands for: names trimmed, a blank model back to its
+/// default, a blank check or branch to none. Fields with a problem
+/// (`draft_problems`) are the caller's to refuse; here they fall back to the
+/// default like a blank one.
 pub fn normalize_draft(draft: &Draft) -> OrchestrationSettings {
     let base = orchestration_defaults();
     let problems = draft_problems(draft);
@@ -181,8 +155,6 @@ pub fn normalize_draft(draft: &Draft) -> OrchestrationSettings {
         (!text.is_empty()).then(|| text.to_owned())
     };
     OrchestrationSettings {
-        max_workers: clamp(draft.max_workers, MAX_WORKERS, base.max_workers),
-        max_attempts: clamp(draft.max_attempts, MAX_ATTEMPTS, base.max_attempts),
         auto_merge: draft.auto_merge,
         // A check is run through the person's shell exactly as typed, inner
         // spaces and all: only the ends are trimmed.
@@ -252,8 +224,6 @@ mod tests {
         assert_eq!(
             draft_of(&Workspace::default()),
             Draft {
-                max_workers: f64::from(base.max_workers),
-                max_attempts: f64::from(base.max_attempts),
                 auto_merge: base.auto_merge,
                 check_command: String::new(),
                 orchestrator_model: base.orchestrator_model,
@@ -268,7 +238,7 @@ mod tests {
     #[test]
     fn opens_on_what_the_workspace_runs_with_a_malformed_field_read_as_its_default() {
         let saved = OrchestrationSettings {
-            max_workers: 5,
+            auto_merge: false,
             check_command: Some("pnpm test".into()),
             worker_model: "  ".into(),
             branch: Some("main".into()),
@@ -279,42 +249,22 @@ mod tests {
             ..Workspace::default()
         };
         let opened = draft_of(&ws);
-        assert_eq!(opened.max_workers, 5.0);
+        assert!(!opened.auto_merge);
         assert_eq!(opened.check_command, "pnpm test");
         assert_eq!(opened.worker_model, "sonnet");
         assert_eq!(opened.branch, "main");
     }
 
     #[test]
-    fn reads_a_count_under_one_and_a_mode_nobody_offers_as_the_default() {
+    fn reads_a_mode_nobody_offers_as_the_default() {
         let ws = Workspace {
             orchestration: Some(OrchestrationSettings {
-                max_workers: 0,
-                max_attempts: 0,
                 permission_mode: Some("yolo".into()),
                 ..orchestration_defaults()
             }),
             ..Workspace::default()
         };
         assert_eq!(orchestration_of(&ws), orchestration_defaults());
-    }
-
-    #[test]
-    fn holds_the_counts_to_the_range_the_steppers_offer_whole_numbers_only() {
-        let held = normalize_draft(&draft(|d| {
-            d.max_workers = 0.0;
-            d.max_attempts = 99.0;
-        }));
-        assert_eq!(held.max_workers, MAX_WORKERS.min);
-        assert_eq!(held.max_attempts, MAX_ATTEMPTS.max);
-        assert_eq!(
-            normalize_draft(&draft(|d| d.max_workers = 2.6)).max_workers,
-            3
-        );
-        assert_eq!(
-            normalize_draft(&draft(|d| d.max_workers = f64::NAN)).max_workers,
-            orchestration_defaults().max_workers
-        );
     }
 
     #[test]
@@ -349,7 +299,7 @@ mod tests {
     #[test]
     fn is_what_settings_of_reads_back_once_stored() {
         let next = normalize_draft(&draft(|d| {
-            d.max_workers = 4.0;
+            d.reviewer_model = "haiku".into();
             d.auto_merge = false;
             d.check_command = "make check".into();
             d.branch = "develop".into();

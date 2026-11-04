@@ -91,7 +91,9 @@ pub fn review_line(outcome: &Outcome, model: &str) -> Option<String> {
     Some(format!("Review ({model}): {verdict}.{notes}"))
 }
 
-/// `Delivery failed (<outcome>, <n> of <max>): <detail>`.
-pub fn failed_comment(outcome: &str, failures: usize, max: usize, detail: &str) -> String {
-    format!("{FAILED} ({outcome}, {failures} of {max}): {detail}")
+/// `Delivery failed (<outcome>, <n>): <detail>`, the task's n-th failed
+/// delivery. Comments written while a task could fail a set number of times
+/// say `<n> of <max>`; P20's `FAILED` reads both.
+pub fn failed_comment(outcome: &str, failures: usize, detail: &str) -> String {
+    format!("{FAILED} ({outcome}, {failures}): {detail}")
 }

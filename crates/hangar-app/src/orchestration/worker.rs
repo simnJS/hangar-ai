@@ -5,9 +5,11 @@
 //! own, with ports of its own and a brief written from the task. Starting one
 //! is all or nothing: the claim, the worktree, the pane and the brief either
 //! all happen, or whatever was done is undone and the task is back in todo.
-//! The limits — workers at once, attempts per task, files two tasks in doing
-//! may not share — are refused here and in hangar-core's board.rs, never left
-//! to a prompt.
+//! What would break the work — two tasks in doing that share a file, a
+//! workspace with no room for another pane — is refused here and in
+//! hangar-core's board.rs, never left to a prompt. How many workers run at
+//! once and how many a task gets are not: Hangar sets no limit on either,
+//! the orchestrator decides.
 //!
 //! A workspace that is not a git repository has no worktree to give: its
 //! workers start in its own folder, side by side (`Pane::shared_folder`), and
@@ -73,7 +75,8 @@ pub const COPY_PATTERNS: [&str; 4] = [".env", ".env.*", "*.local", ".vscode/**"]
 
 /// The starts still under way. They hold their place, their name and their
 /// ports from the first check to the end, so two starts at once can neither
-/// both take the last free worker, nor the same name or the same ports.
+/// both take the last free pane of the grid, nor the same name or the same
+/// ports.
 #[derive(Debug, Default)]
 pub struct Starting {
     names: HashSet<String>,
@@ -124,14 +127,13 @@ pub trait WorkerPort: Sync {
     fn dir_exists(&self, path: &str) -> impl Future<Output = bool> + Send;
     fn sleep(&self, ms: u64) -> impl Future<Output = ()> + Send;
     fn board_load(&self, cwd: &str) -> impl Future<Output = Result<Vec<Task>, String>> + Send;
-    /// board.rs `claim_for_worker`: refused, with the reason, for every limit
-    /// on the task.
+    /// board.rs `claim_for_worker`: refused, with the reason, for whatever
+    /// stands in the task's way.
     fn claim(
         &self,
         cwd: &str,
         id: &str,
         worker: &str,
-        max_attempts: u32,
         shared_folder: bool,
     ) -> impl Future<Output = Result<Task, String>> + Send;
     /// board.rs `release_worker`.
@@ -434,7 +436,6 @@ pub struct BriefFacts<'a> {
     pub port_base: u32,
     pub check_command: Option<&'a str>,
     pub attempt: u32,
-    pub max_attempts: u32,
     pub hook_failure: Option<&'a HookFailure>,
 }
 
@@ -495,8 +496,8 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         Some(if description.is_empty() { "(No description beyond the title.)".into() } else { description.to_string() }),
         (facts.attempt > 1).then(|| {
             format!(
-                "\nThis is attempt {} of {}: an earlier worker did not finish it. Read the task's comments (board_list_tasks) before you start.",
-                facts.attempt, facts.max_attempts
+                "\nThis is attempt {}: an earlier worker did not finish it. Read the task's comments (board_list_tasks) before you start.",
+                facts.attempt
             )
         }),
         Some(String::new()),
@@ -659,7 +660,6 @@ pub struct SpawnedTask {
     pub id: String,
     pub title: String,
     pub attempt: u32,
-    pub max_attempts: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -743,25 +743,7 @@ pub async fn spawn_worker(
             .starting()
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let running = workers_of(ws);
         let pending = starting.in_workspace(&ws.id);
-        if running.len() + pending >= settings.max_workers as usize {
-            let names: Vec<String> = running
-                .iter()
-                .map(|pane| format!("\"{}\"", pane.name))
-                .collect();
-            return Err(format!(
-                "\"{}\" already runs {} worker(s){}, its limit (maxWorkers {}). Wait for one to deliver, or stop one with worker_stop, then start the next. The limit is the person's setting.",
-                ws.name,
-                running.len() + pending,
-                if names.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({})", names.join(", "))
-                },
-                settings.max_workers
-            ));
-        }
         if ws.pane_count() + pending >= MAX_PANES {
             return Err(full(ws));
         }
@@ -881,13 +863,7 @@ async fn start_steps(
     }
 
     let task = port
-        .claim(
-            &ws.cwd,
-            &start.task_id,
-            &start.name,
-            settings.max_attempts,
-            git.is_none(),
-        )
+        .claim(&ws.cwd, &start.task_id, &start.name, git.is_none())
         .await?;
     undo.push(Undo::Release);
 
@@ -997,7 +973,6 @@ async fn start_steps(
         port_base: start.port_base,
         check_command: settings.check_command.as_deref(),
         attempt,
-        max_attempts: settings.max_attempts,
         hook_failure: hook_failure.as_ref(),
     });
     port.enqueue(&id, &brief, by.unwrap_or("hangar")).await?;
@@ -1036,7 +1011,6 @@ async fn start_steps(
             id: task.id.clone(),
             title: task.title.clone(),
             attempt,
-            max_attempts: settings.max_attempts,
         },
         model: start.model.clone(),
         folder,
@@ -1157,7 +1131,6 @@ fn delivery_of(task: Option<&Task>, shared_folder: bool) -> Option<&'static str>
 /// `worker_list`: each worker with its task, branch, ports and delivery.
 pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
     let panes = workers_of(ws);
-    let settings = orchestration_of(ws);
     let (tasks, trees) = if panes.is_empty() {
         (Vec::new(), Vec::new())
     } else {
@@ -1212,8 +1185,6 @@ pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
     }
     json!({
         "workspace": ws.name,
-        "maxWorkers": settings.max_workers,
-        "maxAttempts": settings.max_attempts,
         "workers": workers,
     })
 }

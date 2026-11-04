@@ -316,8 +316,6 @@ fn rig() -> Rig {
         cwd: "C:\\dev\\app".into(),
         panes: vec![ava, worker()],
         orchestration: Some(OrchestrationSettings {
-            max_workers: 3,
-            max_attempts: 2,
             auto_merge: false,
             check_command: Some("pnpm test".into()),
             orchestrator_model: "opus".into(),
@@ -468,6 +466,31 @@ fn comments_say_what_the_check_and_the_review_of_the_delivery_that_waits_found()
                 {"file": "src/qr.ts", "line": 12, "problem": "the code is drawn before it is checked"},
                 {"file": "src/i18n.ts", "problem": "a French string is missing"},
              ]},
+        ]),
+    );
+}
+
+/// A failure counted since a task has no most it may fail (`<n>`, where the
+/// boards on disk say `<n> of <max>`) reads as one written before.
+#[test]
+fn comments_read_a_failed_delivery_counted_with_or_without_a_most() {
+    let since = comment(
+        "c4",
+        "hangar",
+        &crate::control::delivery_text::failed_comment(
+            "conflict",
+            4,
+            "Merging hangar/qr onto main conflicts in src/qr.ts.",
+        ),
+        4_000,
+    );
+    let (passed, earlier) = delivery_history(&[failed_check(), since]);
+    assert!(passed.is_none());
+    assert_equal(
+        &json!(earlier),
+        json!([
+            {"at": 1_000, "outcome": "checkFailed", "text": "The check `pnpm test` failed (exit 1) on hangar/qr merged onto main."},
+            {"at": 4_000, "outcome": "conflict", "text": "Merging hangar/qr onto main conflicts in src/qr.ts."},
         ]),
     );
 }

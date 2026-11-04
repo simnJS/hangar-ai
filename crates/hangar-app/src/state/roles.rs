@@ -4,10 +4,10 @@
 //!
 //! A workspace's orchestration is one Claude Code pane pinned as its
 //! orchestrator, which plans on the board and hands each task to a worker pane
-//! of its own. The limits here are Hangar's to hold, not the orchestrator's: a
-//! prompt can ask a model to start no more than three workers, only code can
-//! refuse the fourth. P10 (`orchestration_ui`) and P19 (`orchestration`) build
-//! on these rather than writing their own.
+//! of its own. How many workers run at once, and how many times a task is
+//! tried, are the orchestrator's call: Hangar sets no limit on either. P10
+//! (`orchestration_ui`) and P19 (`orchestration`) build on these rather than
+//! writing their own.
 
 use super::types::{AppState, OrchestrationSettings, Pane, PaneRole, Workspace};
 
@@ -32,14 +32,13 @@ pub fn orchestration_defaults() -> OrchestrationSettings {
 }
 
 /// A workspace's orchestration settings, each one absent or malformed read as
-/// its default (`orchestrationOf`): a count below one, a blank model name, a
-/// permission mode not offered. Names and optional texts come back trimmed.
+/// its default (`orchestrationOf`): a blank model name, a permission mode not
+/// offered. Names and optional texts come back trimmed.
 pub fn orchestration_of(ws: &Workspace) -> OrchestrationSettings {
     let defaults = OrchestrationSettings::default();
     let Some(saved) = &ws.orchestration else {
         return defaults;
     };
-    let count = |value: u32, fallback: u32| if value >= 1 { value } else { fallback };
     let name = |value: &str, fallback: &str| {
         let value = value.trim();
         if value.is_empty() {
@@ -56,8 +55,6 @@ pub fn orchestration_of(ws: &Workspace) -> OrchestrationSettings {
             .map(str::to_string)
     };
     OrchestrationSettings {
-        max_workers: count(saved.max_workers, defaults.max_workers),
-        max_attempts: count(saved.max_attempts, defaults.max_attempts),
         auto_merge: saved.auto_merge,
         check_command: optional(&saved.check_command),
         orchestrator_model: name(&saved.orchestrator_model, &defaults.orchestrator_model),
@@ -153,7 +150,6 @@ mod tests {
     #[test]
     fn reads_back_what_was_stored_and_defaults_what_is_off() {
         let stored = OrchestrationSettings {
-            max_workers: 4,
             auto_merge: false,
             check_command: Some("make check".into()),
             branch: Some("develop".into()),
@@ -164,7 +160,6 @@ mod tests {
         assert_eq!(orchestration_of(&w), stored);
 
         w.orchestration = Some(OrchestrationSettings {
-            max_workers: 0,
             worker_model: "  ".into(),
             reviewer_model: " haiku ".into(),
             check_command: Some("   ".into()),
@@ -172,7 +167,6 @@ mod tests {
             ..OrchestrationSettings::default()
         });
         let read = orchestration_of(&w);
-        assert_eq!(read.max_workers, 3);
         assert_eq!(read.worker_model, "sonnet");
         assert_eq!(read.reviewer_model, "haiku");
         assert_eq!(read.check_command, None);

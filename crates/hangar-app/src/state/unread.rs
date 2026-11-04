@@ -15,8 +15,8 @@
 //! made of it) is noted as its *substitute*. After every store action, an
 //! entry whose field no longer holds its substitute, or whose object is gone
 //! (a workspace removed, a pane closed), is dropped for good. One case slips
-//! through: an action that writes exactly the substitute (a form saving the
-//! default `maxWorkers: 3` over a hand-written `"many"`) is not seen as a
+//! through: an action that writes exactly the substitute (the settings saving
+//! the default `fontSize: 13` over a hand-written `"big"`) is not seen as a
 //! write, and the raw value comes back in the file. The app goes on reading
 //! the default, as it does today, so the only trace is in the file.
 //!

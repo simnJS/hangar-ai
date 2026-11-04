@@ -675,7 +675,6 @@ pub fn board_claim_worker(
     cwd: String,
     id: String,
     worker: String,
-    max_attempts: u32,
     shared_folder: Option<bool>,
 ) -> Result<board::Task, String>
 ```

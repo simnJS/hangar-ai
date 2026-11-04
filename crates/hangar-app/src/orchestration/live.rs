@@ -233,7 +233,6 @@ impl WorkerPort for LivePort {
         cwd: &str,
         id: &str,
         worker: &str,
-        max_attempts: u32,
         shared_folder: bool,
     ) -> Result<Task, String> {
         let (host, cwd, id, worker) = (
@@ -243,14 +242,7 @@ impl WorkerPort for LivePort {
             worker.to_string(),
         );
         blocking(move || {
-            hangar_core::board_claim_worker(
-                &host,
-                cwd,
-                id,
-                worker,
-                max_attempts,
-                Some(shared_folder),
-            )
+            hangar_core::board_claim_worker(&host, cwd, id, worker, Some(shared_folder))
         })
         .await?
     }

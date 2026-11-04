@@ -2028,24 +2028,12 @@ pub enum Key {
     OrchCheckPlaceholder,
     /// `orch.default`
     OrchDefault,
-    /// `orch.fewer`
-    OrchFewer,
     /// `orch.intro`
     OrchIntro,
-    /// `orch.maxAttempts`
-    OrchMaxAttempts,
-    /// `orch.maxAttemptsHint`
-    OrchMaxAttemptsHint,
-    /// `orch.maxWorkers`
-    OrchMaxWorkers,
-    /// `orch.maxWorkersHint`
-    OrchMaxWorkersHint,
     /// `orch.modelInvalid`
     OrchModelInvalid,
     /// `orch.modelsHint`
     OrchModelsHint,
-    /// `orch.more`
-    OrchMore,
     /// `orch.navMark`
     OrchNavMark,
     /// `orch.navMarkWorkers`
@@ -3557,7 +3545,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1770;
+pub const KEY_COUNT: usize = 1764;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4569,15 +4557,9 @@ impl Key {
         Key::OrchCheckHint,
         Key::OrchCheckPlaceholder,
         Key::OrchDefault,
-        Key::OrchFewer,
         Key::OrchIntro,
-        Key::OrchMaxAttempts,
-        Key::OrchMaxAttemptsHint,
-        Key::OrchMaxWorkers,
-        Key::OrchMaxWorkersHint,
         Key::OrchModelInvalid,
         Key::OrchModelsHint,
-        Key::OrchMore,
         Key::OrchNavMark,
         Key::OrchNavMarkWorkers,
         Key::OrchNoRoom,
@@ -6344,15 +6326,9 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "orch.checkHint", en: Text::plain("Run by your shell in a clean copy of the delivery, before it lands: install what it needs in the same command"), fr: Text::plain("Lancée par ton shell dans une copie propre de la livraison, avant qu'elle arrive\u{202f}: installe ce qu'il lui faut dans la même commande") },
     Message { id: "orch.checkPlaceholder", en: Text::plain("none — pnpm test, cargo test…"), fr: Text::plain("aucune — pnpm test, cargo test…") },
     Message { id: "orch.default", en: Text::plain("default: {value}"), fr: Text::plain("par défaut\u{202f}: {value}") },
-    Message { id: "orch.fewer", en: Text::plain("{label}: one fewer"), fr: Text::plain("{label}\u{202f}: un de moins") },
-    Message { id: "orch.intro", en: Text::plain("A Claude Code pane pinned as orchestrator plans the work on the board and hands each task to a worker of its own, in a worktree. Hangar holds these limits itself, whatever the prompt says."), fr: Text::plain("Un panneau Claude Code épinglé comme orchestrateur planifie le travail au tableau et confie chaque tâche à un worker à lui, dans un worktree. Hangar tient ces limites lui-même, quoi que dise le prompt.") },
-    Message { id: "orch.maxAttempts", en: Text::plain("Attempts per task"), fr: Text::plain("Tentatives par tâche") },
-    Message { id: "orch.maxAttemptsHint", en: Text::plain("Workers started on one task before it comes back to you"), fr: Text::plain("Workers lancés sur une même tâche avant qu'elle te revienne") },
-    Message { id: "orch.maxWorkers", en: Text::plain("Workers at once"), fr: Text::plain("Workers en même temps") },
-    Message { id: "orch.maxWorkersHint", en: Text::plain("The orchestrator does not count. Hangar refuses one more."), fr: Text::plain("L'orchestrateur ne compte pas. Hangar refuse le suivant.") },
+    Message { id: "orch.intro", en: Text::plain("A Claude Code pane pinned as orchestrator plans the work on the board and hands each task to a worker of its own, in a worktree. It decides how many workers run at once and how many times a task is tried. What is set here, Hangar holds itself, whatever the prompt says."), fr: Text::plain("Un panneau Claude Code épinglé comme orchestrateur planifie le travail au tableau et confie chaque tâche à un worker à lui, dans un worktree. C'est lui qui décide combien de workers tournent en même temps et combien de fois une tâche est retentée. Ce qui est réglé ici, Hangar le tient lui-même, quoi que dise le prompt.") },
     Message { id: "orch.modelInvalid", en: Text::plain("No spaces or quotes in a model name"), fr: Text::plain("Pas d'espace ni de guillemet dans un nom de modèle") },
     Message { id: "orch.modelsHint", en: Text::plain("An alias (opus, sonnet, haiku) or a full model id. The orchestrator's applies the next time it starts."), fr: Text::plain("Un alias (opus, sonnet, haiku) ou l'identifiant complet d'un modèle. Celui de l'orchestrateur s'applique à son prochain lancement.") },
-    Message { id: "orch.more", en: Text::plain("{label}: one more"), fr: Text::plain("{label}\u{202f}: un de plus") },
     Message { id: "orch.navMark", en: Text::plain("Orchestrator: {name}"), fr: Text::plain("Orchestrateur\u{202f}: {name}") },
     Message { id: "orch.navMarkWorkers", en: Text::plural("Orchestrator: {name}, {n} worker running", "Orchestrator: {name}, {n} workers running"), fr: Text::plural("Orchestrateur\u{202f}: {name}, {n} worker en cours", "Orchestrateur\u{202f}: {name}, {n} workers en cours") },
     Message { id: "orch.noRoom", en: Text::plain("No room for another pane in {workspace}"), fr: Text::plain("Plus de place pour un panneau dans {workspace}") },

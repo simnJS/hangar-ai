@@ -21,6 +21,22 @@ fn load(file: &str) -> (Model, Value) {
     (model, raw)
 }
 
+/// The keys of 1.x this version reads as nothing and leaves out on save:
+/// its limits on the workers (`OrchestrationSettings`).
+const LIMITS_OF_1X: [&str; 2] = ["maxWorkers", "maxAttempts"];
+
+/// The file as this version writes it back: as it was, but for the limits.
+fn without_the_limits(mut raw: Value) -> Value {
+    for ws in raw["workspaces"].as_array_mut().into_iter().flatten() {
+        if let Some(orchestration) = ws.get_mut("orchestration").and_then(Value::as_object_mut) {
+            for key in LIMITS_OF_1X {
+                orchestration.remove(key);
+            }
+        }
+    }
+    raw
+}
+
 /// JSON equality as JavaScript reads it: `14` and `14.0` are one number.
 fn same_meaning(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -68,7 +84,7 @@ fn difference(a: &Value, b: &Value, at: &str) -> Option<String> {
 fn a_file_the_app_wrote_comes_back_as_it_was() {
     let (model, raw) = load(TYPICAL);
     let written = model.to_json();
-    assert_eq!(difference(&written, &raw, ""), None);
+    assert_eq!(difference(&written, &without_the_limits(raw), ""), None);
 
     let state = model.state();
     assert_eq!(state.workspaces.len(), 3);
@@ -170,12 +186,47 @@ fn the_panes_of_the_retired_agents_open_as_shells_and_are_saved_as_shells() {
 
 #[test]
 fn a_file_the_app_wrote_survives_a_change_with_only_that_change() {
-    let (mut model, mut raw) = load(TYPICAL);
+    let (mut model, raw) = load(TYPICAL);
     model.apply(StoreAction::UpdateSettings(Patch::new(
         |s: &mut Settings| s.font_size = 15.0,
     )));
+    let mut raw = without_the_limits(raw);
     raw["settings"]["fontSize"] = json!(15);
     assert_eq!(difference(&model.to_json(), &raw, ""), None);
+}
+
+/// Hangar sets no limit on the workers any more (owner's decision,
+/// 2026-11-04): a file of 1.x that holds `maxWorkers` and `maxAttempts` loads
+/// with every other orchestration setting it holds, and the first save leaves
+/// the two out, so 1.x reads its own defaults for them.
+#[test]
+fn the_limits_1x_kept_load_as_nothing_and_are_left_out_on_save() {
+    let (model, raw) = load(TYPICAL);
+    let read = model.state().workspaces[0].orchestration.clone().unwrap();
+    assert!(!read.auto_merge);
+    assert_eq!(read.check_command.as_deref(), Some("cargo test"));
+    assert_eq!(read.branch.as_deref(), Some("develop"));
+    assert_eq!(read.permission_mode.as_deref(), Some("acceptEdits"));
+
+    let written = model.to_json();
+    let saved = written["workspaces"][0]["orchestration"]
+        .as_object()
+        .unwrap();
+    let before = raw["workspaces"][0]["orchestration"].as_object().unwrap();
+    for key in LIMITS_OF_1X {
+        assert!(before.contains_key(key), "{key}");
+        assert!(!saved.contains_key(key), "{key}");
+    }
+    assert_eq!(saved.len(), before.len() - LIMITS_OF_1X.len());
+    // A hand-written one that never read goes too, rather than coming back.
+    let (model, raw) = load(HAND_EDITED);
+    assert_eq!(
+        raw["workspaces"][1]["orchestration"]["maxWorkers"],
+        json!("many")
+    );
+    let saved = &model.to_json()["workspaces"][1]["orchestration"];
+    assert_eq!(saved["autoMerge"], json!(false));
+    assert!(saved.get("maxWorkers").is_none(), "{saved}");
 }
 
 #[test]
@@ -221,7 +272,7 @@ fn a_hand_edited_file_loads_whole() {
             b: Box::new(layout::leaf("p-one")),
         })
     );
-    assert_eq!(legacy.orchestration.as_ref().unwrap().max_workers, 3);
+    assert!(!legacy.orchestration.as_ref().unwrap().auto_merge);
     assert_eq!(state.active_workspace_id, None);
     let settings = &state.settings;
     assert_eq!(settings.font_size, 13.0);
@@ -262,10 +313,6 @@ fn what_could_not_be_read_is_written_back_as_it_was() {
     assert_eq!(api["panes"][1]["agent"], json!("aider"));
     assert_eq!(api["panes"][2], json!(3), "kept, at the end of its list");
     assert_eq!(written["workspaces"][2], json!("not a workspace"));
-    assert_eq!(
-        written["workspaces"][1]["orchestration"]["maxWorkers"],
-        json!("many")
-    );
     assert_eq!(written["folders"][0]["collapsed"], json!("yes"));
     assert_eq!(written["activeWorkspaceId"], json!(42));
     assert_eq!(written["version"], json!(3));

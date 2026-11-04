@@ -126,10 +126,10 @@ starts workers to carry it out. You follow everything from one window.
 2. **Start workers.** `worker_spawn` gives a task to a new Claude Code pane (Sonnet by
    default). The worker runs in its own git worktree, on a new branch from the target
    branch, with a block of 20 ports for its dev servers and tests.
-   Hangar enforces the limits, whatever the prompt says:
-   - it refuses a task whose files overlap a task already in progress;
-   - it runs 3 workers at once by default;
-   - it allows 2 attempts per task by default, then hands the task back to you.
+   There is no limit on how many workers run at once, or on how many times a task is
+   tried: the orchestrator decides, and hands a task back to you when it needs you.
+   Hangar still refuses, whatever the prompt says, a task whose files overlap a task
+   already in progress.
 3. **Deliver.** A worker hands in its branch with `delivery_submit`, and the branch joins
    a merge queue. Each delivery goes through four steps:
    - the branch is merged in a temporary worktree;
@@ -149,14 +149,14 @@ starts workers to carry it out. You follow everything from one window.
    - deliveries ready to merge, when automatic merging is off.
 
 You set the following per workspace: the models of the orchestrator, workers and reviewer
-(Opus, Sonnet and Sonnet by default), the limits, the check command, the target branch,
+(Opus, Sonnet and Sonnet by default), the check command, the target branch,
 automatic merging (on by default) and the permission mode. Orchestration needs a git repository and
 Claude Code.
 
 <table>
   <tr>
     <td width="50%"><img src=".github/assets/needs-you.webp" alt="The Needs you list: one question the orchestrator handed back to you, which provider takes EU cards, and two deliveries ready to merge, whose check and review passed"></td>
-    <td width="50%"><img src=".github/assets/orchestration-settings.webp" alt="A workspace's orchestration settings: workers at once, attempts per task, permissions, automatic merging, here turned off, and the check command"></td>
+    <td width="50%"><img src=".github/assets/orchestration-settings.webp" alt="A workspace's orchestration settings: permissions, automatic merging, here turned off, and the check command"></td>
   </tr>
   <tr>
     <td align="center"><sub>Needs you: what waits for you, across workspaces</sub></td>
@@ -337,7 +337,7 @@ have been tested by CI but not yet used by a person.
 4. **Try orchestration.** In a git repository, run **New orchestrator** from the command
    palette (`Ctrl`/`Cmd`+`Shift`+`P`), or pin an existing Claude Code pane from its **…**
    menu. Then describe the goal to it. **Orchestration…** in the same menu opens the
-   workspace's settings: models, limits, check command and automatic merging.
+   workspace's settings: models, permissions, check command and automatic merging.
 
 The command palette lists every command. Shortcuts can be changed in
 **Settings → Shortcuts**, and the defaults use `Ctrl` on Windows and Linux and `Cmd` on
