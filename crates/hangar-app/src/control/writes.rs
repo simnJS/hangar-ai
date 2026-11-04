@@ -117,8 +117,16 @@ pub fn carry_out(
             command,
             query,
             stats_project,
+            capture,
+            pane_menu,
         } => {
             run.extend(command.map(Message::Command));
+            if let Some(pane) = pane_menu {
+                run.push(Message::PaneMenu(crate::pane_menu::Msg::Toggle(
+                    pane,
+                    crate::pane_menu::Folded::default(),
+                )));
+            }
             if let Some(project) = stats_project {
                 run.push(Message::Stats(crate::stats::Msg::SetProject(Some(project))));
             }
@@ -127,6 +135,7 @@ pub fn carry_out(
                     hangar_ui::palette::Msg::Query(query),
                 )));
             }
+            run.extend(capture.map(|size| Message::DevCapture(Some(size))));
             StoreOutcome::default()
         }
         ModelCmd::Activate { ws, pane } => {

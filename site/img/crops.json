@@ -1,7 +1,7 @@
 {
   "$comment": [
     "What scripts/site-crops.mjs cuts out of the captures, and how. Run it with --sources <folder>.",
-    "The captures are real sessions of the app, 2560 x 1440 px: a 1280 x 720 window at scale 2.",
+    "The captures are real sessions of the app, 2560 x 1440 px: a 1280 x 720 window at scale 2 (HANGAR_DEV_CAPTURE_DIR, see shell/dev_screenshot.rs).",
     "rect: [x, y, width, height] in capture pixels (scale 1: one capture pixel per unit),",
     "or { \"ref\": \"path/in/the/rects/index\" } with optional pad and x/y/w/h overrides.",
     "In a list of the index, a path step is a position or an entry's name: stills/en/hero/rects/workers/Zoe/box.",
@@ -12,79 +12,337 @@
     "390 x 844 at scale 2 with an iPhone's safe areas, the PC and the workspace renamed; the page draws the phone."
   ],
   "scale": 1,
-  "rects": "../../index.json",
   "out": ".",
   "href": "img/",
   "page": "../index.html",
   "formats": {
-    "avif": { "quality": 62, "speed": 4 },
-    "webp": { "quality": 82, "method": 6 }
+    "avif": {
+      "quality": 62,
+      "speed": 4
+    },
+    "webp": {
+      "quality": 82,
+      "method": 6
+    }
   },
   "images": {
     "hero": {
-      "src": "alt/hero-r2-8.png",
-      "rect": [0, 0, 2560, 1440],
-      "widths": [1280, 1920, 2560],
+      "src": "alt/hero.png",
+      "rect": [
+        0,
+        0,
+        2560,
+        1440
+      ],
+      "widths": [
+        1280,
+        1920,
+        2560
+      ],
       "marks": [
-        [12, 96, 480, 452],
-        [514, 94, 138, 48],
-        [1250, 94, 206, 48],
-        [514, 736, 648, 48],
-        { "ref": "alternates/en/alt/hero-r2-8/rects/needsYouButton", "pad": [6, 6, 6, 18] },
-        { "ref": "alternates/en/alt/hero-r2-8/rects/inspector", "pad": -8, "h": 770 }
+        [
+          12,
+          140,
+          484,
+          200
+        ],
+        [
+          524,
+          98,
+          208,
+          44
+        ],
+        [
+          1324,
+          98,
+          452,
+          44
+        ],
+        [
+          1324,
+          738,
+          452,
+          44
+        ],
+        [
+          1584,
+          22,
+          90,
+          50
+        ],
+        [
+          1968,
+          96,
+          584,
+          770
+        ]
       ]
     },
-    "pin": { "src": "pin.png", "rect": [1270, 88, 698, 396], "widths": [448, 698] },
+    "pin": {
+      "src": "pin.png",
+      "rect": [
+        1850,
+        90,
+        690,
+        390
+      ],
+      "widths": [
+        448,
+        690
+      ]
+    },
     "board": {
       "src": "alt/board-inspector.png",
-      "rect": [504, 88, 1464, 812],
-      "fade": { "bottom": 64 },
-      "widths": [732, 1464]
+      "rect": [
+        508,
+        90,
+        1458,
+        812
+      ],
+      "fade": {
+        "bottom": 64
+      },
+      "widths": [
+        729,
+        1458
+      ]
     },
-    "workers": { "src": "s-grid.png", "rect": { "ref": "stills/en/s-grid/rects/paneGrid", "w": 1720 }, "widths": [860, 1720] },
-    "needs": { "src": "alt/needs-3.png", "rect": [984, 8, 880, 728], "widths": [440, 880] },
+    "workers": {
+      "src": "alt/hero.png",
+      "rect": [
+        508,
+        90,
+        1458,
+        1262
+      ],
+      "widths": [
+        729,
+        1458
+      ]
+    },
+    "needs": {
+      "src": "alt/needs.png",
+      "rect": [
+        800,
+        80,
+        884,
+        910
+      ],
+      "widths": [
+        442,
+        884
+      ]
+    },
     "orch": {
       "src": "orch.png",
-      "rect": { "ref": "stills/en/orch/rects/dialogs/0/box", "pad": 4 },
-      "widths": [604, 1208]
+      "rect": [
+        640,
+        512,
+        1280,
+        1176
+      ],
+      "widths": [
+        640,
+        1280
+      ]
     },
     "palette": {
       "src": "alt/palette-open.png",
-      "rect": { "ref": "alternates/en/alt/palette-open/rects/dialogs/0/box", "pad": 6 },
-      "widths": [646, 1292]
+      "rect": [
+        640,
+        202,
+        1280,
+        506
+      ],
+      "widths": [
+        640,
+        1280
+      ]
     },
-    "stats": { "src": "stats.png", "rect": [504, 88, 1436, 688], "widths": [718, 1436] },
-    "model": { "src": "model.png", "rect": [504, 88, 2056, 912], "widths": [1180, 2056] },
-
+    "stats": {
+      "src": "stats.png",
+      "rect": [
+        508,
+        90,
+        1452,
+        730
+      ],
+      "widths": [
+        726,
+        1452
+      ]
+    },
+    "model": {
+      "src": "model.png",
+      "rect": [
+        508,
+        88,
+        2052,
+        920
+      ],
+      "widths": [
+        1180,
+        2052
+      ]
+    },
     "hero-m": {
-      "src": "alt/hero-r2-8.png",
-      "rect": { "ref": "alternates/en/alt/hero-r2-8/rects/orchestrator/box", "h": 460 },
-      "widths": [400, 732]
+      "src": "alt/hero.png",
+      "rect": [
+        508,
+        90,
+        1128,
+        760
+      ],
+      "widths": [
+        400,
+        732
+      ]
     },
-    "pin-m": { "src": "pin.png", "rect": [1270, 88, 698, 396], "widths": [400, 698] },
+    "pin-m": {
+      "src": "pin.png",
+      "rect": [
+        1850,
+        90,
+        690,
+        390
+      ],
+      "widths": [
+        400,
+        690
+      ]
+    },
     "board-m": {
       "src": "alt/board-inspector.png",
-      "rect": [1235, 190, 733, 700],
-      "fade": { "bottom": 64 },
-      "widths": [400, 733]
+      "rect": [
+        1240,
+        190,
+        720,
+        700
+      ],
+      "fade": {
+        "bottom": 64
+      },
+      "widths": [
+        400,
+        720
+      ]
     },
     "workers-m": {
-      "src": "s-grid.png",
-      "rect": { "ref": "stills/en/s-grid/rects/workers/Max/box", "h": 430 },
-      "widths": [400, 800]
+      "src": "alt/hero.png",
+      "rect": [
+        1316,
+        90,
+        650,
+        640
+      ],
+      "widths": [
+        400,
+        650
+      ]
     },
     "needs-m": {
-      "src": "alt/needs-3.png",
-      "rect": { "ref": "alternates/en/alt/needs-3/rects/dialogs/0/box" },
-      "widths": [400, 800]
+      "src": "alt/needs.png",
+      "rect": [
+        800,
+        80,
+        884,
+        910
+      ],
+      "widths": [
+        400,
+        800
+      ]
     },
-    "orch-m": { "src": "orch.png", "rect": [820, 472, 940, 248], "widths": [400, 800] },
-    "stats-m": { "src": "stats.png", "rect": [526, 196, 704, 572], "widths": [400, 704] },
-    "model-m": { "src": "alt/model-wide.png", "rect": [1283, 88, 685, 860], "widths": [400, 685] },
-
-    "mobile-for-you": { "src": "mobile/for-you.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
-    "mobile-question": { "src": "mobile/question.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
-    "mobile-permission": { "src": "mobile/permission.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] },
-    "mobile-shared": { "src": "mobile/shared.png", "rect": [0, 0, 780, 1688], "widths": [300, 600] }
+    "orch-m": {
+      "src": "orch.png",
+      "rect": [
+        672,
+        1310,
+        1216,
+        250
+      ],
+      "widths": [
+        400,
+        800
+      ]
+    },
+    "stats-m": {
+      "src": "stats.png",
+      "rect": [
+        548,
+        212,
+        676,
+        596
+      ],
+      "widths": [
+        400,
+        676
+      ]
+    },
+    "model-m": {
+      "src": "model.png",
+      "rect": [
+        1536,
+        88,
+        1024,
+        920
+      ],
+      "widths": [
+        400,
+        685
+      ]
+    },
+    "mobile-for-you": {
+      "src": "mobile/for-you.png",
+      "rect": [
+        0,
+        0,
+        780,
+        1688
+      ],
+      "widths": [
+        300,
+        600
+      ]
+    },
+    "mobile-question": {
+      "src": "mobile/question.png",
+      "rect": [
+        0,
+        0,
+        780,
+        1688
+      ],
+      "widths": [
+        300,
+        600
+      ]
+    },
+    "mobile-permission": {
+      "src": "mobile/permission.png",
+      "rect": [
+        0,
+        0,
+        780,
+        1688
+      ],
+      "widths": [
+        300,
+        600
+      ]
+    },
+    "mobile-shared": {
+      "src": "mobile/shared.png",
+      "rect": [
+        0,
+        0,
+        780,
+        1688
+      ],
+      "widths": [
+        300,
+        600
+      ]
+    }
   }
 }

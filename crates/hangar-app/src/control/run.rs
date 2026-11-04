@@ -108,15 +108,32 @@ async fn dev_command(args: &Value, port: &Port) -> Result<Value, String> {
         .transpose()?;
     let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_string);
     let (query, stats_project) = (text("query"), text("stats_project"));
-    if command.is_none() && query.is_none() && stats_project.is_none() {
+    let number = |key: &str| {
+        args.get("capture")
+            .and_then(|capture| capture.get(key))
+            .and_then(Value::as_f64)
+    };
+    let capture = number("width")
+        .zip(number("height"))
+        .map(|(width, height)| iced::Size::new(width as f32, height as f32));
+    let pane_menu = text("pane_menu");
+    if command.is_none()
+        && query.is_none()
+        && stats_project.is_none()
+        && capture.is_none()
+        && pane_menu.is_none()
+    {
         return Err(
-            "Give command (a command id, such as view.board), query or stats_project.".into(),
+            "Give command (a command id, such as view.board), query, stats_project or capture."
+                .into(),
         );
     }
     port.apply(ModelCmd::DevCommand {
         command,
         query,
         stats_project,
+        capture,
+        pane_menu,
     })
     .await?;
     Ok(serde_json::json!({ "ran": id }))

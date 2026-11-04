@@ -109,11 +109,16 @@ pub enum ModelCmd {
     /// the captures of the README and the site switch views with no one at
     /// the keyboard. The palette opens in a later update than the one that
     /// runs its command, so its query is a call of its own. `stats_project`
-    /// filters the statistics on one project, as its menu does.
+    /// filters the statistics on one project, as its menu does. `capture`
+    /// takes a capture with the view laid out at that size rather than the
+    /// window's: a dialog taller than the window, shown whole.
     DevCommand {
         command: Option<crate::commands::CommandId>,
         query: Option<String>,
         stats_project: Option<String>,
+        capture: Option<iced::Size>,
+        /// Opens that pane's « … » menu, as its button does.
+        pane_menu: Option<PaneId>,
     },
     /// Switches the window to the workspace and focuses the pane.
     Activate {

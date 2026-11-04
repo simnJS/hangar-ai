@@ -79,12 +79,12 @@ then map the `--*` names to the keys `TOKENS` lists in `main.js`.
 
 ## Captures
 
-Everything in `img/` is the real app: Hangar.AI 1.0 on Windows, the web-view
-app that 2.0 replaced and whose interface it draws natively (new captures of 2.0
-are still to be taken, with the same care about what they show),
-with real Claude Code agents (the orchestrator on Opus, workers and reviewer on
-Sonnet) orchestrating **checkout-v2**, a small sample repository, over one
-afternoon. The captures are lossless PNGs of the window's client area:
+Everything in `img/` but the phone screens is the real app: Hangar.AI 2.0 on
+Linux, with real Claude Code agents (the orchestrator on Opus, workers and
+reviewer on Sonnet) orchestrating **checkout-v2**, a small sample repository in
+`/work`, over one night. A debug build takes them on demand
+(`HANGAR_DEV_CAPTURE_DIR`, then `kill -USR1` the app; `dev_command` on the
+control API switches views, see `crates/hangar-app/src/shell/dev_screenshot.rs`). The captures are lossless PNGs of the window's client area:
 
 - window 1280 × 720 at scale 2, so each capture is 2560 × 1440 px;
 - Graphite, the interface in English, permissions in Auto mode;
