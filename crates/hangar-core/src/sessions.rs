@@ -2,7 +2,7 @@
 //! agent Hangar runs (owner's decision, 2026-11-03): a plain shell pane keeps
 //! no session, so nothing here takes an agent.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -114,6 +114,7 @@ struct Transcript {
 /// directory listing and file metadata alone: no file is opened. Newest first.
 fn transcripts_in(roots: &[PathBuf], cwd: &str) -> Vec<Transcript> {
     let mut found: Vec<Transcript> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     for root in roots {
         let Ok(entries) = fs::read_dir(root.join(encode_project_dir(cwd))) else {
             continue;
@@ -127,7 +128,7 @@ fn transcripts_in(roots: &[PathBuf], cwd: &str) -> Vec<Transcript> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if found.iter().any(|known| known.id == id) {
+            if !seen.insert(id.clone()) {
                 continue;
             }
             let meta = entry.metadata().ok();
@@ -215,11 +216,21 @@ fn claude_transcript_exists_in(roots: &[PathBuf], id: &str) -> Option<bool> {
 fn claude_transcript_exists(projects: &Path, id: &str) -> Option<bool> {
     let file = format!("{id}.jsonl");
     let entries = fs::read_dir(projects).ok()?;
-    Some(
-        entries
-            .filter_map(Result::ok)
-            .any(|entry| entry.path().join(&file).is_file()),
-    )
+    let mut unsure = false;
+    for entry in entries.filter_map(Result::ok) {
+        match fs::metadata(entry.path().join(&file)) {
+            Ok(meta) if meta.is_file() => return Some(true),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // Permissions, a transient I/O error: not proof of absence.
+            Err(_) => unsure = true,
+        }
+    }
+    if unsure {
+        None
+    } else {
+        Some(false)
+    }
 }
 
 /// Whether Claude Code is on PATH, so the UI can say when a pane will not
@@ -394,6 +405,26 @@ mod tests {
         assert_eq!(cached_label(&path, 11, 2), "second");
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// A project folder that cannot be searched is not proof the transcript
+    /// is gone.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_project_folder_does_not_report_a_session_gone() {
+        use std::os::unix::fs::PermissionsExt;
+        let projects = temp_dir("denied");
+        let locked = projects.join("C--locked");
+        fs::create_dir_all(&locked).expect("project dir");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod");
+        // Running as root ignores the mode: nothing to prove then.
+        if fs::metadata(locked.join("x.jsonl"))
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+        {
+            assert_eq!(claude_transcript_exists(&projects, "x"), None);
+        }
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("chmod");
+        fs::remove_dir_all(&projects).ok();
     }
 
     #[test]
