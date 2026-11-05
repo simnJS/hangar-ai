@@ -13,7 +13,7 @@ Every release, with its installers, is on the
 ### Fixed
 
 - A dialog opened over another one, such as a kit's activation dialog over the settings, is drawn opaque and on top: the settings' scrolled content no longer shows through it.
-- A relaunch no longer leaves an agent pane on a bare prompt: its command is typed once the shell has printed its prompt and gone quiet (never before the launch delay, at most 3 s after it), is typed again if neither its echo nor a running program shows, and a launch lost twice is logged. A saved conversation whose transcript is not found once is started fresh but kept, and forgotten only after a second miss in a row.
+- A relaunch no longer leaves an agent pane on a bare prompt: its command is typed on an emptied line (keys that reached the focused pane first are no longer glued to its front) once the shell has printed its prompt and gone quiet (never before the launch delay, at most 3 s after it), is typed again if the shell runs nothing after it, and a launch lost twice is logged. A saved conversation whose transcript is not found once is started fresh but kept, and forgotten only after a second miss in a row.
 - A pane started at launch before Hangar had finished looking for the machine's shells no longer runs the default shell instead of the one it was given: its shell starts once detection has answered.
 
 ## [2.0.0] - 2026-11-05
