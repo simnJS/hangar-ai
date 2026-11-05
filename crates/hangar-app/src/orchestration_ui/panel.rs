@@ -49,6 +49,14 @@ pub enum PanelMsg {
     /// A mode of `ORCHESTRATION_PERMISSION_MODES`, or empty for the person's own.
     Permission(String),
     AutoMerge(bool),
+    /// The "Shared build cache" switch (saved with the rest, by Save).
+    BuildCache(bool),
+    /// "Empty": asks first, and is refused while a worker of the workspace runs.
+    EmptyCache,
+    /// The confirmation said no.
+    EmptyCancel,
+    /// The confirmation said yes.
+    EmptyConfirm,
     Check(String),
     Branch(String),
     Model(ModelField, String),
@@ -65,6 +73,17 @@ pub enum PanelMsg {
 pub struct Panel {
     pub ws: WsId,
     draft: Draft,
+    cache: Cache,
+}
+
+/// The workspace's build cache folder as the panel knows it: its size once
+/// measured (off the UI thread), and whether "Empty" is waiting for a yes or
+/// is deleting.
+#[derive(Debug, Default)]
+struct Cache {
+    size: Option<u64>,
+    asking: bool,
+    emptying: bool,
 }
 
 impl Panel {
@@ -73,7 +92,114 @@ impl Panel {
         Some(Panel {
             ws: ws.id.clone(),
             draft: draft_of(ws),
+            cache: Cache::default(),
         })
+    }
+}
+
+/// Measures the workspace's cache folder on the blocking pool; the answer is
+/// `Msg::CacheSize`.
+pub fn measure(ws: &str) -> iced::Task<Message> {
+    let ws = ws.to_owned();
+    iced::Task::perform(
+        async move {
+            let dir = hangar_core::build_cache::dir_for(&ws);
+            let size = tokio::task::spawn_blocking(move || hangar_core::build_cache::size_of(&dir))
+                .await
+                .unwrap_or(0);
+            (ws, size)
+        },
+        |(ws, size)| Message::OrchestrationUi(Msg::CacheSize(ws, size)),
+    )
+}
+
+/// The size came back.
+pub fn cache_measured(st: &mut State, ws: &str, size: u64) {
+    if let Some(panel) = st.panel.as_mut().filter(|panel| panel.ws == ws) {
+        panel.cache.size = Some(size);
+    }
+}
+
+/// The folder was emptied, or not: says so, and measures again.
+pub fn cache_emptied(
+    st: &mut State,
+    m: &Model,
+    ws: &str,
+    result: Result<(), String>,
+) -> iced::Task<Message> {
+    if let Some(panel) = st.panel.as_mut().filter(|panel| panel.ws == ws) {
+        panel.cache.emptying = false;
+        panel.cache.asking = false;
+    }
+    let text = match result {
+        Ok(()) => hangar_i18n::t(m.locale(), Key::OrchBuildCacheEmptied),
+        Err(error) => hangar_i18n::t_with(
+            m.locale(),
+            Key::OrchBuildCacheEmptyFailed,
+            &args!("error" => error.as_str()),
+        ),
+    };
+    iced::Task::batch([
+        iced::Task::done(Message::Intent(Intent::Notice(Notice::Agent(
+            text.into_owned(),
+        )))),
+        measure(ws),
+    ])
+}
+
+/// A worker of the workspace is running: its builds are in the cache.
+fn refuse_while_busy(panel: &mut Panel, m: &Model) -> Option<iced::Task<Message>> {
+    let ws = m.workspace(&panel.ws)?;
+    if workers_of(ws).is_empty() {
+        return None;
+    }
+    panel.cache.asking = false;
+    let text = hangar_i18n::t_with(
+        m.locale(),
+        Key::OrchBuildCacheBusy,
+        &args!("workspace" => ws.name.as_str()),
+    );
+    Some(iced::Task::done(Message::Intent(Intent::Notice(
+        Notice::Problem(text.into_owned()),
+    ))))
+}
+
+/// Deletes the folder on the blocking pool; the answer is `Msg::CacheEmptied`.
+fn empty_cache(ws: &str) -> iced::Task<Message> {
+    let ws = ws.to_owned();
+    iced::Task::perform(
+        async move {
+            let dir = hangar_core::build_cache::dir_for(&ws);
+            let result = tokio::task::spawn_blocking(move || hangar_core::build_cache::empty(&dir))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|done| done.map_err(|error| error.to_string()));
+            (ws, result)
+        },
+        |(ws, result)| Message::OrchestrationUi(Msg::CacheEmptied(ws, result)),
+    )
+}
+
+/// "412 MB", "1,5 Go".
+fn size_text(locale: hangar_i18n::Locale, bytes: u64) -> String {
+    let megabytes = bytes as f64 / (1024.0 * 1024.0);
+    let french = locale == hangar_i18n::Locale::Fr;
+    let (value, unit) = match (megabytes >= 1024.0, french) {
+        (true, true) => (megabytes / 1024.0, "Go"),
+        (true, false) => (megabytes / 1024.0, "GB"),
+        (false, true) => (megabytes.round(), "Mo"),
+        (false, false) => (megabytes.round(), "MB"),
+    };
+    let rounded = (value * 10.0).round() / 10.0;
+    let number = if rounded.fract() == 0.0 {
+        format!("{rounded:.0}")
+    } else {
+        format!("{rounded:.1}")
+    };
+    if french {
+        format!("{} {unit}", number.replace('.', ","))
+    } else {
+        format!("{number} {unit}")
     }
 }
 
@@ -93,6 +219,25 @@ pub fn update(st: &mut State, m: &mut Model, msg: PanelMsg) -> iced::Task<Messag
     match msg {
         PanelMsg::Permission(mode) => panel.draft.permission_mode = mode,
         PanelMsg::AutoMerge(on) => panel.draft.auto_merge = on,
+        PanelMsg::BuildCache(on) => panel.draft.shared_build_cache = on,
+        PanelMsg::EmptyCache => {
+            if let Some(refused) = refuse_while_busy(panel, m) {
+                return refused;
+            }
+            panel.cache.asking = panel.cache.size != Some(0);
+        }
+        PanelMsg::EmptyCancel => panel.cache.asking = false,
+        PanelMsg::EmptyConfirm => {
+            if let Some(refused) = refuse_while_busy(panel, m) {
+                return refused;
+            }
+            if !panel.cache.asking || panel.cache.emptying {
+                return iced::Task::none();
+            }
+            panel.cache.asking = false;
+            panel.cache.emptying = true;
+            return empty_cache(&panel.ws);
+        }
         PanelMsg::Check(text) => panel.draft.check_command = text,
         PanelMsg::Branch(text) => panel.draft.branch = text,
         PanelMsg::Model(which, text) => *model_field(&mut panel.draft, which) = text,
@@ -176,7 +321,18 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, ws_id: &'a WsId) -> Element<'a, Mes
     let body = column![
         typography::label(t, ctx.t(Key::OrchIntro)),
         status(ctx, ws),
-        form::section(t, ctx.t(Key::OrchSectionWorkers)).group(vec![permission_row(ctx, draft)]),
+        form::section(t, ctx.t(Key::OrchSectionWorkers)).group(vec![
+            permission_row(ctx, draft),
+            form::row(
+                t,
+                ctx.t(Key::OrchBuildCache),
+                input::switch(t, draft.shared_build_cache)
+                    .on_toggle(|on| msg(PanelMsg::BuildCache(on)))
+            )
+            .hint(ctx.t(Key::OrchBuildCacheHint))
+            .into(),
+            cache_row(ctx, &panel.cache),
+        ]),
         form::section(t, ctx.t(Key::OrchSectionDeliveries)).group(vec![
             form::row(
                 t,
@@ -311,6 +467,43 @@ fn status<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
         .width(Length::Fill)
         .style(style::container::card(t))
         .into()
+}
+
+/// The cache's size and what empties it: a button, which asks first.
+fn cache_row<'a>(ctx: Ctx<'a>, cache: &Cache) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let size = match cache.size {
+        Some(bytes) => size_text(ctx.model.locale(), bytes),
+        None => ctx.t(Key::OrchBuildCacheMeasuring).into_owned(),
+    };
+    let control: Element<'a, Message> = if cache.asking {
+        row![
+            typography::hint(t, ctx.t(Key::OrchBuildCacheEmptyAsk)),
+            button::danger(t, ctx.t(Key::OrchBuildCacheEmptyConfirm))
+                .small()
+                .on_press(msg(PanelMsg::EmptyConfirm)),
+            button::ghost(t, ctx.t(Key::CreateCancel))
+                .small()
+                .on_press(msg(PanelMsg::EmptyCancel)),
+        ]
+        .spacing(tokens::space::LG)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        row![
+            typography::body(t, size),
+            button::secondary(t, ctx.t(Key::OrchBuildCacheEmpty))
+                .small()
+                .on_press_maybe(
+                    (cache.size.is_some_and(|bytes| bytes > 0) && !cache.emptying)
+                        .then(|| msg(PanelMsg::EmptyCache))
+                ),
+        ]
+        .spacing(tokens::space::LG)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    form::row(t, ctx.t(Key::OrchBuildCacheSize), control).into()
 }
 
 fn permission_row<'a>(ctx: Ctx<'a>, draft: &'a Draft) -> Element<'a, Message> {
@@ -469,5 +662,120 @@ mod tests {
             ctx(&model, &pkg).t(Key::OrchIntro).contains(intro),
             "{intro}"
         );
+    }
+
+    fn shop(workers: bool) -> Model {
+        let mut panes = vec![];
+        if workers {
+            panes.push(crate::state::types::Pane {
+                id: "p1".into(),
+                name: "Sam".into(),
+                role: Some(crate::state::types::PaneRole::Worker),
+                ..crate::state::types::Pane::default()
+            });
+        }
+        model_of(AppState {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                name: "Shop".into(),
+                cwd: "/code/shop".into(),
+                panes,
+                ..Workspace::default()
+            }],
+            ..AppState::default()
+        })
+    }
+
+    fn opened(model: &Model) -> State {
+        State {
+            panel: Panel::open(model, "w1"),
+            ..State::default()
+        }
+    }
+
+    #[test]
+    fn shows_the_build_cache_switch_its_size_and_empty() {
+        let model = shop(false);
+        let mut st = opened(&model);
+        let pkg = Packages::default();
+        let ws: WsId = "w1".into();
+        {
+            let mut ui = simulate(view(&st, ctx(&model, &pkg), &ws));
+            assert!(ui.find("Shared build cache").is_ok());
+            assert!(ui.find("Measuring…").is_ok());
+        }
+        cache_measured(&mut st, "w1", 3 * 1024 * 1024 * 1024);
+        let mut ui = simulate(view(&st, ctx(&model, &pkg), &ws));
+        assert!(ui.find("3 GB").is_ok());
+        assert!(ui.find("Empty").is_ok());
+    }
+
+    #[test]
+    fn the_switch_is_part_of_the_draft_and_off_is_what_gets_saved() {
+        let mut model = shop(false);
+        let mut st = opened(&model);
+        assert!(st.panel.as_ref().unwrap().draft.shared_build_cache);
+        let _ = update(&mut st, &mut model, PanelMsg::BuildCache(false));
+        let draft = &st.panel.as_ref().unwrap().draft;
+        assert!(!draft.shared_build_cache);
+        assert!(!normalize_draft(draft).shared_build_cache);
+        // It is a change to save, and not the defaults any more.
+        assert!(!same_settings(
+            &normalize_draft(draft),
+            &orchestration_defaults()
+        ));
+    }
+
+    #[test]
+    fn empty_asks_first_and_cancel_leaves_the_cache_alone() {
+        let mut model = shop(false);
+        let mut st = opened(&model);
+        cache_measured(&mut st, "w1", 5_000_000);
+        let _ = update(&mut st, &mut model, PanelMsg::EmptyCache);
+        assert!(st.panel.as_ref().unwrap().cache.asking);
+        let pkg = Packages::default();
+        let ws: WsId = "w1".into();
+        {
+            let mut ui = simulate(view(&st, ctx(&model, &pkg), &ws));
+            assert!(ui.find("Yes, empty").is_ok());
+        }
+        let _ = update(&mut st, &mut model, PanelMsg::EmptyCancel);
+        let cache = &st.panel.as_ref().unwrap().cache;
+        assert!(!cache.asking);
+        assert!(!cache.emptying);
+    }
+
+    #[test]
+    fn confirming_without_having_been_asked_does_nothing() {
+        let mut model = shop(false);
+        let mut st = opened(&model);
+        cache_measured(&mut st, "w1", 5_000_000);
+        let _ = update(&mut st, &mut model, PanelMsg::EmptyConfirm);
+        assert!(!st.panel.as_ref().unwrap().cache.emptying);
+    }
+
+    #[test]
+    fn empty_is_refused_while_a_worker_of_the_workspace_runs() {
+        let mut model = shop(true);
+        let mut st = opened(&model);
+        cache_measured(&mut st, "w1", 5_000_000);
+        let _ = update(&mut st, &mut model, PanelMsg::EmptyCache);
+        assert!(!st.panel.as_ref().unwrap().cache.asking);
+        // Nor does a yes go through, if a worker started after the question.
+        st.panel.as_mut().unwrap().cache.asking = true;
+        let _ = update(&mut st, &mut model, PanelMsg::EmptyConfirm);
+        let cache = &st.panel.as_ref().unwrap().cache;
+        assert!(!cache.asking);
+        assert!(!cache.emptying);
+    }
+
+    #[test]
+    fn sizes_read_in_megabytes_then_gigabytes() {
+        use hangar_i18n::Locale;
+        assert_eq!(size_text(Locale::En, 0), "0 MB");
+        assert_eq!(size_text(Locale::En, 412 * 1024 * 1024), "412 MB");
+        assert_eq!(size_text(Locale::En, 1536 * 1024 * 1024), "1.5 GB");
+        assert_eq!(size_text(Locale::Fr, 1536 * 1024 * 1024), "1,5 Go");
+        assert_eq!(size_text(Locale::Fr, 12 * 1024 * 1024), "12 Mo");
     }
 }

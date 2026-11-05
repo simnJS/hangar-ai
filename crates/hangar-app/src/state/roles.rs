@@ -150,8 +150,7 @@ mod tests {
 
     #[test]
     fn a_file_without_the_build_cache_field_reads_true() {
-        let saved: OrchestrationSettings =
-            serde_json::from_str(r#"{"autoMerge": false}"#).unwrap();
+        let saved: OrchestrationSettings = serde_json::from_str(r#"{"autoMerge": false}"#).unwrap();
         assert!(saved.shared_build_cache);
         assert!(!saved.auto_merge);
         let mut w = ws(vec![]);

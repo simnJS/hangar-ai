@@ -2020,6 +2020,26 @@ pub enum Key {
     OrchBranchInvalid,
     /// `orch.branchPlaceholder`
     OrchBranchPlaceholder,
+    /// `orch.buildCache`
+    OrchBuildCache,
+    /// `orch.buildCacheBusy`
+    OrchBuildCacheBusy,
+    /// `orch.buildCacheEmptied`
+    OrchBuildCacheEmptied,
+    /// `orch.buildCacheEmpty`
+    OrchBuildCacheEmpty,
+    /// `orch.buildCacheEmptyAsk`
+    OrchBuildCacheEmptyAsk,
+    /// `orch.buildCacheEmptyConfirm`
+    OrchBuildCacheEmptyConfirm,
+    /// `orch.buildCacheEmptyFailed`
+    OrchBuildCacheEmptyFailed,
+    /// `orch.buildCacheHint`
+    OrchBuildCacheHint,
+    /// `orch.buildCacheMeasuring`
+    OrchBuildCacheMeasuring,
+    /// `orch.buildCacheSize`
+    OrchBuildCacheSize,
     /// `orch.checkCommand`
     OrchCheckCommand,
     /// `orch.checkHint`
@@ -3545,7 +3565,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1764;
+pub const KEY_COUNT: usize = 1774;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4553,6 +4573,16 @@ impl Key {
         Key::OrchBranchHint,
         Key::OrchBranchInvalid,
         Key::OrchBranchPlaceholder,
+        Key::OrchBuildCache,
+        Key::OrchBuildCacheBusy,
+        Key::OrchBuildCacheEmptied,
+        Key::OrchBuildCacheEmpty,
+        Key::OrchBuildCacheEmptyAsk,
+        Key::OrchBuildCacheEmptyConfirm,
+        Key::OrchBuildCacheEmptyFailed,
+        Key::OrchBuildCacheHint,
+        Key::OrchBuildCacheMeasuring,
+        Key::OrchBuildCacheSize,
         Key::OrchCheckCommand,
         Key::OrchCheckHint,
         Key::OrchCheckPlaceholder,
@@ -6322,6 +6352,16 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "orch.branchHint", en: Text::plain("Where deliveries land"), fr: Text::plain("Là où arrivent les livraisons") },
     Message { id: "orch.branchInvalid", en: Text::plain("Not a branch name git accepts"), fr: Text::plain("Pas un nom de branche que git accepte") },
     Message { id: "orch.branchPlaceholder", en: Text::plain("the workspace's current branch"), fr: Text::plain("la branche courante du workspace") },
+    Message { id: "orch.buildCache", en: Text::plain("Shared build cache"), fr: Text::plain("Cache de compilation partagé") },
+    Message { id: "orch.buildCacheBusy", en: Text::plain("A worker of {workspace} is running: stop it before emptying the build cache."), fr: Text::plain("Un worker de {workspace} tourne\u{202f}: arrête-le avant de vider le cache de compilation.") },
+    Message { id: "orch.buildCacheEmptied", en: Text::plain("Build cache emptied."), fr: Text::plain("Cache de compilation vidé.") },
+    Message { id: "orch.buildCacheEmpty", en: Text::plain("Empty"), fr: Text::plain("Vider") },
+    Message { id: "orch.buildCacheEmptyAsk", en: Text::plain("Delete the build cache? The next build compiles everything again."), fr: Text::plain("Supprimer le cache de compilation\u{202f}? Le prochain build recompilera tout.") },
+    Message { id: "orch.buildCacheEmptyConfirm", en: Text::plain("Yes, empty"), fr: Text::plain("Oui, vider") },
+    Message { id: "orch.buildCacheEmptyFailed", en: Text::plain("Could not empty the build cache: {error}"), fr: Text::plain("Impossible de vider le cache de compilation\u{202f}: {error}") },
+    Message { id: "orch.buildCacheHint", en: Text::plain("Workers and delivery checks build into one folder of this workspace, so dependencies are compiled once. Applies to new workers; Cargo projects only."), fr: Text::plain("Les workers et les vérifications de livraison compilent dans un seul dossier de ce workspace\u{202f}: les dépendances ne sont compilées qu'une fois. Vaut pour les nouveaux workers\u{202f}; projets Cargo seulement.") },
+    Message { id: "orch.buildCacheMeasuring", en: Text::plain("Measuring…"), fr: Text::plain("Mesure…") },
+    Message { id: "orch.buildCacheSize", en: Text::plain("Build cache size"), fr: Text::plain("Taille du cache") },
     Message { id: "orch.checkCommand", en: Text::plain("Check command"), fr: Text::plain("Commande de vérification") },
     Message { id: "orch.checkHint", en: Text::plain("Run by your shell in a clean copy of the delivery, before it lands: install what it needs in the same command"), fr: Text::plain("Lancée par ton shell dans une copie propre de la livraison, avant qu'elle arrive\u{202f}: installe ce qu'il lui faut dans la même commande") },
     Message { id: "orch.checkPlaceholder", en: Text::plain("none — pnpm test, cargo test…"), fr: Text::plain("aucune — pnpm test, cargo test…") },

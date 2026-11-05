@@ -930,7 +930,10 @@ mod tests {
 
     #[test]
     fn only_a_worker_carries_the_build_cache_variables() {
-        let env = vec![("CARGO_TARGET_DIR".to_string(), "C:/b/1234abcd/target".to_string())];
+        let env = vec![(
+            "CARGO_TARGET_DIR".to_string(),
+            "C:/b/1234abcd/target".to_string(),
+        )];
         let mut worker = CommandBuilder::new("sh");
         apply_build_cache(&mut worker, Some(41020), &env);
         assert_eq!(

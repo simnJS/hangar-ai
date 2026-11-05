@@ -54,11 +54,20 @@ pub enum Msg {
     Panel(panel::PanelMsg),
     /// `hq_dir` answered: the folder of the HQ, made, or why not.
     FolderMade(Result<String, String>),
+    /// The size of a workspace's build cache, measured.
+    CacheSize(WsId, u64),
+    /// A workspace's build cache was emptied, or why not.
+    CacheEmptied(WsId, Result<(), String>),
 }
 
 pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Panel(message) => panel::update(st, m, message),
+        Msg::CacheSize(ws, size) => {
+            panel::cache_measured(st, &ws, size);
+            Task::none()
+        }
+        Msg::CacheEmptied(ws, result) => panel::cache_emptied(st, m, &ws, result),
         Msg::FolderMade(folder) => {
             st.manager.end();
             let name = hq_name(m);
@@ -241,7 +250,11 @@ pub fn on_intent(
         // runs with now.
         Intent::OpenOrchestration(ws) | Intent::OpenOverlay(Overlay::Orchestration(ws)) => {
             st.panel = panel::Panel::open(m, ws);
-            Some(Task::none())
+            Some(if st.panel.is_some() {
+                panel::measure(ws)
+            } else {
+                Task::none()
+            })
         }
         Intent::PinOrchestrator { ws, pane, pinned } => {
             Some(pin_orchestrator(m, ws, pane, *pinned))
