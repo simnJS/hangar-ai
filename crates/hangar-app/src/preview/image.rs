@@ -7,8 +7,8 @@
 //! keeps their framing.
 //!
 //! An animated GIF or WebP plays: `decode.rs` makes its frames off the UI
-//! thread and the stage shows the one the clock says (`image_stage.rs`). An
-//! AVIF is decoded there too, to pixels.
+//! thread and the stage shows the one the clock says (`image_stage.rs`). Every
+//! other raster (an AVIF, a PNG, a JPEG…) is decoded there too, to pixels.
 
 use std::path::Path;
 
@@ -23,9 +23,18 @@ use super::decode;
 pub use super::decode::{Bytes, Loaded};
 use super::glyph::Glyph;
 use super::image_stage::{Gesture, Measured, NUDGE, Pic, Stage, StageKey};
-use super::model::{self, FIT_MARGIN, ImageFrame, Size, ZOOM_STEP, fit_zoom, zoom_around};
+use super::model::{
+    self, FIT_MARGIN, ImageFrame, Size, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, fit_zoom, zoom_around,
+};
 use super::parts::{self, Feel, Mark};
 use crate::ctx::Ctx;
+
+/// The longest side an SVG is drawn at, in logical pixels.
+pub const VECTOR_MAX_SIDE: f32 = 8192.0;
+
+/// The most logical pixels an SVG is drawn over: 32 MB of pixmap at a scale
+/// of 1, 128 MB on a screen of scale 2.
+pub const VECTOR_MAX_AREA: f32 = 8.0 * 1024.0 * 1024.0;
 
 /// What the image viewer is told.
 #[derive(Debug, Clone)]
@@ -116,11 +125,42 @@ impl Picture {
         self.chosen = Some(change(self.frame()));
     }
 
-    /// Exactly 1, not what `1 / zoom × zoom` rounds to.
+    /// The most an image may be zoomed. An SVG is rasterised by the renderer
+    /// whole, at the size it is drawn, on the UI thread: zoomed 32 times a
+    /// 1000 px drawing would be a 4 GB pixmap. So it stops where its drawn
+    /// size reaches [`VECTOR_MAX_SIDE`] or [`VECTOR_MAX_AREA`]; a raster is
+    /// drawn from its pixels at any zoom and is not held back.
+    pub fn zoom_cap(&self) -> f32 {
+        match (&self.pic, self.natural) {
+            (Some(Pic::Vector(_)), Some(natural))
+                if natural.width > 0.0 && natural.height > 0.0 =>
+            {
+                let side = VECTOR_MAX_SIDE / natural.width.max(natural.height);
+                let area = (VECTOR_MAX_AREA / (natural.width * natural.height)).sqrt();
+                ZOOM_MAX.min(side).min(area).max(ZOOM_MIN)
+            }
+            _ => ZOOM_MAX,
+        }
+    }
+
+    /// `factor`, held so that the zoom does not pass [`Picture::zoom_cap`].
+    fn capped(&self, now: ImageFrame, factor: f32) -> f32 {
+        factor.min(self.zoom_cap() / now.zoom)
+    }
+
+    /// Zoomed by `factor` around `point`, within the cap.
+    fn zoom_by(&mut self, factor: f32, point: (f32, f32)) {
+        let factor = self.capped(self.frame(), factor);
+        self.change(|now| zoom_around(now, factor, point));
+    }
+
+    /// Exactly 1, not what `1 / zoom × zoom` rounds to (or the cap, for an
+    /// SVG too large to be drawn at its own size).
     fn actual_size(&mut self, point: (f32, f32)) {
+        let zoom = self.zoom_cap().min(1.0);
         self.change(|now| ImageFrame {
-            zoom: 1.0,
-            ..zoom_around(now, 1.0 / now.zoom, point)
+            zoom,
+            ..zoom_around(now, zoom / now.zoom, point)
         });
     }
 
@@ -132,25 +172,28 @@ impl Picture {
                 self.failed = Some(String::new());
             }
             Msg::Stage(size) => self.stage = size,
-            Msg::ZoomOut => self.change(|now| zoom_around(now, 1.0 / ZOOM_STEP, (0.0, 0.0))),
-            Msg::ZoomIn => self.change(|now| zoom_around(now, ZOOM_STEP, (0.0, 0.0))),
+            Msg::ZoomOut => self.zoom_by(1.0 / ZOOM_STEP, (0.0, 0.0)),
+            Msg::ZoomIn => self.zoom_by(ZOOM_STEP, (0.0, 0.0)),
             Msg::Fit => self.chosen = None,
             Msg::ActualSize => self.actual_size((0.0, 0.0)),
             Msg::Gesture(gesture) => match gesture {
-                Gesture::Zoom { factor, at } => self.change(|now| zoom_around(now, factor, at)),
+                Gesture::Zoom { factor, at } => self.zoom_by(factor, at),
                 Gesture::Pan { dx, dy } => self.change(|now| ImageFrame {
                     x: now.x + dx,
                     y: now.y + dy,
                     ..now
                 }),
-                Gesture::Pinch { factor, from, to } => self.change(|now| {
-                    let zoomed = zoom_around(now, factor, from);
-                    ImageFrame {
-                        x: zoomed.x + to.0 - from.0,
-                        y: zoomed.y + to.1 - from.1,
-                        ..zoomed
-                    }
-                }),
+                Gesture::Pinch { factor, from, to } => {
+                    let factor = self.capped(self.frame(), factor);
+                    self.change(|now| {
+                        let zoomed = zoom_around(now, factor, from);
+                        ImageFrame {
+                            x: zoomed.x + to.0 - from.0,
+                            y: zoomed.y + to.1 - from.1,
+                            ..zoomed
+                        }
+                    });
+                }
                 Gesture::Double { at } => {
                     if self.chosen.is_some() {
                         self.chosen = None;
@@ -445,5 +488,87 @@ mod tests {
         let after = pic_of("a/shot.png", &bytes);
         assert_ne!(before, after);
         assert_eq!(before.clone(), before);
+    }
+
+    fn vector(natural: (f32, f32)) -> Picture {
+        Picture {
+            pic: Some(Pic::Vector(iced::widget::svg::Handle::from_memory(
+                b"<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>".to_vec(),
+            ))),
+            ..picture(natural, (800.0, 600.0))
+        }
+    }
+
+    fn drawn(shown: &Picture) -> (f32, f32) {
+        let natural = shown.natural.unwrap();
+        let zoom = shown.frame().zoom;
+        (natural.width * zoom, natural.height * zoom)
+    }
+
+    #[test]
+    fn an_svg_is_never_zoomed_past_what_the_renderer_can_rasterise() {
+        let mut shown = vector((1000.0, 1000.0));
+        for _ in 0..40 {
+            shown.update(Msg::ZoomIn);
+        }
+        shown.update(Msg::Gesture(Gesture::Zoom {
+            factor: 50.0,
+            at: (30.0, 10.0),
+        }));
+        shown.update(Msg::Gesture(Gesture::Pinch {
+            factor: 50.0,
+            from: (0.0, 0.0),
+            to: (5.0, 5.0),
+        }));
+        let (width, height) = drawn(&shown);
+        assert!(width <= VECTOR_MAX_SIDE + 0.5 && height <= VECTOR_MAX_SIDE + 0.5);
+        assert!(
+            width * height <= VECTOR_MAX_AREA * 1.001,
+            "{width} × {height}"
+        );
+        assert!(shown.frame().zoom > 2.0, "it still zooms in a fair way");
+        // And back out as usual.
+        shown.update(Msg::ZoomOut);
+        assert!(drawn(&shown).0 < width);
+    }
+
+    #[test]
+    fn a_long_svg_is_held_by_its_longest_side() {
+        let mut shown = vector((4000.0, 100.0));
+        shown.update(Msg::Gesture(Gesture::Zoom {
+            factor: 32.0,
+            at: (0.0, 0.0),
+        }));
+        assert!(
+            drawn(&shown).0 <= VECTOR_MAX_SIDE + 0.5,
+            "{:?}",
+            drawn(&shown)
+        );
+    }
+
+    #[test]
+    fn a_huge_svg_shown_at_its_actual_size_is_held_by_the_cap() {
+        let mut shown = vector((20000.0, 20000.0));
+        shown.update(Msg::ActualSize);
+        let (width, height) = drawn(&shown);
+        assert!(
+            width * height <= VECTOR_MAX_AREA * 1.001,
+            "{width} × {height}"
+        );
+    }
+
+    #[test]
+    fn a_raster_zooms_to_the_usual_maximum() {
+        let mut shown = picture((1000.0, 1000.0), (800.0, 600.0));
+        shown.pic = Some(Pic::Raster(iced::widget::image::Handle::from_rgba(
+            1,
+            1,
+            vec![0; 4],
+        )));
+        shown.update(Msg::Gesture(Gesture::Zoom {
+            factor: 1000.0,
+            at: (0.0, 0.0),
+        }));
+        assert_eq!(shown.frame().zoom, ZOOM_MAX);
     }
 }

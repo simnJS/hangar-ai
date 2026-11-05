@@ -552,21 +552,122 @@ impl PreviewAccess for Shared {
 
 /// A workspace's kit tabs in the file `<app data>/kit-tabs.json`, an object
 /// by workspace id. It is read on the first ask and written whole, through a
-/// temporary file, whenever a workspace's tabs change.
+/// temporary file, whenever a workspace's tabs change: by a thread of its
+/// own, never the caller's (the store is edited on the UI thread), the
+/// changes of [`WRITE_AFTER`] taken together. What is waiting is written when
+/// it is dropped.
 pub struct FileSavedTabs {
     path: PathBuf,
     held: Mutex<Option<Map<String, Value>>>,
-    /// What the file holds now, to write only what changed.
+    /// What was last handed to the disk, to write only what changed.
     written: Mutex<String>,
+    disk: Arc<Disk>,
+    writer: Option<std::thread::JoinHandle<()>>,
+}
+
+/// How long a change waits for the next before the file is written.
+pub const WRITE_AFTER: Duration = Duration::from_millis(300);
+
+/// What the writer thread is to write.
+struct Disk {
+    path: PathBuf,
+    pending: Mutex<Pending>,
+    wake: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct Pending {
+    text: Option<String>,
+    closing: bool,
+}
+
+impl Disk {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Pending> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    fn write(&self, text: &str) {
+        // The tabs stay open if the disk refuses; only a restart loses them.
+        if let Err(err) = write_atomically(&self.path, text) {
+            eprintln!(
+                "hangar: the kit tabs could not be saved to {}: {err}",
+                self.path.display()
+            );
+        }
+    }
+
+    /// The writer: waits for a change, then for the ones that follow it
+    /// within [`WRITE_AFTER`], and writes the last.
+    fn run(&self) {
+        let mut pending = self.lock();
+        loop {
+            while pending.text.is_none() && !pending.closing {
+                pending = self
+                    .wake
+                    .wait(pending)
+                    .unwrap_or_else(|poison| poison.into_inner());
+            }
+            if !pending.closing {
+                let deadline = std::time::Instant::now() + WRITE_AFTER;
+                while !pending.closing {
+                    let left = deadline.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    pending = self
+                        .wake
+                        .wait_timeout(pending, left)
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .0;
+                }
+            }
+            let text = pending.text.take();
+            let closing = pending.closing;
+            drop(pending);
+            if let Some(text) = text {
+                self.write(&text);
+            }
+            if closing {
+                return;
+            }
+            pending = self.lock();
+        }
+    }
 }
 
 impl FileSavedTabs {
     pub fn new(path: PathBuf) -> Self {
+        let disk = Arc::new(Disk {
+            path: path.clone(),
+            pending: Mutex::new(Pending::default()),
+            wake: std::sync::Condvar::new(),
+        });
+        let writer = std::thread::Builder::new()
+            .name("hangar-kit-tabs".into())
+            .spawn({
+                let disk = disk.clone();
+                move || disk.run()
+            })
+            .ok();
         FileSavedTabs {
             path,
             held: Mutex::new(None),
             written: Mutex::new(String::new()),
+            disk,
+            writer,
         }
+    }
+
+    /// Hands the text to the writer, or writes it here without one.
+    fn hand_over(&self, text: String) {
+        if self.writer.is_none() {
+            self.disk.write(&text);
+            return;
+        }
+        self.disk.lock().text = Some(text);
+        self.disk.wake.notify_one();
     }
 
     fn with_map<T>(&self, use_map: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
@@ -624,14 +725,23 @@ impl SavedTabs for FileSavedTabs {
         if *written == text {
             return;
         }
-        // The tabs stay open if the disk refuses; only a restart loses them.
-        if write_atomically(&self.path, &text).is_ok() {
-            *written = text;
-        }
+        *written = text.clone();
+        drop(written);
+        self.hand_over(text);
     }
 
     fn workspaces(&self) -> Vec<String> {
         self.with_map(|map| map.keys().cloned().collect())
+    }
+}
+
+impl Drop for FileSavedTabs {
+    fn drop(&mut self) {
+        self.disk.lock().closing = true;
+        self.disk.wake.notify_one();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.join();
+        }
     }
 }
 
@@ -889,6 +999,7 @@ mod tests {
 
         // Closing the last tab leaves nothing for the workspace.
         shared.edit(|store| store.close_workspace_models("w1"));
+        drop(shared);
         let written: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(written.get("w1").is_none());
@@ -904,6 +1015,55 @@ mod tests {
         let saved = FileSavedTabs::new(path);
         assert_eq!(saved.read("w1"), None);
         assert!(saved.workspaces().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn kit_tabs_are_written_off_the_callers_thread_the_last_of_a_burst_once_dropped_at_the_latest()
+    {
+        let dir =
+            std::env::temp_dir().join(format!("hangar-kit-tabs-burst-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("kit-tabs.json");
+        let tab = |title: &str| crate::preview::store::SavedKitTab {
+            id: Some("p1".into()),
+            kit_id: "ci".into(),
+            tab_id: "run".into(),
+            path: "hangar-kit://ci/run".into(),
+            title: title.into(),
+            titled: true,
+            params: Default::default(),
+            opened_by: None,
+        };
+        let mut saved = FileSavedTabs::new(path.clone());
+        for n in 0..20 {
+            saved.write("w1", Some(&[tab(&format!("Run #{n}"))]));
+        }
+        // The caller did not wait on the disk: the burst is still waiting.
+        assert!(!path.exists(), "written on the caller's thread");
+        drop(saved);
+        let written: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["w1"][0]["title"], "Run #19");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn kit_tabs_are_written_soon_after_a_change_without_a_drop() {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-tabs-soon-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("kit-tabs.json");
+        let mut saved = FileSavedTabs::new(path.clone());
+        saved.write("w1", None);
+        saved.write("w2", Some(&[]));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !path.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let written: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(written.get("w2").is_some());
+        drop(saved);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

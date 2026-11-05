@@ -99,7 +99,9 @@ pub struct State {
     focused: HashSet<window::Id>,
     /// git's last answer for each folder some window looks at, until the next
     /// one or a failure.
-    changes: HashMap<String, Arc<Changes>>,
+    /// With the rows of the Files section worked out once, when it arrives
+    /// (`files_model::Indexed`), not at every build of the view.
+    changes: HashMap<String, files_model::Indexed>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,7 +366,9 @@ fn reduce(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             if poll_keys(st, m).contains(&key) {
                 match answer {
                     Ok(changes) => {
-                        st.changes.insert(key.folder, changes);
+                        let indexed =
+                            files_model::Indexed::new(changes, &key.folder, files::FOLDER_SHOWN);
+                        st.changes.insert(key.folder, indexed);
                     }
                     Err(_) => {
                         st.changes.remove(&key.folder);

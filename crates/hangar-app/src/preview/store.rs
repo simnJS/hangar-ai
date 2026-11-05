@@ -419,6 +419,10 @@ pub struct Store {
     /// The workspaces whose saved tabs have been read: until then, saving
     /// would lose them.
     restored: HashSet<WsId>,
+    /// What was last handed to `saved` for each workspace this run: an edit
+    /// that leaves a workspace's kit tabs as they were (a model loading, a
+    /// file's badge) writes nothing.
+    last_saved: HashMap<WsId, Vec<SavedKitTab>>,
     watchers: HashMap<String, Vec<(WatchId, KitTabWatcher)>>,
     next_watch: u64,
     next_id: u64,
@@ -455,6 +459,7 @@ impl Store {
             view: View::default(),
             saved: None,
             restored: HashSet::new(),
+            last_saved: HashMap::new(),
             watchers: HashMap::new(),
             next_watch: 0,
             next_id: 0,
@@ -930,9 +935,13 @@ impl Store {
                 })
             })
             .collect();
+        if self.saved.is_none() || self.last_saved.get(workspace) == Some(&tabs) {
+            return;
+        }
         if let Some(saved) = &mut self.saved {
             saved.write(workspace, (!tabs.is_empty()).then_some(tabs.as_slice()));
         }
+        self.last_saved.insert(workspace.to_string(), tabs);
     }
 
     /// Brings back the kit tabs a workspace had open when the app last closed,
@@ -996,6 +1005,7 @@ impl Store {
         for workspace in saved.workspaces() {
             if !keep.contains(&workspace) {
                 saved.write(&workspace, None);
+                self.last_saved.remove(&workspace);
             }
         }
     }

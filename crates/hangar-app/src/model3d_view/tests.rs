@@ -266,6 +266,34 @@ fn a_model_that_is_shown_is_read_and_reported_to_the_store() {
 }
 
 #[test]
+fn a_read_whose_stream_ends_without_an_outcome_fails_instead_of_spinning() {
+    let mut h = Harness::new("ended");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    let revision = h.entry(&id).revision;
+    h.roots(&id);
+    // The reader's thread died: the stream is over, with no `Done`.
+    h.send(Msg::LoadEnded(id.clone(), revision));
+    assert!(h.slot(&id).flight.is_none());
+    assert_eq!(h.slot(&id).failed, Some(revision));
+    assert_eq!(h.entry(&id).status, Status::Error);
+    assert!(matches!(h.st.registry.look(&id, revision), Look::Failed(_)));
+}
+
+#[test]
+fn a_read_that_ended_with_its_outcome_is_not_failed_by_the_end_of_its_stream() {
+    let mut h = Harness::new("ended-done");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    let revision = h.entry(&id).revision;
+    h.roots(&id);
+    h.land(&id);
+    h.send(Msg::LoadEnded(id.clone(), revision));
+    assert_eq!(h.entry(&id).status, Status::Ready);
+    assert!(h.slot(&id).failed.is_none());
+}
+
+#[test]
 fn a_model_that_cannot_be_opened_says_why_and_is_not_tried_again_until_asked() {
     let mut h = Harness::new("fail");
     let id = h.show("model.usdz", b"PK usdz");
@@ -486,6 +514,59 @@ fn a_snapshots_request_loads_a_model_that_was_dropped_without_telling_the_store(
         h.st.registry.look(&id, revision),
         Look::Ready { .. }
     ));
+}
+
+/// A message handled as `step` does, but with the workspaces given as
+/// asleep (the harness's model cannot put one to sleep).
+fn send_asleep(h: &mut Harness, msg: Msg, asleep: &HashSet<&str>) {
+    let _ = handle(&mut h.st, &mut h.model, msg);
+    let wants = loads::wants(&h.shared);
+    let _ = loads::settle(&mut h.st, &h.model, &wants, asleep);
+}
+
+#[test]
+fn a_snapshots_request_loads_a_model_whose_workspace_is_asleep() {
+    let mut h = Harness::new("ensure-asleep");
+    let id = h.show("cube.glb", &samples::cube_glb());
+    h.tick();
+    h.land(&id);
+    let revision = h.entry(&id).revision;
+    let ws = h.ws.clone();
+    let asleep: HashSet<&str> = [ws.as_str()].into();
+
+    // Put to sleep, the model goes.
+    send_asleep(&mut h, Msg::Store, &asleep);
+    assert!(h.st.slots.is_empty());
+    assert!(matches!(h.st.registry.look(&id, revision), Look::Missing));
+
+    // A snapshot asks: the load starts and is not let go of by the sleep.
+    send_asleep(&mut h, Msg::Ensure(id.clone()), &asleep);
+    assert!(h.slot(&id).loading(revision));
+    send_asleep(&mut h, Msg::Store, &asleep);
+    assert!(h.slot(&id).loading(revision), "still loading while asleep");
+    let roots = vec![h.dir.path().to_path_buf()];
+    send_asleep(&mut h, Msg::Roots(id.clone(), revision, roots), &asleep);
+    assert!(h.slot(&id).flight.as_ref().unwrap().cancel.is_some());
+
+    let model = hangar_model3d::load::load(&h.entry(&id).path).unwrap();
+    send_asleep(
+        &mut h,
+        Msg::Load(id.clone(), revision, LoadEvent::Done(Ok(Arc::new(model)))),
+        &asleep,
+    );
+    // The snapshot finds it, even after the store is looked at again.
+    send_asleep(&mut h, Msg::Store, &asleep);
+    assert!(matches!(
+        h.st.registry.look(&id, revision),
+        Look::Ready { .. }
+    ));
+
+    // Once the hold is over, the sleeping workspace lets it go again.
+    h.st.ensured
+        .insert(id.clone(), Instant::now() - Duration::from_millis(1));
+    send_asleep(&mut h, Msg::Store, &asleep);
+    assert!(h.st.slots.is_empty());
+    assert!(h.st.ensured.is_empty());
 }
 
 #[test]

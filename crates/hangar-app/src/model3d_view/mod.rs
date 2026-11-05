@@ -74,7 +74,7 @@ mod tests;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iced::futures::stream::{self, StreamExt};
 use iced::widget::{column, container};
@@ -141,6 +141,10 @@ pub struct State {
     reduced_motion: bool,
     /// The system's setting has been asked for.
     motion_asked: bool,
+    /// The models a snapshot asked for (`Msg::Ensure`), held open until the
+    /// time given even when their workspace is asleep, so the load is not
+    /// let go of before the snapshot has its model (`loads::settle`).
+    ensured: HashMap<String, Instant>,
 }
 
 impl Default for State {
@@ -163,6 +167,7 @@ impl State {
             dev_captured: false,
             reduced_motion: false,
             motion_asked: false,
+            ensured: HashMap::new(),
         }
     }
 }
@@ -183,6 +188,9 @@ pub enum Msg {
     Roots(String, u64, Vec<std::path::PathBuf>),
     /// What a read reported.
     Load(String, u64, LoadEvent),
+    /// A read's stream is over: if it said nothing of how it ended, the load
+    /// failed (`loads::ended`).
+    LoadEnded(String, u64),
     /// The person stopped a load.
     CancelLoad(String),
     /// Load a model that could not be, or no longer can be, again.
@@ -228,6 +236,11 @@ fn step(st: &mut State, m: &mut Model, inbox: &Inbox, msg: Msg) -> Task<Message>
     if matches!(msg, Msg::Tick) {
         return Task::none();
     }
+    // A read's progress changes only its own slot: looking at every model
+    // again for each report would cost a full reconcile per step of a file.
+    if matches!(msg, Msg::Load(_, _, LoadEvent::Progress(_))) {
+        return handle(st, m, msg);
+    }
     register(st, inbox);
     let asked = ask_motion(st);
     let first = handle(st, m, msg);
@@ -267,6 +280,10 @@ fn handle(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         Msg::Roots(id, revision, roots) => loads::read(st, &id, revision, roots),
         Msg::Load(id, revision, event) => {
             loads::progressed(st, &id, revision, event);
+            Task::none()
+        }
+        Msg::LoadEnded(id, revision) => {
+            loads::ended(st, &id, revision);
             Task::none()
         }
         Msg::CancelLoad(id) => {
@@ -401,7 +418,14 @@ fn ensure(st: &mut State, id: &str) -> Task<Message> {
         .slots
         .entry(want.id.clone())
         .or_insert_with(|| Slot::new(want.ws.clone(), st.display, st.reduced_motion));
-    if slot.loading(want.revision) || slot.failed == Some(want.revision) {
+    if slot.failed == Some(want.revision) {
+        return Task::none();
+    }
+    // Held open until the load lands and the snapshot has had a moment to
+    // take the model, even if its workspace sleeps.
+    st.ensured
+        .insert(want.id.clone(), Instant::now() + loads::ENSURE_HOLD);
+    if slot.loading(want.revision) {
         return Task::none();
     }
     if slot.loaded == Some(want.revision)
@@ -410,6 +434,7 @@ fn ensure(st: &mut State, id: &str) -> Task<Message> {
         // In memory, but the registry let it go (or never had it).
         st.registry
             .put(&want.id, want.revision, &want.ws, model.clone());
+        loads::release_hold(st, &want.id);
         return Task::none();
     }
     loads::begin(st, &want)

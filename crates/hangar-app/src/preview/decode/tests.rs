@@ -128,13 +128,54 @@ fn a_gif_of_several_frames_is_played_with_the_time_of_each() {
     assert_eq!(pixels.len(), 8 * 6 * 4);
 }
 
-#[test]
-fn a_gif_of_one_frame_is_left_to_the_renderer() {
-    let file = gif((4, 4), &[([1, 2, 3, 255], 100)]);
-    match load(file.clone()).expect("loaded") {
-        Loaded::Encoded(bytes) => assert_eq!(*bytes.0, file),
+/// The pixels of a still picture, and its size.
+fn pixels(loaded: Result<Loaded, String>) -> (Vec<u8>, u32, u32) {
+    match loaded.expect("loaded") {
+        Loaded::Pixels(Handle::Rgba { pixels, .. }, width, height) => {
+            (pixels.to_vec(), width, height)
+        }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn a_gif_of_one_frame_is_decoded_to_pixels() {
+    let file = gif((4, 4), &[([1, 2, 3, 255], 100)]);
+    let (rgba, width, height) = pixels(load(file));
+    assert_eq!((width, height), (4, 4));
+    assert!(same([rgba[0], rgba[1], rgba[2], rgba[3]], [1, 2, 3, 255]));
+}
+
+#[test]
+fn a_png_is_decoded_to_pixels_off_the_ui_thread() {
+    let image = RgbaImage::from_pixel(5, 3, Rgba([10, 20, 30, 255]));
+    let mut file = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut file), ::image::ImageFormat::Png)
+        .unwrap();
+    let (rgba, width, height) = pixels(load(file));
+    assert_eq!((width, height), (5, 3));
+    assert_eq!(rgba.len(), 5 * 3 * 4);
+    assert_eq!(&rgba[..4], &[10, 20, 30, 255]);
+}
+
+#[test]
+fn a_picture_that_claims_too_many_pixels_is_refused_before_it_is_decoded() {
+    // A BMP header that says 20000 × 20000 (400 million pixels), and nothing
+    // after it: refused on its size, not on its missing data.
+    let mut file = Vec::new();
+    file.extend_from_slice(b"BM");
+    file.extend_from_slice(&0u32.to_le_bytes()); // file size, unchecked
+    file.extend_from_slice(&0u32.to_le_bytes()); // reserved
+    file.extend_from_slice(&54u32.to_le_bytes()); // pixels start
+    file.extend_from_slice(&40u32.to_le_bytes()); // BITMAPINFOHEADER
+    file.extend_from_slice(&20_000i32.to_le_bytes());
+    file.extend_from_slice(&20_000i32.to_le_bytes());
+    file.extend_from_slice(&1u16.to_le_bytes()); // planes
+    file.extend_from_slice(&24u16.to_le_bytes()); // bits a pixel
+    file.extend_from_slice(&[0; 24]); // no compression, sizes, palette
+    let why = load(file).unwrap_err();
+    assert!(why.contains("20000 × 20000"), "{why}");
 }
 
 #[test]
@@ -156,8 +197,9 @@ fn an_animated_webp_is_played_with_the_time_of_each_frame() {
 }
 
 #[test]
-fn a_file_that_is_not_animated_or_not_readable_is_left_to_the_renderer() {
-    // A PNG, text, nothing, and a GIF cut off in its header.
+fn a_file_that_is_not_a_readable_picture_fails() {
+    // A PNG cut after its signature, text, nothing, a GIF cut off in its
+    // header, and a WebP of junk.
     for bytes in [
         b"\x89PNG\r\n\x1a\n".to_vec(),
         b"hello".to_vec(),
@@ -165,10 +207,7 @@ fn a_file_that_is_not_animated_or_not_readable_is_left_to_the_renderer() {
         b"GIF89a".to_vec(),
         b"RIFF\0\0\0\0WEBPjunk".to_vec(),
     ] {
-        match load(bytes.clone()) {
-            Ok(Loaded::Encoded(kept)) => assert_eq!(*kept.0, bytes),
-            other => panic!("{other:?}"),
-        }
+        assert!(load(bytes.clone()).is_err(), "{bytes:?}");
     }
 }
 

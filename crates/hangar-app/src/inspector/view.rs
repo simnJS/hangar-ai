@@ -2,7 +2,7 @@
 //! focused pane, with the grip on its left edge; or, with no pane in focus,
 //! a quiet note.
 
-use hangar_core::git::Changes;
+use super::files_model::Indexed;
 use hangar_i18n::Key;
 use hangar_theme::tokens::{BORDER_WIDTH, font_size};
 use hangar_theme::{AgentState, fonts, style};
@@ -70,7 +70,7 @@ pub(super) struct Data<'a> {
     pub task: Option<TaskCard>,
     /// A shell pane's shell.
     pub shell: Option<String>,
-    pub changes: Option<&'a Changes>,
+    pub changes: Option<&'a Indexed>,
     /// 1-based place in reading order.
     pub index: usize,
 }
@@ -105,7 +105,7 @@ fn pane_panel<'a>(
             ],
         )
         .map(|found| found.label.clone()),
-        changes: st.changes.get(folder).map(|changes| changes.as_ref()),
+        changes: st.changes.get(folder),
         index,
     };
     column_of(&scene, data)

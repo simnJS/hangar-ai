@@ -2,7 +2,6 @@
 //! with git's counts where git knows them, or, for a pane whose agent
 //! reported nothing, what changed in its folder.
 
-use hangar_core::git::Changes;
 use hangar_i18n::{Key, args};
 use hangar_theme::tokens::font_size;
 use hangar_theme::{fonts, style};
@@ -12,7 +11,7 @@ use hangar_ui::{Icon, icon, list};
 use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Padding};
 
-use super::files_model::{FileRow, diff_segments, diff_totals, edited_rows, folder_rows};
+use super::files_model::{FileRow, Indexed, diff_segments, diff_totals};
 use super::sections::{Scene, empty_note, ink};
 use super::widgets::{diff_bar, stacked};
 use super::{Msg, SectionId};
@@ -21,7 +20,7 @@ use crate::state::live::PaneInsight;
 
 /// Edited files listed before "+N more": the diff view has the rest.
 const EDITED_SHOWN: usize = 10;
-const FOLDER_SHOWN: usize = 8;
+pub(super) const FOLDER_SHOWN: usize = 8;
 /// Narrower than this, the "View diff" action gives up its words.
 const NARROW: f32 = 280.0;
 
@@ -43,9 +42,14 @@ enum Listing {
     Nothing,
 }
 
-fn listing(edited: &[String], changes: Option<&Changes>, folder: &str) -> Listing {
+/// What the section lists. The folder's rows were worked out when git
+/// answered (`Indexed::new`); the edits are the agent's few.
+fn listing(edited: &[String], changes: Option<&Indexed>, folder: &str) -> Listing {
     if !edited.is_empty() {
-        let rows = edited_rows(edited, changes, Some(folder));
+        let rows = match changes {
+            Some(changes) => changes.edited_rows(edited, Some(folder)),
+            None => super::files_model::edited_rows(edited, None, Some(folder)),
+        };
         let count = rows.len();
         let counted = rows.iter().any(|row| row.additions.is_some());
         let totals = diff_totals(&rows);
@@ -58,8 +62,11 @@ fn listing(edited: &[String], changes: Option<&Changes>, folder: &str) -> Listin
         };
     }
     if let Some(changes) = changes {
-        let (rows, more) = folder_rows(changes, folder, FOLDER_SHOWN);
-        return Listing::Folder { rows, more };
+        let (rows, more) = changes.folder_rows();
+        return Listing::Folder {
+            rows: rows.to_vec(),
+            more,
+        };
     }
     Listing::Nothing
 }
@@ -174,7 +181,7 @@ pub(super) fn section<'a>(
     s: &Scene<'a>,
     insight: &'a PaneInsight,
     folder: &'a str,
-    changes: Option<&Changes>,
+    changes: Option<&Indexed>,
 ) -> Section<'a, Message> {
     let (t, tr) = (s.theme(), s.tr());
     let c = &t.colors;
@@ -300,7 +307,7 @@ pub(super) fn section<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hangar_core::git::ChangedFile;
+    use hangar_core::git::{ChangedFile, Changes};
 
     fn file(path: &str) -> ChangedFile {
         ChangedFile {
@@ -312,13 +319,14 @@ mod tests {
         }
     }
 
-    fn changes(files: Vec<ChangedFile>) -> Changes {
-        Changes {
+    fn changes(files: Vec<ChangedFile>) -> Indexed {
+        let changes = Changes {
             root: "/work".into(),
             base: Some("abc1234".into()),
             files,
             truncated: false,
-        }
+        };
+        Indexed::new(std::sync::Arc::new(changes), "/work", FOLDER_SHOWN)
     }
 
     #[test]

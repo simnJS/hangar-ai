@@ -215,6 +215,11 @@ impl Gpu {
             .retain(|_, target| frame.saturating_sub(target.last_used) < KEEP_TARGET_FRAMES);
     }
 
+    /// Drops the GPU copy of every model but `model`.
+    pub(crate) fn keep_only(&mut self, model: Option<u64>) {
+        self.models.retain(|id, _| Some(*id) == model);
+    }
+
     /// Drops a model's copy on the GPU.
     pub(crate) fn forget(&mut self, model: u64) {
         self.models.remove(&model);

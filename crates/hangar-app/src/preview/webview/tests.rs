@@ -1403,3 +1403,45 @@ async fn windows_follow_what_is_seen_in_the_real_helper() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_pool_serves_every_request_with_no_more_threads_than_its_size() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let running = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let done = Arc::new(AtomicUsize::new(0));
+    let pool = Pool::new("test-serve", 3);
+    assert_eq!(pool.size(), 3);
+    for _ in 0..50 {
+        let (running, most, done) = (running.clone(), most.clone(), done.clone());
+        pool.run(move || {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            most.fetch_max(now, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            running.fetch_sub(1, Ordering::SeqCst);
+            done.fetch_add(1, Ordering::SeqCst);
+        });
+    }
+    // Dropped, it finishes what is in line.
+    drop(pool);
+    assert_eq!(done.load(Ordering::SeqCst), 50);
+    assert!(
+        most.load(Ordering::SeqCst) <= 3,
+        "{}",
+        most.load(Ordering::SeqCst)
+    );
+}
+
+#[test]
+fn a_request_that_panics_does_not_take_its_thread_with_it() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let done = Arc::new(AtomicUsize::new(0));
+    let pool = Pool::new("test-panic", 1);
+    pool.run(|| panic!("a broken server"));
+    let after = done.clone();
+    pool.run(move || {
+        after.fetch_add(1, Ordering::SeqCst);
+    });
+    drop(pool);
+    assert_eq!(done.load(Ordering::SeqCst), 1);
+}

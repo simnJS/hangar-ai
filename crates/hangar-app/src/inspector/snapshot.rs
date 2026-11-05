@@ -246,6 +246,12 @@ fn draw(name: &str, agent: AgentId, theme_id: &str, locale: Locale, width: f64) 
     let scene = scene(ctx, ws, pane);
     let insight = insight();
     let changes = changes();
+    let root = changes.root.clone();
+    let changes = super::files_model::Indexed::new(
+        std::sync::Arc::new(changes),
+        &root,
+        super::files::FOLDER_SHOWN,
+    );
     let limits = limits();
     let data = Data {
         insight: &insight,

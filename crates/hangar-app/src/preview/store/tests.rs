@@ -1256,3 +1256,57 @@ mod across_a_restart {
         );
     }
 }
+
+/// A storage that counts what it is asked to write.
+#[derive(Clone, Default)]
+struct Counting {
+    inner: Memory,
+    writes: Arc<Mutex<Vec<String>>>,
+}
+
+impl SavedTabs for Counting {
+    fn read(&self, workspace: &str) -> Option<Value> {
+        self.inner.read(workspace)
+    }
+
+    fn write(&mut self, workspace: &str, tabs: Option<&[SavedKitTab]>) {
+        self.writes.lock().unwrap().push(workspace.to_string());
+        self.inner.write(workspace, tabs);
+    }
+
+    fn workspaces(&self) -> Vec<String> {
+        self.inner.workspaces()
+    }
+}
+
+#[test]
+fn an_edit_that_leaves_the_kit_tabs_as_they_were_writes_nothing() {
+    let saved = Counting::default();
+    let mut store = Store::with_saved(Box::new(saved.clone()));
+    store.restore_kit_tabs("ws");
+    store.restore_kit_tabs("other");
+    let tab = store.open_kit_tab(KitTabToOpen::new("ws", "ci", "run", "Run"));
+    let written = saved.writes.lock().unwrap().len();
+    assert!(written >= 1, "the new tab is saved");
+
+    // A model shown, loaded, brought forward, in the same workspace: no
+    // kit tab changed, nothing is written.
+    let shot = model(&mut store, "/m/chair.glb");
+    store.settle_model(&shot, Ok(info()));
+    store.activate_model(&shot);
+    store.set_kit_tab_badge(
+        &tab,
+        Some(KitBadge {
+            state: KitBadgeState::Running,
+            text: None,
+        }),
+    );
+    assert_eq!(saved.writes.lock().unwrap().len(), written);
+
+    // Its title changes: that workspace, and only it, is written.
+    store.set_kit_tab_title(&tab, "Run #12");
+    let writes = saved.writes.lock().unwrap().clone();
+    assert_eq!(writes.len(), written + 1);
+    assert_eq!(writes.last().map(String::as_str), Some("ws"));
+    assert_eq!(saved.inner.read("ws").unwrap()[0]["title"], "Run #12");
+}
