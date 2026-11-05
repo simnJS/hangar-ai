@@ -12,13 +12,15 @@
 //!
 //! "A value of its own" is told by comparison: when the state settles after
 //! hydration, the field's value (its default, or what the hydration fix-ups
-//! made of it) is noted as its *substitute*. After every store action, an
-//! entry whose field no longer holds its substitute, or whose object is gone
-//! (a workspace removed, a pane closed), is dropped for good. One case slips
-//! through: an action that writes exactly the substitute (the settings saving
-//! the default `fontSize: 13` over a hand-written `"big"`) is not seen as a
-//! write, and the raw value comes back in the file. The app goes on reading
-//! the default, as it does today, so the only trace is in the file.
+//! made of it) is noted as its *substitute*. An entry whose field no longer
+//! holds its substitute, or whose object is gone (a workspace removed, a pane
+//! closed), is left out of every JSON written, and dropped for good at the
+//! next save (`Model::take_save`). Two cases slip through: an action that
+//! writes exactly the substitute (the settings saving the default
+//! `fontSize: 13` over a hand-written `"big"`), and a field written then put
+//! back to its substitute between two saves, are not seen as writes, and the
+//! raw value comes back in the file. The app goes on reading the default, as
+//! it does today, so the only trace is in the file.
 //!
 //! Entries of a list that did not read (a `3` among the panes, a number among
 //! the names of a custom MCP list) are kept too, and written back at the end

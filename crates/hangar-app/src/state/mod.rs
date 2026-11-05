@@ -48,8 +48,8 @@ pub use live::{
 pub use snapshot::Snapshot;
 #[allow(unused_imports)]
 pub use store::{
-    CommandScope, FolderPatch, PanePatch, Patch, Respawn, SavedCommandDraft, SettingsPatch,
-    StoreAction, StoreOutcome, WorkspaceDraft, WorkspacePatch,
+    CommandScope, FolderPatch, PanePatch, Patch, Removed, Respawn, SavedCommandDraft,
+    SettingsPatch, StoreAction, StoreOutcome, WorkspaceDraft, WorkspacePatch,
 };
 #[allow(unused_imports)]
 pub use types::{
@@ -67,11 +67,17 @@ pub struct Model {
     /// Bumped by every store action that changed `state`: what the save and
     /// the snapshot follow.
     revision: u64,
+    /// Whether the store action being applied wrote `state` (`state_mut`):
+    /// how `apply` tells a change without keeping a copy to compare.
+    wrote: bool,
     /// What `state.json` held that no field could read, written back on
     /// every save (unread.rs).
     unread: unread::Unread,
     /// Respawns not yet announced (`Intent::PaneRespawned`).
     respawned: Vec<Respawn>,
+    /// Workspaces removed and not yet cleaned up after (their delivery
+    /// check worktree): the shell takes them (`take_removed`).
+    removed: Vec<Removed>,
     pub ui: Ui,
     pub live: Live,
 }
@@ -96,6 +102,23 @@ impl Model {
     /// that this version could not read put back where it was.
     pub fn to_json(&self) -> serde_json::Value {
         persist::to_json(&self.state, &self.unread)
+    }
+
+    /// What a save writes, to be turned into JSON off the UI thread
+    /// (`persist::Save::into_json`). The values set aside at load that the
+    /// app has since written over are forgotten for good here, once per
+    /// save rather than after every store action: that needs the state as
+    /// JSON, which only a file written by another version (`unread` not
+    /// empty) pays for.
+    pub fn take_save(&mut self) -> persist::Save {
+        if !self.unread.is_empty() {
+            let now = serde_json::to_value(&*self.state).unwrap_or_default();
+            self.unread.prune(&now);
+        }
+        persist::Save {
+            state: self.state_arc(),
+            unread: self.unread.clone(),
+        }
     }
 
     pub fn settings(&self) -> &Settings {

@@ -261,6 +261,15 @@ pub struct Respawn {
     pub keeps_session: bool,
 }
 
+/// A workspace `RemoveWorkspace` took away: what cleaning up after it needs
+/// (`hangar_core::delivery::remove_workspace_check`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removed {
+    pub ws: WsId,
+    /// Its folder, the repository its check worktree was made from.
+    pub cwd: String,
+}
+
 /// A fresh id, as `crypto.randomUUID()` made them.
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -320,16 +329,29 @@ pub fn make_workspace<S: AsRef<str>>(
 
 impl Model {
     /// Applies one store action.
+    ///
+    /// A change is told by `reduce` itself: every arm writes the state
+    /// (`state_mut`) only when what it writes differs from what is there, so
+    /// no copy of the state is kept to compare with. The state is shared
+    /// with the last published snapshot, if any: the first write after it
+    /// copies it (`Arc::make_mut`), later ones write in place.
     pub fn apply(&mut self, action: StoreAction) -> StoreOutcome {
-        let before = self.state.clone();
+        // Tests hold `reduce` to its word: a write is a change, and no change
+        // goes unwritten. A deep copy, not an `Arc` clone, so the state's
+        // sharing is the same as in a build.
+        #[cfg(test)]
+        let before = (*self.state).clone();
+        self.wrote = false;
         let mut outcome = reduce(self, action);
-        outcome.changed = !Arc::ptr_eq(&before, &self.state) && *before != *self.state;
+        outcome.changed = self.wrote;
+        #[cfg(test)]
+        assert_eq!(
+            outcome.changed,
+            before != *self.state,
+            "a store action wrote the state without changing it, or changed it unwritten"
+        );
         if outcome.changed {
             self.revision += 1;
-            if !self.unread.is_empty() {
-                let now = serde_json::to_value(&*self.state).unwrap_or_default();
-                self.unread.prune(&now);
-            }
         }
         outcome
     }
@@ -366,9 +388,17 @@ impl Model {
         std::mem::take(&mut self.respawned)
     }
 
+    /// The workspaces removed since the last call, oldest first (the shell
+    /// removes their delivery check worktree off the UI thread).
+    pub(crate) fn take_removed(&mut self) -> Vec<Removed> {
+        std::mem::take(&mut self.removed)
+    }
+
     /// The persisted state for writing. Private to `state`: packages go
-    /// through `apply`.
+    /// through `apply`. Only for a write that changes something: calling it
+    /// is what makes the action a change.
     fn state_mut(&mut self) -> &mut AppState {
+        self.wrote = true;
         Arc::make_mut(&mut self.state)
     }
 }
@@ -453,7 +483,11 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
         }
 
         StoreAction::RemoveWorkspace(id) => {
-            if model.state.workspaces.iter().any(|ws| ws.id == id) {
+            if let Some(ws) = model.state.workspaces.iter().find(|ws| ws.id == id) {
+                model.removed.push(Removed {
+                    ws: ws.id.clone(),
+                    cwd: ws.cwd.clone(),
+                });
                 let state = model.state_mut();
                 state.workspaces.retain(|ws| ws.id != id);
                 if state.active_workspace_id.as_deref() == Some(id.as_str()) {

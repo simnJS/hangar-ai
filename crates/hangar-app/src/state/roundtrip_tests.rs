@@ -362,11 +362,17 @@ fn a_field_the_app_writes_is_the_app_s_from_then_on() {
         json!("left screen")
     );
 
-    // Back to the default, the field stays the app's: no "big" again.
+    // Saved, then back to the default, the field stays the app's: no "big"
+    // again. The save is what forgets the raw value for good.
+    assert_eq!(model.take_save().into_json(), written);
     model.apply(StoreAction::UpdateSettings(Patch::new(
         |s: &mut Settings| s.font_size = 13.0,
     )));
     assert_eq!(model.to_json()["settings"]["fontSize"], json!(13.0));
+    assert_eq!(
+        model.take_save().into_json()["settings"]["fontSize"],
+        json!(13.0)
+    );
 }
 
 #[test]

@@ -155,13 +155,28 @@ pub fn run() -> iced::Result {
 /// control.ts and remoteControl.ts said it.
 const STARTING: &str = "Hangar.AI is still starting. Try again in a moment.";
 
-/// What the snapshot was last published for: a change to any of these
-/// republishes it.
-#[derive(Debug, Clone, Default, PartialEq)]
-struct Published {
-    revision: u64,
-    version: u64,
-    opened: Vec<String>,
+/// The app's log file, in the system's log folder (`Paths::app_log_dir`).
+const LOG_FILE: &str = "hangar.log";
+
+/// Adds `line` to the app's log file, dated: what a release build on Windows,
+/// which has no console, would otherwise lose. Best effort: a log that cannot
+/// be written has nowhere to say so.
+fn log_to_file(host: &hangar_core::host::Host, line: &str) {
+    use std::io::Write as _;
+    let Ok(dir) = host.paths().app_log_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(LOG_FILE));
+    if let Ok(mut file) = file {
+        let now = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+        let _ = writeln!(file, "{now} {line}");
+    }
 }
 
 pub struct App {
@@ -172,7 +187,8 @@ pub struct App {
     /// once each (`to_iced` allocates).
     iced_themes: HashMap<&'static str, iced::Theme>,
     snapshot: watch::Sender<Arc<Snapshot>>,
-    published: Published,
+    /// The revision the snapshot was last published for.
+    published: u64,
     /// The model revision last written to `state.json`.
     saved: u64,
     writer: persist::Writer,
@@ -231,7 +247,7 @@ impl App {
             services,
             iced_themes: HashMap::new(),
             snapshot,
-            published: Published::default(),
+            published: 0,
             saved: 0,
             writer: persist::Writer::default(),
             bus,
@@ -417,22 +433,19 @@ impl App {
     fn after_update(&mut self) -> Task<Message> {
         let mut tasks = self.follow_changes();
         self.cache_themes();
-        let now = Published {
-            revision: self.model.revision(),
-            version: self.model.live.version,
-            opened: self.model.ui.opened_ids.clone(),
-        };
-        if now != self.published {
-            let saved_revision = self.published.revision;
-            self.published = now;
+        let revision = self.model.revision();
+        if revision != self.published {
+            self.published = revision;
             self.publish_snapshot();
-            if self.model.live.hydrated && self.model.revision() != saved_revision {
-                tasks.push(persist::schedule(self.model.revision()));
+            if self.model.live.hydrated {
+                tasks.push(persist::schedule(revision));
             }
-        }
-        // Nothing to save, but what the engines and hibernation read beside
-        // the state (deliveries, activity, sleep) may have moved (P18).
-        if self.model.live.hydrated && self.snapshot.borrow().is_stale(&self.model) {
+        } else if self.model.live.hydrated && self.snapshot.borrow().is_stale(&self.model) {
+            // Nothing to save, but what the engines and hibernation read
+            // beside the state (opened workspaces, deliveries, activity,
+            // sleep) moved (P18). Compared rather than republished on every
+            // read-model change (`live.version`, bumped by each keystroke in
+            // a pane), so the snapshot is only rebuilt when it differs.
             self.publish_snapshot();
         }
         Task::batch(tasks)
@@ -450,10 +463,16 @@ impl App {
             return Task::none();
         }
         let host = self.services.core().host().clone();
-        let value = self.model.to_json();
+        let save = self.model.take_save();
         let writer = self.writer.clone();
+        // The JSON is made on a blocking thread too, not on the UI's.
         Task::perform(
-            services::core::save_state(host, value, writer, revision),
+            async move {
+                let value = tokio::task::spawn_blocking(move || save.into_json())
+                    .await
+                    .map_err(|err| format!("the state could not be written as JSON: {err}"))?;
+                services::core::save_state(host, value, writer, revision).await
+            },
             move |result| Message::Saved(revision, result),
         )
     }
@@ -485,15 +504,21 @@ impl App {
     /// close"): the last change saved, the core shut down, then exit.
     fn quit(&mut self) -> Task<Message> {
         if self.model.live.hydrated && self.model.revision() != self.saved {
+            // On the UI thread, and waited for: it is what guarantees the
+            // last change.
             let host = self.services.core().host();
-            let value = self.model.to_json();
+            let value = self.model.take_save().into_json();
             let revision = self.model.revision();
             match self
                 .writer
                 .write(revision, || hangar_core::store::save_state(host, value))
             {
                 Ok(_) => self.saved = revision,
-                Err(error) => eprintln!("the last change could not be saved: {error}"),
+                Err(error) => {
+                    let line = format!("the last change could not be saved: {error}");
+                    eprintln!("{line}");
+                    log_to_file(host, &line);
+                }
             }
         }
         self.services.core().shutdown();
@@ -581,9 +606,8 @@ impl App {
 
     /// The themes the windows are drawn in, built when first needed.
     fn cache_themes(&mut self) {
-        let mut ids: Vec<window::Id> = self.model.live.windows.keys().copied().collect();
-        ids.push(self.main_window);
-        for w in ids {
+        let windows = self.model.live.windows.keys().copied();
+        for w in windows.chain(std::iter::once(self.main_window)) {
             let theme = self.model.theme_in(w);
             self.iced_themes
                 .entry(theme.id)

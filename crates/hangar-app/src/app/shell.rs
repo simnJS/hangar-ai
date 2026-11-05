@@ -356,6 +356,16 @@ impl App {
             })));
         }
 
+        // A workspace deleted, whoever deleted it, takes its delivery check
+        // worktree with it: git forgets it and the disk lets it go. Git is
+        // waited for, so off the UI thread.
+        for removed in self.model.take_removed() {
+            let cleanup = tokio::task::spawn_blocking(move || {
+                hangar_core::delivery::remove_workspace_check(&removed.ws, &removed.cwd, None);
+            });
+            tasks.push(Task::future(cleanup).discard());
+        }
+
         // Workspaces stay opened once visited, so their panes live on while
         // hidden; nothing spawns for one never opened.
         let active = self.model.state().active_workspace_id.clone();

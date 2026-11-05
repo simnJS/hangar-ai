@@ -904,3 +904,72 @@ fn a_workspace_with_views_is_written_so_that_1x_reads_its_terminals() {
     let read: Workspace = serde_json::from_value(written).unwrap();
     assert_eq!(read, *ws(&m, &w));
 }
+
+// what `apply` costs
+
+#[test]
+fn applying_writes_the_state_in_place_when_nothing_else_holds_it() {
+    let mut m = model();
+    let id = with_workspace(&mut m, 2, &[]);
+    let at = Arc::as_ptr(&m.state);
+    let outcome = m.apply(StoreAction::UpdateWorkspace(
+        id.clone(),
+        Patch::new(|w: &mut Workspace| w.name = "renamed".into()),
+    ));
+    assert!(outcome.changed, "the change is still seen");
+    assert_eq!(ws(&m, &id).name, "renamed");
+    assert!(
+        std::ptr::eq(at, Arc::as_ptr(&m.state)),
+        "no copy of the state was made for a change nothing else saw"
+    );
+    let unchanged = m.apply(StoreAction::SetActiveWorkspace(Some(id)));
+    assert!(!unchanged.changed);
+    assert!(std::ptr::eq(at, Arc::as_ptr(&m.state)));
+}
+
+#[test]
+fn a_published_snapshot_keeps_the_state_it_was_taken_with() {
+    let mut m = model();
+    let id = with_workspace(&mut m, 1, &[]);
+    let published = m.state_arc();
+    // Nothing written: the snapshot and the model still share it.
+    let outcome = m.apply(StoreAction::UpdateWorkspace(id.clone(), Patch::none()));
+    assert!(!outcome.changed);
+    assert!(Arc::ptr_eq(&published, &m.state));
+    // Written: copied once, the snapshot left as it was.
+    let outcome = m.apply(StoreAction::UpdateWorkspace(
+        id.clone(),
+        Patch::new(|w: &mut Workspace| w.name = "renamed".into()),
+    ));
+    assert!(outcome.changed);
+    assert!(!Arc::ptr_eq(&published, &m.state));
+    assert_eq!(published.workspaces[0].name, "w");
+    assert_eq!(ws(&m, &id).name, "renamed");
+    // The next write goes in place: only the model holds its copy now.
+    let at = Arc::as_ptr(&m.state);
+    m.apply(StoreAction::UpdateWorkspace(
+        id,
+        Patch::new(|w: &mut Workspace| w.name = "again".into()),
+    ));
+    assert!(std::ptr::eq(at, Arc::as_ptr(&m.state)));
+}
+
+#[test]
+fn a_removed_workspace_is_handed_over_for_its_check_to_go() {
+    let mut m = model();
+    let id = with_workspace(&mut m, 1, &[]);
+    m.apply(StoreAction::RemoveWorkspace("nope".into()));
+    assert!(
+        m.take_removed().is_empty(),
+        "nothing removed, nothing to clean"
+    );
+    m.apply(StoreAction::RemoveWorkspace(id.clone()));
+    assert_eq!(
+        m.take_removed(),
+        [Removed {
+            ws: id,
+            cwd: "/p".into()
+        }]
+    );
+    assert!(m.take_removed().is_empty(), "handed over once");
+}

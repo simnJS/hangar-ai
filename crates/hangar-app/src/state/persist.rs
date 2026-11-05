@@ -36,15 +36,35 @@ pub fn is_due(due: u64, current: u64, saved: u64) -> bool {
 }
 
 /// The JSON `save_state` writes: the whole state, camelCase as the TS wrote
-/// it, with the values set aside at load put back (unread.rs).
+/// it, with the values set aside at load put back (unread.rs), but for
+/// those the app has written over since.
 pub fn to_json(state: &AppState, unread: &Unread) -> Value {
     let mut value = serde_json::to_value(state).unwrap_or_else(|err| {
         // The types here only hold what serde_json writes; this cannot
         // happen, and an empty object would be worse than no save at all.
         panic!("the state could not be written as JSON: {err}")
     });
-    unread.restore(&mut value);
+    if !unread.is_empty() {
+        let mut unread = unread.clone();
+        unread.prune(&value);
+        unread.restore(&mut value);
+    }
     value
+}
+
+/// What a save writes (`Model::take_save`): the state as it stood, shared
+/// rather than copied, and the values set aside at load. Made into JSON by
+/// `into_json`, on the thread that writes the file, not the UI's.
+#[derive(Debug, Clone)]
+pub struct Save {
+    pub state: Arc<AppState>,
+    pub unread: Unread,
+}
+
+impl Save {
+    pub fn into_json(self) -> Value {
+        to_json(&self.state, &self.unread)
+    }
 }
 
 /// The revisions written so far, shared by every write: a write waits for the

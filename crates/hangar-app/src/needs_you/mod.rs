@@ -39,7 +39,7 @@ use crate::state::roles::orchestrator_of;
 
 use crate::state::Model;
 
-use model::{BoardSource, NeedsYouItem, NoticeMemory, watched_boards};
+use model::{BoardSource, NeedsYouItem, NoticeMemory, is_orchestrated, watched_boards};
 
 /// How often the list is worked out again while there is anything to watch:
 /// a pane that starts waiting, a task that gets its label, a delivery that
@@ -317,7 +317,9 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         Event::Window(window::Event::Unfocused) => Some(Message::NeedsYou(Msg::Focus(false))),
         _ => None,
     });
-    let watching = !watched(m).is_empty()
+    // `watched(m)` is not empty: without the sidebar's sort, as this runs
+    // after every message.
+    let watching = m.state().workspaces.iter().any(is_orchestrated)
         || !st.items.is_empty()
         || !st.landing.is_empty()
         || m.live.signals.needs_you != 0;
