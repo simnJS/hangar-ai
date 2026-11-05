@@ -251,6 +251,11 @@ impl WorkerPort for World {
         &self.starting
     }
 
+    // The machine's own ports are not the tests' business.
+    fn port_free(&self, _port: u32) -> bool {
+        true
+    }
+
     fn journal(&self, workspace_id: &str) -> Vec<JournalEntry> {
         self.journal
             .lock()
@@ -861,7 +866,7 @@ async fn gives_each_worker_a_block_of_ports_no_pane_of_any_workspace_has() {
         [json!(PORT_POOL_START + 20), json!(PORT_POOL_START + 40)]
     );
     assert_eq!(
-        allocate_port_base(&app.state().workspaces, []),
+        allocate_port_base(&app.state().workspaces, [], |_| true),
         Some(PORT_POOL_START + 60)
     );
     // A block another pane overlaps is skipped too, aligned or not.
@@ -872,7 +877,10 @@ async fn gives_each_worker_a_block_of_ports_no_pane_of_any_workspace_has() {
         }],
         ..Workspace::default()
     };
-    assert_eq!(allocate_port_base(&[odd], []), Some(PORT_POOL_START + 40));
+    assert_eq!(
+        allocate_port_base(&[odd], [], |_| true),
+        Some(PORT_POOL_START + 40)
+    );
 }
 
 /// Hangar sets no limit on how many workers run at once: the orchestrator
@@ -1925,4 +1933,49 @@ fn sanitizes_branch_names_and_places_worktrees_beside_the_checkout() {
         "/home/me/shop-worktrees/hangar-x"
     );
     assert_eq!(worktree_folder(REPO, "a b"), sibling("a-b"));
+}
+
+/// Two workspaces draw from one pool: a block held in one is never handed to
+/// the other.
+#[test]
+fn two_workspaces_never_get_the_same_block() {
+    let mut taken: Vec<Workspace> = Vec::new();
+    let mut seen = HashSet::new();
+    for index in 0..4 {
+        let base = allocate_port_base(&taken, [], |_| true).unwrap();
+        assert!(seen.insert(base), "block {base} handed out twice");
+        // Alternate the workspace that holds it.
+        if taken.len() < 2 {
+            taken.push(Workspace::default());
+        }
+        taken[index % 2].panes.push(Pane {
+            port_base: Some(base),
+            ..shell(&format!("p{index}"), "p")
+        });
+    }
+    assert_eq!(seen.len(), 4);
+}
+
+/// A block with one port listened on by another process is skipped, and
+/// handed out again once the port is free.
+#[test]
+fn a_block_with_a_busy_port_is_skipped() {
+    let listener = (PORT_POOL_START..=PORT_POOL_END)
+        .step_by(PORT_COUNT as usize)
+        .find_map(|base| {
+            // A port in the middle of the block, on every interface.
+            let port = u16::try_from(base + 7).unwrap();
+            std::net::TcpListener::bind(("0.0.0.0", port))
+                .ok()
+                .map(|listener| (base, listener))
+        })
+        .expect("a free port in the pool");
+    let (base, listener) = listener;
+    let busy = base + 7;
+    // The real probe sees it; the block before it is not forced free.
+    assert!(!port_is_free(busy));
+    let granted = allocate_port_base(&[], [], port_is_free).unwrap();
+    assert!(!(granted..granted + PORT_COUNT).contains(&busy));
+    drop(listener);
+    assert!(port_is_free(busy));
 }
