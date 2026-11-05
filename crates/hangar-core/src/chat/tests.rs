@@ -130,7 +130,7 @@ fn append(path: &Path, text: &str) {
 
 fn read(
     path: &Path,
-    cache: &mut HashMap<PathBuf, Transcript>,
+    cache: &mut Option<Transcript>,
     before: Option<u64>,
     limit: usize,
 ) -> ChatPage {
@@ -855,7 +855,7 @@ fn pages_go_back_by_cursor_until_the_first_item() {
         .map(|n| said(&format!("a{n:02}"), n, &format!("message {n}")))
         .collect();
     write_lines(&path, &lines);
-    let mut cache = HashMap::new();
+    let mut cache = None;
 
     let newest = read(&path, &mut cache, None, 10);
     assert_eq!(ids(&newest.items).first(), Some(&"a15"));
@@ -929,12 +929,12 @@ fn a_large_transcript_is_read_from_its_end_and_further_back_on_demand() {
     ]);
     write_lines(&path, &lines);
     let len = fs::metadata(&path).unwrap().len();
-    let mut cache = HashMap::new();
+    let mut cache = None;
 
     let newest = read(&path, &mut cache, None, 2);
     assert_eq!(ids(&newest.items), ["u2", "a3"]);
     assert!(newest.older);
-    let transcript = &cache[&path];
+    let transcript = cache.as_ref().unwrap();
     assert!(transcript.start > 0, "only the end was read");
     assert!(len - transcript.start <= SPAN_BYTES);
 
@@ -945,7 +945,7 @@ fn a_large_transcript_is_read_from_its_end_and_further_back_on_demand() {
     let (_, _, _, result, state) = action(&back.items[1]);
     assert_eq!(result.map(|r| r.text.as_str()), Some("Finished"));
     assert_eq!(state, CallState::Done);
-    assert_eq!(cache[&path].start, 0);
+    assert_eq!(cache.as_ref().unwrap().start, 0);
 }
 
 #[test]
@@ -968,7 +968,7 @@ fn a_line_longer_than_a_span_is_read_whole_going_back() {
         said("a3", 6, "Welcome."),
     ];
     write_lines(&path, &lines);
-    let mut cache = HashMap::new();
+    let mut cache = None;
     let newest = read(&path, &mut cache, None, 2);
     assert_eq!(ids(&newest.items), ["u2", "a3"]);
     let cursor = newest.cursor.unwrap().parse::<u64>().unwrap();
@@ -996,7 +996,7 @@ fn a_call_in_an_older_span_without_a_result_was_left_behind() {
     }
     lines.extend([person("u1", 2, "Hello?"), said("a2", 3, "Here.")]);
     write_lines(&path, &lines);
-    let mut cache = HashMap::new();
+    let mut cache = None;
     let newest = read(&path, &mut cache, None, 1);
     let cursor = newest.cursor.unwrap().parse::<u64>().unwrap();
     let back = read(&path, &mut cache, Some(cursor), 10);
@@ -1009,7 +1009,7 @@ fn a_call_in_an_older_span_without_a_result_was_left_behind() {
 fn a_growing_file_is_read_incrementally() {
     let path = temp_path("growing");
     write_lines(&path, &[person("u1", 1, "Run the tests")]);
-    let mut cache = HashMap::new();
+    let mut cache = None;
     assert_eq!(ids(&read(&path, &mut cache, None, 60).items), ["u1"]);
 
     append(
@@ -1031,14 +1031,14 @@ fn a_growing_file_is_read_incrementally() {
         running.open_call.as_ref().map(|c| c.title.as_str()),
         Some("Ran pnpm test")
     );
-    let start = cache[&path].start;
+    let start = cache.as_ref().unwrap().start;
 
     // The result mid-write: nothing changes until its newline lands.
     let result = tool_result("r1", 3, "toolu_1", json!("12 passed"), false);
     append(&path, &result[..40]);
     let mid = read(&path, &mut cache, None, 60);
     assert_eq!(action(&mid.items[1]).4, CallState::Running);
-    let parsed = cache[&path].end;
+    let parsed = cache.as_ref().unwrap().end;
     assert!(parsed < fs::metadata(&path).unwrap().len());
 
     append(
@@ -1050,15 +1050,18 @@ fn a_growing_file_is_read_incrementally() {
     assert_eq!(action(&done.items[1]).4, CallState::Done);
     assert_eq!(done.open_call, None);
     // Read from where the last look stopped: the span only grew forward.
-    assert_eq!(cache[&path].start, start);
-    assert_eq!(cache[&path].end, fs::metadata(&path).unwrap().len());
+    assert_eq!(cache.as_ref().unwrap().start, start);
+    assert_eq!(
+        cache.as_ref().unwrap().end,
+        fs::metadata(&path).unwrap().len()
+    );
 }
 
 #[test]
 fn a_rewritten_file_is_read_again() {
     let path = temp_path("rewritten");
     write_lines(&path, &[said("a1", 1, "one"), said("a2", 2, "two")]);
-    let mut cache = HashMap::new();
+    let mut cache = None;
     assert_eq!(ids(&read(&path, &mut cache, None, 60).items), ["a1", "a2"]);
     write_lines(&path, &[said("b1", 3, "fresh")]);
     assert_eq!(ids(&read(&path, &mut cache, None, 60).items), ["b1"]);
@@ -1067,32 +1070,41 @@ fn a_rewritten_file_is_read_again() {
 #[test]
 fn a_missing_file_is_no_page() {
     let path = temp_path("missing").with_file_name("nothing-here.jsonl");
-    let mut cache = HashMap::new();
+    let mut cache = None;
     assert_eq!(page_of(&path, &mut cache, None, 60).unwrap(), None);
-    assert!(cache.is_empty());
+    assert!(cache.is_none());
 }
 
 #[test]
 fn the_cache_keeps_the_most_recently_asked_transcripts() {
-    let mut cache = HashMap::new();
+    let mut slots = HashMap::new();
     for n in 0..(CACHED as u64 + 2) {
-        let path = PathBuf::from(format!("t{n}.jsonl"));
-        cache.insert(
-            path,
-            Transcript {
-                len: 0,
-                modified: None,
-                start: 0,
-                end: 0,
-                thread: Thread::default(),
-                used: n,
-            },
-        );
+        let slot = Slot::default();
+        slot.used.store(n, Ordering::Relaxed);
+        slots.insert(PathBuf::from(format!("t{n}.jsonl")), Arc::new(slot));
     }
-    evict(&mut cache);
-    assert_eq!(cache.len(), CACHED);
-    assert!(!cache.contains_key(Path::new("t0.jsonl")));
-    assert!(!cache.contains_key(Path::new("t1.jsonl")));
+    evict(&mut slots);
+    assert_eq!(slots.len(), CACHED);
+    assert!(!slots.contains_key(Path::new("t0.jsonl")));
+    assert!(!slots.contains_key(Path::new("t1.jsonl")));
+}
+
+#[test]
+fn two_transcripts_do_not_share_a_lock() {
+    let cache = Cache::default();
+    let (a, b) = (Path::new("a.jsonl"), Path::new("b.jsonl"));
+    let first = cache.slot(a).unwrap();
+    // One transcript's reader holds its own lock across its I/O...
+    let reading = first.transcript.lock().unwrap();
+    // ...and neither the map nor another transcript's slot waits for it.
+    let second = cache.slot(b).unwrap();
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(second.transcript.try_lock().is_ok());
+    assert!(cache.slots.try_lock().is_ok());
+    // The same transcript is the same slot, so its own readers do queue.
+    assert!(Arc::ptr_eq(&first, &cache.slot(a).unwrap()));
+    assert!(first.transcript.try_lock().is_err());
+    drop(reading);
 }
 
 #[test]
