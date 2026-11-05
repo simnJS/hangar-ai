@@ -62,7 +62,18 @@ pub struct State {
     switcher: switcher::Menu,
     page: settings_page::Page,
     writes: usage::Writes,
+    /// The newest `accounts_list` applied (`LISTS`): an older read that
+    /// finishes last does not overwrite a newer one.
+    listed: u64,
+    /// The usage file has been read. A save before that would write only
+    /// what this run has seen, over the other accounts' figures on disk.
+    usage_read: bool,
+    /// A save was asked before the file was read: done once it has been.
+    save_after_read: bool,
 }
+
+/// Numbers every `accounts_list` asked for, in the order asked.
+static LISTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// What logging in on a separate profile does on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +103,8 @@ pub struct Live {
 pub enum Msg {
     /// The app has started: read the accounts and the usage.
     Started,
-    Listed(Vec<ClaudeAccount>),
+    /// An `accounts_list` answered, numbered as it was asked (`LISTS`).
+    Listed(u64, Vec<ClaudeAccount>),
     SupportRead(Support),
     UsageRead(Usage),
     UsageSaved,
@@ -157,8 +169,8 @@ fn now_ms() -> u64 {
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Started => Task::batch([refresh(), read_support(), read_usage(sv)]),
-        Msg::Listed(accounts) => {
-            m.live.accounts.accounts = Some(accounts);
+        Msg::Listed(seq, accounts) => {
+            listed(st, m, seq, accounts);
             Task::none()
         }
         Msg::SupportRead(support) => {
@@ -167,8 +179,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         }
         Msg::UsageRead(read) => {
             // What arrived while the file was being read is newer than it.
-            let fresh = std::mem::take(&mut m.live.accounts.usage);
-            m.live.accounts.usage = merge_usage(&read, &fresh);
+            if usage_arrived(st, m, read) {
+                return save_usage(st, m, sv);
+            }
             Task::none()
         }
         Msg::UsageSaved => {
@@ -246,17 +259,44 @@ fn switcher_step(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
     }
 }
 
+/// Keeps an `accounts_list` answer unless a newer one is already shown.
+fn listed(st: &mut State, m: &mut Model, seq: u64, accounts: Vec<ClaudeAccount>) {
+    if seq > st.listed {
+        st.listed = seq;
+        m.live.accounts.accounts = Some(accounts);
+    }
+}
+
+/// The usage file was read: merged under what arrived meanwhile, which is
+/// newer. Returns whether a save held back until now is due.
+fn usage_arrived(st: &mut State, m: &mut Model, read: Usage) -> bool {
+    let fresh = std::mem::take(&mut m.live.accounts.usage);
+    m.live.accounts.usage = merge_usage(&read, &fresh);
+    st.usage_read = true;
+    std::mem::take(&mut st.save_after_read)
+}
+
+/// Whether figures may be written now; if not (the file is not read yet),
+/// the save is remembered for when it is.
+fn may_save(st: &mut State) -> bool {
+    if !st.usage_read {
+        st.save_after_read = true;
+    }
+    st.usage_read
+}
+
 /// The accounts, read again: at start and after every `accounts:changed`.
 /// They are small files on disk, so off the UI thread.
 fn refresh() -> Task<Message> {
+    let seq = LISTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Task::perform(
         async {
             tokio::task::spawn_blocking(hangar_core::accounts::accounts_list)
                 .await
                 .ok()
         },
-        |read| match read {
-            Some(accounts) => Message::Accounts(Msg::Listed(accounts)),
+        move |read| match read {
+            Some(accounts) => Message::Accounts(Msg::Listed(seq, accounts)),
             None => Message::Noop,
         },
     )
@@ -286,7 +326,8 @@ fn read_support() -> Task<Message> {
 
 fn read_usage(sv: &Services) -> Task<Message> {
     let Some(file) = usage::path(sv.core().host()) else {
-        return Task::none();
+        // No file to read, so nothing on disk to overwrite either.
+        return Task::done(Message::Accounts(Msg::UsageRead(Usage::default())));
     };
     Task::perform(
         async move {
@@ -301,6 +342,9 @@ fn read_usage(sv: &Services) -> Task<Message> {
 /// Writes the figures, unless a write is running: it then writes again, with
 /// the latest, when it ends.
 fn save_usage(st: &mut State, m: &Model, sv: &Services) -> Task<Message> {
+    if !may_save(st) {
+        return Task::none();
+    }
     if st.writes.wanted() {
         write_usage(m, sv)
     } else {
@@ -315,7 +359,10 @@ fn write_usage(m: &Model, sv: &Services) -> Task<Message> {
     let figures = m.live.accounts.usage.clone();
     Task::perform(
         async move {
-            let _ = tokio::task::spawn_blocking(move || usage::save(&file, &figures)).await;
+            let saved = tokio::task::spawn_blocking(move || usage::save(&file, &figures)).await;
+            if let Ok(Err(err)) = saved {
+                eprintln!("accounts: could not save the usage figures: {err}");
+            }
         },
         |()| Message::Accounts(Msg::UsageSaved),
     )

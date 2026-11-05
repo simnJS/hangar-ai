@@ -149,9 +149,11 @@ pub fn launch_account(
 /// ([`usage_by_account`](super::switch::usage_by_account)).
 ///
 /// It lives in `Model.live.accounts.launched`: P5 notes the account when it
-/// launches a Claude Code pane (`note(pane, Some(account))`) and forgets it
-/// when the pane ends (`note(pane, None)`). It is app state, so no
-/// subscription is needed: a view reads it when it is drawn.
+/// launches a Claude Code pane (`note(pane, Some(account))`, in
+/// `panes::controller`) and forgets it when the pane's shell exits, or the
+/// pane is closed, restarted or put to sleep (`note(pane, None)`, same file).
+/// It is app state, so no subscription is needed: a view reads it when it is
+/// drawn.
 #[derive(Debug, Default, Clone)]
 pub struct Launched(HashMap<PaneId, AccountId>);
 
@@ -159,7 +161,6 @@ impl Launched {
     /// `account` `None`: the pane no longer runs Claude Code on any account.
     /// Returns whether anything changed. Called by P5 as it launches and
     /// ends Claude Code panes.
-    #[allow(dead_code)]
     pub fn note(&mut self, pane: &str, account: Option<&str>) -> bool {
         match account {
             None => self.0.remove(pane).is_some(),

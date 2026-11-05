@@ -464,6 +464,7 @@ fn a_workspace_file_makes_its_first_existing_folder_the_main_one() {
     let mut m = on_top();
     let mut st = State::default();
     st.folder.suggestion = Some("/work/My app.code-workspace".into());
+    st.folder.reading = Some(7);
     let root = |name: &str, path: &str, exists: bool| Root {
         name: name.into(),
         path: path.into(),
@@ -473,6 +474,7 @@ fn a_workspace_file_makes_its_first_existing_folder_the_main_one() {
         &mut st,
         &mut m,
         Msg::FileRead {
+            read: 7,
             path: "/work/My app.code-workspace".into(),
             result: Ok(vec![
                 root("gone", "/work/gone", false),
@@ -497,10 +499,12 @@ fn a_workspace_file_that_cannot_be_read_says_so_and_keeps_the_folder() {
     let mut m = on_top();
     let mut st = State::default();
     st.folder.cwd = "/work".into();
+    st.folder.reading = Some(3);
     let _ = form(
         &mut st,
         &mut m,
         Msg::FileRead {
+            read: 3,
             path: "/work/broken.code-workspace".into(),
             result: Err("no \"folders\" list".into()),
         },
@@ -887,4 +891,161 @@ mod bar {
         let mut ui = h.show(view(&measured, h.ctx()));
         assert!(ui.find("Receiving objects 45 %").is_ok());
     }
+}
+
+// ── WSD-01, WSD-02, WSD-03: stale answers and a Stop that waits ────────
+
+fn roots_of(path: &str) -> Result<Vec<Root>, String> {
+    Ok(vec![Root {
+        name: "a".into(),
+        path: path.into(),
+        exists: true,
+    }])
+}
+
+#[test]
+fn a_suggestion_for_a_folder_since_left_is_not_shown() {
+    let mut m = on_top();
+    let mut st = State::default();
+    let _ = form(&mut st, &mut m, Msg::Picked(Some("/share/a".into())));
+    let _ = form(&mut st, &mut m, Msg::Picked(Some("/share/b".into())));
+    // A's answer arrives late.
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::Suggestion {
+            for_cwd: "/share/a".into(),
+            found: Some("/share/a/a.code-workspace".into()),
+        },
+    );
+    assert!(st.folder.suggestion.is_none());
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::Suggestion {
+            for_cwd: "/share/b".into(),
+            found: Some("/share/b/b.code-workspace".into()),
+        },
+    );
+    assert_eq!(
+        st.folder.suggestion.as_deref(),
+        Some("/share/b/b.code-workspace")
+    );
+}
+
+#[test]
+fn a_workspace_file_read_for_an_older_folder_is_not_applied() {
+    let mut m = on_top();
+    let mut st = State::default();
+    let _ = form(&mut st, &mut m, Msg::Picked(Some("/share/a".into())));
+    st.folder.suggestion = Some("/share/a/a.code-workspace".into());
+    let _ = form(&mut st, &mut m, Msg::UseSuggestion);
+    let read = st.folder.reading.expect("a read is pending");
+    // The person moves on to B before the file is read.
+    let _ = form(&mut st, &mut m, Msg::Picked(Some("/share/b".into())));
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::FileRead {
+            read,
+            path: "/share/a/a.code-workspace".into(),
+            result: roots_of("/share/a"),
+        },
+    );
+    assert_eq!(st.folder.cwd, "/share/b");
+    assert!(st.folder.roots.is_empty());
+}
+
+#[test]
+fn a_workspace_file_read_does_not_fill_a_form_reset_since() {
+    let mut m = on_top();
+    let mut st = State::default();
+    let _ = form(&mut st, &mut m, Msg::Picked(Some("/share/a".into())));
+    st.folder.suggestion = Some("/share/a/a.code-workspace".into());
+    let _ = form(&mut st, &mut m, Msg::UseSuggestion);
+    let read = st.folder.reading.expect("a read is pending");
+    // Closed and opened again.
+    opened(&mut st);
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::FileRead {
+            read,
+            path: "/share/a/a.code-workspace".into(),
+            result: roots_of("/share/a"),
+        },
+    );
+    assert_eq!(st.folder.cwd, "");
+    assert_eq!(st.name, "");
+    // And the next read is not mistaken for the old one.
+    st.folder.suggestion = Some("/share/a/a.code-workspace".into());
+    let _ = form(&mut st, &mut m, Msg::UseSuggestion);
+    assert_ne!(st.folder.reading, Some(read));
+}
+
+#[test]
+fn typing_a_folder_drops_the_loaded_files_roots() {
+    let mut m = on_top();
+    let mut st = State::default();
+    st.folder.reading = Some(1);
+    let _ = form(
+        &mut st,
+        &mut m,
+        Msg::FileRead {
+            read: 1,
+            path: "/work/x.code-workspace".into(),
+            result: roots_of("/work/x"),
+        },
+    );
+    assert_eq!(st.folder.roots.len(), 1);
+    let _ = form(&mut st, &mut m, Msg::Cwd("/elsewhere".into()));
+    assert!(st.folder.roots.is_empty());
+}
+
+#[tokio::test]
+async fn a_stop_waits_for_the_job_however_long_the_checks_take() {
+    let ended = Arc::new(AtomicBool::new(false));
+    let mut asked = 0;
+    // The job only exists on the 40th ask: 8 s at the real pace, well past
+    // the 3 s the Stop used to give up after.
+    let cancelled = cancel_until("job".into(), ended, Duration::from_millis(1), |job| {
+        assert_eq!(job, "job");
+        asked += 1;
+        asked >= 40
+    })
+    .await;
+    assert!(cancelled);
+    assert_eq!(asked, 40);
+}
+
+#[tokio::test]
+async fn a_stop_ends_with_the_flow() {
+    let ended = Arc::new(AtomicBool::new(false));
+    let flag = ended.clone();
+    let mut asked = 0;
+    let cancelled = cancel_until("job".into(), ended, Duration::from_millis(1), |_| {
+        asked += 1;
+        if asked == 5 {
+            // The flow failed before any clone started.
+            flag.store(true, Ordering::SeqCst);
+        }
+        false
+    })
+    .await;
+    assert!(!cancelled);
+    assert_eq!(asked, 5);
+}
+
+#[test]
+fn the_end_of_the_flow_releases_its_stop() {
+    let mut m = on_top();
+    let mut st = State::default();
+    let ended = Arc::new(AtomicBool::new(false));
+    st.git.job = Some("job".into());
+    st.git.ended = Some(ended.clone());
+    st.git.running = true;
+    let t = Translator::new(m.locale());
+    let _ = git_done(&mut st, &mut m, t, "job", created(false));
+    assert!(ended.load(Ordering::SeqCst));
+    assert!(st.git.ended.is_none());
 }

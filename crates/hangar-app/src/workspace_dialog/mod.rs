@@ -25,6 +25,8 @@ mod tests;
 mod view;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use hangar_i18n::{Key, Translator, args};
@@ -51,9 +53,15 @@ use hooks::{HookField, HooksDraft};
 
 /// The pause in the typing after which an address is read.
 const PARSE_DELAY: Duration = Duration::from_millis(250);
-/// How long a cancel is retried while the clone has not started yet.
-const STOP_ATTEMPTS: u32 = 15;
+/// How often a cancel is asked again while the clone has not started yet. It
+/// is asked until it lands or the flow ends: the job only exists once the
+/// ownership checks (`gh api`, with no short timeout) are through, and a Stop
+/// given up on before that would let the clone go ahead.
 const STOP_RETRY: Duration = Duration::from_millis(200);
+
+/// Tokens of `.code-workspace` reads, unique for the whole run: a `State` reset
+/// by the dialog reopening must not hand an old read's token out again.
+static READS: AtomicU64 = AtomicU64::new(1);
 
 /// What the dialog creates a workspace from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -71,6 +79,9 @@ struct Folder {
     roots: Vec<Root>,
     /// A workspace file found next to the folder that was just picked.
     suggestion: Option<String>,
+    /// The `.code-workspace` read whose answer the form waits for. A read for
+    /// a folder since changed, or for a form since reset, is not applied.
+    reading: Option<u64>,
     file_error: Option<String>,
     shell_id: Option<String>,
     layout: u8,
@@ -87,6 +98,7 @@ impl Default for Folder {
             cwd: String::new(),
             roots: Vec::new(),
             suggestion: None,
+            reading: None,
             file_error: None,
             shell_id: None,
             layout: folder::DEFAULT_LAYOUT,
@@ -120,6 +132,9 @@ struct Git {
     error: Option<String>,
     /// The job the dialog follows and cancels.
     job: Option<String>,
+    /// Raised when that job's flow has ended, which is what stops a Stop
+    /// still waiting for the job to exist.
+    ended: Option<Arc<AtomicBool>>,
     cancelled: bool,
     /// When the clone began and the last tick since: the sweep of the
     /// indeterminate bar is the difference.
@@ -197,11 +212,16 @@ pub enum Msg {
     Picked(Option<PathBuf>),
     BrowseFile,
     FilePicked(Option<PathBuf>),
-    /// `find_code_workspace` answered for the folder just picked.
-    Suggestion(Option<String>),
+    /// `find_code_workspace` answered for the folder `for_cwd`.
+    Suggestion {
+        for_cwd: String,
+        found: Option<String>,
+    },
     UseSuggestion,
     DismissSuggestion,
+    /// A `.code-workspace` was read, for the read numbered `read`.
     FileRead {
+        read: u64,
         path: String,
         result: Result<Vec<Root>, String>,
     },
@@ -343,6 +363,12 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         // ── the folder half ──
         Msg::Cwd(cwd) => {
             st.folder.cwd = cwd;
+            // A folder typed by hand is not the loaded file's any more: its
+            // other roots would go out with a workspace they are not part of,
+            // and its pending read or suggestion is for another folder.
+            st.folder.roots.clear();
+            st.folder.reading = None;
+            st.folder.suggestion = None;
             Task::none()
         }
         Msg::Browse => Task::perform(
@@ -356,6 +382,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             st.folder.roots.clear();
             st.folder.file_error = None;
             st.folder.suggestion = None;
+            st.folder.reading = None;
             // Only auto-fill the name while the user has not typed their own.
             if st.name.trim().is_empty() {
                 st.name = folder::basename(&selected);
@@ -363,6 +390,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             // A folder holding a workspace file is usually meant to be opened
             // through it — usually, not always, so this is offered rather
             // than applied.
+            let for_cwd = selected.clone();
             Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || {
@@ -372,7 +400,12 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                     .ok()
                     .flatten()
                 },
-                |found| Message::WorkspaceDialog(Msg::Suggestion(found)),
+                move |found| {
+                    Message::WorkspaceDialog(Msg::Suggestion {
+                        for_cwd: for_cwd.clone(),
+                        found,
+                    })
+                },
             )
         }
         Msg::BrowseFile => Task::perform(
@@ -386,20 +419,28 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             |picked| Message::WorkspaceDialog(Msg::FilePicked(picked)),
         ),
         Msg::FilePicked(None) => Task::none(),
-        Msg::FilePicked(Some(path)) => read_workspace_file(path.to_string_lossy().into_owned()),
-        Msg::Suggestion(found) => {
-            st.folder.suggestion = found;
+        Msg::FilePicked(Some(path)) => read_workspace_file(st, path.to_string_lossy().into_owned()),
+        Msg::Suggestion { for_cwd, found } => {
+            // Late, for a folder the form has moved on from (or a form reset
+            // since): it would offer another folder's file for this one.
+            if for_cwd == st.folder.cwd {
+                st.folder.suggestion = found;
+            }
             Task::none()
         }
         Msg::UseSuggestion => match st.folder.suggestion.clone() {
-            Some(path) => read_workspace_file(path),
+            Some(path) => read_workspace_file(st, path),
             None => Task::none(),
         },
         Msg::DismissSuggestion => {
             st.folder.suggestion = None;
             Task::none()
         }
-        Msg::FileRead { path, result } => {
+        Msg::FileRead { read, path, result } => {
+            if st.folder.reading != Some(read) {
+                return Task::none();
+            }
+            st.folder.reading = None;
             match result {
                 Err(_) => st.folder.file_error = Some(path),
                 Ok(found) => {
@@ -559,8 +600,11 @@ fn schedule_parse(st: &mut State) -> Task<Message> {
     })
 }
 
-/// Splits a `.code-workspace` into the folder to open in and the rest.
-fn read_workspace_file(path: String) -> Task<Message> {
+/// Splits a `.code-workspace` into the folder to open in and the rest. Only
+/// the latest read is applied (`Folder::reading`).
+fn read_workspace_file(st: &mut State, path: String) -> Task<Message> {
+    let read = READS.fetch_add(1, Ordering::Relaxed);
+    st.folder.reading = Some(read);
     let file = path.clone();
     Task::perform(
         async move {
@@ -580,7 +624,7 @@ fn read_workspace_file(path: String) -> Task<Message> {
             .map_err(|err| err.to_string())
             .and_then(|read| read)
         },
-        move |result| Message::WorkspaceDialog(Msg::FileRead { path, result }),
+        move |result| Message::WorkspaceDialog(Msg::FileRead { read, path, result }),
     )
 }
 
@@ -626,6 +670,7 @@ fn start_git(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     }
     let job = new_clone_job_id();
     st.git.job = Some(job.clone());
+    st.git.ended = Some(Arc::new(AtomicBool::new(false)));
     st.git.cancelled = false;
     st.git.error = None;
     st.git.progress = None;
@@ -662,6 +707,9 @@ fn git_done(
         return Task::none();
     }
     st.git.job = None;
+    if let Some(ended) = st.git.ended.take() {
+        ended.store(true, Ordering::SeqCst);
+    }
     st.git.running = false;
     let visible = on_top(m);
     match outcome {
@@ -716,23 +764,42 @@ fn git_done(
 }
 
 /// Stops the clone. It may not have started yet (the address is being
-/// checked): ask again briefly.
+/// checked): asked again until it lands or the flow ends.
 fn stop_clone(st: &mut State) -> Task<Message> {
     st.git.cancelled = true;
     let Some(job) = st.git.job.clone() else {
         return Task::none();
     };
+    let ended = st
+        .git
+        .ended
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     Task::perform(
-        async move {
-            for _ in 0..STOP_ATTEMPTS {
-                if hangar_core::git_clone::git_clone_cancel(job.clone()) {
-                    return;
-                }
-                tokio::time::sleep(STOP_RETRY).await;
-            }
-        },
-        |()| Message::Noop,
+        cancel_until(job, ended, STOP_RETRY, |job| {
+            hangar_core::git_clone::git_clone_cancel(job.to_string())
+        }),
+        |_| Message::Noop,
     )
+}
+
+/// Asks `cancel` for `job` every `retry` until it says it cancelled it
+/// (`true`) or the flow has `ended` (`false`).
+async fn cancel_until(
+    job: String,
+    ended: Arc<AtomicBool>,
+    retry: Duration,
+    mut cancel: impl FnMut(&str) -> bool,
+) -> bool {
+    loop {
+        if cancel(&job) {
+            return true;
+        }
+        if ended.load(Ordering::SeqCst) {
+            return false;
+        }
+        tokio::time::sleep(retry).await;
+    }
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
