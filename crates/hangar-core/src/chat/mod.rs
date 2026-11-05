@@ -18,7 +18,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use serde::Serialize;
@@ -172,8 +173,6 @@ struct Transcript {
     start: u64,
     end: u64,
     thread: Thread,
-    /// When it was last asked for, to drop the coldest past `CACHED`.
-    used: u64,
 }
 
 impl Transcript {
@@ -187,13 +186,42 @@ impl Transcript {
             start: end,
             end,
             thread: Thread::default(),
-            used: 0,
         })
     }
 }
 
-static TRANSCRIPTS: OnceLock<Mutex<HashMap<PathBuf, Transcript>>> = OnceLock::new();
-static TICK: OnceLock<Mutex<u64>> = OnceLock::new();
+/// One transcript's place in the cache. Its own lock covers the file reads,
+/// so a slow first contact with one transcript holds nobody else.
+#[derive(Default)]
+struct Slot {
+    /// `None` until read, and again once the file is gone.
+    transcript: Mutex<Option<Transcript>>,
+    /// When it was last asked for, to drop the coldest past `CACHED`.
+    used: AtomicU64,
+}
+
+#[derive(Default)]
+struct Cache {
+    /// Locked only to look a slot up, insert or evict: never across I/O.
+    slots: Mutex<HashMap<PathBuf, Arc<Slot>>>,
+    tick: AtomicU64,
+}
+
+static TRANSCRIPTS: OnceLock<Cache> = OnceLock::new();
+
+impl Cache {
+    /// The slot of `path`, created if new, marked as just used.
+    fn slot(&self, path: &Path) -> Result<Arc<Slot>, String> {
+        let mut slots = self.slots.lock().map_err(|_| "chat cache poisoned")?;
+        let slot = slots.entry(path.to_path_buf()).or_default().clone();
+        slot.used.store(
+            self.tick.fetch_add(1, Ordering::Relaxed) + 1,
+            Ordering::Relaxed,
+        );
+        evict(&mut slots);
+        Ok(slot)
+    }
+}
 
 fn read_range(path: &Path, from: u64, to: u64) -> std::io::Result<Vec<u8>> {
     let mut file = fs::File::open(path)?;
@@ -293,16 +321,17 @@ fn modified(meta: &fs::Metadata) -> Option<SystemTime> {
 }
 
 /// One page of the transcript at `path`; `None` when there is no such file.
+/// `slot` holds what was parsed of it so far.
 fn page_of(
     path: &Path,
-    transcripts: &mut HashMap<PathBuf, Transcript>,
+    slot: &mut Option<Transcript>,
     before: Option<u64>,
     limit: usize,
 ) -> std::io::Result<Option<ChatPage>> {
     let meta = match fs::metadata(path) {
         Ok(meta) => meta,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            transcripts.remove(path);
+            *slot = None;
             return Ok(None);
         }
         Err(err) => return Err(err),
@@ -312,16 +341,16 @@ fn page_of(
 
     // Shorter than what was read, or rewritten in place at the same size:
     // the file is not the one parsed, so the parse starts over.
-    let stale = transcripts
-        .get(path)
+    let stale = slot
+        .as_ref()
         .is_some_and(|t| len < t.end || (len == t.len && time != t.modified));
     if stale {
-        transcripts.remove(path);
+        *slot = None;
     }
-    if !transcripts.contains_key(path) {
-        transcripts.insert(path.to_path_buf(), Transcript::at_end(path, len)?);
+    if slot.is_none() {
+        *slot = Some(Transcript::at_end(path, len)?);
     }
-    let transcript = transcripts.get_mut(path).expect("inserted above");
+    let transcript = slot.as_mut().expect("filled above");
 
     if len != transcript.len || time != transcript.modified {
         read_new(path, transcript, len)?;
@@ -341,15 +370,16 @@ fn page_of(
     }))
 }
 
-/// Keeps at most `CACHED` transcripts parsed, dropping the coldest.
-fn evict(transcripts: &mut HashMap<PathBuf, Transcript>) {
-    while transcripts.len() > CACHED {
-        let coldest = transcripts
+/// Keeps at most `CACHED` slots, dropping the coldest. A slot being read
+/// stays alive through its `Arc` until its reader is done.
+fn evict(slots: &mut HashMap<PathBuf, Arc<Slot>>) {
+    while slots.len() > CACHED {
+        let coldest = slots
             .iter()
-            .min_by_key(|(_, t)| t.used)
+            .min_by_key(|(_, slot)| slot.used.load(Ordering::Relaxed))
             .map(|(path, _)| path.clone());
         match coldest {
-            Some(path) => transcripts.remove(&path),
+            Some(path) => slots.remove(&path),
             None => break,
         };
     }
@@ -376,16 +406,11 @@ fn chat_of(
     let Some(path) = crate::context::claude_transcript(cwd, session_id) else {
         return Ok(None);
     };
-    let transcripts = TRANSCRIPTS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut transcripts = transcripts.lock().map_err(|_| "chat cache poisoned")?;
-    let page = page_of(&path, &mut transcripts, before, limit).map_err(|err| err.to_string())?;
-    if let Some(transcript) = transcripts.get_mut(&path) {
-        let tick = TICK.get_or_init(|| Mutex::new(0));
-        let mut tick = tick.lock().map_err(|_| "chat cache poisoned")?;
-        *tick += 1;
-        transcript.used = *tick;
-    }
-    evict(&mut transcripts);
+    let cache = TRANSCRIPTS.get_or_init(Cache::default);
+    let slot = cache.slot(&path)?;
+    // Only this transcript's lock is held across the reads.
+    let mut transcript = slot.transcript.lock().map_err(|_| "chat cache poisoned")?;
+    let page = page_of(&path, &mut transcript, before, limit).map_err(|err| err.to_string())?;
     Ok(page)
 }
 
