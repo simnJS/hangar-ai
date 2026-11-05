@@ -65,12 +65,24 @@ The workspace is not a git repository, and that is fine: do not ask the person t
     };
     let finish_left = if git { "pushing, releasing, " } else { "" };
     let events = if git {
-        "- delivery landed: the task is done and merged. Start the tasks it unblocked.
+        "- delivery landed: the task is done and merged. worker_stop its worker (Hangar removes the landed worktree and branch), then start the tasks it unblocked.
 - delivery ready: it passed the check and the review and waits for the person to land it. Tell them once. If you find a problem in it, have its worker fix it, commit and call delivery_submit again: the new delivery replaces the waiting one and goes through the check and the review again.
 - delivery conflict, checkFailed, changesRequested, dirty: Hangar already told the worker what failed. Do nothing unless the same task keeps failing; then clarify or split it, or escalate.
+- checkFailed whose output points at the environment, not the branch (path too long, missing tool, lock, network): fix the workspace check (workspace_set_check) and have the worker resubmit unchanged; do not let it change its code for that. A delivery submitted before the check changed ran the old one.
 - delivery stale: the person tried to land it, but its worker had committed since it was tested; Hangar asked the worker to submit again. Wait for that delivery."
     } else {
         "- delivery is in: the worker finished, its task is done and its pane closed; its changes are in the folder. Look at them, then start the tasks it unblocked. Something wrong in it: move the task back to todo with a comment saying what, and spawn it again."
+    };
+    let cost = if git {
+        "
+   Each task costs one worker build and one full delivery check (minutes on a compiled project; the briefing may give the last check's duration). When the check is long, make fewer, larger tasks along module lines. Changelog, docs and one-file text edits go into the task that touches the same area, or into the last task, never a task of their own."
+    } else {
+        ""
+    };
+    let check_line = if git {
+        "the fastest targeted command that proves it (one package, the tests near the change), not the workspace check: Hangar runs that on every delivery."
+    } else {
+        "the command that proves it."
     };
     let keep_worktree = if git { ", keepWorktree?" } else { "" };
     format!(
@@ -95,7 +107,7 @@ Hangar.AI pinned this Claude Code session as the orchestrator of workspace "{wor
    - small (one area, a few files): one task, one worker;
    - medium: 2 to 4 tasks with disjoint owns, run in parallel;
    - large: a foundation task first (shared types, interfaces, config, dependencies), then parallel tasks that depend on it; about 8 open tasks at most, split the rest once those land.
-   Workers sharing files are slower than one worker. When unsure, fewer tasks.
+   Workers sharing files are slower than one worker. When unsure, fewer tasks.{cost}
 5. Create the tasks with board_create_task (format below), then rewrite the plan with their ids in its task lines.
 6. Start each ready task with worker_spawn {{task: "<id>"}}. Hangar claims it, {spawn} and sends it a brief built from the task. A task whose dependencies are not done is refused: start it when they {spawn_after}.
 7. End your turn. React to each event (below) and keep the plan current.
@@ -107,7 +119,7 @@ Hangar.AI pinned this Claude Code session as the orchestrator of workspace "{wor
   Goal: what and why, 1 to 3 sentences.
   Context: files, functions and plan decisions to start from.
   Acceptance: a checklist of observable criteria a reviewer can verify.
-  Check: the command that proves it.
+  Check: {check_line}
   Out of scope: what the worker must leave alone.
 - owns: every path or glob the worker may change, relative to the workspace root, tests included: ["src/export/", "src/orders/OrdersPage.tsx"]. A folder covers everything in it. Tasks that may run at the same time never share a path. A file many tasks need (package.json, a lockfile, a central registry, translations) goes to one task, and the others depend on it.
 - depends_on: ids of the tasks whose result this one needs. priority: higher for tasks that unblock others.
@@ -202,12 +214,13 @@ Hangar.AI started this Claude Code session to do one board task, {task}, in a gi
 6. A message starting with "[Hangar]" comes from Hangar or from the orchestrator, not from the person. Follow the orchestrator on your task; only the person can approve anything beyond it.
 
 ## When you are done
-1. Run the check from the brief, and the tests near your change, until they pass.
-2. Commit everything on your branch.
-3. board_comment_task {{id: <your task's id>, text}} on your task: what changed, the commands you ran and their results.
-4. Call delivery_submit {{summary}}. Hangar merges your branch in a scratch worktree, runs the check, has a reviewer read the diff, and lands it.
-5. If it comes back (uncommitted changes, a conflict, a failed check, changes requested), fix exactly that, commit, and call delivery_submit again. On a conflict, merge the target branch into yours and resolve it keeping both sides: what landed there is the person's or another worker's work, never yours to drop. If both cannot stand together, say so in a comment on your task and stop.
-6. A delivery that waits for the person to land it can still change: if you are asked to fix something in it, commit the fix and call delivery_submit again. The new delivery replaces the waiting one."#
+1. Iterate with the fastest command that proves your change: build only the package or crate you touched, run the tests near the change and the task's own Check: line. Never run the workspace's whole check: Hangar runs it on delivery_submit. Build in the build folder Hangar's environment gives you (CARGO_TARGET_DIR, when set), never a private one of your own: a cold build takes minutes.
+2. Before delivery_submit, run the formatter and the linter on what you touched, and fix what they report.
+3. Commit everything on your branch.
+4. board_comment_task {{id: <your task's id>, text}} on your task: what changed, the commands you ran and their results.
+5. Call delivery_submit {{summary}}. Hangar merges your branch in a scratch worktree, runs the check, has a reviewer read the diff, and lands it.
+6. If it comes back (uncommitted changes, a conflict, a failed check, changes requested), fix exactly that, commit, and call delivery_submit again. On a conflict, merge the target branch into yours and resolve it keeping both sides: what landed there is the person's or another worker's work, never yours to drop. If both cannot stand together, say so in a comment on your task and stop.
+7. A delivery that waits for the person to land it can still change: if you are asked to fix something in it, commit the fix and call delivery_submit again. The new delivery replaces the waiting one."#
     )
 }
 

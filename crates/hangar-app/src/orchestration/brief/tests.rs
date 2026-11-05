@@ -609,6 +609,64 @@ fn gives_it_its_task_its_files_its_check_and_its_ports() {
     assert!(!context.contains("Plan"));
 }
 
+/// Builds are the cost of a compiled project: the worker iterates cheaply and
+/// leaves the whole check to the delivery, which runs it anyway.
+#[test]
+fn tells_a_worker_to_iterate_cheaply_and_leave_the_whole_check_to_the_delivery() {
+    let system = build(&with_pane("w1")).unwrap().system;
+    for needed in [
+        "Iterate with the fastest command that proves your change",
+        "build only the package or crate you touched",
+        "Never run the workspace's whole check: Hangar runs it on delivery_submit",
+        "CARGO_TARGET_DIR, when set), never a private one of your own",
+        "run the formatter and the linter on what you touched",
+    ] {
+        assert!(system.contains(needed), "{needed}");
+    }
+    assert!(!system.contains("Run the check from the brief"));
+}
+
+/// Without git nobody else runs the check, so the worker still does.
+#[test]
+fn keeps_the_shared_folder_worker_running_the_check_itself() {
+    let mut inputs = with_pane("w1");
+    inputs.state.workspaces[0].panes[1].shared_folder = Some(true);
+    let system = build(&inputs).unwrap().system;
+    assert!(system.contains("Run the check from the brief, and the tests near your change"));
+    assert!(!system.contains("Never run the workspace's whole check"));
+}
+
+#[test]
+fn sizes_tasks_by_what_a_build_and_a_delivery_check_cost() {
+    let system = build(&setup()).unwrap().system;
+    for needed in [
+        "Each task costs one worker build and one full delivery check",
+        "the briefing may give the last check's duration",
+        "fewer, larger tasks along module lines",
+        "never a task of their own",
+        "Check: the fastest targeted command that proves it",
+        "not the workspace check: Hangar runs that on every delivery",
+        "worker_stop its worker (Hangar removes the landed worktree and branch)",
+        "checkFailed whose output points at the environment, not the branch",
+        "workspace_set_check",
+        "A delivery submitted before the check changed ran the old one",
+    ] {
+        assert!(system.contains(needed), "{needed}");
+    }
+}
+
+#[test]
+fn leaves_the_check_of_a_task_in_a_shared_folder_as_the_command_that_proves_it() {
+    let system = build(&Setup {
+        git: false,
+        ..setup()
+    })
+    .unwrap()
+    .system;
+    assert!(system.contains("Check: the command that proves it."));
+    assert!(!system.contains("delivery check"));
+}
+
 /* ── the plan document ─────────────────────────────────────────── */
 
 #[test]
