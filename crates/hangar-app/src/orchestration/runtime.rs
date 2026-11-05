@@ -142,6 +142,24 @@ struct Shared {
     /// Rung when a deadline may have moved closer (an event posted).
     wake: Notify,
     tickers: Mutex<Vec<Ticker>>,
+    /// The workspace folders whose worktrees were swept already.
+    swept: Mutex<std::collections::HashSet<String>>,
+}
+
+/// Every folder a pane runs in, in any workspace (a pane without a folder of
+/// its own runs in its workspace's), plus the workspaces' own folders: a
+/// worktree under one of them is in use.
+fn panes_folders(state: &AppState) -> Vec<String> {
+    let mut folders = Vec::new();
+    for ws in &state.workspaces {
+        folders.push(ws.cwd.clone());
+        folders.extend(ws.extra_roots.iter().cloned());
+        for pane in &ws.panes {
+            folders.push(pane.cwd.clone().unwrap_or_else(|| ws.cwd.clone()));
+        }
+    }
+    folders.retain(|folder| !folder.is_empty());
+    folders
 }
 
 /// The way into the runtime, cloned wherever it is needed.
@@ -172,6 +190,7 @@ pub fn start(services: Services) -> OrchestrationHandle {
             starting: Mutex::new(Starting::default()),
             wake: Notify::new(),
             tickers: Mutex::new(Vec::new()),
+            swept: Mutex::new(Default::default()),
         }),
         tx,
     };
@@ -309,6 +328,48 @@ impl OrchestrationHandle {
             engines.manager.tick(port, now);
         })
         .await;
+        self.sweep_new_workspaces().await;
+    }
+
+    /// Removes the worktrees nobody uses in each workspace folder seen for the
+    /// first time: the first tick after the state was loaded covers every
+    /// workspace of the app, a later one the workspace that was opened since.
+    async fn sweep_new_workspaces(&self) {
+        let state = self.port().state();
+        let (fresh, held) = {
+            let mut done = locked(&self.shared.swept);
+            let fresh: Vec<String> = state
+                .workspaces
+                .iter()
+                .filter(|ws| !ws.cwd.is_empty() && done.insert(ws.cwd.clone()))
+                .map(|ws| ws.cwd.clone())
+                .collect();
+            (fresh, panes_folders(&state))
+        };
+        if fresh.is_empty() {
+            return;
+        }
+        let swept = tokio::task::spawn_blocking(move || {
+            let mut seen = Vec::new();
+            for cwd in fresh {
+                // Not a repository, or git is missing: nothing to sweep.
+                if let Ok(sweep) =
+                    hangar_core::git::sweep_orphan_worktrees(std::path::Path::new(&cwd), &held)
+                {
+                    // Two workspaces of one repository say it once.
+                    for line in sweep.removed.into_iter().chain(sweep.kept) {
+                        if !seen.contains(&line) {
+                            eprintln!("worktree sweep ({cwd}): {line}");
+                            seen.push(line);
+                        }
+                    }
+                }
+            }
+        })
+        .await;
+        if let Err(error) = swept {
+            eprintln!("the worktree sweep stopped on an error: {error}");
+        }
     }
 
     fn every_five_seconds(&self) {
