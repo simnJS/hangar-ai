@@ -239,6 +239,7 @@ fn read_whole(
         loaded: 0,
         total,
     });
+    let mut pace = Pace::new();
     loop {
         cancel.check()?;
         let n = file.read(&mut chunk).map_err(fail)?;
@@ -251,6 +252,17 @@ fn read_whole(
                 size: bytes.len() as u64,
             });
         }
+        let loaded = bytes.len() as u64;
+        if pace.due(loaded, total) {
+            progress(LoadProgress {
+                phase: Phase::Read,
+                loaded,
+                total,
+            });
+        }
+    }
+    // The last word of the read is always said.
+    if pace.said != bytes.len() as u64 {
         progress(LoadProgress {
             phase: Phase::Read,
             loaded: bytes.len() as u64,
@@ -258,6 +270,43 @@ fn read_whole(
         });
     }
     Ok(bytes)
+}
+
+/// How often a read reports its progress: each report makes the app look at
+/// every open model again and build its view, so a 200 MB file must not send
+/// 200 of them. One every [`Pace::STEP`] of the file or [`Pace::EVERY`],
+/// whichever comes first.
+struct Pace {
+    /// The bytes last reported.
+    said: u64,
+    at: std::time::Instant,
+}
+
+impl Pace {
+    /// A twentieth of the file.
+    const STEP: u64 = 20;
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
+    fn new() -> Pace {
+        Pace {
+            said: 0,
+            at: std::time::Instant::now(),
+        }
+    }
+
+    /// Whether `loaded` bytes of `total` are worth a report, and if so,
+    /// counted as reported.
+    fn due(&mut self, loaded: u64, total: u64) -> bool {
+        let step = (total / Self::STEP).max(1);
+        let due = loaded >= total
+            || loaded.saturating_sub(self.said) >= step
+            || self.at.elapsed() >= Self::EVERY;
+        if due {
+            self.said = loaded;
+            self.at = std::time::Instant::now();
+        }
+        due
+    }
 }
 
 /// What a running load reports.
@@ -272,6 +321,44 @@ pub enum LoadEvent {
 /// returned stream (`Task::run` takes it as it is); dropping it, or calling
 /// [`Cancel::cancel`], stops the load at its next step.
 pub fn start(path: PathBuf, options: LoadOptions) -> (mpsc::UnboundedReceiver<LoadEvent>, Cancel) {
+    let format = ModelFormat::from_path(&path);
+    start_with(format, move |cancel, report| {
+        load_with(&path, &options, cancel, report)
+    })
+}
+
+/// What a panic carried, as a sentence.
+pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no message".into())
+}
+
+/// A reader that panicked, as the error the load ends with: the parsers are
+/// third-party code, and a load that ends without a word would spin forever.
+fn panicked(format: Option<ModelFormat>, panic: &(dyn std::any::Any + Send)) -> LoadError {
+    let reason = format!(
+        "the reader stopped on an internal error ({}).",
+        panic_message(panic)
+    );
+    match format {
+        Some(format) => LoadError::Parse { format, reason },
+        None => LoadError::Read(format!("The file could not be read: {reason}")),
+    }
+}
+
+/// [`start`], with the reading itself given: the load runs `read` on its
+/// thread, and the stream always ends with [`LoadEvent::Done`], a panic of
+/// `read` included.
+pub(crate) fn start_with<F>(
+    format: Option<ModelFormat>,
+    read: F,
+) -> (mpsc::UnboundedReceiver<LoadEvent>, Cancel)
+where
+    F: FnOnce(&Cancel, &mut dyn FnMut(LoadProgress)) -> Result<Model, LoadError> + Send + 'static,
+{
     let (sender, receiver) = mpsc::unbounded();
     let cancel = Cancel::default();
     let token = cancel.clone();
@@ -289,7 +376,12 @@ pub fn start(path: PathBuf, options: LoadOptions) -> (mpsc::UnboundedReceiver<Lo
                         token.cancel();
                     }
                 };
-                let result = load_with(&path, &options, &token, &mut report).map(Arc::new);
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        read(&token, &mut report)
+                    }))
+                    .unwrap_or_else(|panic| Err(panicked(format, panic.as_ref())))
+                    .map(Arc::new);
                 let _ = sender.unbounded_send(LoadEvent::Done(result));
             }
         });
@@ -409,5 +501,60 @@ mod tests {
         // or panic when nobody listens.
         std::thread::sleep(std::time::Duration::from_millis(50));
         let _ = cancel.is_cancelled();
+    }
+    #[test]
+    fn a_reader_that_panics_ends_the_load_with_an_error() {
+        let (events, _cancel) = start_with(Some(ModelFormat::Fbx), |_, report| {
+            report(LoadProgress {
+                phase: Phase::Parse,
+                loaded: 0,
+                total: 0,
+            });
+            panic!("index out of bounds in a third-party parser");
+        });
+        let events: Vec<LoadEvent> = pollster::block_on(events.collect());
+        let Some(LoadEvent::Done(Err(error))) = events.last() else {
+            panic!("the stream ends with Done: {events:?}");
+        };
+        assert!(matches!(error, LoadError::Parse { format: ModelFormat::Fbx, .. }), "{error}");
+        let said = error.to_string();
+        assert!(said.contains("index out of bounds"), "{said}");
+        assert!(said.contains("internal error"), "{said}");
+    }
+
+    #[test]
+    fn a_reader_that_panics_without_a_known_format_says_it_could_not_read() {
+        let (events, _cancel) = start_with(None, |_, _| std::panic::panic_any(7_u8));
+        let events: Vec<LoadEvent> = pollster::block_on(events.collect());
+        assert!(matches!(
+            events.last(),
+            Some(LoadEvent::Done(Err(LoadError::Read(message)))) if message.contains("no message")
+        ));
+    }
+
+    #[test]
+    fn a_large_read_reports_its_progress_a_bounded_number_of_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.bin");
+        // 64 chunks of a MiB: at most one report a twentieth, plus the first
+        // and the last (the clock may add some on a slow machine).
+        std::fs::write(&path, vec![0u8; 64 << 20]).unwrap();
+        let mut reports = Vec::new();
+        let bytes = read_whole(&path, &Cancel::default(), &mut |p| reports.push(p.loaded)).unwrap();
+        assert_eq!(bytes.len(), 64 << 20);
+        assert_eq!(reports.first(), Some(&0));
+        assert_eq!(reports.last(), Some(&(64 << 20)));
+        assert!(reports.len() < 64, "{} reports", reports.len());
+        assert!(reports.windows(2).all(|pair| pair[0] < pair[1]), "{reports:?}");
+    }
+
+    #[test]
+    fn the_pace_reports_each_step_and_the_end() {
+        let mut pace = Pace::new();
+        assert!(!pace.due(1, 100));
+        assert!(pace.due(5, 100));
+        assert!(!pace.due(6, 100));
+        assert!(pace.due(10, 100));
+        assert!(pace.due(100, 100));
     }
 }

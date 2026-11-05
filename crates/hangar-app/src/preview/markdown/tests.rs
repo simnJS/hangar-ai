@@ -455,3 +455,46 @@ fn headings_are_sized_in_ems_of_the_text() {
     assert!(heading_size(HeadingLevel::H1) > heading_size(HeadingLevel::H2));
     assert!(heading_size(HeadingLevel::H4) > heading_size(HeadingLevel::H5));
 }
+
+#[test]
+fn the_code_blocks_are_listed_once_each_wherever_they_sit() {
+    let page = "```rust\nconst A: u8 = 1;\n```\n\n\
+                - item\n\n  ```rust\n  const A: u8 = 1;\n  ```\n\n\
+                > ```python\n> x = 1\n> ```\n\n\
+                ```\nno language\n```\n";
+    let rendered = Rendered::parse(page, "/tmp/readme.md");
+    let blocks = rendered.code_blocks();
+    let listed: Vec<(&str, &str)> = blocks
+        .iter()
+        .map(|block| (block.language.as_str(), block.code.trim_end()))
+        .collect();
+    // The same block twice is coloured once; one without a language never.
+    assert_eq!(listed, [("rust", "const A: u8 = 1;"), ("python", "x = 1")]);
+}
+
+#[test]
+fn the_code_blocks_are_coloured_once_and_the_view_only_looks_them_up() {
+    let page = "```rust\nconst A: u8 = 1;\n```\n\n```nolanguageknown\nzzz\n```\n";
+    let mut rendered = Rendered::parse(page, "/tmp/readme.md");
+    let blocks = rendered.code_blocks();
+    let (rust, other) = (blocks[0].clone(), blocks[1].clone());
+    // Plain until the colours arrive.
+    assert!(!rendered.has_colours(&rust.language, &rust.code));
+    let found = highlight_blocks(blocks);
+    // A language nobody knows is left out, and stays plain.
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0]
+            .1
+            .iter()
+            .flatten()
+            .any(|run| run.text == "const" && run.class == highlight::Class::Keyword)
+    );
+    rendered.colour_code(found);
+    assert!(rendered.has_colours(&rust.language, &rust.code));
+    assert!(!rendered.has_colours(&other.language, &other.code));
+    // The key is the block's language and code, nothing else.
+    assert_eq!(block_key("rust", "a"), block_key("rust", "a"));
+    assert_ne!(block_key("rust", "a"), block_key("rust", "b"));
+    assert_ne!(block_key("rust", "a"), block_key("python", "a"));
+}

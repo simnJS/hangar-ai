@@ -221,6 +221,11 @@ fn local(bounds: Rectangle, point: Point) -> (f32, f32) {
 
 fn measure(renderer: &iced::Renderer, pic: &Pic) -> Measured {
     match pic {
+        // Decoded off the UI thread (`decode.rs`): its size is known, and
+        // asking the renderer would upload it in the middle of the layout.
+        Pic::Raster(image::Handle::Rgba { width, height, .. }) => {
+            Measured::Size(FrameSize::new(*width as f32, *height as f32))
+        }
         Pic::Raster(handle) => match renderer.load_image(handle) {
             Ok(allocation) => {
                 let size = allocation.size();

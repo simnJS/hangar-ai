@@ -56,6 +56,56 @@ impl std::fmt::Debug for Coloured {
     }
 }
 
+/// How long a viewer of a picture or a Markdown page keeps what it decoded
+/// once its pane is out of sight.
+pub const RELEASE_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Of the viewers out of sight that long, how many still keep theirs: the
+/// last seen, so that going back and forth between a few tabs reads nothing
+/// again.
+pub const KEEP_HIDDEN: usize = 2;
+
+/// Notes which viewers are on screen, and drops the ones of pictures and
+/// Markdown pages that have not been for [`RELEASE_AFTER`], beyond the
+/// [`KEEP_HIDDEN`] last seen. A picture holds up to hundreds of megabytes of
+/// pixels or frames; a dropped viewer reads its file again when its pane is
+/// back on screen (`mount`). Text viewers hold at most a head of 256 KB and
+/// are kept, with where they were scrolled to.
+pub fn release_hidden(
+    viewers: &mut std::collections::HashMap<String, ViewerState>,
+    shown: &std::collections::BTreeSet<String>,
+    now: std::time::Instant,
+) {
+    for (id, viewer) in viewers.iter_mut() {
+        if shown.contains(id) {
+            viewer.seen = now;
+        }
+    }
+    let mut stale: Vec<(std::time::Instant, String)> = viewers
+        .iter()
+        .filter(|(id, viewer)| {
+            !shown.contains(*id)
+                && matches!(viewer.kind, FileKind::Image | FileKind::Markdown)
+                && now.saturating_duration_since(viewer.seen) >= RELEASE_AFTER
+        })
+        .map(|(id, viewer)| (viewer.seen, id.clone()))
+        .collect();
+    stale.sort_unstable_by(|a, b| b.cmp(a));
+    for (_, id) in stale.into_iter().skip(KEEP_HIDDEN) {
+        viewers.remove(&id);
+    }
+}
+
+/// The colours of a page's code blocks, by block, to ride in a message.
+#[derive(Clone)]
+pub struct CodeColours(pub Vec<(u64, Arc<Lines>)>);
+
+impl std::fmt::Debug for CodeColours {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CodeColours({} blocks)", self.0.len())
+    }
+}
+
 /// What a viewer is told.
 #[derive(Debug, Clone)]
 pub enum ViewerMsg {
@@ -83,6 +133,8 @@ pub enum ViewerMsg {
     Markdown(markdown::Msg),
     /// The pictures of a Markdown page that were read from the disk.
     MarkdownImages(Vec<(String, markdown::Resolved)>),
+    /// The colours of the code blocks of the page of this generation.
+    MarkdownCode(u64, CodeColours),
     Window(Action),
 }
 
@@ -105,6 +157,9 @@ pub struct ViewerState {
     /// of the rendered page (the viewer shows one at a time).
     pub doc: Doc,
     pub selection: String,
+    /// When its pane was last on screen: a viewer out of sight long enough
+    /// lets go of what it decoded ([`release_hidden`]).
+    pub seen: std::time::Instant,
 }
 
 impl ViewerState {
@@ -120,6 +175,7 @@ impl ViewerState {
             scroll: code_lines::Scroll::default(),
             doc: Doc::new(iced::Color::TRANSPARENT),
             selection: String::new(),
+            seen: std::time::Instant::now(),
         }
     }
 
@@ -534,5 +590,66 @@ mod tests {
         assert_eq!(language_for(&page, FileKind::Html), Some("xml"));
         let log = entry("/a/run.log", FileKind::Text);
         assert_eq!(language_for(&log, FileKind::Text), None);
+    }
+
+    #[test]
+    fn viewers_of_pictures_out_of_sight_for_a_while_let_go_beyond_the_last_seen() {
+        let mut store = super::super::store::Store::with_clock(|| 1);
+        let mut viewers = std::collections::HashMap::new();
+        let mut open = |path: &str, kind: FileKind| {
+            let id = store.show_file(super::super::store::ShowFile {
+                workspace_id: "w".into(),
+                path: path.into(),
+                title: None,
+                opened_by: None,
+                modified_ms: 1,
+                what: super::super::store::What::File {
+                    kind,
+                    mime: String::new(),
+                    size: 1,
+                },
+            });
+            let entry = store.entry(&id).unwrap().clone();
+            viewers.insert(id.clone(), ViewerState::new(&entry, kind));
+            id
+        };
+        let pictures: Vec<String> = (0..4)
+            .map(|n| open(&format!("/a/{n}.png"), FileKind::Image))
+            .collect();
+        let page = open("/a/README.md", FileKind::Markdown);
+        let text = open("/a/main.rs", FileKind::Text);
+        let start = std::time::Instant::now();
+        // Each seen in turn, a second apart, the first picture last of all.
+        let order = [
+            &pictures[1],
+            &pictures[2],
+            &pictures[3],
+            &page,
+            &text,
+            &pictures[0],
+        ];
+        for (n, id) in order.iter().enumerate() {
+            let shown = std::collections::BTreeSet::from([(*id).clone()]);
+            release_hidden(
+                &mut viewers,
+                &shown,
+                start + std::time::Duration::from_secs(n as u64),
+            );
+        }
+        assert_eq!(viewers.len(), 6, "nothing goes while it was seen lately");
+
+        // A while later, the first picture still on screen.
+        let later = start + RELEASE_AFTER + std::time::Duration::from_secs(10);
+        let shown = std::collections::BTreeSet::from([pictures[0].clone()]);
+        release_hidden(&mut viewers, &shown, later);
+        // On screen: kept. The text: kept. Of the pictures and pages out of
+        // sight, the two seen last (the page, then the fourth picture) are kept.
+        assert!(viewers.contains_key(&pictures[0]));
+        assert!(viewers.contains_key(&text));
+        assert!(viewers.contains_key(&page));
+        assert!(viewers.contains_key(&pictures[3]));
+        assert!(!viewers.contains_key(&pictures[1]));
+        assert!(!viewers.contains_key(&pictures[2]));
+        assert_eq!(viewers[&pictures[0]].seen, later);
     }
 }

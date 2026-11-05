@@ -150,20 +150,32 @@ pub(crate) fn decode_all(
                     if i >= count || cancel.is_cancelled() {
                         break;
                     }
-                    let outcome = match &sources[i] {
-                        ImageSource::Bytes(bytes) => decode_image(bytes),
-                        ImageSource::Uri(uri) => {
-                            resources.read(uri).and_then(|bytes| decode_image(&bytes))
+                    // A decoder that panics loses this one picture, not the
+                    // whole load (a re-raised panic would end it with no word).
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        match &sources[i] {
+                            ImageSource::Bytes(bytes) => decode_image(bytes),
+                            ImageSource::Uri(uri) => {
+                                resources.read(uri).and_then(|bytes| decode_image(&bytes))
+                            }
                         }
-                    };
-                    results.lock().unwrap()[i] = Some(outcome);
+                    }))
+                    .unwrap_or_else(|panic| {
+                        Err(format!(
+                            "the image decoder stopped on an internal error ({})",
+                            crate::load::panic_message(panic.as_ref())
+                        ))
+                    });
+                    results
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())[i] = Some(outcome);
                 }
             });
         }
     });
     results
         .into_inner()
-        .unwrap()
+        .unwrap_or_else(|poison| poison.into_inner())
         .into_iter()
         .map(|outcome| outcome.unwrap_or_else(|| Err("cancelled".into())))
         .collect()

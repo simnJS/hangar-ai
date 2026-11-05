@@ -1,15 +1,19 @@
 //! What a picture file is, and what a viewer is given to draw for it.
 //!
-//! iced draws a still picture from the bytes of a file it can decode (PNG,
-//! JPEG, BMP, a GIF or WebP's first frame) or from pixels. Two kinds need this
-//! module first, off the UI thread:
+//! Every picture is decoded here, off the UI thread, to pixels: iced would
+//! otherwise decode a file handed to it as bytes inside `layout`, on the UI
+//! thread, and a 50 MB PNG would freeze the window for seconds.
 //!
 //! - **An animated GIF or WebP.** Its frames are decoded here, composed onto
 //!   the whole canvas, each with the time it stays (`Animation`); the stage
 //!   plays them (`image_stage.rs`). The webview did this by itself.
 //! - **An AVIF.** iced cannot decode it; `avif.rs` does, to pixels.
+//! - **Anything else** (PNG, JPEG, BMP, a still GIF or WebP, the first frame
+//!   of an animation too large to play): its header is read first, a picture
+//!   of more than [`MAX_PIXELS`] is refused, and the rest decoded to RGBA.
 //!
-//! Everything else is handed on as the bytes it is, for the renderer.
+//! Only an SVG is handed on as its source (`Loaded::Encoded`), for the stage
+//! to rasterise.
 //!
 //! A file is told by its first bytes, not by its name: a `.png` that is a GIF
 //! plays as one.
@@ -45,10 +49,14 @@ pub const FRAME_BUDGET: usize = 256 * 1024 * 1024;
 const SHORTEST: Duration = Duration::from_millis(20);
 const FALLBACK: Duration = Duration::from_millis(100);
 
+/// More pixels than this are refused before anything is decoded: the output
+/// is four bytes each (the same cap as an AVIF's, and a Markdown picture's).
+pub const MAX_PIXELS: u64 = avif::MAX_PIXELS;
+
 /// What the viewer is given for a picture file.
 #[derive(Debug, Clone)]
 pub enum Loaded {
-    /// The file as it is, for the renderer to decode.
+    /// The file as it is: an SVG's source, for the stage to rasterise.
     Encoded(Bytes),
     /// A picture decoded here, as pixels.
     Pixels(Handle, u32, u32),
@@ -188,18 +196,47 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 /// a damaged file (a parser's assertion) must not take the task with it, so a
 /// panic is a failed picture like any other.
 pub fn load(bytes: Vec<u8>) -> Result<Loaded, String> {
-    let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode(&bytes)))
-        .unwrap_or_else(|_| Err("the file is damaged".to_string()));
-    match decoded {
-        Ok(Some(loaded)) => Ok(loaded),
-        // A picture of one frame, or one that would take too much memory, is
-        // drawn by the renderer from the file: its first frame.
-        Ok(None) => Ok(Loaded::Encoded(Bytes(Arc::new(bytes)))),
-        Err(why) => Err(why),
-    }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match decode(&bytes)? {
+            Some(loaded) => Ok(loaded),
+            // A picture of one frame, or an animation that would take too
+            // much memory: its first frame.
+            None => still(&bytes),
+        }
+    }))
+    .unwrap_or_else(|_| Err("the file is damaged".to_string()))
 }
 
-/// The pictures made here, or `None` for a file left to the renderer.
+/// A picture of one frame, decoded to pixels after its size is checked.
+fn still(bytes: &[u8]) -> Result<Loaded, String> {
+    let reader = ::image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|err| err.to_string())?;
+    if reader.format().is_none() {
+        return Err("not a picture the preview can read".into());
+    }
+    // The reader's own limits stay (512 MiB a decoding): a file that claims
+    // a small size and asks for more is refused there.
+    let decoder = reader.into_decoder().map_err(|err| err.to_string())?;
+    let (width, height) = decoder.dimensions();
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(format!(
+            "{width} × {height} pixels, more than the {} million the preview decodes",
+            MAX_PIXELS / 1_000_000
+        ));
+    }
+    let rgba = ::image::DynamicImage::from_decoder(decoder)
+        .map_err(|err| err.to_string())?
+        .into_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(Loaded::Pixels(
+        Handle::from_rgba(width, height, rgba.into_raw()),
+        width,
+        height,
+    ))
+}
+
+/// An AVIF or an animation, or `None` for a picture of one frame.
 fn decode(bytes: &[u8]) -> Result<Option<Loaded>, String> {
     if avif::is_avif(&bytes[..bytes.len().min(512)]) {
         let pixels = avif::decode(bytes)?;
@@ -208,8 +245,8 @@ fn decode(bytes: &[u8]) -> Result<Option<Loaded>, String> {
     }
     let animation = if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         let decoder = ::image::codecs::gif::GifDecoder::new(Cursor::new(bytes));
-        // A GIF the decoder cannot start on is left to the renderer, which
-        // says what it makes of it.
+        // A GIF the decoder cannot start on is read as a still picture,
+        // which says what is wrong with it.
         match decoder {
             Ok(decoder) => {
                 let size = decoder.dimensions();

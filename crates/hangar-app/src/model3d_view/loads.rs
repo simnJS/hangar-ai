@@ -13,8 +13,8 @@
 //!   found and the person finds the model ready;
 //! - those whose pane is on screen, when not in memory (dropped to make room
 //!   for others, or their workspace was asleep);
-
-//! - any a snapshot asks for (`Msg::Ensure`).
+//! - any a snapshot asks for (`Msg::Ensure`), even in a workspace asleep: it
+//!   is held open (`State::ensured`) until a moment after its load is over.
 //!
 //! Closed tabs let go of their models, and so does a workspace put to sleep:
 //! its models stay listed and load again once it is back on screen. Of the
@@ -22,6 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use iced::Task;
 
@@ -40,6 +41,15 @@ use crate::state::{Model as AppModel, Workspace, WsId};
 /// engine): a model is up to hundreds of megabytes once decoded, and a person
 /// who has opened a dozen should not pay for all of them.
 pub const KEEP_LOADED: usize = 3;
+
+/// How long a model a snapshot asked for is held open, from the ask: the
+/// snapshot's own wait, and a margin.
+pub const ENSURE_HOLD: Duration = Duration::from_secs(60);
+
+/// How long it stays held once its load has landed or failed: long enough for
+/// the snapshot waiting on the registry to take the model (it then holds its
+/// own `Arc`), short enough for a sleeping workspace's model to go soon after.
+pub const ENSURE_GRACE: Duration = Duration::from_secs(10);
 
 /// An open model, as the store has it now.
 #[derive(Debug, Clone)]
@@ -110,9 +120,13 @@ pub(super) fn settle(
     wants: &[Want],
     asleep: &HashSet<&str>,
 ) -> Task<Message> {
+    // A model a snapshot asked for stays, asleep or not, until its hold ends.
+    let now = Instant::now();
+    st.ensured.retain(|_, until| *until > now);
+    let ensured = &st.ensured;
     let awake: Vec<&Want> = wants
         .iter()
-        .filter(|want| !asleep.contains(want.ws.as_str()))
+        .filter(|want| !asleep.contains(want.ws.as_str()) || ensured.contains_key(&want.id))
         .collect();
 
     // Closed tabs let go of their models, and so does a workspace put to sleep.
@@ -207,7 +221,32 @@ pub fn read(st: &mut State, id: &str, revision: u64, roots: Vec<PathBuf>) -> Tas
         hangar_model3d::load_task(PathBuf::from(path), LoadOptions { roots: Some(roots) });
     flight.cancel = Some(cancel);
     let id = id.to_string();
+    let ended = Task::done(Message::Model3d(Msg::LoadEnded(id.clone(), revision)));
     task.map(move |event| Message::Model3d(Msg::Load(id.clone(), revision, event)))
+        .chain(ended)
+}
+
+/// The stream of a read is over. It ends with `Done`, which takes the load out
+/// of its slot; a load still under way here is one whose thread died without
+/// saying how, and would otherwise spin until the file changes.
+pub fn ended(st: &mut State, id: &str, revision: u64) {
+    let Some(slot) = st.slots.get_mut(id) else {
+        return;
+    };
+    let reading = slot
+        .flight
+        .as_ref()
+        .is_some_and(|flight| flight.revision == revision && flight.cancel.is_some());
+    if !reading {
+        return;
+    }
+    slot.flight = None;
+    failed(
+        st,
+        id,
+        revision,
+        "The model's reader stopped without saying why: show the file again to retry.".into(),
+    );
 }
 
 /// What a running load reported.
@@ -251,6 +290,7 @@ fn landed(st: &mut State, id: &str, revision: u64, model: std::sync::Arc<Model>)
     slot.loaded = Some(revision);
     slot.failed = None;
     st.registry.put(id, revision, &slot.ws, model.clone());
+    release_hold(st, id);
     let info = info_of(&model);
     st.shared.edit(|store| store.settle_model(id, Ok(info)));
 }
@@ -262,7 +302,15 @@ pub fn failed(st: &mut State, id: &str, revision: u64, message: String) {
         slot.failed = Some(revision);
     }
     st.registry.fail(id, revision, message.clone());
+    release_hold(st, id);
     st.shared.edit(|store| store.settle_model(id, Err(message)));
+}
+
+/// A load a snapshot asked for is over: the hold ends after a short grace.
+pub(super) fn release_hold(st: &mut State, id: &str) {
+    if let Some(until) = st.ensured.get_mut(id) {
+        *until = (*until).min(Instant::now() + ENSURE_GRACE);
+    }
 }
 
 /// The person stops a load: the entry shows why, with a way to try again.

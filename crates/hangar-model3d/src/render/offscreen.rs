@@ -3,10 +3,15 @@
 //! tab that is not on screen. It needs no window and no surface, so it works
 //! from any thread.
 //!
-//! One device is made the first time and kept: starting a GPU takes longer
-//! than drawing a cube.
+//! One device is made the first time it is needed and kept while pictures are
+//! asked for: starting a GPU takes longer than drawing a cube, and an agent
+//! often asks for several angles in a row. It keeps only the model it last
+//! drew, and the whole device goes after [`IDLE`] without a picture: the
+//! window's device already holds every model on screen, and a second copy of
+//! each in VRAM for the rest of the process is not worth it.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use iced::wgpu;
 
@@ -49,7 +54,60 @@ struct Offscreen {
     gpu: Gpu,
 }
 
-static CONTEXT: Mutex<Option<Offscreen>> = Mutex::new(None);
+/// The capture device, when one is open, and what lets it go.
+struct Context {
+    open: Option<Offscreen>,
+    /// When the last picture was drawn.
+    used: Option<Instant>,
+    /// A thread is waiting to close the device once it is idle.
+    reaper: bool,
+}
+
+static CONTEXT: Mutex<Context> = Mutex::new(Context {
+    open: None,
+    used: None,
+    reaper: false,
+});
+
+/// How long the capture device stays open without a picture.
+pub(crate) const IDLE: Duration = Duration::from_secs(30);
+
+fn context() -> std::sync::MutexGuard<'static, Context> {
+    CONTEXT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Closes the capture device if it has not drawn for `idle`; whether it did.
+fn close_if_idle(held: &mut Context, idle: Duration) -> bool {
+    let idle = held.used.is_none_or(|used| used.elapsed() >= idle);
+    if idle {
+        held.open = None;
+        held.used = None;
+    }
+    idle
+}
+
+/// Starts the thread that closes the device once it is idle, if none runs.
+fn watch_idle(held: &mut Context) {
+    if held.reaper {
+        return;
+    }
+    let started = std::thread::Builder::new()
+        .name("model3d-capture-idle".into())
+        .spawn(|| {
+            loop {
+                std::thread::sleep(IDLE);
+                let mut held = context();
+                if close_if_idle(&mut held, IDLE) {
+                    held.reaper = false;
+                    return;
+                }
+            }
+        });
+    // Without the thread the device stays open, as it did before.
+    held.reaper = started.is_ok();
+}
 
 /// The target the captures are drawn into: any key will do, there is one
 /// picture at a time.
@@ -116,16 +174,18 @@ pub(crate) fn render(
     if scene.model.is_none() {
         return Err(CaptureError::Empty);
     }
-    let mut guard = CONTEXT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if guard.is_none() {
-        *guard = Some(open()?);
+    let mut guard = context();
+    if guard.open.is_none() {
+        guard.open = Some(open()?);
     }
-    let context = guard.as_mut().expect("the context was just made");
+    let context = guard.open.as_mut().expect("the context was just made");
     let result = draw(context, scene, size);
     context.gpu.release(CAPTURE_KEY);
+    // Only the model just drawn stays, for the next angle of it.
+    context.gpu.keep_only(scene.model.map(|model| model.id));
     context.gpu.trim();
+    guard.used = Some(Instant::now());
+    watch_idle(&mut guard);
     result
 }
 
@@ -137,8 +197,49 @@ fn draw(
     let Offscreen { device, queue, gpu } = context;
     let max = device.limits().max_texture_dimension_2d;
     let size = (size.0.clamp(1, max), size.1.clamp(1, max));
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
 
+    // Both error scopes are popped whatever happens inside, and an
+    // out-of-memory is reported rather than left to wgpu's handler (which
+    // panics on this thread).
+    let recorded = super::guarded(device, || record(device, queue, gpu, scene, size))
+        .map_err(CaptureError::Gpu)??;
+    let (readback, receiver, unpadded, padded) = recorded;
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|error| CaptureError::Gpu(error.to_string()))?;
+    receiver
+        .recv()
+        .map_err(|error| CaptureError::Gpu(error.to_string()))?
+        .map_err(|error| CaptureError::Gpu(error.to_string()))?;
+
+    let mapped = readback.slice(..).get_mapped_range();
+    let mut pixels = Vec::with_capacity((unpadded * size.1) as usize);
+    for row in mapped.chunks_exact(padded as usize) {
+        pixels.extend_from_slice(&row[..unpadded as usize]);
+    }
+    drop(mapped);
+    readback.unmap();
+    Ok((pixels, size))
+}
+
+/// What a picture waits on once it is submitted: the buffer it is read back
+/// into, the end of its mapping, and its rows' width without and with
+/// padding.
+type Recorded = (
+    wgpu::Buffer,
+    std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    u32,
+    u32,
+);
+
+/// Draws the scene and asks for it back.
+fn record(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    gpu: &mut Gpu,
+    scene: &Scene<'_>,
+    size: (u32, u32),
+) -> Result<Recorded, CaptureError> {
     gpu.prepare(CAPTURE_KEY, size, scene);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("model3d capture"),
@@ -183,25 +284,7 @@ fn draw(
         .map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .map_err(|error| CaptureError::Gpu(error.to_string()))?;
-    if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-        return Err(CaptureError::Gpu(error.to_string()));
-    }
-    receiver
-        .recv()
-        .map_err(|error| CaptureError::Gpu(error.to_string()))?
-        .map_err(|error| CaptureError::Gpu(error.to_string()))?;
-
-    let mapped = readback.slice(..).get_mapped_range();
-    let mut pixels = Vec::with_capacity((unpadded * size.1) as usize);
-    for row in mapped.chunks_exact(padded as usize) {
-        pixels.extend_from_slice(&row[..unpadded as usize]);
-    }
-    drop(mapped);
-    readback.unmap();
-    Ok((pixels, size))
+    Ok((readback, receiver, unpadded, padded))
 }
 
 /// A picture as PNG bytes.
@@ -213,4 +296,23 @@ pub(crate) fn encode_png(pixels: Vec<u8>, size: (u32, u32)) -> Result<Vec<u8>, C
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|error| CaptureError::Encode(error.to_string()))?;
     Ok(png)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_capture_device_goes_once_it_has_not_drawn_for_a_while() {
+        let mut held = Context {
+            open: None,
+            used: Some(Instant::now()),
+            reaper: true,
+        };
+        assert!(!close_if_idle(&mut held, IDLE), "just used");
+        held.used = Instant::now().checked_sub(IDLE + Duration::from_secs(1));
+        assert!(held.used.is_some());
+        assert!(close_if_idle(&mut held, IDLE));
+        assert!(held.open.is_none() && held.used.is_none());
+    }
 }

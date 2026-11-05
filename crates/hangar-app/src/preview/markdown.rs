@@ -30,7 +30,9 @@
 //! - **Links** never take the window anywhere: a web address or `mailto:`
 //!   opens outside, a file beside it does nothing and says so.
 //! - **Code blocks** are coloured by the preview's own highlighter, in the
-//!   window's theme.
+//!   window's theme. They are coloured once, off the UI thread, after the page
+//!   is parsed ([`highlight_blocks`]); the view only looks the colours up, and
+//!   shows a block plain until they arrive.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -101,6 +103,9 @@ pub struct Rendered {
     offset: f32,
     /// What is selected on the page, kept across the views built of it.
     doc: Doc,
+    /// The colours of the code blocks, by [`block_key`]: classes, not colours,
+    /// so a change of theme needs none worked out again.
+    code: HashMap<u64, Arc<Lines>>,
 }
 
 impl std::fmt::Debug for Rendered {
@@ -156,7 +161,65 @@ impl Rendered {
             wanted,
             offset: 0.0,
             doc: Doc::new(iced::Color::TRANSPARENT),
+            code: HashMap::new(),
         }
+    }
+
+    /// The code blocks of the page that name a language, each once: what
+    /// [`highlight_blocks`] colours.
+    pub fn code_blocks(&self) -> Vec<CodeBlock> {
+        fn walk(
+            items: &[Item],
+            out: &mut Vec<CodeBlock>,
+            seen: &mut std::collections::HashSet<u64>,
+        ) {
+            for item in items {
+                match item {
+                    Item::CodeBlock {
+                        language: Some(language),
+                        code,
+                        ..
+                    } => {
+                        let key = block_key(language, code);
+                        if seen.insert(key) {
+                            out.push(CodeBlock {
+                                key,
+                                language: language.clone(),
+                                code: code.clone(),
+                            });
+                        }
+                    }
+                    Item::Quote(inner) => walk(inner, out, seen),
+                    Item::List { bullets, .. } => {
+                        for bullet in bullets {
+                            match bullet {
+                                markdown::Bullet::Point { items }
+                                | markdown::Bullet::Task { items, .. } => walk(items, out, seen),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(
+            self.content.items(),
+            &mut out,
+            &mut std::collections::HashSet::new(),
+        );
+        out
+    }
+
+    /// Puts the colours [`highlight_blocks`] found on their blocks.
+    pub fn colour_code(&mut self, found: Vec<(u64, Arc<Lines>)>) {
+        self.code.extend(found);
+    }
+
+    /// Whether the block of this language and code has its colours.
+    #[cfg(test)]
+    pub fn has_colours(&self, language: &str, code: &str) -> bool {
+        self.code.contains_key(&block_key(language, code))
     }
 
     /// Selects nothing.
@@ -336,6 +399,38 @@ fn read_image(file: &Path) -> Option<Resolved> {
         Loaded::Pixels(handle, ..) => Resolved::Raster(handle),
         Loaded::Animated(animation) => Resolved::Animated(animation),
     })
+}
+
+/* ── code blocks ───────────────────────────────────────────────── */
+
+/// A fenced block of a page, to be coloured.
+#[derive(Debug, Clone)]
+pub struct CodeBlock {
+    pub key: u64,
+    pub language: String,
+    pub code: String,
+}
+
+/// What a block's colours are found by: its language word and its code.
+pub fn block_key(language: &str, code: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    language.hash(&mut hasher);
+    code.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Colours the code blocks of a page: run off the UI thread (the grammars
+/// take a moment to load, and a long block longer). A block in a language the
+/// highlighter does not know is left out, and stays plain.
+pub fn highlight_blocks(blocks: Vec<CodeBlock>) -> Vec<(u64, Arc<Lines>)> {
+    blocks
+        .into_iter()
+        .filter_map(|block| {
+            highlight::highlight_block(&block.code, &block.language)
+                .map(|lines| (block.key, Arc::new(lines)))
+        })
+        .collect()
 }
 
 /* ── before the parser ─────────────────────────────────────────── */
@@ -664,6 +759,8 @@ fn settings(t: &Theme) -> Settings {
 struct Page<'a> {
     t: &'a Theme,
     images: &'a HashMap<Uri, Resolved>,
+    /// The colours of the code blocks found so far.
+    code: &'a HashMap<u64, Arc<Lines>>,
     /// Where the page's text is selected: each paragraph, heading and line of
     /// code is a block of it.
     doc: &'a Doc,
@@ -807,17 +904,19 @@ impl<'a> markdown::Viewer<'a, Msg, iced::Theme, iced::Renderer> for Page<'a> {
         lines: &'a [markdown::Text],
     ) -> Element<'a, Msg> {
         let t = self.t;
-        let coloured: Option<Lines> =
-            language.and_then(|language| highlight::highlight_block(code, language));
+        // Coloured once off the UI thread (`highlight_blocks`), looked up here.
+        let coloured: Option<&'a Lines> = language
+            .and_then(|language| self.code.get(&block_key(language, code)))
+            .map(|lines| lines.as_ref());
         let mono = fonts::mono();
         let rows: Vec<Element<'a, Msg>> = match coloured {
             Some(coloured) => coloured
-                .into_iter()
+                .iter()
                 .map(|runs| {
                     let spans: Vec<text::Span<'a, Uri, Font>> = runs
-                        .into_iter()
+                        .iter()
                         .map(|run| {
-                            let part = span(run.text).font(mono);
+                            let part = span(run.text.as_str()).font(mono);
                             match highlight::colour(t, run.class) {
                                 Some(colour) => part.color(colour),
                                 None => part,
@@ -885,6 +984,7 @@ pub fn view<'a>(
     let page = Page {
         t,
         images: &rendered.images,
+        code: &rendered.code,
         doc: &rendered.doc,
         ids: RefCell::new(HashMap::new()),
     };

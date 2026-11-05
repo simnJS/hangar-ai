@@ -98,7 +98,7 @@ use self::model::{FileKind, Kind};
 use self::parts::Notice;
 use self::store::{Body, Entry, Scope, Status};
 use self::text::{Head, Load};
-use self::viewer::{Coloured, Loaded, ViewerMsg, ViewerState, language_for};
+use self::viewer::{CodeColours, Coloured, Loaded, ViewerMsg, ViewerState, language_for};
 use self::webview::{HelperHandle, StartError, WebMsg};
 use crate::control::{self, Hook};
 use crate::ctx::Ctx;
@@ -475,11 +475,13 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
     st.notices.retain(|id, _| every.contains_key(id.as_str()));
     st.missing.retain(|id, _| every.contains_key(id.as_str()));
     st.watching.retain(|id| every.contains_key(id.as_str()));
+    viewer::release_hidden(&mut st.viewers, &shown, std::time::Instant::now());
     for (_, entry, seen) in &front_files {
         let Body::File { kind, .. } = &entry.body else {
             continue;
         };
-        // A viewer reads its file once its pane is on screen, and keeps it.
+        // A viewer reads its file once its pane is on screen, and keeps it
+        // until it has been out of sight for a while (`release_hidden`).
         if !seen && !st.viewers.contains_key(&entry.id) {
             continue;
         }
@@ -589,6 +591,26 @@ fn markdown_images(
     })
 }
 
+/// Colours the code blocks of a Markdown page off the UI thread, once.
+fn markdown_code(
+    id: &str,
+    revision: u64,
+    generation: u64,
+    blocks: Vec<markdown::CodeBlock>,
+) -> Task<Message> {
+    if blocks.is_empty() {
+        return Task::none();
+    }
+    let id = id.to_string();
+    Task::perform(
+        blocking(move || Ok(markdown::highlight_blocks(blocks))),
+        move |found| {
+            let found = CodeColours(found.unwrap_or_default());
+            viewer_message(&id, revision, ViewerMsg::MarkdownCode(generation, found))
+        },
+    )
+}
+
 /// Colours a text off the UI thread: the grammars take a moment to load and
 /// a long file longer.
 fn colour(
@@ -665,9 +687,11 @@ fn viewer_update(
                 generation,
             );
             let mut images = Task::none();
+            let mut code = Task::none();
             if kind == FileKind::Markdown {
                 let rendered = markdown::Rendered::parse(&ready.text, &entry.path);
                 images = markdown_images(id, revision, rendered.wanted());
+                code = markdown_code(id, revision, generation, rendered.code_blocks());
                 viewer.rendered = Some(rendered);
             }
             viewer.generation = generation;
@@ -677,7 +701,17 @@ fn viewer_update(
             Task::batch([
                 colour(id, revision, generation, body, path, language),
                 images,
+                code,
             ])
+        }
+        ViewerMsg::MarkdownCode(generation, CodeColours(found)) => {
+            if let Some(viewer) = st.viewers.get_mut(id)
+                && viewer.generation == generation
+                && let Some(rendered) = viewer.rendered.as_mut()
+            {
+                rendered.colour_code(found);
+            }
+            Task::none()
         }
         ViewerMsg::MarkdownImages(found) => {
             if let Some(rendered) = st.viewers.get_mut(id).and_then(|v| v.rendered.as_mut()) {
