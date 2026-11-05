@@ -203,9 +203,9 @@ pub async fn known_session_ids(agent: AgentId, cwd: String) -> HashSet<String> {
         return HashSet::new();
     }
     tokio::task::spawn_blocking(move || {
-        hangar_core::sessions::list_sessions(cwd)
+        hangar_core::sessions::list_session_ids(cwd)
             .into_iter()
-            .map(|session| session.id)
+            .map(|(id, _)| id)
             .collect()
     })
     .await
