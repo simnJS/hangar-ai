@@ -121,7 +121,12 @@ pub fn aggregate<'a>(
         .collect();
     digests.sort_by_key(|digest| {
         (
-            digest.calls.first().map(|call| call.at).unwrap_or(i64::MAX),
+            digest
+                .calls
+                .first()
+                .map(|call| call.at)
+                .or_else(|| digest.stamps.first().copied())
+                .unwrap_or(i64::MAX),
             digest.sub,
             digest.session.clone(),
         )
@@ -133,6 +138,8 @@ pub fn aggregate<'a>(
     let mut model_index: HashMap<&str, i32> = HashMap::new();
     let mut buckets: Buckets = HashMap::new();
     let mut seen: HashSet<u64> = HashSet::new();
+    let mut seen_prompts: HashSet<u64> = HashSet::new();
+    let mut seen_stamps: HashSet<i64> = HashSet::new();
 
     for digest in &digests {
         let at = *index.entry(digest.session.as_str()).or_insert_with(|| {
@@ -161,7 +168,11 @@ pub fn aggregate<'a>(
             session.info.title = digest.title.clone();
             session.title_rank = digest.title_rank;
         }
-        session.stamps.extend_from_slice(&digest.stamps);
+        // A copied history brings its messages' times along: they belong to
+        // the file read first, whichever session it names.
+        session
+            .stamps
+            .extend(digest.stamps.iter().filter(|&&at| seen_stamps.insert(at)));
 
         for call in &digest.calls {
             if call.key != 0 && !seen.insert(call.key) {
@@ -202,9 +213,12 @@ pub fn aggregate<'a>(
         }
 
         if !digest.sub {
-            for &prompt in &digest.prompts {
-                if window.contains(prompt) {
-                    bucket(&mut buckets, at, hour_of(prompt), -1).turns += 1;
+            for prompt in &digest.prompts {
+                if prompt.key != 0 && !seen_prompts.insert(prompt.key) {
+                    continue;
+                }
+                if window.contains(prompt.at) {
+                    bucket(&mut buckets, at, hour_of(prompt.at), -1).turns += 1;
                 }
             }
         }
@@ -260,7 +274,7 @@ pub fn aggregate<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::parse::{Call, Digest};
+    use super::super::parse::{Call, Digest, Prompt};
     use super::*;
 
     const HOUR: i64 = 3_600_000;
@@ -285,7 +299,12 @@ mod tests {
         }
     }
 
-    fn digest(session: &str, calls: Vec<Call>, stamps: Vec<i64>, prompts: Vec<i64>) -> Digest {
+    /// Prompts without a message key, as old transcripts give them.
+    fn typed(times: &[i64]) -> Vec<Prompt> {
+        times.iter().map(|&at| Prompt { key: 0, at }).collect()
+    }
+
+    fn digest(session: &str, calls: Vec<Call>, stamps: Vec<i64>, prompts: Vec<Prompt>) -> Digest {
         Digest {
             session: session.to_string(),
             cwd: "C:\\dev\\app".to_string(),
@@ -303,7 +322,7 @@ mod tests {
             "s-1",
             vec![call(1, DAY + 60_000, 50), call(2, DAY + 120_000, 70)],
             vec![],
-            vec![DAY],
+            typed(&[DAY]),
         );
         let result = aggregate([&main], Window::default(), utc_hour);
         assert_eq!(result.sessions.len(), 1);
@@ -339,6 +358,49 @@ mod tests {
         assert_eq!(first.id, "s-1");
     }
 
+    /// A fork copies the parent's history into a new file under a new
+    /// session id; each copied message keeps its uuid and its time.
+    #[test]
+    fn a_forked_transcript_does_not_count_the_copied_turns_or_time_twice() {
+        let minute = 60_000;
+        let key = |n: u64| Prompt {
+            key: n,
+            at: DAY + n as i64 * minute,
+        };
+        let original = digest(
+            "s-1",
+            vec![call(1, DAY + 90_000, 10)],
+            vec![DAY + minute, DAY + 90_000, DAY + 2 * minute],
+            vec![key(1), key(2)],
+        );
+        // The fork: the same three messages, then one new turn.
+        let fork = digest(
+            "s-2",
+            vec![call(1, DAY + 90_000, 10), call(2, DAY + 4 * minute, 20)],
+            vec![
+                DAY + minute,
+                DAY + 90_000,
+                DAY + 2 * minute,
+                DAY + 3 * minute,
+                DAY + 4 * minute,
+            ],
+            vec![key(1), key(2), key(3)],
+        );
+        let result = aggregate([&fork, &original], Window::default(), utc_hour);
+        let turns: u32 = result.buckets.iter().map(|row| row.turns).sum();
+        assert_eq!(turns, 3);
+        let output: u64 = result.buckets.iter().map(|row| row.output).sum();
+        assert_eq!(output, 30);
+        let id = |id: &str| result.sessions.iter().find(|s| s.id == id).unwrap();
+        // The original keeps its own span; the fork only gets what is new.
+        assert_eq!(id("s-1").first_at, DAY + minute);
+        assert_eq!(id("s-1").last_at, DAY + 2 * minute);
+        assert_eq!(id("s-2").first_at, DAY + 3 * minute);
+        assert_eq!(id("s-2").last_at, DAY + 4 * minute);
+        let active: i64 = result.buckets.iter().map(|row| row.active_ms).sum();
+        assert_eq!(active, 2 * minute);
+    }
+
     #[test]
     fn active_time_sums_gaps_and_caps_the_long_ones() {
         let minute = 60_000;
@@ -368,10 +430,10 @@ mod tests {
     fn a_subagent_fills_its_parents_timeline_without_adding_turns() {
         let minute = 60_000;
         // The parent waits 20 minutes on its subagent, which works throughout.
-        let parent = digest("s-1", vec![], vec![DAY, DAY + 20 * minute], vec![DAY]);
+        let parent = digest("s-1", vec![], vec![DAY, DAY + 20 * minute], typed(&[DAY]));
         let child = Digest {
             sub: true,
-            prompts: vec![DAY + minute],
+            prompts: typed(&[DAY + minute]),
             ..digest(
                 "s-1",
                 vec![],
@@ -389,7 +451,7 @@ mod tests {
 
     #[test]
     fn the_window_keeps_what_happened_inside_it() {
-        let early = digest("s-1", vec![call(1, DAY, 10)], vec![DAY], vec![DAY]);
+        let early = digest("s-1", vec![call(1, DAY, 10)], vec![DAY], typed(&[DAY]));
         let late = digest(
             "s-2",
             vec![call(2, DAY + 2 * HOUR, 20)],
