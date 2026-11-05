@@ -9,10 +9,9 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use semver::Version;
-use tempfile::TempPath;
 
 use crate::error::{Error, Result, Stage};
-use crate::install::{self, InstallOutcome};
+use crate::install::{self, InstallOutcome, Signed, Staged};
 use crate::manifest::{Manifest, parse_version};
 use crate::platform::{Install, Target};
 use crate::{ENDPOINT, PUBKEY, http, signature};
@@ -107,7 +106,7 @@ struct Inner {
     state: State,
     pending: Option<Pending>,
     /// The verified download, until it is installed. Dropping it deletes it.
-    staged: Option<TempPath>,
+    staged: Option<Staged>,
 }
 
 type Observer = Arc<dyn Fn(&State) + Send + Sync>;
@@ -196,8 +195,10 @@ impl Updater {
     /// again once a release is already downloaded it answers with that release
     /// instead of asking again.
     pub fn check(&self) -> Result<Option<ReleaseInfo>> {
+        // The state is read and moved on under one lock, so that two calls at
+        // once cannot both start.
         {
-            let inner = lock(&self.shared.inner);
+            let mut inner = lock(&self.shared.inner);
             match &inner.state {
                 State::Checking => return Err(Error::State("a check is already running".into())),
                 State::Downloading { .. } | State::Installing(_) => {
@@ -206,8 +207,9 @@ impl Updater {
                 State::Ready(info) | State::Installed(info) => return Ok(Some(info.clone())),
                 State::Idle | State::Available(_) | State::Error { .. } => {}
             }
+            inner.state = State::Checking;
         }
-        self.set(State::Checking);
+        self.notify(&State::Checking);
 
         match self.check_inner() {
             Ok(Some(pending)) => {
@@ -234,6 +236,10 @@ impl Updater {
         let Some(install) = self.install_kind() else {
             return Ok(None);
         };
+        if matches!(install, Install::Nsis | Install::Msi) {
+            // The installers earlier updates had to leave behind.
+            install::sweep_stale(&std::env::temp_dir(), Duration::from_secs(60 * 60));
+        }
         let Some(target) = config.target.or_else(Target::current) else {
             return Ok(None);
         };
@@ -268,7 +274,7 @@ impl Updater {
     /// the state at `Available`.
     pub fn download(&self) -> Result<()> {
         let (pending_url, signature, install, info) = {
-            let inner = lock(&self.shared.inner);
+            let mut inner = lock(&self.shared.inner);
             match &inner.state {
                 State::Ready(_) | State::Installed(_) => return Ok(()),
                 State::Available(_) | State::Error { .. } => {}
@@ -278,16 +284,23 @@ impl Updater {
                 .pending
                 .as_ref()
                 .ok_or_else(|| Error::State("there is no update to download".into()))?;
-            (
+            let taken = (
                 pending.url.clone(),
                 pending.signature.clone(),
                 pending.install.clone(),
                 pending.info.clone(),
-            )
+            );
+            // Moved on under the same lock as the check above: a second call
+            // now finds `Downloading` and is refused.
+            inner.state = State::Downloading {
+                release: taken.3.clone(),
+                bytes: 0,
+                total: None,
+            };
+            self.shared.cancel.store(false, Ordering::Relaxed);
+            taken
         };
-
-        self.shared.cancel.store(false, Ordering::Relaxed);
-        self.set(State::Downloading {
+        self.notify(&State::Downloading {
             release: info.clone(),
             bytes: 0,
             total: None,
@@ -316,7 +329,7 @@ impl Updater {
         signature: &str,
         install: &Install,
         info: &ReleaseInfo,
-    ) -> Result<TempPath> {
+    ) -> Result<Staged> {
         let config = &self.shared.config;
         let (mut file, staged) = install::create_staging(install)?;
 
@@ -340,7 +353,7 @@ impl Updater {
             .map_err(|e| Error::io("writing the download", e))?;
         drop(file);
 
-        signature::verify_file(&staged, &config.pubkey, signature)?;
+        signature::verify_file(staged.path(), &config.pubkey, signature)?;
         Ok(staged)
     }
 
@@ -370,7 +383,7 @@ impl Updater {
     /// the person for a password. On success the next step depends on the
     /// outcome; see [`InstallOutcome`].
     pub fn install(&self) -> Result<InstallOutcome> {
-        let (staged, install, info) = {
+        let (staged, install, signature, info) = {
             let mut inner = lock(&self.shared.inner);
             let info = match &inner.state {
                 State::Ready(info) => info.clone(),
@@ -380,12 +393,22 @@ impl Updater {
             else {
                 return Err(Error::State("the update has not been downloaded".into()));
             };
-            (staged, pending.install.clone(), info)
+            let taken = (
+                staged,
+                pending.install.clone(),
+                pending.signature.clone(),
+                info,
+            );
+            inner.state = State::Installing(taken.3.clone());
+            taken
         };
-
-        self.set(State::Installing(info.clone()));
+        self.notify(&State::Installing(info.clone()));
         let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-        match install::apply(&install, staged, &args) {
+        let signed = Signed {
+            pubkey: &self.shared.config.pubkey,
+            signature: &signature,
+        };
+        match install::apply(&install, staged, signed, &args) {
             Ok(outcome) => {
                 self.set(State::Installed(info));
                 Ok(outcome)
@@ -857,5 +880,70 @@ mod tests {
     fn the_updater_can_be_shared_between_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Updater>();
+    }
+
+    /// The staged download beside the image, as a local process would find it.
+    fn staged_file(f: &Fixture) -> PathBuf {
+        fs::read_dir(f.dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.to_string_lossy().ends_with(".part"))
+            .expect("the download is staged beside the image")
+    }
+
+    #[test]
+    fn a_download_swapped_between_check_and_install_is_refused() {
+        let f = Fixture::new();
+        f.updater.check().unwrap();
+        f.updater.download().unwrap();
+        // Verified and waiting for Restart; another process rewrites it.
+        let mut swapped = payload();
+        swapped[200] ^= 0xff;
+        fs::write(staged_file(&f), swapped).unwrap();
+
+        match f.updater.install() {
+            Err(Error::Signature(why)) => assert!(why.contains("does not match"), "{why}"),
+            other => panic!("expected the swapped file to be refused, got {other:?}"),
+        }
+        assert!(matches!(
+            f.updater.state(),
+            State::Error {
+                stage: Stage::Install,
+                ..
+            }
+        ));
+        assert_eq!(fs::read(&f.image).unwrap(), b"1.12.1 image");
+        assert_eq!(
+            f.folder(),
+            ["Hangar.AI.AppImage"],
+            "the bad file is deleted"
+        );
+
+        // Downloading again is the retry, and that one installs.
+        f.updater.download().unwrap();
+        f.updater.install().unwrap();
+        assert_eq!(fs::read(&f.image).unwrap(), payload());
+    }
+
+    #[test]
+    fn a_second_download_while_one_runs_is_refused() {
+        let f = Fixture::new();
+        f.server.reply(
+            "/Hangar.AI_1.13.0_amd64.AppImage",
+            Reply::ok(payload()).slowly(4096, Duration::from_millis(30)),
+        );
+        f.updater.check().unwrap();
+        let first = f.updater.clone();
+        let running = std::thread::spawn(move || first.download());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !matches!(f.updater.state(), State::Downloading { .. }) {
+            assert!(Instant::now() < deadline, "the download never started");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(matches!(f.updater.download(), Err(Error::State(_))));
+        assert!(matches!(f.updater.check(), Err(Error::State(_))));
+        f.updater.cancel();
+        assert!(matches!(running.join().unwrap(), Err(Error::Cancelled)));
+        assert_eq!(f.folder(), ["Hangar.AI.AppImage"], "one staging file, gone");
     }
 }

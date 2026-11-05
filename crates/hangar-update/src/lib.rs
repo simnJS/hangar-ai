@@ -28,9 +28,9 @@
 //! | Install | Feed key | Artifact | Put in place by |
 //! | --- | --- | --- | --- |
 //! | AppImage | `linux-x86_64-appimage`, then `linux-x86_64` | the `.AppImage` itself (or a `.tar.gz` holding one) | renaming it over `$APPIMAGE` |
-//! | `.deb` | `linux-x86_64-deb`, then `linux-x86_64` | the `.deb` | `pkexec dpkg -i` |
-//! | `.rpm` | `linux-x86_64-rpm`, then `linux-x86_64` | the `.rpm` | `pkexec rpm -U` |
-//! | macOS | `darwin-{arch}-app`, then `darwin-{arch}` | `.app.tar.gz` | swapping the bundle |
+//! | `.deb` | `linux-x86_64-deb`, then `linux-x86_64` | the `.deb` | `pkexec` running `dpkg -i` on a root-owned copy checked against the verified bytes |
+//! | `.rpm` | `linux-x86_64-rpm`, then `linux-x86_64` | the `.rpm` | `pkexec` running `rpm -U` the same way |
+//! | macOS | `darwin-{arch}-app`, then `darwin-{arch}` | `.app.tar.gz` | swapping the bundle (as root, from a re-checked copy, when the folder is not the person's) |
 //! | Windows (NSIS) | `windows-x86_64-nsis`, then `windows-x86_64` | the `-setup.exe` | running it with `/P /R /UPDATE /ARGS …` |
 //! | Windows (MSI) | `windows-x86_64-msi`, then `windows-x86_64` | the `.msi` | `msiexec /i … /passive` |
 //!
@@ -60,6 +60,7 @@ mod http;
 mod install;
 mod manifest;
 mod platform;
+mod sha256;
 mod signature;
 mod updater;
 

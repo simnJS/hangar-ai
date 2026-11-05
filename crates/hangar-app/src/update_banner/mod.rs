@@ -29,7 +29,7 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::navigator::skin;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Region, WindowKind};
+use crate::shell::{Region, WindowKind};
 use crate::state::Model;
 
 /// Where the banner is (`Stage` of the TS).
@@ -130,6 +130,29 @@ impl State {
             self.progress = 100;
         }
     }
+
+    /// *Restart* was clicked: `false` when a restart is already under way.
+    fn begin_restart(&mut self) -> bool {
+        if self.restarting {
+            return false;
+        }
+        self.restarting = true;
+        true
+    }
+
+    /// The install or the relaunch failed: the banner says so, with why as
+    /// its tooltip, and the next *Restart* is allowed again.
+    fn restart_failed(&mut self, why: String) {
+        self.restarting = false;
+        self.stage = Phase::Failed;
+        self.error = Some(why);
+    }
+
+    /// *Retry*: back to the offer, with nothing left waiting.
+    fn retry(&mut self) {
+        self.restarting = false;
+        self.stage = Phase::Available;
+    }
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -150,6 +173,9 @@ pub enum Msg {
     Restart,
     /// *Retry* after a failure: back to the offer.
     Retry,
+    /// The install and relaunch a *Restart* started have failed. (Success
+    /// closes the window instead.)
+    RestartFailed(String),
 }
 
 fn updater_of(st: &mut State, sv: &Services) -> Option<Updater> {
@@ -207,7 +233,11 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Retry => {
-            st.stage = Phase::Available;
+            st.retry();
+            Task::none()
+        }
+        Msg::RestartFailed(why) => {
+            st.restart_failed(why);
             Task::none()
         }
         Msg::Install => {
@@ -218,35 +248,47 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 return Task::none();
             };
             // Progress and failure come back through the observer; a cancelled
-            // download leaves the offer standing.
-            blocking(move || updater.download().is_ok(), |_| Message::Noop)
+            // download leaves the offer standing. The state is read once more
+            // when it returns, for a download that had nothing to do (already
+            // downloaded or installed) and so reported no change.
+            blocking(
+                move || {
+                    let _ = updater.download();
+                    updater.state()
+                },
+                |state| Message::UpdateBanner(Msg::Changed(state)),
+            )
         }
         Msg::Restart => {
-            if st.restarting {
-                return Task::none();
-            }
             let Some(Handle(updater)) = st.updater.clone() else {
                 return Task::none();
             };
-            st.restarting = true;
+            if !st.begin_restart() {
+                return Task::none();
+            }
             let main = m
                 .live
                 .windows
                 .iter()
                 .find(|(_, kind)| **kind == WindowKind::Main)
                 .map(|(id, _)| *id);
-            blocking(
-                move || restart(&updater),
+            Task::perform(
+                async move { tokio::task::spawn_blocking(move || restart(&updater)).await },
                 move |result| match result {
                     // The shell's way out of the main window: the last change
                     // saved, the core shut down, then the process ends. The
                     // new version is already starting; it waits for this
                     // process to be gone (hangar-update's relaunch helper).
-                    Ok(()) => match main {
+                    Ok(Ok(())) => match main {
                         Some(id) => Message::Window(id, window::Event::CloseRequested),
                         None => Message::Noop,
                     },
-                    Err(error) => Message::Intent(Intent::Notice(Notice::Problem(error))),
+                    // Shown by the banner alone, which also lets Restart be
+                    // clicked again.
+                    Ok(Err(error)) => Message::UpdateBanner(Msg::RestartFailed(error)),
+                    Err(_) => Message::UpdateBanner(Msg::RestartFailed(
+                        "the update stopped unexpectedly".into(),
+                    )),
                 },
             )
         }
@@ -254,8 +296,13 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 }
 
 /// Puts the downloaded version in place and starts it. An installer that waits
-/// for this process to end (Windows) starts the new version itself.
+/// for this process to end (Windows) starts the new version itself. A version
+/// already put in place by an earlier *Restart*, whose relaunch failed, is
+/// only started.
 fn restart(updater: &Updater) -> Result<(), String> {
+    if matches!(updater.state(), hangar_update::State::Installed(_)) {
+        return updater.relaunch().map_err(|error| error.to_string());
+    }
     match updater.install().map_err(|error| error.to_string())? {
         InstallOutcome::Replaced => updater.relaunch().map_err(|error| error.to_string()),
         InstallOutcome::InstallerStarted => Ok(()),
