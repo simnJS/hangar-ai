@@ -115,8 +115,8 @@ around the terminals, and needs a fraction of the memory and processor it did.
   - **The check has a build folder of its own.** Every check of a workspace runs in one
     folder with a short path (no more paths too long to build in on Windows), put back on
     each merge's files and cleaned of what the last check left, and builds into a target
-    folder only checks use. Rust keys a workspace's own crates by their path, so only what
-    changed is rebuilt now.
+    folder only checks use. A fresh checkout for every check made the build start over;
+    in the same folder, only what changed is rebuilt.
   - **A shared build cache for the workers, if you want it.** It is off by default:
     workers building different branches in one shared folder can mix their builds, so turn
     it on in the orchestration settings only if they rarely build at once. The settings
@@ -132,6 +132,19 @@ around the terminals, and needs a fraction of the memory and processor it did.
   - **Leftovers are removed.** At start, Hangar removes the delivery folders earlier
     versions left in the temporary folder and has git forget the worktrees whose folder is
     gone.
+- **The orchestrator has a free hand.** Your instructions come first: its role says so at
+  the top, and everything else in it is a default, not a wall.
+  - It does small things itself (the changelog, docs, configuration, a fix to the check),
+    commits, and can merge a finished branch into the target branch without waiting for the
+    delivery queue. It decides when a delivery check and a review are worth their minutes.
+    It pushes, tags or releases when you ask, never on its own.
+  - A worktree per task is its choice now: `worker_spawn` with `worktree: false` starts a
+    worker in the workspace's own folder, beside the others, with no branch and no
+    delivery.
+- **No worktree left behind.** After a delivery lands, what Windows kept of its folder (a
+  `node_modules`, read-only files, paths too long) goes too, and the worktrees nobody uses
+  any more, merged, clean and with no pane, are removed with their branch when Hangar
+  starts or a workspace opens.
 - **Not there yet.**
   - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux
     is where it was used.
