@@ -15,9 +15,10 @@
 //!   close button alone, `'close,minimize:'` puts two on the left), round on
 //!   a faint disc;
 //! - on Windows they are Windows 11's: minimise, maximise or restore, close,
-//!   always at the right end, rectangular, 46 px wide and the band's height,
+//!   always at the right end, rectangular, 36 px wide and the band's height,
 //!   flush with the window's top-right corner, close turning red under the
-//!   pointer ([`windows_style`]). No Snap Layouts flyout for now: that needs
+//!   pointer ([`windows_style`]), their glyphs the system's own caption font
+//!   ([`caption_font`]). No Snap Layouts flyout for now: that needs
 //!   the window's hit-testing, which winit keeps;
 //! - the window's edges resize it while it is not maximised (winit leaves
 //!   an undecorated window's borders to the app on both systems: its
@@ -39,6 +40,7 @@
 //! manager's), or on Windows the plain one. macOS keeps its own.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use hangar_i18n::Key;
@@ -46,9 +48,9 @@ use hangar_theme::{Theme, tokens};
 use hangar_ui::{Icon, icon, tip};
 use iced::border::Radius;
 use iced::mouse::Interaction;
-use iced::widget::{Space, button, column, container, mouse_area, row};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::window::{self, Direction};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
@@ -226,7 +228,7 @@ pub enum Side {
 const SIDE: f32 = 24.0;
 const GAP: f32 = tokens::space::MD;
 /// A Windows button's width: the full band tall, none between two.
-const WINDOWS_WIDTH: f32 = 46.0;
+const WINDOWS_WIDTH: f32 = 36.0;
 /// Windows' close button under the pointer, and pressed.
 const WINDOWS_CLOSE: Color = Color::from_rgb(196.0 / 255.0, 43.0 / 255.0, 28.0 / 255.0);
 const WINDOWS_CLOSE_PRESSED: Color = Color {
@@ -309,18 +311,8 @@ fn control_button<'a>(ctx: Ctx<'a>, control: Control) -> Element<'a, Message> {
     } else {
         (SIDE, SIDE)
     };
-    // Windows' minimise glyph is a 10 px hairline, drawn here: the icon set's
-    // `Minus` is a stroke with no height, which the renderer draws as nothing.
-    let glyph: Element<'a, Message> = if windows_style() && control == Control::Minimize {
-        let line = t.colors.fg;
-        container(Space::new())
-            .width(10)
-            .height(1)
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(Background::Color(line)),
-                ..container::Style::default()
-            })
-            .into()
+    let glyph: Element<'a, Message> = if windows_style() {
+        windows_glyph(control, maximized(ctx), glyph, t.colors.fg)
     } else {
         icon(glyph, 13.0).into()
     };
@@ -331,6 +323,66 @@ fn control_button<'a>(ctx: Ctx<'a>, control: Control) -> Element<'a, Message> {
         .style(look(t, control))
         .on_press(press(ctx.window, Press::Control(control)));
     tip::bottom(t, built, ctx.t(words).into_owned())
+}
+
+/// The system font Windows draws its own caption buttons with: Segoe Fluent
+/// Icons (Windows 11), else Segoe MDL2 Assets (Windows 10). Microsoft's, so
+/// it is never bundled: nothing when the system has neither.
+fn caption_font() -> Option<Font> {
+    static FONT: OnceLock<Option<Font>> = OnceLock::new();
+    *FONT.get_or_init(|| {
+        if !cfg!(target_os = "windows") {
+            return None;
+        }
+        let fonts = std::path::PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
+        if fonts.join("SegoeIcons.ttf").is_file() {
+            Some(Font::with_name("Segoe Fluent Icons"))
+        } else if fonts.join("segmdl2.ttf").is_file() {
+            Some(Font::with_name("Segoe MDL2 Assets"))
+        } else {
+            None
+        }
+    })
+}
+
+/// The codepoint of a caption button's glyph in those fonts.
+fn caption_char(control: Control, maximized: bool) -> char {
+    match control {
+        Control::Minimize => '',
+        Control::Maximize if maximized => '',
+        Control::Maximize => '',
+        Control::Close => '',
+    }
+}
+
+/// A Windows button's glyph: the system's own, as text, about 10 px in the
+/// text colour the button gives it; without the font, the icon set's, and for
+/// minimise (whose `Minus` is a stroke with no height, which the renderer
+/// draws as nothing) a 10 px hairline.
+fn windows_glyph<'a>(
+    control: Control,
+    maximized: bool,
+    fallback: Icon,
+    fg: Color,
+) -> Element<'a, Message> {
+    if let Some(font) = caption_font() {
+        return text(caption_char(control, maximized).to_string())
+            .font(font)
+            .size(10)
+            .shaping(text::Shaping::Advanced)
+            .into();
+    }
+    if control == Control::Minimize {
+        return container(Space::new())
+            .width(10)
+            .height(1)
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(Background::Color(fg)),
+                ..container::Style::default()
+            })
+            .into();
+    }
+    icon(fallback, 13.0).into()
 }
 
 /// On Linux round, on a faint disc of the text colour, as the desktop's own
@@ -656,7 +708,7 @@ mod tests {
     #[test]
     fn windows_buttons_take_their_width_and_no_gap() {
         assert_eq!(room(true, 0), 0.0);
-        assert_eq!(room(true, 3), 3.0 * 46.0);
+        assert_eq!(room(true, 3), 3.0 * WINDOWS_WIDTH);
         assert_eq!(room(false, 3), 3.0 * (SIDE + GAP));
     }
 
