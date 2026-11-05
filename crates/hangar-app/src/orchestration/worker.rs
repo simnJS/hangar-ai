@@ -888,10 +888,7 @@ async fn start_steps(
     };
     // The orchestrator may start the worker in the workspace's own folder even
     // in a repository (`worktree: false`): no worktree, no branch, no delivery.
-    let wants_tree = match start.worktree {
-        None => true,
-        Some(wanted) => wanted,
-    };
+    let wants_tree = start.worktree.unwrap_or(true);
     let shared_checkout = git.is_some() && !wants_tree;
     let git = git.filter(|_| wants_tree);
     let target = git
