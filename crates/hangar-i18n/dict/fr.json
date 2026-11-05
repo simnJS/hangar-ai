@@ -438,7 +438,7 @@
   "settings.showInspector": "Afficher l'inspecteur",
   "settings.showInspectorHint": "Ce que fait l'agent actif, à droite",
   "settings.systemTitleBar": "Utiliser la barre de titre du système",
-  "settings.systemTitleBarHint": "Hangar dessine la sienne, aux couleurs de son thème, avec les boutons que montre ton bureau. Active ceci pour retrouver celle que dessine ton bureau.",
+  "settings.systemTitleBarHint": "Hangar dessine la sienne, aux couleurs de son thème, avec les boutons que montre ton système. Active ceci pour retrouver celle que dessine ton système.",
   "settings.theme": "Thème",
   "settings.themeHint": "Palette des terminaux — toute la fenêtre la suit",
   "settings.themePerWorkspace": "Propre à ce workspace",

@@ -438,7 +438,7 @@
   "settings.showInspector": "Show the inspector",
   "settings.showInspectorHint": "What the focused agent is doing, on the right",
   "settings.systemTitleBar": "Use the system's title bar",
-  "settings.systemTitleBarHint": "Hangar draws its own, in its theme, with the buttons your desktop shows. Turn this on for the bar your desktop draws instead.",
+  "settings.systemTitleBarHint": "Hangar draws its own, in its theme, with the buttons your system shows. Turn this on for the bar your system draws instead.",
   "settings.theme": "Theme",
   "settings.themeHint": "Terminal palette — the whole window follows it",
   "settings.themePerWorkspace": "Specific to this workspace",

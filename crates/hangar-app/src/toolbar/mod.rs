@@ -432,9 +432,13 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
                 .keys(keys(CommandId::ViewInspector))
                 .on_press(Message::Intent(Intent::ToggleInspector)),
         );
-    // The window's buttons the desktop puts on the right, last.
+    // The window's buttons the desktop puts on the right, last. Windows'
+    // are flush with the window's corner: no gap before, no padding after.
     if let Some(controls) = title_bar::toolbar(ctx, title_bar::Side::End) {
-        trail = trail.push(Space::new().width(space::MD)).push(controls);
+        if !title_bar::flush_end(ctx) {
+            trail = trail.push(Space::new().width(space::MD));
+        }
+        trail = trail.push(controls);
     }
 
     row![
@@ -445,7 +449,11 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     .spacing(space::XL)
     .padding(Padding {
         top: 0.0,
-        right: space::MD,
+        right: if title_bar::flush_end(ctx) {
+            0.0
+        } else {
+            space::MD
+        },
         bottom: 0.0,
         left: space::XL,
     })
