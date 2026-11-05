@@ -278,6 +278,10 @@ struct State {
     started: bool,
     /// A press landed on the veil, and is waiting for its release.
     pressed_outside: bool,
+    /// The window, as the last layout saw it: the render layer the overlay
+    /// draws in is clipped to it rather than to the content's own box, so a
+    /// shadow cast outside a menu or a docked card is kept.
+    window: Size,
 }
 
 /// The settings the overlay needs, borrowed from the widget.
@@ -686,6 +690,7 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
             (bounds.width - 2.0 * self.settings.margin).max(0.0),
             (bounds.height - 2.0 * self.settings.margin).max(0.0),
         );
+        self.state.window = bounds;
         let limits = layout::Limits::new(Size::ZERO, room);
         let content = self
             .content
@@ -721,7 +726,12 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
         // A render layer of its own: iced draws the overlays of one level in
         // the same layer, quads before text, and a scrollable in a lower
         // overlay opens a layer after it, which would land over this one.
-        iced::advanced::Renderer::with_layer(renderer, layout.bounds(), |renderer| {
+        let clip = if self.state.window == Size::ZERO {
+            layout.bounds()
+        } else {
+            Rectangle::with_size(self.state.window)
+        };
+        iced::advanced::Renderer::with_layer(renderer, clip, |renderer| {
             if let Some(veil) = self.settings.veil {
                 container::draw_background(renderer, &veil(theme), layout.bounds());
             }
