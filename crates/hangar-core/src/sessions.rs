@@ -218,7 +218,12 @@ fn claude_transcript_exists(projects: &Path, id: &str) -> Option<bool> {
     let entries = fs::read_dir(projects).ok()?;
     let mut unsure = false;
     for entry in entries.filter_map(Result::ok) {
-        match fs::metadata(entry.path().join(&file)) {
+        let dir = entry.path();
+        // A stray file (.DS_Store) is not a project folder: nothing in it.
+        if !dir.is_dir() {
+            continue;
+        }
+        match fs::metadata(dir.join(&file)) {
             Ok(meta) if meta.is_file() => return Some(true),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -272,6 +277,8 @@ mod tests {
         let elsewhere = projects.join("C--other-spelling");
         fs::create_dir_all(&here).expect("project dir");
         fs::create_dir_all(&elsewhere).expect("project dir");
+        // A stray file among the project folders is not a reason to doubt.
+        fs::write(projects.join(".DS_Store"), "x").expect("stray file");
         fs::write(elsewhere.join("kept-1.jsonl"), "{}\n").expect("transcript");
 
         assert_eq!(claude_transcript_exists(&projects, "kept-1"), Some(true));
