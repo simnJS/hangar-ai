@@ -417,3 +417,81 @@ mod shadows {
         assert!(near < 250, "the shadow shows beside the card, got {near}");
     }
 }
+
+mod focus {
+    use iced::widget::text_input;
+    use iced::{Element, Event, mouse};
+    use iced_test::core::clipboard;
+    use iced_test::core::widget::{self, Operation, operation::Focusable};
+    use iced_test::runtime::UserInterface;
+    use iced_test::runtime::user_interface::Cache;
+
+    use super::*;
+    use crate::testing::WINDOW;
+
+    /// Writes down the ids of the fields that hold the keyboard.
+    #[derive(Default)]
+    struct Focused(Vec<String>);
+
+    impl Operation for Focused {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+
+        fn focusable(
+            &mut self,
+            id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            state: &mut dyn Focusable,
+        ) {
+            if state.is_focused() {
+                self.0.push(format!("{:?}", id));
+            }
+        }
+    }
+
+    fn view<'a>(modal_open: bool) -> Element<'a, ()> {
+        let page = text_input("page", "").id("page");
+        let content = modal_open.then(|| Element::from(text_input("dialog", "").id("dialog")));
+        modal(page, content).into()
+    }
+
+    fn focused(ui: &mut UserInterface<'_, (), iced::Theme, iced::Renderer>, r: &iced::Renderer) -> Vec<String> {
+        let mut op = Focused::default();
+        ui.operate(r, &mut op);
+        op.0
+    }
+
+    #[test]
+    fn a_field_focused_under_a_modal_loses_the_focus_and_the_dialog_takes_it() {
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced::Font::DEFAULT,
+                iced::Pixels(16.0),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("a headless renderer");
+
+        // The page alone, with its field focused.
+        let mut ui = UserInterface::build(view(false), WINDOW, Cache::default(), &mut renderer);
+        let mut focus = widget::operation::focusable::focus(widget::Id::new("page"));
+        ui.operate(&renderer, &mut focus);
+        assert_eq!(focused(&mut ui, &renderer).len(), 1);
+
+        // The dialog opens over it; the next event reaches the overlay first.
+        let cache = ui.into_cache();
+        let mut ui = UserInterface::build(view(true), WINDOW, cache, &mut renderer);
+        let mut messages = Vec::new();
+        ui.update(
+            &[Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(400.0, 300.0),
+            })],
+            mouse::Cursor::Available(Point::new(400.0, 300.0)),
+            &mut renderer,
+            &mut clipboard::Null,
+            &mut messages,
+        );
+        assert_eq!(focused(&mut ui, &renderer), ["Some(Id(Custom(\"dialog\")))"]);
+    }
+}

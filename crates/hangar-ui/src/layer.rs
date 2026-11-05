@@ -274,8 +274,12 @@ impl<'a, M: Clone + 'a> Layer<'a, M> {
 /// What a layer remembers between frames.
 #[derive(Debug, Default)]
 struct State {
-    /// The content has been given the keyboard (or the base lost it).
-    started: bool,
+    /// The page under the layer has let go of the keyboard (trap_keys).
+    base_unfocused: bool,
+    /// The content has taken the keyboard (autofocus). Kept apart from
+    /// `base_unfocused`: iced hands an event to the overlay before the page,
+    /// so one shared flag was already set when the page looked at it.
+    autofocused: bool,
     /// A press landed on the veil, and is waiting for its release.
     pressed_outside: bool,
     /// The window, as the last layout saw it: the render layer the overlay
@@ -358,12 +362,13 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Layer<'_, M> {
     ) {
         let state = tree.state.downcast_mut::<State>();
         if self.content.is_none() {
-            state.started = false;
+            state.base_unfocused = false;
+            state.autofocused = false;
             state.pressed_outside = false;
-        } else if self.trap_keys && !state.started {
+        } else if self.trap_keys && !state.base_unfocused {
             // A dialog has opened over the window: whatever field had the
             // keyboard under it must not keep a caret, nor take the keys.
-            state.started = true;
+            state.base_unfocused = true;
             self.base.as_widget_mut().operate(
                 &mut tree.children[0],
                 layout,
@@ -775,8 +780,8 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
         let panel = Self::panel(layout);
 
         // The first thing a dialog does is take the keyboard.
-        if self.settings.autofocus && !self.state.started {
-            self.state.started = true;
+        if self.settings.autofocus && !self.state.autofocused {
+            self.state.autofocused = true;
             self.move_focus(panel, renderer, FocusStep::First);
             shell.request_redraw();
         }
