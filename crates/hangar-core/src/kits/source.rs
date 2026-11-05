@@ -620,26 +620,54 @@ pub(crate) mod tests {
     }
 
     /// An http server on loopback that takes connections and never answers:
-    /// a network that stalled.
-    pub(crate) fn stalled_server(offset: u16) -> String {
+    /// a network that stalled. It listens on the last ports of the worker's
+    /// range, which the other tests leave alone, and is closed when dropped.
+    pub(crate) struct Stalled {
+        pub url: String,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for Stalled {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// `offset` counts down from the end of the range: 0 is its last port.
+    pub(crate) fn stalled_server(offset: u16) -> Stalled {
         let port = std::env::var("HANGAR_PORT_BASE")
             .ok()
             .and_then(|base| base.parse::<u16>().ok())
-            .map_or(0, |base| base + offset);
+            .map_or(0, |base| base + 19 - offset);
         let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = std::thread::spawn(move || {
             let mut held = Vec::new();
-            for stream in listener.incoming().flatten() {
-                held.push(stream);
+            while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => held.push(stream),
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
             }
         });
-        format!("http://127.0.0.1:{port}/o/r")
+        Stalled {
+            url: format!("http://127.0.0.1:{port}/o/r"),
+            stop,
+            thread: Some(thread),
+        }
     }
 
     #[test]
     fn git_is_stopped_at_its_deadline_when_the_network_stalls() {
-        let url = stalled_server(0);
+        let server = stalled_server(0);
+        let url = server.url.clone();
         TEST_DEADLINE.with(|deadline| deadline.set(Some(Duration::from_secs(2))));
         let started = Instant::now();
         let err = remote_refs(&url).unwrap_err();

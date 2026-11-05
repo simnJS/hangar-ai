@@ -1734,7 +1734,8 @@ mod tests {
     #[test]
     fn a_stalled_network_does_not_hold_the_store() {
         let (_home, store) = store("stalled");
-        let url = source::tests::stalled_server(1);
+        let server = source::tests::stalled_server(1);
+        let url = server.url.clone();
         let (done, finished) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let store = &store;
