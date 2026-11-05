@@ -15,6 +15,7 @@
 //! a page in its sandbox; anything else it hands over to be saved.
 
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -215,6 +216,18 @@ fn retain(shares: &mut Vec<Share>, count: usize, bytes: u64) -> Vec<Share> {
     dropped
 }
 
+/// `CON`, `NUL`, `COM1`…: names Windows keeps for its devices, whatever
+/// the case, and with any extension.
+fn reserved_on_windows(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    let stem = stem.to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0')
+}
+
 /// A file name and nothing else: no folder, no `..`, no character Windows or
 /// a shell would read as more, and a length a file system accepts.
 pub fn sanitize_name(raw: &str) -> String {
@@ -232,6 +245,10 @@ pub fn sanitize_name(raw: &str) -> String {
     let cleaned = cleaned.trim_matches(|c: char| c == '.' || c.is_whitespace());
     if cleaned.is_empty() {
         return "file".to_string();
+    }
+    // A Windows device's name, extension or not, is no file there (MOB-15).
+    if reserved_on_windows(cleaned) {
+        return sanitize_name(&format!("_{cleaned}"));
     }
     if cleaned.chars().count() <= NAME_LIMIT {
         return cleaned.to_string();
@@ -324,19 +341,17 @@ fn judge(copy: &Path) -> (Kind, String) {
     }
 }
 
-/// The part of a file a request's `Range` header asks for, read.
+/// The part of a file a request's `Range` header asks for.
 #[derive(Debug, PartialEq)]
 pub enum Part {
     Whole {
         len: u64,
-        body: Vec<u8>,
     },
     /// Inclusive, as HTTP counts; `len` is the whole file's.
     Range {
         start: u64,
         end: u64,
         len: u64,
-        body: Vec<u8>,
     },
     /// Several ranges, a malformed one, or one past the end: 416.
     Unsatisfiable {
@@ -344,32 +359,85 @@ pub enum Part {
     },
 }
 
-/// Reads what `range` asks of the file at `path` — through the scheme's own
-/// reading of a `Range` header (model.rs) — and no byte of it when `body` is
-/// false, for a HEAD. A player asks for a range, Safari's before it plays
-/// anything at all.
-pub fn read_part(path: &Path, range: Option<&str>, body: bool) -> std::io::Result<Part> {
+/// What `range` asks of the file at `path` — through the scheme's own
+/// reading of a `Range` header (model.rs) — without a byte of it read: the
+/// bytes are streamed (`stream`). A player asks for a range, Safari's before
+/// it plays anything at all.
+pub fn part_of(path: &Path, range: Option<&str>) -> std::io::Result<Part> {
     let len = fs::metadata(path)?.len();
-    let read = |start: u64, count: u64| {
-        if body {
-            model::read_span(path, start, count)
-        } else {
-            Ok(Vec::new())
-        }
-    };
     Ok(match model::asked_span(range, len) {
-        Some(Span::Whole) => Part::Whole {
-            len,
-            body: read(0, len)?,
-        },
-        Some(Span::Part { start, end }) => Part::Range {
-            start,
-            end,
-            len,
-            body: read(start, end - start + 1)?,
-        },
+        Some(Span::Whole) => Part::Whole { len },
+        Some(Span::Part { start, end }) => Part::Range { start, end, len },
         Some(Span::Unsatisfiable) | None => Part::Unsatisfiable { len },
     })
+}
+
+/// What a download reads at a time.
+const CHUNK: u64 = 64 * 1024;
+/// Chunks read ahead of a phone slower than the disk.
+const AHEAD: usize = 4;
+
+/// `count` bytes of the file at `path` from `start`, read on a blocking
+/// thread a chunk at a time as the phone takes them: a download holds a few
+/// chunks in memory, never the file, whatever its size (MOB-08). A file that
+/// ends early, or cannot be read, ends the body with an error, which cuts the
+/// answer short rather than passing a short one for whole.
+pub fn stream(path: PathBuf, start: u64, count: u64) -> axum::body::Body {
+    let (sender, receiver) = tokio::sync::mpsc::channel(AHEAD);
+    tokio::task::spawn_blocking(move || {
+        let fail = |error: std::io::Error| {
+            let _ = sender.blocking_send(Err(error));
+        };
+        let mut file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) => return fail(error),
+        };
+        if let Err(error) = file.seek(SeekFrom::Start(start)) {
+            return fail(error);
+        }
+        let mut left = count;
+        while left > 0 {
+            let mut chunk = vec![0; CHUNK.min(left) as usize];
+            match file.read(&mut chunk) {
+                Ok(0) => {
+                    return fail(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+                }
+                Ok(read) => {
+                    chunk.truncate(read);
+                    left -= read as u64;
+                    if sender
+                        .blocking_send(Ok(axum::body::Bytes::from(chunk)))
+                        .is_err()
+                    {
+                        // The phone went away.
+                        return;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return fail(error),
+            }
+        }
+    });
+    axum::body::Body::new(FileBody { receiver })
+}
+
+/// The chunks `stream` reads, as an HTTP body.
+struct FileBody {
+    receiver: tokio::sync::mpsc::Receiver<std::io::Result<axum::body::Bytes>>,
+}
+
+impl hyper::body::Body for FileBody {
+    type Data = axum::body::Bytes;
+    type Error = std::io::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        self.receiver
+            .poll_recv(cx)
+            .map(|chunk| chunk.map(|chunk| chunk.map(hyper::body::Frame::data)))
+    }
 }
 
 /// Saves a phone's file as `<cwd>/.hangar/uploads/<stamp>-<name>`, and
@@ -387,14 +455,33 @@ pub fn save_upload(cwd: &Path, name: &str, bytes: &[u8], stamp: &str) -> Result<
         let _ = fs::write(&ignore, "*\n");
     }
     let name = sanitize_name(name);
-    let mut target = dir.join(format!("{stamp}-{name}"));
+    // Taken only if it was free: two uploads of one name in the same second
+    // (two phones, or a retry) never write over each other (MOB-14).
     let mut n = 1;
-    while target.exists() {
-        n += 1;
-        target = dir.join(format!("{stamp}-{n}-{name}"));
-    }
-    fs::write(&target, bytes)
-        .map_err(|err| format!("could not save {}: {err}", target.display()))?;
+    let target = loop {
+        let target = if n == 1 {
+            dir.join(format!("{stamp}-{name}"))
+        } else {
+            dir.join(format!("{stamp}-{n}-{name}"))
+        };
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(err) = file.write_all(bytes) {
+                    drop(file);
+                    let _ = fs::remove_file(&target);
+                    return Err(format!("could not save {}: {err}", target.display()));
+                }
+                break target;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists && n < 10_000 => n += 1,
+            Err(err) => return Err(format!("could not save {}: {err}", target.display())),
+        }
+    };
     Ok(target)
 }
 
@@ -565,6 +652,14 @@ pub(super) mod tests {
             ("tab\tname\0.txt", "tab_name_.txt"),
             ("  spaced  .txt ", "spaced  .txt"),
             ("photo été.jpg", "photo été.jpg"),
+            // Windows devices (MOB-15), any case, with an extension or not.
+            ("nul.txt", "_nul.txt"),
+            ("CON", "_CON"),
+            ("con.tar.gz", "_con.tar.gz"),
+            ("Com1.log", "_Com1.log"),
+            ("lpt9", "_lpt9"),
+            ("com0.txt", "com0.txt"),
+            ("console.txt", "console.txt"),
         ] {
             assert_eq!(sanitize_name(given), expected, "{given:?}");
         }
@@ -731,25 +826,18 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn a_part_is_read_as_a_range_asks_for_it() {
+    fn a_part_is_what_a_range_asks_for() {
         let work = scratch("part");
         let path = file_of(&work, "voice.wav", b"0123456789");
-        let part = |range: Option<&str>| read_part(&path, range, true).unwrap();
+        let part = |range: Option<&str>| part_of(&path, range).unwrap();
 
-        assert_eq!(
-            part(None),
-            Part::Whole {
-                len: 10,
-                body: b"0123456789".to_vec()
-            }
-        );
+        assert_eq!(part(None), Part::Whole { len: 10 });
         assert_eq!(
             part(Some("bytes=0-1")),
             Part::Range {
                 start: 0,
                 end: 1,
-                len: 10,
-                body: b"01".to_vec()
+                len: 10
             }
         );
         assert_eq!(
@@ -757,8 +845,7 @@ pub(super) mod tests {
             Part::Range {
                 start: 7,
                 end: 9,
-                len: 10,
-                body: b"789".to_vec()
+                len: 10
             }
         );
         assert_eq!(
@@ -766,8 +853,7 @@ pub(super) mod tests {
             Part::Range {
                 start: 8,
                 end: 9,
-                len: 10,
-                body: b"89".to_vec()
+                len: 10
             }
         );
         for refused in ["bytes=10-", "bytes=5-2", "bytes=0-1,4-5", "bytes=x-"] {
@@ -777,16 +863,24 @@ pub(super) mod tests {
                 "{refused}"
             );
         }
-        // A HEAD: what would be sent, without a byte of it.
+    }
+
+    /// MOB-08: a file past one chunk comes through whole, a chunk at a time.
+    #[tokio::test]
+    async fn a_file_is_streamed_a_chunk_at_a_time_whole_or_from_a_range() {
+        let work = scratch("stream");
+        let bytes: Vec<u8> = (0..(CHUNK * 3 + 17)).map(|n| (n % 251) as u8).collect();
+        let path = file_of(&work, "big.bin", &bytes);
+        let read = |start: u64, count: u64| {
+            axum::body::to_bytes(stream(path.clone(), start, count), usize::MAX)
+        };
+        assert_eq!(read(0, bytes.len() as u64).await.unwrap(), bytes);
         assert_eq!(
-            read_part(&path, Some("bytes=2-4"), false).unwrap(),
-            Part::Range {
-                start: 2,
-                end: 4,
-                len: 10,
-                body: Vec::new()
-            }
+            read(CHUNK - 3, 10).await.unwrap(),
+            bytes[(CHUNK - 3) as usize..][..10]
         );
+        // A file shorter than said is an error, not a short answer.
+        assert!(read(0, bytes.len() as u64 + 1).await.is_err());
     }
 
     #[test]

@@ -272,13 +272,31 @@ async fn send(remote: Option<Arc<Remote>>, message: PushMessage) {
         en: words.en,
         fr: Some(words.fr),
     };
-    let _ = hangar_core::remote::remote_push(
+    let pushed = hangar_core::remote::remote_push(
         remote,
         text(message.title),
         text(message.body),
         message.url,
     )
     .await;
+    if let Some(error) = newly_failing(&LAST_PUSH_ERROR, pushed.err()) {
+        eprintln!("Hangar Mobile could not push a notification: {error}");
+    }
+}
+
+/// The last reason a push failed as a whole (a VAPID key that cannot be read
+/// or written…), said once rather than at every notification (MOB-21).
+static LAST_PUSH_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// The error to log: one not said since the last push that worked.
+fn newly_failing(last: &Mutex<Option<String>>, error: Option<String>) -> Option<String> {
+    let mut last = locked(last);
+    let fresh = error
+        .as_ref()
+        .filter(|error| last.as_ref() != Some(*error))
+        .cloned();
+    *last = error;
+    fresh
 }
 
 /// The push's own task: its timers, and every 10 s how many phones listen.
@@ -524,5 +542,21 @@ impl Sources for LiveSources {
             })
             .await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_push_failure_is_said_once_until_one_works_or_another_fails() {
+        let last = Mutex::new(None);
+        let fail = |why: &str| Some(why.to_string());
+        assert_eq!(newly_failing(&last, fail("no key")), fail("no key"));
+        assert_eq!(newly_failing(&last, fail("no key")), None);
+        assert_eq!(newly_failing(&last, fail("disk full")), fail("disk full"));
+        assert_eq!(newly_failing(&last, None), None);
+        assert_eq!(newly_failing(&last, fail("disk full")), fail("disk full"));
     }
 }

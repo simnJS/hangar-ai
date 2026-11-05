@@ -114,6 +114,11 @@ pub struct RemoteScreen {
     pub agent: String,
     pub activity: RemoteActivity,
     pub text: String,
+    /// The permission the pane asks for, when the PC can tell which
+    /// (`ChatPending::Permission`'s `prompt`), for the phone to send back
+    /// with its answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 /// `RemoteSent`: `queued` when held for a Claude Code session not up yet.
@@ -171,6 +176,10 @@ pub enum ChatPending {
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+        /// Which prompt this is (`chat_live::prompt_of`): the phone sends it
+        /// back with its answer, which is refused unless the pane still asks
+        /// this one (MOB-02).
+        prompt: String,
     },
 }
 
@@ -415,7 +424,9 @@ pub struct RemoteWorkspace {
     pub cwd: String,
 }
 
-/// An answer as the bus carries it.
-pub fn value<T: Serialize>(answer: &T) -> Value {
-    serde_json::to_value(answer).unwrap_or(Value::Null)
+/// An answer as the bus carries it; one that cannot be put in JSON fails
+/// with why, rather than reaching the phone as a `null` it would take for an
+/// answer (MOB-21).
+pub fn value<T: Serialize>(answer: &T) -> Result<Value, String> {
+    serde_json::to_value(answer).map_err(|err| format!("The answer could not be written: {err}"))
 }

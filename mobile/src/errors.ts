@@ -8,7 +8,8 @@ export function errorText(error: unknown): string {
     case "offline":
       return t("error.offline");
     case "busy":
-      return t("error.busy");
+      // It may have run: a tap again would be a call of its own.
+      return error.code === "pc-slow" ? t("error.slow") : t("error.busy");
     case "unpaired":
       return t("pair.again");
     case "refused":

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, type Activity, type Key, type Screen } from "../api";
+import { ApiError, type Activity, type Key, type Screen, type ScreenShown } from "../api";
 import { StateLabel, useNavigation } from "../components/Chrome";
 import { Icon } from "../components/Icon";
 import { errorText } from "../errors";
@@ -89,7 +89,7 @@ export function useStatus() {
 
 export function Console(props: ConsoleProps) {
   const { client } = useRemoteContext();
-  const [screen, setScreen] = useState<Screen | null>(null);
+  const [screen, setScreen] = useState<ScreenShown | null>(null);
   const [gone, setGone] = useState(false);
   const { status, setStatus, act } = useStatus();
   /**
@@ -115,8 +115,10 @@ export function Console(props: ConsoleProps) {
 
   const answer = async (allow: boolean) => {
     setAnsweredAt(Date.now());
+    // The prompt of the screen shown: the PC refuses it once the pane moved on.
+    const prompt = screen?.prompt;
     const ok = await act(
-      () => client.permission(props.paneId, allow),
+      () => client.permission(props.paneId, allow, prompt),
       allow ? t("permission.allowed") : t("permission.denied"),
     );
     if (!ok) setAnsweredAt(null);

@@ -148,7 +148,8 @@ fn write(file: &Path, saved: &SavedKey) -> Result<(), String> {
     }
     let body = serde_json::to_string_pretty(saved).map_err(|err| err.to_string())?;
     let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, body).map_err(|err| format!("could not save the push key: {err}"))?;
+    super::store::write_private(&tmp, body.as_bytes())
+        .map_err(|err| format!("could not save the push key: {err}"))?;
     fs::rename(&tmp, file).map_err(|err| format!("could not save the push key: {err}"))
 }
 
@@ -196,6 +197,60 @@ fn decode(value: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
+/// A host on the internet, as a push service's is: not an address of this
+/// PC, its network or the tailnet (100.64.0.0/10, `*.ts.net`), nor a name only
+/// a local resolver knows. A public name that resolves to a private address
+/// still passes: the push services' own names do not, and the body the PC
+/// posts is encrypted for the phone, which only a push service forwards.
+pub fn public_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(ip) => public_v4(ip),
+            std::net::IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
+                Some(v4) => public_v4(v4),
+                None => {
+                    let first = ip.segments()[0];
+                    !(ip.is_loopback()
+                        || ip.is_unspecified()
+                        || ip.is_multicast()
+                        // fc00::/7, unique local; fe80::/10, link-local.
+                        || first & 0xfe00 == 0xfc00
+                        || first & 0xffc0 == 0xfe80)
+                }
+            },
+        };
+    }
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
+    let local = [
+        ".localhost",
+        ".local",
+        ".internal",
+        ".lan",
+        ".home",
+        ".home.arpa",
+        ".ts.net",
+    ];
+    name.contains('.')
+        && !local
+            .iter()
+            .any(|suffix| name.ends_with(suffix) || name == suffix[1..])
+}
+
+fn public_v4(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    !(ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_documentation()
+        // 100.64.0.0/10: shared address space, Tailscale's addresses.
+        || (a == 100 && (64..128).contains(&b))
+        || a == 0)
+}
+
 /// The subscription a phone posts, `{ subscription, lang }`, checked: an
 /// https address, and keys that make a P-256 point and a 16-byte secret.
 pub fn subscription(body: &Value, now: u64) -> Result<Subscription, String> {
@@ -213,6 +268,11 @@ pub fn subscription(body: &Value, now: u64) -> Result<Subscription, String> {
         .map_err(|_| "the endpoint is not an address".to_string())?;
     if uri.scheme_str() != Some("https") || uri.host().is_none_or(str::is_empty) {
         return Err("the endpoint is not an https address".to_string());
+    }
+    // The PC posts to it on every push: never to itself, its network or the
+    // tailnet, which a phone could otherwise make it reach (MOB-10).
+    if !uri.host().is_some_and(public_host) {
+        return Err("the endpoint is not a push service's address".to_string());
     }
     let p256dh = given["keys"]["p256dh"]
         .as_str()
@@ -618,7 +678,25 @@ pub(super) mod tests {
             ),
             json!({ "lang": "en" }),
             json!({ "subscription": { "endpoint": "https://push.example/x" } }),
-        ] {
+        ]
+        .into_iter()
+        .chain(
+            [
+                "https://127.0.0.1:8443/x",
+                "https://localhost/x",
+                "https://[::1]/x",
+                "https://192.168.1.10/x",
+                "https://10.0.0.2/x",
+                "https://169.254.169.254/latest",
+                "https://100.101.102.103/x",
+                "https://nas.tail1234.ts.net/x",
+                "https://router/x",
+                "https://printer.local/x",
+                "https://[fd7a:115c:a1e0::1]/x",
+                "https://[::ffff:127.0.0.1]/x",
+            ]
+            .map(|endpoint| posted(endpoint, rfc8291::UA_PUBLIC, rfc8291::AUTH, "en")),
+        ) {
             assert!(subscription(&body, 1).is_err(), "{body}");
         }
     }

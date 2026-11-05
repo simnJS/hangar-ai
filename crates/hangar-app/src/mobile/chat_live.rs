@@ -13,7 +13,7 @@ use hangar_core::chat::{Body, CallState, ChatItem, ChatPage, PendingQuestion};
 
 use crate::control::port::{Port, activity_of};
 use crate::state::live::{BridgeEvent, RateLimit, ToolPhase};
-use crate::state::{AgentActivity, AgentId, PaneId};
+use crate::state::{AgentActivity, AgentId, Pane, PaneId, Workspace};
 
 use super::calls::{asked_questions, describe_call};
 use super::contract::{ChatPending, ChatReason, RemoteChat};
@@ -171,17 +171,34 @@ impl ChatLive {
             .and_then(|live| live.permission.as_ref())
         {
             let described = describe_call(tool, input, Some(cwd));
+            // The call the dialog holds, when the mod reported it start: two
+            // prompts for the same command are still two prompts.
+            let call = self.panes.get(pane).and_then(|live| {
+                live.calls
+                    .iter()
+                    .rev()
+                    .find(|call| call.tool == *tool)
+                    .map(|call| call.tool_use_id.as_str())
+            });
             return Some(ChatPending::Permission {
+                prompt: prompt_of(call, tool, &described.ask, described.detail.as_deref()),
                 tool: tool.clone(),
                 title: described.ask,
                 detail: described.detail,
             });
         }
         page.open_call.as_ref().map(|call| ChatPending::Permission {
+            prompt: prompt_of(None, &call.tool, &call.title, call.detail.as_deref()),
             tool: call.tool.clone(),
             title: call.title.clone(),
             detail: call.detail.clone(),
         })
+    }
+
+    /// Keeps what the mods of these panes reported, and forgets the panes
+    /// gone (MOB-16).
+    pub fn keep_only(&mut self, panes: &std::collections::HashSet<&str>) {
+        self.panes.retain(|pane, _| panes.contains(pane.as_str()));
     }
 
     /// The calls the pane runs now, as actions after the transcript's: not a
@@ -230,6 +247,65 @@ impl ChatLive {
     }
 }
 
+/// Which permission prompt the phone shows: its call when known, and what it
+/// shows of it — the tool, the title, the detail. The phone sends it back
+/// with its answer, and the PC types nothing unless the pane still asks the
+/// same (MOB-02). Two prompts the PC cannot tell apart ask for the same
+/// thing, word for word.
+pub fn prompt_of(call: Option<&str>, tool: &str, title: &str, detail: Option<&str>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (call, tool, title, detail).hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// What a Claude Code pane waits on the person for now, as `remote_chat`
+/// shows it: its mod's report and the end of its transcript. `None` for a
+/// pane the PC cannot say this of: not Claude Code, or no session yet.
+pub async fn pending_now(
+    port: &Port,
+    mobile: &Mobile,
+    ws: &Workspace,
+    pane: &Pane,
+) -> Result<Option<ChatPending>, String> {
+    if pane.agent != AgentId::Claude {
+        return Ok(None);
+    }
+    let Some(session_id) = pane.session_id.clone().filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    let cwd = cwd_of(ws, pane);
+    let page = mobile
+        .sources()
+        .chat(ChatRead {
+            session_id,
+            cwd: cwd.clone(),
+            before: None,
+            limit: None,
+        })
+        .await?
+        .unwrap_or_else(|| ChatPage {
+            items: Vec::new(),
+            older: false,
+            cursor: None,
+            question: None,
+            open_call: None,
+        });
+    let activity = activity_of(&port.snapshot(), &pane.id).map(|entry| entry.activity);
+    Ok(mobile
+        .book()
+        .chat
+        .pending_of(&pane.id, &page, activity, &cwd))
+}
+
+/// The folder a pane's session runs in: its own, else its workspace's.
+fn cwd_of(ws: &Workspace, pane: &Pane) -> String {
+    pane.cwd
+        .clone()
+        .filter(|cwd| !cwd.is_empty())
+        .unwrap_or_else(|| ws.cwd.clone())
+}
+
 /// `remote_chat {pane, before?, limit?}`: a page of a Claude Code pane's
 /// conversation, the newest unless `before` asks for an older one.
 pub async fn remote_chat(port: &Port, mobile: &Mobile, args: &Value) -> Result<RemoteChat, String> {
@@ -261,11 +337,7 @@ pub async fn remote_chat(port: &Port, mobile: &Mobile, args: &Value) -> Result<R
     let Some(session_id) = pane.session_id.clone().filter(|id| !id.is_empty()) else {
         return Ok(empty(ChatReason::NoSession));
     };
-    let cwd = pane
-        .cwd
-        .clone()
-        .filter(|cwd| !cwd.is_empty())
-        .unwrap_or_else(|| ws.cwd.clone());
+    let cwd = cwd_of(&ws, &pane);
     let limit = args
         .get("limit")
         .and_then(Value::as_f64)
