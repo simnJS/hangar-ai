@@ -11,16 +11,19 @@
 //! `refs/tags/<tag>`, which git reads as that tag and no branch of the same
 //! name. It moves only when the catalog names another tag (`update_target`).
 
+use std::ffi::OsStr;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest;
+use super::{commands, manifest};
 
-/// Hides the console window Windows would flash for every git call.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// How often a running git is looked at.
+const POLL: Duration = Duration::from_millis(20);
+/// How long its output is waited for once it ended.
+const DRAIN: Duration = Duration::from_millis(500);
 
 /// A ref under this names a tag, and only that.
 const TAG_REF: &str = "refs/tags/";
@@ -182,8 +185,42 @@ pub fn check_ref(git_ref: &str) -> Result<(), String> {
     }
 }
 
+/// The longest any git call may take. A call over the network that stalls is
+/// also ended by git itself, once it has moved less than `LOW_SPEED_BYTES` a
+/// second for `LOW_SPEED_SECONDS`; this bounds the rest, a remote that trickles
+/// included. Nothing waits on a stalled network for ever: an add or an update
+/// fails, and says so.
+pub const GIT_DEADLINE: Duration = Duration::from_secs(180);
+const LOW_SPEED_BYTES: &str = "1000";
+const LOW_SPEED_SECONDS: &str = "30";
+
+#[cfg(test)]
+thread_local! {
+    /// A shorter deadline for the git calls of one test's thread.
+    pub static TEST_DEADLINE: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn deadline() -> Duration {
+    #[cfg(test)]
+    if let Some(deadline) = TEST_DEADLINE.with(std::cell::Cell::get) {
+        return deadline;
+    }
+    GIT_DEADLINE
+}
+
 /// Runs git, in `dir` when there is one, and hands back its stdout.
 pub fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
+    git_within(dir, args, &[], deadline())
+}
+
+/// `git`, with variables of its own and a deadline past which git and what it
+/// started are killed.
+fn git_within(
+    dir: Option<&Path>,
+    args: &[&str],
+    env: &[(&str, &OsStr)],
+    deadline: Duration,
+) -> Result<String, String> {
     // A bundled macOS app starts with launchd's bare PATH (path_env.rs).
     crate::path_env::ensure();
     let mut command = Command::new("git");
@@ -191,13 +228,25 @@ pub fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
         command.arg("-C").arg(dir);
     }
     command
+        .args([
+            "-c",
+            &format!("http.lowSpeedLimit={LOW_SPEED_BYTES}"),
+            "-c",
+            &format!("http.lowSpeedTime={LOW_SPEED_SECONDS}"),
+        ])
         .args(args)
         .env("LC_ALL", "C")
         .env("LANGUAGE", "")
         // Nobody is there to type a password, and a large file is not worth
         // the wait: a kit is text.
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_LFS_SKIP_SMUDGE", "1");
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        // No helper that would open a window to ask for a password either.
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     // Inherited from a Hangar started inside a git hook, these would aim
     // every call below at another repository.
     for name in [
@@ -208,19 +257,45 @@ pub fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     ] {
         command.env_remove(name);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
+    for (name, value) in env {
+        command.env(name, value);
     }
-    let output = command.output().map_err(|err| match err.kind() {
+    // Its own process group, so a deadline ends git-remote-https with it; no
+    // console window on Windows.
+    commands::prepare(&mut command);
+    let mut child = command.spawn().map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => "git was not found on PATH".to_string(),
         _ => format!("could not run git: {err}"),
     })?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let stdout = commands::Capture::start(child.stdout.take().expect("piped above"));
+    let stderr = commands::Capture::start(child.stderr.take().expect("piped above"));
+    let until = Instant::now() + deadline;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= until => {
+                commands::kill_tree(&mut child);
+                return Err(format!(
+                    "git took longer than {} s and was stopped: is the network there?",
+                    deadline.as_secs()
+                ));
+            }
+            Ok(None) => std::thread::sleep(POLL),
+            Err(err) => {
+                commands::kill_tree(&mut child);
+                return Err(format!("could not run git: {err}"));
+            }
+        }
+    };
+    let drained = Instant::now() + DRAIN;
+    let (stdout, stdout_cut) = commands::text_of(stdout.finish(drained));
+    let (stderr, _) = commands::text_of(stderr.finish(drained));
+    if status.success() {
+        if stdout_cut {
+            return Err("git answered more than a kit can hold".into());
+        }
+        Ok(stdout)
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         let line = stderr
             .lines()
             .map(str::trim)
@@ -269,30 +344,38 @@ pub fn remote_refs(url: &str) -> Result<RemoteRefs, String> {
     git(None, &["ls-remote", "--heads", "--tags", "--", url]).map(|listing| read_refs(&listing))
 }
 
-/// A fresh shallow clone of `source` in `dir`, which must not exist yet.
-pub fn clone(source: &GitSource, dir: &Path) -> Result<(), String> {
+/// A full commit id, as `rev-parse` prints it: what is recorded and compared,
+/// and what the calls below take as a revision.
+fn commit_id(text: &str) -> Result<String, String> {
+    let id = text.trim();
+    if (id.len() == 40 || id.len() == 64) && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(id.to_ascii_lowercase())
+    } else {
+        Err(format!("git named no commit: {id:?}"))
+    }
+}
+
+/// A fresh shallow clone of `source` in `dir`, which must not exist yet, and the
+/// commit it holds.
+pub fn clone(source: &GitSource, dir: &Path) -> Result<String, String> {
     let dir_text = dir.to_string_lossy();
     git(None, &["init", "-q", "--", &dir_text])?;
     // Before anything is checked out: a symlink in the repository becomes a
     // small text file, and can never point out of the kit.
     git(Some(dir), &["config", "core.symlinks", "false"])?;
     git(Some(dir), &["remote", "add", "--", "origin", &source.url])?;
-    fetch(source, dir)?;
+    let commit = fetch(source, dir)?;
     git(
         Some(dir),
-        &[
-            "-c",
-            "advice.detachedHead=false",
-            "checkout",
-            "-q",
-            "FETCH_HEAD",
-        ],
+        &["-c", "advice.detachedHead=false", "checkout", "-q", &commit],
     )?;
-    Ok(())
+    Ok(commit)
 }
 
-/// The one commit `source` points at now, as FETCH_HEAD.
-pub fn fetch(source: &GitSource, dir: &Path) -> Result<(), String> {
+/// Fetches the one commit `source` points at now, and names it. It is named
+/// right away and used by its id afterwards: what FETCH_HEAD holds is the last
+/// fetch's, whoever made it.
+pub fn fetch(source: &GitSource, dir: &Path) -> Result<String, String> {
     let wanted = source.git_ref.as_deref().unwrap_or("HEAD");
     check_ref(wanted)?;
     git(
@@ -307,23 +390,66 @@ pub fn fetch(source: &GitSource, dir: &Path) -> Result<(), String> {
             "origin",
             wanted,
         ],
-    )
-    .map(drop)
+    )?;
+    // An annotated tag is fetched as the tag: the commit is what it points at.
+    commit_id(&git(
+        Some(dir),
+        &["rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}"],
+    )?)
 }
 
-/// A file of the fetched commit, by its path in the repository.
-pub fn fetched_file(dir: &Path, path: &str) -> Result<String, String> {
-    git(Some(dir), &["show", &format!("FETCH_HEAD:{path}")])
+/// The commit the clone has checked out.
+pub fn head(dir: &Path) -> Result<String, String> {
+    commit_id(&git(
+        Some(dir),
+        &["rev-parse", "--verify", "-q", "HEAD^{commit}"],
+    )?)
 }
 
-/// Moves the checkout to the fetched commit. Files the repository does not
-/// track — what a setup step installed in the kit folder — stay.
-pub fn checkout_fetched(dir: &Path) -> Result<(), String> {
-    git(Some(dir), &["reset", "-q", "--hard", "FETCH_HEAD"]).map(drop)
+/// A file of a fetched commit, by its path in the repository.
+pub fn file_at(dir: &Path, commit: &str, path: &str) -> Result<String, String> {
+    commit_id(commit)?;
+    git(Some(dir), &["show", &format!("{commit}:{path}")])
+}
+
+/// Writes the files of `commit` into `into`, a folder that must not exist yet,
+/// leaving the clone's own checkout and index as they are: what an update would
+/// bring, to be read before anything switches to it. Symlinks come out as small
+/// text files, as in the clone.
+pub fn export(dir: &Path, commit: &str, into: &Path) -> Result<(), String> {
+    commit_id(commit)?;
+    std::fs::create_dir(into).map_err(|e| format!("{}: {e}", into.display()))?;
+    let index = into.with_extension("index");
+    let work_tree = into.to_string_lossy().into_owned();
+    let result = git_within(
+        Some(dir),
+        &[
+            "-c",
+            "core.symlinks=false",
+            "--work-tree",
+            &work_tree,
+            "checkout",
+            "-q",
+            commit,
+            "--",
+            ".",
+        ],
+        &[("GIT_INDEX_FILE", index.as_os_str())],
+        deadline(),
+    );
+    let _ = std::fs::remove_file(&index);
+    result.map(drop)
+}
+
+/// Moves the checkout to `commit`. Files the repository does not track — what a
+/// setup step installed in the kit folder — stay.
+pub fn checkout(dir: &Path, commit: &str) -> Result<(), String> {
+    commit_id(commit)?;
+    git(Some(dir), &["reset", "-q", "--hard", commit]).map(drop)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn link(input: &str) -> Link {
@@ -491,6 +617,34 @@ mod tests {
             assert_eq!(update_target(&branch, None).as_ref(), Some(&branch));
             assert_eq!(update_target(&branch, Some("v2")).as_ref(), Some(&branch));
         }
+    }
+
+    /// An http server on loopback that takes connections and never answers:
+    /// a network that stalled.
+    pub(crate) fn stalled_server(offset: u16) -> String {
+        let port = std::env::var("HANGAR_PORT_BASE")
+            .ok()
+            .and_then(|base| base.parse::<u16>().ok())
+            .map_or(0, |base| base + offset);
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming().flatten() {
+                held.push(stream);
+            }
+        });
+        format!("http://127.0.0.1:{port}/o/r")
+    }
+
+    #[test]
+    fn git_is_stopped_at_its_deadline_when_the_network_stalls() {
+        let url = stalled_server(0);
+        TEST_DEADLINE.with(|deadline| deadline.set(Some(Duration::from_secs(2))));
+        let started = Instant::now();
+        let err = remote_refs(&url).unwrap_err();
+        assert!(err.contains("longer than 2 s"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(15));
     }
 
     #[test]

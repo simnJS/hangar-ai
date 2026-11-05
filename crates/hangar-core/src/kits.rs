@@ -15,6 +15,7 @@
 //!
 //! The contract the other parts build on is written out in docs/kits.md.
 
+mod code;
 pub mod commands;
 pub mod data;
 pub mod files;
@@ -302,7 +303,7 @@ fn info(store: &Store, entry: Entry) -> KitInfo {
     let (manifest, error, hooks_permission, commands_permission) = match store.loaded(&entry) {
         Ok(kit) => {
             let hooks_permission = kit.hooks_permission();
-            let commands_permission = commands::grant(&kit.manifest, manifest::current_os());
+            let commands_permission = kit.commands_permission(manifest::current_os());
             (
                 Some(kit.manifest),
                 None,

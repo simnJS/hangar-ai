@@ -119,7 +119,13 @@ struct Canonical<'a> {
 /// `commands:<first 16 hex of the SHA-256 of the canonical list>`, for this OS.
 /// `None` when it has none here, which stores nothing. A reworded description
 /// or another timeout changes nothing that can run, and asks nothing.
-pub fn grant(manifest: &Manifest, os: &str) -> Option<String> {
+///
+/// A command that runs a file of the kit, `{kitDir}/tools/x.js`, runs what that
+/// file holds: the content of every file the argvs name in `root` is hashed with
+/// the list (code.rs), `[list, [[path, sha256], …]]`, so an update that changes
+/// the script is asked about as one that changes the argv. A kit whose commands
+/// name none of its files keeps the hash of the list alone.
+pub fn grant(manifest: &Manifest, root: &Path, os: &str) -> Option<String> {
     let commands = for_os(manifest, os);
     if commands.is_empty() {
         return None;
@@ -136,7 +142,19 @@ pub fn grant(manifest: &Manifest, os: &str) -> Option<String> {
                 .collect(),
         })
         .collect();
-    let text = serde_json::to_string(&canonical).ok()?;
+    let code = super::code::files(
+        root,
+        commands
+            .iter()
+            .flat_map(|command| command.argv.iter().skip(1).map(String::as_str)),
+        &super::code::KIT_DIR,
+        &[],
+    );
+    let text = if code.is_empty() {
+        serde_json::to_string(&canonical).ok()?
+    } else {
+        serde_json::to_string(&(&canonical, &code)).ok()?
+    };
     Some(format!("commands:{}", &sha256_hex(&text)[..16]))
 }
 
@@ -353,21 +371,21 @@ impl Drop for Slot {
 }
 
 #[derive(Default)]
-struct Kept {
-    bytes: Vec<u8>,
-    truncated: bool,
+pub(super) struct Kept {
+    pub(super) bytes: Vec<u8>,
+    pub(super) truncated: bool,
 }
 
 /// A stream being read on a thread of its own. It is read to its end past the
 /// cap: a program writing to a full pipe would otherwise stop right there, until
 /// its timeout.
-struct Capture {
+pub(super) struct Capture {
     kept: Arc<Mutex<Kept>>,
     ended: mpsc::Receiver<()>,
 }
 
 impl Capture {
-    fn start(mut stream: impl Read + Send + 'static) -> Self {
+    pub(super) fn start(mut stream: impl Read + Send + 'static) -> Self {
         let kept = Arc::new(Mutex::new(Kept::default()));
         let (done, ended) = mpsc::channel();
         let shared = kept.clone();
@@ -395,7 +413,7 @@ impl Capture {
 
     /// What came, once the stream ended or `until` is reached. What is still
     /// holding the pipe then is not waited for.
-    fn finish(self, until: Instant) -> Kept {
+    pub(super) fn finish(self, until: Instant) -> Kept {
         let _ = self
             .ended
             .recv_timeout(until.saturating_duration_since(Instant::now()));
@@ -409,7 +427,7 @@ impl Capture {
 
 /// As text. The cap may have cut a character in two, and half of one is not
 /// something the program wrote.
-fn text_of(kept: Kept) -> (String, bool) {
+pub(super) fn text_of(kept: Kept) -> (String, bool) {
     let Kept {
         mut bytes,
         truncated,
@@ -427,13 +445,13 @@ fn text_of(kept: Kept) -> (String, bool) {
 /// A process group of its own on unix, which is exactly its tree. No console
 /// window on Windows: a tab polling would flash one every second.
 #[cfg(unix)]
-fn prepare(command: &mut Command) {
+pub(super) fn prepare(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
 }
 
 #[cfg(windows)]
-fn prepare(command: &mut Command) {
+pub(super) fn prepare(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     command.creation_flags(CREATE_NO_WINDOW);
 }
@@ -441,7 +459,7 @@ fn prepare(command: &mut Command) {
 /// Ends the command and everything below it. The process first, so it starts
 /// nothing more. Holding its handle keeps its id from being given to another
 /// process meanwhile; the process table finds what its group does not hold.
-fn kill_tree(child: &mut Child) {
+pub(super) fn kill_tree(child: &mut Child) {
     let root = child.id();
     let _ = child.kill();
     #[cfg(unix)]
@@ -527,7 +545,7 @@ pub struct Call {
 }
 
 pub fn run(kit: &Loaded, call: &Call, os: &str, search: &Search) -> Result<Output, TabError> {
-    if matches!(kit.entry.source, Source::Git(_)) && call.accepted != grant(&kit.manifest, os) {
+    if matches!(kit.entry.source, Source::Git(_)) && call.accepted != kit.commands_permission(os) {
         return Err(TabError::new(
             TabError::DENIED,
             "this kit's commands are not the ones accepted on this workspace",
@@ -1259,7 +1277,7 @@ mod tests {
     }
 
     fn hash(commands: Value, os: &str) -> Option<String> {
-        grant(&manifest_of(commands), os)
+        grant(&manifest_of(commands), Path::new("/nowhere"), os)
     }
 
     #[test]
@@ -1416,7 +1434,7 @@ mod tests {
         let kit = Kit::new("cmd-consent", echo(&[], json!({})));
         let os = manifest::current_os();
         let github = from_github(&kit);
-        let current = grant(&github.manifest, os);
+        let current = github.commands_permission(os);
         assert!(current.is_some());
         let call = |accepted: Option<&str>| Call {
             accepted: accepted.map(str::to_string),

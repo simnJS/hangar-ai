@@ -10,7 +10,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::store::{write_atomic, Store};
+use super::store::{self, write_atomic, Store};
 
 const FILE: &str = "setup.json";
 
@@ -59,10 +59,24 @@ fn path(store: &Store) -> std::path::PathBuf {
 /// A missing or unreadable record is one where nothing ran: the worst it
 /// costs is a step asked for again.
 fn load(store: &Store) -> Records {
-    fs::read_to_string(path(store))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+    load_to_change(store).unwrap_or_default()
+}
+
+/// The records, to be written back: a file that is there and cannot be read is
+/// an error, rather than every step done forgotten when it is overwritten.
+fn load_to_change(store: &Store) -> Result<Records, String> {
+    let path = path(store);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Records::default()),
+        Err(err) => return Err(format!("{} cannot be read: {err}", path.display())),
+    };
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|err| {
+        format!(
+            "{} cannot be read ({err}); fix or delete it",
+            path.display()
+        )
+    })
 }
 
 fn save(store: &Store, records: &Records) -> Result<(), String> {
@@ -111,7 +125,10 @@ pub fn mark(
             "the kit {id:?} has no setup step {step:?} for {os}"
         ));
     };
-    let mut records = load(store);
+    // With the store's lock: a removal forgetting the kit, or another mark, in
+    // between the read and the write would otherwise lose one of the two.
+    let guard = store::lock();
+    let mut records = load_to_change(store)?;
     records
         .done
         .retain(|done| !(done.kit == id && done.step == step));
@@ -122,12 +139,16 @@ pub fn mark(
         at: now,
     });
     save(store, &records)?;
+    drop(guard);
     status(store, id, os)
 }
 
-/// Drops every record of a kit.
+/// Drops every record of a kit. Called with the store's lock held. A file that
+/// cannot be read is left as it is.
 pub fn forget(store: &Store, id: &str) {
-    let mut records = load(store);
+    let Ok(mut records) = load_to_change(store) else {
+        return;
+    };
     let before = records.done.len();
     records.done.retain(|done| done.kit != id);
     if records.done.len() != before {
@@ -191,6 +212,53 @@ mod tests {
 
         store.remove("studio").unwrap();
         assert!(load(&store).done.is_empty(), "a removed kit is forgotten");
+    }
+
+    #[test]
+    fn a_record_file_that_cannot_be_read_is_not_overwritten() {
+        let home = Folder::new("setup-broken");
+        let store = Store::at(home.root.join("kits"));
+        let source = Folder::new("setup-broken-src");
+        kit_with_steps(&source, "npx bridge install");
+        store.add_folder(&source.root.to_string_lossy(), 1).unwrap();
+        fs::write(path(&store), "{ broken").unwrap();
+
+        assert!(!status(&store, "studio", "windows").unwrap()[0].done);
+        assert!(mark(&store, "studio", "bridge", "windows", 5)
+            .unwrap_err()
+            .contains("cannot be read"));
+        store.remove("studio").unwrap();
+        assert_eq!(fs::read_to_string(path(&store)).unwrap(), "{ broken");
+    }
+
+    #[test]
+    fn marks_made_at_once_are_all_kept() {
+        let home = Folder::new("setup-race");
+        let store = Store::at(home.root.join("kits"));
+        let mut kits = Vec::new();
+        for n in 0..8 {
+            let source = Folder::new("setup-race-src");
+            source.file(
+                manifest::FILE,
+                &json!({
+                    "schema": 1, "id": format!("kit-{n}"), "name": "K", "version": "1.0.0",
+                    "description": "d",
+                    "setup": [{ "id": "step", "title": "Step", "run": { "linux": "true" } }]
+                })
+                .to_string(),
+            );
+            store.add_folder(&source.root.to_string_lossy(), 1).unwrap();
+            kits.push(source);
+        }
+        std::thread::scope(|scope| {
+            for n in 0..8 {
+                let store = &store;
+                scope.spawn(move || {
+                    mark(store, &format!("kit-{n}"), "step", "linux", 1).unwrap();
+                });
+            }
+        });
+        assert_eq!(load(&store).done.len(), 8);
     }
 
     #[test]

@@ -12,12 +12,19 @@
 //! the first place). A system notification calls the person when the window
 //! is not the one they are looking at.
 //!
+//! The next question takes the place of the one answered, under the very same
+//! buttons. A click that comes within `SETTLE` of a question appearing there is
+//! ignored: the second click of a double-click on Clone would otherwise approve
+//! a request nobody has read yet, perhaps from another agent for another
+//! repository.
+//!
 //! The card speaks the person's language, the app's (the setting, else the
 //! system's), as `useLocale` did; the trace in the activity log is in the
 //! system's, like the rest of that log.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use hangar_i18n::{Key, Translator, args};
 use hangar_theme::style::Tone;
@@ -39,6 +46,9 @@ use crate::state::Model;
 const WIDTH: f32 = 420.0;
 /// The column of the facts' names.
 const NAMES: f32 = 100.0;
+/// How long a question has to have been on the card before a click answers it:
+/// longer than a double-click, shorter than reading a line.
+pub const SETTLE: Duration = Duration::from_millis(500);
 
 /// The package's UI state; lives in `App.pkg.consent_card`.
 #[derive(Debug, Default)]
@@ -50,6 +60,27 @@ pub struct State {
     told: HashSet<String>,
     /// The main window does not have the system's focus.
     away: bool,
+    /// The question on the card, and since when it is there.
+    shown: Option<(String, Instant)>,
+}
+
+impl State {
+    /// Takes the new queue, and notes when its first question came on the card.
+    fn show(&mut self, pending: Arc<Vec<ConsentRequest>>, now: Instant) {
+        let head = pending.first().map(|request| request.id.as_str());
+        if self.shown.as_ref().map(|(id, _)| id.as_str()) != head {
+            self.shown = head.map(|id| (id.to_string(), now));
+        }
+        self.pending = pending;
+    }
+
+    /// Whether a click on `id` at `now` answers it: it is the question on the
+    /// card, and has been for `SETTLE` at least.
+    fn settled(&self, id: &str, now: Instant) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|(shown, since)| shown == id && now.duration_since(*since) >= SETTLE)
+    }
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -119,14 +150,20 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
                     })))
                 })
                 .collect();
-            st.pending = pending;
+            st.show(pending, Instant::now());
             Task::batch(tasks)
         }
         Msg::Answer { id, allow } => {
+            let now = Instant::now();
+            // A click that came before the question could be read, the second
+            // of a double-click above all: not an answer.
+            if !st.settled(&id, now) {
+                return Task::none();
+            }
             consent::queue().answer(&id, allow);
             // Show the next question at once, without waiting for the queue's
             // own message.
-            st.pending = consent::queue().pending();
+            st.show(consent::queue().pending(), now);
             Task::none()
         }
         Msg::Focus(window, focused) => {
@@ -464,6 +501,39 @@ mod tests {
         assert!(ui.find("1 more waiting").is_ok());
         ui.click("Clone").expect("the button is drawn");
         assert!(answered(&messages(ui), "c1", true));
+    }
+
+    #[test]
+    fn a_click_right_after_a_question_appears_does_not_answer_it() {
+        let first = request(Some("Ava"));
+        let second = ConsentRequest {
+            id: "c2".into(),
+            url: "https://github.com/other/second.git".into(),
+            ..request(Some("Max"))
+        };
+        let start = Instant::now();
+        let mut st = State::default();
+        assert!(!st.settled("c1", start), "nothing shown");
+        st.show(Arc::new(vec![first.clone(), second.clone()]), start);
+        assert!(!st.settled("c1", start));
+        assert!(!st.settled("c1", start + SETTLE - Duration::from_millis(1)));
+        assert!(st.settled("c1", start + SETTLE));
+        assert!(!st.settled("c2", start + SETTLE), "not the one on the card");
+
+        // The first is answered, and the second takes its place under the same
+        // buttons: the second click of a double-click lands on it.
+        let answered = start + Duration::from_secs(3);
+        st.show(Arc::new(vec![second.clone()]), answered);
+        assert!(!st.settled("c2", answered + Duration::from_millis(80)));
+        assert!(st.settled("c2", answered + SETTLE));
+
+        // The queue's own message with the same head does not restart the wait.
+        let later = answered + Duration::from_millis(200);
+        st.show(Arc::new(vec![second, first]), later);
+        assert!(st.settled("c2", answered + SETTLE));
+
+        st.show(Arc::new(Vec::new()), later);
+        assert!(st.shown.is_none());
     }
 
     #[test]
