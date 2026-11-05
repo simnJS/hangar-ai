@@ -321,8 +321,7 @@ fn rig() -> Rig {
             orchestrator_model: "opus".into(),
             worker_model: "sonnet".into(),
             reviewer_model: "sonnet".into(),
-            branch: None,
-            permission_mode: None,
+            ..OrchestrationSettings::default()
         }),
         ..Workspace::default()
     };
