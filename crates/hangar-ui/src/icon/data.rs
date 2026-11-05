@@ -301,7 +301,11 @@ impl Icon {
             Icon::Send => r##"<path d="M13.6 2.4 7 9M13.6 2.4l-4.2 11.2-2.4-4.6-4.6-2.4z"/>"##,
             Icon::Download => r##"<path d="M8 2.67V10M4.67 7 8 10.33 11.33 7M3.33 13.33h9.34"/>"##,
             Icon::Plus => r##"<path d="M8 3.25v9.5M3.25 8h9.5"/>"##,
-            Icon::Minus => r##"<path d="M3.25 8h9.5"/>"##,
+            // The same bar as the horizontal stroke of Plus, as a filled pill: a bare
+            // horizontal line has a bounding box with no height and usvg drops it.
+            Icon::Minus => {
+                r##"<rect x="2.575" y="7.325" width="10.85" height="1.35" rx="0.675" fill="#000" stroke="none"/>"##
+            }
             Icon::Close => r##"<path d="m4.5 4.5 7 7m0-7-7 7"/>"##,
             Icon::Check => r##"<path d="m3.5 8.4 2.9 2.9 6.1-6.6"/>"##,
             Icon::More => r##"<circle cx="3.6" cy="8" r=".9" fill="#000" stroke="none"/><circle cx="8" cy="8" r=".9" fill="#000" stroke="none"/><circle cx="12.4" cy="8" r=".9" fill="#000" stroke="none"/>"##,
