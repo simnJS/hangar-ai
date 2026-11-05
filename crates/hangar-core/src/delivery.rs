@@ -582,7 +582,7 @@ fn listing(files: &[String]) -> String {
     text
 }
 
-//// Where the delivery worktrees of the old versions went: one new folder per
+/// Where the delivery worktrees of the old versions went: one new folder per
 /// delivery, in a folder of the system's own. Only the startup sweep reads it.
 fn legacy_root() -> PathBuf {
     std::env::temp_dir().join("hangar-deliveries")
