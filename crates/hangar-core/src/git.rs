@@ -940,6 +940,36 @@ fn remove_link(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// `path` in the form Windows accepts past 260 characters (`\\?\`, which also
+/// takes no `/` and no `..`). A `node_modules` tree goes deeper than the plain
+/// form allows, and what cannot be named cannot be deleted. Anywhere else, and
+/// for a relative path, it is `path` itself.
+fn verbatim(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy().replace('/', "\\");
+        if text.starts_with("\\\\?\\") {
+            return PathBuf::from(text);
+        }
+        if let Some(unc) = text.strip_prefix("\\\\") {
+            return PathBuf::from(format!("\\\\?\\UNC\\{unc}"));
+        }
+        let drive = text.as_bytes();
+        if drive.len() > 2
+            && drive[0].is_ascii_alphabetic()
+            && drive[1] == b':'
+            && drive[2] == b'\\'
+        {
+            return PathBuf::from(format!("\\\\?\\{text}"));
+        }
+        PathBuf::from(text)
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 /// Deletes what it can under `path`, `path` included, noting each entry it
 /// could not. A link is removed itself and never entered, so a junction in
 /// `node_modules` costs its own entry and not its target.
@@ -955,6 +985,16 @@ fn remove_tree(path: &Path, held: &mut Vec<PathBuf>) {
     }
     if meta.is_dir() {
         let before = held.len();
+        // A folder without write permission cannot lose its entries.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = meta.permissions();
+            if permissions.mode() & 0o700 != 0o700 {
+                permissions.set_mode(permissions.mode() | 0o700);
+                let _ = std::fs::set_permissions(path, permissions);
+            }
+        }
         match std::fs::read_dir(path) {
             Ok(entries) => {
                 for entry in entries.flatten() {
@@ -1035,7 +1075,7 @@ pub(crate) fn sweep_leftovers(
     let mut held = Vec::new();
     for attempt in 1..=tries.max(1) {
         held.clear();
-        remove_tree(folder, &mut held);
+        remove_tree(&verbatim(folder), &mut held);
         if !folder.exists() {
             break;
         }
@@ -1048,7 +1088,10 @@ pub(crate) fn sweep_leftovers(
         let shown: Vec<String> = held
             .iter()
             .take(3)
-            .map(|path| path.display().to_string())
+            .map(|path| {
+                let text = path.display().to_string();
+                text.strip_prefix("\\\\?\\").unwrap_or(&text).to_string()
+            })
             .collect();
         let more = held.len().saturating_sub(shown.len());
         let files = if shown.is_empty() {
@@ -1172,6 +1215,104 @@ pub async fn git_worktree_remove(
         )
     })
     .await
+}
+
+/// What an orphan sweep did, one line each, for the log.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrphanSweep {
+    pub removed: Vec<String>,
+    pub kept: Vec<String>,
+}
+
+/// Removes the worktrees of the repository holding `dir` that nobody uses any
+/// more: under the `<checkout>-worktrees` folder (never one made by hand
+/// elsewhere, never the main checkout), on a branch whose every commit is on
+/// the main checkout's branch, with nothing uncommitted, not locked, and no
+/// pane in them (`held`: the folders panes run in, a pane in a subfolder
+/// counts). Their branch goes with them. Whatever stays is said, with why.
+pub fn sweep_orphan_worktrees(dir: &Path, held: &[String]) -> Result<OrphanSweep, String> {
+    let mut sweep = OrphanSweep::default();
+    let listed = list_worktrees(dir).map_err(String::from)?;
+    let Some(main) = listed.iter().find(|entry| entry.is_main && !entry.bare) else {
+        return Ok(sweep);
+    };
+    let Some(home) = worktrees_folder(&main.path).map(|root| format!("{}/", compare_key(&root)))
+    else {
+        return Ok(sweep);
+    };
+    let main_path = main.path.clone();
+    // Folders git no longer lists and that hold no `.git`: what a removal
+    // left behind (a `node_modules` git did not delete).
+    let folder = home.trim_end_matches('/').to_string();
+    if let Ok(entries) = std::fs::read_dir(&folder) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let text = path.to_string_lossy().replace('\\', "/");
+            let here = compare_key(&text);
+            let listed_here = listed.iter().any(|item| compare_key(&item.path) == here);
+            let used = held.iter().any(|held| {
+                let held = compare_key(held);
+                held == here || held.starts_with(&format!("{here}/"))
+            });
+            let is_dir = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
+            if listed_here || used || !is_dir || path.join(".git").exists() {
+                continue;
+            }
+            match sweep_leftovers(Path::new(&main_path), &path, SWEEP_TRIES, SWEEP_PAUSE) {
+                Ok(()) => sweep
+                    .removed
+                    .push(format!("{text}: leftover folder removed")),
+                Err(Sweep::Held(why) | Sweep::Refused(why)) => {
+                    sweep.kept.push(format!("{text}: kept, {why}"))
+                }
+            }
+        }
+    }
+    for item in merged_worktrees(Path::new(&main_path), &[]).map_err(String::from)? {
+        let here = compare_key(&item.path);
+        if !(here.starts_with(&home) && here.len() > home.len()) {
+            continue; // not Hangar's: not even worth a line
+        }
+        let used = held.iter().any(|folder| {
+            let folder = compare_key(folder);
+            folder == here || folder.starts_with(&format!("{here}/"))
+        });
+        let why = if used {
+            Some("a pane uses it".to_string())
+        } else if item.locked.is_some() {
+            Some("it is locked".to_string())
+        } else if item.dirty != Some(0) {
+            Some("it has uncommitted changes, or git could not say".to_string())
+        } else if item.no_own_commit {
+            Some("its branch has no commit of its own (a worker may be starting)".to_string())
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            sweep.kept.push(format!("{}: kept, {why}", item.path));
+            continue;
+        }
+        match remove_worktree(&main_path, &item.path, false, None, HOOK_TIMEOUT) {
+            Ok(result) if result.removed => {
+                let branch = match run_git(Path::new(&main_path), &["branch", "-D", &item.branch]) {
+                    Ok(_) => format!("branch {} deleted", item.branch),
+                    Err(error) => {
+                        format!("branch {} kept ({})", item.branch, String::from(error))
+                    }
+                };
+                sweep
+                    .removed
+                    .push(format!("{}: removed, {branch}", item.path));
+            }
+            Ok(result) => sweep.kept.push(format!(
+                "{}: kept, {}",
+                item.path,
+                result.message.unwrap_or_else(|| "git refused".into())
+            )),
+            Err(error) => sweep.kept.push(format!("{}: kept, {error}", item.path)),
+        }
+    }
+    Ok(sweep)
 }
 
 // ---------------------------------------------------------------------------
@@ -4048,5 +4189,115 @@ mod tests {
         );
         assert!(report.output.starts_with('…'));
         assert!(report.output.contains("line number 4000"));
+    }
+
+    // --- long paths, read-only files, orphans ---------------------------------
+
+    #[test]
+    fn a_deep_tree_with_a_read_only_file_and_a_link_out_is_removed_and_the_target_is_not() {
+        let (root, main, linked) = laid_out("deep");
+        let outside = root.join("precious");
+        write(&outside, "keep.txt", "mine");
+        write(&outside, "sub/more.txt", "mine too");
+        // Past 260 characters, which only the `\\?\` form can name on Windows.
+        let mut deep = linked.join("node_modules");
+        for _ in 0..12 {
+            deep = deep.join("a-folder-with-a-rather-long-name");
+        }
+        assert!(deep.to_string_lossy().len() > 300);
+        std::fs::create_dir_all(verbatim(&deep)).unwrap();
+        let file = deep.join("locked.txt");
+        std::fs::write(verbatim(&file), "ro").unwrap();
+        let mut permissions = std::fs::metadata(verbatim(&file)).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(verbatim(&file), permissions).unwrap();
+        link_dir(&outside, &linked.join("node_modules/linked"));
+        std::fs::remove_file(linked.join(".git")).unwrap();
+
+        sweep_leftovers(&main, &linked, 1, Duration::ZERO).expect("swept");
+        assert!(!linked.exists());
+        assert_eq!(read(&outside, "keep.txt"), "mine");
+        assert_eq!(read(&outside, "sub/more.txt"), "mine too");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A worktree under `repo-worktrees` on its own branch with one commit.
+    fn worker_branch(main: &Path, root: &Path, name: &str) -> PathBuf {
+        let folder = root.join("repo-worktrees").join(name);
+        git(
+            main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                name,
+                folder.to_str().unwrap(),
+            ],
+        );
+        git(&folder, &["config", "user.email", "t@example.com"]);
+        git(&folder, &["config", "user.name", "T"]);
+        git(&folder, &["config", "commit.gpgsign", "false"]);
+        write(&folder, &format!("{name}.txt"), name);
+        git(&folder, &["add", "."]);
+        git(&folder, &["commit", "-q", "-m", name]);
+        folder
+    }
+
+    #[test]
+    fn the_orphan_sweep_removes_only_what_landed_is_clean_and_has_no_pane() {
+        let (root, main, linked) = laid_out("orphans");
+        // `laid_out` made `w` on `feature`: it has no commit of its own.
+        let gone = worker_branch(&main, &root, "gone");
+        let used = worker_branch(&main, &root, "used");
+        let dirty = worker_branch(&main, &root, "dirty");
+        git(
+            &main,
+            &[
+                "merge", "-q", "--no-ff", "-m", "land", "gone", "used", "dirty",
+            ],
+        );
+        let unlanded = worker_branch(&main, &root, "unlanded");
+        write(&dirty, "wip.txt", "unsaved");
+        // Ignored, as it is in a real project: it must not make it dirty.
+        write(&main, ".git/info/exclude", "node_modules/\n");
+        write(&gone, "node_modules/pkg/index.js", "x");
+        // One the person made by hand, merged and clean, outside the folder.
+        let by_hand = root.join("by-hand");
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "hand",
+                by_hand.to_str().unwrap(),
+            ],
+        );
+        // What a removal left behind: no `.git`, git does not list it.
+        let leftover = root.join("repo-worktrees").join("leftover");
+        write(&leftover, "node_modules/pkg/index.js", "x");
+        let held = vec![wt_str(&used.join("src")), wt_str(&linked)];
+
+        let sweep = sweep_orphan_worktrees(&main, &held).expect("swept");
+
+        assert_eq!(sweep.removed.len(), 2, "{sweep:?}");
+        assert!(sweep.removed.iter().any(|line| line.contains("gone")));
+        assert!(!leftover.exists());
+        assert!(!gone.exists());
+        assert!(run_git(&main, &["rev-parse", "--verify", "refs/heads/gone"]).is_err());
+        for kept in [&used, &dirty, &unlanded, &linked, &by_hand, &main] {
+            assert!(kept.exists(), "{kept:?}");
+        }
+        assert!(sweep.kept.iter().any(|line| line.contains("pane")));
+        assert!(sweep.kept.iter().any(|line| line.contains("uncommitted")));
+        assert!(
+            !sweep.kept.iter().any(|line| line.contains("by-hand")),
+            "{sweep:?}"
+        );
+        // The unlanded commit is still there to land.
+        assert!(run_git(&main, &["rev-parse", "--verify", "refs/heads/unlanded"]).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
