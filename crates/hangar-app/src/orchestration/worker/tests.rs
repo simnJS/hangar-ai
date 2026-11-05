@@ -1433,6 +1433,77 @@ async fn starts_the_worker_in_its_folder_no_worktree_no_branch_and_a_brief_that_
     );
 }
 
+/* ── worktree: false in a git repository ───────────────────────── */
+
+#[tokio::test]
+async fn starts_the_worker_in_the_workspace_folder_when_asked_for_no_worktree_even_in_a_repository()
+{
+    let app = world(Options {
+        tasks: vec![job("t1", "Arena timer", &["Content/Arena/**"])],
+        ..Options::default()
+    });
+
+    let spawned = app
+        .call("worker_spawn", json!({"task": "t1", "worktree": false}))
+        .await
+        .unwrap();
+
+    assert_eq!(spawned["folder"], REPO);
+    assert_eq!(spawned["branch"], Value::Null);
+    assert_eq!(spawned["base"], Value::Null);
+    assert_eq!(spawned["worktree"], Value::Null);
+    assert!(
+        spawned["note"]
+            .as_str()
+            .unwrap()
+            .contains("without a worktree, as asked")
+    );
+    let mia = app.pane_named("Mia").unwrap();
+    assert_eq!(mia.cwd.as_deref(), Some(REPO));
+    assert_eq!(mia.shared_folder, Some(true));
+    let made: Vec<String> = app
+        .log()
+        .into_iter()
+        .filter(|line| {
+            ["claim:", "worktree:", "copy:", "branch:"]
+                .iter()
+                .any(|p| line.starts_with(p))
+        })
+        .collect();
+    assert_eq!(made, ["claim:t1:Mia:shared"]);
+    let brief = app.brief("Mia");
+    assert!(brief.contains("You work in the shared checkout of the workspace"));
+    assert!(brief.contains("`git add <those paths>`, never `git add -A`"));
+    assert!(brief.contains("never checkout, reset, stash or rebase"));
+    assert!(!brief.contains("git worktree of its own") && !brief.contains("on branch"));
+}
+
+#[tokio::test]
+async fn still_gives_a_worktree_by_default_or_when_asked_for_one_and_refuses_a_value_that_is_no_boolean()
+ {
+    for args in [
+        json!({"task": "t1"}),
+        json!({"task": "t1", "worktree": true}),
+    ] {
+        let app = world(Options {
+            tasks: vec![job("t1", "One", &["a/**"])],
+            ..Options::default()
+        });
+        let spawned = app.call("worker_spawn", args).await.unwrap();
+        assert!(spawned["worktree"].is_string());
+        assert!(spawned["branch"].is_string());
+    }
+    let app = world(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    let refused = err(app
+        .call("worker_spawn", json!({"task": "t1", "worktree": "no"}))
+        .await);
+    assert!(refused.contains("worktree is true or false"), "{refused}");
+    assert_eq!(app.task("t1").column, "todo");
+}
+
 #[tokio::test]
 async fn does_the_same_when_git_is_not_installed_at_all() {
     let app = world(Options {
@@ -1794,6 +1865,7 @@ fn facts<'a>(owns: &'a [String]) -> BriefFacts<'a> {
         check_command: None,
         attempt: 1,
         hook_failure: None,
+        shared_checkout: false,
     }
 }
 
