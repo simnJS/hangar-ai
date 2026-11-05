@@ -82,6 +82,14 @@ fn base() -> Settings {
         // (title_bar.rs): the frame paints everything else.
         settings.transparent = true;
     }
+    #[cfg(target_os = "windows")]
+    {
+        // Windows draws the corners, the border and the shadow of the
+        // window without its title bar (title_bar.rs): not transparent.
+        settings.platform_specific.undecorated_shadow = true;
+        settings.platform_specific.corner_preference =
+            window::settings::platform::CornerPreference::Round;
+    }
     settings
 }
 

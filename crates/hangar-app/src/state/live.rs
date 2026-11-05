@@ -114,7 +114,7 @@ pub struct Live {
     /// no engine or control request runs, before.
     pub hydrated: bool,
     pub windows: HashMap<window::Id, WindowKind>,
-    /// The title bars Hangar draws on Linux (shell/title_bar.rs).
+    /// The title bars Hangar draws on Linux and Windows (shell/title_bar.rs).
     pub title_bar: crate::shell::title_bar::Live,
     /// Bumped whenever a read-model changes, so views can cache on it.
     pub version: u64,

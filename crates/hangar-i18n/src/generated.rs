@@ -6632,7 +6632,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "settings.showNavigatorHint", en: Text::plain("Workspaces and their agents, on the left"), fr: Text::plain("Les workspaces et leurs agents, à gauche") },
     Message { id: "settings.size", en: Text::plain("Size"), fr: Text::plain("Taille") },
     Message { id: "settings.systemTitleBar", en: Text::plain("Use the system's title bar"), fr: Text::plain("Utiliser la barre de titre du système") },
-    Message { id: "settings.systemTitleBarHint", en: Text::plain("Hangar draws its own, in its theme, with the buttons your desktop shows. Turn this on for the bar your desktop draws instead."), fr: Text::plain("Hangar dessine la sienne, aux couleurs de son thème, avec les boutons que montre ton bureau. Active ceci pour retrouver celle que dessine ton bureau.") },
+    Message { id: "settings.systemTitleBarHint", en: Text::plain("Hangar draws its own, in its theme, with the buttons your system shows. Turn this on for the bar your system draws instead."), fr: Text::plain("Hangar dessine la sienne, aux couleurs de son thème, avec les boutons que montre ton système. Active ceci pour retrouver celle que dessine ton système.") },
     Message { id: "settings.theme", en: Text::plain("Theme"), fr: Text::plain("Thème") },
     Message { id: "settings.themeDark", en: Text::plain("Dark"), fr: Text::plain("Sombres") },
     Message { id: "settings.themeHint", en: Text::plain("Terminal palette — the whole window follows it"), fr: Text::plain("Palette des terminaux — toute la fenêtre la suit") },

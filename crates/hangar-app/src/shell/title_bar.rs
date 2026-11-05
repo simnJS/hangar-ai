@@ -1,4 +1,4 @@
-//! Hangar's own title bar, on Linux.
+//! Hangar's own title bar, on Linux and Windows.
 //!
 //! GNOME on Wayland leaves a window's title bar to the window, and winit's is
 //! a band of its own above the app, in neither the app's colours nor the
@@ -10,23 +10,37 @@
 //! - a press where no control takes it moves the window, two in a row
 //!   maximise it or bring it back, and a right press opens the desktop's
 //!   window menu;
-//! - the window's buttons are the ones the desktop shows, on its side
-//!   (`button-layout`, read once at start: GNOME's `':close'` gives a close
-//!   button alone, `'close,minimize:'` puts two on the left);
-//! - the window's edges resize it, and a hairline outlines it, while it is
-//!   not maximised;
-//! - its corners are rounded as GNOME's own windows are, while it is neither
-//!   maximised nor full screen. The window is transparent on Linux for that:
-//!   what draws at a corner (the window's page, the navigator, the toolbar,
-//!   the status bar) rounds that corner of its own background
-//!   ([`corners`]). A dialog's veil stays square, so a window's corners are
-//!   dimmed with it.
+//! - on Linux the window's buttons are the ones the desktop shows, on its
+//!   side (`button-layout`, read once at start: GNOME's `':close'` gives a
+//!   close button alone, `'close,minimize:'` puts two on the left), round on
+//!   a faint disc;
+//! - on Windows they are Windows 11's: minimise, maximise or restore, close,
+//!   always at the right end, rectangular, 36 px wide and the band's height,
+//!   flush with the window's top-right corner, close turning red under the
+//!   pointer ([`windows_style`]), their glyphs the system's own caption font
+//!   ([`caption_font`]). No Snap Layouts flyout for now: that needs
+//!   the window's hit-testing, which winit keeps;
+//! - the window's edges resize it while it is not maximised (winit leaves
+//!   an undecorated window's borders to the app on both systems: its
+//!   `WM_NCCALCSIZE` gives the whole window to the client area, so Windows
+//!   finds no border to resize from);
+//! - on Linux a hairline outlines it and its corners are rounded as GNOME's
+//!   own windows are, while it is neither maximised nor full screen. The
+//!   window is transparent on Linux for that: what draws at a corner (the
+//!   window's page, the navigator, the toolbar, the status bar) rounds that
+//!   corner of its own background ([`corners`]). A dialog's veil stays
+//!   square, so a window's corners are dimmed with it. On Windows the system
+//!   draws the corners, the border and the shadow (the window opens with
+//!   `undecorated_shadow` and rounded `corner_preference`, not transparent),
+//!   so Hangar adds none; maximised, winit keeps the window to the work area,
+//!   clear of the taskbar.
 //!
 //! "Use the system's title bar" (Appearance) gives the system's back, for a
 //! desktop that draws one in its own colours (KDE's, a tiling window
-//! manager's). macOS and Windows keep theirs.
+//! manager's), or on Windows the plain one. macOS keeps its own.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use hangar_i18n::Key;
@@ -34,9 +48,9 @@ use hangar_theme::{Theme, tokens};
 use hangar_ui::{Icon, icon, tip};
 use iced::border::Radius;
 use iced::mouse::Interaction;
-use iced::widget::{Space, button, column, container, mouse_area, row};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::window::{self, Direction};
-use iced::{Alignment, Background, Border, Color, Element, Length};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
@@ -56,6 +70,13 @@ pub enum Control {
 pub struct Layout {
     pub start: Vec<Control>,
     pub end: Vec<Control>,
+}
+
+impl Layout {
+    /// Windows' buttons: always the three, at the end of the band.
+    pub fn windows() -> Layout {
+        Layout::default()
+    }
 }
 
 impl Default for Layout {
@@ -115,7 +136,7 @@ impl Default for Live {
         Live {
             layout: Layout::default(),
             maximized: HashSet::new(),
-            decorated: !cfg!(target_os = "linux"),
+            decorated: !has_own_bar(),
             last_press: None,
         }
     }
@@ -142,9 +163,20 @@ pub fn is_double(last: Option<(window::Id, Instant)>, w: window::Id, now: Instan
     last.is_some_and(|(at_w, at)| at_w == w && now.saturating_duration_since(at) <= DOUBLE_PRESS)
 }
 
+/// Whether this system's windows may carry Hangar's title bar: Linux and
+/// Windows. macOS keeps its own.
+pub const fn has_own_bar() -> bool {
+    cfg!(target_os = "linux") || cfg!(target_os = "windows")
+}
+
+/// Whether the buttons are Windows 11's rectangles rather than discs.
+const fn windows_style() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// Whether Hangar draws the title bar of its windows.
 pub fn drawn(settings: &Settings) -> bool {
-    cfg!(target_os = "linux") && !settings.system_title_bar
+    has_own_bar() && !settings.system_title_bar
 }
 
 /// Reads the desktop's button layout: GNOME's setting, then GTK's
@@ -192,9 +224,17 @@ pub enum Side {
     End,
 }
 
-/// A button's side, and the gap between two.
+/// A round button's side, and the gap between two.
 const SIDE: f32 = 24.0;
 const GAP: f32 = tokens::space::MD;
+/// A Windows button's width: the full band tall, none between two.
+const WINDOWS_WIDTH: f32 = 36.0;
+/// Windows' close button under the pointer, and pressed.
+const WINDOWS_CLOSE: Color = Color::from_rgb(196.0 / 255.0, 43.0 / 255.0, 28.0 / 255.0);
+const WINDOWS_CLOSE_PRESSED: Color = Color {
+    a: 0.8,
+    ..WINDOWS_CLOSE
+};
 
 /// The buttons the toolbar holds on `side`: the start ones only where the
 /// navigator is not drawn (it holds them then).
@@ -213,10 +253,23 @@ fn toolbar_controls(ctx: Ctx<'_>, side: Side) -> &[Control] {
 /// The room the toolbar's buttons take, gap to the rest included: the
 /// toolbar lays itself out for the width left.
 pub fn toolbar_room(ctx: Ctx<'_>) -> f32 {
-    let room = |n: usize| {
-        if n == 0 { 0.0 } else { n as f32 * (SIDE + GAP) }
-    };
-    room(toolbar_controls(ctx, Side::Start).len()) + room(toolbar_controls(ctx, Side::End).len())
+    room(windows_style(), toolbar_controls(ctx, Side::Start).len())
+        + room(windows_style(), toolbar_controls(ctx, Side::End).len())
+}
+
+/// The room `n` buttons take, gap to the rest included.
+fn room(windows: bool, n: usize) -> f32 {
+    match (windows, n) {
+        (_, 0) => 0.0,
+        (true, n) => n as f32 * WINDOWS_WIDTH,
+        (false, n) => n as f32 * (SIDE + GAP),
+    }
+}
+
+/// Whether the toolbar's end is the window's top-right corner, with
+/// Windows' buttons flush against it: no padding after them.
+pub fn flush_end(ctx: Ctx<'_>) -> bool {
+    windows_style() && !toolbar_controls(ctx, Side::End).is_empty()
 }
 
 /// The window's buttons at the toolbar's `side`, if the desktop puts any
@@ -237,7 +290,8 @@ fn controls<'a>(ctx: Ctx<'a>, which: &[Control]) -> Option<Element<'a, Message>>
     if which.is_empty() {
         return None;
     }
-    let mut buttons = row![].spacing(GAP).align_y(Alignment::Center);
+    let gap = if windows_style() { 0.0 } else { GAP };
+    let mut buttons = row![].spacing(gap).align_y(Alignment::Center);
     for control in which {
         buttons = buttons.push(control_button(ctx, *control));
     }
@@ -252,19 +306,110 @@ fn control_button<'a>(ctx: Ctx<'a>, control: Control) -> Element<'a, Message> {
         Control::Maximize => (Icon::Maximize, Key::TitleBarMaximize),
         Control::Close => (Icon::Close, Key::TitleBarClose),
     };
-    let built = button(container(icon(glyph, 13.0)).center(Length::Fill))
+    let (width, height) = if windows_style() {
+        (WINDOWS_WIDTH, tokens::size::TOOLBAR_HEIGHT)
+    } else {
+        (SIDE, SIDE)
+    };
+    let glyph: Element<'a, Message> = if windows_style() {
+        windows_glyph(control, maximized(ctx), glyph, t.colors.fg)
+    } else {
+        icon(glyph, 13.0).into()
+    };
+    let built = button(container(glyph).center(Length::Fill))
         .padding(0)
-        .width(SIDE)
-        .height(SIDE)
-        .style(look(t))
+        .width(width)
+        .height(height)
+        .style(look(t, control))
         .on_press(press(ctx.window, Press::Control(control)));
     tip::bottom(t, built, ctx.t(words).into_owned())
 }
 
-/// Round, on a faint disc of the text colour, as the desktop's own are.
-fn look(t: &Theme) -> impl Fn(&iced::Theme, button::Status) -> button::Style + '_ {
+/// The system font Windows draws its own caption buttons with: Segoe Fluent
+/// Icons (Windows 11), else Segoe MDL2 Assets (Windows 10). Microsoft's, so
+/// it is never bundled: nothing when the system has neither.
+fn caption_font() -> Option<Font> {
+    static FONT: OnceLock<Option<Font>> = OnceLock::new();
+    *FONT.get_or_init(|| {
+        if !cfg!(target_os = "windows") {
+            return None;
+        }
+        let fonts = std::path::PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
+        if fonts.join("SegoeIcons.ttf").is_file() {
+            Some(Font::with_name("Segoe Fluent Icons"))
+        } else if fonts.join("segmdl2.ttf").is_file() {
+            Some(Font::with_name("Segoe MDL2 Assets"))
+        } else {
+            None
+        }
+    })
+}
+
+/// The codepoint of a caption button's glyph in those fonts.
+fn caption_char(control: Control, maximized: bool) -> char {
+    match control {
+        Control::Minimize => '',
+        Control::Maximize if maximized => '',
+        Control::Maximize => '',
+        Control::Close => '',
+    }
+}
+
+/// A Windows button's glyph: the system's own, as text, about 10 px in the
+/// text colour the button gives it; without the font, the icon set's, and for
+/// minimise (whose `Minus` is a stroke with no height, which the renderer
+/// draws as nothing) a 10 px hairline.
+fn windows_glyph<'a>(
+    control: Control,
+    maximized: bool,
+    fallback: Icon,
+    fg: Color,
+) -> Element<'a, Message> {
+    if let Some(font) = caption_font() {
+        return text(caption_char(control, maximized).to_string())
+            .font(font)
+            .size(10)
+            .shaping(text::Shaping::Advanced)
+            .into();
+    }
+    if control == Control::Minimize {
+        return container(Space::new())
+            .width(10)
+            .height(1)
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(Background::Color(fg)),
+                ..container::Style::default()
+            })
+            .into();
+    }
+    icon(fallback, 13.0).into()
+}
+
+/// On Linux round, on a faint disc of the text colour, as the desktop's own
+/// are; on Windows a rectangle, bare until the pointer is over it.
+fn look(
+    t: &Theme,
+    control: Control,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + '_ {
     move |_, status| {
         let c = &t.colors;
+        if windows_style() {
+            let (background, text_color) = match (control, status) {
+                (Control::Close, button::Status::Hovered) => (Some(WINDOWS_CLOSE), Color::WHITE),
+                (Control::Close, button::Status::Pressed) => {
+                    (Some(WINDOWS_CLOSE_PRESSED), Color::WHITE)
+                }
+                (_, button::Status::Hovered) => (Some(Color { a: 0.08, ..c.fg }), c.fg),
+                (_, button::Status::Pressed) => (Some(Color { a: 0.05, ..c.fg }), c.fg),
+                _ => (None, c.fg),
+            };
+            return button::Style {
+                background: background.map(Background::Color),
+                text_color,
+                border: Border::default(),
+                ..button::Style::default()
+            };
+        }
         let disc = match status {
             button::Status::Hovered => 0.14,
             button::Status::Pressed => 0.24,
@@ -301,7 +446,9 @@ pub fn bare_band<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
     if !drawn(ctx.model.settings()) {
         return None;
     }
-    let mut strip = row![].align_y(Alignment::Center).spacing(GAP);
+    let mut strip = row![]
+        .align_y(Alignment::Center)
+        .spacing(if windows_style() { 0.0 } else { GAP });
     if let Some(start) = toolbar(ctx, Side::Start) {
         strip = strip.push(start);
     }
@@ -312,7 +459,16 @@ pub fn bare_band<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
     let strip = container(strip)
         .width(Length::Fill)
         .height(tokens::size::TOOLBAR_HEIGHT)
-        .padding([0.0, tokens::space::MD])
+        .padding(Padding {
+            top: 0.0,
+            right: if flush_end(ctx) {
+                0.0
+            } else {
+                tokens::space::MD
+            },
+            bottom: 0.0,
+            left: tokens::space::MD,
+        })
         .style(rounded_style(
             ctx,
             Corners::top(ctx),
@@ -373,9 +529,10 @@ impl Corners {
     }
 }
 
-/// Whether this window's corners are rounded now.
+/// Whether this window's corners are rounded now: by Hangar, on Linux only.
+/// Windows rounds its own.
 fn rounded(ctx: Ctx<'_>) -> bool {
-    drawn(ctx.model.settings()) && !maximized(ctx)
+    cfg!(target_os = "linux") && drawn(ctx.model.settings()) && !maximized(ctx)
 }
 
 /// The radius a region's background takes at `which` of its corners: the
@@ -470,7 +627,7 @@ pub fn edges<'a>(ctx: Ctx<'a>) -> Option<Element<'a, Message>> {
 
 /// `frame` outlined by a hairline, rounded at the window's corners, which
 /// tells the window from what is behind it now that the system draws no
-/// edge. Not while it is maximised.
+/// edge. Not while it is maximised, nor on Windows, which draws its own.
 pub fn outline<'a>(ctx: Ctx<'a>, frame: Element<'a, Message>) -> Element<'a, Message> {
     if !rounded(ctx) {
         return frame;
@@ -536,6 +693,37 @@ mod tests {
                 end: vec![]
             }
         );
+    }
+
+    #[test]
+    fn windows_buttons_are_the_three_at_the_end() {
+        let layout = Layout::windows();
+        assert!(layout.start.is_empty());
+        assert_eq!(
+            layout.end,
+            [Control::Minimize, Control::Maximize, Control::Close]
+        );
+    }
+
+    #[test]
+    fn windows_buttons_take_their_width_and_no_gap() {
+        assert_eq!(room(true, 0), 0.0);
+        assert_eq!(room(true, 3), 3.0 * WINDOWS_WIDTH);
+        assert_eq!(room(false, 3), 3.0 * (SIDE + GAP));
+    }
+
+    #[test]
+    fn linux_and_windows_draw_their_bar_and_the_setting_gives_the_system_back() {
+        let mut settings = Settings::default();
+        assert_eq!(drawn(&settings), has_own_bar());
+        settings.system_title_bar = true;
+        assert!(!drawn(&settings));
+        assert_eq!(
+            has_own_bar(),
+            cfg!(any(target_os = "linux", target_os = "windows"))
+        );
+        // Windows opens undecorated, like Linux; macOS keeps its bar.
+        assert_eq!(Live::default().decorated, cfg!(target_os = "macos"));
     }
 
     #[test]
