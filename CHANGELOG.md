@@ -110,6 +110,25 @@ around the terminals, and needs a fraction of the memory and processor it did.
   from the orchestration settings, and Hangar no longer hands a task back to you after its
   second worker or its third failed delivery. 1.x, reading the same file, goes back to its
   defaults, 3 workers and 2 attempts.
+- **Faster orchestration.** The delivery check was the slowest step, and most of it was
+  rebuilding the same code.
+  - **A shared build cache.** The workers of a workspace and its delivery check build into
+    one cache folder, so a build one of them did is not done again by the next. It has a
+    toggle in the orchestration settings, shows its size, and can be emptied there.
+  - **The check runs in a folder of its own that stays.** One per workspace, with a short
+    path, put back on each merge's files and cleaned of what the last check left. Rust
+    keys a workspace's own crates by their path, so only what changed is rebuilt now.
+  - **Workers build what they touch.** They iterate with targeted builds and tests, and
+    the full check runs once per delivery.
+  - **A check that could not fail is skipped.** A delivery that changes only
+    documentation (Markdown, text, `docs/`, licence and changelog files, issue templates)
+    runs no check, and neither does one whose merged files are exactly a tree that already
+    passed the same check. The review still runs, and the delivery says why.
+  - **The orchestrator sees what the check costs.** Its briefing gives the last check's
+    time and verdict ("last check 12 min, passed").
+  - **Leftovers are removed.** At start, Hangar removes the delivery folders earlier
+    versions left in the temporary folder and has git forget the worktrees whose folder is
+    gone.
 - **Not there yet.**
   - Windows and macOS are built and tested by CI, but nobody has used 2.0 on them yet. Linux
     is where it was used.

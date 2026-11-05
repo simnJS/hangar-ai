@@ -588,17 +588,6 @@ fn legacy_root() -> PathBuf {
     std::env::temp_dir().join("hangar-deliveries")
 }
 
-/// Eight hex digits naming a workspace's check folder. Stands in for
-/// `build_cache::key_for` until that module is here.
-fn stable_key(workspace_id: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(workspace_id.as_bytes());
-    digest[..4]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 /// The folder every check of a workspace runs in: short and stable, because
 /// Cargo keys the workspace's own crates by path and a new path recompiles
 /// them all. `%LOCALAPPDATA%\hangar\c\<8 hex>` (elsewhere the user's local
@@ -617,7 +606,7 @@ fn check_folder(request: &Delivery) -> PathBuf {
     };
     let _ = std::fs::create_dir_all(&root);
     let root = dunce::canonicalize(&root).unwrap_or(root);
-    root.join(stable_key(&request.workspace_id))
+    root.join(crate::build_cache::key_for(&request.workspace_id))
 }
 
 /// The workspace's worktree for checks: made once, put on each merge in turn.

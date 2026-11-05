@@ -547,6 +547,34 @@ async fn answers_at_once_and_runs_the_delivery_with_the_workspaces_settings() {
 }
 
 #[tokio::test]
+async fn hands_the_check_the_shared_build_cache_unless_it_is_off() {
+    let s = setup();
+    let dir = std::env::temp_dir().join(format!("hangar-build-env-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[workspace]\n").unwrap();
+    let cwd = dir.to_string_lossy().into_owned();
+    s.fake.patch("w1", |ws| ws.cwd = cwd.clone());
+    s.now(Kind::Conflict, "conflict", |_| {});
+
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    let on = s.runs().last().unwrap().build_env.clone();
+    assert_eq!(
+        on,
+        hangar_core::build_cache::env_for(&dir, "w1", true),
+        "{on:?}"
+    );
+    assert_eq!(on.len(), 1);
+    assert_eq!(on[0].0, "CARGO_TARGET_DIR");
+
+    s.settings(|settings| settings.shared_build_cache = false);
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    assert!(s.runs().last().unwrap().build_env.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn reviews_on_the_workspaces_claude_account_and_on_nothing_when_it_is_the_default_one() {
     let s = setup();
     // A delivery that does not land keeps the worker's pane for the next one.

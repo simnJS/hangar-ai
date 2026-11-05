@@ -840,7 +840,11 @@ async fn deliver(
         reuse: landing,
         port_base: pane.port_base,
         workspace_id: ws.id.clone(),
-        build_env: vec![],
+        build_env: hangar_core::build_cache::env_for(
+            std::path::Path::new(&ws.cwd),
+            &ws.id,
+            settings.shared_build_cache,
+        ),
         check_root: None,
         data_dir: None,
     };
