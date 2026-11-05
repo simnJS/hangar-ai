@@ -304,4 +304,51 @@ mod stacking {
         let beside = pixel(cx + 2 * 150, cy);
         assert!(beside[0] > beside[2], "the lower dialog shows around it");
     }
+
+    /// The shell's case: two dialogs are siblings in a `stack`, not nested.
+    /// Their overlays are grouped at one level; the later one still wins.
+    #[test]
+    fn a_sibling_dialog_over_a_sibling_with_a_scrollable_hides_the_scrolled_content() {
+        const RED: Color = Color::from_rgb(1.0, 0.0, 0.0);
+        const BLUE: Color = Color::from_rgb(0.0, 0.0, 1.0);
+
+        let lower = scrollable(block(RED, 400.0, 800.0))
+            .width(Length::Fixed(400.0))
+            .height(Length::Fixed(400.0));
+        let under = modal(Element::from(container("")), Some(Element::from(lower)));
+        let over = modal(
+            Element::from(container("")),
+            Some(block(BLUE, 100.0, 100.0)),
+        );
+        let both = iced::widget::stack![Element::from(under), Element::from(over)];
+
+        let mut ui = simulate(Element::from(both));
+        let snapshot = ui.snapshot(&iced::Theme::Dark).expect("it draws");
+        let dir = std::env::temp_dir().join(format!("hangar-layer-sib-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        snapshot
+            .matches_image(dir.join("stacked"))
+            .expect("written");
+        let file = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .next()
+            .expect("the png")
+            .path();
+        let mut reader =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()))
+                .read_info()
+                .unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let pixel = |x: u32, y: u32| {
+            let at = (y as usize * info.width as usize + x as usize) * 4;
+            &bytes[at..at + 3]
+        };
+        let (cx, cy) = (info.width / 2, info.height / 2);
+        assert_eq!(pixel(cx, cy), [0, 0, 255], "the later dialog is on top");
+        assert_eq!(pixel(cx + 60, cy), [0, 0, 255]);
+    }
 }
