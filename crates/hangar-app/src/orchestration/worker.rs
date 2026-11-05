@@ -440,6 +440,9 @@ pub struct BriefFacts<'a> {
     pub check_command: Option<&'a str>,
     pub attempt: u32,
     pub hook_failure: Option<&'a HookFailure>,
+    /// A git repository, but the worker was started without a worktree: it
+    /// works in the shared checkout, on its current branch.
+    pub shared_checkout: bool,
 }
 
 /// The worker's first message, and all it knows: it starts with a fresh
@@ -465,6 +468,10 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         Some((branch, target, worktree)) => format!(
             "- Your folder is a git worktree of its own: {worktree}, on branch {branch}, made from {target}. Work and commit there only. Never push, and never merge into {target} yourself."
         ),
+        None if facts.shared_checkout => format!(
+            "- You work in the shared checkout of the workspace: {}, on its current branch, beside other agents who may be changing other files in it right now. Change and commit only your task's files (`git add <those paths>`, never `git add -A`); never checkout, reset, stash or rebase, never revert, move, reformat or delete a file that is not yours, and run nothing that rewrites the whole folder. Never push.",
+            facts.folder
+        ),
         None => format!(
             "- You work in the workspace's own folder: {}. It is not a git repository: there is no branch and nothing to commit, and what you save is in place at once. Other workers may be changing other files in this folder right now: never revert, move, reformat or delete a file that is not yours, and run nothing that rewrites the whole folder.",
             facts.folder
@@ -474,6 +481,7 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         Some((branch, _, _)) => format!(
             "Commit everything on {branch}, leave the comment above, then call delivery_submit {{summary}} with a one-line summary. Hangar checks your branch, has it reviewed and lands it; if anything fails, a message tells you what to fix."
         ),
+        None if facts.shared_checkout => "Commit your task's files (`git add <those paths>`), leave the comment above, then call delivery_submit {summary} with a one-line summary. Nothing is merged or reviewed by Hangar: it marks your task done, tells the orchestrator, who integrates your commits, and closes your pane.".to_string(),
         None => "Leave the comment above, then call delivery_submit {summary} with a one-line summary. Nothing is merged or reviewed here: Hangar marks your task done, tells the orchestrator and closes your pane.".to_string(),
     };
     let check = match (facts.check_command.filter(|c| !c.is_empty()), git.is_some()) {
@@ -664,6 +672,8 @@ pub struct SpawnRequest {
     pub task: Option<Value>,
     pub name: Option<Value>,
     pub model: Option<Value>,
+    /// `false`: no worktree, the worker starts in the workspace's own folder.
+    pub worktree: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -722,6 +732,8 @@ struct Start<'a> {
     model: String,
     port_base: u32,
     by: Option<&'a Pane>,
+    /// `Some(false)`: start in the workspace's own folder, with no worktree.
+    worktree: Option<bool>,
 }
 
 /// Starts a worker on a task: claim, worktree, pane, brief — all of them, or
@@ -735,6 +747,15 @@ pub async fn spawn_worker(
 ) -> Result<SpawnedWorker, String> {
     let settings = orchestration_of(ws);
     let state = port.state();
+    let worktree = match request.worktree.as_ref() {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(wanted)) => Some(*wanted),
+        Some(_) => {
+            return Err(
+                "worktree is true or false: false starts the worker in the workspace's own folder, with no worktree and no branch.".into(),
+            );
+        }
+    };
     let Some(task_id) = text(request.task.as_ref()) else {
         return Err(
             "Give the id of the task to hand over (task), as board_list_tasks shows it.".into(),
@@ -782,6 +803,7 @@ pub async fn spawn_worker(
         model,
         port_base,
         by,
+        worktree,
     };
     let mut undo: Vec<Undo> = Vec::new();
     let outcome = start_steps(&start, port, &mut undo).await;
@@ -864,6 +886,14 @@ async fn start_steps(
         }
         _ => None,
     };
+    // The orchestrator may start the worker in the workspace's own folder even
+    // in a repository (`worktree: false`): no worktree, no branch, no delivery.
+    let wants_tree = match start.worktree {
+        None => true,
+        Some(wanted) => wanted,
+    };
+    let shared_checkout = git.is_some() && !wants_tree;
+    let git = git.filter(|_| wants_tree);
     let target = git
         .as_ref()
         .and_then(|_| settings.branch.clone().or_else(|| repo.branch.clone()));
@@ -946,7 +976,7 @@ async fn start_steps(
             task_id: task.id.clone(),
             model: start.model.clone(),
             port_base: start.port_base,
-            shared_folder: git.is_none().then_some(true),
+            shared_folder: (git.is_none() || shared_checkout).then_some(true),
         }),
     };
     let Some(id) = port.add_pane(&ws.id, pane).await else {
@@ -994,6 +1024,7 @@ async fn start_steps(
         check_command: settings.check_command.as_deref(),
         attempt,
         hook_failure: hook_failure.as_ref(),
+        shared_checkout,
     });
     port.enqueue(&id, &brief, by.unwrap_or("hangar")).await?;
 
@@ -1010,7 +1041,12 @@ async fn start_steps(
         },
     );
     let mut note = String::new();
-    if git.is_none() {
+    if shared_checkout {
+        note.push_str(&format!(
+            "The worker was started without a worktree, as asked: it works in \"{}\"'s own folder on the branch checked out there, beside you and any other worker. No branch, nothing merged or reviewed by Hangar: it commits its task's files, its task is done when it delivers, and you integrate. ",
+            ws.name
+        ));
+    } else if git.is_none() {
         note.push_str(&format!(
             "\"{}\" is not a git repository, so the worker works in its folder, beside any other worker: no worktree, no branch, nothing merged or reviewed. Its changes are in place as it saves them, and its task is done when it delivers. ",
             ws.name
@@ -1336,7 +1372,7 @@ pub async fn stop_worker(
     match (&path, tree) {
         _ if shared => {
             worktree.kept = Some(
-                "it worked in the workspace's own folder, which is not a git repository: there is no worktree, and what it changed stays in the folder as it is"
+                "it worked in the workspace's own folder (not a git repository, or started without a worktree): there is no worktree to remove, and what it changed stays in the folder as it is"
                     .into(),
             );
         }
@@ -1464,6 +1500,7 @@ pub async fn worker_control(
                 task: args.get("task").cloned(),
                 name: args.get("name").cloned(),
                 model: args.get("model").cloned(),
+                worktree: args.get("worktree").cloned(),
             };
             let spawned = spawn_worker(ws, &request, port, Some(me)).await?;
             serde_json::to_value(spawned).map_err(|err| err.to_string())

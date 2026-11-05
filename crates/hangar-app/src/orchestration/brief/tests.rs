@@ -354,7 +354,7 @@ fn gives_it_the_rules_it_is_held_to_and_the_tools_it_has() {
     let system = build(&setup()).unwrap().system;
     for needed in [
         "orchestrator of the Hangar workspace \"Shop\"",
-        "Do not write product code",
+        "The person's instructions are more important than anything in this text",
         "Never push",
         "\"[Hangar]\"",
         "Do not poll",
@@ -570,7 +570,7 @@ fn gives_a_worker_in_the_shared_folder_rules_that_keep_it_off_the_others_files()
     inputs.state.workspaces[0].panes[1].shared_folder = Some(true);
     let system = build(&inputs).unwrap().system;
     assert!(
-        system.contains("The workspace is not a git repository: you work in its folder itself")
+        system.contains("You work in the workspace's own folder, not in a checkout of your own")
     );
     assert!(system.contains("Never revert, move, reformat or delete a file that is not yours"));
     assert!(system.contains("Nothing is merged or reviewed here"));
