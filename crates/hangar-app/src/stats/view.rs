@@ -50,7 +50,7 @@ fn msg(m: Msg) -> Message {
 /// Region `main` in the stats view.
 pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let ui = Ui::new(&ctx);
-    let computed = st.computed(&ctx);
+    let computed = st.computed();
     responsive(move |bounds| page(st, ctx, ui, computed.clone(), bounds.width)).into()
 }
 
@@ -63,15 +63,16 @@ fn page<'a>(
 ) -> Element<'a, Message> {
     let live = &ctx.model.live.stats;
     let bar = bar(st, ctx, ui, computed.as_deref(), width);
-    let body: Element<'a, Message> = match (&live.data, &computed) {
-        (Some(data), Some(computed)) => {
+    let body: Element<'a, Message> = match &computed {
+        Some(computed) => {
+            let data = &computed.data;
             if data.buckets.is_empty() && !live.refreshing {
                 empty_state(ui, data)
             } else {
                 content(st, ctx, ui, computed, data, width)
             }
         }
-        _ => match &live.error {
+        None => match &live.error {
             Some(error) => hangar_ui::empty::empty(ui.t, Icon::Alert, ui.s(Key::StatsErrorTitle))
                 .description(error.clone())
                 .action(

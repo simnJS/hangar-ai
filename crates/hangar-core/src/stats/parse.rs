@@ -49,6 +49,18 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// One prompt a person typed: a turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Prompt {
+    /// What identifies the message across files, like `Call::key`, so a
+    /// resumed or forked session's copied history is not a second turn.
+    /// 0 when unknown.
+    #[serde(rename = "k")]
+    pub key: u64,
+    #[serde(rename = "t")]
+    pub at: i64,
+}
+
 /// How sure a title is: a name the user gave beats Claude Code's own, which
 /// beats the first prompt.
 pub const TITLE_PROMPT: u8 = 1;
@@ -71,8 +83,8 @@ pub struct Digest {
     pub calls: Vec<Call>,
     /// The time of every message, the user's and the agent's, sorted as read.
     pub stamps: Vec<i64>,
-    /// The time of every prompt a person typed: a turn.
-    pub prompts: Vec<i64>,
+    /// Every prompt a person typed: a turn.
+    pub prompts: Vec<Prompt>,
     /// Lines that would not parse, skipped.
     pub bad_lines: u32,
     /// Bytes parsed so far, always on a line boundary: where an appended
@@ -197,6 +209,8 @@ struct ClaudeLine<'a> {
     meta: Option<bool>,
     #[serde(rename = "isCompactSummary")]
     compact: Option<bool>,
+    #[serde(borrow)]
+    uuid: Option<Cow<'a, str>>,
     #[serde(rename = "requestId", borrow)]
     request_id: Option<Cow<'a, str>>,
     #[serde(borrow)]
@@ -371,7 +385,11 @@ pub fn claude_line(line: &str, digest: &mut Digest, seen: &mut HashMap<u64, usiz
             if is_injected(&text) {
                 return;
             }
-            digest.prompts.push(at);
+            let key = parsed
+                .uuid
+                .as_deref()
+                .map_or(0, |uuid| fnv1a(&[b"claude-prompt", uuid.as_bytes()]));
+            digest.prompts.push(Prompt { key, at });
             if !text.trim_start().starts_with('<') {
                 digest.offer_title(&text, TITLE_PROMPT);
             }
@@ -509,8 +527,26 @@ mod tests {
         assert_eq!(digest.models, vec!["claude-opus-5-5"]);
         // The prompt is a turn; the tool result is not.
         assert_eq!(digest.prompts.len(), 1);
+        assert_eq!(digest.prompts[0].key, 0);
         assert_eq!(digest.stamps.len(), 5);
         assert_eq!(digest.title, "Fix the login bug");
+    }
+
+    #[test]
+    fn a_prompt_is_keyed_by_its_message_uuid() {
+        let line = |uuid: &str| {
+            user("2026-10-01T10:00:00Z", r#""hello""#).replacen(
+                r#"{"type":"user","#,
+                &format!(r#"{{"uuid":"{uuid}","type":"user","#),
+                1,
+            )
+        };
+        let a = read(&line("u-1")).prompts[0];
+        let b = read(&line("u-1")).prompts[0];
+        let c = read(&line("u-2")).prompts[0];
+        assert_ne!(a.key, 0);
+        assert_eq!(a, b);
+        assert_ne!(a.key, c.key);
     }
 
     #[test]

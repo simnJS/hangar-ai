@@ -35,16 +35,18 @@ fn week() -> State {
         },
     );
     let st = State::default();
-    *st.computed.lock().unwrap() = Some((
+    let mut st = st;
+    st.computed = Some((
         ComputedFor {
             generation: 0,
             period: Period::D7,
             measure: Measure::Tokens,
             project: None,
-            roots: 0,
+            roots_rev: 0,
             day: 0,
         },
         Arc::new(Computed {
+            data: Arc::new(data),
             summary: Arc::new(summary),
             projects,
         }),
@@ -250,4 +252,80 @@ mod stale {
         assert!(!is_stale(false, true, Some(started), later));
         assert!(!is_stale(true, true, None, later));
     }
+}
+
+mod roots {
+    use super::*;
+    use crate::state::types::{Pane, Workspace};
+
+    fn app() -> Workspace {
+        Workspace {
+            id: "app".to_owned(),
+            name: "app".to_owned(),
+            cwd: "/dev/app".to_owned(),
+            ..Workspace::default()
+        }
+    }
+
+    #[test]
+    fn a_cd_in_a_pane_does_not_change_what_the_roots_are_built_from() {
+        let before = workspaces_fingerprint(&[app()]);
+        let mut moved = app();
+        moved.panes = vec![Pane {
+            id: "p1".to_owned(),
+            cwd: Some("/dev/app/sub".to_owned()),
+            ..Pane::default()
+        }];
+        assert_eq!(workspaces_fingerprint(&[moved]), before);
+    }
+
+    #[test]
+    fn a_workspace_added_moved_or_given_roots_changes_it() {
+        let base = workspaces_fingerprint(&[app()]);
+        let mut moved = app();
+        moved.cwd = "/dev/other".to_owned();
+        let mut rooted = app();
+        rooted.extra_roots = vec!["/dev/lib".to_owned()];
+        let second = Workspace {
+            id: "web".to_owned(),
+            ..app()
+        };
+        for changed in [vec![moved], vec![rooted], vec![app(), second]] {
+            assert_ne!(workspaces_fingerprint(&changed), base);
+        }
+    }
+}
+
+#[test]
+fn an_answer_for_an_older_ask_is_dropped() {
+    let mut st = week();
+    let shown = st.computed().unwrap();
+    let key = ComputedFor {
+        generation: 9,
+        period: Period::D30,
+        measure: Measure::Tokens,
+        project: None,
+        roots_rev: 0,
+        day: 0,
+    };
+    st.compute_seq = 2;
+    st.pending = Some(key.clone());
+    // Ask number 1 comes back late: the page already asked again.
+    let late = Arc::new(Computed {
+        data: shown.data.clone(),
+        summary: shown.summary.clone(),
+        projects: Vec::new(),
+    });
+    st.land(1, key.clone(), Some(late));
+    assert!(Arc::ptr_eq(&st.computed().unwrap(), &shown));
+    assert!(st.pending.is_some());
+    // The latest one lands and replaces it.
+    let fresh = Arc::new(Computed {
+        data: shown.data.clone(),
+        summary: shown.summary.clone(),
+        projects: Vec::new(),
+    });
+    st.land(2, key, Some(fresh.clone()));
+    assert!(Arc::ptr_eq(&st.computed().unwrap(), &fresh));
+    assert!(st.pending.is_none());
 }
