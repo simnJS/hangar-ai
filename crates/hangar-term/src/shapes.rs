@@ -107,6 +107,18 @@ impl Metrics {
         }
     }
 
+    /// The metrics as bits, to tell whether shapes drawn with other metrics
+    /// still fit.
+    pub(crate) fn key(&self) -> [u32; 5] {
+        [
+            self.width.to_bits(),
+            self.height.to_bits(),
+            self.pixel.to_bits(),
+            self.light.to_bits(),
+            self.size.to_bits(),
+        ]
+    }
+
     fn heavy(&self) -> f32 {
         self.light * 2.0
     }

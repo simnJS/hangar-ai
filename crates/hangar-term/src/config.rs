@@ -30,7 +30,14 @@ pub enum Osc52 {
 /// [`Font`]: crate::Font
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
-    /// Lines of history kept above the screen.
+    /// Lines of history kept above the screen, up to
+    /// [`MAX_SCROLLBACK`](crate::MAX_SCROLLBACK).
+    ///
+    /// The history is memory the terminal keeps as it fills: 24 bytes per
+    /// cell, so `scrollback × columns × 24` bytes per pane once it is full.
+    /// The default of 10 000 lines is about 19 MB for a pane 80 columns wide
+    /// and 48 MB for one 200 columns wide; sixteen wide panes that have
+    /// printed a lot hold about 770 MB.
     pub scrollback: usize,
     /// The cursor the program gets until it asks for another with `DECSCUSR`.
     pub cursor_shape: CursorShape,
