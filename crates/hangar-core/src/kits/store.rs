@@ -9,11 +9,12 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::commands;
 use super::manifest::{self, Manifest};
 use super::plugin;
 use super::source::{self, GitSource};
@@ -51,12 +52,73 @@ pub struct Entry {
     /// linked folder is never asked: every edit would ask again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hooks_consent: bool,
+    /// The commit a git kit's clone holds, as it was added or last updated. Null
+    /// for a linked folder, and for a git kit no update has moved since a Hangar
+    /// that did not record it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+}
+
+/// The commit a tag of a repository pointed at the first time this machine
+/// installed a kit from it. Kept when the kit is removed: a tag its owner moves
+/// after the catalog's review is refused at the next install.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pin {
+    pub url: String,
+    pub tag: String,
+    pub commit: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Index {
     #[serde(default)]
     kits: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pins: Vec<Pin>,
+}
+
+impl Index {
+    /// Refuses a tag that now points elsewhere than the commit recorded for it.
+    fn check_pin(&self, source: &GitSource, commit: &str) -> Result<(), String> {
+        let Some(tag) = source::pinned_tag(source) else {
+            return Ok(());
+        };
+        match self
+            .pins
+            .iter()
+            .find(|pin| pin.url == source.url && pin.tag == tag)
+        {
+            Some(pin) if pin.commit != commit => Err(format!(
+                "the tag {tag} of {} now points at the commit {}, not at {} as when it was installed here: its owner moved it after it was reviewed, and it is not taken",
+                source.url,
+                short(commit),
+                short(&pin.commit)
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Records the commit a tag points at, the first time it is seen.
+    fn pin(&mut self, source: &GitSource, commit: &str) {
+        let Some(tag) = source::pinned_tag(source) else {
+            return;
+        };
+        if !self
+            .pins
+            .iter()
+            .any(|pin| pin.url == source.url && pin.tag == tag)
+        {
+            self.pins.push(Pin {
+                url: source.url.clone(),
+                tag: tag.to_string(),
+                commit: commit.to_string(),
+            });
+        }
+    }
+}
+
+fn short(commit: &str) -> &str {
+    commit.get(..12).unwrap_or(commit)
 }
 
 /// What an update check found out.
@@ -88,9 +150,16 @@ impl Loaded {
     }
 
     /// `hooks:<hash>` of what its plugin runs by itself (plugin.rs): its hooks
-    /// and everything else; `None` when it runs nothing.
+    /// and everything else, the files they run included; `None` when it runs
+    /// nothing.
     pub fn hooks_permission(&self) -> Option<String> {
         plugin::permission(&self.plugin_dir()?)
+    }
+
+    /// `commands:<hash>` of what its tabs may run on `os` (commands.rs), the
+    /// files those name in the kit included; `None` without any.
+    pub fn commands_permission(&self, os: &str) -> Option<String> {
+        commands::grant(&self.manifest, &self.root, os)
     }
 }
 
@@ -98,12 +167,38 @@ pub struct Store {
     root: PathBuf,
 }
 
-/// One change to the store at a time, across every window and command.
-fn lock() -> MutexGuard<'static, ()> {
+/// One change to the store at a time, across every window and command. Never
+/// held over the network: a stalled remote would hold every other kit with it.
+pub(super) fn lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// One fetch, update or removal of a kit's clone at a time, held over the
+/// network: a second one on the same kit waits for the first, a check of
+/// another kit does not. Taken before `lock`, never after.
+fn kit_lock(id: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(id.to_string())
+        .or_default()
+        .clone()
+}
+
+fn hold(lock: &Mutex<()>) -> MutexGuard<'_, ()> {
+    lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// What an update would bring, fetched and read in full, and nothing switched
+/// to it yet.
+struct Prepared {
+    commit: String,
+    version: String,
 }
 
 /// Update checks remembered until the app quits, by store and kit.
@@ -235,6 +330,7 @@ impl Store {
             installed_version: manifest.version,
             added_at: now,
             hooks_consent: false,
+            commit: None,
         };
         index.kits.push(entry.clone());
         self.save(&index)?;
@@ -259,10 +355,9 @@ impl Store {
     }
 
     /// The clone itself, from any URL git takes: the link was checked by the
-    /// caller, and the tests clone from `file://`.
+    /// caller, and the tests clone from `file://`. The network part runs with no
+    /// lock held; the store is locked only to move the clone in and record it.
     pub fn add_git_source(&self, source: GitSource, now: u64) -> Result<Entry, String> {
-        let _guard = lock();
-        let mut index = self.load()?;
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         // Cloned aside first: the id is only known once the manifest is read,
         // and a clone that turns out not to be a kit leaves nothing behind.
@@ -270,15 +365,31 @@ impl Store {
             .root
             .join(format!(".clone-{}", uuid::Uuid::new_v4().simple()));
         let checked = (|| {
-            source::clone(&source, &staging)?;
+            let commit = source::clone(&source, &staging)?;
             let root = kit_root(&staging, source.subdir.as_deref())?;
             let manifest = manifest::read(&root)?;
             manifest::compatible(&manifest, HANGAR_VERSION)?;
-            refuse_taken(&index, &manifest.id)?;
-            Ok::<_, String>(manifest)
+            Ok::<_, String>((manifest, commit))
         })();
-        let manifest = match checked {
-            Ok(manifest) => manifest,
+        let (manifest, commit) = match checked {
+            Ok(found) => found,
+            Err(why) => {
+                let _ = remove_tree(&staging);
+                return Err(why);
+            }
+        };
+
+        let kit = kit_lock(&manifest.id);
+        let _kit = hold(&kit);
+        let _guard = lock();
+        let recorded = (|| {
+            let index = self.load()?;
+            refuse_taken(&index, &manifest.id)?;
+            index.check_pin(&source, &commit)?;
+            Ok::<_, String>(index)
+        })();
+        let mut index = match recorded {
+            Ok(index) => index,
             Err(why) => {
                 let _ = remove_tree(&staging);
                 return Err(why);
@@ -301,6 +412,7 @@ impl Store {
             let _ = remove_tree(&staging);
         })?;
         let dir = kit_root(&target, source.subdir.as_deref())?;
+        index.pin(&source, &commit);
         let entry = Entry {
             id: manifest.id.clone(),
             source: Source::Git(source),
@@ -308,6 +420,7 @@ impl Store {
             installed_version: manifest.version,
             added_at: now,
             hooks_consent: true,
+            commit: Some(commit),
         };
         index.kits.push(entry.clone());
         self.save(&index)?;
@@ -317,6 +430,8 @@ impl Store {
     /// Takes a kit out of the index, and deletes its folder only when Hangar
     /// cloned it: a linked folder is the person's, and stays as it is.
     pub fn remove(&self, id: &str) -> Result<(), String> {
+        let kit = kit_lock(id);
+        let _kit = hold(&kit);
         let _guard = lock();
         let mut index = self.load()?;
         let at = index
@@ -346,20 +461,23 @@ impl Store {
     /// against the one installed. A kit pinned to a tag is only looked at on
     /// another tag the catalog names (`catalog_tag`, `source::update_target`); with
     /// none, it is as it is and nothing is fetched. A folder kit is always as it is
-    /// on disk: there is nothing to check, and the answer is `None`.
+    /// on disk: there is nothing to check, and the answer is `None`. A new version
+    /// that could not be used here — a manifest that does not hold, a newer Hangar
+    /// needed, another kit — is an error that says so, not an update.
     pub fn check_update(
         &self,
         id: &str,
         now: u64,
         catalog_tag: Option<&str>,
     ) -> Result<Option<UpdateInfo>, String> {
-        let _guard = lock();
+        let kit = kit_lock(id);
+        let _kit = hold(&kit);
         let entry = self.find(id)?;
         let Source::Git(source) = &entry.source else {
             return Ok(None);
         };
         let latest = match source::update_target(source, catalog_tag) {
-            Some(target) => self.fetch_version(&entry, &target)?,
+            Some(target) => self.prepare(&entry, &target)?.version,
             None => entry.installed_version.clone(),
         };
         let info = UpdateInfo {
@@ -376,50 +494,73 @@ impl Store {
     /// recorded version to what its manifest says. A kit pinned to a tag moves to
     /// the tag the catalog names, which it then is pinned to, and never back to an
     /// older version; with no other tag named, it stays as it is.
+    ///
+    /// The new commit is fetched and read in full aside — its manifest, this
+    /// Hangar's version against it, its id — before the kit's folder moves to it,
+    /// so an update that could not be used leaves the kit as it was. If recording
+    /// the update fails once it moved, the folder goes back to the commit it held.
     pub fn update(&self, id: &str, catalog_tag: Option<&str>) -> Result<Entry, String> {
+        let kit = kit_lock(id);
+        let _kit = hold(&kit);
+        let entry = self.find(id)?;
+        let Source::Git(source) = &entry.source else {
+            let _guard = lock();
+            let mut index = self.load()?;
+            let at = position(&index, id)?;
+            index.kits[at].installed_version = manifest::read(Path::new(&entry.dir))?.version;
+            self.save(&index)?;
+            checks().remove(&(self.root.clone(), id.to_string()));
+            return Ok(index.kits[at].clone());
+        };
+        let Some(target) = source::update_target(source, catalog_tag) else {
+            checks().remove(&(self.root.clone(), id.to_string()));
+            return Ok(entry);
+        };
+        let prepared = self.prepare(&entry, &target)?;
+        if source::pinned_tag(source).is_some()
+            && !is_later(&prepared.version, &entry.installed_version)
+        {
+            return Err(format!(
+                "the catalog names the tag {}, which holds version {}: not later than the installed {}",
+                source::pinned_tag(&target).unwrap_or_default(),
+                prepared.version,
+                entry.installed_version
+            ));
+        }
+
         let _guard = lock();
         let mut index = self.load()?;
-        let at = index
-            .kits
-            .iter()
-            .position(|entry| entry.id == id)
-            .ok_or_else(|| format!("no kit {id:?} is installed"))?;
-        let entry = index.kits[at].clone();
-        let version = match &entry.source {
-            Source::Folder { .. } => manifest::read(Path::new(&entry.dir))?.version,
-            Source::Git(source) => {
-                let Some(target) = source::update_target(source, catalog_tag) else {
-                    checks().remove(&(self.root.clone(), id.to_string()));
-                    return Ok(entry);
-                };
-                let latest = self.fetch_version(&entry, &target)?;
-                if source::pinned_tag(source).is_some()
-                    && !is_later(&latest, &entry.installed_version)
-                {
-                    return Err(format!(
-                        "the catalog names the tag {}, which holds version {latest}: not later than the installed {}",
-                        source::pinned_tag(&target).unwrap_or_default(),
-                        entry.installed_version
-                    ));
-                }
-                let hooks_before = self
-                    .loaded(&entry)
-                    .ok()
-                    .and_then(|kit| kit.hooks_permission());
-                source::checkout_fetched(&self.clone_dir(id))?;
-                let hooks_now = self
-                    .loaded(&entry)
-                    .ok()
-                    .and_then(|kit| kit.hooks_permission());
-                if hooks_now != hooks_before {
-                    index.kits[at].hooks_consent = true;
-                }
-                index.kits[at].source = Source::Git(target);
-                latest
-            }
-        };
-        index.kits[at].installed_version = version;
-        self.save(&index)?;
+        let at = position(&index, id)?;
+        if index.kits[at] != entry {
+            return Err("the kit changed while its update was fetched; try again".into());
+        }
+        index.check_pin(&target, &prepared.commit)?;
+        let clone = self.clone_dir(id);
+        let previous = source::head(&clone)?;
+        let hooks_before = self
+            .loaded(&entry)
+            .ok()
+            .and_then(|kit| kit.hooks_permission());
+        source::checkout(&clone, &prepared.commit)?;
+        let hooks_now = self
+            .loaded(&entry)
+            .ok()
+            .and_then(|kit| kit.hooks_permission());
+        if hooks_now != hooks_before {
+            index.kits[at].hooks_consent = true;
+        }
+        index.pin(&target, &prepared.commit);
+        index.kits[at].source = Source::Git(target);
+        index.kits[at].installed_version = prepared.version;
+        index.kits[at].commit = Some(prepared.commit);
+        if let Err(why) = self.save(&index) {
+            return Err(match source::checkout(&clone, &previous) {
+                Ok(()) => format!("the update could not be recorded ({why}); the kit is as it was"),
+                Err(back) => format!(
+                    "the update could not be recorded ({why}), nor the kit put back as it was ({back}); remove it and add it again"
+                ),
+            });
+        }
         checks().remove(&(self.root.clone(), id.to_string()));
         Ok(index.kits[at].clone())
     }
@@ -432,27 +573,61 @@ impl Store {
             .ok_or_else(|| format!("no kit {id:?} is installed"))
     }
 
-    /// Fetches the remote ref, and reads the version its manifest declares —
-    /// refusing a remote that has become another kit.
-    fn fetch_version(&self, entry: &Entry, source: &GitSource) -> Result<String, String> {
+    /// Fetches the remote ref, and reads what it holds in full, written out
+    /// aside: a manifest that holds, for this Hangar, of this very kit. The
+    /// commit is checked against the one recorded for its tag, if any.
+    fn prepare(&self, entry: &Entry, source: &GitSource) -> Result<Prepared, String> {
         let clone = self.clone_dir(&entry.id);
-        source::fetch(source, &clone)?;
+        let commit = source::fetch(source, &clone)?;
+        self.load()?.check_pin(source, &commit)?;
         let path = match &source.subdir {
             Some(subdir) => format!("{subdir}/{}", manifest::FILE),
             None => manifest::FILE.to_string(),
         };
-        let text = source::fetched_file(&clone, &path)
+        let text = source::file_at(&clone, &commit, &path)
             .map_err(|_| format!("the remote holds no {path} any more"))?;
-        let (remote_id, version) = manifest::version_of(&text)
-            .ok_or_else(|| format!("the remote {path} has no valid id and version"))?;
-        if remote_id != entry.id {
-            return Err(format!(
-                "the remote now holds the kit {remote_id:?}, not {:?}",
-                entry.id
-            ));
+        // Its id first: a remote that has become another kit is said as such.
+        if let Some((remote_id, _)) = manifest::version_of(&text) {
+            if remote_id != entry.id {
+                return Err(format!(
+                    "the remote now holds the kit {remote_id:?}, not {:?}",
+                    entry.id
+                ));
+            }
         }
-        Ok(version)
+        let aside = self
+            .root
+            .join(format!(".check-{}", uuid::Uuid::new_v4().simple()));
+        let read = (|| {
+            source::export(&clone, &commit, &aside)?;
+            let root = kit_root(&aside, source.subdir.as_deref())?;
+            let manifest = manifest::read(&root)
+                .map_err(|why| format!("the new version cannot be used: {why}"))?;
+            if manifest.id != entry.id {
+                return Err(format!(
+                    "the remote now holds the kit {:?}, not {:?}",
+                    manifest.id, entry.id
+                ));
+            }
+            manifest::compatible(&manifest, HANGAR_VERSION).map_err(|why| {
+                format!("version {} cannot be used here: {why}", manifest.version)
+            })?;
+            Ok(manifest.version)
+        })();
+        let _ = remove_tree(&aside);
+        Ok(Prepared {
+            commit,
+            version: read?,
+        })
     }
+}
+
+fn position(index: &Index, id: &str) -> Result<usize, String> {
+    index
+        .kits
+        .iter()
+        .position(|entry| entry.id == id)
+        .ok_or_else(|| format!("no kit {id:?} is installed"))
 }
 
 /// Whether `latest` is an update of `current`. A version that is not semver has
@@ -1313,5 +1488,282 @@ mod tests {
         fs::write(store.index_path(), escaping.to_string()).unwrap();
         assert!(store.entries().unwrap_err().contains("invalid kit id"));
         assert!(store.update("..", None).is_err() && store.remove("..").is_err());
+    }
+
+    /// The commit the clone of `id` holds.
+    fn head_of(store: &Store, id: &str) -> String {
+        in_clone(store, id, &["rev-parse", "HEAD"])
+    }
+
+    fn no_folder_left_aside(store: &Store) {
+        let left: Vec<String> = fs::read_dir(store.root())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn an_update_that_changes_only_a_script_its_hooks_run_is_a_change() {
+        let (_home, store) = store("consent-script");
+        let remote = Remote::new("consent-script-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        with_hooks(&remote, "node ${CLAUDE_PLUGIN_ROOT}/guard.js");
+        remote.folder.file("work/guard.js", "console.log('one')");
+        remote.push("first");
+        cloned(&store, &remote);
+        forget_consent(&store, "studio");
+        let permission = || {
+            store
+                .loaded(&store.entry("studio").unwrap())
+                .unwrap()
+                .hooks_permission()
+                .unwrap()
+        };
+        let before = permission();
+
+        // What nothing runs: as it was.
+        remote.folder.file("work/README.md", "docs");
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.push("docs");
+        assert!(!store.update("studio", None).unwrap().hooks_consent);
+        assert_eq!(permission(), before);
+
+        // The same command line, another script behind it.
+        remote
+            .folder
+            .file("work/guard.js", "require('child_process')");
+        remote.folder.manifest("work", "studio", "1.2.0");
+        remote.push("another guard");
+        let changed = store.update("studio", None).unwrap();
+        assert!(changed.hooks_consent, "the workspace is asked again");
+        assert_ne!(permission(), before);
+
+        // A program in bin/, on the PATH of Claude's shell, counts as well.
+        let with_guard = permission();
+        remote.folder.file("work/bin/tool", "#!/bin/sh\necho two");
+        remote.folder.manifest("work", "studio", "1.3.0");
+        remote.push("a tool");
+        store.update("studio", None).unwrap();
+        assert_ne!(permission(), with_guard);
+    }
+
+    #[test]
+    fn an_update_that_changes_only_a_script_a_command_runs_needs_another_grant() {
+        let (_home, store) = store("consent-command");
+        let remote = Remote::new("consent-command-remote");
+        let manifest = |version: &str| {
+            json!({
+                "schema": 1, "id": "studio", "name": "studio", "version": version,
+                "description": "d",
+                "commands": { "audit": { "description": "d", "run": ["node", "{kitDir}/tools/audit.js"] } }
+            })
+            .to_string()
+        };
+        remote
+            .folder
+            .file("work/hangar-kit.json", &manifest("1.0.0"));
+        remote.folder.file("work/tools/audit.js", "one");
+        remote.push("first");
+        let entry = cloned(&store, &remote);
+        let os = manifest::current_os();
+        let before = store
+            .loaded(&entry)
+            .unwrap()
+            .commands_permission(os)
+            .unwrap();
+
+        remote
+            .folder
+            .file("work/hangar-kit.json", &manifest("1.1.0"));
+        remote.folder.file("work/tools/audit.js", "two");
+        remote.push("another audit");
+        let updated = store.update("studio", None).unwrap();
+        let after = store
+            .loaded(&updated)
+            .unwrap()
+            .commands_permission(os)
+            .unwrap();
+        assert_ne!(
+            after, before,
+            "the grant for the old script does not run the new one"
+        );
+    }
+
+    #[test]
+    fn an_update_that_could_not_be_used_leaves_the_kit_as_it_was() {
+        let (_home, store) = store("update-bad");
+        let remote = Remote::new("update-bad-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        cloned(&store, &remote);
+        let head = head_of(&store, "studio");
+
+        for (why, manifest) in [
+            (
+                "needs Hangar",
+                json!({ "schema": 1, "id": "studio", "name": "studio", "version": "1.1.0",
+                        "description": "d", "hangar": ">=99.0.0" }),
+            ),
+            (
+                "cannot be used",
+                json!({ "schema": 1, "id": "studio", "version": "1.2.0", "description": "d",
+                        "tabs": [{ "id": "t", "title": "T", "page": "missing.html" }] }),
+            ),
+        ] {
+            remote
+                .folder
+                .file("work/hangar-kit.json", &manifest.to_string());
+            remote.push(why);
+            let err = store.check_update("studio", 2, None).unwrap_err();
+            assert!(err.contains(why), "{err}");
+            let err = store.update("studio", None).unwrap_err();
+            assert!(err.contains(why), "{err}");
+            assert_eq!(head_of(&store, "studio"), head, "not checked out");
+            assert_eq!(on_disk(&store, "studio"), "1.0.0");
+            let kept = store.entry("studio").unwrap();
+            assert_eq!(kept.installed_version, "1.0.0");
+            assert!(store.loaded(&kept).is_ok(), "still usable");
+            no_folder_left_aside(&store);
+        }
+
+        // A good version after them goes through.
+        remote.folder.manifest("work", "studio", "1.3.0");
+        remote.push("fixed");
+        let updated = store.update("studio", None).unwrap();
+        assert_eq!(updated.installed_version, "1.3.0");
+        assert_eq!(
+            updated.commit.as_deref(),
+            Some(head_of(&store, "studio").as_str())
+        );
+        assert_ne!(head_of(&store, "studio"), head);
+    }
+
+    #[test]
+    fn the_commit_of_a_tag_is_recorded_and_a_tag_moved_since_is_refused() {
+        let (_home, store) = store("tag-commit");
+        let remote = Remote::new("tag-commit-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1");
+        let entry = from_tree(&store, &remote, &["v1"]);
+        let reviewed = head_of(&store, "studio");
+        assert_eq!(entry.commit.as_deref(), Some(reviewed.as_str()));
+        assert_eq!(
+            store.entry("studio").unwrap().commit,
+            entry.commit,
+            "on disk"
+        );
+
+        // Removed, and its tag moved by its owner meanwhile.
+        store.remove("studio").unwrap();
+        remote.folder.manifest("work", "studio", "1.0.0");
+        remote.folder.file("work/hooks/hooks.json", "{}");
+        remote.push("not reviewed");
+        git(&remote.work(), &["tag", "-f", "v1"]);
+        git(
+            &remote.work(),
+            &["push", "-q", "-f", "origin", "refs/tags/v1"],
+        );
+        let err = store
+            .add_git_link(
+                source::Link {
+                    url: remote.url(),
+                    tree: vec!["v1".into()],
+                },
+                2,
+            )
+            .unwrap_err();
+        assert!(
+            err.contains("moved") && err.contains(&reviewed[..12]),
+            "{err}"
+        );
+        assert!(store.entries().unwrap().is_empty());
+        no_folder_left_aside(&store);
+        assert!(!store.root().join("studio").exists());
+
+        // Another tag is new to this machine: taken, and recorded in turn.
+        tag(&remote, "v2");
+        let other = from_tree(&store, &remote, &["v2"]);
+        assert_eq!(
+            other.commit.as_deref(),
+            Some(head_of(&store, "studio").as_str())
+        );
+        let pins = store.load().unwrap().pins;
+        assert_eq!(pins.len(), 2, "{pins:?}");
+    }
+
+    #[test]
+    fn an_update_to_a_tag_that_moved_since_it_was_seen_is_refused() {
+        let (_home, store) = store("tag-commit-update");
+        let remote = Remote::new("tag-commit-update-remote");
+        remote.folder.kit("work", "studio", "1.0.0");
+        remote.push("first");
+        tag(&remote, "v1");
+        release(&remote, "1.1.0");
+        from_tree(&store, &remote, &["v1.1.0"]);
+        // Back to v1, by hand, then forward again: v1.1.0 is known.
+        store.remove("studio").unwrap();
+        from_tree(&store, &remote, &["v1"]);
+
+        remote.folder.manifest("work", "studio", "1.1.0");
+        remote.folder.file("work/extra.txt", "moved");
+        remote.push("moved");
+        git(&remote.work(), &["tag", "-f", "v1.1.0"]);
+        git(
+            &remote.work(),
+            &["push", "-q", "-f", "origin", "refs/tags/v1.1.0"],
+        );
+        assert!(store
+            .check_update("studio", 2, Some("v1.1.0"))
+            .unwrap_err()
+            .contains("moved"));
+        assert!(store
+            .update("studio", Some("v1.1.0"))
+            .unwrap_err()
+            .contains("moved"));
+        assert_eq!(
+            git_ref(&store.entry("studio").unwrap()),
+            Some("refs/tags/v1")
+        );
+        assert_eq!(on_disk(&store, "studio"), "1.0.0");
+    }
+
+    #[test]
+    fn a_stalled_network_does_not_hold_the_store() {
+        let (_home, store) = store("stalled");
+        let server = source::tests::stalled_server();
+        let url = server.url.clone();
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let store = &store;
+            scope.spawn(move || {
+                source::TEST_DEADLINE.with(|d| d.set(Some(Duration::from_secs(4))));
+                let result = store.add_git_source(
+                    GitSource {
+                        url,
+                        git_ref: None,
+                        subdir: None,
+                    },
+                    1,
+                );
+                done.send(result).unwrap();
+            });
+            std::thread::sleep(Duration::from_millis(500));
+            // While the clone waits on the network, the store goes on.
+            let folder = Folder::new("stalled-src");
+            let dir = folder.kit(".", "linked", "1.0.0");
+            store.add_folder(&dir.to_string_lossy(), 1).unwrap();
+            store.remove("linked").unwrap();
+            assert!(
+                finished.try_recv().is_err(),
+                "the clone was still waiting meanwhile"
+            );
+            let err = finished.recv().unwrap().unwrap_err();
+            assert!(err.contains("longer than"), "{err}");
+        });
+        no_folder_left_aside(&store);
     }
 }

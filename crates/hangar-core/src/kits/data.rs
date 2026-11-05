@@ -29,6 +29,14 @@ const FOLDER: &str = "kit-data";
 /// `KIT_DATA_MAX_BYTES` in src/lib/kits.ts.
 pub const MAX_BYTES: u64 = 1024 * 1024;
 
+/// The most a tab's writes may bring a kit's data folder to. A tab writing
+/// 1 MB at its rate, left open, would otherwise fill the disk in days. What a
+/// hook writes there is counted, and not stopped: a write past this is refused,
+/// and says why.
+pub const MAX_FOLDER_BYTES: u64 = 100 * 1024 * 1024;
+/// How deep the folder is counted: past this, a folder counts as full.
+const MAX_FOLDER_DEPTH: usize = 16;
+
 /// The longest path a tab may give.
 const MAX_PATH_CHARS: usize = 1024;
 
@@ -179,8 +187,45 @@ impl Data {
         }
         let target = dir.join(name);
         check_target(&folder, &target, raw)?;
+        let replaced = fs::symlink_metadata(&target)
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .map_or(0, |meta| meta.len());
+        let used = folder_bytes(&folder, 0);
+        if used.saturating_sub(replaced) + text.len() as u64 > MAX_FOLDER_BYTES {
+            return Err(failed(format!(
+                "the kit's data folder would hold more than {} MB",
+                MAX_FOLDER_BYTES / (1024 * 1024)
+            )));
+        }
         write_whole(&dir, &target, text.as_bytes(), raw)
     }
+}
+
+/// The bytes of the files under `dir`, links not followed. Past the depth it is
+/// counted to, it counts as full.
+fn folder_bytes(dir: &Path, depth: usize) -> u64 {
+    if depth > MAX_FOLDER_DEPTH {
+        return MAX_FOLDER_BYTES;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in entries.flatten() {
+        let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if meta.is_dir() {
+            total = total.saturating_add(folder_bytes(&entry.path(), depth + 1));
+        } else if meta.is_file() {
+            total = total.saturating_add(meta.len());
+        }
+        if total > MAX_FOLDER_BYTES {
+            break;
+        }
+    }
+    total
 }
 
 /// The folder `part` of `dir`, made when it is not there. `create_dir` takes
@@ -335,6 +380,27 @@ mod tests {
             Some(PathBuf::from("/dev/hangar").join("kit-data"))
         );
         assert_eq!(root_from(None, None), None);
+    }
+
+    #[test]
+    fn a_kits_data_folder_is_capped() {
+        let (home, data) = data("data-cap");
+        data.write("studio", "seed.txt", "x").unwrap();
+        // What a hook left there, near the cap.
+        let big = home.root.join(FOLDER).join("studio").join("hook.log");
+        fs::File::create(&big)
+            .unwrap()
+            .set_len(MAX_FOLDER_BYTES - 10)
+            .unwrap();
+        let text = "y".repeat(100);
+        let err = data.write("studio", "more.txt", &text).unwrap_err();
+        assert_eq!(err.code, TabError::FAILED);
+        assert!(err.message.contains("100 MB"), "{}", err.message);
+        assert!(data.read("studio", "more.txt").is_err(), "nothing written");
+        // Replacing a file counts what it held no more.
+        data.write("studio", "seed.txt", "z").unwrap();
+        // Another kit has a folder of its own.
+        data.write("other", "more.txt", &text).unwrap();
     }
 
     #[test]

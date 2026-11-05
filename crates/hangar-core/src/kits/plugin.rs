@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use super::code;
 use super::commands::{self, CommandInfo};
 use super::hooks::{self, Hook};
 use super::manifest::{self, Tab};
@@ -225,7 +226,9 @@ pub fn inspect(kit: &Loaded, os: &str) -> Inspection {
         ),
         None => Default::default(),
     };
-    let hooks_permission = grant(&hooks, &running);
+    let hooks_permission = plugin_dir
+        .as_deref()
+        .and_then(|dir| grant(&hooks, &running, &code_of(dir, &hooks, &running)));
     Inspection {
         plugin,
         skills,
@@ -250,7 +253,7 @@ pub fn inspect(kit: &Loaded, os: &str) -> Inspection {
             })
             .collect(),
         declared_commands: commands::for_os(&kit.manifest, os),
-        commands_permission: commands::grant(&kit.manifest, os),
+        commands_permission: commands::grant(&kit.manifest, &kit.root, os),
     }
 }
 
@@ -477,15 +480,51 @@ pub fn running(plugin_dir: &Path) -> Vec<Running> {
 /// `hooks:<hash>` of what a plugin runs by itself: what accepting it stores on a
 /// workspace; `None` when it runs nothing.
 pub fn permission(plugin_dir: &Path) -> Option<String> {
-    grant(&hooks::read(plugin_dir), &running(plugin_dir))
+    let hook_list = hooks::read(plugin_dir);
+    let running = running(plugin_dir);
+    let code = code_of(plugin_dir, &hook_list, &running);
+    grant(&hook_list, &running, &code)
+}
+
+/// The files of the plugin its hooks and the rest run, by content (code.rs):
+/// what `${CLAUDE_PLUGIN_ROOT}` names in them, and `bin/`.
+pub fn code_of(
+    plugin_dir: &Path,
+    hook_list: &[Hook],
+    running: &[Running],
+) -> Vec<(String, String)> {
+    let texts = hook_list
+        .iter()
+        .map(|hook| hook.command.as_str())
+        .chain(running.iter().flat_map(|item| {
+            let written: Vec<&str> = item
+                .argv
+                .iter()
+                .map(String::as_str)
+                .chain(item.text.as_deref())
+                .collect();
+            // What has no argv or text of its own is read as it was written.
+            if written.is_empty() {
+                vec![item.sealed.as_str()]
+            } else {
+                written
+            }
+        }));
+    code::files(plugin_dir, texts, &code::PLUGIN_ROOT, &["bin"])
 }
 
 /// A plugin that only has hooks keeps the hash it always had (hooks.rs), so a
 /// workspace that accepted them is not asked again. Anything else makes it the
 /// hash of `[hooks, [[kind, name, what it wrote], …]]`: the person was never shown
-/// those, so holding the older hash cannot stand for having accepted them.
-pub fn grant(hook_list: &[Hook], running: &[Running]) -> Option<String> {
-    if running.is_empty() {
+/// those, so holding the older hash cannot stand for having accepted them. When
+/// they run files of the plugin, `code` (code_of), the content of those files is
+/// hashed with them, `[hooks, items, [[path, sha256], …]]`: an update that changes
+/// a script is a change to accept, as one that changes its command line is.
+pub fn grant(hook_list: &[Hook], running: &[Running], code: &[(String, String)]) -> Option<String> {
+    if hook_list.is_empty() && running.is_empty() {
+        return None;
+    }
+    if running.is_empty() && code.is_empty() {
         return hooks::grant(hook_list);
     }
     let mut canonical_hooks = hook_list.to_vec();
@@ -497,7 +536,11 @@ pub fn grant(hook_list: &[Hook], running: &[Running]) -> Option<String> {
         .collect();
     items.sort();
     items.dedup();
-    let text = serde_json::to_string(&(&canonical_hooks, &items)).ok()?;
+    let text = if code.is_empty() {
+        serde_json::to_string(&(&canonical_hooks, &items)).ok()?
+    } else {
+        serde_json::to_string(&(&canonical_hooks, &items, code)).ok()?
+    };
     Some(format!("hooks:{}", &sha256_hex(&text)[..16]))
 }
 
@@ -1135,7 +1178,11 @@ mod tests {
             "its MCP server: {:?}",
             found.running
         );
-        assert_eq!(found.hooks_permission, grant(&[], &found.running));
+        let dir = Path::new(&found.plugin.as_ref().unwrap().dir);
+        assert_eq!(
+            found.hooks_permission,
+            grant(&[], &found.running, &code_of(dir, &[], &found.running))
+        );
         assert!(found.hooks_permission.is_some());
     }
 
@@ -1161,7 +1208,15 @@ mod tests {
             found.hooks[0].command,
             "echo ran >> \"$HANGAR_KITS_DATA/studio/log\""
         );
-        assert_eq!(found.hooks_permission, grant(&found.hooks, &found.running));
+        let dir = Path::new(&found.plugin.as_ref().unwrap().dir);
+        assert_eq!(
+            found.hooks_permission,
+            grant(
+                &found.hooks,
+                &found.running,
+                &code_of(dir, &found.hooks, &found.running)
+            )
+        );
         let sent = serde_json::to_value(&found).unwrap();
         assert_eq!(sent["hooks"][0]["matcher"], "Bash");
         assert_eq!(
