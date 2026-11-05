@@ -11,7 +11,7 @@ mod geometry;
 mod gltf;
 mod obj;
 mod ply;
-mod resources;
+pub(crate) mod resources;
 mod stl;
 
 use std::io::Read;
@@ -376,12 +376,11 @@ where
                         token.cancel();
                     }
                 };
-                let result =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        read(&token, &mut report)
-                    }))
-                    .unwrap_or_else(|panic| Err(panicked(format, panic.as_ref())))
-                    .map(Arc::new);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    read(&token, &mut report)
+                }))
+                .unwrap_or_else(|panic| Err(panicked(format, panic.as_ref())))
+                .map(Arc::new);
                 let _ = sender.unbounded_send(LoadEvent::Done(result));
             }
         });
@@ -516,7 +515,16 @@ mod tests {
         let Some(LoadEvent::Done(Err(error))) = events.last() else {
             panic!("the stream ends with Done: {events:?}");
         };
-        assert!(matches!(error, LoadError::Parse { format: ModelFormat::Fbx, .. }), "{error}");
+        assert!(
+            matches!(
+                error,
+                LoadError::Parse {
+                    format: ModelFormat::Fbx,
+                    ..
+                }
+            ),
+            "{error}"
+        );
         let said = error.to_string();
         assert!(said.contains("index out of bounds"), "{said}");
         assert!(said.contains("internal error"), "{said}");
@@ -545,7 +553,10 @@ mod tests {
         assert_eq!(reports.first(), Some(&0));
         assert_eq!(reports.last(), Some(&(64 << 20)));
         assert!(reports.len() < 64, "{} reports", reports.len());
-        assert!(reports.windows(2).all(|pair| pair[0] < pair[1]), "{reports:?}");
+        assert!(
+            reports.windows(2).all(|pair| pair[0] < pair[1]),
+            "{reports:?}"
+        );
     }
 
     #[test]

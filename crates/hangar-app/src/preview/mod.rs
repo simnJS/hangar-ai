@@ -1121,6 +1121,20 @@ async fn inspect(path: String) -> Result<model::PreviewFile, String> {
 /// its model: a newer modification time, steady for a moment, has the viewer
 /// read it again. A file that disappears or is now refused keeps its last
 /// version on screen, and the reason is said.
+/// Whether [`watch`] would look at any file: one whose pane is on screen.
+fn watches_anything(st: &State, m: &Model) -> bool {
+    let view = st.shared.read(|store| store.view().clone());
+    screens(m).into_iter().any(|(ws, shown)| {
+        shown
+            && m.live.preview.scope(&ws).is_some_and(|scope| {
+                scope
+                    .entries
+                    .iter()
+                    .any(|entry| (entry.is_file() || entry.is_model()) && view.shows(&entry.id))
+            })
+    })
+}
+
 fn watch(st: &mut State, m: &Model) -> Task<Message> {
     let mut tasks = Vec::new();
     let view = st.shared.read(|store| store.view().clone());
@@ -1223,7 +1237,9 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         // until it has.
         subscriptions.push(iced::time::every(HYDRATION).map(|_| Message::Preview(Msg::Changed)));
     }
-    if live.any_open() {
+    // The files are looked at only while one is in front on a grid on screen:
+    // a kit tab of a sleeping workspace does not wake the app every 1.5 s.
+    if live.any_open() && watches_anything(st, m) {
         subscriptions.push(iced::time::every(WATCH).map(|_| Message::Preview(Msg::Tick)));
     }
     let loading = live.scopes.values().any(|scope| {

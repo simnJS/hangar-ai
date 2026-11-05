@@ -18,10 +18,21 @@ pub struct RootGrants {
     granted: Vec<(String, Vec<String>)>,
 }
 
-/// A path as it is compared: the same folder written with the other slash, in
-/// the other case or with a trailing one is the same folder.
+/// A path as it is compared: the same folder written with the other slash or
+/// with a trailing one is the same folder. Case is folded only where the
+/// file system ignores it, Windows and macOS (and for a Windows drive path,
+/// wherever it is written): on Linux `/home/u/Proj` and `/home/u/proj` are
+/// two folders, and a grant of one must not open the other.
 pub fn comparable(path: &str) -> String {
-    path.replace('\\', "/").trim_end_matches('/').to_lowercase()
+    let slashed = path.replace('\\', "/");
+    let trimmed = slashed.trim_end_matches('/');
+    let bytes = trimmed.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if drive || cfg!(any(windows, target_os = "macos")) {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 impl RootGrants {
@@ -199,6 +210,18 @@ mod tests {
         assert!(!inside("/work/application/a.png", &roots));
         assert!(!inside("/work", &roots));
         assert!(inside("C:\\Work\\App\\a.png", &["c:/work/app".to_string()]));
+    }
+
+    #[test]
+    fn case_is_folded_only_where_the_file_system_folds_it() {
+        let roots = vec!["/home/u/proj".to_string()];
+        let folded = inside("/home/u/Proj/x.png", &roots);
+        assert_eq!(folded, cfg!(any(windows, target_os = "macos")));
+        // A drive path is a Windows one, on any platform.
+        assert!(inside(
+            "C:/Users/U/Proj/x.png",
+            &["c:/users/u/proj".to_string()]
+        ));
     }
 
     #[test]

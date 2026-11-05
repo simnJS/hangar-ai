@@ -200,14 +200,16 @@ impl Helper {
     }
 
     /// Reads the helper's events until it ends: a request for a file is
-    /// answered at once, on a thread of its own so that a big video does not
-    /// hold up the next page; the rest goes to its owner.
+    /// answered by a small pool of threads ([`Pool`]), so that a big video
+    /// does not hold up the next page and a page of 300 pictures does not
+    /// start 300 threads; the rest goes to its owner.
     fn pump(&self, events: hangar_webview::Events, client: Arc<Client>, inbox: Inbox) {
+        let pool = Pool::new("hangar-preview-serve", SERVE_THREADS);
         while let Some(event) = events.recv() {
             if let Event::SchemeRequest(request) = event {
                 let client = client.clone();
                 let server = self.server_of(&request.window);
-                std::thread::spawn(move || {
+                pool.run(move || {
                     let response = match server {
                         Some(serve) => serve(&request),
                         None => answer(&request),
@@ -1112,5 +1114,80 @@ impl Windows {
 
 #[cfg(test)]
 pub(crate) mod testing;
+/// How many requests of the helper's pages are served at once.
+const SERVE_THREADS: usize = 6;
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+/// A few threads that run what they are given in turn: at most `size` at
+/// once, the rest waiting in line. A thread the system refuses is one fewer;
+/// with none at all, a job runs on the caller's thread rather than never.
+pub(crate) struct Pool {
+    sender: Option<std::sync::mpsc::Sender<Job>>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Pool {
+    pub(crate) fn new(name: &str, size: usize) -> Pool {
+        let (sender, receiver) = std::sync::mpsc::channel::<Job>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let threads: Vec<_> = (0..size.max(1))
+            .filter_map(|n| {
+                let receiver = receiver.clone();
+                std::thread::Builder::new()
+                    .name(format!("{name}-{n}"))
+                    .spawn(move || {
+                        loop {
+                            let job = receiver
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .recv();
+                            let Ok(job) = job else {
+                                return;
+                            };
+                            // A job that panics loses its own answer, not the
+                            // thread.
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                        }
+                    })
+                    .ok()
+            })
+            .collect();
+        Pool {
+            sender: (!threads.is_empty()).then_some(sender),
+            threads,
+        }
+    }
+
+    /// Runs `job` on a thread of the pool, once one is free.
+    pub(crate) fn run(&self, job: impl FnOnce() + Send + 'static) {
+        let job: Job = Box::new(job);
+        match &self.sender {
+            Some(sender) => {
+                if let Err(refused) = sender.send(job) {
+                    (refused.0)();
+                }
+            }
+            None => job(),
+        }
+    }
+
+    /// How many threads it has.
+    #[cfg(test)]
+    pub(crate) fn size(&self) -> usize {
+        self.threads.len()
+    }
+}
+
+/// The threads finish what is in line, then end.
+impl Drop for Pool {
+    fn drop(&mut self) {
+        self.sender = None;
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

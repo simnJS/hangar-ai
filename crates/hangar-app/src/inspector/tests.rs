@@ -610,7 +610,7 @@ mod polling {
             Msg::Changes(current.clone(), Ok(changes.clone())),
         );
         let kept = st.changes.get("/work/app/packages/ui").expect("kept");
-        assert!(Arc::ptr_eq(kept, &changes));
+        assert!(Arc::ptr_eq(&kept.changes, &changes));
 
         // The pane changed while git was thinking: that answer is not this
         // pane's.
@@ -624,7 +624,7 @@ mod polling {
         });
         send(&mut st, &mut m, Msg::Changes(stale, Ok(other)));
         assert!(Arc::ptr_eq(
-            st.changes.get("/work/app/packages/ui").unwrap(),
+            &st.changes.get("/work/app/packages/ui").unwrap().changes,
             &changes
         ));
 

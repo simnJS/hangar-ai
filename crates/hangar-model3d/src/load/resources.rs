@@ -110,12 +110,31 @@ pub fn decode_image(bytes: &[u8]) -> Result<Image, String> {
         return Err("KTX2 textures are not supported by the preview".into());
     }
     let decoded = image::load_from_memory(bytes).map_err(|err| err.to_string())?;
-    let rgba = decoded.into_rgba8();
+    let mut rgba = decoded.into_rgba8();
+    // Shrunk here, on the load's thread, rather than by the renderer on the
+    // window's thread when it is first drawn (and again for each device).
+    if rgba.width().max(rgba.height()) > MAX_TEXTURE_SIDE {
+        let (width, height) = fitted(rgba.width(), rgba.height(), MAX_TEXTURE_SIDE);
+        rgba = image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Triangle);
+    }
     Ok(Image {
         width: rgba.width(),
         height: rgba.height(),
         rgba: rgba.into_raw(),
     })
+}
+
+/// The longest side a texture keeps once loaded: what every GPU the preview
+/// runs on can take (wgpu's default limit), and already 256 MB of RGBA.
+pub const MAX_TEXTURE_SIDE: u32 = 8192;
+
+/// `width` × `height` scaled down so its longer side is `limit`.
+pub(crate) fn fitted(width: u32, height: u32, limit: u32) -> (u32, u32) {
+    let scale = f64::from(limit) / f64::from(width.max(height));
+    (
+        ((f64::from(width) * scale) as u32).clamp(1, limit),
+        ((f64::from(height) * scale) as u32).clamp(1, limit),
+    )
 }
 
 /// Where a picture comes from.
@@ -166,9 +185,7 @@ pub(crate) fn decode_all(
                             crate::load::panic_message(panic.as_ref())
                         ))
                     });
-                    results
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner())[i] = Some(outcome);
+                    results.lock().unwrap_or_else(|poison| poison.into_inner())[i] = Some(outcome);
                 }
             });
         }
@@ -285,5 +302,22 @@ mod tests {
         assert!(results[1].is_err());
         assert_eq!(results[2].as_ref().unwrap().rgba[0], 2);
         assert_eq!(results[3].as_ref().unwrap().rgba[0], 3);
+    }
+
+    #[test]
+    fn a_texture_over_the_largest_side_is_shrunk_on_loading_keeping_its_shape() {
+        assert_eq!(fitted(16384, 4096, 8192), (8192, 2048));
+        assert_eq!(fitted(100, 9000, 8192), (91, 8192));
+        assert_eq!(fitted(100_000, 1, 8192), (8192, 1));
+        // A tall, thin PNG, cheap to make and over the limit.
+        let image =
+            image::RgbaImage::from_pixel(2, MAX_TEXTURE_SIDE + 8, image::Rgba([1, 2, 3, 255]));
+        let mut png = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let decoded = decode_image(&png).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, MAX_TEXTURE_SIDE));
+        assert_eq!(decoded.rgba.len(), MAX_TEXTURE_SIDE as usize * 4);
     }
 }

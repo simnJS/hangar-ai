@@ -6,10 +6,10 @@
 //!
 //! Pure, so the matching rules can be tested without a repository.
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use hangar_core::git::{ChangedFile, Changes};
-use regex::Regex;
 
 /// One row of the section.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,25 +42,85 @@ pub enum DiffSegment {
 
 /// Forward slashes, no doubled or trailing separator (`normalizePath`).
 pub fn normalize_path(path: &str) -> String {
-    static DOUBLED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/{2,}").unwrap());
-    let slashed = path.replace('\\', "/");
-    let slashed = DOUBLED.replace_all(&slashed, "/");
-    if slashed.len() > 1 {
-        slashed.strip_suffix('/').unwrap_or(&slashed).to_string()
-    } else {
-        slashed.into_owned()
+    let mut out = String::with_capacity(path.len());
+    for c in path.chars() {
+        let c = if c == '\\' { '/' } else { c };
+        if c == '/' && out.ends_with('/') {
+            continue;
+        }
+        out.push(c);
     }
+    if out.len() > 1 && out.ends_with('/') {
+        out.pop();
+    }
+    out
 }
 
 /// Windows paths compare without regard to case — `C:/Dev` and `c:/dev` are
 /// one folder — and git on Windows may report either spelling.
 fn comparable(path: &str) -> String {
-    static DRIVE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^[a-z]:/").unwrap());
-    if DRIVE.is_match(path) {
+    let bytes = path.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    if drive {
         path.to_lowercase()
     } else {
         path.to_string()
     }
+}
+
+/// A folder's changes, with what the Files section needs of them worked out
+/// once, when git answers, rather than at every build of the view: every
+/// changed file's path in the form it is compared in, and the rows of the
+/// folder (`folder_rows`).
+#[derive(Debug)]
+pub struct Indexed {
+    pub changes: Arc<Changes>,
+    /// The index in `changes.files` of each file, by its compared path.
+    by_key: HashMap<String, usize>,
+    /// The rows of the folder asked about, and how many more there are.
+    folder: (Vec<FileRow>, usize),
+}
+
+impl Indexed {
+    /// `changes`, as the section shows them for `folder`, `limit` rows of it.
+    pub fn new(changes: Arc<Changes>, folder: &str, limit: usize) -> Indexed {
+        let by_key = index_of(&changes);
+        let folder = folder_rows(&changes, folder, limit);
+        Indexed {
+            changes,
+            by_key,
+            folder,
+        }
+    }
+
+    /// The files the agent edited (`edited_rows`).
+    pub fn edited_rows(&self, edited: &[String], folder: Option<&str>) -> Vec<FileRow> {
+        rows_of_edited(edited, Some((&self.changes, &self.by_key)), folder)
+    }
+
+    /// The rows of the folder, and how many more there are (`folder_rows`).
+    pub fn folder_rows(&self) -> (&[FileRow], usize) {
+        (&self.folder.0, self.folder.1)
+    }
+}
+
+impl std::ops::Deref for Indexed {
+    type Target = Changes;
+
+    fn deref(&self) -> &Changes {
+        &self.changes
+    }
+}
+
+/// Every changed file's index, by its compared path.
+fn index_of(changes: &Changes) -> HashMap<String, usize> {
+    changes
+        .files
+        .iter()
+        .enumerate()
+        .map(|(at, file)| (comparable(&normalize_path(&file.path)), at))
+        .collect()
 }
 
 /// `path` relative to `root`, or `None` when it is not inside it.
@@ -134,15 +194,17 @@ pub fn edited_rows(
     changes: Option<&Changes>,
     folder: Option<&str>,
 ) -> Vec<FileRow> {
-    let by_path: std::collections::HashMap<String, &ChangedFile> = changes
-        .map(|changes| {
-            changes
-                .files
-                .iter()
-                .map(|file| (comparable(&normalize_path(&file.path)), file))
-                .collect()
-        })
-        .unwrap_or_default();
+    let index = changes.map(index_of);
+    rows_of_edited(edited, changes.zip(index.as_ref()), folder)
+}
+
+/// `edited_rows`, with the changes' paths already indexed.
+fn rows_of_edited(
+    edited: &[String],
+    known: Option<(&Changes, &HashMap<String, usize>)>,
+    folder: Option<&str>,
+) -> Vec<FileRow> {
+    let changes = known.map(|(changes, _)| changes);
     let mut seen = std::collections::HashSet::new();
     let mut rows = Vec::new();
     for raw in edited {
@@ -160,7 +222,9 @@ pub fn edited_rows(
         if !seen.insert(key.clone()) {
             continue;
         }
-        rows.push(match by_path.get(&key) {
+        let found =
+            known.and_then(|(changes, by_key)| by_key.get(&key).map(|at| &changes.files[*at]));
+        rows.push(match found {
             Some(known) => row_from_change(known, &path),
             None => {
                 let (dir, name) = split_path(&path);
@@ -503,6 +567,50 @@ mod tests {
         fn a_small_side_never_vanishes() {
             assert_eq!(diff_segments(100, 1, 5), [Add, Add, Add, Add, Del]);
             assert_eq!(diff_segments(1, 100, 5), [Add, Del, Del, Del, Del]);
+        }
+    }
+
+    mod indexed {
+        use super::*;
+
+        #[test]
+        fn rows_worked_out_once_are_the_ones_worked_out_each_time() {
+            let mut files: Vec<ChangedFile> = (0..2000)
+                .map(|n| counted(&format!("src/m{n}/f.rs"), "M", n, 1))
+                .collect();
+            files.push(counted("SRC/Upper.ts", "A", 3, 0));
+            let found = changes(files);
+            let edited = strings(&[
+                "C:\\dev\\hangar-ai\\src\\m7\\f.rs",
+                "c:/DEV/hangar-ai/SRC/Upper.ts",
+                "C:/dev/hangar-ai/gone.rs",
+            ]);
+            let indexed = Indexed::new(Arc::new(found.clone()), "C:/dev/hangar-ai/src", 8);
+            assert_eq!(
+                indexed.edited_rows(&edited, Some("C:/dev/hangar-ai")),
+                edited_rows(&edited, Some(&found), Some("C:/dev/hangar-ai"))
+            );
+            let rows = indexed.edited_rows(&edited, None);
+            assert_eq!(rows[0].additions, Some(7));
+            assert_eq!(rows[1].status.as_deref(), Some("A"));
+            assert!(rows[2].settled);
+            let (rows, more) = indexed.folder_rows();
+            let (want, want_more) = folder_rows(&found, "C:/dev/hangar-ai/src", 8);
+            assert_eq!((rows.to_vec(), more), (want, want_more));
+            assert_eq!(more, 1992);
+            // It reads as the changes it holds.
+            assert_eq!(indexed.root, "C:/dev/hangar-ai");
+        }
+
+        #[test]
+        fn paths_are_normalised_and_compared_without_a_regex() {
+            assert_eq!(normalize_path("a\\\\b//c///"), "a/b/c");
+            assert_eq!(normalize_path("//"), "/");
+            assert_eq!(normalize_path(""), "");
+            assert_eq!(comparable("C:/Dev/X"), "c:/dev/x");
+            assert_eq!(comparable("/home/Me"), "/home/Me");
+            assert_eq!(comparable("C:"), "C:");
+            assert_eq!(comparable("ab:/x"), "ab:/x");
         }
     }
 }

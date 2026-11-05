@@ -197,11 +197,16 @@ impl Gpu {
         let limit = self.device.limits().max_texture_dimension_2d;
         let shrunk;
         let (image, width, height) = if image.width > limit || image.height > limit {
-            let scale = f64::from(limit) / f64::from(image.width.max(image.height));
-            let width = ((f64::from(image.width) * scale) as u32).max(1);
-            let height = ((f64::from(image.height) * scale) as u32).max(1);
-            let source = image::RgbaImage::from_raw(image.width, image.height, image.rgba.clone())
-                .expect("a decoded image has width x height x 4 bytes");
+            // Rare: textures are shrunk to `MAX_TEXTURE_SIDE` on loading, so
+            // only a device below that limit gets here. Read in place, not
+            // copied.
+            let (width, height) = crate::load::resources::fitted(image.width, image.height, limit);
+            let source = image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(
+                image.width,
+                image.height,
+                image.rgba.as_slice(),
+            )
+            .expect("a decoded image has width x height x 4 bytes");
             let resized = image::imageops::resize(
                 &source,
                 width,
