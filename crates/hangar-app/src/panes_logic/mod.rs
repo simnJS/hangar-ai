@@ -178,6 +178,10 @@ pub struct Live {
     hibernation: Hibernation,
     carried: CarriedQueues,
     claims: Claims,
+    /// The saved sessions a launch did not find on disk, this run: one miss
+    /// keeps the id (a transcript under a root not looked in, a read that
+    /// failed), a second forgets it.
+    missed: HashSet<String>,
     branches: BranchCache,
     /// The transcript hunt of every pane whose agent can resume.
     watches: HashMap<PaneId, SessionWatch>,
@@ -417,6 +421,19 @@ impl Live {
 
     pub fn release_session(&mut self, session_id: Option<&str>) {
         self.claims.release(session_id);
+    }
+
+    /// A launch looked for `session_id`'s transcript: whether the pane is to
+    /// forget it, which only a second miss in a row decides.
+    pub fn session_looked_up(&mut self, session_id: &str, exists: Option<bool>) -> bool {
+        match exists {
+            Some(false) => !self.missed.insert(session_id.to_owned()),
+            Some(true) => {
+                self.missed.remove(session_id);
+                false
+            }
+            None => false,
+        }
     }
 
     /// Whether the pane's next launch must resume whatever the auto-resume

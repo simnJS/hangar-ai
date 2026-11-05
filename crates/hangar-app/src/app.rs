@@ -295,7 +295,9 @@ impl App {
             Message::Detected(claude, shells) => {
                 self.model.ui.claude_installed = claude;
                 self.model.ui.shells = shells;
-                Task::none()
+                // The panes' shells start only now: one started before
+                // would run the first shell found instead of its own.
+                Task::done(Message::Panes(crate::panes::Msg::ShellsDetected))
             }
             Message::SaveDue(revision) => self.save_if_due(revision),
             Message::Saved(revision, result) => match result {

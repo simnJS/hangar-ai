@@ -33,11 +33,13 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
+use std::time::Instant;
 
 use hangar_core::pty::{PtyEvent, PtyManager, PtySink};
 use hangar_term::{Event, Terminal};
 use tokio::sync::mpsc as tokio_mpsc;
 
+use super::launch::Echo;
 use crate::state::PaneId;
 
 /// What a pane's reader thread tells the window.
@@ -89,6 +91,15 @@ pub struct PaneLink {
     terminal: Arc<Mutex<Terminal>>,
     jobs: mpsc::Sender<Job>,
     woken: Arc<AtomicBool>,
+    launch: Arc<Mutex<LaunchWatch>>,
+}
+
+/// What the launch of the pane's agent reads of its output: when the shell
+/// last printed, and whether the command it typed came back.
+#[derive(Debug, Default)]
+struct LaunchWatch {
+    last_output: Option<Instant>,
+    echo: Option<Echo>,
 }
 
 impl std::fmt::Debug for PaneLink {
@@ -116,6 +127,7 @@ impl PaneLink {
             terminal: Arc::new(Mutex::new(terminal)),
             jobs,
             woken: Arc::new(AtomicBool::new(false)),
+            launch: Arc::default(),
         })
     }
 
@@ -134,6 +146,31 @@ impl PaneLink {
         }
     }
 
+    /// When the shell last printed, if it did.
+    pub fn last_output(&self) -> Option<Instant> {
+        self.watch().last_output
+    }
+
+    /// Types an agent's command (`text`, its line ending included) and
+    /// starts looking for its echo (`command`). One write, so nothing the
+    /// terminal answers lands in the middle of it.
+    pub fn type_command(&self, command: &str, text: String) {
+        self.watch().echo = Some(Echo::new(command));
+        self.write(text.into_bytes());
+    }
+
+    /// Whether the command last typed with [`Self::type_command`] was
+    /// echoed.
+    pub fn echoed(&self) -> bool {
+        self.watch().echo.as_ref().is_some_and(Echo::found)
+    }
+
+    fn watch(&self) -> MutexGuard<'_, LaunchWatch> {
+        self.launch
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
     /// Tells the process its window changed size (`pty_resize`).
     pub fn resize(&self, columns: u16, rows: u16) {
         let _ = self.jobs.send(Job::Resize(columns, rows));
@@ -150,10 +187,18 @@ impl PaneLink {
         let terminal = self.terminal.clone();
         let jobs = self.jobs.clone();
         let woken = self.woken.clone();
+        let launch = self.launch.clone();
         let id = self.id.clone();
         let Waker { sender: hub, awake } = waker;
         Box::new(move |event| match event {
             PtyEvent::Output(output) => {
+                {
+                    let mut watch = launch.lock().unwrap_or_else(|poison| poison.into_inner());
+                    watch.last_output = Some(Instant::now());
+                    if let Some(echo) = &mut watch.echo {
+                        echo.feed(&output.data);
+                    }
+                }
                 let events = terminal
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner())
@@ -354,6 +399,29 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(woken, "a taken wake-up is sent again");
+
+        // A command typed for an agent is followed until its echo shows.
+        assert!(link.last_output().is_some(), "the shell's output is dated");
+        // Keys that reached the pane first are wiped off the line, and the
+        // command runs as typed.
+        link.write(b"etc".to_vec());
+        let command = "echo launched-$((6*7))";
+        link.type_command(
+            command,
+            format!("{}{command}\r", crate::panes::launch::CLEAR_LINE),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let ran = || {
+            link.lock()
+                .read_lines(50)
+                .iter()
+                .any(|line| line.trim_end() == "launched-42")
+        };
+        while Instant::now() < deadline && !(link.echoed() && ran()) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(link.echoed(), "the command's echo was seen");
+        assert!(ran(), "the command ran, without the keys typed before it");
         let _ = hangar_core::pty::pty_kill(&pty, id, None);
     }
 }

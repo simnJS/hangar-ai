@@ -31,6 +31,7 @@ mod gauge;
 mod grid;
 mod header;
 mod hub;
+pub(crate) mod launch;
 mod look;
 mod press;
 mod pty_link;
@@ -101,6 +102,8 @@ pub struct State {
     /// follows the system after.
     scales: HashMap<iced::window::Id, f32>,
     asked_scale: HashSet<iced::window::Id>,
+    /// The machine's shells were detected: the panes' shells may start.
+    shells_known: bool,
 }
 
 /// The pickers of a header.
@@ -175,10 +178,15 @@ pub enum Msg {
     /// The terminal had its time to measure itself: start the shell.
     SpawnDue(PaneId),
     Spawned(PaneId, Result<SpawnReport, String>),
-    /// The launch delay is over: whether the session to resume exists, and
+    /// The shell is ready for the agent: whether the session to resume exists, and
     /// the transcripts known before the launch.
     LaunchReady(PaneId, Option<bool>, HashSet<String>),
     LoginReady(PaneId),
+    /// The machine's shells are known: the shells that were due start.
+    ShellsDetected,
+    /// The check of a launch: the attempt it checked (from 0), whether the
+    /// shell runs something.
+    LaunchChecked(PaneId, u8, bool),
     /// Whether the session a role's restart resumes exists.
     RoleRestart(WsId, PaneId, String, bool),
     FlushDrops,
@@ -266,7 +274,7 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         Msg::Frame => printed(frame(st)),
         Msg::Sync => sync(st, m, sv),
         Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::start(rt, sv, &st.channel),
+            Some(rt) => controller::start(rt, m, sv, &st.channel, st.shells_known),
             None => Task::none(),
         },
         Msg::Spawned(pane, result) => match st.panes.get_mut(&pane) {
@@ -285,9 +293,24 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             None => Task::none(),
         },
         Msg::LaunchReady(pane, exists, known) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::launch_ready(rt, m, exists, known),
+            Some(rt) => controller::launch_ready(rt, m, sv, exists, known),
             None => Task::none(),
         },
+        Msg::LaunchChecked(pane, attempt, running) => match st.panes.get_mut(&pane) {
+            Some(rt) => controller::launch_checked(rt, sv, attempt, running),
+            None => Task::none(),
+        },
+        Msg::ShellsDetected => {
+            st.shells_known = true;
+            let channel = st.channel.clone();
+            let due: Vec<Task<Message>> = st
+                .panes
+                .values_mut()
+                .filter(|rt| rt.start_due())
+                .map(|rt| controller::start(rt, m, sv, &channel, true))
+                .collect();
+            Task::batch(due)
+        }
         Msg::LoginReady(pane) => {
             if let Some(rt) = st.panes.get_mut(&pane) {
                 controller::login_ready(rt);
@@ -496,7 +519,7 @@ fn term_action(
     let settles = term_settles(measured, &events);
     let mut tasks = Vec::new();
     if measured {
-        tasks.push(controller::start(rt, sv, &st.channel));
+        tasks.push(controller::start(rt, m, sv, &st.channel, st.shells_known));
     }
     // What the person copies (Ctrl+Shift+C, the selection on Linux) comes as
     // `SetClipboard` here; what a program asks to copy (`OSC 52`) never

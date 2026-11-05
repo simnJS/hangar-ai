@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hangar_core::kits::{KitInfo, LaunchIssue};
 use hangar_i18n::{Key, Locale, Translator, args};
@@ -46,6 +46,7 @@ use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
 
 use super::Msg;
 use super::hub::{Hub, HubChannel};
+use super::launch::{self, Check, Settle};
 use super::look::{self, Look};
 use super::pty_link::PaneLink;
 use super::search::Search;
@@ -80,8 +81,12 @@ pub struct PaneRt {
     pub launched_role: Option<PaneRole>,
     /// The restart a role asked for was dealt with, once per pin.
     pub role_handled: bool,
-    /// The spawn, while the terminal has not measured itself yet.
+    /// The spawn, while the terminal has not measured itself yet or the
+    /// machine's shells are not known yet.
     pending: Option<Spawn>,
+    /// The spawn was due while the shells were not known: it goes as soon
+    /// as they are.
+    start_due: bool,
     /// The resume the launch is waiting to type, and whether the hibernation
     /// owed it.
     resume: Option<String>,
@@ -93,8 +98,18 @@ pub struct PaneRt {
     pub look: Look,
     /// Whether the terminal was last told it has the keyboard.
     pub focused: bool,
-    /// The launch's sleep, aborted with the pane.
+    /// The launch's wait for the shell, then its check that the command
+    /// ran, aborted with the pane.
     launch: Option<iced::task::Handle>,
+    /// The agent's command as it was typed, for the check to type again.
+    typed: Option<String>,
+}
+
+impl PaneRt {
+    /// Whether its shell waits for the machine's shells to be known.
+    pub fn start_due(&self) -> bool {
+        self.start_due && self.pending.is_some()
+    }
 }
 
 impl std::fmt::Debug for PaneRt {
@@ -282,6 +297,8 @@ pub fn mount(
         workspace: ws.claude_account.clone(),
         pane: pane.claude_account.clone(),
     });
+    // Resolved again when the shell starts (`start`), once the machine's
+    // shells are known.
     let shell = shell_of(m, ws, pane).cloned();
     let scope = workspace_mcp(Some(ws));
     let spawn = Spawn {
@@ -343,25 +360,45 @@ pub fn mount(
         launched_role: pane.role,
         role_handled: false,
         pending: Some(spawn),
+        start_due: false,
         resume: None,
         owed: false,
         mcp_arg: None,
         look,
         focused: false,
         launch: None,
+        typed: None,
     };
     (rt, Task::batch([mounted, due]))
 }
 
 /// Starts the shell, if it has not started: on the terminal's first
-/// measure, or once `MEASURE_WAIT` is over. The kits on disk are read first,
+/// measure, or once `MEASURE_WAIT` is over, and never before the machine's
+/// shells are known (`shells_known`): the pane's shell is resolved here,
+/// and one resolved before detection answered would be the first shell
+/// found (the login shell) instead of the pane's. The kits on disk are read first,
 /// to hold out those whose hooks were not accepted; the spawn then runs on
 /// the blocking pool, since it waits up to 5 s for a shell of the same id
 /// still being reaped, and the MCP scope file is written before it.
-pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Message> {
-    let Some(spawn) = rt.pending.take() else {
+pub fn start(
+    rt: &mut PaneRt,
+    m: &Model,
+    sv: &Services,
+    channel: &HubChannel,
+    shells_known: bool,
+) -> Task<Message> {
+    if rt.pending.is_none() {
+        return Task::none();
+    }
+    if !shells_known {
+        rt.start_due = true;
+        return Task::none();
+    }
+    rt.start_due = false;
+    let Some(mut spawn) = rt.pending.take() else {
         return Task::none();
     };
+    spawn.resolve_shell(m, &rt.ws);
     let (columns, rows) = rt.link.lock().size();
     let sink = rt.link.sink(channel.waker());
     let pty = sv.core().pty().clone();
@@ -379,6 +416,19 @@ pub fn start(rt: &mut PaneRt, sv: &Services, channel: &HubChannel) -> Task<Messa
 }
 
 impl Spawn {
+    /// The pane's shell, resolved against the shells detected by now, and
+    /// the quoting of its MCP argument with it.
+    fn resolve_shell(&mut self, m: &Model, ws: &str) {
+        let Some((ws, pane)) = find(m, ws, &self.id) else {
+            return;
+        };
+        let shell = shell_of(m, ws, pane).cloned();
+        if let Some(mcp) = &mut self.mcp {
+            mcp.family = shell_family(shell.as_ref());
+        }
+        self.shell = shell;
+    }
+
     /// `kits` is what [`launch_kits`] found: only its `ids` reach the shell
     /// and the MCP scope, and its `held` become notes.
     fn run(
@@ -628,7 +678,7 @@ pub fn spawned(
         if fell_back {
             return running;
         }
-        let (task, handle) = Task::perform(tokio::time::sleep(delay), move |()| {
+        let (task, handle) = Task::perform(shell_ready(rt.link.clone(), delay), move |()| {
             Message::Panes(Msg::LoginReady(id.clone()))
         })
         .abortable();
@@ -654,22 +704,17 @@ pub fn spawned(
     // conversation found". Asked while the shell settles; the transcripts
     // known before the launch are read then too, so a brand new one stands
     // out to the session hunt.
+    let link = rt.link.clone();
     let (task, handle) = Task::perform(
         async move {
             let exists = async {
                 match saved {
-                    Some(id) => tokio::task::spawn_blocking(move || {
-                        hangar_core::sessions::session_exists(id)
-                    })
-                    .await
-                    .ok()
-                    .flatten(),
+                    Some(id) => transcript_exists(id).await,
                     None => None,
                 }
             };
             let known = known_session_ids(agent, cwd);
-            let (exists, known, ()) =
-                iced::futures::join!(exists, known, tokio::time::sleep(delay));
+            let (exists, known, ()) = iced::futures::join!(exists, known, shell_ready(link, delay));
             (exists, known)
         },
         move |(exists, known)| Message::Panes(Msg::LaunchReady(id.clone(), exists, known)),
@@ -679,11 +724,112 @@ pub fn spawned(
     Task::batch([running, task])
 }
 
-/// The shell has settled: type the agent's command, and start following its
-/// session.
+/// Resolves once the pane's new shell is ready for a command: it printed
+/// something and paused, within the bounds `launch::settle` keeps
+/// (`launchDelayMs` at least).
+async fn shell_ready(link: Arc<PaneLink>, min: Duration) {
+    let started = Instant::now();
+    loop {
+        let since_output = link.last_output().map(|at| at.elapsed());
+        match launch::settle(started.elapsed(), since_output, min) {
+            Settle::Type => return,
+            Settle::Wait(wait) => tokio::time::sleep(wait.max(Duration::from_millis(1))).await,
+        }
+    }
+}
+
+/// Whether the transcript of `session` is on disk. A "no" is asked again a
+/// moment later: at a relaunch the disk is busy, and a "no" costs the pane
+/// its resume.
+async fn transcript_exists(session: String) -> Option<bool> {
+    let ask = |session: String| async move {
+        tokio::task::spawn_blocking(move || hangar_core::sessions::session_exists(session))
+            .await
+            .ok()
+            .flatten()
+    };
+    match ask(session.clone()).await {
+        Some(false) => {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            ask(session).await
+        }
+        found => found,
+    }
+}
+
+/// Waits for the echo of the command just typed (a little longer once it
+/// shows, for the program to start), then asks the shell whether it runs
+/// something.
+fn check_launch(rt: &mut PaneRt, sv: &Services, attempt: u8) -> Task<Message> {
+    let link = rt.link.clone();
+    let pty = sv.core().pty().clone();
+    let id = link.id.clone();
+    let (task, handle) = Task::perform(
+        async move {
+            let deadline = Instant::now() + launch::ECHO_WAIT;
+            while Instant::now() < deadline && !link.echoed() {
+                tokio::time::sleep(launch::POLL).await;
+            }
+            if link.echoed() {
+                tokio::time::sleep(launch::RUN_WAIT).await;
+            }
+            // Unreadable is not "nothing runs": the command is not typed
+            // into an agent that may have started.
+            hangar_core::pty::pty_has_children(pty, vec![link.id.clone()])
+                .await
+                .map_or(true, |running| !running.is_empty())
+        },
+        move |running| Message::Panes(Msg::LaunchChecked(id.clone(), attempt, running)),
+    )
+    .abortable();
+    rt.launch = Some(handle.abort_on_drop());
+    task
+}
+
+/// Types `command` on an emptied line.
+fn type_line(rt: &PaneRt, command: &str) {
+    rt.link
+        .type_command(command, format!("{}{command}\r", launch::CLEAR_LINE));
+}
+
+/// What the check of a launch found: nothing to do, the command typed once
+/// more, or the loss said.
+pub fn launch_checked(rt: &mut PaneRt, sv: &Services, attempt: u8, running: bool) -> Task<Message> {
+    rt.launch = None;
+    let Some(command) = rt.typed.clone() else {
+        return Task::none();
+    };
+    match launch::check(running, attempt) {
+        Check::Ran => {
+            rt.typed = None;
+            Task::none()
+        }
+        Check::Retry => {
+            eprintln!(
+                "pane {}: the agent's command did not start (echoed: {}); typing it again",
+                rt.link.id,
+                rt.link.echoed()
+            );
+            type_line(rt, &command);
+            check_launch(rt, sv, attempt + 1)
+        }
+        Check::Lost => {
+            rt.typed = None;
+            eprintln!(
+                "pane {}: the agent's command was typed twice and never started: {command}",
+                rt.link.id
+            );
+            Task::none()
+        }
+    }
+}
+
+/// The shell has settled: type the agent's command, start following its
+/// session, and check that the command ran.
 pub fn launch_ready(
     rt: &mut PaneRt,
     m: &mut Model,
+    sv: &Services,
     exists: Option<bool>,
     known: HashSet<String>,
 ) -> Task<Message> {
@@ -697,8 +843,20 @@ pub fn launch_ready(
         m.live.panes_logic.must_resume(&id, true);
     }
     let mut resume = rt.resume.take();
-    let forget = resume.is_some() && exists == Some(false);
-    if forget {
+    // A transcript not found is not resumed, but its id is kept: one miss
+    // may be a root not looked in or a read that failed, and forgetting it
+    // would lose the conversation for good. A second miss in a row forgets
+    // it.
+    let forget = resume
+        .as_deref()
+        .is_some_and(|id| m.live.panes_logic.session_looked_up(id, exists));
+    if exists == Some(false) {
+        if let Some(id) = &resume {
+            eprintln!(
+                "pane {}: no transcript for session {id}; starting fresh",
+                rt.link.id
+            );
+        }
         resume = None;
     }
     let settings = m.settings();
@@ -717,11 +875,14 @@ pub fn launch_ready(
         model: pane.model.as_deref(),
     };
     let mut launched = None;
+    let mut check = Task::none();
     if let Some(command) = launch_command(rt.agent, resume.as_deref(), &options) {
         if let Some(id) = &resume {
             m.live.panes_logic.claim_session(id);
         }
-        rt.link.write(format!("{command}\r").into_bytes());
+        type_line(rt, &command);
+        rt.typed = Some(command);
+        check = check_launch(rt, sv, 0);
         // Dates the launch for the pane's agent state (P4 ignores it where
         // the bridge or a shell says more).
         launched = Some(Task::done(Message::PanesLogic(Logic::Launched {
@@ -751,7 +912,7 @@ pub fn launch_ready(
         Task::none()
     };
     match launched {
-        Some(launched) => Task::batch([launched, watch]),
+        Some(launched) => Task::batch([launched, watch, check]),
         None => watch,
     }
 }
@@ -759,8 +920,7 @@ pub fn launch_ready(
 /// The login pane's shell has settled.
 pub fn login_ready(rt: &mut PaneRt) {
     rt.launch = None;
-    rt.link
-        .write(format!("{}\r", crate::accounts::LOGIN_COMMAND).into_bytes());
+    type_line(rt, crate::accounts::LOGIN_COMMAND);
 }
 
 /// The workspace and the pane of `pane`, if both still exist.
@@ -907,12 +1067,14 @@ pub(crate) fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
         launched_role: pane.role,
         role_handled: false,
         pending: None,
+        start_due: false,
         resume: None,
         owed: false,
         mcp_arg: None,
         look: look::look(&crate::state::Settings::default(), ws, pane.agent),
         focused: false,
         launch: None,
+        typed: None,
     }
 }
 
@@ -1054,6 +1216,68 @@ mod tests {
             .into_owned();
         assert!(warning.contains("studio"), "{warning}");
         assert_eq!(rt.notes, [warning]);
+    }
+
+    /// A pane mounted before the machine's shells were detected starts the
+    /// shell it asked for, not the first one found.
+    #[test]
+    fn the_shell_is_resolved_when_it_starts_not_when_the_pane_mounts() {
+        let pane = Pane {
+            id: "p1".into(),
+            name: "Ava".into(),
+            agent: AgentId::Claude,
+            shell_id: Some("bash".into()),
+            ..Pane::default()
+        };
+        let ws = Workspace {
+            id: "w1".into(),
+            name: "hangar".into(),
+            cwd: "/work/hangar".into(),
+            panes: vec![pane.clone()],
+            ..Workspace::default()
+        };
+        let mut m = Model::default();
+        m.hydrate(AppState {
+            workspaces: vec![ws.clone()],
+            ..AppState::default()
+        });
+        // At mount, detection has not answered.
+        let mut spawn = Spawn {
+            id: pane.id.clone(),
+            workspace_id: ws.id.clone(),
+            workspace_cwd: ws.cwd.clone(),
+            cwd: ws.cwd.clone(),
+            shell: shell_of(&m, &ws, &pane).cloned(),
+            name: pane.name.clone(),
+            bridge: false,
+            port_base: None,
+            build_env: Vec::new(),
+            kits: None,
+            agent: pane.agent,
+            account: None,
+            mcp: Some(McpLaunch {
+                mode: McpMode::default(),
+                enabled: Vec::new(),
+                role: false,
+                family: None,
+                tr: Translator::new(Locale::En),
+            }),
+        };
+        assert!(spawn.shell.is_none());
+
+        let shell = |id: &str| ShellInfo {
+            id: id.into(),
+            label: id.into(),
+            program: format!("/bin/{id}"),
+            args: Vec::new(),
+        };
+        m.ui.shells = vec![shell("zsh"), shell("bash")];
+        spawn.resolve_shell(&m, &ws.id);
+        assert_eq!(spawn.shell.as_ref().map(|s| s.id.as_str()), Some("bash"));
+        assert_eq!(
+            spawn.mcp.as_ref().and_then(|mcp| mcp.family),
+            shell_family(spawn.shell.as_ref())
+        );
     }
 
     /// A Codex pane of the old app's file: a shell now, which says so in its
