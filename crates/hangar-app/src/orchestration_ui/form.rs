@@ -29,6 +29,7 @@ pub const DEFAULT_REVIEWER_MODEL: &str = "sonnet";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Draft {
     pub auto_merge: bool,
+    pub shared_build_cache: bool,
     pub check_command: String,
     pub orchestrator_model: String,
     pub worker_model: String,
@@ -76,6 +77,7 @@ pub fn draft_of(ws: &Workspace) -> Draft {
     let settings = orchestration_of(ws);
     Draft {
         auto_merge: settings.auto_merge,
+        shared_build_cache: settings.shared_build_cache,
         check_command: settings.check_command.unwrap_or_default(),
         orchestrator_model: settings.orchestrator_model,
         worker_model: settings.worker_model,
@@ -156,6 +158,7 @@ pub fn normalize_draft(draft: &Draft) -> OrchestrationSettings {
     };
     OrchestrationSettings {
         auto_merge: draft.auto_merge,
+        shared_build_cache: draft.shared_build_cache,
         // A check is run through the person's shell exactly as typed, inner
         // spaces and all: only the ends are trimmed.
         check_command: optional(&draft.check_command),
@@ -225,6 +228,7 @@ mod tests {
             draft_of(&Workspace::default()),
             Draft {
                 auto_merge: base.auto_merge,
+                shared_build_cache: true,
                 check_command: String::new(),
                 orchestrator_model: base.orchestrator_model,
                 worker_model: base.worker_model,

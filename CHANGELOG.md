@@ -8,7 +8,7 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-11-05
 
 Hangar, rewritten as a native app. It keeps your data, your workspaces and the features
 around the terminals, and needs a fraction of the memory and processor it did.
@@ -56,10 +56,17 @@ around the terminals, and needs a fraction of the memory and processor it did.
     one.
 - **Hangar Mobile is unchanged**: the same phone app, the same pairing, the same
   notifications.
-- **On Linux, Hangar draws its own title bar.** The toolbar is the window's title bar, in
-  your theme, with the buttons your desktop shows, on its side (GNOME's button layout). Drag
-  it to move the window, double-click it to maximise, right-click it for the window menu;
-  the edges resize the window, and its corners are rounded as GNOME's own windows are.
+- **Hangar draws its own title bar, on Linux and Windows.** Its windows open without the
+  system's title bar: the toolbar and the top of the navigator are the bar, in your theme.
+  Press on it to move the window, press twice to maximise or restore it, right-press for the
+  window menu; the edges resize the window.
+  - On Linux, the buttons are the ones your desktop shows, on its side (GNOME's button
+    layout), and the corners are rounded as GNOME's own windows are.
+  - On Windows, minimize, maximize/restore and close sit on the right as in Windows 11, the
+    close button red when you point at it. A window still snaps to the screen's edges, and
+    Windows 11 rounds the corners and draws the shadow.
+  - **Appearance › Use the system's title bar** brings the system's back, on Linux and
+    Windows. macOS keeps its own.
 - **A Linux icon shaped like the others.** The dock and the app grid now show Hangar on a
   rounded tile with room around it, the shape GNOME and KDE give their own app icons,
   instead of a square from edge to edge; the packages carry it from 16 to 512 px and as an
@@ -97,8 +104,7 @@ around the terminals, and needs a fraction of the memory and processor it did.
     `viewPanes`, a field it does not know, and lays out its terminals without them.
 - **A shorter toolbar.** The four layouts are one button with a menu, and the activity
   capsule in the middle is gone: the pane's own header and the inspector say what it is
-  doing. **Appearance › Use the system's title bar** brings the
-  system's back. macOS and Windows keep theirs.
+  doing.
 - **No limit on the workers.** The orchestrator decides how many workers run at once and
   how many times a task is tried: **Workers at once** and **Attempts per task** are gone
   from the orchestration settings, and Hangar no longer hands a task back to you after its
@@ -641,6 +647,7 @@ statistics, workspace sleep and per-workspace MCP servers.
 - Automatic updates from signed GitHub releases.
 - An interface in English and French (0.1.1).
 
+[2.0.0]: https://github.com/simnJS/hangar-ai/releases/tag/v2.0.0
 [1.0.1]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.1
 [1.0.0]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.0
 [0.15]: https://github.com/simnJS/hangar-ai/releases/tag/v0.15.0

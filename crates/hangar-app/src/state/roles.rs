@@ -56,6 +56,7 @@ pub fn orchestration_of(ws: &Workspace) -> OrchestrationSettings {
     };
     OrchestrationSettings {
         auto_merge: saved.auto_merge,
+        shared_build_cache: saved.shared_build_cache,
         check_command: optional(&saved.check_command),
         orchestrator_model: name(&saved.orchestrator_model, &defaults.orchestrator_model),
         worker_model: name(&saved.worker_model, &defaults.worker_model),
@@ -145,6 +146,24 @@ mod tests {
             ..AppState::default()
         };
         assert_eq!(manager_of(&state).map(|(_, p)| p.id.as_str()), Some("m2"));
+    }
+
+    #[test]
+    fn a_file_without_the_build_cache_field_reads_true() {
+        let saved: OrchestrationSettings = serde_json::from_str(r#"{"autoMerge": false}"#).unwrap();
+        assert!(saved.shared_build_cache);
+        assert!(!saved.auto_merge);
+        let mut w = ws(vec![]);
+        w.orchestration = Some(saved);
+        assert!(orchestration_of(&w).shared_build_cache);
+
+        w.orchestration = Some(OrchestrationSettings {
+            shared_build_cache: false,
+            ..OrchestrationSettings::default()
+        });
+        assert!(!orchestration_of(&w).shared_build_cache);
+        let json = serde_json::to_value(orchestration_of(&w)).unwrap();
+        assert_eq!(json["sharedBuildCache"], false);
     }
 
     #[test]

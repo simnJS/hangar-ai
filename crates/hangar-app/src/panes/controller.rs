@@ -234,6 +234,9 @@ struct Spawn {
     name: String,
     bridge: bool,
     port_base: Option<u16>,
+    /// The workspace's build cache variables, for a worker (it has a
+    /// `port_base`) of a workspace that keeps the cache on.
+    build_env: Vec<(String, String)>,
     /// `None` for a login pane, which starts with no kit.
     kits: Option<KitChoice>,
     agent: AgentId,
@@ -290,6 +293,15 @@ pub fn mount(
         name: pane.name.clone(),
         bridge: settings.claude_bridge,
         port_base: pane.port_base.and_then(|port| u16::try_from(port).ok()),
+        build_env: if pane.port_base.is_some() {
+            hangar_core::build_cache::env_for(
+                std::path::Path::new(&ws.cwd),
+                &ws.id,
+                orchestration_of(ws).shared_build_cache,
+            )
+        } else {
+            Vec::new()
+        },
         // A pane opened to log its Claude account in runs the login and
         // nothing else: no kits, no servers, no conversation. The TS said so
         // too, but still handed such a pane the kits turned on everywhere
@@ -392,7 +404,7 @@ impl Spawn {
             Some(launch) => self.mcp_scope(host, launch, &kits.ids, account.as_deref(), &mut notes),
             None => (None, None),
         };
-        let spawned = hangar_core::pty::pty_spawn(
+        let spawned = hangar_core::pty::pty_spawn_with(
             pty,
             sink,
             self.id,
@@ -403,6 +415,7 @@ impl Spawn {
             Some(self.name),
             Some(self.bridge),
             self.port_base,
+            self.build_env,
             // The shell is handed the file's path (`HANGAR_MCP_CONFIG`); the
             // typed command names the variable, never the path, which holds
             // the person's name.

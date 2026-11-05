@@ -19,6 +19,7 @@ pub mod accounts;
 pub mod autostart;
 pub mod board;
 pub mod bridge;
+pub mod build_cache;
 pub mod chat;
 pub mod context;
 pub mod control;

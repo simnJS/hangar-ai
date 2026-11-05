@@ -278,6 +278,17 @@ fn apply_ports(cmd: &mut CommandBuilder, port_base: Option<u16>) {
     }
 }
 
+/// The variables of the workspace's shared build cache (build_cache.rs), for a
+/// worker only: it is the pane that has ports of its own. Nothing is removed
+/// from the others: the person's own `CARGO_TARGET_DIR` stays theirs.
+fn apply_build_cache(cmd: &mut CommandBuilder, port_base: Option<u16>, env: &[(String, String)]) {
+    if port_base.is_some() {
+        for (name, value) in env {
+            cmd.env(name, value);
+        }
+    }
+}
+
 /// The `--mcp-config` file a Claude Code pane starts with, written just
 /// before (lib/mcpScope): the command typed into the shell names this variable
 /// instead of the path, which holds the user's name and would stay on screen.
@@ -404,6 +415,46 @@ pub fn pty_spawn(
     agent: Option<String>,
     claude_account: Option<String>,
 ) -> Result<Spawned, String> {
+    pty_spawn_with(
+        manager,
+        output,
+        id,
+        cwd,
+        shell,
+        cols,
+        rows,
+        name,
+        bridge,
+        port_base,
+        Vec::new(),
+        mcp_config,
+        kits,
+        agent,
+        claude_account,
+    )
+}
+
+/// `pty_spawn` with the workspace's build cache environment
+/// (`build_cache::env_for`), applied to a worker's pane only: one without
+/// `port_base` starts without it, whatever is passed.
+#[allow(clippy::too_many_arguments)]
+pub fn pty_spawn_with(
+    manager: &PtyManager,
+    output: PtySink,
+    id: String,
+    cwd: String,
+    shell: Option<crate::shells::ShellInfo>,
+    cols: u16,
+    rows: u16,
+    name: Option<String>,
+    bridge: Option<bool>,
+    port_base: Option<u16>,
+    build_env: Vec<(String, String)>,
+    mcp_config: Option<String>,
+    kits: Option<Vec<String>>,
+    agent: Option<String>,
+    claude_account: Option<String>,
+) -> Result<Spawned, String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
     // that id. A live session is a caller mistake and fails, but a dying one is
@@ -489,6 +540,7 @@ pub fn pty_spawn(
         crate::bridge::sideloading_forbidden(),
     );
     apply_ports(&mut cmd, port_base);
+    apply_build_cache(&mut cmd, port_base, &build_env);
     apply_mcp_config(&mut cmd, mcp_config.as_deref());
     // The account's profile is brought level with the main account before
     // its Claude Code starts on it.
@@ -874,6 +926,36 @@ mod tests {
         apply_ports(&mut other, None);
         assert_eq!(other.get_env("HANGAR_PORT_BASE"), None);
         assert_eq!(other.get_env("HANGAR_PORT_COUNT"), None);
+    }
+
+    #[test]
+    fn only_a_worker_carries_the_build_cache_variables() {
+        let env = vec![(
+            "CARGO_TARGET_DIR".to_string(),
+            "C:/b/1234abcd/target".to_string(),
+        )];
+        let mut worker = CommandBuilder::new("sh");
+        apply_build_cache(&mut worker, Some(41020), &env);
+        assert_eq!(
+            worker.get_env("CARGO_TARGET_DIR"),
+            Some(std::ffi::OsStr::new("C:/b/1234abcd/target"))
+        );
+
+        // Not a worker: not given.
+        let mut other = CommandBuilder::new("sh");
+        apply_build_cache(&mut other, None, &env);
+        assert_ne!(
+            other.get_env("CARGO_TARGET_DIR"),
+            Some(std::ffi::OsStr::new("C:/b/1234abcd/target"))
+        );
+
+        // A worker whose workspace turned the cache off.
+        let mut off = CommandBuilder::new("sh");
+        apply_build_cache(&mut off, Some(41020), &[]);
+        assert_ne!(
+            off.get_env("CARGO_TARGET_DIR"),
+            Some(std::ffi::OsStr::new("C:/b/1234abcd/target"))
+        );
     }
 
     #[test]
