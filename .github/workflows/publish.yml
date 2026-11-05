@@ -1,0 +1,90 @@
+name: Publish a draft release
+
+# The release workflow's publish job alone, on a draft whose builds already
+# uploaded: fetch the updater artifacts, sign them, write latest.json, check
+# them as an install will, upload, publish. For when that job failed after the
+# builds were fine, so that a fix to signing costs minutes, not another round
+# of builds on three systems (2.0.0: the key was refused by cargo-packager's
+# signer after every build had passed).
+#
+# Run it from the default branch, which holds the signing fix being tried:
+#   gh workflow run publish.yml -f tag=v2.0.0 -f release_id=<the draft's id>
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of the draft release (e.g. v2.0.0)"
+        required: true
+      release_id:
+        description: "Id of the draft release (the release workflow's draft job outputs it)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PACKAGER_VERSION: 0.11.8
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      ID: ${{ inputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version "$CARGO_PACKAGER_VERSION" --locked
+
+      # Given an id, check it is a draft of that tag before touching it.
+      - name: Check the draft
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$ID" --jq '"\(.tag_name) draft=\(.draft)"' | tee /tmp/draft
+          grep -qx "$TAG draft=true" /tmp/draft || { echo "release $ID is not a draft of $TAG" >&2; exit 1; }
+
+      - name: Fetch the updater artifacts
+        run: |
+          set -euo pipefail
+          mkdir artifacts
+          gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets?per_page=100" \
+            --jq '.[] | select(.name | test("(\\.AppImage|\\.deb|\\.rpm|\\.msi|-setup\\.exe|\\.app\\.tar\\.gz)$")) | "\(.id) \(.name)"' \
+            | while read -r asset_id name; do
+                gh api -H "Accept: application/octet-stream" \
+                  "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "artifacts/$name"
+                echo "fetched $name ($(wc -c < "artifacts/$name") bytes)"
+              done
+
+      - name: Sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: crates/hangar-app/packaging/sign.sh artifacts/Hangar.AI*
+
+      - name: Write latest.json
+        run: |
+          set -euo pipefail
+          NOTES="$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID" --jq .body)" \
+          REPO="$GITHUB_REPOSITORY" \
+            crates/hangar-app/packaging/latest-json.sh artifacts latest.json
+
+      # Nothing is published unless every file verifies against the public key
+      # compiled into the app.
+      - name: Check the release as an install will
+        run: cargo run --locked -q -p hangar-update --example verify_feed -- latest.json artifacts --version "$TAG"
+
+      - name: Upload the signatures and latest.json
+        run: crates/hangar-app/packaging/upload-assets.sh "$ID" artifacts/*.sig latest.json
+
+      - name: Publish
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" \
+            -F draft=false -f make_latest=true

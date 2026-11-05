@@ -27,9 +27,30 @@ if [ -z "$key" ]; then
 fi
 password="${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}}"
 
+# The real key, made by `tauri signer generate` with an empty password, is
+# refused by cargo-packager's signer ("Wrong password for that key", 2.0.0's
+# first publish), while the Tauri signer that signed every 1.x release reads
+# it. So when cargo-packager refuses, the same Tauri CLI as 1.12.1 signs: its
+# .sig is the same text, and the publish job verifies every one of them
+# against the public key the installs carry before anything is published.
+# The key goes through the environment, never the command line; an empty
+# password has to be given as an argument, since an empty variable reads as
+# no password at all and the CLI would then ask for one.
+TAURI_CLI="@tauri-apps/cli@2.11.4"
+
 for file in "$@"; do
-  CARGO_PACKAGER_SIGN_PRIVATE_KEY="$key" \
-  CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD="$password" \
-    cargo packager signer sign "$file"
+  if ! CARGO_PACKAGER_SIGN_PRIVATE_KEY="$key" \
+    CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD="$password" \
+    cargo packager signer sign "$file"; then
+    echo "cargo-packager refused the key: signing $file with $TAURI_CLI" >&2
+    rm -f "$file.sig"
+    if [ -z "$password" ]; then
+      TAURI_SIGNING_PRIVATE_KEY="$key" \
+        npx --yes "$TAURI_CLI" signer sign --password "" "$file"
+    else
+      TAURI_SIGNING_PRIVATE_KEY="$key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$password" \
+        npx --yes "$TAURI_CLI" signer sign "$file"
+    fi
+  fi
   test -s "$file.sig"
 done
