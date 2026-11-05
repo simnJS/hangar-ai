@@ -103,12 +103,47 @@ pub struct PaneRt {
     launch: Option<iced::task::Handle>,
     /// The agent's command as it was typed, for the check to type again.
     typed: Option<String>,
+    /// The launch put off while its resume waits its wave (`waves`): what
+    /// the shell's readiness answered.
+    parked: Option<(Option<bool>, HashSet<String>)>,
 }
 
 impl PaneRt {
     /// Whether its shell waits for the machine's shells to be known.
     pub fn start_due(&self) -> bool {
         self.start_due && self.pending.is_some()
+    }
+
+    /// Whether the launch `launch_ready` would make with `exists` resumes a
+    /// session: the launches that may wait their wave.
+    pub fn resumes(&self, exists: Option<bool>) -> bool {
+        self.resume.is_some() && exists != Some(false)
+    }
+
+    /// Whether the agent's command is still to come: the shell not started,
+    /// or not settled yet. A pane on screen in that state holds the panes
+    /// off screen back, so that it resumes first.
+    pub fn launch_to_come(&self) -> bool {
+        self.agent != AgentId::Shell
+            && self.parked.is_none()
+            && (self.pending.is_some()
+                || self.status == PaneStatus::Starting
+                || (self.launch.is_some() && self.typed.is_none()))
+    }
+
+    /// Whether the command typed was checked: it runs, or was lost.
+    pub fn launch_checked(&self) -> bool {
+        self.typed.is_none()
+    }
+
+    /// The launch waits its wave, with what the shell's readiness answered.
+    pub fn park(&mut self, exists: Option<bool>, known: HashSet<String>) {
+        self.parked = Some((exists, known));
+    }
+
+    /// The launch put off, now that its turn came.
+    pub fn unpark(&mut self) -> Option<(Option<bool>, HashSet<String>)> {
+        self.parked.take()
     }
 }
 
@@ -368,6 +403,7 @@ pub fn mount(
         focused: false,
         launch: None,
         typed: None,
+        parked: None,
     };
     (rt, Task::batch([mounted, due]))
 }
@@ -1075,6 +1111,7 @@ pub(crate) fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
         focused: false,
         launch: None,
         typed: None,
+        parked: None,
     }
 }
 

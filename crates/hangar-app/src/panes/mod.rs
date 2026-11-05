@@ -40,6 +40,7 @@ mod status;
 mod term_widget;
 mod terminal_pane;
 mod view_pane;
+mod waves;
 mod workspace_terminals;
 mod zoom_bar;
 
@@ -47,6 +48,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use hangar_term::{Action, ClipboardTarget, Event as TermEvent, ScrollTo};
 use iced::futures::stream;
@@ -104,6 +106,10 @@ pub struct State {
     asked_scale: HashSet<iced::window::Id>,
     /// The machine's shells were detected: the panes' shells may start.
     shells_known: bool,
+    /// The resumes of the panes off screen, waiting their wave.
+    waves: waves::Waves,
+    /// When the next look at the waves is due, while one is on its way.
+    wave_look: Option<Instant>,
 }
 
 /// The pickers of a header.
@@ -187,6 +193,8 @@ pub enum Msg {
     /// The check of a launch: the attempt it checked (from 0), whether the
     /// shell runs something.
     LaunchChecked(PaneId, u8, bool),
+    /// The time to look at the resumes waiting their wave.
+    WaveLook,
     /// Whether the session a role's restart resumes exists.
     RoleRestart(WsId, PaneId, String, bool),
     FlushDrops,
@@ -262,8 +270,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 /// packages read of them is republished.
 fn settle(st: &mut State, m: &mut Model, sv: &Services, task: Task<Message>) -> Task<Message> {
     let synced = sync_if_needed(st, m, sv);
+    let released = release(st, m, sv);
     publish(st, m);
-    Task::batch([task, synced])
+    Task::batch([task, synced, released])
 }
 
 fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
@@ -292,14 +301,36 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             }
             None => Task::none(),
         },
-        Msg::LaunchReady(pane, exists, known) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::launch_ready(rt, m, sv, exists, known),
-            None => Task::none(),
-        },
+        Msg::LaunchReady(pane, exists, known) => {
+            let Some(rt) = st.panes.get_mut(&pane) else {
+                return Task::none();
+            };
+            if rt.resumes(exists) {
+                let front = m.workspace(&rt.ws).is_some_and(|ws| in_front(m, ws, &pane));
+                if !front {
+                    rt.park(exists, known);
+                    st.waves.wait(pane);
+                    return Task::none();
+                }
+                st.waves.typed(pane, Instant::now());
+            }
+            controller::launch_ready(rt, m, sv, exists, known)
+        }
         Msg::LaunchChecked(pane, attempt, running) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::launch_checked(rt, sv, attempt, running),
+            Some(rt) => {
+                let task = controller::launch_checked(rt, sv, attempt, running);
+                if rt.launch_checked() {
+                    st.waves.checked(&pane);
+                }
+                task
+            }
             None => Task::none(),
         },
+        // `settle` releases what is due.
+        Msg::WaveLook => {
+            st.wave_look = None;
+            Task::none()
+        }
         Msg::ShellsDetected => {
             st.shells_known = true;
             let channel = st.channel.clone();
@@ -976,6 +1007,70 @@ fn visible(m: &Model, ws: &Workspace, pane: &str) -> bool {
     on_screen(m, ws) && zoomed_pane(m, ws).is_none_or(|zoomed| zoomed == pane)
 }
 
+/// The pane is on screen in the focused window (the main one before any
+/// window says it has the focus): what resumes first at a relaunch.
+fn in_front(m: &Model, ws: &Workspace, pane: &str) -> bool {
+    if !visible(m, ws, pane) {
+        return false;
+    }
+    match m.focused_window().and_then(|id| m.live.windows.get(&id)) {
+        Some(WindowKind::Workspace(id)) => *id == ws.id,
+        Some(WindowKind::Main) | None => {
+            ws.detached != Some(true)
+                && m.state().active_workspace_id.as_deref() == Some(ws.id.as_str())
+        }
+    }
+}
+
+/// Launches the resumes put off whose turn came: those now on screen in the
+/// focused window at once, the others in waves (`waves`), and schedules the
+/// next look while any still waits. A pane on screen whose command is still
+/// to come holds the waves back, so that it goes first.
+fn release(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
+    if !st.waves.any_waiting() {
+        return Task::none();
+    }
+    let front = |m: &Model, rt: &PaneRt, id: &PaneId| {
+        m.workspace(&rt.ws).is_some_and(|ws| in_front(m, ws, id))
+    };
+    let mut go = st
+        .waves
+        .shown(|id| st.panes.get(id).is_some_and(|rt| front(m, rt, id)));
+    let held = st
+        .panes
+        .iter()
+        .any(|(id, rt)| rt.launch_to_come() && front(m, rt, id));
+    let now = Instant::now();
+    if !held {
+        go.extend(st.waves.due(now));
+    }
+    let mut tasks = Vec::new();
+    for id in go {
+        let Some(rt) = st.panes.get_mut(&id) else {
+            st.waves.forget(&id);
+            continue;
+        };
+        let Some((exists, known)) = rt.unpark() else {
+            st.waves.forget(&id);
+            continue;
+        };
+        st.waves.typed(id, now);
+        tasks.push(controller::launch_ready(rt, m, sv, exists, known));
+    }
+    // Held, the launch that holds the waves brings them back here as it
+    // goes; otherwise one look at a time, the earliest wins.
+    if !held && let Some(wait) = st.waves.next_look(now) {
+        let at = now + wait;
+        if st.wave_look.is_none_or(|look| at < look) {
+            st.wave_look = Some(at);
+            tasks.push(Task::perform(tokio::time::sleep(wait), |()| {
+                Message::Panes(Msg::WaveLook)
+            }));
+        }
+    }
+    Task::batch(tasks)
+}
+
 /// The pane whose terminal has the keyboard in the focused window.
 fn keyboard_pane(m: &Model) -> Option<PaneId> {
     let window = m.ui.focused_window;
@@ -1024,6 +1119,8 @@ fn signature(st: &State, m: &Model) -> u64 {
         .collect();
     windows.sort();
     windows.hash(&mut hash);
+    // A resume waiting its wave goes when its window takes the focus.
+    format!("{:?}", m.ui.focused_window).hash(&mut hash);
     let s = m.settings();
     (
         &s.theme_id,
@@ -1113,6 +1210,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         let Some(rt) = st.panes.remove(&id) else {
             continue;
         };
+        st.waves.forget(&id);
         if st.hovered.as_ref() == Some(&id) {
             st.hovered = None;
         }
