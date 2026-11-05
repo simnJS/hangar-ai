@@ -99,6 +99,11 @@ pub trait WorkerPort: Sync {
     fn activity(&self, pane: &str) -> Option<PaneActivity>;
     /// The starts under way, shared by every op of the app.
     fn starting(&self) -> &Mutex<Starting>;
+    /// Whether no process listens on `port` (a block with a busy port is
+    /// not handed out).
+    fn port_free(&self, port: u32) -> bool {
+        port_is_free(port)
+    }
     /// What the workspace's orchestrator heard lately (`orchestratorJournal`).
     fn journal(&self, workspace_id: &str) -> Vec<JournalEntry>;
     /// `postOrchestratorEvent`.
@@ -312,13 +317,36 @@ pub fn worktree_folder(main_root: &str, branch: &str) -> String {
     segments.join(separator)
 }
 
+/// Whether nothing listens on `port` on this machine: a bind on loopback and
+/// on every interface (IPv4 and IPv6) works. A server of another Hangar
+/// process, or one that outlived its worker, holds ports the model knows
+/// nothing about. An address family the machine lacks does not count as busy.
+pub fn port_is_free(port: u32) -> bool {
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener};
+    let Ok(port) = u16::try_from(port) else {
+        return false;
+    };
+    let addrs = [
+        SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)),
+        SocketAddr::from((Ipv6Addr::UNSPECIFIED, port)),
+    ];
+    addrs.iter().all(|addr| match TcpListener::bind(addr) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::AddrInUse,
+    })
+}
+
 /// The first block of `PORT_COUNT` ports nobody has, from a pool shared by
-/// every workspace: 21000, 21020, 21040… A worker keeps its block for as long
-/// as its pane lives, restarts included. `None` when every block is taken
-/// (`allocatePortBase`).
+/// every workspace of the app: 21000, 21020, 21040… Taken means a pane of any
+/// workspace holds it, a start under way reserves it, or `is_free` finds one
+/// of its ports listened on by another process. A worker keeps its block for
+/// as long as its pane lives, restarts included. `None` when every block is
+/// taken (`allocatePortBase`).
 pub fn allocate_port_base(
     workspaces: &[Workspace],
     reserved: impl IntoIterator<Item = u32>,
+    is_free: impl Fn(u32) -> bool,
 ) -> Option<u32> {
     let mut taken: Vec<u32> = reserved.into_iter().collect();
     taken.extend(
@@ -332,6 +360,7 @@ pub fn allocate_port_base(
         if taken
             .iter()
             .all(|other| other + PORT_COUNT <= base || base + PORT_COUNT <= *other)
+            && (base..base + PORT_COUNT).all(&is_free)
         {
             return Some(base);
         }
@@ -783,10 +812,13 @@ pub async fn spawn_worker(
         let model =
             model_arg(request.model.as_ref())?.unwrap_or_else(|| settings.worker_model.clone());
         let name = name_arg(request.name.as_ref(), &state, &starting, &recent)?;
-        let Some(port_base) = allocate_port_base(&state.workspaces, starting.ports.iter().copied())
-        else {
+        let Some(port_base) = allocate_port_base(
+            &state.workspaces,
+            starting.ports.iter().copied(),
+            |candidate| port.port_free(candidate),
+        ) else {
             return Err(
-                "Every block of worker ports is taken. Stop a worker you no longer need first."
+                "Every block of worker ports is taken or has a port in use by another process. Stop a worker you no longer need first."
                     .into(),
             );
         };
