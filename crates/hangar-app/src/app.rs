@@ -565,7 +565,8 @@ impl App {
     }
 
     /// What a window is cleared to before its frame is drawn: nothing, on
-    /// Linux, so that the corners the frame rounds are see-through
+    /// Linux (not Windows, whose system rounds its corners), so that the
+    /// corners the frame rounds are see-through
     /// (shell/title_bar.rs).
     fn style(&self, theme: &iced::Theme) -> iced::theme::Style {
         use iced::theme::Base;

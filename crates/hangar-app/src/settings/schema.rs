@@ -430,7 +430,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
                         .keywords("inspector inspecteur panneau droite right details détails"),
                     ]
                     .into_iter()
-                    .chain(cfg!(target_os = "linux").then(|| {
+                    .chain(crate::shell::title_bar::has_own_bar().then(|| {
                         toggle(
                             "systemTitleBar",
                             tx(Key::SettingsSystemTitleBar),
@@ -439,7 +439,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
                         )
                         .hint(tx(Key::SettingsSystemTitleBarHint))
                         .keywords(
-                            "title bar barre de titre fenêtre window decorations décorations buttons boutons gnome kde",
+                            "title bar barre de titre fenêtre window decorations décorations buttons boutons gnome kde windows",
                         )
                     }))
                     .collect(),
