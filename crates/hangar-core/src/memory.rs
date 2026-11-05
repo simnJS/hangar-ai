@@ -14,7 +14,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -608,7 +608,9 @@ impl MemoryStore {
     /// open: every caller renders what it gets, and an empty list is
     /// indistinguishable from a memory that has been lost.
     pub fn read(&self, dir: &Path) -> Result<Memory, StoreError> {
-        let _guard = self.guard.lock().unwrap();
+        // A panic in another caller's mutation left the file as it was: the
+        // write comes after it, so the lock is still good to take.
+        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
         read_memory(dir)
     }
 
@@ -622,7 +624,9 @@ impl MemoryStore {
         dir: &Path,
         mutate: impl FnOnce(&mut Memory) -> Result<T, String>,
     ) -> Result<T, StoreError> {
-        let _guard = self.guard.lock().unwrap();
+        // A panic in another caller's mutation left the file as it was: the
+        // write comes after it, so the lock is still good to take.
+        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
         let mut memory = read_memory(dir)?;
         let outcome = mutate(&mut memory).map_err(StoreError::Refused)?;
         write_memory(dir, &memory).map_err(StoreError::Storage)?;

@@ -55,13 +55,35 @@ struct Api {
     cwd: String,
 }
 
+/// The API's URL and token as the pane's environment gives them: the bridge
+/// mod's pair, else a kit hook's (bridge.rs, pty.rs). Inside a pane that is the
+/// pane's own token, which is how the API knows who calls (server.rs, `Caller`)
+/// whatever a body says; endpoint.json is for an agent Hangar did not start.
+fn pane_endpoint(var: impl Fn(&str) -> Option<String>) -> Option<(String, String)> {
+    [
+        ("HANGAR_BRIDGE_URL", "HANGAR_BRIDGE_TOKEN"),
+        ("HANGAR_API_URL", "HANGAR_API_TOKEN"),
+    ]
+    .into_iter()
+    .find_map(|(url, token)| Some((var(url)?, var(token)?)))
+}
+
 impl Api {
     fn connect() -> Result<Self, String> {
-        let endpoint =
-            crate::endpoint::read().ok_or("Hangar.AI is not running (no endpoint file found)")?;
+        let (base, token) = match pane_endpoint(|name| env_var(&[name])) {
+            Some(pair) => pair,
+            None => {
+                let endpoint = crate::endpoint::read()
+                    .ok_or("Hangar.AI is not running (no endpoint file found)")?;
+                (
+                    format!("http://127.0.0.1:{}", endpoint.port),
+                    endpoint.token,
+                )
+            }
+        };
         Ok(Api {
-            base: format!("http://127.0.0.1:{}", endpoint.port),
-            token: endpoint.token,
+            base: base.trim_end_matches('/').to_string(),
+            token,
             cwd: workspace_cwd(),
         })
     }
@@ -158,7 +180,7 @@ fn read_api_response(mut response: ureq::http::Response<ureq::Body>) -> Result<V
     Err(message)
 }
 
-fn urlencode(value: &str) -> String {
+pub(crate) fn urlencode(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {
@@ -222,7 +244,7 @@ fn base_tool_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string" },
-                    "agent": { "type": "string", "description": "Your identity, e.g. 'claude-1'. Defaults to the pane name." }
+                    "agent": { "type": "string", "description": "Your identity, e.g. 'claude-1'. Defaults to the pane name; in a Hangar pane it is always the pane name." }
                 },
                 "required": ["id"]
             }
@@ -292,7 +314,7 @@ fn base_tool_definitions() -> Value {
                 "properties": {
                     "id": { "type": "string" },
                     "text": { "type": "string" },
-                    "author": { "type": "string" }
+                    "author": { "type": "string", "description": "Defaults to the pane name; in a Hangar pane it is always the pane name." }
                 },
                 "required": ["id", "text"]
             }
@@ -1208,6 +1230,35 @@ pub fn run_stdio() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inside a pane, the proxy calls with what the pane's environment holds
+    /// (its own token), and only a pair that is whole counts.
+    #[test]
+    fn a_pane_s_proxy_calls_with_the_pane_s_own_token() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.to_string())
+            }
+        };
+        const BOTH: [(&str, &str); 4] = [
+            ("HANGAR_BRIDGE_URL", "http://127.0.0.1:1"),
+            ("HANGAR_BRIDGE_TOKEN", "pane"),
+            ("HANGAR_API_URL", "http://127.0.0.1:2"),
+            ("HANGAR_API_TOKEN", "kit"),
+        ];
+        assert_eq!(
+            pane_endpoint(env(&BOTH)),
+            Some(("http://127.0.0.1:1".into(), "pane".into()))
+        );
+        assert_eq!(
+            pane_endpoint(env(&BOTH[1..])),
+            Some(("http://127.0.0.1:2".into(), "kit".into()))
+        );
+        assert_eq!(pane_endpoint(env(&[("HANGAR_BRIDGE_TOKEN", "pane")])), None);
+    }
 
     fn tool(name: &str) -> Value {
         tool_definitions()
