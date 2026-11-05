@@ -43,6 +43,12 @@ const TICK: Duration = Duration::from_millis(70);
 /// faster than the trace so the wave runs smoothly.
 const WAVE_TICK: Duration = Duration::from_millis(40);
 
+/// The longest a transcription is waited for. The core always reports how one
+/// ended, but an event can still be lost on the way (a bus that lagged), and
+/// dictation would then be dead until a restart, with the wave redrawing every
+/// window for good. Generous: a local model on a slow CPU takes tens of seconds.
+pub(crate) const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Where a dictation is (`VoicePhase`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Phase {
@@ -180,6 +186,20 @@ impl State {
         Some(cancel)
     }
 
+    /// Gives up on a transcription that never reported back: `true` when it
+    /// had been running longer than `TRANSCRIBE_TIMEOUT` at `now`, and the
+    /// pill is back to idle.
+    fn overdue(&mut self, now: Instant) -> bool {
+        let late = self.phase == Phase::Transcribing
+            && self
+                .since
+                .is_some_and(|since| now.saturating_duration_since(since) >= TRANSCRIBE_TIMEOUT);
+        if late {
+            self.set_phase(Phase::Idle);
+        }
+        late
+    }
+
     /// The meter scrolls one step with the latest level.
     fn tick(&mut self) {
         self.bars.rotate_left(1);
@@ -218,6 +238,9 @@ pub enum Msg {
     Blur,
     /// The meter scrolls, or the wave moves.
     Tick,
+    /// The wave moves while transcribing; also where a transcription that
+    /// never answered is given up on.
+    Wave,
     /// The microphone opened, or did not.
     Started(Result<(), String>),
     /// The app has just started: a microphone the core still holds open from
@@ -273,6 +296,12 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Cancel => stop(st, m, sv, true),
         Msg::Tick => {
             st.tick();
+            Task::none()
+        }
+        Msg::Wave => {
+            if st.overdue(Instant::now()) {
+                return failed(m, "the transcription never finished");
+            }
             Task::none()
         }
     }
@@ -363,7 +392,7 @@ pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
             }),
             iced::time::every(TICK).map(|_| Message::Voice(Msg::Tick)),
         ]),
-        Phase::Transcribing => iced::time::every(WAVE_TICK).map(|_| Message::Noop),
+        Phase::Transcribing => iced::time::every(WAVE_TICK).map(|_| Message::Voice(Msg::Wave)),
     };
     Subscription::batch([recover, phase])
 }

@@ -212,3 +212,28 @@ fn no_microphone_is_held_open_when_the_app_starts() {
         &hangar_core::voice::VoiceManager::default()
     ));
 }
+
+#[test]
+fn a_transcription_that_never_answers_is_given_up_on() {
+    let mut st = State::default();
+    st.press();
+    st.starting = false;
+    st.stop(false);
+    let since = st.since().unwrap();
+    // Still waiting just before the limit.
+    assert!(!st.overdue(since + TRANSCRIBE_TIMEOUT - Duration::from_secs(1)));
+    assert_eq!(st.phase(), Phase::Transcribing);
+    assert!(st.overdue(since + TRANSCRIBE_TIMEOUT));
+    assert_eq!(st.phase(), Phase::Idle);
+    // Dictation works again.
+    assert!(st.press());
+}
+
+#[test]
+fn only_a_transcription_times_out() {
+    let mut st = State::default();
+    st.press();
+    let since = st.since().unwrap();
+    assert!(!st.overdue(since + TRANSCRIBE_TIMEOUT * 2));
+    assert_eq!(st.phase(), Phase::Recording);
+}
